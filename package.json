@@ -21,7 +21,8 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "rushes": "tsx src/cli/index.ts"
+    "rushes": "tsx src/cli/index.ts",
+    "prepare": "npm run build"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.3",
