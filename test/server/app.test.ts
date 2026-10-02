@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { Store } from "../../src/core/store.js";
 import { tmpProject } from "../helpers/tmp.js";
 import { createApp } from "../../src/server/app.js";
 
@@ -53,6 +55,29 @@ describe("local-only guard", () => {
     const local = await app.request("/api/notes", { method: "POST", headers: { "content-type": "application/json; charset=utf-8", origin: "http://localhost:4317" }, body: note });
     expect(local.status).toBe(201);
     expect((await store.read("notes")).notes).toHaveLength(1);
+  });
+});
+
+describe("root page and listeners", () => {
+  it("GET / says Rushes is running for the project, with the root escaped", async () => {
+    const { root } = await tmpProject();
+    const odd = join(root, "<b>A&B</b>");
+    const store = new Store(odd);
+    await store.init("odd");
+    const res = await createApp(store).request("/");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/html");
+    const html = await res.text();
+    expect(html).toBe(
+      `<!doctype html><title>Rushes</title><p>Rushes is running for <code>${odd.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</code>. The dashboard arrives in the next release.</p>`,
+    );
+    expect(html).not.toContain("<b>");
+  });
+
+  it("lets any number of SSE clients listen without a warning", async () => {
+    const { store } = await tmpProject();
+    createApp(store);
+    expect(store.getMaxListeners()).toBe(0);
   });
 });
 

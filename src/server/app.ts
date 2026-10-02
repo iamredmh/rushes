@@ -107,8 +107,13 @@ function hostnameOf(value: string, isUrl: boolean): string | null {
   }
 }
 
+const escapeHtml = (text: string) =>
+  text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+
 export function createApp(store: Store): Hono {
   const app = new Hono();
+  // Every SSE client adds a change listener, so lift Node's default limit of ten.
+  store.setMaxListeners(0);
 
   app.onError((err, c) => {
     if (err instanceof RushesError) return c.json({ error: err.code, message: err.message, ...err.detail }, err.status as 400);
@@ -141,6 +146,10 @@ export function createApp(store: Store): Hono {
     }
     await next();
   });
+
+  app.get("/", (c) =>
+    c.html(`<!doctype html><title>Rushes</title><p>Rushes is running for <code>${escapeHtml(store.root)}</code>. The dashboard arrives in the next release.</p>`),
+  );
 
   app.get("/api/health", (c) => c.json({ ok: true, app: "rushes", version: VERSION, root: store.root }));
 
