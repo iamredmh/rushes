@@ -4,7 +4,7 @@ import type { Note, Section, TabState } from "../../web/src/types.js";
 
 const note = (over: Partial<Note>): Note => ({
   id: "n_1", stage: "picture", video: "hero", version: "v3", on: null, scope: "point", t: 12.4, tOut: null, frame: null,
-  text: "x", box: null, grab: null, status: "todo", reply: "", fixT: null, fixVersion: null, batch: null,
+  text: "x", box: null, grab: null, shot: null, status: "todo", reply: "", fixT: null, fixVersion: null, batch: null,
   createdAt: "2026-10-02T00:00:00Z", by: "user", ...over,
 });
 
@@ -93,9 +93,9 @@ describe("isChanged and latest", () => {
     expect(isChanged(sec("Line.", "New line."))).toBe(true);
   });
   it("picks a video's newest version", () => {
-    const v = (id: string) => ({ id, file: `${id}.mp4`, duration: null, fps: null, addedAt: "", note: "" });
-    expect(latest({ id: "hero", name: "Hero", versions: [v("v1"), v("v2")] })?.id).toBe("v2");
-    expect(latest({ id: "hero", name: "Hero", versions: [] })).toBeUndefined();
+    const v = (id: string) => ({ id, file: `${id}.mp4`, duration: null, fps: null, addedAt: "", note: "", shots: [] });
+    expect(latest({ id: "hero", name: "Hero", versions: [v("v1"), v("v2")], lockedVersion: null })?.id).toBe("v2");
+    expect(latest({ id: "hero", name: "Hero", versions: [], lockedVersion: null })).toBeUndefined();
     expect(latest(undefined)).toBeUndefined();
   });
 });

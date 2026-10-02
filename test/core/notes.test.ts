@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { addNote, applyReply, applyUserEdit, filterNotes } from "../../src/core/notes.js";
-import type { NotesFile } from "../../src/core/schema.js";
+import { NoteSchema, type NotesFile } from "../../src/core/schema.js";
 
 const empty = (): NotesFile => ({ schema: 1, rev: 0, notes: [] });
 
@@ -64,6 +64,21 @@ describe("reopening", () => {
     expect(applyUserEdit(f, { id: a.id, text: "a2" }).batch).toBe("b_1");
     expect(applyReply(f, { id: a.id, reply: "On it", status: "todo" }).batch).toBe("b_1");
     expect(applyReply(f, { id: a.id, status: "done" }).batch).toBe("b_1");
+  });
+});
+
+describe("NoteSchema", () => {
+  it("a Plan 2 note with no shot validates, with shot: null", () => {
+    const plan2Fixture = {
+      id: "n_abc123",
+      stage: "picture",
+      scope: "point",
+      t: 4.1,
+      text: "Title too short",
+      createdAt: "2026-10-02T12:00:00.000Z",
+    };
+    const parsed = NoteSchema.parse(plan2Fixture);
+    expect(parsed.shot).toBeNull();
   });
 });
 

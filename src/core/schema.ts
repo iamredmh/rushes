@@ -10,6 +10,16 @@ export type LaneStage = z.infer<typeof LaneStageSchema>;
 const id = z.string().min(1).max(64);
 const seconds = z.number().nonnegative();
 
+export const ProjectIdSchema = z.string().regex(/^[abcdefghjkmnpqrstuvwxyz23456789]{8}$/);
+
+export const ShotSchema = z.object({
+  n: z.number().int().positive(),
+  name: z.string().trim().min(1).max(80),
+  start: z.number().nonnegative(),
+  tag: z.string().trim().max(24).default(""),
+});
+export type Shot = z.infer<typeof ShotSchema>;
+
 export const VersionSchema = z.object({
   id,
   file: z.string().min(1),
@@ -17,6 +27,7 @@ export const VersionSchema = z.object({
   fps: z.number().positive().nullable().default(null),
   addedAt: z.string(),
   note: z.string().default(""),
+  shots: z.array(ShotSchema).max(200).default([]),
 });
 export type Version = z.infer<typeof VersionSchema>;
 
@@ -24,6 +35,7 @@ export const VideoSchema = z.object({
   id,
   name: z.string().min(1),
   versions: z.array(VersionSchema).default([]),
+  lockedVersion: z.string().nullable().default(null),
 });
 export type Video = z.infer<typeof VideoSchema>;
 
@@ -50,6 +62,7 @@ export type Lane = z.infer<typeof LaneSchema>;
 export const ProjectSchema = z.object({
   schema: z.literal(1),
   rev: z.number().int().nonnegative(),
+  id: ProjectIdSchema.optional(),
   name: z.string().min(1),
   fps: z.number().positive().default(30),
   videos: z.array(VideoSchema).default([]),
@@ -109,6 +122,7 @@ export const NoteSchema = z
     text: z.string().trim().min(1).max(4000),
     box: BoxSchema.nullable().default(null),
     grab: z.string().nullable().default(null),
+    shot: z.object({ n: z.number().int().positive(), name: z.string() }).nullable().default(null),
     status: z.enum(["todo", "done"]).default("todo"),
     reply: z.string().default(""),
     fixT: seconds.nullable().default(null),

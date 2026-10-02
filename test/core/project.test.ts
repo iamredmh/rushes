@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { join } from "node:path";
-import { addVariant, addVersion, latestVersion } from "../../src/core/project.js";
+import { addVariant, addVersion, ensureProjectId, latestVersion, lockPicture, setShots, shotAt } from "../../src/core/project.js";
 import { fromManifestPath, toManifestPath } from "../../src/core/paths.js";
-import { slugify, uniqueId } from "../../src/core/ids.js";
+import { newProjectId, PROJECT_ID_ALPHABET, slugify, uniqueId } from "../../src/core/ids.js";
 import { parseRate } from "../../src/core/media.js";
-import type { Project } from "../../src/core/schema.js";
+import { ProjectSchema, type Project, type Shot } from "../../src/core/schema.js";
+import { InvalidError, NotFoundError } from "../../src/core/errors.js";
 
 const empty = (): Project => ({ schema: 1, rev: 0, name: "demo", fps: 30, videos: [], lanes: [] });
 
@@ -17,6 +18,38 @@ describe("ids", () => {
   it("uniqueId appends -2, -3", () => {
     expect(uniqueId("a", ["a", "a-2"])).toBe("a-3");
     expect(uniqueId("b", ["a"])).toBe("b");
+  });
+});
+
+describe("newProjectId", () => {
+  it("makes 8 characters from the alphabet, and 200 calls don't collide", () => {
+    const ids = Array.from({ length: 200 }, () => newProjectId());
+    for (const id of ids) {
+      expect(id).toHaveLength(8);
+      expect([...id].every((c) => PROJECT_ID_ALPHABET.includes(c))).toBe(true);
+    }
+    expect(new Set(ids).size).toBe(200);
+  });
+});
+
+describe("ensureProjectId", () => {
+  it("sets an id on a project without one and returns true", () => {
+    const p = empty();
+    expect(p.id).toBeUndefined();
+    expect(ensureProjectId(p)).toBe(true);
+    expect(p.id).toMatch(new RegExp(`^[${PROJECT_ID_ALPHABET}]{8}$`));
+  });
+  it("a second call returns false and leaves the id unchanged", () => {
+    const p = empty();
+    ensureProjectId(p);
+    const id = p.id;
+    expect(ensureProjectId(p)).toBe(false);
+    expect(p.id).toBe(id);
+  });
+  it("a project parsed from a Plan 2 JSON fixture with no id still validates", () => {
+    const plan2Fixture = { schema: 1, rev: 0, name: "demo", fps: 30, videos: [], lanes: [] };
+    const parsed = ProjectSchema.parse(plan2Fixture);
+    expect(parsed.id).toBeUndefined();
   });
 });
 
@@ -53,6 +86,94 @@ describe("addVersion", () => {
     addVersion(p, { video: "a", file: "2.mp4" });
     p.videos[0].versions.shift();
     expect(addVersion(p, { video: "a", file: "3.mp4" }).version.id).toBe("v3");
+  });
+  it("a new version inherits the previous version's shots, as a deep copy", () => {
+    const p = empty();
+    addVersion(p, { video: "a", file: "1.mp4" });
+    setShots(p, "a", "v1", [{ name: "Wide", start: 0 }]);
+    const { version: v2 } = addVersion(p, { video: "a", file: "2.mp4" });
+    expect(v2.shots).toEqual([{ n: 1, name: "Wide", start: 0, tag: "" }]);
+    v2.shots[0].name = "Changed";
+    expect(p.videos[0].versions[0].shots[0].name).toBe("Wide");
+  });
+  it("the first version of a new video has no shots", () => {
+    const p = empty();
+    expect(addVersion(p, { video: "b", file: "1.mp4" }).version.shots).toEqual([]);
+  });
+});
+
+describe("setShots", () => {
+  it("sorts by start and renumbers from 1", () => {
+    const p = empty();
+    addVersion(p, { video: "a", file: "1.mp4" });
+    const v = setShots(p, "a", "v1", [
+      { name: "B", start: 5 },
+      { name: "A", start: 1.5 },
+    ]);
+    expect(v.shots).toEqual([
+      { n: 1, name: "A", start: 1.5, tag: "" },
+      { n: 2, name: "B", start: 5, tag: "" },
+    ]);
+  });
+  it("defaults to the newest version", () => {
+    const p = empty();
+    addVersion(p, { video: "a", file: "1.mp4" });
+    addVersion(p, { video: "a", file: "2.mp4" });
+    const v = setShots(p, "a", undefined, [{ name: "A", start: 0 }]);
+    expect(v.id).toBe("v2");
+  });
+  it("throws for a duplicate start, with the time to 2dp", () => {
+    const p = empty();
+    addVersion(p, { video: "a", file: "1.mp4" });
+    expect(() => setShots(p, "a", "v1", [{ name: "A", start: 1.7 }, { name: "B", start: 1.7 }])).toThrow(
+      "Two shots start at 1.70 s",
+    );
+  });
+  it("throws when a start is at or after the cut's known duration", () => {
+    const p = empty();
+    addVersion(p, { video: "a", file: "1.mp4", duration: 10 });
+    expect(() => setShots(p, "a", "v1", [{ name: "A", start: 10 }])).toThrow(InvalidError);
+  });
+  it("throws for an unknown video or version", () => {
+    const p = empty();
+    addVersion(p, { video: "a", file: "1.mp4" });
+    expect(() => setShots(p, "nope", "v1", [])).toThrow(NotFoundError);
+    expect(() => setShots(p, "a", "v9", [])).toThrow(NotFoundError);
+  });
+});
+
+describe("lockPicture", () => {
+  it("locks at a version and unlocks with null", () => {
+    const p = empty();
+    addVersion(p, { video: "a", file: "1.mp4" });
+    const locked = lockPicture(p, "a", "v1");
+    expect(locked.lockedVersion).toBe("v1");
+    const unlocked = lockPicture(p, "a", null);
+    expect(unlocked.lockedVersion).toBeNull();
+  });
+  it("throws for an unknown version", () => {
+    const p = empty();
+    addVersion(p, { video: "a", file: "1.mp4" });
+    expect(() => lockPicture(p, "a", "v9")).toThrow(NotFoundError);
+  });
+});
+
+describe("shotAt", () => {
+  const shots: Shot[] = [
+    { n: 1, name: "Wide", start: 2, tag: "" },
+    { n: 2, name: "Close", start: 5, tag: "" },
+  ];
+  it("returns null when t is before the first shot's start", () => {
+    expect(shotAt(shots, 1)).toBeNull();
+  });
+  it("returns a shot exactly at its start", () => {
+    expect(shotAt(shots, 5)).toEqual({ n: 2, name: "Close" });
+  });
+  it("returns the last shot when t is after the last start", () => {
+    expect(shotAt(shots, 99)).toEqual({ n: 2, name: "Close" });
+  });
+  it("returns null for an empty list", () => {
+    expect(shotAt([], 5)).toBeNull();
   });
 });
 

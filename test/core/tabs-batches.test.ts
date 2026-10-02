@@ -38,7 +38,7 @@ describe("tabStates", () => {
 
   it("does not unlock picture for a video with no versions, or music for an empty lane", () => {
     const c = ctx();
-    c.project.videos.push({ id: "x", name: "X", versions: [] });
+    c.project.videos.push({ id: "x", name: "X", versions: [], lockedVersion: null });
     c.project.lanes.push({ id: "music", stage: "music", name: "Music", variants: [] });
     expect(unlocked(c)).toMatchObject({ picture: false, music: false });
   });

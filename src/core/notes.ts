@@ -14,6 +14,8 @@ export interface NewNote {
   text: string;
   box?: Note["box"];
   grab?: string | null;
+  /** Stamped by the server (Task 2) from the version's shots; passed through here. */
+  shot?: Note["shot"];
   by?: Note["by"];
 }
 
