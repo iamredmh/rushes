@@ -21,7 +21,7 @@ function Empty({ stage, unlocked }: { stage: Stage; unlocked: boolean }) {
 }
 
 export function App() {
-  const { state, problem, refresh } = useRushes();
+  const { state, problem, wrongProject, refresh } = useRushes();
   const [stage, setStage] = useState<Stage | null>(null);
   const [videoId, setVideoId] = useState<string | null>(null);
   const [versionId, setVersionId] = useState<string | null>(null);
@@ -46,6 +46,11 @@ export function App() {
     if (stage === null) setStage(firstTab(state.tabs));
     if (videoId === null && state.project.videos[0]) setVideoId(state.project.videos[0].id);
   }, [state]);
+
+  // The tab's title follows the project's name as soon as it's known.
+  useEffect(() => {
+    if (state?.project.name) document.title = `${state.project.name} · Rushes`;
+  }, [state?.project.name]);
 
   // Follow the newest cut unless you've chosen an older one.
   const video = state?.project.videos.find((v) => v.id === videoId) ?? state?.project.videos[0];
@@ -134,6 +139,7 @@ export function App() {
         <span class="logo"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg></span>
         <nav class="crumb" aria-label="Project">
           <span>{state.project.name}</span>
+          {state.project.id && <span class="pid mono">{state.project.id}</span>}
           {video && (
             <>
               <span class="slash">/</span>
@@ -213,6 +219,13 @@ export function App() {
       )}
       {toastText && <div class="toast" role="status">{toastText}</div>}
 
+      {wrongProject && (
+        <div class="banner lost" role="alert">
+          <Icon name="alert" />
+          {`This tab is for ${state.project.name}, which isn't running here any more. Ask your agent to open it again.`}
+        </div>
+      )}
+
       <nav class="tabs" role="tablist" aria-label="Stages">
         {ORDER.map((s) => {
           const t = tab(s);
@@ -225,7 +238,7 @@ export function App() {
           );
         })}
       </nav>
-      {problem && <div class="banner"><Icon name="alert" />{problem}</div>}
+      {problem && !wrongProject && <div class="banner"><Icon name="alert" />{problem}</div>}
 
       <main class="body">
         {!unlocked || !BUILT[stage] ? (

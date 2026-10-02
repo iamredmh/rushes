@@ -9,8 +9,13 @@ const CLI = fileURLToPath(new URL("../dist/cli/index.js", import.meta.url));
 const CLIP = fileURLToPath(new URL("./fixtures/clip.mp4", import.meta.url));
 const VERTICAL = fileURLToPath(new URL("./fixtures/vertical.mp4", import.meta.url));
 
+const DASHBOARD_URL = /http:\/\/127\.0\.0\.1:\d+\/p\/[a-z2-9]{8}\//;
+
 export interface Rushes {
+  /** The dashboard URL this tab should be on: `http://127.0.0.1:PORT/p/<id>/`. */
   url: string;
+  /** Origin only (no `/p/<id>/`), for calling the API the way an agent would. */
+  base: string;
   root: string;
   /** Call the server's API the way an agent would. */
   api<T = any>(method: string, path: string, body?: unknown): Promise<T>;
@@ -18,20 +23,35 @@ export interface Rushes {
   addCut(note?: string): Promise<{ version: { id: string } }>;
   /** Register the 9:16 test clip (360x640, 2 s) as a new cut of "Hero". */
   addVerticalCut(note?: string): Promise<{ version: { id: string } }>;
+  /**
+   * Stop this project's server and start a different, fresh project on exactly the
+   * same port, simulating port reuse after `rushes stop`. Updates `url`, `base` and
+   * `root` to the new project once it's up.
+   */
+  swapProject(): Promise<void>;
 }
 
-/** Start `rushes serve` on a fresh project folder (with a space in its path) and wait for its URL. */
-async function start(): Promise<{ child: ChildProcess; url: string; root: string; base: string }> {
-  const base = await mkdtemp(join(tmpdir(), "rushes e2e "));
-  const root = join(base, "My Film");
+interface Started {
+  child: ChildProcess;
+  url: string;
+  base: string;
+  port: number;
+  root: string;
+  tmpDir: string;
+}
+
+/** Start `rushes serve` on a fresh project folder (with a space in its path) and wait for its dashboard URL. */
+async function start(port = 0): Promise<Started> {
+  const tmpDir = await mkdtemp(join(tmpdir(), "rushes e2e "));
+  const root = join(tmpDir, "My Film");
   await mkdir(join(root, "renders"), { recursive: true });
-  const child = spawn(process.execPath, [CLI, "serve", root, "--port", "0"], { stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(process.execPath, [CLI, "serve", root, "--port", String(port)], { stdio: ["ignore", "pipe", "pipe"] });
   const url = await new Promise<string>((ok, fail) => {
     let out = "";
     const timer = setTimeout(() => fail(new Error(`rushes serve didn't start:\n${out}`)), 10_000);
     child.stdout!.on("data", (d) => {
       out += d;
-      const m = out.match(/http:\/\/127\.0\.0\.1:\d+/);
+      const m = out.match(DASHBOARD_URL);
       if (m) {
         clearTimeout(timer);
         ok(m[0]);
@@ -40,15 +60,48 @@ async function start(): Promise<{ child: ChildProcess; url: string; root: string
     child.stderr!.on("data", (d) => (out += d));
     child.on("exit", (code) => fail(new Error(`rushes serve exited (${code}):\n${out}`)));
   });
-  return { child, url, root, base };
+  const u = new URL(url);
+  return { child, url, base: u.origin, port: Number(u.port), root, tmpDir };
+}
+
+/** Kill a server and wait for it to exit. */
+async function stop(child: ChildProcess): Promise<void> {
+  child.kill("SIGTERM");
+  await new Promise((ok) => child.once("exit", ok));
+}
+
+/**
+ * Start a fresh project on exactly `port`. If the OS hands back a different port
+ * (the original is briefly in TIME_WAIT and `rushes serve --port N` fell through to
+ * N+1), kill that child and try again, up to ~5 s. Node sets SO_REUSEADDR by
+ * default, so this is usually a no-op after the first attempt.
+ */
+async function startOnPort(port: number): Promise<Started> {
+  const deadline = Date.now() + 5000;
+  for (;;) {
+    const attempt = await start(port);
+    if (attempt.port === port) return attempt;
+    await stop(attempt.child);
+    await rm(attempt.tmpDir, { recursive: true, force: true });
+    if (Date.now() > deadline) {
+      throw new Error(`rushes serve kept landing on ${attempt.port} instead of ${port} after 5 s`);
+    }
+  }
 }
 
 export const test = base.extend<{ rushes: Rushes }>({
   rushes: async ({}, use) => {
-    const { child, url, root, base } = await start();
+    const tmpDirs: string[] = [];
+    let started = await start();
+    tmpDirs.push(started.tmpDir);
+    let child = started.child;
+    let url = started.url;
+    let origin = started.base;
+    let root = started.root;
     let cuts = 0;
+
     const api = async (method: string, path: string, body?: unknown) => {
-      const res = await fetch(url + path, {
+      const res = await fetch(origin + path, {
         method,
         headers: body === undefined ? {} : { "content-type": "application/json" },
         body: body === undefined ? undefined : JSON.stringify(body),
@@ -69,10 +122,30 @@ export const test = base.extend<{ rushes: Rushes }>({
       await copyFile(VERTICAL, join(root, file));
       return api("POST", "/api/versions", { video: "Hero", file, note });
     };
-    await use({ url, root, api, addCut, addVerticalCut });
-    child.kill("SIGTERM");
-    await new Promise((r) => child.once("exit", r));
-    await rm(base, { recursive: true, force: true });
+    const swapProject = async () => {
+      const port = Number(new URL(url).port);
+      await stop(child);
+      const next = await startOnPort(port);
+      tmpDirs.push(next.tmpDir);
+      child = next.child;
+      url = next.url;
+      origin = next.base;
+      root = next.root;
+      cuts = 0;
+    };
+
+    await use({
+      get url() { return url; },
+      get base() { return origin; },
+      get root() { return root; },
+      api,
+      addCut,
+      addVerticalCut,
+      swapProject,
+    });
+
+    await stop(child);
+    for (const dir of tmpDirs) await rm(dir, { recursive: true, force: true });
   },
 });
 

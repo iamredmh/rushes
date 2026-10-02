@@ -242,3 +242,33 @@ test("a note the server rejects stays in the box and says why", async ({ page, r
   await expect(page.getByLabel("New note")).toHaveValue(long);
   await expect(page.locator(".note")).toHaveCount(0);
 });
+
+test("every project has its own address and title", async ({ page, rushes }) => {
+  await page.goto(rushes.url);
+  await expect(page).toHaveURL(/\/p\/[a-z2-9]{8}\/$/);
+  await expect(page).toHaveTitle("My Film · Rushes");
+  const id = new URL(rushes.url).pathname.match(/\/p\/([a-z2-9]{8})\//)![1];
+  await expect(page.locator(".pid")).toHaveText(id);
+});
+
+test("a tab left open after its project stops never writes into the project that takes its port", async ({ page, rushes }) => {
+  await rushes.addCut();
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await page.keyboard.press("n");
+  await page.getByLabel("New note").fill("Still here when it reconnects.");
+
+  await rushes.swapProject();
+
+  await expect(page.locator(".banner.lost")).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator(".banner.lost")).toHaveAttribute("role", "alert");
+  await expect(page.locator(".banner.lost")).toContainText("isn't running here any more");
+  await expect(page.getByLabel("New note")).toBeVisible();
+  await expect(page.getByLabel("New note")).toBeEnabled();
+
+  await page.getByLabel("New note").press("Enter");
+  await expect(page.getByLabel("New note")).toHaveValue("Still here when it reconnects.");
+
+  const { notes } = await rushes.api("GET", "/api/notes");
+  expect(notes).toEqual([]);
+});

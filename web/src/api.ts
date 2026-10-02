@@ -5,10 +5,20 @@ export class ApiError extends Error {
   }
 }
 
+/** This tab's project id, parsed from the URL (`/p/<id>/`). Null on an old tab at `/` (the server redirects those). */
+export function projectId(): string | null {
+  const m = location.pathname.match(/\/p\/([a-z2-9]{8})\//);
+  return m ? m[1] : null;
+}
+
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const id = projectId();
+  const headers: Record<string, string> = {};
+  if (body !== undefined) headers["content-type"] = "application/json";
+  if (id) headers["x-rushes-project"] = id;
   const res = await fetch(path, {
     method,
-    headers: body === undefined ? {} : { "content-type": "application/json" },
+    headers,
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const text = await res.text();
@@ -25,5 +35,12 @@ export const api = {
 
 /** URL the browser can load a registered media file (or grab) from. */
 export function mediaUrl(path: string): string {
-  return `/media?path=${encodeURIComponent(path)}`;
+  const id = projectId();
+  return `/media?path=${encodeURIComponent(path)}${id ? `&project=${id}` : ""}`;
+}
+
+/** URL for this tab's change-event stream, carrying the project id where headers can't be set. */
+export function eventsUrl(): string {
+  const id = projectId();
+  return `/api/events${id ? `?project=${id}` : ""}`;
 }
