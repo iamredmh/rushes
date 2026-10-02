@@ -264,6 +264,7 @@ export function Picture({ video, version, fps, notes, toast, onChanged }: Pictur
         version={version.id}
         placeholder={placeholder}
         inputRef={input}
+        toast={toast}
         onAdd={add}
         onChanged={onChanged}
         onSeek={(to, n) => {

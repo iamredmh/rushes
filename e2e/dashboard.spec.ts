@@ -151,3 +151,26 @@ test("a broken hand edit shows a banner naming the file", async ({ page, rushes 
   await writeFile(join(rushes.root, ".rushes", "picks.json"), "{ broken");
   await expect(page.getByText("picks.json has an error", { exact: false })).toBeVisible();
 });
+
+test("a script edit still waiting to save is kept when the agent replaces the script", async ({ page, rushes }) => {
+  await rushes.api("PUT", "/api/script", { sections: [{ id: "s1", start: 0, end: 13, current: "First line." }] });
+  await page.goto(rushes.url);
+  const box = page.getByLabel("Your version of s1");
+  await box.fill("First line, edited.");
+  // Within the save delay, the agent replaces the whole script, so the row disappears.
+  await rushes.api("PUT", "/api/script", { replace: true, sections: [{ id: "s9", start: 0, end: 13, current: "Brand new script." }] });
+  // The pending save is flushed, and since s1 is gone it fails visibly instead of silently.
+  await expect(page.getByRole("status")).toContainText("Couldn't save S1");
+});
+
+test("a note the server rejects stays in the box and says why", async ({ page, rushes }) => {
+  await rushes.addCut();
+  await page.goto(rushes.url);
+  await videoReady(page);
+  const long = "x".repeat(4001);
+  await page.getByLabel("New note").fill(long);
+  await page.getByLabel("New note").press("Enter");
+  await expect(page.getByRole("status")).toContainText("Couldn't add the note");
+  await expect(page.getByLabel("New note")).toHaveValue(long);
+  await expect(page.locator(".note")).toHaveCount(0);
+});

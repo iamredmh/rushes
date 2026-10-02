@@ -12,12 +12,19 @@ const STATUS = {
 
 const SAVE_AFTER_MS = 500;
 
-/** Run `fn` once input has paused for `ms`; flush() runs it now. */
+/** Run `fn` once input has paused for `ms`; flush() runs it now. A pending run is flushed, not dropped, on unmount. */
 function useDebounced(fn: () => void, ms: number) {
   const timer = useRef<number | undefined>(undefined);
   const latest = useRef(fn);
   latest.current = fn;
-  useEffect(() => () => clearTimeout(timer.current), []);
+  useEffect(
+    () => () => {
+      if (timer.current === undefined) return;
+      clearTimeout(timer.current);
+      latest.current();
+    },
+    [],
+  );
   return {
     schedule() {
       clearTimeout(timer.current);
@@ -32,7 +39,7 @@ function useDebounced(fn: () => void, ms: number) {
   };
 }
 
-function Row({ section, wps, onChanged }: { section: Section; wps: number; onChanged(): void }) {
+function Row({ section, wps, toast, onChanged }: { section: Section; wps: number; toast(message: string): void; onChanged(): void }) {
   const [text, setText] = useState(section.proposed ?? section.current);
   const [direction, setDirection] = useState(section.direction);
   const editing = useRef(false);
@@ -55,7 +62,11 @@ function Row({ section, wps, onChanged }: { section: Section; wps: number; onCha
   }, [text]);
 
   const patch = async (body: Record<string, unknown>) => {
-    await api.patch(`/api/script/${encodeURIComponent(section.id)}`, body);
+    try {
+      await api.patch(`/api/script/${encodeURIComponent(section.id)}`, body);
+    } catch (e) {
+      toast(`Couldn't save ${section.id.toUpperCase()}: ${(e as Error).message}`);
+    }
     onChanged();
   };
   const saveText = useDebounced(() => {
@@ -149,7 +160,7 @@ function Row({ section, wps, onChanged }: { section: Section; wps: number; onCha
 }
 
 /** The VO script: the agent's current line beside your version, one row per section. */
-export function Script({ script, onChanged }: { script: ScriptData; onChanged(): void }) {
+export function Script({ script, toast, onChanged }: { script: ScriptData; toast(message: string): void; onChanged(): void }) {
   const changed = script.sections.filter(isChanged).length;
   return (
     <div class="col">
@@ -161,7 +172,7 @@ export function Script({ script, onChanged }: { script: ScriptData; onChanged():
       </div>
       <div class="sgrid scols"><span /><span>Current</span><span>Yours</span></div>
       <div style={{ display: "grid", gap: "12px" }}>
-        {script.sections.map((s) => <Row key={s.id} section={s} wps={script.wordsPerSecond} onChanged={onChanged} />)}
+        {script.sections.map((s) => <Row key={s.id} section={s} wps={script.wordsPerSecond} toast={toast} onChanged={onChanged} />)}
       </div>
     </div>
   );

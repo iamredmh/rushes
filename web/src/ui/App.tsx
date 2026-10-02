@@ -201,7 +201,7 @@ export function App() {
         ) : stage === "picture" && video && version ? (
           <Picture video={video} version={version} fps={fps} notes={pictureNotes} toast={toast} onChanged={() => void refresh()} />
         ) : stage === "script" ? (
-          <Script script={state.script} onChanged={() => void refresh()} />
+          <Script script={state.script} toast={toast} onChanged={() => void refresh()} />
         ) : (
           <Empty stage={stage} unlocked={unlocked} />
         )}

@@ -16,13 +16,15 @@ export interface NotesProps {
   /** Chips shown above the note box (a box or a frame grab waiting to be attached). */
   attachments?: ComponentChildren;
   inputRef?: RefObject<HTMLTextAreaElement>;
+  /** Tell the user something went wrong (a failed save, say). */
+  toast(message: string): void;
   onAdd(text: string): Promise<void>;
   onSeek?(t: number, note: Note): void;
   onChanged(): void;
 }
 
 /** The notes column used on every tab: list, filter, done circles and the note box. */
-export function Notes({ notes, version, placeholder, attachments, inputRef, onAdd, onSeek, onChanged }: NotesProps) {
+export function Notes({ notes, version, placeholder, attachments, inputRef, toast, onAdd, onSeek, onChanged }: NotesProps) {
   const [filter, setFilter] = useState<Filter>("all");
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -33,7 +35,11 @@ export function Notes({ notes, version, placeholder, attachments, inputRef, onAd
     .sort((a, b) => (a.at.t ?? -1) - (b.at.t ?? -1));
 
   const toggle = async (n: Note) => {
-    await api.patch(`/api/notes/${n.id}`, { status: n.status === "done" ? "todo" : "done" });
+    try {
+      await api.patch(`/api/notes/${n.id}`, { status: n.status === "done" ? "todo" : "done" });
+    } catch (e) {
+      toast(`Couldn't update that note: ${(e as Error).message}`);
+    }
     onChanged();
   };
 
@@ -44,6 +50,9 @@ export function Notes({ notes, version, placeholder, attachments, inputRef, onAd
     try {
       await onAdd(value);
       setText("");
+    } catch (e) {
+      // Keep what was typed so nothing is lost.
+      toast(`Couldn't add the note: ${(e as Error).message}`);
     } finally {
       setBusy(false);
     }
