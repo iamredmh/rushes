@@ -158,6 +158,17 @@ describe("API", () => {
     expect((await call("GET", "/api/batches/b_9")).status).toBe(404);
   });
 
+  it("a note sent, marked done and reopened goes in the next batch", async () => {
+    const { call } = await setup();
+    const n = (await call("POST", "/api/notes", { stage: "picture", scope: "point", t: 1, text: "x" })).json.note;
+    expect((await call("POST", "/api/batches", { stage: "picture" })).json.batch.noteIds).toEqual([n.id]);
+    await call("POST", "/api/replies", { replies: [{ id: n.id, reply: "Fixed", status: "done" }] });
+    await call("PATCH", `/api/notes/${n.id}`, { status: "todo" });
+    const again = await call("POST", "/api/batches", { stage: "picture" });
+    expect(again.status).toBe(201);
+    expect(again.json.batch).toMatchObject({ id: "b_2", noteIds: [n.id] });
+  });
+
   it("two batch requests at once get different ids and split the notes", async () => {
     const { call } = await setup();
     await call("POST", "/api/notes", { stage: "picture", scope: "point", t: 1, text: "x" });

@@ -48,6 +48,25 @@ describe("field ownership", () => {
   });
 });
 
+describe("reopening", () => {
+  it("a note reopened by the user or the agent leaves its old batch so it can be sent again", () => {
+    const f = empty();
+    const a = addNote(f, { stage: "picture", scope: "point", t: 1, text: "a" });
+    const b = addNote(f, { stage: "picture", scope: "point", t: 2, text: "b" });
+    for (const n of [a, b]) Object.assign(n, { batch: "b_1", status: "done" });
+    expect(applyUserEdit(f, { id: a.id, status: "todo" }).batch).toBeNull();
+    expect(applyReply(f, { id: b.id, status: "todo", reply: "Not fixed yet" }).batch).toBeNull();
+  });
+  it("other edits keep the batch", () => {
+    const f = empty();
+    const a = addNote(f, { stage: "picture", scope: "point", t: 1, text: "a" });
+    a.batch = "b_1";
+    expect(applyUserEdit(f, { id: a.id, text: "a2" }).batch).toBe("b_1");
+    expect(applyReply(f, { id: a.id, reply: "On it", status: "todo" }).batch).toBe("b_1");
+    expect(applyReply(f, { id: a.id, status: "done" }).batch).toBe("b_1");
+  });
+});
+
 describe("filterNotes", () => {
   it("filters by stage, status, batch and version", () => {
     const f = empty();

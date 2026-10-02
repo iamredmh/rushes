@@ -39,9 +39,15 @@ export interface Reply {
   fixVersion?: string | null;
 }
 
+/** A done note going back to todo leaves its batch, so the next Send includes it. */
+function reopen(n: Note, status: Note["status"] | undefined): void {
+  if (n.status === "done" && status === "todo") n.batch = null;
+}
+
 export function applyReply(file: NotesFile, r: Reply): Note {
   const n = find(file, r.id);
   if (r.reply !== undefined) n.reply = r.reply;
+  reopen(n, r.status);
   if (r.status !== undefined) n.status = r.status;
   if (r.fixT !== undefined) n.fixT = r.fixT;
   if (r.fixVersion !== undefined) n.fixVersion = r.fixVersion;
@@ -68,7 +74,8 @@ export function applyUserEdit(file: NotesFile, e: UserEdit): Note {
   }
   const parsed = NoteSchema.safeParse(next);
   if (!parsed.success) throw new InvalidError("Note edit is invalid", parsed.error.issues);
-  Object.assign(n, parsed.data);
+  reopen(n, e.status);
+  Object.assign(n, { ...parsed.data, batch: n.batch });
   return n;
 }
 
