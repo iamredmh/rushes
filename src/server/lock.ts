@@ -78,6 +78,32 @@ export async function isRushesFor(port: number, root: string): Promise<boolean> 
   }
 }
 
+/** Errors from link() that mean the volume can't hard-link (exFAT, FAT32, some network shares). */
+const NO_HARD_LINKS = new Set(["EPERM", "ENOTSUP", "EOPNOTSUPP", "EXDEV", "ENOSYS", "EMLINK"]);
+
+/**
+ * Put the lock in place if nothing is there. Returns false when a lock already
+ * exists. Prefers a hard link (the lock appears whole or not at all) and falls
+ * back to an exclusive create on volumes that can't hard-link.
+ */
+async function claim(tmp: string, path: string, text: string, linkInto: typeof link): Promise<boolean> {
+  try {
+    await linkInto(tmp, path);
+    return true;
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === "EEXIST") return false;
+    if (!code || !NO_HARD_LINKS.has(code)) throw e;
+  }
+  try {
+    await writeFile(path, text, { encoding: "utf8", flag: "wx" });
+    return true;
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "EEXIST") return false;
+    throw e;
+  }
+}
+
 /**
  * Claim the project's lock. The lock is written to a temporary file and then
  * hard-linked into place, so it appears complete or not at all, and only one
@@ -85,19 +111,17 @@ export async function isRushesFor(port: number, root: string): Promise<boolean> 
  * root wins over us (AlreadyRunningError). A stale one is removed, but only if
  * it is still the same lock we judged stale. After winning, we re-read the
  * lock once: if a racing claimant replaced it, we go round again and defer to
- * that server.
+ * that server. `opts.link` is for tests.
  */
-export async function writeLock(root: string, port: number): Promise<Lock> {
+export async function writeLock(root: string, port: number, opts: { link?: typeof link } = {}): Promise<Lock> {
   const lock: Lock = { port, pid: process.pid, startedAt: new Date().toISOString(), token: randomUUID() };
   const path = lockPath(root);
   const tmp = `${path}.${lock.token}.tmp`;
-  await writeFile(tmp, JSON.stringify(lock, null, 2) + "\n", "utf8");
+  const text = JSON.stringify(lock, null, 2) + "\n";
+  await writeFile(tmp, text, "utf8");
   try {
     for (let attempt = 0; attempt < 5; attempt++) {
-      try {
-        await link(tmp, path);
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+      if (!(await claim(tmp, path, text, opts.link ?? link))) {
         const existing = await readLockFile(root);
         if (existing && alive(existing.pid) && (await isRushesFor(existing.port, root))) {
           throw new AlreadyRunningError(`http://127.0.0.1:${existing.port}`);
