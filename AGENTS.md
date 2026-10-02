@@ -33,6 +33,8 @@ The MCP server has eleven tools: `rushes_open`, `rushes_status`, `rushes_add_ver
 - Never edit `.rushes/*.json` by hand while the server is running. Use the tools, or the CLI (`rushes add`, `rushes notes`, `rushes reply`).
 - You own a note's `reply`, `fixT` and `fixVersion`. The user owns its text, times and box. Either of you can set `status`.
 - Times are seconds from the start of the video, as numbers (e.g. `31.05`).
+- A server you start through the tools stops by itself after two hours with nothing connected. The next tool call starts it again. `rushes stop` stops it now.
+- Prefer H.264 MP4 for cuts: browsers can't play ProRes, and some can't play HEVC.
 
 ## Without MCP
 

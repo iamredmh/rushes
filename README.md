@@ -13,7 +13,7 @@ Your notes are saved as plain files in your project. The agent reads them, fixes
 
 It runs on your machine. There's no account, no API key and no server to sign up for. You need [Node.js](https://nodejs.org) 20 or newer, and git (needed to install straight from GitHub until Rushes is on npm).
 
-> Status: early. The data layer, MCP tools and CLI work today. The dashboard is being built.
+> Status: early. The Script and Picture tabs, the MCP tools and the CLI work today. The audio tabs (Voiceover, Music, Sound effects, Mix) are next.
 
 ## Get started
 
@@ -62,8 +62,11 @@ ChatGPT's apps can't run local MCP servers yet. Use Codex, OpenAI's agent, inste
 
 ```bash
 cd your-project
-npx -y github:iamredmh/rushes open
+npx -y github:iamredmh/rushes open    # opens the review desk in your browser
+npx -y github:iamredmh/rushes stop    # stops it
 ```
+
+A server your agent starts in the background stops by itself after two hours with nothing connected.
 
 ## What gets saved
 
