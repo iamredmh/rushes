@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
 import { startServer } from "../../src/server/start.js";
 import { createMcpServer } from "../../src/mcp/tools.js";
 import { RushesClient } from "../../src/mcp/client.js";
 import { ensureServer, findServer } from "../../src/mcp/ensure.js";
+import { resolveProjectRoot, stdioContext } from "../../src/mcp/stdio.js";
 import { lockPath } from "../../src/server/lock.js";
 import { SOURCE } from "../../src/setup/harnesses.js";
 
@@ -147,6 +150,19 @@ describe("ensureServer", () => {
     await expect(err).rejects.toThrow(`npx -y ${SOURCE} open`);
   });
 
+  it("a failed default start leaves its output in .rushes/server.log and the error names that file", async () => {
+    const { root } = await tmpProject();
+    const log = join(root, ".rushes", "server.log");
+    // Under vitest the default spawn points at src/cli/index.js, which doesn't exist, so node fails at once.
+    await expect(ensureServer(root, { timeoutMs: 400 })).rejects.toThrow(log);
+    let text = "";
+    for (let i = 0; i < 40 && !text.includes("Cannot find module"); i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      text = await readFile(log, "utf8").catch(() => "");
+    }
+    expect(text).toContain("Cannot find module");
+  });
+
   it("doesn't crash if defaultSpawn fails to start (missing cli, no permissions, etc)", async () => {
     const { root } = await tmpProject();
     // When no spawnServer override is provided, defaultSpawn is used, which will fail because
@@ -154,5 +170,33 @@ describe("ensureServer", () => {
     // prevent an unhandled 'error' event from crashing the process, and ensureServer should
     // time out and throw a readable error instead.
     await expect(ensureServer(root, { timeoutMs: 400 })).rejects.toThrow(/did not start/);
+  });
+});
+
+describe("project root for stdio", () => {
+  const ASK = 'Tell me which project folder to use: pass "project" (e.g. "/Users/you/Videos/launch-film").';
+
+  it("refuses / and the home folder, which is where Claude Desktop starts it", () => {
+    expect(() => resolveProjectRoot("/")).toThrow(ASK);
+    expect(() => resolveProjectRoot(homedir())).toThrow(ASK);
+    expect(() => resolveProjectRoot(join(homedir(), "Videos"), "..")).toThrow(ASK);
+    expect(resolveProjectRoot("/", "/Users/you/Videos/launch-film")).toBe("/Users/you/Videos/launch-film");
+    expect(resolveProjectRoot("/work/film")).toBe("/work/film");
+    expect(resolveProjectRoot("/work", "film")).toBe("/work/film");
+  });
+
+  it("a tool started in / returns that error and never spawns a server", async () => {
+    let spawns = 0;
+    const server = createMcpServer(stdioContext("/", { spawnServer: () => { spawns++; }, timeoutMs: 300 }));
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "test", version: "0" });
+    await Promise.all([server.connect(a), client.connect(b)]);
+    for (const name of ["rushes_status", "rushes_open"]) {
+      const r = (await client.callTool({ name, arguments: { browser: false } })) as { content: { text: string }[]; isError?: boolean };
+      expect(r.isError).toBe(true);
+      expect(r.content[0].text).toBe(ASK);
+    }
+    expect(spawns).toBe(0);
+    await client.close();
   });
 });

@@ -13,6 +13,7 @@ describe("Store", () => {
     expect((await store.read("notes")).notes).toEqual([]);
     const ignore = await readFile(join(store.dir, ".gitignore"), "utf8");
     expect(ignore).toContain("server.json");
+    expect(ignore).toContain("server.log");
   });
 
   it("init does not overwrite existing files", async () => {
