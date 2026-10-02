@@ -27,6 +27,16 @@ describe("cli", () => {
     expect(a.out.join("\n")).toContain("add shots");
     expect(a.out.join("\n")).toContain("rushes lock");
     expect(a.out.join("\n")).toContain("rushes unlock");
+    // The description column lines up across every usage line, including "unlock".
+    const lines = a.out.join("\n").split("\n");
+    const lockLine = lines.find((l) => l.includes("rushes lock "))!;
+    const unlockLine = lines.find((l) => l.includes("rushes unlock"))!;
+    const descColumn = (line: string) => {
+      let last = -1;
+      for (const m of line.matchAll(/ {2,}\S/g)) last = m.index + m[0].length - 1;
+      return last;
+    };
+    expect(descColumn(unlockLine)).toBe(descColumn(lockLine));
     const b = io("/tmp");
     expect(await main(["frobnicate"], b.x)).toBe(2);
     expect(b.err[0]).toContain('Unknown command "frobnicate"');
@@ -89,6 +99,36 @@ describe("cli", () => {
     const a = io(root);
     expect(await main(["add", "shots", "shots.json", "--video", "hero", "--version", "v1"], a.x)).toBe(0);
     expect(a.out.pop()).toBe("Shots set on hero v1: 2");
+    await s.close();
+  });
+
+  it("add shots takes --version <value> before the file name too, not just after", async () => {
+    const { root } = await tmpProject();
+    const s = await startServer(root, { port: 0 });
+    await fetch(`${s.url}/api/versions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ video: "Hero", file: "a.mp4" }),
+    });
+    await writeFile(join(root, "shots.json"), JSON.stringify([{ name: "Wide", start: 0 }]), "utf8");
+    const a = io(root);
+    expect(await main(["add", "shots", "--version", "v1", "shots.json", "--video", "hero"], a.x)).toBe(0);
+    expect(a.out.pop()).toBe("Shots set on hero v1: 1");
+    await s.close();
+  });
+
+  it("add shots takes --version=<value> too", async () => {
+    const { root } = await tmpProject();
+    const s = await startServer(root, { port: 0 });
+    await fetch(`${s.url}/api/versions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ video: "Hero", file: "a.mp4" }),
+    });
+    await writeFile(join(root, "shots.json"), JSON.stringify([{ name: "Wide", start: 0 }]), "utf8");
+    const a = io(root);
+    expect(await main(["add", "shots", "shots.json", "--video", "hero", "--version=v1"], a.x)).toBe(0);
+    expect(a.out.pop()).toBe("Shots set on hero v1: 1");
     await s.close();
   });
 

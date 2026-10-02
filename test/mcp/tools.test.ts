@@ -120,6 +120,16 @@ describe("MCP tools", () => {
     await t.close();
   });
 
+  it("rushes_set_shots and rushes_lock_picture accept the video's display name, not just its id", async () => {
+    const t = await connect();
+    await t.call("rushes_add_version", { video: "Hero 60s", file: "renders/hero_v1.mp4" });
+    const set = await t.call("rushes_set_shots", { video: "Hero 60s", shots: [{ name: "Wide", start: 0 }] });
+    expect(set.json.version.shots).toEqual([{ n: 1, name: "Wide", start: 0, tag: "" }]);
+    const locked = await t.call("rushes_lock_picture", { video: "Hero 60s", version: "v1" });
+    expect(locked.json.video.lockedVersion).toBe("v1");
+    await t.close();
+  });
+
   it("returns readable tool errors instead of throwing", async () => {
     const t = await connect();
     const r = await t.call("rushes_reply", { replies: [{ id: "n_missing", reply: "x" }] });

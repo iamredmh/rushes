@@ -98,6 +98,23 @@ export function findVideo(p: Project, id: string): Video {
   return v;
 }
 
+/**
+ * Finds a video by id, slug or name, so routes, MCP tools and the CLI all accept either
+ * "Hero 60s" or "hero-60s". Tried in order: exact id, then `slugify(ref)`, then a
+ * case-insensitive exact name match.
+ */
+export function resolveVideo(p: Project, ref: string): Video {
+  const byId = p.videos.find((v) => v.id === ref);
+  if (byId) return byId;
+  const slug = slugify(ref);
+  const bySlug = p.videos.find((v) => v.id === slug);
+  if (bySlug) return bySlug;
+  const lower = ref.toLowerCase();
+  const byName = p.videos.find((v) => v.name.toLowerCase() === lower);
+  if (byName) return byName;
+  throw new NotFoundError("video", ref);
+}
+
 export interface ShotInput {
   name: string;
   start: number;
@@ -106,7 +123,7 @@ export interface ShotInput {
 
 /** Replaces a version's shot list: sorted by start, renumbered from 1. */
 export function setShots(p: Project, videoId: string, versionId: string | undefined, shots: ShotInput[]): Version {
-  const video = findVideo(p, videoId);
+  const video = resolveVideo(p, videoId);
   const version = resolveVersion(video, versionId);
   if (shots.length > 200) throw new InvalidError("A shot list holds at most 200 shots");
   const sorted = [...shots].sort((a, b) => a.start - b.start);
@@ -123,7 +140,7 @@ export function setShots(p: Project, videoId: string, versionId: string | undefi
 
 /** Locks a video's picture at a version, or unlocks it when `versionId` is null. */
 export function lockPicture(p: Project, videoId: string, versionId: string | null): Video {
-  const video = findVideo(p, videoId);
+  const video = resolveVideo(p, videoId);
   if (versionId !== null && !video.versions.some((v) => v.id === versionId)) throw new NotFoundError("version", versionId);
   video.lockedVersion = versionId;
   return video;

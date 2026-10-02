@@ -1,3 +1,5 @@
+import { ProjectIdSchema } from "../core/schema.js";
+
 /** Thin HTTP client for the Rushes server API, used by the MCP server and the CLI. */
 export class ApiError extends Error {
   constructor(
@@ -29,8 +31,18 @@ export class RushesClient {
   patch<T = any>(path: string, json: unknown) { return this.call<T>("PATCH", path, json); }
 }
 
-/** The dashboard address for a running server, `${base}/p/${id}/`, read from its own health check. */
+/**
+ * The dashboard address for a running server, read from its own health check: `${base}/p/${id}/`
+ * for a current server, or `${base}/` for an older one (before project ids) that serves its
+ * own dashboard there instead of at a `/p/<id>/` address.
+ */
 export async function dashboardUrlFor(base: string): Promise<string> {
-  const { id } = await new RushesClient(base).get<{ id: string }>("/api/health");
-  return `${base}/p/${id}/`;
+  let health: { id?: string };
+  try {
+    health = await new RushesClient(base).get<{ id?: string }>("/api/health");
+  } catch {
+    throw new Error(`Rushes at ${base} didn't answer its health check`);
+  }
+  if (!health.id || !ProjectIdSchema.safeParse(health.id).success) return `${base}/`;
+  return `${base}/p/${health.id}/`;
 }

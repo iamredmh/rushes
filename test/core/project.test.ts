@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { join } from "node:path";
-import { addVariant, addVersion, ensureProjectId, latestVersion, lockPicture, setShots, shotAt } from "../../src/core/project.js";
+import { addVariant, addVersion, ensureProjectId, latestVersion, lockPicture, resolveVideo, setShots, shotAt } from "../../src/core/project.js";
 import { fromManifestPath, toManifestPath } from "../../src/core/paths.js";
 import { newProjectId, PROJECT_ID_ALPHABET, slugify, uniqueId } from "../../src/core/ids.js";
 import { parseRate } from "../../src/core/media.js";
@@ -99,6 +99,41 @@ describe("addVersion", () => {
   it("the first version of a new video has no shots", () => {
     const p = empty();
     expect(addVersion(p, { video: "b", file: "1.mp4" }).version.shots).toEqual([]);
+  });
+});
+
+describe("resolveVideo", () => {
+  it("matches by exact id", () => {
+    const p = empty();
+    addVersion(p, { video: "Hero 60s", file: "1.mp4" });
+    expect(resolveVideo(p, "hero-60s").id).toBe("hero-60s");
+  });
+  it("matches by slugify(ref), when ref isn't itself an id", () => {
+    const p = empty();
+    addVersion(p, { video: "Hero 60s", file: "1.mp4" });
+    expect(resolveVideo(p, "Hero 60s").id).toBe("hero-60s");
+    expect(resolveVideo(p, "Hero_60s").id).toBe("hero-60s");
+  });
+  it("matches by a case-insensitive exact name, as a last resort", () => {
+    const p = empty();
+    addVersion(p, { video: "Héro!", file: "1.mp4" });
+    // "Héro!" slugifies to "hero", which collides with nothing here, so the id stays unique:
+    expect(p.videos[0].id).toBe("hero");
+    expect(resolveVideo(p, "héro!").id).toBe("hero");
+    expect(resolveVideo(p, "HÉRO!")).toBe(p.videos[0]);
+  });
+  it("prefers an exact id match over a same-named video with a different id", () => {
+    const p = empty();
+    addVersion(p, { video: "a", file: "1.mp4" });
+    p.videos[0].name = "b";
+    addVersion(p, { video: "b", file: "1.mp4" });
+    expect(resolveVideo(p, "a").id).toBe("a");
+  });
+  it("throws NotFoundError for no match", () => {
+    const p = empty();
+    addVersion(p, { video: "Hero 60s", file: "1.mp4" });
+    expect(() => resolveVideo(p, "nope")).toThrow(NotFoundError);
+    expect(() => resolveVideo(p, "nope")).toThrow('video "nope" not found');
   });
 });
 

@@ -327,6 +327,14 @@ describe("API", () => {
     ]);
   });
 
+  it("shots: the video in the path can be its display name as well as its id", async () => {
+    const { call, root } = await setup();
+    await call("POST", "/api/versions", { video: "Hero 60s", file: `${root}/renders/hero.mp4` });
+    const r = await call("PUT", "/api/videos/Hero%2060s/shots", { shots: [{ name: "A", start: 0 }] });
+    expect(r.status).toBe(200);
+    expect(r.json.version.shots).toEqual([{ n: 1, name: "A", start: 0, tag: "" }]);
+  });
+
   it("shots: a 201st shot gives 400", async () => {
     const { call, root } = await setup();
     await call("POST", "/api/versions", { video: "Hero", file: `${root}/renders/hero.mp4` });

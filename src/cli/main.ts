@@ -40,7 +40,7 @@ Usage
   rushes add variant <music|sfx|voice> <file> --name NAME [--lane ID]
   rushes add shots <file.json> --video NAME [--version V]
   rushes lock <video> <version>                     lock the picture at a cut
-  rushes unlock <video>                              unlock the picture
+  rushes unlock <video>                             unlock the picture
   rushes notes [--stage S] [--status todo|done] [--batch ID] [--json]
   rushes reply <note-id> <text> [--done] [--fix-t SECONDS] [--fix-version V]
 
@@ -82,8 +82,66 @@ export function longRunningCommand(argv: string[]): boolean {
   }
 }
 
+const STRING_OPTIONS = new Set(Object.entries(OPTIONS).filter(([, def]) => def.type === "string").map(([name]) => name));
+
+/**
+ * The command name (first positional), tolerant of leading global flags. A hand-rolled scan
+ * rather than a `parseArgs` probe, because `--version=<value>` must be recognised here even
+ * though `version` is declared boolean (parseArgs would throw on that combination, and we need
+ * this to succeed precisely so we can strip that flag out before the real parse).
+ */
+function firstPositional(argv: string[]): string | undefined {
+  for (let i = 0; i < argv.length; i++) {
+    const tok = argv[i];
+    if (tok === "--") return argv[i + 1];
+    if (tok.startsWith("--")) {
+      const eq = tok.indexOf("=");
+      const name = eq >= 0 ? tok.slice(2, eq) : tok.slice(2);
+      if (eq < 0 && STRING_OPTIONS.has(name)) i++; // takes the next token as its value
+      continue;
+    }
+    if (tok.startsWith("-") && tok.length > 1) continue; // a short flag; none of ours take a value
+    return tok;
+  }
+  return undefined;
+}
+
+/**
+ * `rushes add shots` has its own `--version <value>` / `--version=<value>`, which takes a value
+ * and can appear in any position. That collides with the global `--version`/`-v` flag, which
+ * `node:util parseArgs` only knows how to treat as boolean (no subcommand, "print the package
+ * version"): with one flat option table, `--version v2` ahead of the file name would otherwise
+ * parse as `{version: true}` plus a stray positional, scrambling positional order. So for
+ * `add ...`, pull the flag and its value out of argv textually before parseArgs ever sees it.
+ */
+function extractAddVersionFlag(argv: string[]): { value: string | undefined; rest: string[] } {
+  const rest = [...argv];
+  for (let i = 0; i < rest.length; i++) {
+    const tok = rest[i];
+    if (tok === "--version" && i + 1 < rest.length) {
+      const value = rest[i + 1];
+      rest.splice(i, 2);
+      return { value, rest };
+    }
+    if (tok.startsWith("--version=")) {
+      const value = tok.slice("--version=".length);
+      rest.splice(i, 1);
+      return { value, rest };
+    }
+  }
+  return { value: undefined, rest };
+}
+
 /** Run the CLI. Returns an exit code. Long-running commands (open, serve, mcp) resolve once started. */
 export async function main(argv: string[], io: Io): Promise<number> {
+  // The "add" command gets its own --version <value> pulled out before the real parse (see
+  // extractAddVersionFlag); every other command's --version/-v stays the global boolean flag.
+  let addVersion: string | undefined;
+  if (firstPositional(argv) === "add") {
+    const extracted = extractAddVersionFlag(argv);
+    addVersion = extracted.value;
+    argv = extracted.rest;
+  }
   let parsed;
   try {
     parsed = parseArgs({ args: argv, options: OPTIONS, allowPositionals: true });
@@ -201,7 +259,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
             io.err(`Couldn't read shots from "${a}": ${(e as Error).message}`);
             return 2;
           }
-          const r = await (await client()).put(`/api/videos/${encodeURIComponent(o.video)}/shots`, { version: b, shots });
+          const r = await (await client()).put(`/api/videos/${encodeURIComponent(o.video)}/shots`, { version: addVersion, shots });
           io.out(`Shots set on ${o.video} ${r.version.id}: ${r.version.shots.length}`);
           return 0;
         }

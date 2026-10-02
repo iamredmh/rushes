@@ -59,7 +59,7 @@ export function createMcpServer(ctx: ToolContext): McpServer {
         "Set the storyboard shot list for a cut. Shots are numbered by start time; a new cut copies the previous cut's shots until you send new ones.",
       inputSchema: {
         project,
-        video: z.string().describe("The video's id, exactly as returned by rushes_add_version or rushes_status, e.g. \"hero-60s\" (not its display name)."),
+        video: z.string().describe("Video id or name, e.g. \"Hero 60s\"."),
         version: z.string().optional().describe("Defaults to the latest cut."),
         shots: z.array(
           z.object({
@@ -81,7 +81,7 @@ export function createMcpServer(ctx: ToolContext): McpServer {
         "Lock a video's picture at a version (the dashboard then opens on it, and audio review plays against it), or unlock with version null.",
       inputSchema: {
         project,
-        video: z.string().describe("The video's id, exactly as returned by rushes_add_version or rushes_status, e.g. \"hero-60s\" (not its display name)."),
+        video: z.string().describe("Video id or name, e.g. \"Hero 60s\"."),
         version: z.string().nullable().describe("Version id to lock at, or null to unlock."),
       },
     },
