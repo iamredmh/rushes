@@ -11,7 +11,7 @@ Your agent renders a cut, writes a voiceover script or generates music beds. Rus
 
 Your notes are saved as plain files in your project. The agent reads them, fixes things and replies on each one, and you see each reply arrive.
 
-It runs on your machine. There's no account, no API key and no server to sign up for. You need [Node.js](https://nodejs.org) 20 or newer, and git (needed to install straight from GitHub until Rushes is on npm).
+It runs on your machine. There's no account, no API key and no server to sign up for. You need [Node.js](https://nodejs.org) 20.19 or newer (or 22.12+ on the 22 line), and git (needed to install straight from GitHub until Rushes is on npm).
 
 > Status: early. The Script and Picture tabs, the MCP tools and the CLI work today. The audio tabs (Voiceover, Music, Sound effects, Mix) are next.
 
@@ -67,6 +67,23 @@ npx -y github:iamredmh/rushes stop    # stops it
 ```
 
 A server your agent starts in the background stops by itself after two hours with nothing connected.
+
+## Shortcuts
+
+In the Picture tab:
+
+- **Space** play or pause
+- **←/→** step one frame (Shift: ten)
+- **I/O** set in and out
+- **B** draw a box
+- **G** grab a frame
+- **N** new note
+
+Anywhere:
+
+- **1–6** switch tab
+- **?** shortcuts
+- **Esc** close
 
 ## What gets saved
 

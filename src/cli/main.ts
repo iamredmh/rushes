@@ -232,8 +232,10 @@ function usage(io: Io, line: string): number {
 }
 
 function fmt(t: number): string {
-  const m = Math.floor(t / 60);
-  const s = (t - m * 60).toFixed(2).padStart(5, "0");
+  // Round to hundredths first, so 59.999 becomes 1:00.00 rather than 0:60.00.
+  const cs = Math.round(Math.max(0, t) * 100);
+  const m = Math.floor(cs / 6000);
+  const s = ((cs - m * 6000) / 100).toFixed(2).padStart(5, "0");
   return `${m}:${s}`;
 }
 

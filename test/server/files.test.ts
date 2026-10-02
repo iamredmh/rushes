@@ -60,6 +60,10 @@ describe("dashboard files", () => {
     expect((await call("/assets/nope.js")).status).toBe(404);
     expect((await call("/assets/..%2F..%2Fpackage.json")).status).toBe(404);
   });
+  it("404s rather than 500s on a path with bad percent-encoding", async () => {
+    const { call } = await setup();
+    expect((await call("/assets/%")).status).toBe(404);
+  });
 });
 
 describe("media", () => {
@@ -77,6 +81,7 @@ describe("media", () => {
     expect(whole.status).toBe(200);
     expect(whole.headers.get("content-type")).toBe("video/mp4");
     expect(whole.headers.get("accept-ranges")).toBe("bytes");
+    expect(whole.headers.get("cross-origin-resource-policy")).toBe("same-origin");
     expect((await whole.arrayBuffer()).byteLength).toBe(1000);
     const part = await call(`/media?path=${encodeURIComponent("renders/hero v1.mp4")}`, { headers: { range: "bytes=100-199" } });
     expect(part.status).toBe(206);
@@ -121,5 +126,9 @@ describe("frame grabs", () => {
     expect((await post("/api/grabs", { video: "hero", version: "v1", frame: 1, png: Buffer.from("hello").toString("base64") })).status).toBe(400);
     expect((await post("/api/grabs", { video: "../x", version: "v1", frame: 1, png: PNG_1PX })).status).toBe(400);
     expect((await post("/api/grabs", { video: "hero", version: "latest", frame: 1, png: PNG_1PX })).status).toBe(400);
+  });
+  it("rejects a frame number so large it would print in exponent form", async () => {
+    const { post } = await setup();
+    expect((await post("/api/grabs", { video: "hero", version: "v1", frame: 10_000_001, png: PNG_1PX })).status).toBe(400);
   });
 });

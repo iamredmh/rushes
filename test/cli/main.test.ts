@@ -68,6 +68,20 @@ describe("cli", () => {
     await s.close();
   });
 
+  it("carries 59.999 s into the next minute instead of printing 0:60.00", async () => {
+    const { root } = await tmpProject();
+    const s = await startServer(root, { port: 0 });
+    await fetch(`${s.url}/api/notes`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ stage: "picture", scope: "point", t: 59.999, text: "x" }),
+    });
+    const a = io(root);
+    expect(await main(["notes", "--stage", "picture"], a.x)).toBe(0);
+    expect(a.out[0]).toContain("1:00.00");
+    await s.close();
+  });
+
   it("explains missing arguments and server errors", async () => {
     const { root } = await tmpProject();
     const s = await startServer(root, { port: 0 });

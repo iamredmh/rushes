@@ -105,7 +105,8 @@ const NoteQuery = z.object({
 const GrabBody = z.object({
   video: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
   version: z.string().regex(/^v\d+$/),
-  frame: z.number().int().nonnegative(),
+  // Capped well short of where it would print in exponent form in the grab's filename.
+  frame: z.number().int().nonnegative().max(10_000_000),
   /** PNG bytes, base64, with or without a data: prefix. */
   png: z.string().min(1),
 });
@@ -183,7 +184,13 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   });
 
   app.get("/assets/*", async (c) => {
-    const rel = decodeURIComponent(new URL(c.req.url).pathname.slice(1));
+    const raw = new URL(c.req.url).pathname.slice(1);
+    let rel: string;
+    try {
+      rel = decodeURIComponent(raw);
+    } catch {
+      throw new NotFoundError("asset", raw);
+    }
     const file = inside(webDir, rel);
     if (!file) throw new NotFoundError("asset", rel);
     const res = await sendFile(file, undefined, contentType(file));
@@ -197,7 +204,9 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     const path = c.req.query("path") ?? "";
     const [project, script] = await Promise.all([store.read("project"), store.read("script")]);
     if (!registeredMedia(project, script).has(path) && !GRAB_PATH.test(path)) throw new NotFoundError("media", path);
-    return sendFile(fromManifestPath(store.root, path), c.req.header("range"));
+    const res = await sendFile(fromManifestPath(store.root, path), c.req.header("range"));
+    res.headers.set("cross-origin-resource-policy", "same-origin");
+    return res;
   });
 
   app.post("/api/grabs", async (c) => {

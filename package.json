@@ -16,7 +16,7 @@
     "AGENTS.md"
   ],
   "engines": {
-    "node": ">=20"
+    "node": "^20.19.0 || >=22.12.0"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json && vite build",

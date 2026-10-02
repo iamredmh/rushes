@@ -15,12 +15,21 @@ export function useRushes(): Live {
   const [state, setState] = useState<State | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const timer = useRef<number | undefined>(undefined);
+  // Number each request so a slow one that lands after a newer one can't overwrite it.
+  const seq = useRef(0);
+  const applied = useRef(0);
 
   const refresh = async () => {
+    const id = ++seq.current;
     try {
-      setState(await api.get<State>("/api/state"));
+      const data = await api.get<State>("/api/state");
+      if (id < applied.current) return;
+      applied.current = id;
+      setState(data);
       setProblem(null);
     } catch (e) {
+      if (id < applied.current) return;
+      applied.current = id;
       setProblem((e as Error).message);
     }
   };

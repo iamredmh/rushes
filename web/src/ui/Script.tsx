@@ -89,7 +89,7 @@ function Row({ section, wps, toast, onChanged }: { section: Section; wps: number
         <div class="when">
           <b>{section.id.toUpperCase()}</b>
           <span>{fmt(section.start).replace(/\.\d+$/, "")}–{fmt(section.end).replace(/\.\d+$/, "")}</span>
-          <span class="stat"><i style={{ background: status.color }} />{status.label}</span>
+          <span class="stat" aria-label={status.label} data-tip={status.label} title={status.label}><i style={{ background: status.color }} /></span>
         </div>
         <div class="cur">{section.current}</div>
         <textarea
