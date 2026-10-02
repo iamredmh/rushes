@@ -1,7 +1,7 @@
 import { access, copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { harnesses, mergeJson, mergeToml, MCP_ARGS, MCP_COMMAND, type Harness, type HarnessId } from "./harnesses.js";
+import { harnesses, mcpLaunch, mergeJson, mergeToml, type Harness, type HarnessId } from "./harnesses.js";
 
 export interface SetupEnv {
   home: string;
@@ -60,22 +60,24 @@ async function installSkill(h: Harness, env: SetupEnv, dryRun: boolean): Promise
 async function one(h: Harness, env: SetupEnv, dryRun: boolean): Promise<SetupResult> {
   const base = { harness: h.id, name: h.name };
   if (!(await installed(h, env))) return { ...base, status: "not-found", detail: "not installed" };
+  const launch = mcpLaunch(env.platform);
+  const command = [launch.command, ...launch.args];
   try {
     if (h.kind === "claude-cli") {
-      if (!(await env.which("claude"))) return { ...base, status: "failed", detail: "the claude command isn't on PATH. Run: claude mcp add --scope user rushes -- " + [MCP_COMMAND, ...MCP_ARGS].join(" ") };
+      if (!(await env.which("claude"))) return { ...base, status: "failed", detail: "the claude command isn't on PATH. Run: claude mcp add --scope user rushes -- " + command.join(" ") };
       // Run from home so a project's own .mcp.json can't make it look registered.
       const got = await env.exec("claude", ["mcp", "get", "rushes"], env.home);
       const skill = await installSkill(h, env, dryRun);
       if (got.code === 0) return { ...base, status: "already", detail: "rushes MCP server already registered", skill };
       if (dryRun) return { ...base, status: "would-add", detail: "claude mcp add --scope user rushes", skill };
-      const add = await env.exec("claude", ["mcp", "add", "--scope", "user", "rushes", "--", MCP_COMMAND, ...MCP_ARGS], env.home);
+      const add = await env.exec("claude", ["mcp", "add", "--scope", "user", "rushes", "--", ...command], env.home);
       if (add.code !== 0) return { ...base, status: "failed", detail: add.out.trim() || "claude mcp add failed", skill };
       return { ...base, status: "added", detail: "registered with claude mcp add --scope user", skill };
     }
     const path = h.config!;
     const existed = await exists(path);
     const before = existed ? await readFile(path, "utf8") : null;
-    const merged = h.kind === "toml" ? mergeToml(before) : mergeJson(before);
+    const merged = h.kind === "toml" ? mergeToml(before, launch) : mergeJson(before, launch);
     const skill = await installSkill(h, env, dryRun);
     if (!merged.changed) return { ...base, status: "already", detail: path, skill };
     if (dryRun) return { ...base, status: "would-add", detail: path, skill };

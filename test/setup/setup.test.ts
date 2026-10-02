@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach } from "vitest";
-import { harnesses, mergeJson, mergeToml, MCP_ARGS, SOURCE } from "../../src/setup/harnesses.js";
+import { harnesses, mcpLaunch, mergeJson, mergeToml, MCP_ARGS, SOURCE } from "../../src/setup/harnesses.js";
 import { setup, type SetupEnv } from "../../src/setup/setup.js";
 
 const homes: string[] = [];
@@ -49,6 +49,31 @@ describe("mergeJson", () => {
   it("refuses a config that isn't a JSON object", () => {
     expect(() => mergeJson("[1,2]")).toThrow(/not a JSON object/);
     expect(() => mergeJson("{ broken")).toThrow();
+  });
+});
+
+describe("Windows launch", () => {
+  it("launches through cmd /c on win32 and npx directly elsewhere", () => {
+    expect(mcpLaunch("win32")).toEqual({ command: "cmd", args: ["/c", "npx", "-y", SOURCE, "mcp"] });
+    expect(mcpLaunch("darwin")).toEqual({ command: "npx", args: ["-y", SOURCE, "mcp"] });
+    expect(mcpLaunch("linux")).toEqual({ command: "npx", args: MCP_ARGS });
+  });
+  it("the win32 JSON merge writes cmd /c npx", () => {
+    const doc = JSON.parse(mergeJson(null, mcpLaunch("win32")).text);
+    expect(doc.mcpServers.rushes).toEqual({ command: "cmd", args: ["/c", "npx", "-y", SOURCE, "mcp"] });
+  });
+  it("the win32 TOML merge writes cmd /c npx", () => {
+    expect(mergeToml(null, mcpLaunch("win32")).text).toContain(`command = "cmd"\nargs = ["/c", "npx", "-y", "${SOURCE}", "mcp"]`);
+  });
+  it("setup on win32 registers Claude Code with cmd /c npx and writes cmd into JSON configs", async () => {
+    const { env, home, calls } = await fakeHome();
+    env.platform = "win32";
+    await mkdir(join(home, ".cursor"));
+    const r = await setup(env, { only: ["claude-code", "cursor"] });
+    expect(r.map((x) => x.status)).toEqual(["added", "added"]);
+    expect(calls).toContainEqual(["claude", "mcp", "add", "--scope", "user", "rushes", "--", "cmd", "/c", "npx", "-y", SOURCE, "mcp"]);
+    const cursor = JSON.parse(await readFile(join(home, ".cursor", "mcp.json"), "utf8"));
+    expect(cursor.mcpServers.rushes.command).toBe("cmd");
   });
 });
 

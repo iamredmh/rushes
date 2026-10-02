@@ -7,7 +7,7 @@ import { ensureServer } from "./ensure.js";
 export function openBrowser(url: string): void {
   const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open";
   const args = process.platform === "win32" ? ["/c", "start", "", url] : [url];
-  spawn(cmd, args, { detached: true, stdio: "ignore" }).on("error", () => undefined).unref();
+  spawn(cmd, args, { detached: true, stdio: "ignore", windowsHide: true }).on("error", () => undefined).unref();
 }
 
 /** Run the MCP server over stdio. Projects default to the directory the agent launched it in. */

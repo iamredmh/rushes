@@ -50,6 +50,8 @@ If you can't run commands, give the user the matching line from **Manual setup**
 | **Codex** | add to `~/.codex/config.toml`:<br>`[mcp_servers.rushes]`<br>`command = "npx"`<br>`args = ["-y", "github:iamredmh/rushes", "mcp"]` |
 | **Cursor** (`~/.cursor/mcp.json`), **Claude Desktop** (`claude_desktop_config.json`), **Gemini CLI** (`~/.gemini/settings.json`) | `{ "mcpServers": { "rushes": { "command": "npx", "args": ["-y", "github:iamredmh/rushes", "mcp"] } } }` |
 
+On Windows, `rushes setup` writes the launch as `cmd /c npx -y github:iamredmh/rushes mcp` (in JSON: `"command": "cmd", "args": ["/c", "npx", "-y", "github:iamredmh/rushes", "mcp"]`), because harnesses can't start `npx` directly there. Do the same if you set it up by hand.
+
 ### Other harnesses
 
 Any MCP client that can launch a local stdio server works. Point it at `npx -y github:iamredmh/rushes mcp`. Agents with no MCP support can use the CLI instead (`rushes add`, `rushes notes`, `rushes reply`): see [AGENTS.md](AGENTS.md).
