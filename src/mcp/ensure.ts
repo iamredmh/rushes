@@ -29,6 +29,7 @@ export interface EnsureOptions {
 function defaultSpawn(root: string): void {
   const cli = fileURLToPath(new URL("../cli/index.js", import.meta.url));
   const child = spawn(process.execPath, [cli, "serve", root], { detached: true, stdio: "ignore" });
+  child.on("error", () => undefined);
   child.unref();
 }
 

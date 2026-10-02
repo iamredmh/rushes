@@ -112,4 +112,13 @@ describe("ensureServer", () => {
     const { root } = await tmpProject();
     await expect(ensureServer(root, { spawnServer: () => undefined, timeoutMs: 400 })).rejects.toThrow(/did not start/);
   });
+
+  it("doesn't crash if defaultSpawn fails to start (missing cli, no permissions, etc)", async () => {
+    const { root } = await tmpProject();
+    // When no spawnServer override is provided, defaultSpawn is used, which will fail because
+    // src/cli/index.js doesn't exist yet (it's built in a later task). The error listener should
+    // prevent an unhandled 'error' event from crashing the process, and ensureServer should
+    // time out and throw a readable error instead.
+    await expect(ensureServer(root, { timeoutMs: 400 })).rejects.toThrow(/did not start/);
+  });
 });
