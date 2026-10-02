@@ -1,4 +1,5 @@
 import { createServer, type Server } from "node:http";
+import { mkdir, realpath } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import { getRequestListener } from "@hono/node-server";
 import { Store } from "../core/store.js";
@@ -36,7 +37,9 @@ function listen(server: Server, port: number, host: string): Promise<number> {
  * ports; pass port 0 to let the OS choose (tests do).
  */
 export async function startServer(rootDir: string, opts: { port?: number; host?: string; name?: string } = {}): Promise<Running> {
-  const root = resolve(rootDir);
+  // The real path is the root everywhere (store, lock, health), so a symlinked path finds the same server.
+  await mkdir(resolve(rootDir), { recursive: true });
+  const root = await realpath(resolve(rootDir));
   const store = new Store(root);
   await store.init(opts.name ?? basename(root));
   const app = createApp(store);
@@ -57,7 +60,14 @@ export async function startServer(rootDir: string, opts: { port?: number; host?:
   }
   if (port < 0) throw new Error(`No free port from ${first} to ${first + 10}: ${(lastError as Error)?.message}`);
 
-  await writeLock(root, port);
+  try {
+    await writeLock(root, port);
+  } catch (e) {
+    // Another server owns this project, or the lock couldn't be written: don't leave a socket open.
+    server.closeAllConnections?.();
+    await new Promise<void>((ok) => server.close(() => ok()));
+    throw e;
+  }
   const url = `http://${host}:${port}`;
   let closed = false;
   const close = async () => {

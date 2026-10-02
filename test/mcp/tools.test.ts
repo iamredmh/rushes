@@ -121,6 +121,23 @@ describe("ensureServer", () => {
     await otherServer.close();
   });
 
+  it("parallel calls for one root share a single spawn", async () => {
+    const { root } = await tmpProject();
+    let spawns = 0;
+    const started: Awaited<ReturnType<typeof startServer>>[] = [];
+    const spawnServer = (r: string) => {
+      spawns++;
+      void startServer(r, { port: 0 }).then((s) => { started.push(s); }, () => undefined);
+    };
+    const clients = await Promise.all(Array.from({ length: 5 }, () => ensureServer(root, { spawnServer })));
+    expect(spawns).toBe(1);
+    expect(new Set(clients.map((c) => c.baseUrl)).size).toBe(1);
+    // Once settled, the next call looks again instead of reusing the old promise.
+    await ensureServer(root, { spawnServer });
+    expect(spawns).toBe(1);
+    for (const s of started) await s.close();
+  });
+
   it("gives a clear error when no server comes up", async () => {
     const { root } = await tmpProject();
     await expect(ensureServer(root, { spawnServer: () => undefined, timeoutMs: 400 })).rejects.toThrow(/did not start/);

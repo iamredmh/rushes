@@ -92,6 +92,24 @@ describe("cli", () => {
     await server!.close();
   });
 
+  it("open and serve reuse a server that is already running instead of starting another", async () => {
+    const { root } = await tmpProject();
+    const s = await startServer(root, { port: 0 });
+    const a = io(root);
+    let started: Running | undefined;
+    a.x.onServer = (x) => { started = x; };
+    expect(await main(["open", "."], a.x)).toBe(0);
+    expect(a.out).toEqual([`Rushes is already running for ${root}\n${s.url}`]);
+    expect(a.opened).toEqual([s.url]);
+    const b = io(root);
+    b.x.onServer = (x) => { started = x; };
+    expect(await main(["serve", root], b.x)).toBe(0);
+    expect(b.out).toEqual([`Rushes is already running for ${root}\n${s.url}`]);
+    expect(b.opened).toEqual([]);
+    expect(started).toBeUndefined();
+    await s.close();
+  });
+
   it("status reads the project folder it is given", async () => {
     const { root } = await tmpProject();
     const s = await startServer(root, { port: 0 });

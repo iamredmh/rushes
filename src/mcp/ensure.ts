@@ -1,23 +1,15 @@
 import { spawn } from "node:child_process";
-import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readLock } from "../server/lock.js";
+import { canonicalRoot, isRushesFor, readLock } from "../server/lock.js";
 import { RushesClient } from "./client.js";
 
 /** URL of a live Rushes server for exactly this project root, or null. */
 export async function findServer(rootDir: string): Promise<string | null> {
-  const root = resolve(rootDir);
+  const root = await canonicalRoot(rootDir);
   const lock = await readLock(root);
   if (!lock) return null;
-  const url = `http://127.0.0.1:${lock.port}`;
-  try {
-    const res = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(1500) });
-    const health = (await res.json()) as { app?: string; root?: string };
-    // A reused port or pid can point at something else, so check it's ours.
-    return health.app === "rushes" && health.root === root ? url : null;
-  } catch {
-    return null;
-  }
+  // A reused port or pid can point at something else, so check it's ours.
+  return (await isRushesFor(lock.port, root)) ? `http://127.0.0.1:${lock.port}` : null;
 }
 
 export interface EnsureOptions {
@@ -33,9 +25,20 @@ function defaultSpawn(root: string): void {
   child.unref();
 }
 
+/** One in-flight ensure per root, so parallel tool calls share a single spawn. */
+const pending = new Map<string, Promise<RushesClient>>();
+
 /** Find the project's server, starting one in the background if needed. */
 export async function ensureServer(rootDir: string, opts: EnsureOptions = {}): Promise<RushesClient> {
-  const root = resolve(rootDir);
+  const root = await canonicalRoot(rootDir);
+  const inFlight = pending.get(root);
+  if (inFlight) return inFlight;
+  const run = ensure(root, opts).finally(() => pending.delete(root));
+  pending.set(root, run);
+  return run;
+}
+
+async function ensure(root: string, opts: EnsureOptions): Promise<RushesClient> {
   const found = await findServer(root);
   if (found) return new RushesClient(found);
   (opts.spawnServer ?? defaultSpawn)(root);

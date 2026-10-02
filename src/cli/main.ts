@@ -2,7 +2,8 @@ import { parseArgs } from "node:util";
 import { basename, resolve } from "node:path";
 import { Store } from "../core/store.js";
 import { startServer, DEFAULT_PORT, type Running } from "../server/start.js";
-import { ensureServer, type EnsureOptions } from "../mcp/ensure.js";
+import { ensureServer, findServer, type EnsureOptions } from "../mcp/ensure.js";
+import { AlreadyRunningError, canonicalRoot } from "../server/lock.js";
 import { ApiError } from "../mcp/client.js";
 import { openBrowser, runStdio } from "../mcp/stdio.js";
 import { VERSION } from "../server/app.js";
@@ -84,10 +85,27 @@ export async function main(argv: string[], io: Io): Promise<number> {
     switch (cmd) {
       case "open":
       case "serve": {
-        const root = resolve(io.cwd, rest[0] ?? ".");
-        const s = await startServer(root, { port: o.port ? Number(o.port) : DEFAULT_PORT });
+        const root = await canonicalRoot(resolve(io.cwd, rest[0] ?? "."));
+        const show = (url: string) => {
+          if (cmd === "open" && !o["no-browser"]) (io.openBrowser ?? openBrowser)(url);
+        };
+        const already = (url: string) => {
+          io.out(`Rushes is already running for ${root}\n${url}`);
+          show(url);
+          return 0;
+        };
+        const running = await findServer(root);
+        if (running) return already(running);
+        let s: Running;
+        try {
+          s = await startServer(root, { port: o.port ? Number(o.port) : DEFAULT_PORT });
+        } catch (e) {
+          // Another server won the race between the check above and our start.
+          if (e instanceof AlreadyRunningError) return already(e.url);
+          throw e;
+        }
         io.out(`Rushes is running for ${root}\n${s.url}`);
-        if (cmd === "open" && !o["no-browser"]) (io.openBrowser ?? openBrowser)(s.url);
+        show(s.url);
         if (io.onServer) return io.onServer(s), 0;
         const stop = () => void s.close().then(() => process.exit(0));
         process.once("SIGINT", stop);

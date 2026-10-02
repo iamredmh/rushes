@@ -1,9 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { createServer, request } from "node:http";
-import { access, writeFile } from "node:fs/promises";
+import { Server } from "node:net";
+import { access, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
 import { startServer } from "../../src/server/start.js";
-import { lockPath, readLock, removeLock } from "../../src/server/lock.js";
+import { AlreadyRunningError, canonicalRoot, lockPath, readLock, removeLock } from "../../src/server/lock.js";
+import { ensureServer, findServer } from "../../src/mcp/ensure.js";
+
+/** Servers in this process that are still listening. */
+const listeningServers = () =>
+  ((process as unknown as { _getActiveHandles(): unknown[] })._getActiveHandles()).filter((h) => h instanceof Server && h.listening).length;
 
 describe("startServer", () => {
   it("serves the API, writes a lockfile and removes it on close", async () => {
@@ -58,6 +65,67 @@ describe("startServer", () => {
     await until("event: change");
     expect(text).toContain('"file":"notes"');
     ctrl.abort();
+    await s.close();
+  });
+
+  it("uses the real path as the root, so a symlinked path finds the same server", async () => {
+    const { root } = await tmpProject();
+    const link = join(dirname(root), "Linked Project");
+    await symlink(root, link);
+    const s = await startServer(link, { port: 0 });
+    expect(s.store.root).toBe(root);
+    expect((await (await fetch(`${s.url}/api/health`)).json()).root).toBe(root);
+    expect(await readLock(root)).toMatchObject({ port: s.port });
+    expect(await findServer(link)).toBe(s.url);
+    expect(await findServer(root)).toBe(s.url);
+    const c = await ensureServer(link, { spawnServer: () => { throw new Error("should not spawn"); } });
+    expect(c.baseUrl).toBe(s.url);
+    await s.close();
+  });
+
+  it("canonicalRoot resolves the nearest existing parent of a folder that isn't there yet", async () => {
+    const { root } = await tmpProject();
+    const link = join(dirname(root), "Linked Project");
+    await symlink(root, link);
+    expect(await canonicalRoot(link)).toBe(root);
+    expect(await canonicalRoot(join(link, "Not Yet", "Deeper"))).toBe(join(root, "Not Yet", "Deeper"));
+  });
+
+  it("creates a project folder that doesn't exist yet", async () => {
+    const { root } = await tmpProject();
+    const fresh = join(root, "New Film");
+    expect(await findServer(fresh)).toBeNull();
+    const s = await startServer(fresh, { port: 0 });
+    expect(s.store.root).toBe(fresh);
+    await s.close();
+  });
+
+  it("a second server for the same root refuses to start, and the first one's lock survives", async () => {
+    const { root } = await tmpProject();
+    const first = await startServer(root, { port: 0 });
+    const before = await readFile(lockPath(root), "utf8");
+    const second = startServer(root, { port: 0 });
+    await expect(second).rejects.toBeInstanceOf(AlreadyRunningError);
+    await expect(second).rejects.toMatchObject({ code: "already_running", url: first.url });
+    expect(await readFile(lockPath(root), "utf8")).toBe(before);
+    expect((await fetch(`${first.url}/api/health`)).status).toBe(200);
+    await first.close();
+  });
+
+  it("closes its listening socket when the lock can't be written", async () => {
+    const { root } = await tmpProject();
+    // A directory where server.json should be makes the write fail with something other than EEXIST.
+    await mkdir(lockPath(root));
+    const before = listeningServers();
+    await expect(startServer(root, { port: 0 })).rejects.toThrow();
+    expect(listeningServers()).toBe(before);
+  });
+
+  it("takes over a stale lock whose pid is alive but whose port isn't this project's server", async () => {
+    const { root } = await tmpProject();
+    await writeFile(lockPath(root), JSON.stringify({ port: 1, pid: process.pid, startedAt: "x" }), "utf8");
+    const s = await startServer(root, { port: 0 });
+    expect(await readLock(root)).toMatchObject({ port: s.port });
     await s.close();
   });
 
