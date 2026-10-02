@@ -64,12 +64,13 @@ describe("root page and listeners", () => {
     const odd = join(root, "<b>A&B</b>");
     const store = new Store(odd);
     await store.init("odd");
-    const res = await createApp(store).request("/");
+    // No built dashboard in this folder, so the placeholder page is served.
+    const res = await createApp(store, { webDir: join(root, "no-dashboard") }).request("/");
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/html");
     const html = await res.text();
     expect(html).toBe(
-      `<!doctype html><title>Rushes</title><p>Rushes is running for <code>${odd.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</code>. The dashboard arrives in the next release.</p>`,
+      `<!doctype html><title>Rushes</title><p>Rushes is running for <code>${odd.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</code>. The dashboard isn't built: run <code>npm run build</code>.</p>`,
     );
     expect(html).not.toContain("<b>");
   });

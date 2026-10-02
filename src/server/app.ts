@@ -10,6 +10,11 @@ import { createBatch, latestBatch } from "../core/batches.js";
 import { tabStates } from "../core/tabs.js";
 import { fromManifestPath, toManifestPath } from "../core/paths.js";
 import { probe } from "../core/media.js";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { GRAB_PATH, contentType, inside, registeredMedia, sendFile } from "./files.js";
 import type { CorruptEvent } from "./watch.js";
 import { LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, type Batch } from "../core/schema.js";
 
@@ -97,7 +102,23 @@ const NoteQuery = z.object({
   version: z.string().optional(),
 });
 
+const GrabBody = z.object({
+  video: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
+  version: z.string().regex(/^v\d+$/),
+  frame: z.number().int().nonnegative(),
+  /** PNG bytes, base64, with or without a data: prefix. */
+  png: z.string().min(1),
+});
+
+const MAX_GRAB_BYTES = 25 * 1024 * 1024;
+const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+/** Where the built dashboard lives: <package>/web-dist, next to dist/ and src/. */
+export const DEFAULT_WEB_DIR = fileURLToPath(new URL("../../web-dist/", import.meta.url));
+
 export interface AppOptions {
+  /** Folder with the built dashboard (index.html + assets/). */
+  webDir?: string;
   /** Called after POST /api/shutdown has replied. */
   onShutdown?: () => void;
 }
@@ -117,6 +138,7 @@ const escapeHtml = (text: string) =>
   text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 
 export function createApp(store: Store, opts: AppOptions = {}): Hono {
+  const webDir = opts.webDir ?? DEFAULT_WEB_DIR;
   const app = new Hono();
   // Every SSE client adds a change listener, so lift Node's default limit of ten.
   store.setMaxListeners(0);
@@ -153,9 +175,41 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     await next();
   });
 
-  app.get("/", (c) =>
-    c.html(`<!doctype html><title>Rushes</title><p>Rushes is running for <code>${escapeHtml(store.root)}</code>. The dashboard arrives in the next release.</p>`),
-  );
+  // ---- dashboard ----
+  app.get("/", async (c) => {
+    const index = join(webDir, "index.html");
+    if (existsSync(index)) return c.html(await readFile(index, "utf8"));
+    return c.html(`<!doctype html><title>Rushes</title><p>Rushes is running for <code>${escapeHtml(store.root)}</code>. The dashboard isn't built: run <code>npm run build</code>.</p>`);
+  });
+
+  app.get("/assets/*", async (c) => {
+    const rel = decodeURIComponent(new URL(c.req.url).pathname.slice(1));
+    const file = inside(webDir, rel);
+    if (!file) throw new NotFoundError("asset", rel);
+    const res = await sendFile(file, undefined, contentType(file));
+    if (res.status === 404) throw new NotFoundError("asset", rel);
+    res.headers.set("cache-control", "public, max-age=31536000, immutable");
+    return res;
+  });
+
+  // ---- media: only files the project registered, plus its own grabs ----
+  app.get("/media", async (c) => {
+    const path = c.req.query("path") ?? "";
+    const [project, script] = await Promise.all([store.read("project"), store.read("script")]);
+    if (!registeredMedia(project, script).has(path) && !GRAB_PATH.test(path)) throw new NotFoundError("media", path);
+    return sendFile(fromManifestPath(store.root, path), c.req.header("range"));
+  });
+
+  app.post("/api/grabs", async (c) => {
+    const b = await body(c, GrabBody);
+    const bytes = Buffer.from(b.png.replace(/^data:image\/png;base64,/, ""), "base64");
+    if (bytes.length > MAX_GRAB_BYTES) throw new InvalidError(`Frame grab is over ${MAX_GRAB_BYTES / 1024 / 1024} MB`);
+    if (!bytes.subarray(0, 8).equals(PNG_MAGIC)) throw new InvalidError("Frame grab must be a PNG");
+    const grab = `.rushes/grabs/${b.video}_${b.version}_f${b.frame}.png`;
+    await mkdir(join(store.dir, "grabs"), { recursive: true });
+    await writeFile(fromManifestPath(store.root, grab), bytes);
+    return c.json({ grab }, 201);
+  });
 
   app.post("/api/shutdown", (c) => {
     if (opts.onShutdown) setImmediate(opts.onShutdown);

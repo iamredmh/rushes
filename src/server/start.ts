@@ -22,6 +22,8 @@ export interface StartOptions {
   port?: number;
   host?: string;
   name?: string;
+  /** Folder with the built dashboard. Defaults to the package's web-dist/. */
+  webDir?: string;
   /** Close after this long with no requests and no open connections. Off by default. */
   idleMs?: number;
 }
@@ -54,7 +56,7 @@ export async function startServer(rootDir: string, opts: StartOptions = {}): Pro
   const store = new Store(root);
   await store.init(opts.name ?? basename(root));
   let close: () => Promise<void> = async () => undefined;
-  const app = createApp(store, { onShutdown: () => void close() });
+  const app = createApp(store, { webDir: opts.webDir, onShutdown: () => void close() });
   const listener = getRequestListener(app.fetch);
   let lastRequest = Date.now();
   const server = createServer((req, res) => {
