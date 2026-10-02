@@ -356,6 +356,21 @@ test("the shot strip names each shot, follows the playhead, and notes record the
   await expect(page.locator(".track .tick")).toHaveCount(2);
 });
 
+test("a cut whose first shot starts after a lead-in gets a tick at every shot, and no current shot before it", async ({ page, rushes }) => {
+  await rushes.addCut();
+  await rushes.api("PUT", "/api/videos/hero/shots", { shots: [{ name: "Logo", start: 0.5 }, { name: "Hero", start: 2 }] });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await expect(page.locator(".track .tick")).toHaveCount(2);
+  await expect(page.locator(".shot[aria-current='true']")).toHaveCount(0);
+  // Keys still work once the listener is bound only once: N focuses the note box, I sets In.
+  for (let i = 0; i < 30; i++) await page.keyboard.press("ArrowRight");
+  await expect(page.getByLabel("Timecode")).toContainText("0:01.00");
+  await expect(page.locator(".shot").nth(0)).toHaveAttribute("aria-current", "true");
+  await page.keyboard.press("n");
+  await expect(page.getByLabel("New note")).toBeFocused();
+});
+
 test("a tab left open after its project stops never writes into the project that takes its port", async ({ page, rushes }) => {
   await rushes.addCut();
   await page.goto(rushes.url);

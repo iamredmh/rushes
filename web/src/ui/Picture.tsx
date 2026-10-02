@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { api, mediaUrl } from "../api.js";
 import { boxFrom, fmt, frameAt, noteTime, placeNote, shotAt, shotLabel, snap, stepFrame } from "../lib.js";
 import type { Note, Video, Version } from "../types.js";
@@ -155,26 +155,27 @@ export function Picture({ video, version, fps, notes, toast, onChanged, onPendin
     onChanged();
   };
 
-  // Keyboard: Space, ←/→, I, O, G, B and N, unless you're typing.
-  // A layout effect, not a plain one, to match App's: it re-binds synchronously with the
-  // commit, so a key pressed right after a render that this same closure needs can't land on
-  // a stale one (a plain effect's re-registration is deferred past the next paint).
-  useLayoutEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (typing(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
-      const k = e.key.toLowerCase();
-      if (e.key === " ") { e.preventDefault(); toggle(); }
-      else if (e.key === "ArrowLeft") { e.preventDefault(); step(e.shiftKey ? -10 : -1); }
-      else if (e.key === "ArrowRight") { e.preventDefault(); step(e.shiftKey ? 10 : 1); }
-      else if (k === "i") setIn();
-      else if (k === "o") setOut();
-      else if (k === "g") void grabFrame();
-      else if (k === "b") setBoxMode((m) => !m);
-      else if (k === "n") { e.preventDefault(); input.current?.focus(); }
-    };
+  // Keyboard: Space, ←/→, I, O, G, B and N, unless you're typing. The handler is refreshed on
+  // every render (so it never acts on a stale closure), but the listener is bound once: the
+  // playhead re-renders this component every frame while playing.
+  const onKeyRef = useRef<(e: KeyboardEvent) => void>(() => undefined);
+  onKeyRef.current = (e: KeyboardEvent) => {
+    if (typing(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
+    const k = e.key.toLowerCase();
+    if (e.key === " ") { e.preventDefault(); toggle(); }
+    else if (e.key === "ArrowLeft") { e.preventDefault(); step(e.shiftKey ? -10 : -1); }
+    else if (e.key === "ArrowRight") { e.preventDefault(); step(e.shiftKey ? 10 : 1); }
+    else if (k === "i") setIn();
+    else if (k === "o") setOut();
+    else if (k === "g") void grabFrame();
+    else if (k === "b") setBoxMode((m) => !m);
+    else if (k === "n") { e.preventDefault(); input.current?.focus(); }
+  };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => onKeyRef.current(e);
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  });
+  }, []);
 
   // Drawing a box on the frame.
   const point = (e: PointerEvent) => {
@@ -299,7 +300,7 @@ export function Picture({ video, version, fps, notes, toast, onChanged, onPendin
         >
           {placed.map(({ n, at }) => at.tOut !== null && <div class={`span ${n.status}`} style={{ left: pct(at.t!), width: pct(at.tOut - at.t!) }} />)}
           {range.in !== null && <div class="span live" style={{ left: pct(range.in), width: pct((range.out ?? range.in + 0.2) - range.in) }} />}
-          {shots.slice(1).map((s) => <div class="tick" style={{ left: pct(s.start) }} />)}
+          {shots.filter((s) => s.start > 0).map((s) => <div class="tick" style={{ left: pct(s.start) }} />)}
           {placed.map(({ n, at }) => <div class={`mk ${n.status}`} style={{ left: pct(at.t!) }} title={n.text} />)}
           <div class="playhead" style={{ left: pct(t) }} />
         </div>
