@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, ApiError } from "../api.js";
-import { BUILT, STAGE_NAMES, UNLOCK_HINT, defaultVersion, firstTab, latest, neighbourVideo } from "../lib.js";
+import { BUILT, STAGE_NAMES, UNLOCK_HINT, defaultVersion, firstTab, latest, neighbourVideo, snap } from "../lib.js";
 import type { Batch, Stage, Video } from "../types.js";
 import { useRushes } from "../useRushes.js";
 import { Icon, STAGE_ICONS } from "./Icon.js";
@@ -38,8 +38,9 @@ export function App() {
   // Per-film memory: playhead, version choice and hold state, so switching films and coming
   // back doesn't lose your place. Keyed by video id.
   const memory = useRef(new Map<string, { versionId: string | null; held: boolean; t: number }>());
-  // The current film's live playhead, kept current by Picture's onTime so a switch away can save it.
-  const tRef = useRef(0);
+  // The playing <video> element, forwarded up from Picture, so a switch can read its live
+  // currentTime directly (never stale) and pause it before it unmounts.
+  const playerRef = useRef<HTMLVideoElement | null>(null);
 
   const toast = (message: string) => {
     setToastText(message);
@@ -65,6 +66,7 @@ export function App() {
   const target = defaultVersion(video);
   const version = video?.versions.find((v) => v.id === versionId) ?? target;
   const locked = !!video?.lockedVersion;
+  const fps = version?.fps ?? state?.project.fps ?? 30;
 
   // A new cut arriving mid-review mustn't rewind the player or drop pending marks. So the
   // moment something's pending, hold the cut on screen; a newer one then waits behind a chip.
@@ -91,13 +93,18 @@ export function App() {
   const switchFilm = (newId: string) => {
     if (!video || newId === video.id) return;
     if (pending) return toast(`Add or clear your note on ${video.name} first`);
-    memory.current.set(video.id, { versionId, held, t: tRef.current });
+    // Read the live element directly, and pause it before it unmounts: React state for the
+    // playhead can lag behind what's actually on screen (e.g. mid-play, or a burst of seeks),
+    // so this is the only way to be sure what's saved matches what was really showing.
+    const el = playerRef.current;
+    el?.pause();
+    const t = el ? snap(el.currentTime, fps) : (memory.current.get(video.id)?.t ?? 0);
+    memory.current.set(video.id, { versionId, held, t });
     const saved = memory.current.get(newId);
     setVideoId(newId);
     setVersionId(saved?.versionId ?? null);
     setHeld(saved?.held ?? false);
     setStartAt(saved?.t ?? 0);
-    tRef.current = saved?.t ?? 0;
   };
 
   const toggleLock = async () => {
@@ -118,7 +125,11 @@ export function App() {
     setSent(null);
   };
 
-  useEffect(() => {
+  // A layout effect, not a plain one: a plain effect's re-registration is deferred past the next
+  // paint, so a key pressed right after a DOM update that this same closure needs (e.g. `]` then
+  // `[` again, both switching films) could still hit the previous render's stale closure. The
+  // layout effect re-binds synchronously with the commit instead.
+  useLayoutEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (typing(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
       const n = Number(e.key);
@@ -167,7 +178,6 @@ export function App() {
     );
   }
 
-  const fps = version?.fps ?? state.project.fps;
   const pictureNotes = state.notes.notes.filter((n) => n.stage === "picture" && (!n.video || n.video === video?.id));
   const hasTodo = (vid: string) => state.notes.notes.some((n) => n.stage === "picture" && n.status === "todo" && (!n.video || n.video === vid));
   const unlocked = tab(stage)?.unlocked ?? false;
@@ -202,32 +212,33 @@ export function App() {
           <>
             <span class="plabel">Picture</span>
             {version && (
-              <span class="verwrap" data-tip={locked ? `Picture locked at ${version.id}` : undefined}>
-                <select
-                  class="sel mono"
-                  aria-label="Version"
-                  value={version.id}
-                  onChange={(e) => {
-                    const el = e.target as HTMLSelectElement;
-                    setVersionId(el.value === newest?.id ? null : el.value);
-                    setHeld(false);
-                    // So ←/→ go back to stepping frames rather than the select.
-                    el.blur();
-                  }}
-                >
-                  {[...video.versions].reverse().map((v) => <option value={v.id}>{v.id}{v.note ? ` · ${v.note}` : ""}</option>)}
-                </select>
-                {locked && <Icon name="lock" class="vlk" />}
-              </span>
+              <select
+                class="sel mono"
+                aria-label="Version"
+                value={version.id}
+                onChange={(e) => {
+                  const el = e.target as HTMLSelectElement;
+                  // Picking the version the film would follow anyway collapses back to "follow"
+                  // (null); picking anything else pins it explicitly — including the newest, on a
+                  // locked film, which must show what you asked for rather than snap back to the lock.
+                  setVersionId(el.value === target?.id ? null : el.value);
+                  setHeld(false);
+                  // So ←/→ go back to stepping frames rather than the select.
+                  el.blur();
+                }}
+              >
+                {[...video.versions].reverse().map((v) => <option value={v.id}>{v.id}{v.note ? ` · ${v.note}` : ""}</option>)}
+              </select>
             )}
             {version && (
               <button
-                class="btn ghost ib"
-                aria-label={locked ? "Unlock picture" : `Lock picture at ${version.id}`}
-                data-tip={locked ? "Unlock picture" : `Lock picture at ${version.id}`}
+                class="btn ib lockbtn"
+                aria-pressed={locked}
+                aria-label={locked ? `Picture locked at ${version.id} · unlock` : `Lock picture at ${version.id}`}
+                data-tip={locked ? `Picture locked at ${version.id} · unlock` : `Lock picture at ${version.id}`}
                 onClick={() => void toggleLock()}
               >
-                <Icon name={locked ? "unlock" : "lock"} />
+                <Icon name={locked ? "lock" : "unlock"} />
               </button>
             )}
             {readyVersionId && (
@@ -318,7 +329,7 @@ export function App() {
             onChanged={() => void refresh()}
             onPendingChange={setPending}
             startAt={startAt}
-            onTime={(tt) => { tRef.current = tt; }}
+            playerRef={playerRef}
           />
         ) : stage === "script" ? (
           <Script script={state.script} toast={toast} onChanged={() => void refresh()} />

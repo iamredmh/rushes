@@ -71,16 +71,16 @@ svg.ic { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-wid
 .crumb .slash { color: var(--text-3); }
 .crumb .pid { font-weight: 500; font-size: 13px; color: var(--text-3); margin-left: 2px; }
 .pack { display: flex; align-items: center; gap: 2px; background: var(--app); border-radius: var(--r); padding: 3px; }
-.pill { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; color: var(--text-2); font-size: 15px; font-weight: 500; cursor: pointer; }
+.pill { display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; color: var(--text-2); font-size: 15px; font-weight: 500; cursor: pointer; }
 .pill:hover { color: var(--text); }
 .pill[aria-pressed="true"] { background: var(--raised); color: var(--text); }
-.pill .n { width: 18px; height: 18px; border-radius: 50%; background: var(--line-2); color: var(--text-2); font: 600 11px/18px var(--mono); text-align: center; flex: none; }
+.pill .n { width: 22px; height: 22px; border-radius: 50%; background: var(--line-2); color: var(--text-2); font: 600 15px/22px var(--sans); font-variant-numeric: tabular-nums; text-align: center; flex: none; }
 .pill[aria-pressed="true"] .n { background: var(--accent-soft); color: var(--accent-2); }
 .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--todo); flex: none; }
 .plabel { color: var(--text-3); font-size: 15px; font-weight: 500; }
-.verwrap { position: relative; display: inline-flex; align-items: center; }
-.verwrap .vlk { position: absolute; right: 8px; width: 13px; height: 13px; color: var(--accent-2); pointer-events: none; }
-.verwrap select.sel { padding-right: 28px; }
+.lockbtn { background: transparent; color: var(--text-3); }
+.lockbtn:hover { background: var(--raised); color: var(--text); }
+.lockbtn[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-2); }
 .tabs { display: flex; gap: 4px; padding: 0 14px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
 .tab { border: 0; background: transparent; display: flex; align-items: center; gap: 8px; padding: 12px 14px 13px; color: var(--text-2); font-weight: 500; font-size: 15px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; border-radius: 8px 8px 0 0; }
 .tab:hover { color: var(--text); background: rgba(255, 255, 255, 0.02); }

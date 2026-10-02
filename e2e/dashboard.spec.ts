@@ -290,10 +290,45 @@ test("a locked picture opens on the locked cut", async ({ page, rushes }) => {
   await page.goto(rushes.url);
   await videoReady(page);
   await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v1");
-  await expect(page.locator(".verwrap .vlk")).toBeVisible();
+  const lockBtn = page.getByRole("button", { name: "Picture locked at v1 · unlock" });
+  await expect(lockBtn).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator(".chipx.go")).toContainText("v2 ready");
-  await page.getByRole("button", { name: "Unlock picture" }).click();
+  await lockBtn.click();
   await expect.poll(async () => (await rushes.api("GET", "/api/state")).project.videos[0].lockedVersion).toBeNull();
+});
+
+test("choosing the newest cut by hand on a locked film doesn't snap back to the lock", async ({ page, rushes }) => {
+  const { version: v1 } = await rushes.addCut("first cut");
+  await rushes.addCut("second cut");
+  await rushes.api("PUT", "/api/videos/Hero/lock", { version: v1.id });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v1");
+  await page.getByRole("combobox", { name: "Version" }).selectOption("v2");
+  await videoReady(page);
+  await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v2");
+  const { project } = await rushes.api("GET", "/api/state");
+  expect(project.videos[0].lockedVersion).toBe("v1");
+});
+
+test("switching films pauses the one playing, and its playhead is remembered even mid-play", async ({ page, rushes }) => {
+  await rushes.addCut("hero cut");
+  await rushes.addCut("cutdown cut", "Cutdown");
+  await page.goto(rushes.url);
+  await videoReady(page);
+  const pack = page.getByRole("navigation", { name: "Films" });
+  await page.keyboard.press(" ");
+  await page.waitForTimeout(600);
+  await page.keyboard.press("]");
+  await expect(pack.getByRole("button", { name: /Cutdown/ })).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("[");
+  await expect(pack.getByRole("button", { name: /Hero/ })).toHaveAttribute("aria-pressed", "true");
+  await videoReady(page);
+  const tc = (await page.getByLabel("Timecode").textContent())!;
+  const [mm, ss] = tc.split("/")[0]!.trim().split(":");
+  const seconds = Number(mm) * 60 + Number(ss);
+  expect(seconds).toBeGreaterThanOrEqual(0.4);
+  expect(await page.locator("video").evaluate((v: HTMLVideoElement) => v.paused)).toBe(true);
 });
 
 test("a tab left open after its project stops never writes into the project that takes its port", async ({ page, rushes }) => {
