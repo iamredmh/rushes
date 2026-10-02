@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { canonicalRoot, isRushesFor, readLock } from "../server/lock.js";
 import { RushesClient } from "./client.js";
+import { SOURCE } from "../setup/harnesses.js";
 
 /** URL of a live Rushes server for exactly this project root, or null. */
 export async function findServer(rootDir: string): Promise<string | null> {
@@ -48,5 +49,5 @@ async function ensure(root: string, opts: EnsureOptions): Promise<RushesClient> 
     const url = await findServer(root);
     if (url) return new RushesClient(url);
   }
-  throw new Error(`Rushes server did not start for ${root}. Try running "npx rushes open" in that folder.`);
+  throw new Error(`Rushes server did not start for ${root}. Try running "npx -y ${SOURCE} open" in that folder.`);
 }

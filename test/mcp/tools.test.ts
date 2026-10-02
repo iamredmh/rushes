@@ -8,6 +8,7 @@ import { createMcpServer } from "../../src/mcp/tools.js";
 import { RushesClient } from "../../src/mcp/client.js";
 import { ensureServer, findServer } from "../../src/mcp/ensure.js";
 import { lockPath } from "../../src/server/lock.js";
+import { SOURCE } from "../../src/setup/harnesses.js";
 
 async function connect() {
   const { root } = await tmpProject("spring-launch");
@@ -140,7 +141,10 @@ describe("ensureServer", () => {
 
   it("gives a clear error when no server comes up", async () => {
     const { root } = await tmpProject();
-    await expect(ensureServer(root, { spawnServer: () => undefined, timeoutMs: 400 })).rejects.toThrow(/did not start/);
+    const err = ensureServer(root, { spawnServer: () => undefined, timeoutMs: 400 });
+    await expect(err).rejects.toThrow(/did not start/);
+    // The hint names the install source that works today, not an npm package that isn't published.
+    await expect(err).rejects.toThrow(`npx -y ${SOURCE} open`);
   });
 
   it("doesn't crash if defaultSpawn fails to start (missing cli, no permissions, etc)", async () => {
