@@ -26,13 +26,26 @@ async function connect() {
 }
 
 describe("MCP tools", () => {
-  it("lists the ten v1 tools", async () => {
+  it("lists the eleven v1 tools", async () => {
     const t = await connect();
     const { tools } = await t.client.listTools();
     expect(tools.map((x) => x.name).sort()).toEqual([
       "rushes_add_take", "rushes_add_variant", "rushes_add_version", "rushes_get_batch", "rushes_get_picks",
-      "rushes_list_notes", "rushes_open", "rushes_reply", "rushes_set_script", "rushes_status",
+      "rushes_get_script", "rushes_list_notes", "rushes_open", "rushes_reply", "rushes_set_script", "rushes_status",
     ]);
+    const set = tools.find((x) => x.name === "rushes_set_script")!;
+    expect((set.inputSchema.properties as Record<string, { description?: string }>).replace.description).toMatch(/replace the whole script; default merges by id/);
+    await t.close();
+  });
+
+  it("set_script merges by id, replace swaps the whole list, get_script reads it all", async () => {
+    const t = await connect();
+    await t.call("rushes_set_script", { sections: [{ start: 0, end: 10, current: "A" }, { start: 10, end: 20, current: "B" }] });
+    await t.call("rushes_set_script", { sections: [{ id: "s1", start: 0, end: 10, current: "A2" }] });
+    const got = await t.call("rushes_get_script");
+    expect(got.json.script.sections.map((x: any) => [x.id, x.current])).toEqual([["s1", "A2"], ["s2", "B"]]);
+    await t.call("rushes_set_script", { replace: true, sections: [{ id: "s2", start: 0, end: 10, current: "B" }] });
+    expect((await t.call("rushes_get_script")).json.script.sections.map((x: any) => x.id)).toEqual(["s2"]);
     await t.close();
   });
 

@@ -30,35 +30,66 @@ export interface SectionInput {
   current: string;
 }
 
+export interface SetSectionsOptions {
+  /** Make the input the whole list. By default the input is merged into the script by id. */
+  replace?: boolean;
+}
+
 /**
- * Replace the script's sections. Sections that keep their id keep the user's
- * proposed text, direction, status and takes. If the agent changed `current`
- * to the user's proposal, the proposal is cleared because it has landed.
+ * Write the agent's sections into the script and return the full, sorted list.
+ *
+ * By default this merges: an input whose id exists updates that section's
+ * start, end and current line; an input with no id or an unknown id is a new
+ * section; sections left out stay as they are. With `replace: true` the input
+ * becomes the whole list.
+ *
+ * Either way, a section that keeps its id keeps the user's proposed text,
+ * direction, status and takes. A proposal the agent adopts as the current line
+ * is cleared because it has landed, and a flagged section whose line the agent
+ * changed goes back to draft because the agent has acted on the flag.
  */
-export function setSections(script: Script, input: SectionInput[]): Section[] {
-  const sorted = [...input].sort((a, b) => a.start - b.start);
-  for (let i = 0; i < sorted.length; i++) {
-    const s = sorted[i];
+export function setSections(script: Script, input: SectionInput[], { replace = false }: SetSectionsOptions = {}): Section[] {
+  const seen = new Set<string>();
+  for (const s of input) {
     if (!(s.end > s.start)) throw new InvalidError(`Section at ${s.start}s must end after it starts`);
-    if (i > 0 && s.start < sorted[i - 1].end) throw new InvalidError(`Sections overlap at ${s.start}s`);
+    if (s.id === undefined) continue;
+    if (seen.has(s.id)) throw new InvalidError(`Section id "${s.id}" appears twice`);
+    seen.add(s.id);
   }
+
   const old = new Map(script.sections.map((s) => [s.id, s]));
-  const ids: string[] = [];
-  const next: Section[] = sorted.map((s, i) => {
-    const id = s.id ?? uniqueId(`s${i + 1}`, [...ids, ...input.flatMap((x) => (x.id ? [x.id] : []))]);
-    ids.push(id);
-    const prev = old.get(id);
+  type Draft = Omit<Section, "id"> & { id: string | null };
+  const kept: Draft[] = replace ? [] : script.sections.filter((s) => !seen.has(s.id));
+  const incoming: Draft[] = input.map((s) => {
+    const prev = s.id === undefined ? undefined : old.get(s.id);
     const landed = prev?.proposed != null && prev.proposed.trim() === s.current.trim();
+    const reworked = prev !== undefined && prev.current.trim() !== s.current.trim();
+    const status = !prev || landed || (reworked && prev.status === "flagged") ? "draft" : prev.status;
     return {
-      id,
+      id: s.id ?? null,
       start: s.start,
       end: s.end,
       current: s.current,
       proposed: landed ? null : prev?.proposed ?? null,
       direction: prev?.direction ?? "",
-      status: landed ? "draft" : prev?.status ?? "draft",
+      status,
       takes: prev?.takes ?? [],
     };
+  });
+
+  const sorted = [...kept, ...incoming].sort((a, b) => a.start - b.start);
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i].start < sorted[i - 1].end) throw new InvalidError(`Sections overlap at ${sorted[i].start}s`);
+  }
+
+  // New sections without an id get s<n>, starting from their position, skipping ids already taken.
+  const taken = new Set(sorted.flatMap((s) => (s.id === null ? [] : [s.id])));
+  const next: Section[] = sorted.map((s, i) => {
+    if (s.id !== null) return s as Section;
+    let n = i + 1;
+    while (taken.has(`s${n}`)) n++;
+    taken.add(`s${n}`);
+    return { ...s, id: `s${n}` };
   });
   script.sections = next;
   return next;

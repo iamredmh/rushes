@@ -22,7 +22,7 @@
 - Stages, in this order: `script, picture, voice, music, sfx, mix`.
 - Media paths inside the project are stored relative with `/`. Paths outside the project are stored absolute.
 - Field ownership on notes: the user owns `text, box, grab, scope, t, tOut`. The agent owns `reply, fixT, fixVersion`. Both own `status`.
-- MCP tool names: `rushes_open, rushes_status, rushes_add_version, rushes_add_variant, rushes_set_script, rushes_add_take, rushes_list_notes, rushes_get_batch, rushes_reply, rushes_get_picks`.
+- MCP tool names (eleven): `rushes_open, rushes_status, rushes_add_version, rushes_add_variant, rushes_set_script, rushes_get_script, rushes_add_take, rushes_list_notes, rushes_get_batch, rushes_reply, rushes_get_picks`. `rushes_set_script` merges by id unless `replace: true`.
 - The server binds to `127.0.0.1` only. The default port is 4317, falling back up to +10.
 - Install source: `SOURCE = "github:iamredmh/rushes"` in `src/setup/harnesses.ts`. Every doc and config uses `npx -y github:iamredmh/rushes <command>` until Plan 4 publishes to npm.
 - Zero setup for users: no accounts, keys, telemetry or hosted services. Node ≥ 20 is the only requirement.

@@ -97,14 +97,26 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     "rushes_set_script",
     {
       title: "Set the VO script",
-      description: "Create or replace the script sections. Keep a section's id to keep the user's edits, direction and takes on it.",
+      description:
+        "Add or update VO script sections. By default this merges by id: send only the sections you changed, with their ids, and new sections without one. Sections you leave out stay as they are. A section that keeps its id keeps the user's edits, direction and takes. Returns the full list.",
       inputSchema: {
         project,
-        sections: z.array(z.object({ id: z.string().optional(), start: z.number().nonnegative(), end: z.number().nonnegative(), current: z.string() })),
+        sections: z.array(z.object({ id: z.string().min(1).optional(), start: z.number().nonnegative(), end: z.number().nonnegative(), current: z.string() })),
         wordsPerSecond: z.number().positive().optional(),
+        replace: z.boolean().optional().describe("replace the whole script; default merges by id"),
       },
     },
     safe(async ({ project, ...b }) => (await ctx.client(project)).put("/api/script", b)),
+  );
+
+  server.registerTool(
+    "rushes_get_script",
+    {
+      title: "Get the VO script",
+      description: "The whole script: every section with its current line, the user's proposed line, direction, status and takes, plus wordsPerSecond.",
+      inputSchema: { project },
+    },
+    safe(async ({ project }) => (await ctx.client(project)).get("/api/script")),
   );
 
   server.registerTool(

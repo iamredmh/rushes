@@ -9,13 +9,13 @@ Rushes shows your work to the user stage by stage (script, picture, voiceover, m
 
 1. Register what you made:
    - `rushes_add_version` for a render;
-   - `rushes_set_script` for the VO script;
+   - `rushes_set_script` for the VO script. It merges by `id`, so send only the sections you changed; sections you leave out are kept. `rushes_get_script` reads the whole script;
    - `rushes_add_take` for each VO take;
    - `rushes_add_variant` for each music bed or SFX pass.
 2. Call `rushes_open` and tell the user it's ready.
 3. When the user sends a batch, call `rushes_get_batch` and fix every note in it.
 4. Register the new cut with `rushes_add_version`.
 5. Reply to all the notes in one `rushes_reply` call. For each note set `status: "done"`, a one-line `reply`, `fixT` (when the fix is visible in the new cut, in seconds) and `fixVersion`.
-6. For script batches: when a section's `proposed` differs from `current`, adopt it with `rushes_set_script`, keeping the section's `id`. Then make new takes for it.
+6. For script batches: when a section's `proposed` differs from `current`, adopt it with `rushes_set_script`, sending just that section with its `id`. Then make new takes for it.
 
-The full contract is in `AGENTS.md` at the package root.
+Rushes has eleven tools: `rushes_open`, `rushes_status`, `rushes_add_version`, `rushes_add_variant`, `rushes_set_script`, `rushes_get_script`, `rushes_add_take`, `rushes_list_notes`, `rushes_get_batch`, `rushes_reply` and `rushes_get_picks`. The full contract is in `AGENTS.md` at the package root.

@@ -38,6 +38,75 @@ describe("setSections", () => {
     expect(s.sections[0].takes).toHaveLength(1);
   });
 
+  it("merges by id by default: sections left out stay as they are, takes included", () => {
+    const s = empty();
+    setSections(s, [{ start: 0, end: 10, current: "A" }, { start: 10, end: 20, current: "B" }, { start: 20, end: 30, current: "C" }]);
+    editSection(s, "s1", { proposed: "A2", direction: "Warm" });
+    addTake(s, "s1", { file: "a.wav" });
+    addTake(s, "s3", { file: "c.wav" });
+    setSections(s, [{ id: "s2", start: 10, end: 19, current: "B, shorter" }]);
+    expect(s.sections.map((x) => [x.id, x.start, x.end, x.current])).toEqual([
+      ["s1", 0, 10, "A"], ["s2", 10, 19, "B, shorter"], ["s3", 20, 30, "C"],
+    ]);
+    expect(s.sections[0]).toMatchObject({ proposed: "A2", direction: "Warm" });
+    expect(s.sections[0].takes).toHaveLength(1);
+    expect(s.sections[2].takes).toHaveLength(1);
+  });
+
+  it("merge treats an input with no id as a new section with an s<n> id nobody has", () => {
+    const s = empty();
+    setSections(s, [{ start: 0, end: 10, current: "A" }, { start: 10, end: 20, current: "B" }]);
+    const out = setSections(s, [{ start: 20, end: 30, current: "C" }, { id: "intro", start: 30, end: 40, current: "D" }]);
+    expect(out.map((x) => x.id)).toEqual(["s1", "s2", "s3", "intro"]);
+    // A gap in the numbering is not reused when the id at that position is taken.
+    setSections(s, [{ start: 40, end: 41, current: "E" }]);
+    expect(s.sections.map((x) => x.id)).toEqual(["s1", "s2", "s3", "intro", "s5"]);
+    setSections(s, [{ start: 50, end: 51, current: "F" }, { start: 52, end: 53, current: "G" }]);
+    expect(new Set(s.sections.map((x) => x.id)).size).toBe(s.sections.length);
+    expect(s.sections.every((x) => /^s\d+$|^intro$/.test(x.id))).toBe(true);
+  });
+
+  it("merge checks overlaps against the resulting list and keeps it sorted", () => {
+    const s = empty();
+    setSections(s, [{ start: 0, end: 10, current: "A" }, { start: 20, end: 30, current: "C" }]);
+    expect(() => setSections(s, [{ start: 25, end: 35, current: "X" }])).toThrow(/overlap/);
+    expect(() => setSections(s, [{ id: "s1", start: 0, end: 21, current: "A" }])).toThrow(/overlap/);
+    expect(s.sections).toHaveLength(2);
+    setSections(s, [{ start: 10, end: 20, current: "B" }]);
+    expect(s.sections.map((x) => x.current)).toEqual(["A", "B", "C"]);
+  });
+
+  it("rejects duplicate ids in the input, in both modes", () => {
+    const s = empty();
+    setSections(s, [{ start: 0, end: 10, current: "A" }]);
+    const dup = [{ id: "s1", start: 0, end: 5, current: "A" }, { id: "s1", start: 5, end: 10, current: "B" }];
+    expect(() => setSections(s, dup)).toThrow(/twice/);
+    expect(() => setSections(s, dup, { replace: true })).toThrow(/twice/);
+  });
+
+  it("replace: true makes the input the whole list and keeps retained ids' edits", () => {
+    const s = empty();
+    setSections(s, [{ start: 0, end: 10, current: "A" }, { start: 10, end: 20, current: "B" }]);
+    editSection(s, "s2", { proposed: "B2", direction: "Slow" });
+    addTake(s, "s2", { file: "b.wav" });
+    setSections(s, [{ id: "s2", start: 0, end: 12, current: "B" }], { replace: true });
+    expect(s.sections).toHaveLength(1);
+    expect(s.sections[0]).toMatchObject({ id: "s2", start: 0, end: 12, proposed: "B2", direction: "Slow" });
+    expect(s.sections[0].takes).toHaveLength(1);
+  });
+
+  it("a flagged section goes back to draft when the agent changes its line", () => {
+    const s = empty();
+    setSections(s, [{ start: 0, end: 10, current: "A" }, { start: 10, end: 20, current: "B" }]);
+    editSection(s, "s1", { status: "flagged" });
+    editSection(s, "s2", { status: "flagged" });
+    setSections(s, [{ id: "s1", start: 0, end: 10, current: "A, reworked" }, { id: "s2", start: 10, end: 20, current: "B" }]);
+    expect(s.sections.map((x) => x.status)).toEqual(["draft", "flagged"]);
+    editSection(s, "s1", { status: "flagged" });
+    setSections(s, [{ id: "s1", start: 0, end: 10, current: "A, again" }], { replace: true });
+    expect(s.sections[0].status).toBe("draft");
+  });
+
   it("clears the proposal once the agent adopts it as the current line", () => {
     const s = empty();
     setSections(s, [{ start: 0, end: 10, current: "Old line." }]);

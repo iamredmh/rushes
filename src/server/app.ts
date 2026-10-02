@@ -77,7 +77,8 @@ const VariantBody = z.object({
 });
 const ScriptBody = z.object({
   wordsPerSecond: z.number().positive().optional(),
-  sections: z.array(z.object({ id: z.string().optional(), start: t, end: t, current: z.string() })),
+  replace: z.boolean().optional(),
+  sections: z.array(z.object({ id: z.string().min(1).optional(), start: t, end: t, current: z.string() })),
 });
 const SectionEditBody = z.object({
   proposed: z.string().nullable().optional(),
@@ -164,11 +165,13 @@ export function createApp(store: Store): Hono {
   });
 
   // ---- script ----
+  app.get("/api/script", async (c) => c.json({ script: await store.read("script") }));
+
   app.put("/api/script", async (c) => {
     const b = await body(c, ScriptBody);
     const { result } = await store.update("script", (s) => {
       if (b.wordsPerSecond) s.wordsPerSecond = b.wordsPerSecond;
-      return setSections(s, b.sections);
+      return setSections(s, b.sections, { replace: b.replace });
     });
     return c.json({ sections: result });
   });

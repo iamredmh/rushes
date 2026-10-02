@@ -183,7 +183,7 @@ An MCP server can't wake the agent up on its own. So **Send to agent**:
 An agent with the MCP can also call `rushes_get_batch` with no arguments to pick up the most recent batch, so pasting the prompt is optional.
 
 ### MCP tools (v1)
-Every tool takes an optional `project` path, which defaults to the working directory.
+There are eleven tools. Every tool takes an optional `project` path, which defaults to the working directory.
 
 | Tool | Does |
 |---|---|
@@ -191,7 +191,8 @@ Every tool takes an optional `project` path, which defaults to the working direc
 | `rushes_status` | Lists the tabs, which are unlocked, and the to-do count on each |
 | `rushes_add_version` | Registers a new cut of a video (`file`, optional `note`) and returns the new version id |
 | `rushes_add_variant` | Adds a music bed or SFX pass to a lane (`stage`, `name`, `file`, optional `meta`, `cues`) |
-| `rushes_set_script` | Creates or replaces the script sections (`start`, `end`, `current`) |
+| `rushes_set_script` | Adds or updates script sections (`start`, `end`, `current`). Merges by `id` by default, so sections left out are kept; `replace: true` replaces the whole script |
+| `rushes_get_script` | The whole script: every section with its line, the user's proposal, direction, status and takes |
 | `rushes_add_take` | Attaches a VO take to a section |
 | `rushes_list_notes` | Notes filtered by `stage`, `status`, `batch` or `version` |
 | `rushes_get_batch` | The latest batch, or one by id, with its notes and changed script rows |

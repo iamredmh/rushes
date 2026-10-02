@@ -45,7 +45,7 @@ export function buildPrompt(project: string, stage: Stage, batchId: string, note
   if (sections) parts.push(`${sections} script section${sections === 1 ? "" : "s"}`);
   const steps =
     stage === "script"
-      ? "Use rushes_get_batch, take each section's proposed line, then rushes_set_script."
+      ? "Use rushes_get_batch, take each section's proposed line, then rushes_set_script with just those sections (it merges by id)."
       : "Use rushes_get_batch, fix each note, then rushes_reply with a fixT for each and rushes_add_version for the new cut.";
   return `Work through ${STAGE_NAMES[stage]} batch ${batchId} on ${project}: ${parts.join(" and ")}.\n${steps}`;
 }

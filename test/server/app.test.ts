@@ -82,6 +82,22 @@ describe("API", () => {
     expect((await call("PUT", "/api/script", { sections: [{ start: 0, end: 5, current: "a" }, { start: 4, end: 8, current: "b" }] })).status).toBe(400);
   });
 
+  it("script: PUT merges by id unless replace is set, and GET returns the whole script", async () => {
+    const { call } = await setup();
+    await call("PUT", "/api/script", { sections: [{ start: 0, end: 10, current: "A" }, { start: 10, end: 20, current: "B" }] });
+    await call("POST", "/api/script/s1/takes", { file: "audio/a.wav" });
+    const merged = await call("PUT", "/api/script", { sections: [{ id: "s2", start: 10, end: 20, current: "B2" }] });
+    expect(merged.status).toBe(200);
+    expect(merged.json.sections.map((x: any) => [x.id, x.current])).toEqual([["s1", "A"], ["s2", "B2"]]);
+    const got = await call("GET", "/api/script");
+    expect(got.status).toBe(200);
+    expect(got.json.script.wordsPerSecond).toBe(2.6);
+    expect(got.json.script.sections[0].takes).toHaveLength(1);
+    const replaced = await call("PUT", "/api/script", { replace: true, sections: [{ id: "s2", start: 0, end: 5, current: "B2" }] });
+    expect(replaced.json.sections.map((x: any) => x.id)).toEqual(["s2"]);
+    expect((await call("PUT", "/api/script", { replace: "yes", sections: [] })).status).toBe(400);
+  });
+
   it("variants and picks", async () => {
     const { call } = await setup();
     const v = await call("POST", "/api/variants", { stage: "music", name: "Deep house", file: "audio/a.wav", meta: { bpm: 120 } });
