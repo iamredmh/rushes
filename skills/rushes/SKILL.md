@@ -11,11 +11,13 @@ Rushes shows your work to the user stage by stage (script, picture, voiceover, m
    - `rushes_add_version` for a render;
    - `rushes_set_script` for the VO script. It merges by `id`, so send only the sections you changed; sections you leave out are kept. `rushes_get_script` reads the whole script;
    - `rushes_add_take` for each VO take;
-   - `rushes_add_variant` for each music bed or SFX pass.
-2. Call `rushes_open` and tell the user it's ready.
-3. When the user sends a batch, call `rushes_get_batch` and fix every note in it.
-4. Register the new cut with `rushes_add_version`.
+   - `rushes_add_variant` for each music bed or SFX pass;
+   - `rushes_set_shots` for the storyboard's shots, once you have the first cut; send new timings when a later cut moves them.
+2. Call `rushes_open` and tell the user it's ready. Each project's dashboard lives at its own address, `/p/<id>/`.
+3. When the user sends a batch, call `rushes_get_batch` and fix every note in it. A note carries the `shot` it falls in.
+4. Register the new cut with `rushes_add_version`. On a locked video the reply carries a `warning`.
 5. Reply to all the notes in one `rushes_reply` call. For each note set `status: "done"`, a one-line `reply`, `fixT` (when the fix is visible in the new cut, in seconds) and `fixVersion`.
 6. For script batches: when a section's `proposed` differs from `current`, adopt it with `rushes_set_script`, sending just that section with its `id`. Then make new takes for it.
+7. Lock picture with `rushes_lock_picture` only when the user says picture is locked; `version: null` unlocks it.
 
-Rushes has eleven tools: `rushes_open`, `rushes_status`, `rushes_add_version`, `rushes_add_variant`, `rushes_set_script`, `rushes_get_script`, `rushes_add_take`, `rushes_list_notes`, `rushes_get_batch`, `rushes_reply` and `rushes_get_picks`. The full contract is in `AGENTS.md` at the package root.
+Rushes has thirteen tools: `rushes_open`, `rushes_status`, `rushes_add_version`, `rushes_add_variant`, `rushes_set_script`, `rushes_get_script`, `rushes_add_take`, `rushes_list_notes`, `rushes_get_batch`, `rushes_reply`, `rushes_get_picks`, `rushes_set_shots` and `rushes_lock_picture`. The full contract is in `AGENTS.md` at the package root.

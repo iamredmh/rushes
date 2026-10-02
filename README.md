@@ -37,7 +37,7 @@ If your user asked you to use Rushes, do this:
 2. If it added anything, tell the user to restart the app (or start a new session) so the `rushes_*` tools load.
 3. From then on, follow [AGENTS.md](AGENTS.md). In short: register what you made, call `rushes_open`, wait for the user to press **Send to agent**, then `rushes_get_batch`, fix the notes, and `rushes_reply`.
 
-The MCP server has eleven tools: `rushes_open`, `rushes_status`, `rushes_add_version`, `rushes_add_variant`, `rushes_set_script`, `rushes_get_script`, `rushes_add_take`, `rushes_list_notes`, `rushes_get_batch`, `rushes_reply` and `rushes_get_picks`.
+The MCP server has thirteen tools: `rushes_open`, `rushes_status`, `rushes_add_version`, `rushes_add_variant`, `rushes_set_script`, `rushes_get_script`, `rushes_add_take`, `rushes_list_notes`, `rushes_get_batch`, `rushes_reply`, `rushes_get_picks`, `rushes_set_shots` and `rushes_lock_picture`.
 
 If you can't run commands, give the user the matching line from **Manual setup** below.
 
@@ -66,6 +66,8 @@ npx -y github:iamredmh/rushes open    # opens the review desk in your browser
 npx -y github:iamredmh/rushes stop    # stops it
 ```
 
+Each project opens at its own address, `http://127.0.0.1:4580/p/<id>/` — safe to run several projects at once.
+
 A server your agent starts in the background stops by itself after two hours with nothing connected.
 
 ## Shortcuts
@@ -82,8 +84,13 @@ In the Picture tab:
 Anywhere:
 
 - **1–6** switch tab
+- **[ / ]** previous/next film
 - **?** shortcuts
 - **Esc** close
+
+## Packs, picture lock and shots
+
+A project with more than one film gets numbered pills in the header — `[`/`]` switch between them, and each film remembers its own version and playhead. The header reads **Picture vN**, with a lock button beside it: lock a film at a cut and the dashboard opens on that cut until you unlock it. A version can carry a shot list from the storyboard, shown as a strip under the timeline, and every Picture note records the shot it falls in.
 
 ## What gets saved
 
