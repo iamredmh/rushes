@@ -30,12 +30,13 @@ async function connect() {
 }
 
 describe("MCP tools", () => {
-  it("lists the eleven v1 tools", async () => {
+  it("lists the thirteen tools", async () => {
     const t = await connect();
     const { tools } = await t.client.listTools();
     expect(tools.map((x) => x.name).sort()).toEqual([
       "rushes_add_take", "rushes_add_variant", "rushes_add_version", "rushes_get_batch", "rushes_get_picks",
-      "rushes_get_script", "rushes_list_notes", "rushes_open", "rushes_reply", "rushes_set_script", "rushes_status",
+      "rushes_get_script", "rushes_list_notes", "rushes_lock_picture", "rushes_open", "rushes_reply",
+      "rushes_set_script", "rushes_set_shots", "rushes_status",
     ]);
     const set = tools.find((x) => x.name === "rushes_set_script")!;
     expect((set.inputSchema.properties as Record<string, { description?: string }>).replace.description).toMatch(/replace the whole script; default merges by id/);
@@ -55,8 +56,8 @@ describe("MCP tools", () => {
 
   it("runs the full review loop: add cut, user notes, batch, agent replies", async () => {
     const t = await connect();
-    expect((await t.call("rushes_open")).json.url).toBe(t.running.url);
-    expect(t.opened).toEqual([t.running.url]);
+    expect((await t.call("rushes_open")).json.url).toBe(t.running.dashboardUrl);
+    expect(t.opened).toEqual([t.running.dashboardUrl]);
 
     const v = await t.call("rushes_add_version", { video: "Hero 60s", file: "renders/hero_v1.mp4" });
     expect(v.json.version.id).toBe("v1");
@@ -86,6 +87,36 @@ describe("MCP tools", () => {
     expect((await t.call("rushes_add_take", { section: "s1", file: "audio/s1.wav" })).json.take.id).toBe("t1");
     expect((await t.call("rushes_add_variant", { stage: "music", name: "Deep house", file: "a.wav", meta: { bpm: 120 } })).json.variant.id).toBe("deep-house");
     expect((await t.call("rushes_get_picks")).json).toMatchObject({ lanes: {}, sections: {} });
+    await t.close();
+  });
+
+  it("rushes_open's url is the project's own dashboard address", async () => {
+    const t = await connect();
+    const r = await t.call("rushes_open", { browser: false });
+    expect(r.json.url).toMatch(/\/p\/[a-z2-9]{8}\/$/);
+    expect(r.json.url).toBe(t.running.dashboardUrl);
+    expect(t.opened).toEqual([]);
+    await t.close();
+  });
+
+  it("rushes_set_shots sets a cut's shot list, rushes_lock_picture locks and unlocks it", async () => {
+    const t = await connect();
+    await t.call("rushes_add_version", { video: "Hero 60s", file: "renders/hero_v1.mp4" });
+
+    const set = await t.call("rushes_set_shots", {
+      video: "hero-60s",
+      shots: [{ name: "Wide", start: 0 }, { name: "Logo", start: 5, tag: "brand" }],
+    });
+    expect(set.json.version.shots).toEqual([
+      { n: 1, name: "Wide", start: 0, tag: "" },
+      { n: 2, name: "Logo", start: 5, tag: "brand" },
+    ]);
+
+    const locked = await t.call("rushes_lock_picture", { video: "hero-60s", version: "v1" });
+    expect(locked.json.video.lockedVersion).toBe("v1");
+
+    const unlocked = await t.call("rushes_lock_picture", { video: "hero-60s", version: null });
+    expect(unlocked.json.video.lockedVersion).toBeNull();
     await t.close();
   });
 

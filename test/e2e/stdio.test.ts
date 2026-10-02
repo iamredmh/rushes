@@ -18,7 +18,7 @@ describe.skipIf(!existsSync(cli))("built package over stdio", () => {
 
     const r = (await client.callTool({ name: "rushes_open", arguments: { browser: false } })) as { content: { text: string }[] };
     const { url } = JSON.parse(r.content[0].text);
-    expect(url).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+    expect(url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/p\/[a-z2-9]{8}\/$/);
 
     const v = (await client.callTool({ name: "rushes_add_version", arguments: { video: "Hero", file: "renders/v1.mp4" } })) as { content: { text: string }[] };
     expect(JSON.parse(v.content[0].text).version.id).toBe("v1");

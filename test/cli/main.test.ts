@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { access } from "node:fs/promises";
+import { access, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
 import { main, longRunningCommand, type Io } from "../../src/cli/main.js";
@@ -24,9 +24,18 @@ describe("cli", () => {
     const a = io("/tmp");
     expect(await main([], a.x)).toBe(0);
     expect(a.out.join("\n")).toContain("rushes open [dir]");
+    expect(a.out.join("\n")).toContain("add shots");
+    expect(a.out.join("\n")).toContain("rushes lock");
+    expect(a.out.join("\n")).toContain("rushes unlock");
     const b = io("/tmp");
     expect(await main(["frobnicate"], b.x)).toBe(2);
     expect(b.err[0]).toContain('Unknown command "frobnicate"');
+  });
+
+  it("--version still prints the package version when no command is given", async () => {
+    const a = io("/tmp");
+    expect(await main(["--version"], a.x)).toBe(0);
+    expect(a.out).toHaveLength(1);
   });
 
   it("init creates the .rushes folder in a path with spaces", async () => {
@@ -68,6 +77,97 @@ describe("cli", () => {
     await s.close();
   });
 
+  it("add shots reads a JSON file and sets the cut's shot list", async () => {
+    const { root } = await tmpProject();
+    const s = await startServer(root, { port: 0 });
+    await fetch(`${s.url}/api/versions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ video: "Hero", file: "a.mp4" }),
+    });
+    await writeFile(join(root, "shots.json"), JSON.stringify([{ name: "Wide", start: 0 }, { name: "Logo", start: 5, tag: "brand" }]), "utf8");
+    const a = io(root);
+    expect(await main(["add", "shots", "shots.json", "--video", "hero", "--version", "v1"], a.x)).toBe(0);
+    expect(a.out.pop()).toBe("Shots set on hero v1: 2");
+    await s.close();
+  });
+
+  it("add shots exits 2 with a clear message on a missing file or invalid JSON", async () => {
+    const { root } = await tmpProject();
+    const a = io(root);
+    expect(await main(["add", "shots", "missing.json", "--video", "Hero"], a.x)).toBe(2);
+    expect(a.err[0]).toContain("missing.json");
+
+    await writeFile(join(root, "bad.json"), "{ not json", "utf8");
+    const b = io(root);
+    expect(await main(["add", "shots", "bad.json", "--video", "Hero"], b.x)).toBe(2);
+    expect(b.err[0]).toContain("bad.json");
+  });
+
+  it("add shots needs --video", async () => {
+    const { root } = await tmpProject();
+    await writeFile(join(root, "shots.json"), "[]", "utf8");
+    const a = io(root);
+    expect(await main(["add", "shots", "shots.json"], a.x)).toBe(2);
+    expect(a.err[0]).toContain("--video");
+  });
+
+  it("lock and unlock the picture", async () => {
+    const { root } = await tmpProject();
+    const s = await startServer(root, { port: 0 });
+    await fetch(`${s.url}/api/versions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ video: "Hero", file: "a.mp4" }),
+    });
+    const a = io(root);
+    expect(await main(["lock", "hero", "v1"], a.x)).toBe(0);
+    expect(a.out.pop()).toBe("Picture locked at v1");
+    const b = io(root);
+    expect(await main(["unlock", "hero"], b.x)).toBe(0);
+    expect(b.out.pop()).toBe("Picture unlocked");
+    await s.close();
+  });
+
+  it("lock at a version that doesn't exist is a server 404 and exits 1", async () => {
+    const { root } = await tmpProject();
+    const s = await startServer(root, { port: 0 });
+    await fetch(`${s.url}/api/versions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ video: "Hero", file: "a.mp4" }),
+    });
+    const a = io(root);
+    expect(await main(["lock", "hero", "v9"], a.x)).toBe(1);
+    expect(a.err[0]).toContain("v9");
+    await s.close();
+  });
+
+  it("notes shows shot NN, zero-padded, after the timecode", async () => {
+    const { root } = await tmpProject();
+    const s = await startServer(root, { port: 0 });
+    await fetch(`${s.url}/api/versions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ video: "Hero", file: "a.mp4" }),
+    });
+    await fetch(`${s.url}/api/videos/hero/shots`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ shots: [{ name: "Wide", start: 0 }, { name: "Logo", start: 5 }] }),
+    });
+    await fetch(`${s.url}/api/notes`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ stage: "picture", video: "hero", version: "v1", scope: "point", t: 6, text: "Too long" }),
+    });
+    const a = io(root);
+    expect(await main(["notes", "--stage", "picture"], a.x)).toBe(0);
+    expect(a.out[0]).toContain("shot 02");
+    expect(a.out[0]).toContain("Too long");
+    await s.close();
+  });
+
   it("carries 59.999 s into the next minute instead of printing 0:60.00", async () => {
     const { root } = await tmpProject();
     const s = await startServer(root, { port: 0 });
@@ -94,15 +194,27 @@ describe("cli", () => {
     await s.close();
   });
 
-  it("open starts the server and opens the browser", async () => {
+  it("open starts the server and opens the browser on the project's own dashboard address", async () => {
     const { root } = await tmpProject();
     const a = io(root);
     let server: Running | undefined;
     a.x.onServer = (s) => { server = s; };
     expect(await main(["open", ".", "--port", "0"], a.x)).toBe(0);
-    expect(a.opened).toEqual([server!.url]);
-    const health = await (await fetch(`${a.opened[0]}/api/health`)).json();
+    expect(a.opened).toEqual([server!.dashboardUrl]);
+    expect(a.opened[0]).toMatch(/\/p\/[a-z2-9]{8}\/$/);
+    const health = await (await fetch(`${server!.url}/api/health`)).json();
     expect(health.root).toBe(root);
+    await server!.close();
+  });
+
+  it("open --no-browser prints the dashboard URL without opening it", async () => {
+    const { root } = await tmpProject();
+    const a = io(root);
+    let server: Running | undefined;
+    a.x.onServer = (s) => { server = s; };
+    expect(await main(["open", ".", "--port", "0", "--no-browser"], a.x)).toBe(0);
+    expect(a.opened).toEqual([]);
+    expect(a.out.join("\n")).toMatch(/\/p\/[a-z2-9]{8}\/$/);
     await server!.close();
   });
 
@@ -113,12 +225,12 @@ describe("cli", () => {
     let started: Running | undefined;
     a.x.onServer = (x) => { started = x; };
     expect(await main(["open", "."], a.x)).toBe(0);
-    expect(a.out).toEqual([`Rushes is already running for ${root}\n${s.url}`]);
-    expect(a.opened).toEqual([s.url]);
+    expect(a.out).toEqual([`Rushes is already running for ${root}\n${s.dashboardUrl}`]);
+    expect(a.opened).toEqual([s.dashboardUrl]);
     const b = io(root);
     b.x.onServer = (x) => { started = x; };
     expect(await main(["serve", root], b.x)).toBe(0);
-    expect(b.out).toEqual([`Rushes is already running for ${root}\n${s.url}`]);
+    expect(b.out).toEqual([`Rushes is already running for ${root}\n${s.dashboardUrl}`]);
     expect(b.opened).toEqual([]);
     expect(started).toBeUndefined();
     await s.close();

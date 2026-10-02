@@ -1,10 +1,11 @@
 import { parseArgs } from "node:util";
+import { readFile } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import { Store } from "../core/store.js";
 import { startServer, DEFAULT_PORT, type Running } from "../server/start.js";
 import { ensureServer, findServer, type EnsureOptions } from "../mcp/ensure.js";
 import { AlreadyRunningError, canonicalRoot } from "../server/lock.js";
-import { ApiError, RushesClient } from "../mcp/client.js";
+import { ApiError, RushesClient, dashboardUrlFor } from "../mcp/client.js";
 import { openBrowser, runStdio } from "../mcp/stdio.js";
 import { VERSION } from "../server/app.js";
 import { setup, type SetupEnv } from "../setup/setup.js";
@@ -26,8 +27,8 @@ export interface Io {
 export const HELP = `rushes ${VERSION}: a local review desk for video made with AI agents
 
 Usage
-  rushes open [dir] [--port 4317] [--no-browser]   start the review desk and open it
-  rushes serve [dir] [--port 4317] [--idle-minutes N]
+  rushes open [dir] [--port 4580] [--no-browser]   start the review desk and open it
+  rushes serve [dir] [--port 4580] [--idle-minutes N]
                                                     start the server without a browser (stops after N idle minutes)
   rushes stop [dir]                                 stop the project's running server
   rushes init [dir] [--name NAME]                  create the .rushes folder
@@ -37,6 +38,9 @@ Usage
   rushes status [dir]                               tabs and open items
   rushes add version <file> --video NAME [--note TEXT]
   rushes add variant <music|sfx|voice> <file> --name NAME [--lane ID]
+  rushes add shots <file.json> --video NAME [--version V]
+  rushes lock <video> <version>                     lock the picture at a cut
+  rushes unlock <video>                              unlock the picture
   rushes notes [--stage S] [--status todo|done] [--batch ID] [--json]
   rushes reply <note-id> <text> [--done] [--fix-t SECONDS] [--fix-version V]
 
@@ -89,8 +93,10 @@ export async function main(argv: string[], io: Io): Promise<number> {
     return 2;
   }
   const { values: o, positionals: p } = parsed;
-  if (o.version) return io.out(VERSION), 0;
   const [cmd, ...rest] = p;
+  // A bare `--version`/`-v` prints the package version; on a subcommand (e.g. "add shots
+  // ... --version v2") the same boolean flag is set, but there's a command to run instead.
+  if (!cmd && o.version) return io.out(VERSION), 0;
   if (!cmd || o.help || cmd === "help") return io.out(HELP), 0;
 
   const dir = resolve(io.cwd, o.dir ?? ".");
@@ -104,9 +110,10 @@ export async function main(argv: string[], io: Io): Promise<number> {
         const show = (url: string) => {
           if (cmd === "open" && !o["no-browser"]) (io.openBrowser ?? openBrowser)(url);
         };
-        const already = (url: string) => {
-          io.out(`Rushes is already running for ${root}\n${url}`);
-          show(url);
+        const already = async (url: string) => {
+          const dashboardUrl = await dashboardUrlFor(url);
+          io.out(`Rushes is already running for ${root}\n${dashboardUrl}`);
+          show(dashboardUrl);
           return 0;
         };
         const running = await findServer(root);
@@ -121,8 +128,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
           if (e instanceof AlreadyRunningError) return already(e.url);
           throw e;
         }
-        io.out(`Rushes is running for ${root}\n${s.url}`);
-        show(s.url);
+        io.out(`Rushes is running for ${root}\n${s.dashboardUrl}`);
+        show(s.dashboardUrl);
         if (io.onServer) return io.onServer(s), 0;
         // Exit once the server closes for any reason: a signal, `rushes stop`, or the idle timer.
         void s.closed.then(() => process.exit(0));
@@ -171,27 +178,58 @@ export async function main(argv: string[], io: Io): Promise<number> {
       }
       case "add": {
         const [what, a, b] = rest;
-        const c = await client();
         if (what === "version") {
           if (!a || !o.video) return usage(io, "rushes add version <file> --video NAME");
-          const r = await c.post("/api/versions", { video: o.video, file: resolve(io.cwd, a), note: o.note });
+          const r = await (await client()).post("/api/versions", { video: o.video, file: resolve(io.cwd, a), note: o.note });
           io.out(`Added ${r.video.name} ${r.version.id}`);
           return 0;
         }
         if (what === "variant") {
           if (!a || !b || !o.name) return usage(io, "rushes add variant <music|sfx|voice> <file> --name NAME");
-          const r = await c.post("/api/variants", { stage: a, file: resolve(io.cwd, b), name: o.name, lane: o.lane });
+          const r = await (await client()).post("/api/variants", { stage: a, file: resolve(io.cwd, b), name: o.name, lane: o.lane });
           io.out(`Added ${r.lane.name}: ${r.variant.name}`);
           return 0;
         }
-        return usage(io, "rushes add version|variant ...");
+        if (what === "shots") {
+          if (!a || !o.video) return usage(io, "rushes add shots <file.json> --video NAME [--version V]");
+          // Read and parse the file before touching the server, so a bad file is always exit 2,
+          // never masked by a server-reachability error.
+          let shots: unknown;
+          try {
+            shots = JSON.parse(await readFile(resolve(io.cwd, a), "utf8"));
+          } catch (e) {
+            io.err(`Couldn't read shots from "${a}": ${(e as Error).message}`);
+            return 2;
+          }
+          const r = await (await client()).put(`/api/videos/${encodeURIComponent(o.video)}/shots`, { version: b, shots });
+          io.out(`Shots set on ${o.video} ${r.version.id}: ${r.version.shots.length}`);
+          return 0;
+        }
+        return usage(io, "rushes add version|variant|shots ...");
+      }
+      case "lock": {
+        const [video, lockVersion] = rest;
+        if (!video || !lockVersion) return usage(io, "rushes lock <video> <version>");
+        await (await client()).put(`/api/videos/${encodeURIComponent(video)}/lock`, { version: lockVersion });
+        io.out(`Picture locked at ${lockVersion}`);
+        return 0;
+      }
+      case "unlock": {
+        const [video] = rest;
+        if (!video) return usage(io, "rushes unlock <video>");
+        await (await client()).put(`/api/videos/${encodeURIComponent(video)}/lock`, { version: null });
+        io.out("Picture unlocked");
+        return 0;
       }
       case "notes": {
         const q = new URLSearchParams();
         for (const k of ["stage", "status", "batch"] as const) if (o[k]) q.set(k, o[k]!);
         const { notes } = await (await client()).get(`/api/notes${q.size ? `?${q}` : ""}`);
         if (o.json) return io.out(JSON.stringify(notes, null, 2)), 0;
-        for (const n of notes) io.out(`${n.id}  ${n.status === "done" ? "done" : "todo"}  ${n.stage.padEnd(7)} ${when(n).padEnd(17)} ${n.text}`);
+        for (const n of notes) {
+          const shot = n.shot ? `shot ${String(n.shot.n).padStart(2, "0")} ` : "";
+          io.out(`${n.id}  ${n.status === "done" ? "done" : "todo"}  ${n.stage.padEnd(7)} ${when(n).padEnd(17)} ${shot}${n.text}`);
+        }
         if (!notes.length) io.out("No notes");
         return 0;
       }

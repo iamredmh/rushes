@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { ApiError, type RushesClient } from "./client.js";
+import { ApiError, dashboardUrlFor, type RushesClient } from "./client.js";
 import { VERSION } from "../server/app.js";
 
 export interface ToolContext {
@@ -45,9 +45,47 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     },
     safe(async ({ project, browser }) => {
       const c = await ctx.client(project);
-      if (browser !== false) ctx.openBrowser(c.baseUrl);
-      return { url: c.baseUrl };
+      const url = await dashboardUrlFor(c.baseUrl);
+      if (browser !== false) ctx.openBrowser(url);
+      return { url };
     }),
+  );
+
+  server.registerTool(
+    "rushes_set_shots",
+    {
+      title: "Set shots",
+      description:
+        "Set the storyboard shot list for a cut. Shots are numbered by start time; a new cut copies the previous cut's shots until you send new ones.",
+      inputSchema: {
+        project,
+        video: z.string().describe("The video's id, exactly as returned by rushes_add_version or rushes_status, e.g. \"hero-60s\" (not its display name)."),
+        version: z.string().optional().describe("Defaults to the latest cut."),
+        shots: z.array(
+          z.object({
+            name: z.string().describe("Shot name, e.g. \"Logo reveal\"."),
+            start: z.number().nonnegative().describe("Start time in seconds."),
+            tag: z.string().optional(),
+          }),
+        ),
+      },
+    },
+    safe(async ({ project, video, ...b }) => (await ctx.client(project)).put(`/api/videos/${encodeURIComponent(video)}/shots`, b)),
+  );
+
+  server.registerTool(
+    "rushes_lock_picture",
+    {
+      title: "Lock picture",
+      description:
+        "Lock a video's picture at a version (the dashboard then opens on it, and audio review plays against it), or unlock with version null.",
+      inputSchema: {
+        project,
+        video: z.string().describe("The video's id, exactly as returned by rushes_add_version or rushes_status, e.g. \"hero-60s\" (not its display name)."),
+        version: z.string().nullable().describe("Version id to lock at, or null to unlock."),
+      },
+    },
+    safe(async ({ project, video, version }) => (await ctx.client(project)).put(`/api/videos/${encodeURIComponent(video)}/lock`, { version })),
   );
 
   server.registerTool(

@@ -28,3 +28,9 @@ export class RushesClient {
   put<T = any>(path: string, json: unknown) { return this.call<T>("PUT", path, json); }
   patch<T = any>(path: string, json: unknown) { return this.call<T>("PATCH", path, json); }
 }
+
+/** The dashboard address for a running server, `${base}/p/${id}/`, read from its own health check. */
+export async function dashboardUrlFor(base: string): Promise<string> {
+  const { id } = await new RushesClient(base).get<{ id: string }>("/api/health");
+  return `${base}/p/${id}/`;
+}
