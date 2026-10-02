@@ -96,6 +96,17 @@ const NoteQuery = z.object({
   version: z.string().optional(),
 });
 
+const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost"]);
+
+/** Hostname of "host[:port]" or a full origin URL, lowercased, or null when it doesn't parse. */
+function hostnameOf(value: string, isUrl: boolean): string | null {
+  try {
+    return new URL(isUrl ? value : `http://${value}`).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
 export function createApp(store: Store): Hono {
   const app = new Hono();
 
@@ -103,6 +114,32 @@ export function createApp(store: Store): Hono {
     if (err instanceof RushesError) return c.json({ error: err.code, message: err.message, ...err.detail }, err.status as 400);
     console.error(err);
     return c.json({ error: "internal", message: (err as Error).message }, 500);
+  });
+
+  // The server is for this machine only. Checking Host stops DNS rebinding;
+  // requiring JSON and a local Origin on writes stops other websites posting
+  // to it from the user's browser (a JSON content type forces a CORS preflight,
+  // which this server never answers).
+  app.use("*", async (c, next) => {
+    const host = c.req.header("host") ?? new URL(c.req.url).host;
+    const hostname = hostnameOf(host, false);
+    if (!hostname || !LOCAL_HOSTS.has(hostname)) {
+      return c.json({ error: "forbidden_host", message: `Rushes only answers requests to 127.0.0.1 or localhost, not "${host}"` }, 403);
+    }
+    if (c.req.method !== "GET" && c.req.method !== "HEAD") {
+      const type = (c.req.header("content-type") ?? "").split(";")[0].trim().toLowerCase();
+      if (type !== "application/json") {
+        return c.json({ error: "unsupported_media_type", message: "Requests that change data must send Content-Type: application/json" }, 415);
+      }
+      const origin = c.req.header("origin");
+      if (origin !== undefined) {
+        const from = hostnameOf(origin, true);
+        if (!from || !LOCAL_HOSTS.has(from)) {
+          return c.json({ error: "forbidden_origin", message: `Rushes doesn't accept changes from pages on "${origin}"` }, 403);
+        }
+      }
+    }
+    await next();
   });
 
   app.get("/api/health", (c) => c.json({ ok: true, app: "rushes", version: VERSION, root: store.root }));

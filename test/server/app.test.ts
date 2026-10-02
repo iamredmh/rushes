@@ -17,6 +17,45 @@ async function setup() {
   return { root, store, call };
 }
 
+describe("local-only guard", () => {
+  it("rejects a Host that isn't 127.0.0.1 or localhost with 403", async () => {
+    const { store } = await tmpProject();
+    const app = createApp(store);
+    const res = await app.request("/api/health", { headers: { host: "evil.example" } });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ error: "forbidden_host", message: expect.any(String) });
+    expect((await app.request("http://evil.example:4317/api/state")).status).toBe(403);
+    expect((await app.request("/api/health", { headers: { host: "127.0.0.1:4317" } })).status).toBe(200);
+    expect((await app.request("/api/health", { headers: { host: "localhost:9" } })).status).toBe(200);
+  });
+
+  it("returns 415 for a write that isn't application/json", async () => {
+    const { store } = await tmpProject();
+    const app = createApp(store);
+    const res = await app.request("/api/notes", {
+      method: "POST",
+      headers: { "content-type": "text/plain" },
+      body: JSON.stringify({ stage: "picture", scope: "point", t: 1, text: "x" }),
+    });
+    expect(res.status).toBe(415);
+    expect(await res.json()).toMatchObject({ error: "unsupported_media_type" });
+    expect((await store.read("notes")).notes).toHaveLength(0);
+    expect((await app.request("/api/batches", { method: "POST" })).status).toBe(415);
+  });
+
+  it("rejects a write from a foreign Origin with 403 and accepts a local one", async () => {
+    const { store } = await tmpProject();
+    const app = createApp(store);
+    const note = JSON.stringify({ stage: "picture", scope: "point", t: 1, text: "x" });
+    const evil = await app.request("/api/notes", { method: "POST", headers: { "content-type": "application/json", origin: "https://evil.example" }, body: note });
+    expect(evil.status).toBe(403);
+    expect(await evil.json()).toMatchObject({ error: "forbidden_origin" });
+    const local = await app.request("/api/notes", { method: "POST", headers: { "content-type": "application/json; charset=utf-8", origin: "http://localhost:4317" }, body: note });
+    expect(local.status).toBe(201);
+    expect((await store.read("notes")).notes).toHaveLength(1);
+  });
+});
+
 describe("API", () => {
   it("health names the app and the project root", async () => {
     const { call, root } = await setup();

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createServer } from "node:http";
+import { createServer, request } from "node:http";
 import { access, writeFile } from "node:fs/promises";
 import { tmpProject } from "../helpers/tmp.js";
 import { startServer } from "../../src/server/start.js";
@@ -58,6 +58,21 @@ describe("startServer", () => {
     await until("event: change");
     expect(text).toContain('"file":"notes"');
     ctrl.abort();
+    await s.close();
+  });
+
+  it("refuses a DNS-rebound request whose Host header names another site", async () => {
+    const { root } = await tmpProject();
+    const s = await startServer(root, { port: 0 });
+    const status = await new Promise<number>((ok, fail) => {
+      const req = request({ host: "127.0.0.1", port: s.port, path: "/api/state", headers: { host: `evil.example:${s.port}` } }, (res) => {
+        res.resume();
+        ok(res.statusCode!);
+      });
+      req.on("error", fail);
+      req.end();
+    });
+    expect(status).toBe(403);
     await s.close();
   });
 
