@@ -4,9 +4,10 @@ import { Server } from "node:net";
 import { access, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
-import { startServer } from "../../src/server/start.js";
+import { startServer, DEFAULT_PORT } from "../../src/server/start.js";
 import { AlreadyRunningError, canonicalRoot, lockPath, readLock, removeLock } from "../../src/server/lock.js";
 import { ensureServer, findServer } from "../../src/mcp/ensure.js";
+import { ProjectIdSchema } from "../../src/core/schema.js";
 
 /** Servers in this process that are still listening. */
 const listeningServers = () =>
@@ -157,5 +158,31 @@ describe("startServer", () => {
     await writeFile(lockPath(root), JSON.stringify({ port: 4999, pid: 1, startedAt: "x" }), "utf8");
     expect(await readLock(root)).not.toBeNull();
     expect(await readLock(root)).toMatchObject({ pid: 1 });
+  });
+
+  it("DEFAULT_PORT is 4580", () => {
+    expect(DEFAULT_PORT).toBe(4580);
+  });
+
+  it("a project without an id gets one on start, and running.dashboardUrl ends with /p/<id>/", async () => {
+    const { root, store } = await tmpProject();
+    expect((await store.read("project")).id).toBeUndefined();
+    const s = await startServer(root, { port: 0 });
+    expect(ProjectIdSchema.safeParse(s.id).success).toBe(true);
+    expect(s.dashboardUrl).toBe(`${s.url}/p/${s.id}/`);
+    expect((await s.store.read("project")).id).toBe(s.id);
+    await s.close();
+  });
+
+  it("a second start of the same folder keeps the same id and the same project rev", async () => {
+    const { root } = await tmpProject();
+    const first = await startServer(root, { port: 0 });
+    const { id, rev } = await first.store.read("project");
+    await first.close();
+    const second = await startServer(root, { port: 0 });
+    const again = await second.store.read("project");
+    expect(second.id).toBe(id);
+    expect(again.rev).toBe(rev);
+    await second.close();
   });
 });

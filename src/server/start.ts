@@ -3,15 +3,20 @@ import { mkdir, realpath } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import { getRequestListener } from "@hono/node-server";
 import { Store } from "../core/store.js";
+import { ensureProjectId } from "../core/project.js";
 import { createApp } from "./app.js";
 import { removeLock, writeLock } from "./lock.js";
 import { watchStore } from "./watch.js";
 
-export const DEFAULT_PORT = 4317;
+export const DEFAULT_PORT = 4580;
 
 export interface Running {
   url: string;
   port: number;
+  /** This project's id (8 characters), stable across restarts. */
+  id: string;
+  /** `${url}/p/${id}/`: the one address every open tab and printed link should use. */
+  dashboardUrl: string;
   store: Store;
   close(): Promise<void>;
   /** Resolves once the server has closed, for any reason (close(), shutdown request or idle). */
@@ -88,6 +93,15 @@ export async function startServer(rootDir: string, opts: StartOptions = {}): Pro
     await new Promise<void>((ok) => server.close(() => ok()));
     throw e;
   }
+  // Only the server that actually won the lock ever touches project.json here, so racing
+  // starts for the same root never collide writing it. Restarts never bump the rev: only
+  // write when an id is actually missing.
+  let project = await store.read("project");
+  if (!project.id) {
+    await store.update("project", ensureProjectId);
+    project = await store.read("project");
+  }
+  const id = project.id!;
   const url = `http://${host}:${port}`;
   const stopWatching = watchStore(store);
   let idleTimer: NodeJS.Timeout | undefined;
@@ -117,5 +131,5 @@ export async function startServer(rootDir: string, opts: StartOptions = {}): Pro
     idleTimer = setTimeout(tick, idleMs);
     idleTimer.unref?.();
   }
-  return { url, port, store, close, closed };
+  return { url, port, id, dashboardUrl: `${url}/p/${id}/`, store, close, closed };
 }

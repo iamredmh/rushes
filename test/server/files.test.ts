@@ -46,9 +46,10 @@ describe("inside", () => {
 });
 
 describe("dashboard files", () => {
-  it("serves the built index.html at / and its assets", async () => {
+  it("serves the built index.html at /p/<id>/ and its assets", async () => {
     const { call } = await setup();
-    const page = await call("/");
+    const id = ((await (await call("/api/health")).json()) as { id: string }).id;
+    const page = await call(`/p/${id}/`);
     expect(await page.text()).toContain("<div id=app>");
     const js = await call("/assets/app-abc123.js");
     expect(js.status).toBe(200);

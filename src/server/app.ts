@@ -3,7 +3,7 @@ import { streamSSE } from "hono/streaming";
 import { z } from "zod";
 import type { Store, ChangeEvent } from "../core/store.js";
 import { RushesError, InvalidError, NotFoundError } from "../core/errors.js";
-import { addVariant, addVersion } from "../core/project.js";
+import { addVariant, addVersion, ensureProjectId, lockPicture, setShots, shotAt } from "../core/project.js";
 import { addTake, editSection, setSections } from "../core/script.js";
 import { addNote, applyReply, applyUserEdit, filterNotes } from "../core/notes.js";
 import { createBatch, latestBatch } from "../core/batches.js";
@@ -16,7 +16,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { GRAB_PATH, contentType, inside, registeredMedia, sendFile } from "./files.js";
 import type { CorruptEvent } from "./watch.js";
-import { LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, type Batch } from "../core/schema.js";
+import { LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, ShotSchema, type Batch, type Note } from "../core/schema.js";
 
 export const VERSION = "0.1.0";
 
@@ -102,6 +102,14 @@ const NoteQuery = z.object({
   version: z.string().optional(),
 });
 
+// ShotSchema's own limits (name trimmed 1-80 chars, tag at most 24) apply at the boundary; `n` is server-assigned.
+const ShotsBody = z.object({
+  version: z.string().optional(),
+  shots: z.array(ShotSchema.omit({ n: true })).max(200),
+});
+
+const LockBody = z.object({ version: z.string().nullable() });
+
 const GrabBody = z.object({
   video: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
   version: z.string().regex(/^v\d+$/),
@@ -144,6 +152,28 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   // Every SSE client adds a change listener, so lift Node's default limit of ten.
   store.setMaxListeners(0);
 
+  // The project's id never changes once set, so read it (ensuring it exists) at most
+  // once per app, however many requests ask for it concurrently.
+  let projectId: string | undefined;
+  let ensuringId: Promise<string> | undefined;
+  async function getProjectId(): Promise<string> {
+    if (projectId) return projectId;
+    ensuringId ??= (async () => {
+      const project = await store.read("project");
+      if (project.id) return project.id;
+      const { data } = await store.update("project", ensureProjectId);
+      return data.id!;
+    })();
+    projectId = await ensuringId;
+    return projectId;
+  }
+
+  async function dashboardHtml(): Promise<string> {
+    const index = join(webDir, "index.html");
+    if (existsSync(index)) return readFile(index, "utf8");
+    return `<!doctype html><title>Rushes</title><p>Rushes is running for <code>${escapeHtml(store.root)}</code>. The dashboard isn't built: run <code>npm run build</code>.</p>`;
+  }
+
   app.onError((err, c) => {
     if (err instanceof RushesError) return c.json({ error: err.code, message: err.message, ...err.detail }, err.status as 400);
     console.error(err);
@@ -176,11 +206,31 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     await next();
   });
 
+  // Each dashboard tab carries this project's id (header on fetches, query param
+  // where headers can't be set, e.g. SSE and <img>/<video> src). A request naming
+  // a different project is refused; one with no id (MCP, CLI, curl) is unaffected.
+  app.use("*", async (c, next) => {
+    const given = c.req.header("x-rushes-project") ?? c.req.query("project");
+    if (given !== undefined && given !== (await getProjectId())) {
+      return c.json({ error: "wrong_project", message: "This page is for a different Rushes project" }, 409);
+    }
+    await next();
+  });
+
   // ---- dashboard ----
-  app.get("/", async (c) => {
-    const index = join(webDir, "index.html");
-    if (existsSync(index)) return c.html(await readFile(index, "utf8"));
-    return c.html(`<!doctype html><title>Rushes</title><p>Rushes is running for <code>${escapeHtml(store.root)}</code>. The dashboard isn't built: run <code>npm run build</code>.</p>`);
+  app.get("/", async (c) => c.redirect(`/p/${await getProjectId()}/`, 302));
+
+  app.get("/p/:id", (c) => c.redirect(`/p/${c.req.param("id")}/`, 302));
+
+  app.get("/p/:id/", async (c) => {
+    const id = c.req.param("id");
+    if (id !== (await getProjectId())) {
+      return c.html(
+        `<!doctype html><title>Rushes</title><p>The Rushes project this address belongs to isn't running on this port. Ask your agent to open it again.</p><p><code>${escapeHtml(id)}</code></p>`,
+        404,
+      );
+    }
+    return c.html(await dashboardHtml());
   });
 
   app.get("/assets/*", async (c) => {
@@ -225,7 +275,10 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     return c.json({ ok: true, stopping: !!opts.onShutdown });
   });
 
-  app.get("/api/health", (c) => c.json({ ok: true, app: "rushes", version: VERSION, root: store.root }));
+  app.get("/api/health", async (c) => {
+    const [project, id] = await Promise.all([store.read("project"), getProjectId()]);
+    return c.json({ ok: true, app: "rushes", version: VERSION, root: store.root, id, name: project.name });
+  });
 
   app.get("/api/state", async (c) => {
     const [project, script, notes, picks, batches] = await Promise.all([
@@ -249,7 +302,14 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
 
   app.post("/api/notes", async (c) => {
     const b = await body(c, NewNoteBody);
-    const { result } = await store.update("notes", (f) => addNote(f, { ...b, by: "user" }));
+    // The client never sends shot; the server stamps it from the version's shots.
+    let shot: Note["shot"] = null;
+    if (b.stage === "picture" && b.video && b.version && b.t != null) {
+      const project = await store.read("project");
+      const version = project.videos.find((v) => v.id === b.video)?.versions.find((v) => v.id === b.version);
+      if (version) shot = shotAt(version.shots, b.t);
+    }
+    const { result } = await store.update("notes", (f) => addNote(f, { ...b, shot, by: "user" }));
     return c.json({ note: result }, 201);
   });
 
@@ -270,12 +330,27 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     const b = await body(c, VersionBody);
     const file = toManifestPath(store.root, b.file);
     const info = await probe(fromManifestPath(store.root, file));
+    let lockedVersion: string | null = null;
     const { result } = await store.update("project", (p) => {
       const out = addVersion(p, { video: b.video, file, note: b.note, duration: info.duration, fps: info.fps });
+      lockedVersion = out.video.lockedVersion;
       if (info.fps && p.videos.length === 1 && p.videos[0].versions.length === 1) p.fps = info.fps;
       return out;
     });
+    if (lockedVersion) return c.json({ ...result, warning: `Picture is locked at ${lockedVersion}` }, 201);
     return c.json(result, 201);
+  });
+
+  app.put("/api/videos/:video/shots", async (c) => {
+    const b = await body(c, ShotsBody);
+    const { result } = await store.update("project", (p) => setShots(p, c.req.param("video"), b.version, b.shots));
+    return c.json({ version: result });
+  });
+
+  app.put("/api/videos/:video/lock", async (c) => {
+    const b = await body(c, LockBody);
+    const { result } = await store.update("project", (p) => lockPicture(p, c.req.param("video"), b.version));
+    return c.json({ video: result });
   });
 
   app.post("/api/variants", async (c) => {

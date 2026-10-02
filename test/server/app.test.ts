@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { Store } from "../../src/core/store.js";
 import { tmpProject } from "../helpers/tmp.js";
 import { createApp } from "../../src/server/app.js";
+import { ProjectIdSchema } from "../../src/core/schema.js";
 
 async function setup() {
   const { root, store } = await tmpProject("spring-launch");
@@ -58,14 +59,34 @@ describe("local-only guard", () => {
   });
 });
 
-describe("root page and listeners", () => {
-  it("GET / says Rushes is running for the project, with the root escaped", async () => {
+describe("every project has an address", () => {
+  it("GET / redirects to /p/<id>/", async () => {
+    const { store } = await tmpProject();
+    const app = createApp(store);
+    const res = await app.request("/");
+    expect(res.status).toBe(302);
+    const id = (await store.read("project")).id!;
+    expect(ProjectIdSchema.safeParse(id).success).toBe(true);
+    expect(res.headers.get("location")).toBe(`/p/${id}/`);
+  });
+
+  it("GET /p/<id> (no trailing slash) redirects, adding the slash", async () => {
+    const { store } = await tmpProject();
+    const app = createApp(store);
+    const { id } = (await (await app.request("/api/health")).json()) as { id: string };
+    const res = await app.request(`/p/${id}`);
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe(`/p/${id}/`);
+  });
+
+  it("GET /p/<id>/ serves the placeholder page when the dashboard isn't built, with the root escaped", async () => {
     const { root } = await tmpProject();
     const odd = join(root, "<b>A&B</b>");
     const store = new Store(odd);
     await store.init("odd");
-    // No built dashboard in this folder, so the placeholder page is served.
-    const res = await createApp(store, { webDir: join(root, "no-dashboard") }).request("/");
+    const app = createApp(store, { webDir: join(root, "no-dashboard") });
+    const { id } = (await (await app.request("/api/health")).json()) as { id: string };
+    const res = await app.request(`/p/${id}/`);
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/html");
     const html = await res.text();
@@ -73,6 +94,71 @@ describe("root page and listeners", () => {
       `<!doctype html><title>Rushes</title><p>Rushes is running for <code>${odd.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</code>. The dashboard isn't built: run <code>npm run build</code>.</p>`,
     );
     expect(html).not.toContain("<b>");
+  });
+
+  it("GET /p/<wrong-id>/ gives 404 and says the project isn't running on this port", async () => {
+    const { store } = await tmpProject();
+    const app = createApp(store);
+    const res = await app.request("/p/zzzzzzzz/");
+    expect(res.status).toBe(404);
+    const html = await res.text();
+    expect(html).toContain("isn't running on this port");
+  });
+
+  it("escapes a mismatched id that's echoed back", async () => {
+    const { store } = await tmpProject();
+    const app = createApp(store);
+    const res = await app.request(`/p/${encodeURIComponent("<script>x</script>")}/`);
+    expect(res.status).toBe(404);
+    expect(await res.text()).not.toContain("<script>x</script>");
+  });
+
+  it("health's id matches ProjectIdSchema and carries the project's name", async () => {
+    const { store } = await tmpProject("spring-launch");
+    const app = createApp(store);
+    const json = (await (await app.request("/api/health")).json()) as { id: string; name: string };
+    expect(ProjectIdSchema.safeParse(json.id).success).toBe(true);
+    expect(json.name).toBe("spring-launch");
+  });
+
+  it("the project guard rejects a mismatching x-rushes-project header with 409, accepts the right one, and lets a request with none through", async () => {
+    const { store } = await tmpProject();
+    const app = createApp(store);
+    const id = ((await (await app.request("/api/health")).json()) as { id: string }).id;
+    const wrong = await app.request("/api/state", { headers: { "x-rushes-project": "wrongwrg" } });
+    expect(wrong.status).toBe(409);
+    expect(await wrong.json()).toMatchObject({ error: "wrong_project" });
+    expect((await app.request("/api/state", { headers: { "x-rushes-project": id } })).status).toBe(200);
+    expect((await app.request("/api/state")).status).toBe(200);
+  });
+
+  it("rejects a mismatching ?project= query param on /api/events with 409", async () => {
+    const { store } = await tmpProject();
+    const app = createApp(store);
+    const res = await app.request("/api/events?project=wrongwrg");
+    expect(res.status).toBe(409);
+  });
+
+  it("rejects a wrong project header on POST /api/notes with 409 and writes nothing", async () => {
+    const { store } = await tmpProject();
+    const app = createApp(store);
+    const res = await app.request("/api/notes", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-rushes-project": "wrongwrg" },
+      body: JSON.stringify({ stage: "picture", scope: "point", t: 1, text: "x" }),
+    });
+    expect(res.status).toBe(409);
+    expect((await store.read("notes")).notes).toHaveLength(0);
+  });
+
+  it("the project guard also covers /media and /assets", async () => {
+    const { store } = await tmpProject();
+    const app = createApp(store);
+    expect((await app.request("/media?path=nope.mp4")).status).toBe(404); // no id: passes the guard, falls through to not-registered
+    const wrongMedia = await app.request("/media?path=nope.mp4&project=wrongwrg");
+    expect(wrongMedia.status).toBe(409);
+    const wrongAssets = await app.request("/assets/app.js?project=wrongwrg");
+    expect(wrongAssets.status).toBe(409);
   });
 
   it("lets any number of SSE clients listen without a warning", async () => {
@@ -201,5 +287,66 @@ describe("API", () => {
     await call("POST", "/api/notes", { stage: "music", scope: "whole", text: "y" });
     const [a, b] = await Promise.all([call("POST", "/api/batches", { stage: "picture" }), call("POST", "/api/batches", { stage: "music" })]);
     expect(new Set([a.json.batch.id, b.json.batch.id]).size).toBe(2);
+  });
+
+  it("shots: sorts and renumbers", async () => {
+    const { call, root } = await setup();
+    await call("POST", "/api/versions", { video: "Hero", file: `${root}/renders/hero.mp4` });
+    const r = await call("PUT", "/api/videos/hero/shots", { shots: [{ name: "B", start: 5 }, { name: "A", start: 1.7, tag: "ESTABLISH" }] });
+    expect(r.status).toBe(200);
+    expect(r.json.version.shots).toEqual([
+      { n: 1, name: "A", start: 1.7, tag: "ESTABLISH" },
+      { n: 2, name: "B", start: 5, tag: "" },
+    ]);
+  });
+
+  it("shots: a 201st shot gives 400", async () => {
+    const { call, root } = await setup();
+    await call("POST", "/api/versions", { video: "Hero", file: `${root}/renders/hero.mp4` });
+    const shots = Array.from({ length: 201 }, (_, i) => ({ name: `S${i}`, start: i }));
+    expect((await call("PUT", "/api/videos/hero/shots", { shots })).status).toBe(400);
+  });
+
+  it("shots: an 81-character name gives 400", async () => {
+    const { call, root } = await setup();
+    await call("POST", "/api/versions", { video: "Hero", file: `${root}/renders/hero.mp4` });
+    const r = await call("PUT", "/api/videos/hero/shots", { shots: [{ name: "x".repeat(81), start: 0 }] });
+    expect(r.status).toBe(400);
+  });
+
+  it("lock: locks a video at a version, and locking an unknown version gives 404", async () => {
+    const { call, root } = await setup();
+    await call("POST", "/api/versions", { video: "Hero", file: `${root}/renders/hero.mp4` });
+    const locked = await call("PUT", "/api/videos/hero/lock", { version: "v1" });
+    expect(locked.status).toBe(200);
+    expect(locked.json.video.lockedVersion).toBe("v1");
+    expect((await call("PUT", "/api/videos/hero/lock", { version: "v9" })).status).toBe(404);
+  });
+
+  it("adding a cut to a locked video gives 201 with a warning", async () => {
+    const { call, root } = await setup();
+    await call("POST", "/api/versions", { video: "Hero", file: `${root}/renders/hero.mp4` });
+    await call("PUT", "/api/videos/hero/lock", { version: "v1" });
+    const r = await call("POST", "/api/versions", { video: "Hero", file: `${root}/renders/hero2.mp4` });
+    expect(r.status).toBe(201);
+    expect(r.json.version.id).toBe("v2");
+    expect(r.json.warning).toBe("Picture is locked at v1");
+  });
+
+  it("a picture note is stamped with the shot it falls in, ignoring anything the client sent for shot", async () => {
+    const { call, root } = await setup();
+    await call("POST", "/api/versions", { video: "Hero", file: `${root}/renders/hero.mp4` });
+    await call("PUT", "/api/videos/hero/shots", { shots: [{ name: "Title", start: 0 }, { name: "Window rises in", start: 1.7 }] });
+    const onShot = await call("POST", "/api/notes", {
+      stage: "picture", video: "hero", version: "v1", scope: "point", t: 1.7, text: "x",
+      shot: { n: 9, name: "sneaked in" },
+    });
+    expect(onShot.json.note.shot).toEqual({ n: 2, name: "Window rises in" });
+  });
+
+  it("a script note gets shot: null", async () => {
+    const { call } = await setup();
+    const r = await call("POST", "/api/notes", { stage: "script", scope: "whole", text: "x" });
+    expect(r.json.note.shot).toBeNull();
   });
 });
