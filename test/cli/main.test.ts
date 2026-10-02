@@ -132,6 +132,30 @@ describe("cli", () => {
     await s.close();
   });
 
+  it("add shots refuses a --version with no value instead of eating the next flag", async () => {
+    const { root } = await tmpProject();
+    const a = io(root);
+    expect(await main(["add", "shots", "shots.json", "--version", "--video", "hero"], a.x)).toBe(2);
+    expect(a.err.join("\n")).toContain("--version needs a value");
+    expect(await main(["add", "shots", "shots.json", "--video", "hero", "--version"], a.x)).toBe(2);
+    expect(await main(["add", "shots", "shots.json", "--video", "hero", "--version="], a.x)).toBe(2);
+  });
+
+  it("add shots takes -v <value> as the version too", async () => {
+    const { root } = await tmpProject();
+    const s = await startServer(root, { port: 0 });
+    await fetch(`${s.url}/api/versions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ video: "Hero", file: "a.mp4" }),
+    });
+    await writeFile(join(root, "shots.json"), JSON.stringify([{ name: "Wide", start: 0 }]), "utf8");
+    const a = io(root);
+    expect(await main(["add", "shots", "shots.json", "--video", "hero", "-v", "v1"], a.x)).toBe(0);
+    expect(a.out.pop()).toBe("Shots set on hero v1: 1");
+    await s.close();
+  });
+
   it("add shots exits 2 with a clear message on a missing file or invalid JSON", async () => {
     const { root } = await tmpProject();
     const a = io(root);

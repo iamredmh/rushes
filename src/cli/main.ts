@@ -114,17 +114,20 @@ function firstPositional(argv: string[]): string | undefined {
  * parse as `{version: true}` plus a stray positional, scrambling positional order. So for
  * `add ...`, pull the flag and its value out of argv textually before parseArgs ever sees it.
  */
-function extractAddVersionFlag(argv: string[]): { value: string | undefined; rest: string[] } {
+function extractAddVersionFlag(argv: string[]): { value: string | undefined; rest: string[]; missing?: true } {
   const rest = [...argv];
   for (let i = 0; i < rest.length; i++) {
     const tok = rest[i];
-    if (tok === "--version" && i + 1 < rest.length) {
+    if (tok === "--version" || tok === "-v") {
       const value = rest[i + 1];
+      // A bare --version (last, or followed by another flag) has no value: say so rather than eat the next flag.
+      if (value === undefined || value.startsWith("-")) return { value: undefined, rest, missing: true };
       rest.splice(i, 2);
       return { value, rest };
     }
     if (tok.startsWith("--version=")) {
       const value = tok.slice("--version=".length);
+      if (!value) return { value: undefined, rest, missing: true };
       rest.splice(i, 1);
       return { value, rest };
     }
@@ -139,6 +142,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
   let addVersion: string | undefined;
   if (firstPositional(argv) === "add") {
     const extracted = extractAddVersionFlag(argv);
+    if (extracted.missing) return usage(io, "--version needs a value, e.g. --version v2");
     addVersion = extracted.value;
     argv = extracted.rest;
   }
