@@ -10,6 +10,7 @@ import { createBatch, latestBatch } from "../core/batches.js";
 import { tabStates } from "../core/tabs.js";
 import { fromManifestPath, toManifestPath } from "../core/paths.js";
 import { probe } from "../core/media.js";
+import type { CorruptEvent } from "./watch.js";
 import { LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, type Batch } from "../core/schema.js";
 
 export const VERSION = "0.1.0";
@@ -279,8 +280,13 @@ export function createApp(store: Store): Hono {
   app.get("/api/events", (c) =>
     streamSSE(c, async (stream) => {
       const send = (e: ChangeEvent) => void stream.writeSSE({ event: "change", data: JSON.stringify(e) });
+      const corrupt = (e: CorruptEvent) => void stream.writeSSE({ event: "corrupt", data: JSON.stringify(e) });
       store.on("change", send);
-      stream.onAbort(() => { store.off("change", send); });
+      store.on("corrupt", corrupt);
+      stream.onAbort(() => {
+        store.off("change", send);
+        store.off("corrupt", corrupt);
+      });
       await stream.writeSSE({ event: "hello", data: JSON.stringify({ root: store.root }) });
       while (!stream.aborted) await stream.sleep(15000).then(() => stream.writeSSE({ event: "ping", data: "" }));
     }),

@@ -5,6 +5,7 @@ import { getRequestListener } from "@hono/node-server";
 import { Store } from "../core/store.js";
 import { createApp } from "./app.js";
 import { removeLock, writeLock } from "./lock.js";
+import { watchStore } from "./watch.js";
 
 export const DEFAULT_PORT = 4317;
 
@@ -70,10 +71,12 @@ export async function startServer(rootDir: string, opts: { port?: number; host?:
     throw e;
   }
   const url = `http://${host}:${port}`;
+  const stopWatching = watchStore(store);
   let closed = false;
   const close = async () => {
     if (closed) return;
     closed = true;
+    stopWatching();
     server.closeAllConnections?.();
     await new Promise<void>((ok) => server.close(() => ok()));
     await removeLock(root, token);

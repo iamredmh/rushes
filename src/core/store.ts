@@ -36,6 +36,8 @@ export interface ChangeEvent {
 export class Store extends EventEmitter {
   readonly dir: string;
   private queues = new Map<FileKey, Promise<unknown>>();
+  /** The last rev announced for each file, so a watcher can tell our writes from hand edits. */
+  private announced = new Map<FileKey, number>();
 
   constructor(readonly root: string) {
     super();
@@ -90,11 +92,19 @@ export class Store extends EventEmitter {
       if (!checked.success) throw new InvalidError(`Change to ${FILES[key].name} is invalid`, checked.error.issues);
       const data = checked.data as FileData[K];
       await atomicWrite(this.path(key), serialise(data));
-      this.emit("change", { file: key, rev: data.rev } satisfies ChangeEvent);
+      this.announce(key, data.rev);
       return { data, result };
     });
     this.queues.set(key, run);
     return run;
+  }
+
+  /** Emit a change for `key` at `rev` unless that rev was already announced. Returns whether it emitted. */
+  announce(key: FileKey, rev: number): boolean {
+    if (this.announced.get(key) === rev) return false;
+    this.announced.set(key, rev);
+    this.emit("change", { file: key, rev } satisfies ChangeEvent);
+    return true;
   }
 
   async backup(key: FileKey): Promise<string> {
