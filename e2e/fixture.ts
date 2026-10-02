@@ -19,8 +19,8 @@ export interface Rushes {
   root: string;
   /** Call the server's API the way an agent would. */
   api<T = any>(method: string, path: string, body?: unknown): Promise<T>;
-  /** Register the 4-second test clip as a new cut of "Hero". */
-  addCut(note?: string): Promise<{ version: { id: string } }>;
+  /** Register the 4-second test clip as a new cut of `video` (default "Hero"). */
+  addCut(note?: string, video?: string): Promise<{ version: { id: string } }>;
   /** Register the 9:16 test clip (360x640, 2 s) as a new cut of "Hero". */
   addVerticalCut(note?: string): Promise<{ version: { id: string } }>;
   /**
@@ -98,7 +98,8 @@ export const test = base.extend<{ rushes: Rushes }>({
     let url = started.url;
     let origin = started.base;
     let root = started.root;
-    let cuts = 0;
+    // Counted per video, so cuts to different films never collide on the same render filename.
+    const cutsByVideo = new Map<string, number>();
 
     const api = async (method: string, path: string, body?: unknown) => {
       const res = await fetch(origin + path, {
@@ -110,15 +111,18 @@ export const test = base.extend<{ rushes: Rushes }>({
       if (!res.ok) throw new Error(`${method} ${path} → ${res.status} ${JSON.stringify(json)}`);
       return json;
     };
-    const addCut = async (note?: string) => {
-      cuts++;
-      const file = `renders/hero_v${cuts}.mp4`;
+    const addCut = async (note?: string, video = "Hero") => {
+      const slug = video.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+      const n = (cutsByVideo.get(slug) ?? 0) + 1;
+      cutsByVideo.set(slug, n);
+      const file = `renders/${slug}_v${n}.mp4`;
       await copyFile(CLIP, join(root, file));
-      return api("POST", "/api/versions", { video: "Hero", file, note });
+      return api("POST", "/api/versions", { video, file, note });
     };
     const addVerticalCut = async (note?: string) => {
-      cuts++;
-      const file = `renders/hero_v${cuts}.mp4`;
+      const n = (cutsByVideo.get("hero") ?? 0) + 1;
+      cutsByVideo.set("hero", n);
+      const file = `renders/hero_v${n}.mp4`;
       await copyFile(VERTICAL, join(root, file));
       return api("POST", "/api/versions", { video: "Hero", file, note });
     };
@@ -131,7 +135,7 @@ export const test = base.extend<{ rushes: Rushes }>({
       url = next.url;
       origin = next.base;
       root = next.root;
-      cuts = 0;
+      cutsByVideo.clear();
     };
 
     await use({

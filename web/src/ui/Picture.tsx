@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, mediaUrl } from "../api.js";
 import { boxFrom, fmt, frameAt, noteTime, placeNote, snap, stepFrame } from "../lib.js";
 import type { Note, Video, Version } from "../types.js";
@@ -16,12 +16,16 @@ export interface PictureProps {
   onChanged(): void;
   /** Whether an In/Out, box, grab or half-typed note is waiting to be submitted. */
   onPendingChange?(pending: boolean): void;
+  /** Where to seek to once this cut's metadata has loaded (restoring a film's playhead on return). */
+  startAt?: number;
+  /** Reports the current (frame-snapped) time on pause, seek and unmount, so a caller can remember it. */
+  onTime?(t: number): void;
 }
 
 const typing = (el: EventTarget | null) => el instanceof HTMLElement && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
 
 /** The cut, with notes down the right: frame stepping, In/Out ranges, a box on the frame and frame grabs. */
-export function Picture({ video, version, fps, notes, toast, onChanged, onPendingChange }: PictureProps) {
+export function Picture({ video, version, fps, notes, toast, onChanged, onPendingChange, startAt, onTime }: PictureProps) {
   const ref = useRef<HTMLVideoElement>(null);
   const overlay = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
@@ -40,6 +44,18 @@ export function Picture({ video, version, fps, notes, toast, onChanged, onPendin
   const [noteHasText, setNoteHasText] = useState(false);
   // The click that ends a box drag shouldn't also start playback.
   const justDrew = useRef(false);
+  // Mirrors `t`, so the unmount cleanup can report the last-known time without touching the (possibly
+  // already-detached) video element.
+  const tNow = useRef(0);
+  useEffect(() => { tNow.current = t; }, [t]);
+  // Report the playhead once it settles (on pause or after a seek, including the rapid-fire seeks a
+  // frame-stepping key produces) — never mid-play, where `t` free-runs every frame. Driven by the
+  // rendered `t` itself rather than the seeked/pause DOM events directly, so what's remembered always
+  // matches what's on screen, even when the browser coalesces a burst of seeks into fewer events.
+  // A layout effect, so it's committed before the next keypress (or switch) can read it, not deferred.
+  useLayoutEffect(() => { if (!playing) onTime?.(snap(t, fps)); }, [t, playing]);
+  // Report the playhead on unmount (e.g. switching to another film), so it can be restored on return.
+  useEffect(() => () => onTime?.(tNow.current), []);
 
   // Tell the parent whether there's anything here it would be wrong to discard by
   // jumping to a newer cut: an In/Out, a box, a grab or a half-typed note.
@@ -214,6 +230,10 @@ export function Picture({ video, version, fps, notes, toast, onChanged, onPendin
                 const v = e.target as HTMLVideoElement;
                 setDuration(v.duration || version.duration || 0);
                 if (v.videoWidth && v.videoHeight) setAspect(v.videoWidth / v.videoHeight);
+                if (startAt) {
+                  v.currentTime = Math.min(startAt, v.duration || startAt);
+                  setT(v.currentTime);
+                }
               }}
               onTimeUpdate={(e) => !playing && setT((e.target as HTMLVideoElement).currentTime)}
               onSeeked={(e) => setT((e.target as HTMLVideoElement).currentTime)}

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { api, ApiError } from "../api.js";
-import { BUILT, STAGE_NAMES, UNLOCK_HINT, firstTab, latest } from "../lib.js";
-import type { Batch, Stage } from "../types.js";
+import { BUILT, STAGE_NAMES, UNLOCK_HINT, defaultVersion, firstTab, latest, neighbourVideo } from "../lib.js";
+import type { Batch, Stage, Video } from "../types.js";
 import { useRushes } from "../useRushes.js";
 import { Icon, STAGE_ICONS } from "./Icon.js";
 import { Picture } from "./Picture.js";
@@ -32,7 +32,14 @@ export function App() {
   const [pending, setPending] = useState(false);
   // True while Rushes, not you, is holding the cut on screen because marks are pending.
   const [held, setHeld] = useState(false);
+  // Where the next film's player should seek to once loaded, restoring that film's playhead.
+  const [startAt, setStartAt] = useState(0);
   const toastTimer = useRef<number | undefined>(undefined);
+  // Per-film memory: playhead, version choice and hold state, so switching films and coming
+  // back doesn't lose your place. Keyed by video id.
+  const memory = useRef(new Map<string, { versionId: string | null; held: boolean; t: number }>());
+  // The current film's live playhead, kept current by Picture's onTime so a switch away can save it.
+  const tRef = useRef(0);
 
   const toast = (message: string) => {
     setToastText(message);
@@ -52,27 +59,55 @@ export function App() {
     if (state?.project.name) document.title = `${state.project.name} · Rushes`;
   }, [state?.project.name]);
 
-  // Follow the newest cut unless you've chosen an older one.
+  // Follow the locked version if there is one, otherwise the newest, unless you've chosen another.
   const video = state?.project.videos.find((v) => v.id === videoId) ?? state?.project.videos[0];
   const newest = latest(video);
-  const version = video?.versions.find((v) => v.id === versionId) ?? newest;
+  const target = defaultVersion(video);
+  const version = video?.versions.find((v) => v.id === versionId) ?? target;
+  const locked = !!video?.lockedVersion;
 
   // A new cut arriving mid-review mustn't rewind the player or drop pending marks. So the
   // moment something's pending, hold the cut on screen; a newer one then waits behind a chip.
   // Holding before the cut arrives means the player never renders the new cut, even once.
   useEffect(() => {
-    if (pending && versionId === null && newest) {
-      setVersionId(newest.id);
+    if (pending && versionId === null && target) {
+      setVersionId(target.id);
       setHeld(true);
-    } else if (!pending && held && versionId === newest?.id) {
+    } else if (!pending && held && versionId === target?.id) {
       setVersionId(null);
       setHeld(false);
     }
-  }, [pending, versionId, newest?.id]);
-  const readyVersionId = held && newest && version && newest.id !== version.id ? newest.id : null;
+  }, [pending, versionId, target?.id]);
+  // The chip shows whenever a newer cut than the one on screen exists, and either the video is
+  // locked (so nothing would otherwise tell you a newer one arrived) or the cut is held.
+  const readyVersionId = newest && version && newest.id !== version.id && (locked || held) ? newest.id : null;
   const jumpToReady = () => {
-    setVersionId(null);
+    // Always the newest, even when locked: this views it without touching the lock.
+    if (newest) setVersionId(newest.id);
     setHeld(false);
+  };
+
+  /** Switches to another film, remembering this one's place and restoring the other's. Refused while marks are pending. */
+  const switchFilm = (newId: string) => {
+    if (!video || newId === video.id) return;
+    if (pending) return toast(`Add or clear your note on ${video.name} first`);
+    memory.current.set(video.id, { versionId, held, t: tRef.current });
+    const saved = memory.current.get(newId);
+    setVideoId(newId);
+    setVersionId(saved?.versionId ?? null);
+    setHeld(saved?.held ?? false);
+    setStartAt(saved?.t ?? 0);
+    tRef.current = saved?.t ?? 0;
+  };
+
+  const toggleLock = async () => {
+    if (!video || !version) return;
+    try {
+      await api.put<{ video: Video }>(`/api/videos/${video.id}/lock`, { version: video.lockedVersion ? null : version.id });
+      void refresh();
+    } catch (e) {
+      toast((e as Error).message);
+    }
   };
 
   const tabs = state?.tabs ?? [];
@@ -88,6 +123,10 @@ export function App() {
       if (typing(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
       const n = Number(e.key);
       if (n >= 1 && n <= 6) show(ORDER[n - 1]);
+      if ((e.key === "[" || e.key === "]") && state) {
+        const nxt = neighbourVideo(state.project.videos, videoId, e.key === "]" ? 1 : -1);
+        if (nxt) switchFilm(nxt);
+      }
       if (e.key === "?") setKeysOpen((o) => !o);
       if (e.key === "Escape") {
         setKeysOpen(false);
@@ -130,6 +169,7 @@ export function App() {
 
   const fps = version?.fps ?? state.project.fps;
   const pictureNotes = state.notes.notes.filter((n) => n.stage === "picture" && (!n.video || n.video === video?.id));
+  const hasTodo = (vid: string) => state.notes.notes.some((n) => n.stage === "picture" && n.status === "todo" && (!n.video || n.video === vid));
   const unlocked = tab(stage)?.unlocked ?? false;
   const open = tab(stage)?.todo ?? 0;
 
@@ -140,17 +180,29 @@ export function App() {
         <nav class="crumb" aria-label="Project">
           <span>{state.project.name}</span>
           {state.project.id && <span class="pid mono">{state.project.id}</span>}
-          {video && (
+          {video && state.project.videos.length === 1 && (
             <>
               <span class="slash">/</span>
-              {state.project.videos.length > 1 ? (
-                <select class="sel" aria-label="Video" value={video.id} onChange={(e) => { setVideoId((e.target as HTMLSelectElement).value); setVersionId(null); setHeld(false); }}>
-                  {state.project.videos.map((v) => <option value={v.id}>{v.name}</option>)}
-                </select>
-              ) : (
-                <span class="sel">{video.name}</span>
-              )}
-              {version && (
+              <span class="sel">{video.name}</span>
+            </>
+          )}
+        </nav>
+        {video && state.project.videos.length > 1 && (
+          <nav class="pack" aria-label="Films">
+            {state.project.videos.map((v, i) => (
+              <button class="pill" aria-pressed={v.id === video.id} onClick={() => switchFilm(v.id)}>
+                <span class="n">{i + 1}</span>
+                {v.name}
+                {hasTodo(v.id) && <span class="dot" />}
+              </button>
+            ))}
+          </nav>
+        )}
+        {video && (
+          <>
+            <span class="plabel">Picture</span>
+            {version && (
+              <span class="verwrap" data-tip={locked ? `Picture locked at ${version.id}` : undefined}>
                 <select
                   class="sel mono"
                   aria-label="Version"
@@ -165,16 +217,27 @@ export function App() {
                 >
                   {[...video.versions].reverse().map((v) => <option value={v.id}>{v.id}{v.note ? ` · ${v.note}` : ""}</option>)}
                 </select>
-              )}
-              {readyVersionId && (
-                <button class="chipx go" aria-label={`${readyVersionId} is ready`} data-tip="Switch to the newest cut" onClick={jumpToReady}>
-                  <Icon name="new" />
-                  {readyVersionId} ready
-                </button>
-              )}
-            </>
-          )}
-        </nav>
+                {locked && <Icon name="lock" class="vlk" />}
+              </span>
+            )}
+            {version && (
+              <button
+                class="btn ghost ib"
+                aria-label={locked ? "Unlock picture" : `Lock picture at ${version.id}`}
+                data-tip={locked ? "Unlock picture" : `Lock picture at ${version.id}`}
+                onClick={() => void toggleLock()}
+              >
+                <Icon name={locked ? "unlock" : "lock"} />
+              </button>
+            )}
+            {readyVersionId && (
+              <button class="chipx go" aria-label={`${readyVersionId} is ready`} data-tip="Switch to the newest cut" onClick={jumpToReady}>
+                <Icon name="new" />
+                {readyVersionId} ready
+              </button>
+            )}
+          </>
+        )}
         <span class="sp" />
         <button class="btn ghost ib tip-below" data-tip="Shortcuts  ?" aria-label="Keyboard shortcuts" onClick={() => { setSent(null); setKeysOpen(!keysOpen); }}>
           <Icon name="kbd" />
@@ -212,6 +275,7 @@ export function App() {
             <span><kbd>G</kbd></span><span>Grab frame</span>
             <span><kbd>N</kbd></span><span>New note</span>
             <span><kbd>1</kbd>–<kbd>6</kbd></span><span>Switch tab</span>
+            <span><kbd>[</kbd> <kbd>]</kbd></span><span>Previous or next film</span>
             <span><kbd>?</kbd></span><span>Shortcuts</span>
             <span><kbd>Esc</kbd></span><span>Close</span>
           </div>
@@ -244,7 +308,18 @@ export function App() {
         {!unlocked || !BUILT[stage] ? (
           <Empty stage={stage} unlocked={unlocked} />
         ) : stage === "picture" && video && version ? (
-          <Picture video={video} version={version} fps={fps} notes={pictureNotes} toast={toast} onChanged={() => void refresh()} onPendingChange={setPending} />
+          <Picture
+            key={video.id}
+            video={video}
+            version={version}
+            fps={fps}
+            notes={pictureNotes}
+            toast={toast}
+            onChanged={() => void refresh()}
+            onPendingChange={setPending}
+            startAt={startAt}
+            onTime={(tt) => { tRef.current = tt; }}
+          />
         ) : stage === "script" ? (
           <Script script={state.script} toast={toast} onChanged={() => void refresh()} />
         ) : (

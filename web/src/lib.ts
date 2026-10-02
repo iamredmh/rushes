@@ -62,6 +62,23 @@ export function latest(video: Video | undefined): Version | undefined {
   return video?.versions[video.versions.length - 1];
 }
 
+/** The version a film opens on: its locked version if it has one and the version still exists, otherwise the newest. */
+export function defaultVersion(video: Video | undefined): Version | undefined {
+  if (video?.lockedVersion) {
+    const locked = video.versions.find((v) => v.id === video.lockedVersion);
+    if (locked) return locked;
+  }
+  return latest(video);
+}
+
+/** The id of the film one step before/after `currentId` in `videos`, or null at either end or if not found. */
+export function neighbourVideo(videos: Video[], currentId: string | null, dir: -1 | 1): string | null {
+  const i = videos.findIndex((v) => v.id === currentId);
+  if (i === -1) return null;
+  const j = i + dir;
+  return j >= 0 && j < videos.length ? videos[j].id : null;
+}
+
 /** Is this stage built in this release of the dashboard? Later releases add the audio tabs. */
 export const BUILT: Record<Stage, boolean> = { script: true, picture: true, voice: false, music: false, sfx: false, mix: false };
 

@@ -251,6 +251,51 @@ test("every project has its own address and title", async ({ page, rushes }) => 
   await expect(page.locator(".pid")).toHaveText(id);
 });
 
+test("a pack shows a pill per film, and each film remembers where you were", async ({ page, rushes }) => {
+  await rushes.addCut("hero cut");
+  await rushes.addCut("cutdown cut", "Cutdown");
+  await page.goto(rushes.url);
+  await videoReady(page);
+  const pack = page.getByRole("navigation", { name: "Films" });
+  await expect(pack.getByRole("button")).toHaveCount(2);
+  await expect(pack.getByRole("button", { name: /Hero/ })).toHaveAttribute("aria-pressed", "true");
+  for (let i = 0; i < 15; i++) await page.keyboard.press("ArrowRight");
+  await expect(page.getByLabel("Timecode")).toContainText("0:00.50");
+  await page.keyboard.press("]");
+  await expect(pack.getByRole("button", { name: /Cutdown/ })).toHaveAttribute("aria-pressed", "true");
+  await videoReady(page);
+  await expect(page.getByLabel("Timecode")).toContainText("0:00.00");
+  await page.keyboard.press("[");
+  await expect(pack.getByRole("button", { name: /Hero/ })).toHaveAttribute("aria-pressed", "true");
+  await videoReady(page);
+  await expect(page.getByLabel("Timecode")).toContainText("0:00.50");
+});
+
+test("switching films with a note half-typed is refused, and the note is kept", async ({ page, rushes }) => {
+  await rushes.addCut("hero cut");
+  await rushes.addCut("cutdown cut", "Cutdown");
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await page.getByLabel("New note").fill("Still deciding what this is about.");
+  await page.getByRole("navigation", { name: "Films" }).getByRole("button", { name: /Cutdown/ }).click();
+  await expect(page.getByRole("status")).toHaveText("Add or clear your note on Hero first");
+  await expect(page.getByRole("navigation", { name: "Films" }).getByRole("button", { name: /Hero/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByLabel("New note")).toHaveValue("Still deciding what this is about.");
+});
+
+test("a locked picture opens on the locked cut", async ({ page, rushes }) => {
+  const { version: v1 } = await rushes.addCut("first cut");
+  await rushes.addCut("second cut");
+  await rushes.api("PUT", "/api/videos/Hero/lock", { version: v1.id });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v1");
+  await expect(page.locator(".verwrap .vlk")).toBeVisible();
+  await expect(page.locator(".chipx.go")).toContainText("v2 ready");
+  await page.getByRole("button", { name: "Unlock picture" }).click();
+  await expect.poll(async () => (await rushes.api("GET", "/api/state")).project.videos[0].lockedVersion).toBeNull();
+});
+
 test("a tab left open after its project stops never writes into the project that takes its port", async ({ page, rushes }) => {
   await rushes.addCut();
   await page.goto(rushes.url);

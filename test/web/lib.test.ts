@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { boxFrom, firstTab, fit, fmt, frameAt, isChanged, latest, noteTime, placeNote, snap, stepFrame } from "../../web/src/lib.js";
-import type { Note, Section, TabState } from "../../web/src/types.js";
+import { boxFrom, defaultVersion, firstTab, fit, fmt, frameAt, isChanged, latest, neighbourVideo, noteTime, placeNote, snap, stepFrame } from "../../web/src/lib.js";
+import type { Note, Section, TabState, Video } from "../../web/src/types.js";
 
 const note = (over: Partial<Note>): Note => ({
   id: "n_1", stage: "picture", video: "hero", version: "v3", on: null, scope: "point", t: 12.4, tOut: null, frame: null,
@@ -97,5 +97,46 @@ describe("isChanged and latest", () => {
     expect(latest({ id: "hero", name: "Hero", versions: [v("v1"), v("v2")], lockedVersion: null })?.id).toBe("v2");
     expect(latest({ id: "hero", name: "Hero", versions: [], lockedVersion: null })).toBeUndefined();
     expect(latest(undefined)).toBeUndefined();
+  });
+});
+
+describe("defaultVersion", () => {
+  const v = (id: string) => ({ id, file: `${id}.mp4`, duration: null, fps: null, addedAt: "", note: "", shots: [] });
+  it("follows the newest version when nothing is locked", () => {
+    const video: Video = { id: "hero", name: "Hero", versions: [v("v1"), v("v2")], lockedVersion: null };
+    expect(defaultVersion(video)?.id).toBe("v2");
+  });
+  it("opens on the locked version instead of the newest", () => {
+    const video: Video = { id: "hero", name: "Hero", versions: [v("v1"), v("v2"), v("v3")], lockedVersion: "v1" };
+    expect(defaultVersion(video)?.id).toBe("v1");
+  });
+  it("falls back to the newest if the locked version no longer exists", () => {
+    const video: Video = { id: "hero", name: "Hero", versions: [v("v1"), v("v2")], lockedVersion: "v9" };
+    expect(defaultVersion(video)?.id).toBe("v2");
+  });
+  it("is undefined for a video with no versions, locked or not", () => {
+    expect(defaultVersion({ id: "hero", name: "Hero", versions: [], lockedVersion: null })).toBeUndefined();
+    expect(defaultVersion(undefined)).toBeUndefined();
+  });
+});
+
+describe("neighbourVideo", () => {
+  const videos: Video[] = [
+    { id: "hero", name: "Hero", versions: [], lockedVersion: null },
+    { id: "cutdown", name: "Cutdown", versions: [], lockedVersion: null },
+    { id: "teaser", name: "Teaser", versions: [], lockedVersion: null },
+  ];
+  it("steps to the next and previous film", () => {
+    expect(neighbourVideo(videos, "hero", 1)).toBe("cutdown");
+    expect(neighbourVideo(videos, "cutdown", 1)).toBe("teaser");
+    expect(neighbourVideo(videos, "cutdown", -1)).toBe("hero");
+  });
+  it("doesn't wrap at either end", () => {
+    expect(neighbourVideo(videos, "hero", -1)).toBeNull();
+    expect(neighbourVideo(videos, "teaser", 1)).toBeNull();
+  });
+  it("is null when the current id isn't found", () => {
+    expect(neighbourVideo(videos, "nope", 1)).toBeNull();
+    expect(neighbourVideo(videos, null, 1)).toBeNull();
   });
 });

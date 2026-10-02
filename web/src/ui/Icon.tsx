@@ -11,6 +11,7 @@ const PATHS: Record<string, string> = {
   zap: '<path d="M13 3L5 13h6l-1 8 8-10h-6z"/>',
   sliders: '<path d="M5 21v-7M5 10V3M12 21v-9M12 8V3M19 21v-5M19 12V3M2 14h6M9 8h6M16 16h6"/>',
   lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+  unlock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v1"/>',
   play: '<path d="M7 4.5v15l12-7.5z" fill="currentColor" stroke="none"/>',
   pause: '<path d="M8 5v14M16 5v14"/>',
   prev: '<path d="M15 6l-6 6 6 6"/>',
