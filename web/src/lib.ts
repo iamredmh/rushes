@@ -3,9 +3,10 @@ import type { Note, Section, Stage, TabState, Video, Version } from "./types.js"
 
 /** 72.4 -> "1:12.40" (minutes, seconds, hundredths). */
 export function fmt(t: number): string {
-  const safe = Math.max(0, t);
-  const m = Math.floor(safe / 60);
-  const s = (safe - m * 60).toFixed(2).padStart(5, "0");
+  // Round to hundredths first, so 59.999 becomes 1:00.00 rather than 0:60.00.
+  const cs = Math.round(Math.max(0, t) * 100);
+  const m = Math.floor(cs / 6000);
+  const s = ((cs - m * 6000) / 100).toFixed(2).padStart(5, "0");
   return `${m}:${s}`;
 }
 

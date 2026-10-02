@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { boxFrom, firstTab, fit, fmt, frameAt, noteTime, placeNote, snap, stepFrame } from "../../web/src/lib.js";
-import type { Note, TabState } from "../../web/src/types.js";
+import { boxFrom, firstTab, fit, fmt, frameAt, isChanged, latest, noteTime, placeNote, snap, stepFrame } from "../../web/src/lib.js";
+import type { Note, Section, TabState } from "../../web/src/types.js";
 
 const note = (over: Partial<Note>): Note => ({
   id: "n_1", stage: "picture", video: "hero", version: "v3", on: null, scope: "point", t: 12.4, tOut: null, frame: null,
@@ -14,6 +14,12 @@ describe("timecode", () => {
     expect(fmt(12.4)).toBe("0:12.40");
     expect(fmt(72.456)).toBe("1:12.46");
     expect(fmt(-3)).toBe("0:00.00");
+  });
+  it("carries into the next minute instead of showing 60 seconds", () => {
+    expect(fmt(59.999)).toBe("1:00.00");
+    expect(fmt(119.996)).toBe("2:00.00");
+    expect(fmt(3599.999)).toBe("60:00.00");
+    expect(fmt(59.994)).toBe("0:59.99");
   });
   it("finds frames and steps by one frame, clamped", () => {
     expect(frameAt(12.4, 60)).toBe(744);
@@ -75,5 +81,21 @@ describe("boxFrom", () => {
     expect(boxFrom(100, 50, 300, 150, 400, 200)).toEqual({ x: 0.25, y: 0.25, w: 0.5, h: 0.5 });
     expect(boxFrom(300, 150, 100, 50, 400, 200)).toEqual({ x: 0.25, y: 0.25, w: 0.5, h: 0.5 });
     expect(boxFrom(-50, -50, 500, 300, 400, 200)).toEqual({ x: 0, y: 0, w: 1, h: 1 });
+  });
+});
+
+describe("isChanged and latest", () => {
+  const sec = (current: string, proposed: string | null): Section =>
+    ({ id: "s1", start: 0, end: 5, current, proposed, direction: "", status: "draft", takes: [] });
+  it("counts a row as changed only when your version differs, ignoring surrounding spaces", () => {
+    expect(isChanged(sec("Line.", null))).toBe(false);
+    expect(isChanged(sec("Line.", " Line. "))).toBe(false);
+    expect(isChanged(sec("Line.", "New line."))).toBe(true);
+  });
+  it("picks a video's newest version", () => {
+    const v = (id: string) => ({ id, file: `${id}.mp4`, duration: null, fps: null, addedAt: "", note: "" });
+    expect(latest({ id: "hero", name: "Hero", versions: [v("v1"), v("v2")] })?.id).toBe("v2");
+    expect(latest({ id: "hero", name: "Hero", versions: [] })).toBeUndefined();
+    expect(latest(undefined)).toBeUndefined();
   });
 });
