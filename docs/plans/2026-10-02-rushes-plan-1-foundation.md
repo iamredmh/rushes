@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** A working, headless Rushes that anyone can install from the public GitHub repo with one command, in any agent harness. It covers a project's `.rushes/` folder, a local server that is its only writer, ten MCP tools, a CLI, `rushes setup` for every harness, and a Claude Code plugin. An agent can register cuts, script and audio variants, read the user's notes and batches, and reply. The dashboard comes in Plan 2.
+**Goal:** A working, headless Rushes that anyone can install from the public GitHub repo with one command, in any agent harness. It covers a project's `.rushes/` folder, a local server that is its only writer, eleven MCP tools, a CLI, `rushes setup` for every harness, and a Claude Code plugin. An agent can register cuts, script and audio variants, read the user's notes and batches, and reply. The dashboard comes in Plan 2.
 
 **Architecture:** One TypeScript npm package. `src/core` is pure data logic: zod schemas, plus functions that change a file's data in memory. `src/core/store.ts` is the only code that touches disk: every write is validated, serialised per file, made atomic, and announced as an event. `src/server` wraps the store in a Hono HTTP API with server-sent events. `src/mcp` and `src/cli` are thin clients of that API, and they start a server in the background if none is running.
 
@@ -25,7 +25,7 @@
 - MCP tool names (eleven): `rushes_open, rushes_status, rushes_add_version, rushes_add_variant, rushes_set_script, rushes_get_script, rushes_add_take, rushes_list_notes, rushes_get_batch, rushes_reply, rushes_get_picks`. `rushes_set_script` merges by id unless `replace: true`.
 - The server binds to `127.0.0.1` only. The default port is 4317, falling back up to +10.
 - Install source: `SOURCE = "github:iamredmh/rushes"` in `src/setup/harnesses.ts`. Every doc and config uses `npx -y github:iamredmh/rushes <command>` until Plan 4 publishes to npm.
-- Zero setup for users: no accounts, keys, telemetry or hosted services. Node ≥ 20 is the only requirement.
+- Zero setup for users: no accounts, keys, telemetry or hosted services. Node ≥ 20 is the only requirement, plus git while installs come straight from GitHub.
 - `rushes setup` never removes or rewrites settings it didn't add, backs up any file it changes to `<file>.rushes.bak`, leaves invalid configs untouched, and runs `claude` commands with the home folder as cwd.
 - Prose in docs uses UK English. Code identifiers use the usual US spellings (`color`).
 
@@ -33,7 +33,7 @@
 
 These are the five inputs most likely to bite a real user. Each is pinned by a test in the task that owns the code:
 
-1. **Project folders with spaces** (e.g. `~/Documents/Projects/Video Production`): every path still works. *Task 1 (`tmpProject` always uses "My Project"), Task 2 (manifest paths) and Task 9 (`init "Second Film"`).*
+1. **Project folders with spaces** (e.g. `~/Documents/My Projects`): every path still works. *Task 1 (`tmpProject` always uses "My Project"), Task 2 (manifest paths) and Task 9 (`init "Second Film"`).*
 2. **The browser and the agent writing at the same moment:** no update is lost. *Task 1 (25 concurrent updates), Task 6 (two batches at once get different ids).*
 3. **A hand-edited or half-written `.rushes` file:** never overwritten, and the error names the file and field. *Task 1, Task 6 (500 with `file: "notes.json"`).*
 4. **A stale `server.json`** after a crash, or a reused port pointing at another project's server: Rushes must not talk to the wrong project. *Task 7 (dead pid) and Task 8 (a lock pointing at another project).*
@@ -107,8 +107,8 @@ rushes/
 mkdir -p ~/Documents/Projects/rushes && cd ~/Documents/Projects/rushes
 git init -b main
 mkdir -p src/core src/server src/mcp src/cli test/helpers test/core test/server test/mcp test/cli test/e2e docs/specs docs/plans skills/rushes
-cp "$HOME/Documents/Projects/Video Production/projects/2026-10-02-video-review-tool/docs/specs/2026-10-02-rushes-design.md" docs/specs/
-cp "$HOME/Documents/Projects/Video Production/projects/2026-10-02-video-review-tool/docs/plans/2026-10-02-rushes-plan-1-foundation.md" docs/plans/
+cp <brainstorm folder>/docs/specs/2026-10-02-rushes-design.md docs/specs/
+cp <brainstorm folder>/docs/plans/2026-10-02-rushes-plan-1-foundation.md docs/plans/
 ```
 
 - [ ] **Step 2: Add the project files**

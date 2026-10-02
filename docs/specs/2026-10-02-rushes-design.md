@@ -3,7 +3,7 @@
 **Date:** 2 October 2026
 **Owner:** Red Morley Hewitt (`iamredmh`)
 **Status:** Approved, 2 October 2026
-**Layout reference:** the round three mockup, https://claude.ai/artifact/JMHzZuUHo4pRSZ34Z2Jnnr
+**Layout reference:** the round three layout mockup (private for now; the dashboard in Plan 2 replaces it)
 
 ---
 
@@ -24,7 +24,7 @@ It solves a gap that every agent harness has today. The agent makes a video, the
 
 ### What stays the same as the existing review artifacts
 
-The Caffeine Shorts and OISY Tips review pages proved the core loop. Rushes keeps:
+One-off review pages built for real client films proved the core loop. Rushes keeps:
 - notes tagged with time, frame and version;
 - older notes jumping to the time they were fixed (`fixT`) in the newer cut;
 - sample-locked switching between variants (the VO Polish method);
