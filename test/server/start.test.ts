@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { access, writeFile } from "node:fs/promises";
 import { tmpProject } from "../helpers/tmp.js";
 import { startServer } from "../../src/server/start.js";
-import { lockPath, readLock } from "../../src/server/lock.js";
+import { lockPath, readLock, removeLock } from "../../src/server/lock.js";
 
 describe("startServer", () => {
   it("serves the API, writes a lockfile and removes it on close", async () => {
@@ -59,5 +59,20 @@ describe("startServer", () => {
     expect(text).toContain('"file":"notes"');
     ctrl.abort();
     await s.close();
+  });
+
+  it("does not remove a lock that belongs to another live process", async () => {
+    const { root } = await tmpProject();
+    await writeFile(lockPath(root), JSON.stringify({ port: 4999, pid: process.ppid, startedAt: "x" }), "utf8");
+    await removeLock(root);
+    expect(await readLock(root)).toMatchObject({ pid: process.ppid });
+    await expect(access(lockPath(root))).resolves.toBeUndefined();
+  });
+
+  it("treats EPERM from process.kill as alive", async () => {
+    const { root } = await tmpProject();
+    await writeFile(lockPath(root), JSON.stringify({ port: 4999, pid: 1, startedAt: "x" }), "utf8");
+    expect(await readLock(root)).not.toBeNull();
+    expect(await readLock(root)).toMatchObject({ pid: 1 });
   });
 });
