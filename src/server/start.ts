@@ -60,8 +60,9 @@ export async function startServer(rootDir: string, opts: { port?: number; host?:
   }
   if (port < 0) throw new Error(`No free port from ${first} to ${first + 10}: ${(lastError as Error)?.message}`);
 
+  let token: string | undefined;
   try {
-    await writeLock(root, port);
+    token = (await writeLock(root, port)).token;
   } catch (e) {
     // Another server owns this project, or the lock couldn't be written: don't leave a socket open.
     server.closeAllConnections?.();
@@ -75,7 +76,7 @@ export async function startServer(rootDir: string, opts: { port?: number; host?:
     closed = true;
     server.closeAllConnections?.();
     await new Promise<void>((ok) => server.close(() => ok()));
-    await removeLock(root);
+    await removeLock(root, token);
   };
   return { url, port, store, close };
 }

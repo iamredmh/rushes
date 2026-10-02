@@ -1,4 +1,5 @@
-import { readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { link, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { basename, dirname, join, resolve } from "node:path";
 import { RUSHES_DIR } from "../core/store.js";
 import { RushesError } from "../core/errors.js";
@@ -7,6 +8,8 @@ export interface Lock {
   port: number;
   pid: number;
   startedAt: string;
+  /** Unique per server start, so a server can tell its own lock from a newer one in the same process. */
+  token?: string;
 }
 
 /** A server for this project is already running at `url`. */
@@ -48,15 +51,20 @@ function alive(pid: number): boolean {
   }
 }
 
-/** The running server's lock, or null when there is none or its process has gone. */
-export async function readLock(root: string): Promise<Lock | null> {
+/** The lock file as written, whether or not its process is alive. Null when missing or unreadable. */
+async function readLockFile(root: string): Promise<Lock | null> {
   try {
     const lock = JSON.parse(await readFile(lockPath(root), "utf8")) as Lock;
-    if (typeof lock.port !== "number" || typeof lock.pid !== "number") return null;
-    return alive(lock.pid) ? lock : null;
+    return typeof lock.port === "number" && typeof lock.pid === "number" ? lock : null;
   } catch {
     return null;
   }
+}
+
+/** The running server's lock, or null when there is none or its process has gone. */
+export async function readLock(root: string): Promise<Lock | null> {
+  const lock = await readLockFile(root);
+  return lock && alive(lock.pid) ? lock : null;
 }
 
 /** Does the server on this port answer as Rushes for exactly this root? */
@@ -71,34 +79,49 @@ export async function isRushesFor(port: number, root: string): Promise<boolean> 
 }
 
 /**
- * Claim the project's lock. The file is created exclusively, so two servers
- * can't both win. If a lock is already there and its server is alive and
- * serving this root, throw AlreadyRunningError; otherwise the lock is stale
- * and is replaced.
+ * Claim the project's lock. The lock is written to a temporary file and then
+ * hard-linked into place, so it appears complete or not at all, and only one
+ * claimant can win the link. A lock whose server is alive and serving this
+ * root wins over us (AlreadyRunningError). A stale one is removed, but only if
+ * it is still the same lock we judged stale. After winning, we re-read the
+ * lock once: if a racing claimant replaced it, we go round again and defer to
+ * that server.
  */
 export async function writeLock(root: string, port: number): Promise<Lock> {
-  const lock: Lock = { port, pid: process.pid, startedAt: new Date().toISOString() };
-  const text = JSON.stringify(lock, null, 2) + "\n";
-  for (let attempt = 0; ; attempt++) {
-    try {
-      await writeFile(lockPath(root), text, { encoding: "utf8", flag: "wx" });
-      return lock;
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== "EEXIST" || attempt >= 2) throw e;
+  const lock: Lock = { port, pid: process.pid, startedAt: new Date().toISOString(), token: randomUUID() };
+  const path = lockPath(root);
+  const tmp = `${path}.${lock.token}.tmp`;
+  await writeFile(tmp, JSON.stringify(lock, null, 2) + "\n", "utf8");
+  try {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        await link(tmp, path);
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+        const existing = await readLockFile(root);
+        if (existing && alive(existing.pid) && (await isRushesFor(existing.port, root))) {
+          throw new AlreadyRunningError(`http://127.0.0.1:${existing.port}`);
+        }
+        // Stale: remove it only if it's still the lock we just judged.
+        const again = await readLockFile(root);
+        if (!existing || (again && again.token === existing.token && again.pid === existing.pid && again.startedAt === existing.startedAt)) {
+          await rm(path, { force: true });
+        }
+        continue;
+      }
+      await new Promise((r) => setTimeout(r, 25));
+      if ((await readLockFile(root))?.token === lock.token) return lock;
     }
-    const existing = await readLock(root);
-    if (existing && (await isRushesFor(existing.port, root))) throw new AlreadyRunningError(`http://127.0.0.1:${existing.port}`);
-    // Stale: its process has gone, or its port now belongs to something else.
-    await rm(lockPath(root));
+    throw new Error(`Couldn't claim ${path}: other servers kept replacing it`);
+  } finally {
+    await rm(tmp, { force: true });
   }
 }
 
-/** Remove the lock only if it is ours, so a newer server's lock survives. */
-export async function removeLock(root: string): Promise<void> {
-  try {
-    const lock = JSON.parse(await readFile(lockPath(root), "utf8")) as Lock;
-    if (lock.pid === process.pid) await rm(lockPath(root), { force: true });
-  } catch {
-    // nothing to remove
-  }
+/** Remove the lock only if it is ours (same token, or same pid for locks without one), so a newer server's lock survives. */
+export async function removeLock(root: string, token?: string): Promise<void> {
+  const lock = await readLockFile(root);
+  if (!lock) return;
+  const ours = token !== undefined && lock.token !== undefined ? lock.token === token : lock.pid === process.pid;
+  if (ours) await rm(lockPath(root), { force: true });
 }
