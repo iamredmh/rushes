@@ -79,6 +79,33 @@ describe("every project has an address", () => {
     expect(res.headers.get("location")).toBe(`/p/${id}/`);
   });
 
+  it("GET /p/<a well-shaped but foreign id> (no trailing slash) redirects to the slash route with that same id, not this project's own", async () => {
+    const { store } = await tmpProject();
+    const app = createApp(store);
+    const { id: ownId } = (await (await app.request("/api/health")).json()) as { id: string };
+    const res = await app.request("/p/zzzzzzzz");
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/p/zzzzzzzz/");
+    expect(res.headers.get("location")).not.toBe(`/p/${ownId}/`);
+  });
+
+  it("GET /p/<id with CRLF> (no trailing slash) never reflects it into Location: it gets the 404 page instead", async () => {
+    const { store } = await tmpProject();
+    const app = createApp(store);
+    const res = await app.request(`/p/${encodeURIComponent("bad\r\nid")}`);
+    expect(res.status).toBe(404);
+    expect(res.headers.get("location")).toBeNull();
+    expect(await res.text()).toContain("isn't running on this port");
+  });
+
+  it("GET /p/<UPPERCASE> (no trailing slash) gives 404: the id shape is lower-case only", async () => {
+    const { store } = await tmpProject();
+    const app = createApp(store);
+    const res = await app.request("/p/UPPERCASE");
+    expect(res.status).toBe(404);
+    expect(res.headers.get("location")).toBeNull();
+  });
+
   it("GET /p/<id>/ serves the placeholder page when the dashboard isn't built, with the root escaped", async () => {
     const { root } = await tmpProject();
     const odd = join(root, "<b>A&B</b>");
@@ -314,6 +341,13 @@ describe("API", () => {
     expect(r.status).toBe(400);
   });
 
+  it("shots: a duplicate start gives 400", async () => {
+    const { call, root } = await setup();
+    await call("POST", "/api/versions", { video: "Hero", file: `${root}/renders/hero.mp4` });
+    const r = await call("PUT", "/api/videos/hero/shots", { shots: [{ name: "A", start: 1.7 }, { name: "B", start: 1.7 }] });
+    expect(r.status).toBe(400);
+  });
+
   it("lock: locks a video at a version, and locking an unknown version gives 404", async () => {
     const { call, root } = await setup();
     await call("POST", "/api/versions", { video: "Hero", file: `${root}/renders/hero.mp4` });
@@ -348,5 +382,26 @@ describe("API", () => {
     const { call } = await setup();
     const r = await call("POST", "/api/notes", { stage: "script", scope: "whole", text: "x" });
     expect(r.json.note.shot).toBeNull();
+  });
+
+  it("a picture note on a version with no shots gets shot: null", async () => {
+    const { call, root } = await setup();
+    await call("POST", "/api/versions", { video: "Hero", file: `${root}/renders/hero.mp4` });
+    const r = await call("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 1.7, text: "x" });
+    expect(r.json.note.shot).toBeNull();
+  });
+
+  it("concurrent requests against a fresh app with no project id cause exactly one write, and agree on the id", async () => {
+    const { store } = await tmpProject();
+    const app = createApp(store);
+    const before = await store.read("project");
+    expect(before.id).toBeUndefined();
+    const responses = await Promise.all(Array.from({ length: 8 }, () => app.request("/api/health")));
+    const ids = await Promise.all(responses.map(async (r) => ((await r.json()) as { id: string }).id));
+    expect(new Set(ids).size).toBe(1);
+    expect(ProjectIdSchema.safeParse(ids[0]).success).toBe(true);
+    const after = await store.read("project");
+    expect(after.rev).toBe(before.rev + 1);
+    expect(after.id).toBe(ids[0]);
   });
 });

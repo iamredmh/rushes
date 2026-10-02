@@ -16,7 +16,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { GRAB_PATH, contentType, inside, registeredMedia, sendFile } from "./files.js";
 import type { CorruptEvent } from "./watch.js";
-import { LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, ShotSchema, type Batch, type Note } from "../core/schema.js";
+import { LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, ProjectIdSchema, ShotSchema, type Batch, type Note } from "../core/schema.js";
 
 export const VERSION = "0.1.0";
 
@@ -174,6 +174,14 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     return `<!doctype html><title>Rushes</title><p>Rushes is running for <code>${escapeHtml(store.root)}</code>. The dashboard isn't built: run <code>npm run build</code>.</p>`;
   }
 
+  /** The "this address belongs to a project not running here" page: always 404, id always escaped. */
+  function wrongProjectPage(c: Context, id: string) {
+    return c.html(
+      `<!doctype html><title>Rushes</title><p>The Rushes project this address belongs to isn't running on this port. Ask your agent to open it again.</p><p><code>${escapeHtml(id)}</code></p>`,
+      404,
+    );
+  }
+
   app.onError((err, c) => {
     if (err instanceof RushesError) return c.json({ error: err.code, message: err.message, ...err.detail }, err.status as 400);
     console.error(err);
@@ -220,16 +228,21 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   // ---- dashboard ----
   app.get("/", async (c) => c.redirect(`/p/${await getProjectId()}/`, 302));
 
-  app.get("/p/:id", (c) => c.redirect(`/p/${c.req.param("id")}/`, 302));
+  // No trailing slash: just add it, once the id's shape is valid. The id is never
+  // substituted for this server's own (a stale tab from a different project must
+  // still land on /p/:id/ and see the "isn't running here" page there, never be
+  // silently carried over to this project), and an invalid id is never reflected
+  // into a Location header — it gets the same 404 page the slash route would give it.
+  app.get("/p/:id", (c) => {
+    const id = c.req.param("id");
+    const parsed = ProjectIdSchema.safeParse(id);
+    if (!parsed.success) return wrongProjectPage(c, id);
+    return c.redirect(`/p/${parsed.data}/`, 302);
+  });
 
   app.get("/p/:id/", async (c) => {
     const id = c.req.param("id");
-    if (id !== (await getProjectId())) {
-      return c.html(
-        `<!doctype html><title>Rushes</title><p>The Rushes project this address belongs to isn't running on this port. Ask your agent to open it again.</p><p><code>${escapeHtml(id)}</code></p>`,
-        404,
-      );
-    }
+    if (id !== (await getProjectId())) return wrongProjectPage(c, id);
     return c.html(await dashboardHtml());
   });
 
