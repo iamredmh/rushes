@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { boxFrom, defaultVersion, firstTab, fit, fmt, frameAt, isChanged, latest, neighbourVideo, noteTime, placeNote, snap, stepFrame } from "../../web/src/lib.js";
-import type { Note, Section, TabState, Video } from "../../web/src/types.js";
+import { boxFrom, defaultVersion, firstTab, fit, fmt, frameAt, isChanged, latest, neighbourVideo, noteTime, placeNote, shotAt, shotLabel, snap, stepFrame } from "../../web/src/lib.js";
+import type { Note, Section, Shot, TabState, Video } from "../../web/src/types.js";
 
 const note = (over: Partial<Note>): Note => ({
   id: "n_1", stage: "picture", video: "hero", version: "v3", on: null, scope: "point", t: 12.4, tOut: null, frame: null,
@@ -117,6 +117,35 @@ describe("defaultVersion", () => {
   it("is undefined for a video with no versions, locked or not", () => {
     expect(defaultVersion({ id: "hero", name: "Hero", versions: [], lockedVersion: null })).toBeUndefined();
     expect(defaultVersion(undefined)).toBeUndefined();
+  });
+});
+
+describe("shotLabel", () => {
+  it("zero-pads to 2 digits", () => {
+    expect(shotLabel(2)).toBe("02");
+    expect(shotLabel(12)).toBe("12");
+  });
+  it("widens to 3 digits once n reaches 100", () => {
+    expect(shotLabel(100)).toBe("100");
+  });
+});
+
+describe("shotAt (web)", () => {
+  const shots: Shot[] = [
+    { n: 1, name: "Wide", start: 2, tag: "" },
+    { n: 2, name: "Close", start: 5, tag: "" },
+  ];
+  it("returns null when t is before the first shot's start", () => {
+    expect(shotAt(shots, 1)).toBeNull();
+  });
+  it("returns a shot exactly at its start", () => {
+    expect(shotAt(shots, 5)).toEqual({ n: 2, name: "Close" });
+  });
+  it("returns the last shot when t is after the last start", () => {
+    expect(shotAt(shots, 99)).toEqual({ n: 2, name: "Close" });
+  });
+  it("returns null for an empty list", () => {
+    expect(shotAt([], 5)).toBeNull();
   });
 });
 

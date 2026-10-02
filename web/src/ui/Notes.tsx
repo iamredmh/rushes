@@ -1,7 +1,7 @@
 import type { ComponentChildren, RefObject } from "preact";
 import { useState } from "preact/hooks";
 import { api, mediaUrl } from "../api.js";
-import { noteTime, placeNote } from "../lib.js";
+import { noteTime, placeNote, shotLabel } from "../lib.js";
 import type { Note } from "../types.js";
 import { Icon } from "./Icon.js";
 
@@ -86,6 +86,7 @@ export function Notes({ notes, version, placeholder, attachments, inputRef, toas
               <button class="t" onClick={() => at.t !== null && onSeek?.(at.t, n)}>{noteTime(at.t, at.tOut)}</button>
               {at.from && <span class="from">from {at.from}</span>}
             </div>
+            {n.shot && <div class="shotref">Shot {shotLabel(n.shot.n)} · {n.shot.name}</div>}
             <div class="nx">{n.text}</div>
             {n.grab && (
               <div class="att">

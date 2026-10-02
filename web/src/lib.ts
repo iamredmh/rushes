@@ -1,5 +1,5 @@
 // Pure helpers for the dashboard. No DOM, so they're unit-tested in Node.
-import type { Note, Section, Stage, TabState, Video, Version } from "./types.js";
+import type { Note, Section, Shot, Stage, TabState, Video, Version } from "./types.js";
 
 /** 72.4 -> "1:12.40" (minutes, seconds, hundredths). */
 export function fmt(t: number): string {
@@ -105,6 +105,24 @@ export const UNLOCK_HINT: Record<Stage, string> = {
 export function firstTab(tabs: TabState[]): Stage {
   if (tabs.find((t) => t.stage === "picture")?.unlocked) return "picture";
   return tabs.find((t) => t.unlocked)?.stage ?? "picture";
+}
+
+/**
+ * The last shot whose start is at or before `t`, or null when `t` is before the first shot.
+ * Mirrors src/core/project.ts's shotAt exactly: copied rather than imported, because the web
+ * bundle imports types only from src/.
+ */
+export function shotAt(shots: Shot[], t: number): { n: number; name: string } | null {
+  let found: Shot | null = null;
+  for (const s of shots) {
+    if (s.start <= t && (!found || s.start > found.start)) found = s;
+  }
+  return found ? { n: found.n, name: found.name } : null;
+}
+
+/** "2" -> "02"; widens to 3 digits once n reaches 100. */
+export function shotLabel(n: number): string {
+  return String(n).padStart(2, "0");
 }
 
 /** Normalised box from two pointer positions inside an element of size w × h. */

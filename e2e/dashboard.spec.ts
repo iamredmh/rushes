@@ -331,6 +331,31 @@ test("switching films pauses the one playing, and its playhead is remembered eve
   expect(await page.locator("video").evaluate((v: HTMLVideoElement) => v.paused)).toBe(true);
 });
 
+test("the shot strip names each shot, follows the playhead, and notes record their shot", async ({ page, rushes }) => {
+  await rushes.addCut();
+  await rushes.api("PUT", "/api/videos/hero/shots", {
+    shots: [
+      { name: "Title card", start: 0, tag: "establish" },
+      { name: "Window rises in", start: 1.7, tag: "reveal" },
+      { name: "Wide, cursor enters", start: 2.8 },
+    ],
+  });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await expect(page.locator(".shot")).toHaveCount(3);
+  await expect(page.locator(".shot").nth(0)).toHaveAttribute("aria-current", "true");
+  await page.locator(".shot").nth(1).click();
+  await expect(page.getByLabel("Timecode")).toContainText("0:01.70");
+  await expect(page.locator(".shot").nth(1)).toHaveAttribute("aria-current", "true");
+  await page.keyboard.press("n");
+  await page.keyboard.type("Nice reveal here.");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".note .shotref")).toHaveText("Shot 02 · Window rises in");
+  const { notes } = await rushes.api("GET", "/api/notes?stage=picture");
+  expect(notes[0].shot).toEqual({ n: 2, name: "Window rises in" });
+  await expect(page.locator(".track .tick")).toHaveCount(2);
+});
+
 test("a tab left open after its project stops never writes into the project that takes its port", async ({ page, rushes }) => {
   await rushes.addCut();
   await page.goto(rushes.url);

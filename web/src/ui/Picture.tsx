@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, mediaUrl } from "../api.js";
-import { boxFrom, fmt, frameAt, noteTime, placeNote, snap, stepFrame } from "../lib.js";
+import { boxFrom, fmt, frameAt, noteTime, placeNote, shotAt, shotLabel, snap, stepFrame } from "../lib.js";
 import type { Note, Video, Version } from "../types.js";
 import { Icon } from "./Icon.js";
 import { Notes } from "./Notes.js";
@@ -44,6 +44,12 @@ export function Picture({ video, version, fps, notes, toast, onChanged, onPendin
   const [noteHasText, setNoteHasText] = useState(false);
   // The click that ends a box drag shouldn't also start playback.
   const justDrew = useRef(false);
+  // The shot strip's cards, keyed by shot number, so the current one can be scrolled into view.
+  const shotRefs = useRef<Record<number, HTMLButtonElement | null>>({});
+  // Read inside an effect instead of added as a dependency, so the strip scrolls only when the
+  // current shot changes, never merely because playback started or stopped.
+  const playingRef = useRef(playing);
+  useEffect(() => { playingRef.current = playing; }, [playing]);
 
   // Tell the parent whether there's anything here it would be wrong to discard by
   // jumping to a newer cut: an In/Out, a box, a grab or a half-typed note.
@@ -150,7 +156,10 @@ export function Picture({ video, version, fps, notes, toast, onChanged, onPendin
   };
 
   // Keyboard: Space, ←/→, I, O, G, B and N, unless you're typing.
-  useEffect(() => {
+  // A layout effect, not a plain one, to match App's: it re-binds synchronously with the
+  // commit, so a key pressed right after a render that this same closure needs can't land on
+  // a stale one (a plain effect's re-registration is deferred past the next paint).
+  useLayoutEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (typing(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
       const k = e.key.toLowerCase();
@@ -198,6 +207,15 @@ export function Picture({ video, version, fps, notes, toast, onChanged, onPendin
   const style = (b: Box) => ({ left: `${b.x * 100}%`, top: `${b.y * 100}%`, width: `${b.w * 100}%`, height: `${b.h * 100}%` });
 
   const pct = (s: number) => `${duration ? (s / duration) * 100 : 0}%`;
+  const shots = version.shots;
+  const current = shotAt(shots, t);
+
+  // Keeps the current card in view while playing, never merely because the player re-renders.
+  useEffect(() => {
+    if (!playingRef.current || current === null) return;
+    shotRefs.current[current.n]?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [current?.n]);
+
   const placed = notes.map((n) => ({ n, at: placeNote(n, version.id) })).filter(({ at }) => at.t !== null);
   const rangeLabel = range.in === null ? null : range.out === null ? `${fmt(range.in)} →` : noteTime(range.in, range.out);
   const placeholder = range.in !== null && range.out === null ? "Set an Out point" : `Note at ${rangeLabel && range.out !== null ? rangeLabel : fmt(t)}`;
@@ -244,7 +262,7 @@ export function Picture({ video, version, fps, notes, toast, onChanged, onPendin
               {box && <div class="bx" style={style(box)} />}
               {live && <div class="bx" style={style(live)} />}
             </div>
-            <div class="tcover">f{frameAt(t, fps)}</div>
+            <div class="tcover">f{frameAt(t, fps)}{current && ` · shot ${shotLabel(current.n)}`}</div>
           </div>
         </div>
 
@@ -281,10 +299,29 @@ export function Picture({ video, version, fps, notes, toast, onChanged, onPendin
         >
           {placed.map(({ n, at }) => at.tOut !== null && <div class={`span ${n.status}`} style={{ left: pct(at.t!), width: pct(at.tOut - at.t!) }} />)}
           {range.in !== null && <div class="span live" style={{ left: pct(range.in), width: pct((range.out ?? range.in + 0.2) - range.in) }} />}
+          {shots.slice(1).map((s) => <div class="tick" style={{ left: pct(s.start) }} />)}
           {placed.map(({ n, at }) => <div class={`mk ${n.status}`} style={{ left: pct(at.t!) }} title={n.text} />)}
           <div class="playhead" style={{ left: pct(t) }} />
         </div>
         <div class="ends"><span>0:00</span><span>{fmt(duration)}</span></div>
+
+        {shots.length > 0 && (
+          <div class="shots">
+            {shots.map((s) => (
+              <button
+                type="button"
+                class="shot"
+                ref={(el) => { shotRefs.current[s.n] = el; }}
+                aria-current={current?.n === s.n ? "true" : undefined}
+                onClick={() => { ref.current?.pause(); seek(s.start); }}
+              >
+                <span class="mono">{shotLabel(s.n)} · {s.start.toFixed(2)}s</span>
+                <span class="name">{s.name}</span>
+                {s.tag && <span class="tag">{s.tag}</span>}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <Notes
