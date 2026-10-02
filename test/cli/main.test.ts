@@ -91,6 +91,21 @@ describe("cli", () => {
     expect(health.root).toBe(root);
     await server!.close();
   });
+
+  it("status reads the project folder it is given", async () => {
+    const { root } = await tmpProject();
+    const s = await startServer(root, { port: 0 });
+    await (await fetch(`${s.url}/api/versions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ video: "Hero", file: "a.mp4" }),
+    })).json();
+    const { dirname } = await import("node:path");
+    const a = io(dirname(root));
+    expect(await main(["status", root], a.x)).toBe(0);
+    expect(a.out.find((l) => l.startsWith("picture"))).toMatch(/open/);
+    await s.close();
+  });
 });
 
 describe("cli setup", () => {

@@ -117,7 +117,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
         await runStdio(io.cwd);
         return 0;
       case "status": {
-        const { tabs } = await (await client()).get("/api/tabs");
+        const root = rest[0] ? resolve(io.cwd, rest[0]) : dir;
+        const { tabs } = await (await ensureServer(root, io.ensure)).get("/api/tabs");
         for (const t of tabs as { stage: string; unlocked: boolean; todo: number }[]) {
           io.out(`${t.stage.padEnd(8)} ${t.unlocked ? "open  " : "locked"} ${t.todo ? `${t.todo} to do` : ""}`.trimEnd());
         }
