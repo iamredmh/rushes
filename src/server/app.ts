@@ -3,7 +3,7 @@ import { streamSSE } from "hono/streaming";
 import { z } from "zod";
 import type { Store, ChangeEvent } from "../core/store.js";
 import { RushesError, InvalidError, NotFoundError } from "../core/errors.js";
-import { addVariant, addVersion, ensureProjectId, lockPicture, setShots, shotAt } from "../core/project.js";
+import { addVariant, addVersion, ensureProjectIdOnce, lockPicture, setShots, shotAt } from "../core/project.js";
 import { addTake, editSection, setSections } from "../core/script.js";
 import { addNote, applyReply, applyUserEdit, filterNotes } from "../core/notes.js";
 import { createBatch, latestBatch } from "../core/batches.js";
@@ -130,6 +130,16 @@ export interface AppOptions {
   webDir?: string;
   /** Called after POST /api/shutdown has replied. */
   onShutdown?: () => void;
+  /**
+   * The project's id, already ensured. `startServer` sets this on the same options object it
+   * passed in, as soon as it has won the project's lock and ensured the id, so every request
+   * from then on reads it straight off. Left unset only by in-process app tests that construct
+   * `createApp(store)` directly without it, which fall back to `ensureProjectIdOnce` below — the
+   * same store-keyed, de-duplicated path `startServer` itself uses, so even a direct test
+   * calling this concurrently from several requests never ensures (and so never writes) the id
+   * twice.
+   */
+  projectId?: string;
 }
 
 const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost"]);
@@ -152,20 +162,10 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   // Every SSE client adds a change listener, so lift Node's default limit of ten.
   store.setMaxListeners(0);
 
-  // The project's id never changes once set, so read it (ensuring it exists) at most
-  // once per app, however many requests ask for it concurrently.
-  let projectId: string | undefined;
-  let ensuringId: Promise<string> | undefined;
+  // The project's id never changes once set. When startServer has already ensured and passed
+  // it in, this is immediate; otherwise it shares project.ts's one in-flight ensure (see M3).
   async function getProjectId(): Promise<string> {
-    if (projectId) return projectId;
-    ensuringId ??= (async () => {
-      const project = await store.read("project");
-      if (project.id) return project.id;
-      const { data } = await store.update("project", ensureProjectId);
-      return data.id!;
-    })();
-    projectId = await ensuringId;
-    return projectId;
+    return opts.projectId ?? ensureProjectIdOnce(store);
   }
 
   async function dashboardHtml(): Promise<string> {

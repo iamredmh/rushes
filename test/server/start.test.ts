@@ -174,6 +174,38 @@ describe("startServer", () => {
     await s.close();
   });
 
+  it("a health request fired the instant the port opens still only bumps the project's rev by 1", async () => {
+    const { root, store } = await tmpProject();
+    const before = (await store.read("project")).rev;
+    // Grab a free port, then release it immediately: startServer binds the exact same port
+    // next, and a retry loop below hammers it from the moment it's free, so a request has the
+    // best chance of landing in the gap between the socket opening and the server's own id
+    // ensure finishing — the gap where a second, independent ensure used to sneak in and bump
+    // the rev twice.
+    const probe = createServer();
+    await new Promise<void>((ok) => probe.listen(0, "127.0.0.1", () => ok()));
+    const port = (probe.address() as { port: number }).port;
+    await new Promise<void>((ok) => probe.close(() => ok()));
+    let healthOk = false;
+    const hammer = (async () => {
+      const deadline = Date.now() + 2000;
+      while (Date.now() < deadline && !healthOk) {
+        try {
+          const res = await fetch(`http://127.0.0.1:${port}/api/health`);
+          if (res.ok) healthOk = true;
+        } catch {
+          // Not listening yet.
+        }
+      }
+    })();
+    const s = await startServer(root, { port });
+    await hammer;
+    expect(healthOk).toBe(true);
+    const after = await store.read("project");
+    expect(after.rev).toBe(before + 1);
+    await s.close();
+  });
+
   it("a second start of the same folder keeps the same id and the same project rev", async () => {
     const { root } = await tmpProject();
     const first = await startServer(root, { port: 0 });

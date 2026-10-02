@@ -399,5 +399,5 @@ Routes and behaviour:
 - **UK English.** Change any `4317` left in docs to `4580` (but don't touch `docs/plans/*`).
 - **Verify:**
   1. Run `npm run build && npx vitest run && npm run typecheck && npx playwright test`. All green.
-  2. Run the fresh install `cd "$(mktemp -d)" && npx -y "git+file:///Users/redmh/Developer/rushes#plan-2-dashboard" --help | head -1`. Expect the help line.
+  2. Run the fresh install `cd "$(mktemp -d)" && npx -y "git+file://$HOME/Developer/rushes#plan-2-dashboard" --help | head -1`. Expect the help line.
 - [ ] **Commit** with subject `docs: project addresses, packs, picture lock and shots`.

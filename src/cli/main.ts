@@ -85,15 +85,15 @@ export function longRunningCommand(argv: string[]): boolean {
 const STRING_OPTIONS = new Set(Object.entries(OPTIONS).filter(([, def]) => def.type === "string").map(([name]) => name));
 
 /**
- * The command name (first positional), tolerant of leading global flags. A hand-rolled scan
+ * The index of the first positional, tolerant of leading global flags. A hand-rolled scan
  * rather than a `parseArgs` probe, because `--version=<value>` must be recognised here even
  * though `version` is declared boolean (parseArgs would throw on that combination, and we need
  * this to succeed precisely so we can strip that flag out before the real parse).
  */
-function firstPositional(argv: string[]): string | undefined {
+function firstPositionalIndex(argv: string[]): number {
   for (let i = 0; i < argv.length; i++) {
     const tok = argv[i];
-    if (tok === "--") return argv[i + 1];
+    if (tok === "--") return i + 1 < argv.length ? i + 1 : -1;
     if (tok.startsWith("--")) {
       const eq = tok.indexOf("=");
       const name = eq >= 0 ? tok.slice(2, eq) : tok.slice(2);
@@ -101,9 +101,15 @@ function firstPositional(argv: string[]): string | undefined {
       continue;
     }
     if (tok.startsWith("-") && tok.length > 1) continue; // a short flag; none of ours take a value
-    return tok;
+    return i;
   }
-  return undefined;
+  return -1;
+}
+
+/** The command name (first positional), tolerant of leading global flags. */
+function firstPositional(argv: string[]): string | undefined {
+  const i = firstPositionalIndex(argv);
+  return i >= 0 ? argv[i] : undefined;
 }
 
 /**
@@ -139,12 +145,16 @@ function extractAddVersionFlag(argv: string[]): { value: string | undefined; res
 export async function main(argv: string[], io: Io): Promise<number> {
   // The "add" command gets its own --version <value> pulled out before the real parse (see
   // extractAddVersionFlag); every other command's --version/-v stays the global boolean flag.
+  // Only the tokens after "add" itself are scanned for it: `rushes -v add ...` has its own
+  // leading -v ahead of the positional, which must keep meaning the global version flag, not
+  // be eaten as the add command's --version value (and "add" itself mistaken for that value).
   let addVersion: string | undefined;
-  if (firstPositional(argv) === "add") {
-    const extracted = extractAddVersionFlag(argv);
+  const addAt = firstPositionalIndex(argv);
+  if (addAt >= 0 && argv[addAt] === "add") {
+    const extracted = extractAddVersionFlag(argv.slice(addAt + 1));
     if (extracted.missing) return usage(io, "--version needs a value, e.g. --version v2");
     addVersion = extracted.value;
-    argv = extracted.rest;
+    argv = [...argv.slice(0, addAt + 1), ...extracted.rest];
   }
   let parsed;
   try {
@@ -256,11 +266,22 @@ export async function main(argv: string[], io: Io): Promise<number> {
           if (!a || !o.video) return usage(io, "rushes add shots <file.json> --video NAME [--version V]");
           // Read and parse the file before touching the server, so a bad file is always exit 2,
           // never masked by a server-reachability error.
-          let shots: unknown;
+          let parsed: unknown;
           try {
-            shots = JSON.parse(await readFile(resolve(io.cwd, a), "utf8"));
+            parsed = JSON.parse(await readFile(resolve(io.cwd, a), "utf8"));
           } catch (e) {
             io.err(`Couldn't read shots from "${a}": ${(e as Error).message}`);
+            return 2;
+          }
+          // Either a bare array, or an object wrapping one under "shots" (the shape rushes_set_shots
+          // takes, so a file saved from its reply round-trips straight back in).
+          const shots = Array.isArray(parsed)
+            ? parsed
+            : Array.isArray((parsed as { shots?: unknown } | null)?.shots)
+              ? (parsed as { shots: unknown[] }).shots
+              : undefined;
+          if (shots === undefined) {
+            io.err('shots file must be a JSON array of {name, start, tag?} (or {"shots": [...]})');
             return 2;
           }
           const r = await (await client()).put(`/api/videos/${encodeURIComponent(o.video)}/shots`, { version: addVersion, shots });

@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { join } from "node:path";
-import { addVariant, addVersion, ensureProjectId, latestVersion, lockPicture, resolveVideo, setShots, shotAt } from "../../src/core/project.js";
+import { addVariant, addVersion, ensureProjectId, ensureProjectIdOnce, latestVersion, lockPicture, resolveVideo, setShots, shotAt } from "../../src/core/project.js";
 import { fromManifestPath, toManifestPath } from "../../src/core/paths.js";
 import { newProjectId, PROJECT_ID_ALPHABET, slugify, uniqueId } from "../../src/core/ids.js";
 import { parseRate } from "../../src/core/media.js";
 import { ProjectSchema, type Project, type Shot } from "../../src/core/schema.js";
 import { InvalidError, NotFoundError } from "../../src/core/errors.js";
+import { tmpProject } from "../helpers/tmp.js";
 
 const empty = (): Project => ({ schema: 1, rev: 0, name: "demo", fps: 30, videos: [], lanes: [] });
 
@@ -13,7 +14,15 @@ describe("ids", () => {
   it("slugifies names, keeping digits and dropping accents", () => {
     expect(slugify("Hero 60s!")).toBe("hero-60s");
     expect(slugify("Café Señor")).toBe("cafe-senor");
-    expect(slugify("!!!")).toBe("item");
+    expect(slugify("!!!")).toMatch(/^item-[0-9a-f]{6}$/);
+  });
+  it("two different non-Latin names get different ids, but the same name gives the same one back", () => {
+    const a = slugify("日本");
+    const b = slugify("中国");
+    expect(a).toMatch(/^item-[0-9a-f]{6}$/);
+    expect(b).toMatch(/^item-[0-9a-f]{6}$/);
+    expect(a).not.toBe(b);
+    expect(slugify("日本")).toBe(a);
   });
   it("uniqueId appends -2, -3", () => {
     expect(uniqueId("a", ["a", "a-2"])).toBe("a-3");
@@ -50,6 +59,26 @@ describe("ensureProjectId", () => {
     const plan2Fixture = { schema: 1, rev: 0, name: "demo", fps: 30, videos: [], lanes: [] };
     const parsed = ProjectSchema.parse(plan2Fixture);
     expect(parsed.id).toBeUndefined();
+  });
+});
+
+describe("ensureProjectIdOnce", () => {
+  it("concurrent callers for the same store share one write, and get the same id back", async () => {
+    const { store } = await tmpProject();
+    const before = (await store.read("project")).rev;
+    const ids = await Promise.all(Array.from({ length: 5 }, () => ensureProjectIdOnce(store)));
+    expect(new Set(ids).size).toBe(1);
+    const project = await store.read("project");
+    expect(project.id).toBe(ids[0]);
+    expect(project.rev).toBe(before + 1);
+  });
+  it("when an id is already on disk, the first call for this store just reads it rather than writing again", async () => {
+    const { store } = await tmpProject();
+    await store.update("project", ensureProjectId);
+    const { id, rev } = await store.read("project");
+    const got = await ensureProjectIdOnce(store);
+    expect(got).toBe(id);
+    expect((await store.read("project")).rev).toBe(rev);
   });
 });
 
@@ -99,6 +128,31 @@ describe("addVersion", () => {
   it("the first version of a new video has no shots", () => {
     const p = empty();
     expect(addVersion(p, { video: "b", file: "1.mp4" }).version.shots).toEqual([]);
+  });
+  it("drops inherited shots that start at or past a shorter cut's known duration", () => {
+    const p = empty();
+    addVersion(p, { video: "a", file: "1.mp4" });
+    setShots(p, "a", "v1", [{ name: "A", start: 0 }, { name: "B", start: 2 }, { name: "C", start: 5 }]);
+    const { version: v2 } = addVersion(p, { video: "a", file: "2.mp4", duration: 4 });
+    expect(v2.shots).toEqual([
+      { n: 1, name: "A", start: 0, tag: "" },
+      { n: 2, name: "B", start: 2, tag: "" },
+    ]);
+  });
+  it("keeps every inherited shot when the new version's duration isn't known", () => {
+    const p = empty();
+    addVersion(p, { video: "a", file: "1.mp4" });
+    setShots(p, "a", "v1", [{ name: "A", start: 0 }, { name: "C", start: 5 }]);
+    const { version: v2 } = addVersion(p, { video: "a", file: "2.mp4" });
+    expect(v2.shots).toHaveLength(2);
+  });
+  it("two different non-Latin video names create two videos, not one merged film", () => {
+    const p = empty();
+    addVersion(p, { video: "日本", file: "1.mp4" });
+    addVersion(p, { video: "中国", file: "2.mp4" });
+    expect(p.videos).toHaveLength(2);
+    expect(p.videos[0].versions).toHaveLength(1);
+    expect(p.videos[1].versions).toHaveLength(1);
   });
 });
 

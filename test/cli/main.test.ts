@@ -48,6 +48,46 @@ describe("cli", () => {
     expect(a.out).toHaveLength(1);
   });
 
+  it("-v still prints the version, even with a global --dir ahead of it", async () => {
+    const a = io("/tmp");
+    expect(await main(["-v"], a.x)).toBe(0);
+    expect(a.out).toHaveLength(1);
+  });
+
+  it("rushes -v add ... keeps -v as the global version flag, not the add command's version", async () => {
+    const { root } = await tmpProject();
+    const s = await startServer(root, { port: 0 });
+    await fetch(`${s.url}/api/versions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ video: "Hero", file: "a.mp4" }),
+    });
+    await writeFile(join(root, "shots.json"), JSON.stringify([{ name: "Wide", start: 0 }]), "utf8");
+    const a = io(root);
+    // A leading -v, before the "add" positional, is the global version flag: harmless here,
+    // since a command follows (see the comment above the `o.version` check). It must not be
+    // read as add shots' own --version/-v, which would otherwise eat "add" itself as its
+    // value and scramble the rest of the command into an unknown one.
+    expect(await main(["-v", "add", "shots", "shots.json", "--video", "hero"], a.x)).toBe(0);
+    expect(a.out.pop()).toBe("Shots set on hero v1: 1");
+    await s.close();
+  });
+
+  it("--dir ahead of add shots doesn't confuse the add command's own --version", async () => {
+    const { root } = await tmpProject();
+    const s = await startServer(root, { port: 0 });
+    await fetch(`${s.url}/api/versions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ video: "Hero", file: "a.mp4" }),
+    });
+    await writeFile(join(root, "shots.json"), JSON.stringify([{ name: "Wide", start: 0 }]), "utf8");
+    const a = io(root);
+    expect(await main(["--dir", root, "add", "shots", "shots.json", "--video", "hero", "--version", "v1"], a.x)).toBe(0);
+    expect(a.out.pop()).toBe("Shots set on hero v1: 1");
+    await s.close();
+  });
+
   it("init creates the .rushes folder in a path with spaces", async () => {
     const { root } = await tmpProject();
     const target = join(root, "Second Film");
@@ -154,6 +194,29 @@ describe("cli", () => {
     expect(await main(["add", "shots", "shots.json", "--video", "hero", "-v", "v1"], a.x)).toBe(0);
     expect(a.out.pop()).toBe("Shots set on hero v1: 1");
     await s.close();
+  });
+
+  it("add shots accepts a shots file wrapped as {\"shots\": [...]}, not just a bare array", async () => {
+    const { root } = await tmpProject();
+    const s = await startServer(root, { port: 0 });
+    await fetch(`${s.url}/api/versions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ video: "Hero", file: "a.mp4" }),
+    });
+    await writeFile(join(root, "shots.json"), JSON.stringify({ shots: [{ name: "Wide", start: 0 }] }), "utf8");
+    const a = io(root);
+    expect(await main(["add", "shots", "shots.json", "--video", "hero", "--version", "v1"], a.x)).toBe(0);
+    expect(a.out.pop()).toBe("Shots set on hero v1: 1");
+    await s.close();
+  });
+
+  it("add shots exits 2 with a clear message when the file is neither shape", async () => {
+    const { root } = await tmpProject();
+    await writeFile(join(root, "shots.json"), JSON.stringify({ name: "Wide", start: 0 }), "utf8");
+    const a = io(root);
+    expect(await main(["add", "shots", "shots.json", "--video", "Hero"], a.x)).toBe(2);
+    expect(a.err[0]).toBe('shots file must be a JSON array of {name, start, tag?} (or {"shots": [...]})');
   });
 
   it("add shots exits 2 with a clear message on a missing file or invalid JSON", async () => {

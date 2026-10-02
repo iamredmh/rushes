@@ -3,8 +3,8 @@ import { mkdir, realpath } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import { getRequestListener } from "@hono/node-server";
 import { Store } from "../core/store.js";
-import { ensureProjectId } from "../core/project.js";
-import { createApp } from "./app.js";
+import { ensureProjectIdOnce } from "../core/project.js";
+import { createApp, type AppOptions } from "./app.js";
 import { removeLock, writeLock } from "./lock.js";
 import { watchStore } from "./watch.js";
 
@@ -61,7 +61,11 @@ export async function startServer(rootDir: string, opts: StartOptions = {}): Pro
   const store = new Store(root);
   await store.init(opts.name ?? basename(root));
   let close: () => Promise<void> = async () => undefined;
-  const app = createApp(store, { webDir: opts.webDir, onShutdown: () => void close() });
+  // `appOpts` is the exact object the app's closure reads `projectId` from on every request, so
+  // setting it below (once this server has won the project's lock and ensured the id) reaches
+  // the already-constructed app without recreating it.
+  const appOpts: AppOptions = { webDir: opts.webDir, onShutdown: () => void close() };
+  const app = createApp(store, appOpts);
   const listener = getRequestListener(app.fetch);
   let lastRequest = Date.now();
   const server = createServer((req, res) => {
@@ -94,14 +98,12 @@ export async function startServer(rootDir: string, opts: StartOptions = {}): Pro
     throw e;
   }
   // Only the server that actually won the lock ever touches project.json here, so racing
-  // starts for the same root never collide writing it. Restarts never bump the rev: only
-  // write when an id is actually missing.
-  let project = await store.read("project");
-  if (!project.id) {
-    await store.update("project", ensureProjectId);
-    project = await store.read("project");
-  }
-  const id = project.id!;
+  // starts for the same root never collide writing it. ensureProjectIdOnce shares its one
+  // in-flight promise with the app's own lazy ensure (keyed on this same store), so a request
+  // landing before this line — however briefly a request could reach a freshly-listening
+  // socket — can never cause a second write: restarts never bump the rev either way.
+  const id = await ensureProjectIdOnce(store);
+  appOpts.projectId = id;
   const url = `http://${host}:${port}`;
   const stopWatching = watchStore(store);
   let idleTimer: NodeJS.Timeout | undefined;

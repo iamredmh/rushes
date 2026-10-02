@@ -46,4 +46,7 @@ npx -y github:iamredmh/rushes open
 npx -y github:iamredmh/rushes add version renders/hero_v2.mp4 --video "Hero 60s" --note "logo hold"
 npx -y github:iamredmh/rushes notes --stage picture --status todo --json
 npx -y github:iamredmh/rushes reply n_8f2k3a "Held the phone 0.5 s longer" --done --fix-t 12.9 --fix-version v2
+npx -y github:iamredmh/rushes add shots shots.json --video "Hero 60s" --version v2
 ```
+
+`shots.json` is a JSON array of `{name, start, tag?}`, or that array wrapped as `{"shots": [...]}`.

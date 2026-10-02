@@ -1,4 +1,4 @@
-import { randomBytes, randomInt } from "node:crypto";
+import { createHash, randomBytes, randomInt } from "node:crypto";
 
 /** Short random id such as "n_k3f9x2". */
 export function newId(prefix: string): string {
@@ -15,7 +15,13 @@ export function newProjectId(): string {
   return out;
 }
 
-/** "Hero 60s!" -> "hero-60s". Falls back to "item" when nothing is left. */
+/**
+ * "Hero 60s!" -> "hero-60s". When no ASCII letters or digits survive — a name in a non-Latin
+ * script ("日本"), or pure punctuation — two different such names would otherwise both fall
+ * back to the bare "item" and collide (addVersion would then merge the second film's cuts into
+ * the first). Falling back to "item-<hash>" instead keeps them apart, while a name slugified
+ * twice still gets the same id.
+ */
 export function slugify(text: string): string {
   const s = text
     .normalize("NFKD")
@@ -23,7 +29,9 @@ export function slugify(text: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
-  return s || "item";
+  if (s) return s;
+  const hash = createHash("sha1").update(text.normalize("NFC")).digest("hex").slice(0, 6);
+  return `item-${hash}`;
 }
 
 /** First id from base, base-2, base-3 ... not in `taken`. */

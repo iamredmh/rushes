@@ -1,12 +1,36 @@
 import type { Cue, Lane, LaneStage, Project, Shot, Variant, Version, Video } from "./schema.js";
 import { newProjectId, slugify, uniqueId } from "./ids.js";
 import { InvalidError, NotFoundError } from "./errors.js";
+import type { Store } from "./store.js";
 
 /** Sets `p.id` when missing. Returns whether it changed anything. */
 export function ensureProjectId(p: Project): boolean {
   if (p.id) return false;
   p.id = newProjectId();
   return true;
+}
+
+// One in-flight (or settled) promise per store, so the server's own startup ensure and the
+// app's lazy one (a request that lands before startup's own ensure completes) always converge
+// on the same call: whichever runs first registers the promise here, synchronously, before any
+// `await` yields control, so a second caller for the same store only ever awaits it, never
+// triggers a second store.update (which would otherwise bump project.json's rev a second time
+// even though ensureProjectId itself is a no-op once the id is already set).
+const ensuring = new WeakMap<Store, Promise<string>>();
+
+/** The project's id, generated and persisted the first time this is called for a given store. */
+export function ensureProjectIdOnce(store: Store): Promise<string> {
+  let p = ensuring.get(store);
+  if (!p) {
+    p = (async () => {
+      const project = await store.read("project");
+      if (project.id) return project.id;
+      const { data } = await store.update("project", ensureProjectId);
+      return data.id!;
+    })();
+    ensuring.set(store, p);
+  }
+  return p;
 }
 
 export interface AddVersionInput {
@@ -28,14 +52,19 @@ export function addVersion(p: Project, input: AddVersionInput, now = new Date())
   }
   const n = video.versions.reduce((max, v) => Math.max(max, Number(v.id.replace(/^v/, "")) || 0), 0) + 1;
   const prev = latestVersion(video);
+  const duration = input.duration ?? null;
+  // Inherited shots are a copy of the previous version's, but one that starts at or past a
+  // shorter cut's duration can't belong to it: drop it rather than carry a shot nothing can
+  // ever reach (M4). Left alone when the duration isn't known yet.
+  const shots = prev ? (duration === null ? prev.shots : prev.shots.filter((s) => s.start < duration)) : [];
   const version: Version = {
     id: `v${n}`,
     file: input.file,
-    duration: input.duration ?? null,
+    duration,
     fps: input.fps ?? null,
     addedAt: now.toISOString(),
     note: input.note ?? "",
-    shots: prev ? prev.shots.map((s) => ({ ...s })) : [],
+    shots: shots.map((s) => ({ ...s })),
   };
   video.versions.push(version);
   return { video, version };
