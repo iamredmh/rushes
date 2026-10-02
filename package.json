@@ -11,6 +11,7 @@
   },
   "files": [
     "dist",
+    "web-dist",
     "skills",
     "AGENTS.md"
   ],
@@ -18,11 +19,12 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && vite build",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.web.json",
     "test": "vitest run",
     "rushes": "tsx src/cli/index.ts",
-    "prepare": "npm run build"
+    "prepare": "npm run build",
+    "test:e2e": "npm run build && playwright test"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.3",
