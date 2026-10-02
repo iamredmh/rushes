@@ -1,0 +1,10 @@
+{
+  "name": "rushes",
+  "description": "A local review desk for video made with AI agents: timecoded notes, script edits and audio picks your agent reads and acts on.",
+  "version": "0.1.0",
+  "author": { "name": "Red Morley Hewitt" },
+  "homepage": "https://github.com/iamredmh/rushes",
+  "repository": "https://github.com/iamredmh/rushes",
+  "license": "MIT",
+  "keywords": ["video", "review", "voiceover", "music", "mcp"]
+}

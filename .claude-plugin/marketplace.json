@@ -1,0 +1,14 @@
+{
+  "name": "iamredmh",
+  "description": "Rushes: a local review desk for video made with AI agents.",
+  "owner": {
+    "name": "Red Morley Hewitt"
+  },
+  "plugins": [
+    {
+      "name": "rushes",
+      "source": "./",
+      "description": "A local review desk for video made with AI agents."
+    }
+  ]
+}
