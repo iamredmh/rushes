@@ -213,7 +213,7 @@ The public repo is the whole install. Nobody needs anything from Red: no npm acc
   - It never removes or rewrites other settings, backs up a changed config to `*.rushes.bak`, leaves a broken config untouched, and supports `--dry-run` and `--only`.
 - **A Claude Code plugin in the same repo.** `.claude-plugin/plugin.json`, a marketplace named `iamredmh` (`.claude-plugin/marketplace.json` with `source: "./"`), the root `.mcp.json` and `skills/rushes/SKILL.md`. Install with `/plugin marketplace add iamredmh/rushes` then `/plugin install rushes@iamredmh`.
 - **The README talks to agents first.** A user only has to say "Use github.com/iamredmh/rushes as my review tool". The README's "For agents: set yourself up" section tells the agent to run `setup`, ask for a restart, and then follow `AGENTS.md`.
-- **Requirement:** Node.js 20 or newer. ChatGPT's apps can't launch local MCP servers, so the README points ChatGPT users to Codex.
+- **Requirement:** Node.js 20.19 or newer (22.12+ on the 22 line; Vite 8 builds the dashboard on a git install). ChatGPT's apps can't launch local MCP servers, so the README points ChatGPT users to Codex.
 
 ### What ships for agents
 - `AGENTS.md` at the repo root, plus a `skills/rushes/SKILL.md`. Together they explain the loop: register media, open, wait for a batch, list notes, fix, reply with `fixT`, add the version.
