@@ -125,6 +125,16 @@ export function shotLabel(n: number): string {
   return String(n).padStart(2, "0");
 }
 
+/**
+ * The first frame at or after a shot's start, so clicking its card seeks somewhere that
+ * snaps forward into the shot rather than a frame early (a shot starting between frames,
+ * e.g. 1.71s at 30fps, would otherwise snap back to the frame before it). The epsilon
+ * stops an exact frame boundary being pushed a frame later by floating-point error.
+ */
+export function shotSeek(start: number, fps: number): number {
+  return Math.ceil(start * fps - 1e-9) / fps;
+}
+
 /** Normalised box from two pointer positions inside an element of size w × h. */
 export function boxFrom(x0: number, y0: number, x1: number, y1: number, w: number, h: number) {
   // Four decimals is finer than a pixel on any screen, and keeps notes.json readable.

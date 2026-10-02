@@ -271,6 +271,27 @@ test("a pack shows a pill per film, and each film remembers where you were", asy
   await expect(page.getByLabel("Timecode")).toContainText("0:00.50");
 });
 
+test("a film's restored playhead is used once on return, not reapplied when you pick another version", async ({ page, rushes }) => {
+  await rushes.addCut("hero cut");
+  await rushes.addCut("hero recut");
+  await rushes.addCut("cutdown cut", "Cutdown");
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v2");
+  for (let i = 0; i < 15; i++) await page.keyboard.press("ArrowRight");
+  await expect(page.getByLabel("Timecode")).toContainText("0:00.50");
+  await page.keyboard.press("]");
+  await videoReady(page);
+  await page.keyboard.press("[");
+  await videoReady(page);
+  await expect(page.getByLabel("Timecode")).toContainText("0:00.50");
+  // The restore point was for coming back to the film, not for every cut on it: picking
+  // another version now must start at 0, not reuse 0:00.50 a second time.
+  await page.getByRole("combobox", { name: "Version" }).selectOption("v1");
+  await videoReady(page);
+  await expect(page.getByLabel("Timecode")).toContainText("0:00.00");
+});
+
 test("switching films with a note half-typed is refused, and the note is kept", async ({ page, rushes }) => {
   await rushes.addCut("hero cut");
   await rushes.addCut("cutdown cut", "Cutdown");
@@ -309,6 +330,33 @@ test("choosing the newest cut by hand on a locked film doesn't snap back to the 
   await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v2");
   const { project } = await rushes.api("GET", "/api/state");
   expect(project.videos[0].lockedVersion).toBe("v1");
+});
+
+test("the lock button names the locked cut even while viewing a newer one", async ({ page, rushes }) => {
+  const { version: v1 } = await rushes.addCut("first cut");
+  await rushes.addCut("second cut");
+  await rushes.api("PUT", "/api/videos/Hero/lock", { version: v1.id });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await page.getByRole("combobox", { name: "Version" }).selectOption("v2");
+  await videoReady(page);
+  await expect(page.getByRole("button", { name: "Picture locked at v1 · unlock" })).toHaveAttribute("aria-pressed", "true");
+});
+
+test("a version pin left over from peeking at a cut doesn't block the next one from following, once unlocked", async ({ page, rushes }) => {
+  await rushes.addCut("first cut");
+  await rushes.api("PUT", "/api/videos/Hero/lock", { version: "v1" });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await rushes.addCut("second cut"); // v2, arrives while locked at v1
+  await expect(page.locator(".chipx.go")).toContainText("v2 ready");
+  await page.locator(".chipx.go").click(); // peek at v2 without unlocking: a version pin
+  await videoReady(page);
+  await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v2");
+  await page.getByRole("button", { name: /unlock/ }).click();
+  await expect.poll(async () => (await rushes.api("GET", "/api/state")).project.videos[0].lockedVersion).toBeNull();
+  await rushes.addCut("third cut"); // v3, now unlocked: the stale v2 pin must not swallow this
+  await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v3");
 });
 
 test("switching films pauses the one playing, and its playhead is remembered even mid-play", async ({ page, rushes }) => {
@@ -354,6 +402,24 @@ test("the shot strip names each shot, follows the playhead, and notes record the
   const { notes } = await rushes.api("GET", "/api/notes?stage=picture");
   expect(notes[0].shot).toEqual({ n: 2, name: "Window rises in" });
   await expect(page.locator(".track .tick")).toHaveCount(2);
+});
+
+test("clicking a shot that starts between frames lands a note in that shot, not the one before it", async ({ page, rushes }) => {
+  await rushes.addCut();
+  await rushes.api("PUT", "/api/videos/hero/shots", { shots: [{ name: "A", start: 0 }, { name: "B", start: 1.71 }] });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await page.locator(".shot").nth(1).click();
+  // 1.71s falls between frames at 30fps; the seek must land in B's frame, not snap back
+  // to the frame before its start, which the strip would still (wrongly) call A's.
+  await expect(page.getByLabel("Timecode")).toContainText("0:01.73");
+  await expect(page.locator(".shot").nth(1)).toHaveAttribute("aria-current", "true");
+  await page.keyboard.press("n");
+  await page.keyboard.type("Landed in B.");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".note .shotref")).toHaveText("Shot 02 · B");
+  const { notes } = await rushes.api("GET", "/api/notes?stage=picture");
+  expect(notes[0].shot).toEqual({ n: 2, name: "B" });
 });
 
 test("a cut whose first shot starts after a lead-in gets a tick at every shot, and no current shot before it", async ({ page, rushes }) => {

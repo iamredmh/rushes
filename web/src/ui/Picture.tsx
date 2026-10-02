@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { api, mediaUrl } from "../api.js";
-import { boxFrom, fmt, frameAt, noteTime, placeNote, shotAt, shotLabel, snap, stepFrame } from "../lib.js";
+import { boxFrom, fmt, frameAt, noteTime, placeNote, shotAt, shotLabel, shotSeek, snap, stepFrame } from "../lib.js";
 import type { Note, Video, Version } from "../types.js";
 import { Icon } from "./Icon.js";
 import { Notes } from "./Notes.js";
@@ -44,6 +44,11 @@ export function Picture({ video, version, fps, notes, toast, onChanged, onPendin
   const [noteHasText, setNoteHasText] = useState(false);
   // The click that ends a box drag shouldn't also start playback.
   const justDrew = useRef(false);
+  // startAt restores a film's remembered playhead, but only once: the first metadata load
+  // after this component mounts (i.e. after a film switch, since Picture is keyed by video
+  // id). A later cut within the same film — a new version picked, or a new render arriving —
+  // must start at 0, as in Plan 2, not reuse the old restore point forever.
+  const startApplied = useRef(false);
   // The shot strip's cards, keyed by shot number, so the current one can be scrolled into view.
   const shotRefs = useRef<Record<number, HTMLButtonElement | null>>({});
   // Read inside an effect instead of added as a dependency, so the strip scrolls only when the
@@ -208,8 +213,12 @@ export function Picture({ video, version, fps, notes, toast, onChanged, onPendin
   const style = (b: Box) => ({ left: `${b.x * 100}%`, top: `${b.y * 100}%`, width: `${b.w * 100}%`, height: `${b.h * 100}%` });
 
   const pct = (s: number) => `${duration ? (s / duration) * 100 : 0}%`;
-  const shots = version.shots;
-  const current = shotAt(shots, t);
+  // Belt-and-braces: an inherited shot that runs past a shorter cut's duration is hidden here
+  // too, even though the server already trims these on addVersion.
+  const shots = duration ? version.shots.filter((s) => s.start < duration) : version.shots;
+  // The snapped time, not the raw playhead: a note taken right now would be stamped from this
+  // same snapped time, so the strip and the timecode must agree with it rather than with `t`.
+  const current = shotAt(shots, snap(t, fps));
 
   // Keeps the current card in view while playing, never merely because the player re-renders.
   useEffect(() => {
@@ -237,9 +246,12 @@ export function Picture({ video, version, fps, notes, toast, onChanged, onPendin
                 const v = e.target as HTMLVideoElement;
                 setDuration(v.duration || version.duration || 0);
                 if (v.videoWidth && v.videoHeight) setAspect(v.videoWidth / v.videoHeight);
-                if (startAt) {
-                  v.currentTime = Math.min(startAt, v.duration || startAt);
-                  setT(v.currentTime);
+                if (!startApplied.current) {
+                  startApplied.current = true;
+                  if (startAt) {
+                    v.currentTime = Math.min(startAt, v.duration || startAt);
+                    setT(v.currentTime);
+                  }
                 }
               }}
               onTimeUpdate={(e) => !playing && setT((e.target as HTMLVideoElement).currentTime)}
@@ -314,7 +326,7 @@ export function Picture({ video, version, fps, notes, toast, onChanged, onPendin
                 class="shot"
                 ref={(el) => { shotRefs.current[s.n] = el; }}
                 aria-current={current?.n === s.n ? "true" : undefined}
-                onClick={() => { ref.current?.pause(); seek(s.start); }}
+                onClick={() => { ref.current?.pause(); seek(shotSeek(s.start, fps)); }}
               >
                 <span class="mono">{shotLabel(s.n)} · {s.start.toFixed(2)}s</span>
                 <span class="name">{s.name}</span>

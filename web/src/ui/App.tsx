@@ -80,6 +80,13 @@ export function App() {
       setHeld(false);
     }
   }, [pending, versionId, target?.id]);
+  // A version pin that now matches where the film would follow anyway — e.g. one left over
+  // from peeking at a newer cut via the "vN ready" chip, now that an unlock has made that
+  // cut the default — is cleared. Otherwise it would keep overriding "follow" even once it's
+  // redundant, silently stopping the film from auto-following the next cut that arrives.
+  useEffect(() => {
+    if (!held && versionId !== null && versionId === target?.id) setVersionId(null);
+  }, [target?.id, held, versionId]);
   // The chip shows whenever a newer cut than the one on screen exists, and either the video is
   // locked (so nothing would otherwise tell you a newer one arrived) or the cut is held.
   const readyVersionId = newest && version && newest.id !== version.id && (locked || held) ? newest.id : null;
@@ -234,8 +241,8 @@ export function App() {
               <button
                 class="btn ib lockbtn"
                 aria-pressed={locked}
-                aria-label={locked ? `Picture locked at ${version.id} · unlock` : `Lock picture at ${version.id}`}
-                data-tip={locked ? `Picture locked at ${version.id} · unlock` : `Lock picture at ${version.id}`}
+                aria-label={locked ? `Picture locked at ${video.lockedVersion} · unlock` : `Lock picture at ${version.id}`}
+                data-tip={locked ? `Picture locked at ${video.lockedVersion} · unlock` : `Lock picture at ${version.id}`}
                 onClick={() => void toggleLock()}
               >
                 <Icon name={locked ? "lock" : "unlock"} />

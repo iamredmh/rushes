@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boxFrom, defaultVersion, firstTab, fit, fmt, frameAt, isChanged, latest, neighbourVideo, noteTime, placeNote, shotAt, shotLabel, snap, stepFrame } from "../../web/src/lib.js";
+import { boxFrom, defaultVersion, firstTab, fit, fmt, frameAt, isChanged, latest, neighbourVideo, noteTime, placeNote, shotAt, shotLabel, shotSeek, snap, stepFrame } from "../../web/src/lib.js";
 import type { Note, Section, Shot, TabState, Video } from "../../web/src/types.js";
 
 const note = (over: Partial<Note>): Note => ({
@@ -127,6 +127,18 @@ describe("shotLabel", () => {
   });
   it("widens to 3 digits once n reaches 100", () => {
     expect(shotLabel(100)).toBe("100");
+  });
+});
+
+describe("shotSeek", () => {
+  it("seeks to the first frame at or after a shot's start, not the frame before it", () => {
+    // 1.71s falls between frame 51 (1.7) and 52 (1.7333...) at 30fps: the frame before it
+    // (1.7) is still the previous shot, so the seek must land on 52, not snap back to 51.
+    expect(shotSeek(1.71, 30)).toBeCloseTo(52 / 30, 6);
+  });
+  it("leaves an exact frame boundary alone, rather than pushing it a frame later", () => {
+    expect(shotSeek(1.7, 30)).toBeCloseTo(51 / 30, 6);
+    expect(shotSeek(0, 30)).toBeCloseTo(0, 6);
   });
 });
 
