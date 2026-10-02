@@ -26,6 +26,7 @@ const PATHS: Record<string, string> = {
   reply: '<path d="M5 4v7a4 4 0 0 0 4 4h11"/><path d="M16 11l4 4-4 4"/>',
   image: '<rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/>',
   alert: '<path d="M12 3l9.5 17h-19z"/><path d="M12 10v4M12 17h.01"/>',
+  new: '<path d="M12 19V5M5 12l7-7 7 7"/>',
 };
 
 export function Icon({ name, class: cls }: { name: keyof typeof PATHS | string; class?: string }) {

@@ -23,7 +23,11 @@ export function watchStore(store: Store, debounceMs = 80): () => void {
       const data = await store.read(key);
       store.announce(key, data.rev);
     } catch (e) {
-      if (e instanceof CorruptFileError) store.emit("corrupt", { file: FILES[key].name, message: e.message } satisfies CorruptEvent);
+      if (e instanceof CorruptFileError) {
+        // Forget the rev we last announced, so a restore at the same rev still announces.
+        store.forget(key);
+        store.emit("corrupt", { file: FILES[key].name, message: e.message } satisfies CorruptEvent);
+      }
     }
   };
   try {

@@ -63,6 +63,54 @@ test("In and Out make a range note, with a frame grab and a box attached", async
   await access(join(rushes.root, ".rushes", "grabs", "hero_v1_f60.png"));
 });
 
+test("a box on a vertical cut is measured against the picture, not the 16:9 frame", async ({ page, rushes }) => {
+  await rushes.addVerticalCut();
+  await page.goto(rushes.url);
+  await videoReady(page);
+  // The frame must fit itself to the 9:16 cut, not stay letterboxed inside 16:9.
+  const frame = (await page.locator(".frame").boundingBox())!;
+  expect(frame.width / frame.height).toBeLessThan(1);
+  expect(frame.width / frame.height).toBeCloseTo(360 / 640, 1);
+  await page.keyboard.press("b");
+  const overlay = (await page.locator(".overlay").boundingBox())!;
+  // A few pixels in from the exact corner, clear of the frame's own rounded corner.
+  await page.mouse.move(overlay.x + 6, overlay.y + 6);
+  await page.mouse.down();
+  await page.mouse.move(overlay.x + overlay.width * 0.5, overlay.y + overlay.height * 0.5, { steps: 4 });
+  await page.mouse.up();
+  await page.keyboard.press("n");
+  await page.keyboard.type("Box on a vertical cut.");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".note")).toHaveCount(1);
+  const { notes } = await rushes.api("GET", "/api/notes?stage=picture");
+  const close = (v: number, exp: number) => expect(Math.abs(v - exp)).toBeLessThanOrEqual(0.02);
+  close(notes[0].box.x, 0);
+  close(notes[0].box.y, 0);
+  close(notes[0].box.w, 0.5);
+  close(notes[0].box.h, 0.5);
+});
+
+test("a new cut mid-review waits for a click instead of dropping pending marks", async ({ page, rushes }) => {
+  await rushes.addCut();
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await page.keyboard.press("i");
+  await page.getByLabel("New note").fill("Still deciding what this is about.");
+  await rushes.addCut("tighter cut");
+  await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v1");
+  await expect(page.locator(".chipx.go")).toContainText("v2 ready");
+  await page.getByLabel("New note").press("Enter");
+  await expect(page.locator(".note")).toHaveCount(1);
+  const { notes } = await rushes.api("GET", "/api/notes?stage=picture");
+  expect(notes[0].version).toBe("v1");
+  // The chip stays up rather than auto-switching once the pending work clears.
+  await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v1");
+  await expect(page.locator(".chipx.go")).toContainText("v2 ready");
+  await page.locator(".chipx.go").click();
+  await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v2");
+  await expect(page.locator(".chipx.go")).not.toBeVisible();
+});
+
 test("an agent's reply appears live, and ticking the circle marks a note done", async ({ page, rushes }) => {
   await rushes.addCut();
   const { note } = await rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 1, text: "Too dark." });

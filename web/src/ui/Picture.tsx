@@ -14,17 +14,21 @@ export interface PictureProps {
   notes: Note[];
   toast(message: string): void;
   onChanged(): void;
+  /** Whether an In/Out, box, grab or half-typed note is waiting to be submitted. */
+  onPendingChange?(pending: boolean): void;
 }
 
 const typing = (el: EventTarget | null) => el instanceof HTMLElement && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
 
 /** The cut, with notes down the right: frame stepping, In/Out ranges, a box on the frame and frame grabs. */
-export function Picture({ video, version, fps, notes, toast, onChanged }: PictureProps) {
+export function Picture({ video, version, fps, notes, toast, onChanged, onPendingChange }: PictureProps) {
   const ref = useRef<HTMLVideoElement>(null);
   const overlay = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const [t, setT] = useState(0);
   const [duration, setDuration] = useState(version.duration ?? 0);
+  // The frame's shape: the video's own aspect ratio once metadata loads, 16:9 before then.
+  const [aspect, setAspect] = useState(16 / 9);
   const [playing, setPlaying] = useState(false);
   const [broken, setBroken] = useState(false);
   const [range, setRange] = useState<{ in: number | null; out: number | null }>({ in: null, out: null });
@@ -33,14 +37,24 @@ export function Picture({ video, version, fps, notes, toast, onChanged }: Pictur
   const [box, setBox] = useState<Box | null>(null);
   const [grab, setGrab] = useState<string | null>(null);
   const [shown, setShown] = useState<Box | null>(null);
+  const [noteHasText, setNoteHasText] = useState(false);
   // The click that ends a box drag shouldn't also start playback.
   const justDrew = useRef(false);
+
+  // Tell the parent whether there's anything here it would be wrong to discard by
+  // jumping to a newer cut: an In/Out, a box, a grab or a half-typed note.
+  useEffect(() => {
+    const pending = range.in !== null || box !== null || grab !== null || noteHasText;
+    onPendingChange?.(pending);
+    return () => onPendingChange?.(false);
+  }, [range.in, box, grab, noteHasText]);
 
   // A new cut: start again from the top, with nothing pending. A file the browser
   // can't decode can fail before any handler is attached, so check the element too.
   useEffect(() => {
     setBroken(false);
     setT(0);
+    setAspect(16 / 9);
     setRange({ in: null, out: null });
     setBox(null);
     setGrab(null);
@@ -187,37 +201,43 @@ export function Picture({ video, version, fps, notes, toast, onChanged }: Pictur
   return (
     <div class="split">
       <div class="stack">
-        <div class="frame">
-          {broken && <div class="msg">This file won't play in a browser. Ask your agent for an H.264 MP4 of this cut.</div>}
-          <video
-            hidden={broken}
-            ref={ref}
-            src={mediaUrl(version.file)}
-            preload="auto"
-            playsInline
-            onLoadedMetadata={(e) => setDuration((e.target as HTMLVideoElement).duration || version.duration || 0)}
-            onTimeUpdate={(e) => !playing && setT((e.target as HTMLVideoElement).currentTime)}
-            onSeeked={(e) => setT((e.target as HTMLVideoElement).currentTime)}
-            onPlay={() => setPlaying(true)}
-            onPause={() => setPlaying(false)}
-            onEnded={() => setPlaying(false)}
-          />
-          <div
-            ref={overlay}
-            class={`overlay${boxMode ? " drawing" : ""}`}
-            onPointerDown={down}
-            onPointerMove={move}
-            onPointerUp={up}
-            onClick={() => {
-              if (justDrew.current) justDrew.current = false;
-              else if (!boxMode) toggle();
-            }}
-          >
-            {shown && <div class="bx saved" style={style(shown)} />}
-            {box && <div class="bx" style={style(box)} />}
-            {live && <div class="bx" style={style(live)} />}
+        <div class="framebox">
+          <div class="frame" style={{ aspectRatio: String(aspect) }}>
+            {broken && <div class="msg">This file won't play in a browser. Ask your agent for an H.264 MP4 of this cut.</div>}
+            <video
+              hidden={broken}
+              ref={ref}
+              src={mediaUrl(version.file)}
+              preload="auto"
+              playsInline
+              onLoadedMetadata={(e) => {
+                const v = e.target as HTMLVideoElement;
+                setDuration(v.duration || version.duration || 0);
+                if (v.videoWidth && v.videoHeight) setAspect(v.videoWidth / v.videoHeight);
+              }}
+              onTimeUpdate={(e) => !playing && setT((e.target as HTMLVideoElement).currentTime)}
+              onSeeked={(e) => setT((e.target as HTMLVideoElement).currentTime)}
+              onPlay={() => setPlaying(true)}
+              onPause={() => setPlaying(false)}
+              onEnded={() => setPlaying(false)}
+            />
+            <div
+              ref={overlay}
+              class={`overlay${boxMode ? " drawing" : ""}`}
+              onPointerDown={down}
+              onPointerMove={move}
+              onPointerUp={up}
+              onClick={() => {
+                if (justDrew.current) justDrew.current = false;
+                else if (!boxMode) toggle();
+              }}
+            >
+              {shown && <div class="bx saved" style={style(shown)} />}
+              {box && <div class="bx" style={style(box)} />}
+              {live && <div class="bx" style={style(live)} />}
+            </div>
+            <div class="tcover">f{frameAt(t, fps)}</div>
           </div>
-          <div class="tcover">f{frameAt(t, fps)}</div>
         </div>
 
         <div class="bar">
@@ -267,6 +287,7 @@ export function Picture({ video, version, fps, notes, toast, onChanged }: Pictur
         toast={toast}
         onAdd={add}
         onChanged={onChanged}
+        onTextChange={setNoteHasText}
         onSeek={(to, n) => {
           ref.current?.pause();
           seek(to);

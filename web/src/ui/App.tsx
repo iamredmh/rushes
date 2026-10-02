@@ -29,6 +29,9 @@ export function App() {
   const [sent, setSent] = useState<Batch | null>(null);
   const [keysOpen, setKeysOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [pending, setPending] = useState(false);
+  // Set once a new cut arrives while something's pending, naming the cut that's waiting.
+  const [readyVersionId, setReadyVersionId] = useState<string | null>(null);
   const toastTimer = useRef<number | undefined>(undefined);
 
   const toast = (message: string) => {
@@ -48,6 +51,25 @@ export function App() {
   const video = state?.project.videos.find((v) => v.id === videoId) ?? state?.project.videos[0];
   const newest = latest(video);
   const version = video?.versions.find((v) => v.id === versionId) ?? newest;
+
+  // A new cut arriving mid-review shouldn't rewind the player or drop pending marks: if
+  // something's pending, stay on the cut being watched and offer a chip instead of jumping.
+  const prevNewestId = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (newest && prevNewestId.current && prevNewestId.current !== newest.id) {
+      if (versionId === null && pending) {
+        setVersionId(prevNewestId.current);
+        setReadyVersionId(newest.id);
+      } else {
+        setReadyVersionId(null);
+      }
+    }
+    prevNewestId.current = newest?.id;
+  }, [newest?.id]);
+  const jumpToReady = () => {
+    setVersionId(null);
+    setReadyVersionId(null);
+  };
 
   const tabs = state?.tabs ?? [];
   const tab = (s: Stage) => tabs.find((t) => t.stage === s);
@@ -117,7 +139,7 @@ export function App() {
             <>
               <span class="slash">/</span>
               {state.project.videos.length > 1 ? (
-                <select class="sel" aria-label="Video" value={video.id} onChange={(e) => { setVideoId((e.target as HTMLSelectElement).value); setVersionId(null); }}>
+                <select class="sel" aria-label="Video" value={video.id} onChange={(e) => { setVideoId((e.target as HTMLSelectElement).value); setVersionId(null); setReadyVersionId(null); }}>
                   {state.project.videos.map((v) => <option value={v.id}>{v.name}</option>)}
                 </select>
               ) : (
@@ -129,12 +151,21 @@ export function App() {
                   aria-label="Version"
                   value={version.id}
                   onChange={(e) => {
-                    const id = (e.target as HTMLSelectElement).value;
-                    setVersionId(id === newest?.id ? null : id);
+                    const el = e.target as HTMLSelectElement;
+                    setVersionId(el.value === newest?.id ? null : el.value);
+                    setReadyVersionId(null);
+                    // So ←/→ go back to stepping frames rather than the select.
+                    el.blur();
                   }}
                 >
                   {[...video.versions].reverse().map((v) => <option value={v.id}>{v.id}{v.note ? ` · ${v.note}` : ""}</option>)}
                 </select>
+              )}
+              {readyVersionId && (
+                <button class="chipx go" aria-label={`${readyVersionId} is ready`} data-tip="Switch to the newest cut" onClick={jumpToReady}>
+                  <Icon name="new" />
+                  {readyVersionId} ready
+                </button>
               )}
             </>
           )}
@@ -176,6 +207,8 @@ export function App() {
             <span><kbd>G</kbd></span><span>Grab frame</span>
             <span><kbd>N</kbd></span><span>New note</span>
             <span><kbd>1</kbd>–<kbd>6</kbd></span><span>Switch tab</span>
+            <span><kbd>?</kbd></span><span>Shortcuts</span>
+            <span><kbd>Esc</kbd></span><span>Close</span>
           </div>
         </div>
       )}
@@ -199,7 +232,7 @@ export function App() {
         {!unlocked || !BUILT[stage] ? (
           <Empty stage={stage} unlocked={unlocked} />
         ) : stage === "picture" && video && version ? (
-          <Picture video={video} version={version} fps={fps} notes={pictureNotes} toast={toast} onChanged={() => void refresh()} />
+          <Picture video={video} version={version} fps={fps} notes={pictureNotes} toast={toast} onChanged={() => void refresh()} onPendingChange={setPending} />
         ) : stage === "script" ? (
           <Script script={state.script} toast={toast} onChanged={() => void refresh()} />
         ) : (

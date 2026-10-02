@@ -36,6 +36,26 @@ describe("watching .rushes for hand edits", () => {
     await s.close();
   });
 
+  it("announces again when a corrupt file is restored at the same rev it had before", async () => {
+    const { root } = await tmpProject();
+    const s = await startServer(root, { port: 0 });
+    const events = await sse(s.url);
+    await events.until("event: hello");
+    const notes = JSON.parse(await readFile(s.store.path("notes"), "utf8"));
+    notes.rev = 7;
+    const valid = JSON.stringify(notes, null, 2);
+    await writeFile(s.store.path("notes"), valid);
+    await events.until('"rev":7');
+    await writeFile(s.store.path("notes"), "{ broken");
+    await events.until("event: corrupt");
+    // Restore the exact file the watcher already announced, at the same rev.
+    await writeFile(s.store.path("notes"), valid);
+    const text = await events.untilNext('"rev":7');
+    expect(text.match(/"rev":7/g)).toHaveLength(2);
+    events.stop();
+    await s.close();
+  });
+
   it("reports a broken hand edit as corrupt and leaves it alone", async () => {
     const { root } = await tmpProject();
     const s = await startServer(root, { port: 0 });

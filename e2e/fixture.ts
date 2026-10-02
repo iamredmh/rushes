@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const CLI = fileURLToPath(new URL("../dist/cli/index.js", import.meta.url));
 const CLIP = fileURLToPath(new URL("./fixtures/clip.mp4", import.meta.url));
+const VERTICAL = fileURLToPath(new URL("./fixtures/vertical.mp4", import.meta.url));
 
 export interface Rushes {
   url: string;
@@ -15,6 +16,8 @@ export interface Rushes {
   api<T = any>(method: string, path: string, body?: unknown): Promise<T>;
   /** Register the 4-second test clip as a new cut of "Hero". */
   addCut(note?: string): Promise<{ version: { id: string } }>;
+  /** Register the 9:16 test clip (360x640, 2 s) as a new cut of "Hero". */
+  addVerticalCut(note?: string): Promise<{ version: { id: string } }>;
 }
 
 /** Start `rushes serve` on a fresh project folder (with a space in its path) and wait for its URL. */
@@ -60,7 +63,13 @@ export const test = base.extend<{ rushes: Rushes }>({
       await copyFile(CLIP, join(root, file));
       return api("POST", "/api/versions", { video: "Hero", file, note });
     };
-    await use({ url, root, api, addCut });
+    const addVerticalCut = async (note?: string) => {
+      cuts++;
+      const file = `renders/hero_v${cuts}.mp4`;
+      await copyFile(VERTICAL, join(root, file));
+      return api("POST", "/api/versions", { video: "Hero", file, note });
+    };
+    await use({ url, root, api, addCut, addVerticalCut });
     child.kill("SIGTERM");
     await new Promise((r) => child.once("exit", r));
     await rm(base, { recursive: true, force: true });

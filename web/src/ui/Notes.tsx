@@ -21,10 +21,12 @@ export interface NotesProps {
   onAdd(text: string): Promise<void>;
   onSeek?(t: number, note: Note): void;
   onChanged(): void;
+  /** Whether the note box has anything typed in it, so the player knows a note is pending. */
+  onTextChange?(hasText: boolean): void;
 }
 
 /** The notes column used on every tab: list, filter, done circles and the note box. */
-export function Notes({ notes, version, placeholder, attachments, inputRef, toast, onAdd, onSeek, onChanged }: NotesProps) {
+export function Notes({ notes, version, placeholder, attachments, inputRef, toast, onAdd, onSeek, onChanged, onTextChange }: NotesProps) {
   const [filter, setFilter] = useState<Filter>("all");
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -50,6 +52,7 @@ export function Notes({ notes, version, placeholder, attachments, inputRef, toas
     try {
       await onAdd(value);
       setText("");
+      onTextChange?.(false);
     } catch (e) {
       // Keep what was typed so nothing is lost.
       toast(`Couldn't add the note: ${(e as Error).message}`);
@@ -108,7 +111,11 @@ export function Notes({ notes, version, placeholder, attachments, inputRef, toas
             aria-label="New note"
             placeholder={placeholder}
             value={text}
-            onInput={(e) => setText((e.target as HTMLTextAreaElement).value)}
+            onInput={(e) => {
+              const value = (e.target as HTMLTextAreaElement).value;
+              setText(value);
+              onTextChange?.(value.trim() !== "");
+            }}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();

@@ -107,6 +107,11 @@ export class Store extends EventEmitter {
     return true;
   }
 
+  /** Forget the last announced rev for `key`, so the next valid read announces even at the same rev it had before. */
+  forget(key: FileKey): void {
+    this.announced.delete(key);
+  }
+
   async backup(key: FileKey): Promise<string> {
     const to = this.path(key) + ".bak";
     await copyFile(this.path(key), to);
