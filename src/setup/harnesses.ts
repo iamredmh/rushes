@@ -55,19 +55,28 @@ export function mergeJson(existing: string | null): { text: string; changed: boo
 
 const TOML_BLOCK = `[mcp_servers.rushes]\ncommand = "${MCP_COMMAND}"\nargs = [${MCP_ARGS.map((a) => JSON.stringify(a)).join(", ")}]\n`;
 
-/** Add or replace the [mcp_servers.rushes] table in a Codex config.toml, leaving everything else as written. */
+const TOML_HEADER = /^\s*\[mcp_servers\.rushes\]\s*(#.*)?$/;
+
+/**
+ * Add or replace the [mcp_servers.rushes] table in a Codex config.toml, leaving
+ * everything else as written and keeping the file's line endings. This is line
+ * surgery, not a TOML parser: it never makes a valid file invalid, and a file
+ * that was already broken gets a backup (see setup.ts) and an appended table.
+ */
 export function mergeToml(existing: string | null): { text: string; changed: boolean } {
   const text = existing ?? "";
-  const lines = text.split("\n");
-  const start = lines.findIndex((l) => l.trim() === "[mcp_servers.rushes]");
+  const eol = text.includes("\r\n") ? "\r\n" : "\n";
+  const block = TOML_BLOCK.trimEnd().split("\n");
+  const lines = text.split(/\r?\n/);
+  const start = lines.findIndex((l) => TOML_HEADER.test(l));
   if (start === -1) {
-    const sep = text === "" || text.endsWith("\n\n") ? "" : text.endsWith("\n") ? "\n" : "\n\n";
-    return { text: text + sep + TOML_BLOCK, changed: true };
+    const body = text.replace(/(\r?\n)+$/, "");
+    return { text: (body ? body + eol + eol : "") + block.join(eol) + eol, changed: true };
   }
   let end = lines.findIndex((l, i) => i > start && /^\s*\[/.test(l));
   if (end === -1) end = lines.length;
-  const current = lines.slice(start, end).join("\n").trim();
-  if (current === TOML_BLOCK.trim()) return { text, changed: false };
-  const next = [...lines.slice(0, start), ...TOML_BLOCK.trimEnd().split("\n"), "", ...lines.slice(end)].join("\n");
-  return { text: next.replace(/\n{3,}/g, "\n\n"), changed: true };
+  const current = lines.slice(start + 1, end).map((l) => l.trim()).filter(Boolean);
+  if (current.join("\n") === block.slice(1).join("\n")) return { text, changed: false };
+  const next = [...lines.slice(0, start), ...block, "", ...lines.slice(end)].join(eol);
+  return { text: next.replace(/(\r?\n){3,}/g, eol + eol), changed: true };
 }

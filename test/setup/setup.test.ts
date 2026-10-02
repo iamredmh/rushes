@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach } from "vitest";
-import { mergeJson, mergeToml, MCP_ARGS, SOURCE } from "../../src/setup/harnesses.js";
+import { harnesses, mergeJson, mergeToml, MCP_ARGS, SOURCE } from "../../src/setup/harnesses.js";
 import { setup, type SetupEnv } from "../../src/setup/setup.js";
 
 const homes: string[] = [];
@@ -67,6 +67,26 @@ describe("mergeToml", () => {
     expect(once.text).toContain("[profiles.x]");
     expect(mergeToml(once.text).changed).toBe(false);
   });
+  it("keeps Windows line endings", () => {
+    const { text } = mergeToml('model = "o4"\r\n\r\n[profiles.x]\r\nmodel = "y"\r\n');
+    expect(text.replace(/\r\n/g, "")).not.toContain("\n");
+    expect(text).toContain("[mcp_servers.rushes]\r\n");
+    expect(mergeToml(text).changed).toBe(false);
+  });
+  it("recognises a rushes header with a trailing comment instead of adding a second table", () => {
+    const { text } = mergeToml('[mcp_servers.rushes] # mine\ncommand = "node"\nargs = ["x"]\n');
+    expect(text.match(/\[mcp_servers\.rushes\]/g)).toHaveLength(1);
+    expect(text).toContain(`args = ["-y", "${SOURCE}", "mcp"]`);
+  });
+});
+
+describe("harness paths", () => {
+  it("puts Claude Desktop's config in the right folder on each platform", () => {
+    const desk = (p: NodeJS.Platform, appData?: string) => harnesses("/home/u", p, appData).find((h) => h.id === "claude-desktop")!.config;
+    expect(desk("darwin")).toBe(join("/home/u", "Library", "Application Support", "Claude", "claude_desktop_config.json"));
+    expect(desk("win32", "/c/Users/u/AppData/Roaming")).toBe(join("/c/Users/u/AppData/Roaming", "Claude", "claude_desktop_config.json"));
+    expect(desk("linux")).toBe(join("/home/u", ".config", "Claude", "claude_desktop_config.json"));
+  });
 });
 
 describe("setup", () => {
@@ -88,6 +108,18 @@ describe("setup", () => {
     expect(await readFile(join(home, ".claude", "skills", "rushes", "SKILL.md"), "utf8")).toContain("skill body");
     const second = (await setup(env, { only: ["claude-code"] }))[0];
     expect(second).toMatchObject({ status: "already", skill: "already" });
+  });
+
+  it("running it twice changes nothing the second time", async () => {
+    const { env, home } = await fakeHome();
+    await mkdir(join(home, ".cursor"));
+    await writeFile(join(home, ".cursor", "mcp.json"), '{ "mcpServers": { "other": { "command": "x" } } }');
+    expect((await setup(env, { only: ["cursor"] }))[0].status).toBe("added");
+    const after = await readFile(join(home, ".cursor", "mcp.json"), "utf8");
+    await rm(join(home, ".cursor", "mcp.json.rushes.bak"));
+    expect((await setup(env, { only: ["cursor"] }))[0].status).toBe("already");
+    expect(await readFile(join(home, ".cursor", "mcp.json"), "utf8")).toBe(after);
+    await expect(readFile(join(home, ".cursor", "mcp.json.rushes.bak"), "utf8")).rejects.toThrow();
   });
 
   it("backs up an existing config before changing it", async () => {
