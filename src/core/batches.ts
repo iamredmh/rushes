@@ -1,6 +1,5 @@
 import type { Batch, BatchesFile, NotesFile, Project, Script, Stage } from "./schema.js";
 import { EmptyBatchError } from "./errors.js";
-import { newId } from "./ids.js";
 import { isChanged } from "./script.js";
 
 const STAGE_NAMES: Record<Stage, string> = {

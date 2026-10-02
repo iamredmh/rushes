@@ -158,7 +158,7 @@ The tabs always appear in this order. A tab is locked (dimmed, with a padlock an
 |---|---|---|---|
 | Script | `script.json` has at least one section | Section rows: current line on the left, your version on the right, a fit bar, direction, play, revert, flag and approve | none (the rows are the notes) |
 | Picture | at least one video version | Player, transport, timeline with note markers and spans | Notes, frame grabs, composer |
-| Voiceover | any section has a take, or a `vo` lane exists | Assembled read, with the selected section's takes lined up under it in real time | Picture preview, notes |
+| Voiceover | any section has a take, or a `voice` lane has at least one variant | Assembled read, with the selected section's takes lined up under it in real time | Picture preview, notes |
 | Music | a `music` lane has at least one variant | One lane per bed (name, BPM, key). Use button. Blind mode | Picture preview, notes |
 | Sound effects | an `sfx` lane has at least one variant | One lane per pass, cues labelled on the waveform | Picture preview, notes |
 | Mix | Picture is unlocked, plus at least one audio tab | VO, music and SFX lanes with mute and solo, plus a loudness readout (when ffmpeg is available) | Picture preview, notes |

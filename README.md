@@ -11,7 +11,7 @@ Your agent renders a cut, writes a voiceover script or generates music beds. Rus
 
 Your notes are saved as plain files in your project. The agent reads them, fixes things and replies on each one, and you see each reply arrive.
 
-It runs on your machine. There's no account, no API key and no server to sign up for. All you need is [Node.js](https://nodejs.org) 20 or newer.
+It runs on your machine. There's no account, no API key and no server to sign up for. You need [Node.js](https://nodejs.org) 20 or newer, and git (needed to install straight from GitHub until Rushes is on npm).
 
 > Status: early. The data layer, MCP tools and CLI work today. The dashboard is being built.
 
