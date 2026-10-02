@@ -22,6 +22,9 @@ export interface EnsureOptions {
   timeoutMs?: number;
 }
 
+/** Background servers started for an agent stop after this long with nothing connected. */
+export const BACKGROUND_IDLE_MINUTES = 120;
+
 /** Where a background server's output goes, so a failed start leaves evidence. */
 export function serverLogPath(root: string): string {
   return join(root, RUSHES_DIR, "server.log");
@@ -37,7 +40,7 @@ function defaultSpawn(root: string): void {
     // No log if the folder can't be written; the start may still work.
   }
   try {
-    const child = spawn(process.execPath, [cli, "serve", root], { detached: true, stdio: ["ignore", log, log], windowsHide: true });
+    const child = spawn(process.execPath, [cli, "serve", root, "--idle-minutes", String(BACKGROUND_IDLE_MINUTES)], { detached: true, stdio: ["ignore", log, log], windowsHide: true });
     child.on("error", () => undefined);
     child.unref();
   } finally {

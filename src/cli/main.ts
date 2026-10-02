@@ -4,7 +4,7 @@ import { Store } from "../core/store.js";
 import { startServer, DEFAULT_PORT, type Running } from "../server/start.js";
 import { ensureServer, findServer, type EnsureOptions } from "../mcp/ensure.js";
 import { AlreadyRunningError, canonicalRoot } from "../server/lock.js";
-import { ApiError } from "../mcp/client.js";
+import { ApiError, RushesClient } from "../mcp/client.js";
 import { openBrowser, runStdio } from "../mcp/stdio.js";
 import { VERSION } from "../server/app.js";
 import { setup, type SetupEnv } from "../setup/setup.js";
@@ -27,7 +27,9 @@ export const HELP = `rushes ${VERSION}: a local review desk for video made with 
 
 Usage
   rushes open [dir] [--port 4317] [--no-browser]   start the review desk and open it
-  rushes serve [dir] [--port 4317]                 start the server without a browser
+  rushes serve [dir] [--port 4317] [--idle-minutes N]
+                                                    start the server without a browser (stops after N idle minutes)
+  rushes stop [dir]                                 stop the project's running server
   rushes init [dir] [--name NAME]                  create the .rushes folder
   rushes setup [--only claude-code,codex,...] [--dry-run]
                                                     add Rushes to every agent harness on this machine
@@ -59,6 +61,7 @@ const OPTIONS = {
   dir: { type: "string" },
   only: { type: "string" },
   "dry-run": { type: "boolean" },
+  "idle-minutes": { type: "string" },
   help: { type: "boolean", short: "h" },
   version: { type: "boolean", short: "v" },
 } as const;
@@ -108,9 +111,11 @@ export async function main(argv: string[], io: Io): Promise<number> {
         };
         const running = await findServer(root);
         if (running) return already(running);
+        const idle = o["idle-minutes"] === undefined ? undefined : Number(o["idle-minutes"]);
+        if (idle !== undefined && !(Number.isFinite(idle) && idle > 0)) return usage(io, "--idle-minutes must be a number of minutes above 0");
         let s: Running;
         try {
-          s = await startServer(root, { port: o.port ? Number(o.port) : DEFAULT_PORT });
+          s = await startServer(root, { port: o.port ? Number(o.port) : DEFAULT_PORT, idleMs: idle ? idle * 60_000 : undefined });
         } catch (e) {
           // Another server won the race between the check above and our start.
           if (e instanceof AlreadyRunningError) return already(e.url);
@@ -119,9 +124,19 @@ export async function main(argv: string[], io: Io): Promise<number> {
         io.out(`Rushes is running for ${root}\n${s.url}`);
         show(s.url);
         if (io.onServer) return io.onServer(s), 0;
-        const stop = () => void s.close().then(() => process.exit(0));
-        process.once("SIGINT", stop);
-        process.once("SIGTERM", stop);
+        // Exit once the server closes for any reason: a signal, `rushes stop`, or the idle timer.
+        void s.closed.then(() => process.exit(0));
+        const stopSig = () => void s.close();
+        process.once("SIGINT", stopSig);
+        process.once("SIGTERM", stopSig);
+        return 0;
+      }
+      case "stop": {
+        const root = await canonicalRoot(resolve(io.cwd, rest[0] ?? "."));
+        const url = await findServer(root);
+        if (!url) return io.out(`Rushes isn't running for ${root}`), 0;
+        await new RushesClient(url).post("/api/shutdown", {});
+        io.out(`Stopped Rushes for ${root}`);
         return 0;
       }
       case "init": {

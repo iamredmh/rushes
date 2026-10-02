@@ -162,3 +162,27 @@ describe("cli setup", () => {
     await rm(home, { recursive: true, force: true });
   });
 });
+
+describe("cli stop and idle", () => {
+  it("stop asks the running server to shut down", async () => {
+    const { root } = await tmpProject();
+    const a = io(root);
+    let server: Running | undefined;
+    a.x.onServer = (s) => { server = s; };
+    expect(await main(["serve", ".", "--port", "0"], a.x)).toBe(0);
+    const b = io(root);
+    expect(await main(["stop"], b.x)).toBe(0);
+    expect(b.out[0]).toContain("Stopped Rushes");
+    await server!.closed;
+    const c = io(root);
+    expect(await main(["stop"], c.x)).toBe(0);
+    expect(c.out[0]).toContain("isn't running");
+  });
+
+  it("rejects a bad --idle-minutes", async () => {
+    const { root } = await tmpProject();
+    const a = io(root);
+    expect(await main(["serve", ".", "--idle-minutes", "soon"], a.x)).toBe(2);
+    expect(a.err[0]).toContain("--idle-minutes");
+  });
+});

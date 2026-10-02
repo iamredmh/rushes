@@ -14,6 +14,16 @@ export interface Running {
   port: number;
   store: Store;
   close(): Promise<void>;
+  /** Resolves once the server has closed, for any reason (close(), shutdown request or idle). */
+  closed: Promise<void>;
+}
+
+export interface StartOptions {
+  port?: number;
+  host?: string;
+  name?: string;
+  /** Close after this long with no requests and no open connections. Off by default. */
+  idleMs?: number;
 }
 
 function listen(server: Server, port: number, host: string): Promise<number> {
@@ -37,14 +47,20 @@ function listen(server: Server, port: number, host: string): Promise<number> {
  * Start the Rushes server for a project folder. Tries `port` and the next ten
  * ports; pass port 0 to let the OS choose (tests do).
  */
-export async function startServer(rootDir: string, opts: { port?: number; host?: string; name?: string } = {}): Promise<Running> {
+export async function startServer(rootDir: string, opts: StartOptions = {}): Promise<Running> {
   // The real path is the root everywhere (store, lock, health), so a symlinked path finds the same server.
   await mkdir(resolve(rootDir), { recursive: true });
   const root = await realpath(resolve(rootDir));
   const store = new Store(root);
   await store.init(opts.name ?? basename(root));
-  const app = createApp(store);
-  const server = createServer(getRequestListener(app.fetch));
+  let close: () => Promise<void> = async () => undefined;
+  const app = createApp(store, { onShutdown: () => void close() });
+  const listener = getRequestListener(app.fetch);
+  let lastRequest = Date.now();
+  const server = createServer((req, res) => {
+    lastRequest = Date.now();
+    listener(req, res);
+  });
   const host = opts.host ?? "127.0.0.1";
   const first = opts.port ?? DEFAULT_PORT;
 
@@ -72,14 +88,32 @@ export async function startServer(rootDir: string, opts: { port?: number; host?:
   }
   const url = `http://${host}:${port}`;
   const stopWatching = watchStore(store);
-  let closed = false;
-  const close = async () => {
-    if (closed) return;
-    closed = true;
-    stopWatching();
-    server.closeAllConnections?.();
-    await new Promise<void>((ok) => server.close(() => ok()));
-    await removeLock(root, token);
+  let idleTimer: NodeJS.Timeout | undefined;
+  let done: () => void = () => undefined;
+  const closed = new Promise<void>((ok) => { done = ok; });
+  let closing: Promise<void> | null = null;
+  close = () => {
+    closing ??= (async () => {
+      clearTimeout(idleTimer);
+      stopWatching();
+      server.closeAllConnections?.();
+      await new Promise<void>((ok) => server.close(() => ok()));
+      await removeLock(root, token);
+      done();
+    })();
+    return closing;
   };
-  return { url, port, store, close };
+
+  if (opts.idleMs && opts.idleMs > 0) {
+    const idleMs = opts.idleMs;
+    const tick = () => {
+      server.getConnections((_err, open) => {
+        if (open === 0 && Date.now() - lastRequest >= idleMs) void close();
+        else idleTimer = setTimeout(tick, Math.max(50, idleMs / 4));
+      });
+    };
+    idleTimer = setTimeout(tick, idleMs);
+    idleTimer.unref?.();
+  }
+  return { url, port, store, close, closed };
 }

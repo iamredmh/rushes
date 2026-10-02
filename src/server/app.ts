@@ -97,6 +97,11 @@ const NoteQuery = z.object({
   version: z.string().optional(),
 });
 
+export interface AppOptions {
+  /** Called after POST /api/shutdown has replied. */
+  onShutdown?: () => void;
+}
+
 const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost"]);
 
 /** Hostname of "host[:port]" or a full origin URL, lowercased, or null when it doesn't parse. */
@@ -111,7 +116,7 @@ function hostnameOf(value: string, isUrl: boolean): string | null {
 const escapeHtml = (text: string) =>
   text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 
-export function createApp(store: Store): Hono {
+export function createApp(store: Store, opts: AppOptions = {}): Hono {
   const app = new Hono();
   // Every SSE client adds a change listener, so lift Node's default limit of ten.
   store.setMaxListeners(0);
@@ -151,6 +156,11 @@ export function createApp(store: Store): Hono {
   app.get("/", (c) =>
     c.html(`<!doctype html><title>Rushes</title><p>Rushes is running for <code>${escapeHtml(store.root)}</code>. The dashboard arrives in the next release.</p>`),
   );
+
+  app.post("/api/shutdown", (c) => {
+    if (opts.onShutdown) setImmediate(opts.onShutdown);
+    return c.json({ ok: true, stopping: !!opts.onShutdown });
+  });
 
   app.get("/api/health", (c) => c.json({ ok: true, app: "rushes", version: VERSION, root: store.root }));
 
