@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { access } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
-import { main, type Io } from "../../src/cli/main.js";
+import { main, longRunningCommand, type Io } from "../../src/cli/main.js";
 import { startServer, type Running } from "../../src/server/start.js";
 
 function io(cwd: string) {
@@ -108,6 +108,25 @@ describe("cli", () => {
     expect(b.opened).toEqual([]);
     expect(started).toBeUndefined();
     await s.close();
+  });
+
+  it("reply rejects a --fix-t that isn't a finite, non-negative number", async () => {
+    const { root } = await tmpProject();
+    for (const bad of ["abc", "-1", "Infinity", "NaN", ""]) {
+      const a = io(root);
+      expect(await main(["reply", "n_x", "hello", `--fix-t=${bad}`], a.x)).toBe(2);
+      expect(a.err.join("\n")).toContain("--fix-t");
+    }
+  });
+
+  it("finds the command after flags, so rushes --dir x mcp stays alive", () => {
+    expect(longRunningCommand(["--dir", "x", "mcp"])).toBe(true);
+    expect(longRunningCommand(["--port", "4400", "open", "."])).toBe(true);
+    expect(longRunningCommand(["serve"])).toBe(true);
+    expect(longRunningCommand(["--dir", "open", "status"])).toBe(false);
+    expect(longRunningCommand(["notes", "--json"])).toBe(false);
+    expect(longRunningCommand(["--bogus"])).toBe(false);
+    expect(longRunningCommand([])).toBe(false);
   });
 
   it("status reads the project folder it is given", async () => {

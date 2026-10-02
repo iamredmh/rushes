@@ -63,6 +63,18 @@ const OPTIONS = {
   version: { type: "boolean", short: "v" },
 } as const;
 
+const LONG_RUNNING = ["open", "serve", "mcp"];
+
+/** Does this command line start something that keeps running (open, serve, mcp)? Flags before the command are skipped. */
+export function longRunningCommand(argv: string[]): boolean {
+  try {
+    const [cmd] = parseArgs({ args: argv, options: OPTIONS, allowPositionals: true }).positionals;
+    return LONG_RUNNING.includes(cmd ?? "");
+  } catch {
+    return false;
+  }
+}
+
 /** Run the CLI. Returns an exit code. Long-running commands (open, serve, mcp) resolve once started. */
 export async function main(argv: string[], io: Io): Promise<number> {
   let parsed;
@@ -170,12 +182,18 @@ export async function main(argv: string[], io: Io): Promise<number> {
       }
       case "reply": {
         const [id, ...words] = rest;
-        if (!id || !words.length) return usage(io, "rushes reply <note-id> <text> [--done] [--fix-t SECONDS]");
+        const replyUsage = "rushes reply <note-id> <text> [--done] [--fix-t SECONDS] [--fix-version V]";
+        if (!id || !words.length) return usage(io, replyUsage);
+        const fixT = o["fix-t"] === undefined ? undefined : o["fix-t"].trim() === "" ? NaN : Number(o["fix-t"]);
+        if (fixT !== undefined && !(Number.isFinite(fixT) && fixT >= 0)) {
+          io.err(`--fix-t must be a number of seconds, 0 or more (got "${o["fix-t"]}")`);
+          return usage(io, replyUsage);
+        }
         const reply = {
           id,
           reply: words.join(" "),
           ...(o.done ? { status: "done" } : {}),
-          ...(o["fix-t"] ? { fixT: Number(o["fix-t"]) } : {}),
+          ...(fixT !== undefined ? { fixT } : {}),
           ...(o["fix-version"] ? { fixVersion: o["fix-version"] } : {}),
         };
         await (await client()).post("/api/replies", { replies: [reply] });
