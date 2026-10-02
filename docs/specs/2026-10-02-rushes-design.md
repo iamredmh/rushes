@@ -183,7 +183,7 @@ An MCP server can't wake the agent up on its own. So **Send to agent**:
 An agent with the MCP can also call `rushes_get_batch` with no arguments to pick up the most recent batch, so pasting the prompt is optional.
 
 ### MCP tools (v1)
-There are eleven tools. Every tool takes an optional `project` path, which defaults to the working directory.
+There are eleven tools here; §14.6 adds two more. Every tool takes an optional `project` path, which defaults to the working directory.
 
 | Tool | Does |
 |---|---|
@@ -290,3 +290,50 @@ Red agreed all three on 2 October 2026.
 1. **Frame rate:** read fps with ffprobe when it's installed. Otherwise use the `project.json` fps, and fall back to 30.
 2. **Stale takes:** when a section's `current` text changes after a take exists, mark that take `stale: true`. The UI shows a small "text changed since this take" mark.
 3. **Package name:** publish as `rushes`, and reserve `@iamredmh/rushes` as well.
+
+## 14. Projects, packs, picture lock and shots (agreed 2 October 2026)
+
+Red asked for these after seeing Plan 2. They come from the earlier one-off review pages: the multi-film score review and the shot-by-shot tips review. These additions are binding, and they win wherever an earlier section disagrees.
+
+### 14.1 Every project has an ID, and every dashboard is tied to it
+Red often runs several projects at once, in different conversations. Each project already gets its own server, on its own port. The risk is port reuse. Project A's server stops (idle, or `rushes stop`), and project B's server later starts on the same port. A's old browser tab then quietly reconnects to B, and a note typed in that tab would land in B.
+
+- `project.json` gets an `id`: 8 characters from `abcdefghjkmnpqrstuvwxyz23456789` (lower-case letters and digits, without the look-alikes 0, o, 1, l and i). It's created the first time a server starts for the project, and it never changes. An existing project without an `id` gets one then.
+- The dashboard lives at `/p/<id>/`, for example `http://127.0.0.1:4580/p/k7m2x9qa/`. `GET /` redirects there. Every URL Rushes prints or opens is the `/p/<id>/` one. The browser tab's title is `<project name> · Rushes`, and the header shows the project name with the id beside it, dimmed, in the mono face.
+- The dashboard sends its id with every request: the `x-rushes-project` header on fetches, and `?project=<id>` on `/api/events` and `/media`, where headers can't be set. The server rejects a request whose id doesn't match its own, with `409 wrong_project`. Requests without an id (the MCP server, the CLI, curl) are unaffected.
+- `/p/<other-id>/` serves a short page, with status 404. It says the project that address belongs to isn't running on this port, and to ask your agent to open it again.
+- When the dashboard gets `wrong_project`, it shows a fixed banner: "This tab is for <name>, which isn't running here any more. Ask your agent to open it again." Nothing is written anywhere, and whatever you'd typed stays in its box.
+- Two conversations on the same project share that project's one server (§4), so they can't overwrite each other. The project id doesn't change that.
+- `/api/health` adds `id` and `name`.
+- The default port moves from 4317 to **4580**. 4317 is OpenTelemetry's standard port, and other local tools listen on it. Rushes still tries the next ten ports when one is taken.
+
+### 14.2 Packs: switching between films
+- When a project has more than one video, the header's video picker becomes a row of numbered pills, one per video, in the order they were added: `1 Hero 60s`, `2 Cutdown 15s`, and so on. A pill shows a to-do dot when that video has open Picture notes.
+- Each film remembers its own chosen version and playhead for as long as the page is open. Coming back to a film puts you where you were.
+- `[` and `]` move to the previous and next film. They don't wrap.
+- If marks are pending on the film you're watching (§ Plan 2: In/Out, a box, a grab or a half-typed note), switching films is refused with a toast: "Add or clear your note on <video> first". Nothing pending is ever dropped.
+
+### 14.3 The version, and picture lock
+- The header always reads **Picture v4**: a "Picture" label, then the version picker for the film you're on.
+- A video can be locked at one version: `lockedVersion` on the video in `project.json`, `null` by default. A lock mark next to the picker shows the state, with the tooltip "Picture locked at v4". You can lock or unlock from the dashboard with the lock button beside the picker. Your agent can do the same with `rushes_lock_picture`.
+- While a video is locked, the dashboard opens on the locked version instead of the newest. If newer cuts exist, the "vN ready" chip from Plan 2 offers them, and nothing jumps on its own. Plan 3's audio tabs play against the locked picture when there is one, and the newest cut otherwise.
+- `rushes_add_version` on a locked video still works, and its reply carries `warning: "Picture is locked at v4"`, so the agent knows.
+
+### 14.4 Shots
+- A version can carry a shot list from the storyboard: `shots` on the version, each with `n` (1, 2, 3 … in time order), `name`, `start` in seconds and an optional `tag` such as `ESTABLISH`. A shot runs until the next shot's start, or the end of the cut.
+- A new version starts with a copy of the previous version's shots, until the agent sends new timings. The agent sets them with `rushes_set_shots` (video, version defaulting to the newest, and the list as `{ name, start, tag? }`). The server sorts them by `start` and numbers them. Starts must be unique, at or after 0, and inside the cut's duration when that's known. A list holds at most 200 shots, a name at most 80 characters, and a tag at most 24.
+- Under the timeline, a strip shows one card per shot: `02 · 1.70s`, the name, and the tag in small caps. The card for the shot under the playhead is highlighted, and clicking a card pauses and seeks to its start. Shot boundaries show as small ticks on the timeline. The timecode reads `… · shot 02`.
+- Every Picture note records the shot it falls in, as a snapshot `{ n, name }`. The server works this out from the note's time and the version's shots. A rename later doesn't rewrite old notes. The note list shows `Shot 02 · Window rises in` under the timecode, and the agent sees `shot` in `rushes_get_batch` and `rushes_list_notes`.
+
+### 14.5 Audio choices on locked picture (Plan 3)
+These are recorded here, and Plan 3 builds them.
+- Variant cards carry a name and a one-line description (`meta.description`), like the Night Drive set. Switching variants keeps the playhead.
+- A range note on an audio tab can carry quick marks: **Rise**, **Fall**, **Louder**, **Quieter**. Louder and Quieter take a dB amount. These are stored as `marks: [{ kind, db? }]`, so "0:12–0:15 · Fall · −3 dB" reaches the agent as data, not just prose.
+
+### 14.6 New MCP tools and CLI
+| Tool | Does |
+|---|---|
+| `rushes_set_shots` | Sets the shot list for a version (`video`, optional `version`, `shots`) |
+| `rushes_lock_picture` | Locks a video's picture at a version, or unlocks it with `version: null` |
+
+CLI: `rushes add shots <file.json> --video NAME [--version V]`, `rushes lock <video> <version>` and `rushes unlock <video>`.
