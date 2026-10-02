@@ -30,8 +30,8 @@ export function App() {
   const [keysOpen, setKeysOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [pending, setPending] = useState(false);
-  // Set once a new cut arrives while something's pending, naming the cut that's waiting.
-  const [readyVersionId, setReadyVersionId] = useState<string | null>(null);
+  // True while Rushes, not you, is holding the cut on screen because marks are pending.
+  const [held, setHeld] = useState(false);
   const toastTimer = useRef<number | undefined>(undefined);
 
   const toast = (message: string) => {
@@ -52,23 +52,22 @@ export function App() {
   const newest = latest(video);
   const version = video?.versions.find((v) => v.id === versionId) ?? newest;
 
-  // A new cut arriving mid-review shouldn't rewind the player or drop pending marks: if
-  // something's pending, stay on the cut being watched and offer a chip instead of jumping.
-  const prevNewestId = useRef<string | undefined>(undefined);
+  // A new cut arriving mid-review mustn't rewind the player or drop pending marks. So the
+  // moment something's pending, hold the cut on screen; a newer one then waits behind a chip.
+  // Holding before the cut arrives means the player never renders the new cut, even once.
   useEffect(() => {
-    if (newest && prevNewestId.current && prevNewestId.current !== newest.id) {
-      if (versionId === null && pending) {
-        setVersionId(prevNewestId.current);
-        setReadyVersionId(newest.id);
-      } else {
-        setReadyVersionId(null);
-      }
+    if (pending && versionId === null && newest) {
+      setVersionId(newest.id);
+      setHeld(true);
+    } else if (!pending && held && versionId === newest?.id) {
+      setVersionId(null);
+      setHeld(false);
     }
-    prevNewestId.current = newest?.id;
-  }, [newest?.id]);
+  }, [pending, versionId, newest?.id]);
+  const readyVersionId = held && newest && version && newest.id !== version.id ? newest.id : null;
   const jumpToReady = () => {
     setVersionId(null);
-    setReadyVersionId(null);
+    setHeld(false);
   };
 
   const tabs = state?.tabs ?? [];
@@ -139,7 +138,7 @@ export function App() {
             <>
               <span class="slash">/</span>
               {state.project.videos.length > 1 ? (
-                <select class="sel" aria-label="Video" value={video.id} onChange={(e) => { setVideoId((e.target as HTMLSelectElement).value); setVersionId(null); setReadyVersionId(null); }}>
+                <select class="sel" aria-label="Video" value={video.id} onChange={(e) => { setVideoId((e.target as HTMLSelectElement).value); setVersionId(null); setHeld(false); }}>
                   {state.project.videos.map((v) => <option value={v.id}>{v.name}</option>)}
                 </select>
               ) : (
@@ -153,7 +152,7 @@ export function App() {
                   onChange={(e) => {
                     const el = e.target as HTMLSelectElement;
                     setVersionId(el.value === newest?.id ? null : el.value);
-                    setReadyVersionId(null);
+                    setHeld(false);
                     // So ←/→ go back to stepping frames rather than the select.
                     el.blur();
                   }}

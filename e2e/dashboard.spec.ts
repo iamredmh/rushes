@@ -94,20 +94,40 @@ test("a new cut mid-review waits for a click instead of dropping pending marks",
   await rushes.addCut();
   await page.goto(rushes.url);
   await videoReady(page);
+  for (let i = 0; i < 30; i++) await page.keyboard.press("ArrowRight");
   await page.keyboard.press("i");
+  for (let i = 0; i < 30; i++) await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("o");
+  await page.keyboard.press("b");
+  const frame = (await page.locator(".overlay").boundingBox())!;
+  await page.mouse.move(frame.x + frame.width * 0.25, frame.y + frame.height * 0.25);
+  await page.mouse.down();
+  await page.mouse.move(frame.x + frame.width * 0.75, frame.y + frame.height * 0.75, { steps: 4 });
+  await page.mouse.up();
+  await expect(page.locator(".comp .chipx", { hasText: "Box" })).toBeVisible();
   await page.getByLabel("New note").fill("Still deciding what this is about.");
   await rushes.addCut("tighter cut");
-  await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v1");
   await expect(page.locator(".chipx.go")).toContainText("v2 ready");
+  await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v1");
+  // The marks made before the cut arrived are all still there.
+  await expect(page.locator(".bar .chipx")).toContainText("0:01.00–0:02.00");
+  await expect(page.locator(".comp .chipx", { hasText: "Box" })).toBeVisible();
+  expect(await page.locator("video").evaluate((v: HTMLVideoElement) => v.currentTime)).toBeCloseTo(2, 2);
+  // A second cut while still holding: the chip names the newest one.
+  await rushes.addCut("tighter still");
+  await expect(page.locator(".chipx.go")).toContainText("v3 ready");
+  await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v1");
   await page.getByLabel("New note").press("Enter");
   await expect(page.locator(".note")).toHaveCount(1);
   const { notes } = await rushes.api("GET", "/api/notes?stage=picture");
-  expect(notes[0].version).toBe("v1");
+  expect(notes[0]).toMatchObject({ version: "v1", scope: "range", t: 1, tOut: 2 });
+  expect(notes[0].box.x).toBeCloseTo(0.25, 1);
+  expect(notes[0].box.w).toBeCloseTo(0.5, 1);
   // The chip stays up rather than auto-switching once the pending work clears.
   await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v1");
-  await expect(page.locator(".chipx.go")).toContainText("v2 ready");
+  await expect(page.locator(".chipx.go")).toContainText("v3 ready");
   await page.locator(".chipx.go").click();
-  await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v2");
+  await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v3");
   await expect(page.locator(".chipx.go")).not.toBeVisible();
 });
 
