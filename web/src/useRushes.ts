@@ -34,6 +34,7 @@ export function useRushes(): Live {
   // else writes to the project afterwards. Single timer: only the most recently applied refresh()
   // gets to schedule or clear it, so a burst of concurrent calls can't pile up retries.
   const retryTimer = useRef<number | undefined>(undefined);
+  const retryDelay = useRef(750);
 
   const refresh = async () => {
     const id = ++seq.current;
@@ -67,9 +68,15 @@ export function useRushes(): Live {
     if (assetsResult.ok) setAssets(assetsResult.assets);
 
     clearTimeout(retryTimer.current);
-    const settled = (stateResult.ok || wrongProjectNow) && assetsResult.ok;
-    if (!settled) {
-      retryTimer.current = window.setTimeout(() => void refresh(), 750);
+    // A tab whose project has gone is settled: its assets fetch is refused too, and retrying
+    // won't bring the project back. Otherwise back off from 750 ms to 10 s while the server
+    // stays unreachable, so a stopped server isn't polled every frame of the afternoon.
+    const settled = wrongProjectNow || (stateResult.ok && assetsResult.ok);
+    if (settled) {
+      retryDelay.current = 750;
+    } else {
+      retryTimer.current = window.setTimeout(() => void refresh(), retryDelay.current);
+      retryDelay.current = Math.min(retryDelay.current * 2, 10_000);
     }
   };
 
