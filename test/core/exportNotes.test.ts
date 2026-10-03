@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { exportFileName, notesMarkdown } from "../../src/core/exportNotes.js";
-import { addNote } from "../../src/core/notes.js";
+import { addNote, onLabel } from "../../src/core/notes.js";
+import { voiceOnLabel, voiceRounds } from "../../web/src/lib.js";
+import type { Lane } from "../../web/src/types.js";
 import { addVersion } from "../../src/core/project.js";
 import type { NotesFile, Project } from "../../src/core/schema.js";
 
@@ -142,6 +144,33 @@ describe("notesMarkdown", () => {
     addNote(notes, { stage: "voice", on: "round-2/sombre", scope: "whole", text: "Loved this one" });
     const md = notesMarkdown(p, notes.notes, new Date(2026, 9, 3, 9, 0));
     expect(md).toContain("- **Whole** · Round 2 · Gerald · more sombre · to do — Loved this one");
+  });
+
+  it("labels older voice notes as the dashboard lists them: no on, the read, a section, a take, a missing take (parity, M4)", () => {
+    const p: Project = {
+      ...project(),
+      lanes: [{ id: "round-1", stage: "voice", name: "Round 1", variants: [{ id: "dry", name: "Dry", file: "d.wav", meta: {}, cues: [] }] }],
+    };
+    const take = (id: string) => ({ id, file: `${id}.wav`, duration: 2, forText: "x" });
+    const sections = [
+      { id: "s1", start: 0, end: 3, current: "x", proposed: null, direction: "", status: "draft" as const, takes: [take("t1")] },
+      { id: "s2", start: 3, end: 7, current: "x", proposed: null, direction: "", status: "draft" as const, takes: [take("t1"), take("t2")] },
+    ];
+    const ons = [null, "vo", "s2", "s1:t1", "s2:t2", "s2:t9", "s9:t1", "s9", "nowhere"];
+    const web = { rounds: voiceRounds(p.lanes as Lane[], {}), sections };
+    for (const on of ons) {
+      expect(voiceOnLabel(web, on), String(on)).toBe(onLabel({ stage: "voice", on }, { project: p, script: { sections } }));
+    }
+    expect(voiceOnLabel(web, null)).toBe("Assembled read");
+    expect(voiceOnLabel(web, "s2:t2")).toBe("S2 · Take 2");
+    expect(voiceOnLabel(web, "s2:t9")).toBeNull();
+    // And the export says the same.
+    const notes: NotesFile = { schema: 1, rev: 0, notes: [] };
+    addNote(notes, { stage: "voice", on: null, scope: "whole", text: "No on" });
+    addNote(notes, { stage: "voice", on: "s2:t9", scope: "point", t: 4, text: "Gone take" });
+    const md = notesMarkdown(p, notes.notes, new Date(2026, 9, 3, 9, 0), { sections });
+    expect(md).toContain("- **Whole** · Assembled read · to do — No on");
+    expect(md).toContain("- **0:04.00** · to do — Gone take");
   });
 
   it("escapes nothing -- HTML, ampersands, Markdown emphasis and backticks all appear verbatim", () => {

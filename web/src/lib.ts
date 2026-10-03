@@ -653,11 +653,13 @@ export function voiceListening(rounds: VoiceRound[], selected: string | null): L
   return { select, gains };
 }
 
-/** What Voiceover's notes resolve against: the rounds, and the script's section ids (for older notes). */
+/** What Voiceover's notes resolve against: the rounds, and the script's sections and their takes (for older notes). */
 export interface VoiceNotes {
   rounds: VoiceRound[];
-  sections?: string[];
+  sections?: { id: string; takes: { id: string }[] }[];
 }
+
+const hasSection = (m: VoiceNotes, id: string): boolean => !!m.sections?.some((s) => s.id === id);
 
 /**
  * The read a Voiceover note is on: `"<lane>/<variant>"`, else (legacy) a bare variant id. Never the
@@ -669,7 +671,7 @@ function voiceTarget(m: VoiceNotes, on: string | null): { round: VoiceRound; rea
     const read = round.reads.find((r) => r.key === on);
     if (read) return { round, read };
   }
-  if (on.includes("/") || on.includes(":") || on === READ_ROW || m.sections?.includes(on)) return null;
+  if (on.includes("/") || on.includes(":") || on === READ_ROW || hasSection(m, on)) return null;
   for (const round of m.rounds) {
     const read = round.reads.find((r) => r.variant === on);
     if (read) return { round, read };
@@ -700,22 +702,20 @@ export function voiceOnOptions(rounds: VoiceRound[], nameOf: (r: VariantRow) => 
   return out;
 }
 
-/** "Take 2" for take id "t2"; any other id as it is. */
-const takeName = (id: string): string => (/^t\d+$/.test(id) ? `Take ${id.slice(1)}` : id);
-
 /**
  * What a listed Voiceover note is on: a read in the current round by its name, a read in an older
- * round as "<round> · <read>"; older notes as "Assembled read", "S2" or "S2 · Take 1"; else null.
+ * round as "<round> · <read>"; older notes as "Assembled read" (also with no `on`), "S2" or
+ * "S2 · Take 1" (the take's place in its section, and only while it exists); else null. Older forms
+ * get the same words as export and the CLI (`onLabel` in src/core/notes.ts).
  */
 export function voiceOnLabel(m: VoiceNotes, on: string | null, nameOf: (r: VariantRow) => string = (r) => r.name): string | null {
   const target = voiceTarget(m, on);
   if (target) return target.round.current ? nameOf(target.read) : `${target.round.name} · ${nameOf(target.read)}`;
-  if (on === null) return null;
-  if (on === READ_ROW) return "Assembled read";
-  if (m.sections?.includes(on)) return sectionLabel(on);
-  const i = on.indexOf(":");
-  if (i > 0 && !on.includes("/") && (m.sections === undefined || m.sections.includes(on.slice(0, i)))) {
-    return `${sectionLabel(on.slice(0, i))} · ${takeName(on.slice(i + 1))}`;
+  if (on === null || on === READ_ROW) return "Assembled read";
+  if (hasSection(m, on)) return sectionLabel(on);
+  for (const s of m.sections ?? []) {
+    const i = s.takes.findIndex((t) => `${s.id}:${t.id}` === on);
+    if (i !== -1) return `${sectionLabel(s.id)} · Take ${i + 1}`;
   }
   return null;
 }

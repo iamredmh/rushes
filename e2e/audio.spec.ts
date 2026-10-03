@@ -783,16 +783,23 @@ test("a cut-off description's tooltip isn't clipped by the name column's ellipsi
 test("a read added with no round shows under a Voiceover heading, and older notes are listed, not drawn", async ({ page, rushes }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
-  await rushes.addVariant("voice", "A · Current", { seconds: 4, freq: 196 });
+  const read = await rushes.addVariant("voice", "A · Current", { seconds: 4, freq: 196 });
   await rushes.api("PUT", "/api/script", { replace: true, sections: [{ id: "s1", start: 0, end: 4, current: "Line one." }] });
+  // One take on s1 that still exists, from before rounds.
+  await rushes.api("POST", "/api/script/s1/takes", { file: (read.variant as unknown as { file: string }).file });
   await rushes.api("POST", "/api/notes", { stage: "voice", on: "s1:t1", scope: "point", t: 1, text: "Dip the second word." });
   await rushes.api("POST", "/api/notes", { stage: "voice", on: "vo", scope: "whole", text: "The read as a whole." });
+  const { note: noOn } = await rushes.api("POST", "/api/notes", { stage: "voice", on: null, scope: "whole", text: "No on at all." });
+  const { note: gone } = await rushes.api("POST", "/api/notes", { stage: "voice", on: "s1:t9", scope: "point", t: 2, text: "A take that's gone." });
   await openVoice(page, rushes, 1);
   await expect(page.locator(".rhead .rname")).toHaveText("Voiceover");
   await expect(page.locator(".lane [data-name]")).toHaveText(["A · Current"]);
   await expect(page.locator(".fold")).toHaveCount(0);
-  await expect(page.locator(".note")).toHaveCount(2);
-  await expect(page.locator(".note .on")).toHaveText(["Assembled read", "S1 · Take 1"]);
+  await expect(page.locator(".note")).toHaveCount(4);
+  // The same words as export and the CLI: no on is the assembled read, a take that's gone has none.
+  await expect(page.locator(`.note[data-note="${noOn.id}"] .on`)).toHaveText("Assembled read");
+  await expect(page.locator(`.note[data-note="${gone.id}"] .on`)).toHaveCount(0);
+  await expect(page.locator(".note .on")).toHaveText(["Assembled read", "Assembled read", "S1 · Take 1"]);
   await expect(page.locator(".lane [data-note]")).toHaveCount(0);
   expect(errors).toEqual([]);
 });

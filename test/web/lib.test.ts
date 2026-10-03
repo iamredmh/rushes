@@ -615,14 +615,14 @@ describe("voiceRounds (§18.2)", () => {
     expect(jane.select).toEqual(none.select);
   });
   it("draws a note on its read, by lane-qualified id or (legacy) a bare variant id", () => {
-    const m = { rounds: voiceRounds(lanes, {}), sections: ["s1", "s2"] };
+    const m = { rounds: voiceRounds(lanes, {}), sections: [{ id: "s1", takes: [] }, { id: "s2", takes: [{ id: "t1" }] }] };
     expect(voiceNoteRows(m, { on: "round-2/sombre" })).toBe("round-2/sombre");
     expect(voiceNoteRows(m, { on: "jane" })).toBe("round-1/jane");
     for (const on of [null, "vo", "s2", "s2:t1", "round-2/gone", "nowhere"]) expect(voiceNoteRows(m, { on })).toBeNull();
   });
   it("never reads a section id or 'vo' as a read named like it", () => {
     const clash = voiceRounds([{ id: "r", stage: "voice", name: "R", variants: [v("vo"), v("s2")] }] as Lane[], {});
-    const m = { rounds: clash, sections: ["s2"] };
+    const m = { rounds: clash, sections: [{ id: "s2", takes: [] }] };
     expect(voiceNoteRows(m, { on: "vo" })).toBeNull();
     expect(voiceNoteRows(m, { on: "s2" })).toBeNull();
     expect(voiceNoteRows(m, { on: "r/s2" })).toBe("r/s2");
@@ -662,14 +662,17 @@ describe("voiceRounds (§18.2)", () => {
     expect(onOptionGroups(mixed).map((g) => [g.group, g.options.length])).toEqual([[undefined, 1], ["Round 3 · Gerald, fixes", 1]]);
   });
   it("lists a note by its read, an older round's with the round, and older notes by what they were on", () => {
-    const m = { rounds: voiceRounds(lanes, {}), sections: ["s1", "s2"] };
+    const m = { rounds: voiceRounds(lanes, {}), sections: [{ id: "s1", takes: [] }, { id: "s2", takes: [{ id: "t1" }, { id: "t2" }] }] };
     expect(voiceOnLabel(m, "round-2/sombre")).toBe("sombre");
     expect(voiceOnLabel(m, "round-1/jane")).toBe("Round 1 · Voices · jane");
     expect(voiceOnLabel(m, "round-1/jane", () => "Read 2")).toBe("Round 1 · Voices · Read 2");
     expect(voiceOnLabel(m, "vo")).toBe("Assembled read");
     expect(voiceOnLabel(m, "s2")).toBe("S2");
     expect(voiceOnLabel(m, "s2:t2")).toBe("S2 · Take 2");
-    expect(voiceOnLabel(m, null)).toBeNull();
+    // As export and the CLI say: no `on` is the assembled read, and a take that's gone has no label.
+    expect(voiceOnLabel(m, null)).toBe("Assembled read");
+    expect(voiceOnLabel(m, "s2:t3")).toBeNull();
+    expect(voiceOnLabel(m, "s1:t1")).toBeNull();
     expect(voiceOnLabel(m, "nowhere")).toBeNull();
   });
 });

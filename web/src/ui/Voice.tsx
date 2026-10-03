@@ -95,7 +95,7 @@ export function Voice({ state, assets, video, toast, onChanged, onPendingChange 
 
   // ---- the lanes: the current round open, then older rounds newest first, each folded ----
   const notes = state.notes.notes.filter((n) => n.stage === "voice");
-  const model: VoiceNotes = { rounds, sections: state.script.sections.map((s) => s.id) };
+  const model: VoiceNotes = { rounds, sections: state.script.sections };
   const lane = (round: VoiceRound, r: VariantRow): StageRow => ({
     key: r.key,
     name: nameOf(r),
