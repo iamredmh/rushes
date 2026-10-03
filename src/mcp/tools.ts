@@ -120,13 +120,13 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     {
       title: "Add an audio variant",
       description:
-        "Add a music bed, SFX pass or VO lane variant for side-by-side review. Returns its lane and variant ids: a note on it is `on` \"<lane id>/<variant id>\".",
+        "Add a voice read (in a round), music bed or SFX pass for side-by-side review. Returns its lane and variant ids: a note on it is `on` \"<lane id>/<variant id>\".",
       inputSchema: {
         project,
         stage: z.enum(["voice", "music", "sfx"]),
         name: z.string().describe("Shown on the lane, e.g. \"Deep house\"."),
         file: z.string(),
-        lane: z.string().optional().describe("Lane id. Defaults to the stage."),
+        lane: z.string().optional().describe("Lane id. Defaults to `round` slugged, else the stage. Wins over `round`: give a lane only to add to an existing lane by its id."),
         round: z
           .string()
           .optional()
@@ -170,7 +170,8 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     "rushes_add_take",
     {
       title: "Add a VO take",
-      description: "Attach a recorded or generated VO take to a script section.",
+      description:
+        "Compatibility only: attaches a file to a script section as a take, but the Voiceover tab and the mix ignore takes. For voiceover, register each whole read with rushes_add_variant (stage \"voice\", round).",
       inputSchema: { project, section: z.string(), file: z.string() },
     },
     safe(async ({ project, section, file }) => (await ctx.client(project)).post(`/api/script/${encodeURIComponent(section)}/takes`, { file })),
@@ -181,7 +182,7 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     {
       title: "List notes",
       description:
-        "Notes left in Rushes, filtered by tab, status, batch or version. A note's `on` says what it's about: null on Picture or for the whole mix, \"<lane>/<variant>\" for a music bed, SFX pass or voice variant, \"<lane>/<variant>:<cue>\" for an SFX cue, \"vo\" for the assembled read (Mix: the VO lane), \"<section>:<take>\" for a take, or a section id. Older notes may carry a bare variant id.",
+        "Notes left in Rushes, filtered by tab, status, batch or version. A note's `on` says what it's about: null on Picture or for the whole mix, \"<lane>/<variant>\" for a music bed, SFX pass or voice variant, \"<lane>/<variant>:<cue>\" for an SFX cue, \"vo\" for the VO lane on Mix. Older notes may carry a bare variant id, \"vo\" for the assembled read, \"<section>:<take>\" for a take, or a section id.",
       inputSchema: {
         project,
         stage: stage.optional(),
@@ -201,7 +202,7 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     {
       title: "Get a batch",
       description:
-        "The batch the user sent with Send to agent (latest by default), with its notes and script sections. A note's `on` says what it's about: null on Picture or for the whole mix, \"<lane>/<variant>\" for a music bed, SFX pass or voice variant, \"<lane>/<variant>:<cue>\" for an SFX cue, \"vo\" for the assembled read (Mix: the VO lane), \"<section>:<take>\" for a take, or a section id. Older notes may carry a bare variant id.",
+        "The batch the user sent with Send to agent (latest by default), with its notes and script sections. A note's `on` says what it's about: null on Picture or for the whole mix, \"<lane>/<variant>\" for a music bed, SFX pass or voice variant, \"<lane>/<variant>:<cue>\" for an SFX cue, \"vo\" for the VO lane on Mix. Older notes may carry a bare variant id, \"vo\" for the assembled read, \"<section>:<take>\" for a take, or a section id.",
       inputSchema: { project, id: z.string().optional() },
     },
     safe(async ({ project, id }) => (await ctx.client(project)).get(`/api/batches/${encodeURIComponent(id ?? "latest")}`)),
@@ -234,7 +235,7 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     "rushes_list_assets",
     {
       title: "List assets",
-      description: "Every file in the project: cuts, VO takes, music, SFX and screenshots, with absolute paths. Use it to find a screenshot the user grabbed.",
+      description: "Every file in the project: cuts, voice reads, older VO takes, music, SFX and screenshots, with absolute paths. Use it to find a screenshot the user grabbed.",
       inputSchema: { project, kind: assetKind.optional() },
     },
     safe(async ({ project, kind }) => (await ctx.client(project)).get(`/api/assets${kind ? `?kind=${encodeURIComponent(kind)}` : ""}`)),
@@ -244,7 +245,7 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     "rushes_get_picks",
     {
       title: "Get picks",
-      description: "Which variant is in use per audio lane and which take per script section.",
+      description: "Which variant is in use per audio lane (per round on Voiceover). Section take picks are kept for older projects but not used.",
       inputSchema: { project },
     },
     safe(async ({ project }) => (await ctx.client(project)).get("/api/picks")),

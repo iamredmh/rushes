@@ -104,8 +104,9 @@ describe("createBatch", () => {
       addNote(c.notes, { stage, scope: "whole", text: "Fix it" });
       const b = createBatch(c, stage);
       expect(b.prompt).toContain(
-        'Use rushes_get_batch and rushes_get_picks, fix each note (marks such as "Fall" or "Quieter 3 dB" are part of the note), register the new variant or take, then rushes_reply.',
+        'Use rushes_get_batch and rushes_get_picks, fix each note (marks such as "Fall" or "Quieter 3 dB" are part of the note), register the new variant, then rushes_reply.',
       );
+      expect(b.prompt).not.toContain("take");
     }
   });
 
@@ -114,7 +115,7 @@ describe("createBatch", () => {
     addNote(c.notes, { stage: "voice", scope: "whole", text: "More sombre" });
     const b = createBatch(c, "voice");
     expect(b.prompt).toContain("new whole read");
-    expect(b.prompt).toContain("round");
+    expect(b.prompt).toContain("rushes_add_variant with stage voice and round");
     expect(b.prompt).toContain("rushes_reply");
   });
 

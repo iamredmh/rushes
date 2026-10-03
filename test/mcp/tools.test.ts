@@ -43,6 +43,25 @@ describe("MCP tools", () => {
     await t.close();
   });
 
+  it("steers voiceover to whole reads in rounds, not takes", async () => {
+    const t = await connect();
+    const { tools } = await t.client.listTools();
+    const tool = (n: string) => tools.find((x) => x.name === n)!;
+    const prop = (n: string, p: string) => (tool(n).inputSchema.properties as Record<string, { description?: string }>)[p].description ?? "";
+    const take = tool("rushes_add_take").description ?? "";
+    expect(take).toMatch(/^Compatibility only/);
+    expect(take).toMatch(/Voiceover tab and the mix ignore takes/);
+    expect(take).toMatch(/rushes_add_variant/);
+    expect(take).toMatch(/round/);
+    expect(tool("rushes_add_variant").description).toMatch(/voice read \(in a round\)/);
+    expect(tool("rushes_add_variant").description).not.toMatch(/VO lane variant/);
+    expect(prop("rushes_add_variant", "lane")).toMatch(/Defaults to `round` slugged, else the stage/);
+    expect(prop("rushes_add_variant", "lane")).toMatch(/wins over `round`/i);
+    expect(tool("rushes_get_picks").description).toMatch(/per round on Voiceover/);
+    expect(tool("rushes_get_picks").description).not.toMatch(/take per script section/);
+    await t.close();
+  });
+
   it("set_script merges by id, replace swaps the whole list, get_script reads it all", async () => {
     const t = await connect();
     await t.call("rushes_set_script", { sections: [{ start: 0, end: 10, current: "A" }, { start: 10, end: 20, current: "B" }] });
