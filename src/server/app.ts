@@ -10,12 +10,12 @@ import { createBatch, latestBatch } from "../core/batches.js";
 import { tabStates } from "../core/tabs.js";
 import { fromManifestPath, toManifestPath } from "../core/paths.js";
 import { probe } from "../core/media.js";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { GRAB_PATH, SCREENSHOT_PATH, contentDisposition, contentType, inside, registeredMedia, sendFile } from "./files.js";
-import { listAssets, fpsFor, screenshotName } from "./assets.js";
+import { candidatePaths, listAssets, fpsFor, screenshotName } from "./assets.js";
 import { osRevealer, type Revealer } from "./reveal.js";
 import type { CorruptEvent } from "./watch.js";
 import { LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, ProjectIdSchema, ShotSchema, type Batch, type Note } from "../core/schema.js";
@@ -309,12 +309,16 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   app.post("/api/reveal", async (c) => {
     const b = await body(c, RevealBody);
     const [project, script] = await Promise.all([store.read("project"), store.read("script")]);
-    const assets = await listAssets(store, project, script);
-    // Exact string equality against a listed asset's own path: no path logic beyond this is
-    // needed to reject traversal, absolute paths and anything unregistered.
-    const asset = assets.find((a) => a.path === b.path);
-    if (!asset || asset.missing) throw new NotFoundError("asset", b.path);
-    await reveal(asset.abs);
+    // Exact string equality against a path /api/assets would list: no path logic beyond this is
+    // needed to reject traversal, absolute paths and anything unregistered. candidatePaths is
+    // cheap (no stat calls), so a request for an unlisted path never touches the filesystem at
+    // all; only the one path that matches gets stat'ed, instead of rebuilding the whole index.
+    const candidates = await candidatePaths(store, project, script);
+    if (!candidates.has(b.path)) throw new NotFoundError("asset", b.path);
+    const abs = fromManifestPath(store.root, b.path);
+    const exists = await stat(abs).then(() => true, () => false);
+    if (!exists) throw new NotFoundError("asset", b.path);
+    await reveal(abs);
     return c.json({ ok: true });
   });
 

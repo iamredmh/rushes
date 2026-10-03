@@ -3,7 +3,7 @@ import { basename, join } from "node:path";
 import type { LaneStage, Project, Script } from "../core/schema.js";
 import type { Store } from "../core/store.js";
 import { fromManifestPath } from "../core/paths.js";
-import { GRAB_PATH, SCREENSHOT_PATH } from "./files.js";
+import { GRAB_PATH, SCREENSHOT_PATH, registeredMedia } from "./files.js";
 
 export type AssetKind = "screenshot" | "cut" | "take" | "music" | "sfx" | "voice";
 
@@ -58,50 +58,59 @@ async function statInfo(abs: string): Promise<{ size: number | null; modified: s
   }
 }
 
+/** The two screenshot directories, as (directory, manifest prefix, safe-name regex) triples. */
+const SCREENSHOT_DIRS = [
+  ["screenshots", "screenshots/", SCREENSHOT_PATH],
+  [".rushes/grabs", ".rushes/grabs/", GRAB_PATH],
+] as const;
+
+/** Names (not full paths) of every *.png directly inside `dir`, never recursing. Empty when the directory doesn't exist. */
+async function pngNames(store: Store, dir: string): Promise<string[]> {
+  try {
+    return (await readdir(join(store.root, dir))).filter((n) => n.toLowerCase().endsWith(".png"));
+  } catch {
+    return [];
+  }
+}
+
 /**
- * Every *.png directly inside one screenshots directory (never recursing), skipping anything
- * that isn't a .png and anything whose name `safe` wouldn't let /media serve. A name that
- * parses as video_version_time_frame (or the older video_version_frame) carries video, version,
- * frame and t; anything else is still listed, just without those fields.
+ * Every *.png directly inside one screenshots directory, skipping anything whose name `safe`
+ * wouldn't let /media serve. Stats every candidate in parallel; the returned order matches the
+ * order `names` came in, so the caller's own sort (by modified time) sees a stable input. A name
+ * that parses as video_version_time_frame (or the older video_version_frame) carries video,
+ * version, frame and t; anything else is still listed, just without those fields.
  */
 async function scanScreenshotDir(
   store: Store,
-  dir: string,
+  names: string[],
   manifestPrefix: string,
   safe: RegExp,
   project: Project,
 ): Promise<{ asset: Asset; mtimeMs: number }[]> {
-  let names: string[];
-  try {
-    names = await readdir(join(store.root, dir));
-  } catch {
-    return [];
-  }
-  const out: { asset: Asset; mtimeMs: number }[] = [];
-  for (const name of names) {
-    if (!name.toLowerCase().endsWith(".png")) continue;
-    const path = `${manifestPrefix}${name}`;
-    if (!safe.test(path)) continue;
-    const abs = fromManifestPath(store.root, path);
-    const info = await statInfo(abs);
-    if (info.missing) continue; // vanished between the directory read and the stat
-    const asset: Asset = { kind: "screenshot", path, abs, name, size: info.size, modified: info.modified, missing: false };
-    const newMatch = NEW_NAME.exec(name);
-    const oldMatch = newMatch ? null : OLD_NAME.exec(name);
-    if (newMatch) {
-      asset.video = newMatch[1];
-      asset.version = newMatch[2];
-      asset.frame = Number(newMatch[5]);
-      asset.t = asset.frame / fpsFor(project, asset.video, asset.version);
-    } else if (oldMatch) {
-      asset.video = oldMatch[1];
-      asset.version = oldMatch[2];
-      asset.frame = Number(oldMatch[3]);
-      asset.t = asset.frame / fpsFor(project, asset.video, asset.version);
-    }
-    out.push({ asset, mtimeMs: info.mtimeMs });
-  }
-  return out;
+  const candidates = names.map((name) => ({ name, path: `${manifestPrefix}${name}` })).filter(({ path }) => safe.test(path));
+  const results = await Promise.all(
+    candidates.map(async ({ name, path }) => {
+      const abs = fromManifestPath(store.root, path);
+      const info = await statInfo(abs);
+      if (info.missing) return null; // vanished between the directory read and the stat
+      const asset: Asset = { kind: "screenshot", path, abs, name, size: info.size, modified: info.modified, missing: false };
+      const newMatch = NEW_NAME.exec(name);
+      const oldMatch = newMatch ? null : OLD_NAME.exec(name);
+      if (newMatch) {
+        asset.video = newMatch[1];
+        asset.version = newMatch[2];
+        asset.frame = Number(newMatch[5]);
+        asset.t = asset.frame / fpsFor(project, asset.video, asset.version);
+      } else if (oldMatch) {
+        asset.video = oldMatch[1];
+        asset.version = oldMatch[2];
+        asset.frame = Number(oldMatch[3]);
+        asset.t = asset.frame / fpsFor(project, asset.video, asset.version);
+      }
+      return { asset, mtimeMs: info.mtimeMs };
+    }),
+  );
+  return results.filter((x): x is { asset: Asset; mtimeMs: number } => x !== null);
 }
 
 async function fileAsset(
@@ -115,46 +124,57 @@ async function fileAsset(
   return { kind, path, abs, name: basename(path), size: info.size, modified: info.modified, missing: info.missing, ...extra };
 }
 
-async function variantAssets(store: Store, project: Project, stage: LaneStage): Promise<Asset[]> {
-  const out: Asset[] = [];
-  for (const lane of project.lanes) {
-    if (lane.stage !== stage) continue;
-    for (const variant of lane.variants) {
-      out.push(await fileAsset(store, stage, variant.file, { lane: lane.id, variant: variant.id }));
-    }
-  }
-  return out;
+function variantEntries(project: Project, stage: LaneStage): { lane: string; variant: string; file: string }[] {
+  return project.lanes
+    .filter((lane) => lane.stage === stage)
+    .flatMap((lane) => lane.variants.map((variant) => ({ lane: lane.id, variant: variant.id, file: variant.file })));
 }
 
 /**
  * Every asset in the project: screenshots (newest modified first), then cuts (by video in
  * project order, newest version first), then takes, voice, music and sfx, each in manifest
- * order. Callers never need to sort this themselves.
+ * order. Callers never need to sort this themselves. Every file this returns has been `stat`ed,
+ * in parallel within each group, so a large project doesn't pay for it one file at a time.
  */
 export async function listAssets(store: Store, project: Project, script: Script): Promise<Asset[]> {
+  const cutEntries = project.videos.flatMap((video) =>
+    [...video.versions].reverse().map((version) => ({ video: video.id, version: version.id, file: version.file })),
+  );
+  const takeEntries = script.sections.flatMap((section) => section.takes.map((take) => ({ section: section.id, file: take.file })));
+
+  const [[freshNames, oldNames], cuts, takes, voice, music, sfx] = await Promise.all([
+    Promise.all([pngNames(store, SCREENSHOT_DIRS[0][0]), pngNames(store, SCREENSHOT_DIRS[1][0])]),
+    Promise.all(cutEntries.map((e) => fileAsset(store, "cut", e.file, { video: e.video, version: e.version }))),
+    Promise.all(takeEntries.map((e) => fileAsset(store, "take", e.file, { section: e.section }))),
+    Promise.all(variantEntries(project, "voice").map((e) => fileAsset(store, "voice", e.file, { lane: e.lane, variant: e.variant }))),
+    Promise.all(variantEntries(project, "music").map((e) => fileAsset(store, "music", e.file, { lane: e.lane, variant: e.variant }))),
+    Promise.all(variantEntries(project, "sfx").map((e) => fileAsset(store, "sfx", e.file, { lane: e.lane, variant: e.variant }))),
+  ]);
   const [fresh, old] = await Promise.all([
-    scanScreenshotDir(store, "screenshots", "screenshots/", SCREENSHOT_PATH, project),
-    scanScreenshotDir(store, ".rushes/grabs", ".rushes/grabs/", GRAB_PATH, project),
+    scanScreenshotDir(store, freshNames, SCREENSHOT_DIRS[0][1], SCREENSHOT_DIRS[0][2], project),
+    scanScreenshotDir(store, oldNames, SCREENSHOT_DIRS[1][1], SCREENSHOT_DIRS[1][2], project),
   ]);
   const screenshots = [...fresh, ...old].sort((a, b) => b.mtimeMs - a.mtimeMs).map((x) => x.asset);
 
-  const cuts: Asset[] = [];
-  for (const video of project.videos) {
-    for (const version of [...video.versions].reverse()) {
-      cuts.push(await fileAsset(store, "cut", version.file, { video: video.id, version: version.id }));
-    }
-  }
-
-  const takes: Asset[] = [];
-  for (const section of script.sections) {
-    for (const take of section.takes) {
-      takes.push(await fileAsset(store, "take", take.file, { section: section.id }));
-    }
-  }
-
-  const voice = await variantAssets(store, project, "voice");
-  const music = await variantAssets(store, project, "music");
-  const sfx = await variantAssets(store, project, "sfx");
-
   return [...screenshots, ...cuts, ...takes, ...voice, ...music, ...sfx];
+}
+
+/**
+ * Every path `/api/assets` would list, without stat'ing any of them: registered media (cuts,
+ * takes, variants -- present whether or not the file is actually there) plus every *.png
+ * directly inside screenshots/ and .rushes/grabs/ whose name the matching safe-name regex would
+ * let /media serve. POST /api/reveal uses this to check a path cheaply, stat'ing only the one
+ * file it actually needs instead of every asset in the project.
+ */
+export async function candidatePaths(store: Store, project: Project, script: Script): Promise<Set<string>> {
+  const paths = registeredMedia(project, script);
+  const nameLists = await Promise.all(SCREENSHOT_DIRS.map(([dir]) => pngNames(store, dir)));
+  for (let i = 0; i < SCREENSHOT_DIRS.length; i++) {
+    const [, manifestPrefix, safe] = SCREENSHOT_DIRS[i];
+    for (const name of nameLists[i]) {
+      const path = `${manifestPrefix}${name}`;
+      if (safe.test(path)) paths.add(path);
+    }
+  }
+  return paths;
 }

@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
 import { createApp } from "../../src/server/app.js";
-import { parseRange, inside } from "../../src/server/files.js";
+import { parseRange, inside, contentDisposition } from "../../src/server/files.js";
 
 // The smallest valid PNG (1×1, transparent).
 const PNG_1PX = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
@@ -34,6 +34,21 @@ describe("parseRange", () => {
     expect(parseRange("bytes=-", 1000)).toBeNull();
     expect(parseRange("items=0-1", 1000)).toBeNull();
     expect(parseRange(undefined, 1000)).toBeNull();
+  });
+});
+
+describe("contentDisposition", () => {
+  it("strips control characters (and DEL) from the ASCII fallback so a newline can never reach the header", () => {
+    const header = contentDisposition("evil\nfile.mp4");
+    expect(header).not.toContain("\n");
+    expect(header).toContain('filename="evil_file.mp4"');
+    expect(header).toContain(`filename*=UTF-8''${encodeURIComponent("evil\nfile.mp4")}`);
+  });
+
+  it("replaces non-ASCII characters, quotes, backslashes, C0 controls and DEL with _, leaving filename* untouched", () => {
+    const name = 'caf\u00e9 "clip"\\.mp4\r\n\x7f';
+    const header = contentDisposition(name);
+    expect(header).toBe(`attachment; filename="caf_ _clip__.mp4___"; filename*=UTF-8''${encodeURIComponent(name)}`);
   });
 });
 

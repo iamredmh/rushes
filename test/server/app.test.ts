@@ -526,4 +526,21 @@ describe("GET /media?download=1", () => {
     const r = await call("GET", "/media?path=renders%2Fclip.mp4");
     expect(r.headers.get("content-disposition")).toBeNull();
   });
+
+  it("a file name containing a newline still gets a clean header instead of a 500 (Headers.set would otherwise throw)", async () => {
+    const name = "evil\nfile.mp4";
+    let s: Awaited<ReturnType<typeof withFile>>;
+    try {
+      s = await withFile(name);
+    } catch {
+      // Some filesystems refuse a newline in a file name: fall back to checking contentDisposition
+      // itself, which is exercised directly in test/server/files.test.ts.
+      return;
+    }
+    const r = await s.call("GET", `/media?path=${encodeURIComponent(`renders/${name}`)}&download=1`);
+    expect(r.status).toBe(200);
+    const disposition = r.headers.get("content-disposition")!;
+    expect(disposition).not.toContain("\n");
+    expect(disposition).toContain('filename="evil_file.mp4"');
+  });
 });
