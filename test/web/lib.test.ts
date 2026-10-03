@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   boxFrom, defaultVersion, extOf, firstTab, fit, FOLDERS, fmt, folderItems, formatBytes, frameAt, groupByFilm,
-  isChanged, isPreviewable, latest, neighbourVideo, noteTime, OPEN_SAFE_EXT, placeNote, shotAt, shotLabel, shotSeek, snap, stepFrame,
+  isChanged, isPreviewable, latest, metaLine, neighbourVideo, noteTime, OPEN_SAFE_EXT, placeNote, shotAt, shotLabel, shotSeek, snap, stepFrame,
 } from "../../web/src/lib.js";
 import type { Asset, Note, Section, Shot, TabState, Video } from "../../web/src/types.js";
 // Only this test imports the server's own list, so the web copy (ruling 1) is never pulled
@@ -186,6 +186,22 @@ describe("formatBytes", () => {
   });
 });
 
+describe("metaLine", () => {
+  it("joins the lane name with each meta entry, a numeric one gaining its key as a unit suffix", () => {
+    expect(metaLine("Main bed", { bpm: 120, key: "A minor" })).toBe("Main bed · 120 BPM · A minor");
+  });
+  it("is just the lane name when there's no meta", () => {
+    expect(metaLine("Main bed")).toBe("Main bed");
+    expect(metaLine("Main bed", {})).toBe("Main bed");
+  });
+  it("is just the meta when there's no lane name", () => {
+    expect(metaLine(undefined, { bpm: 120 })).toBe("120 BPM");
+  });
+  it("is null when there's neither", () => {
+    expect(metaLine()).toBeNull();
+  });
+});
+
 describe("extOf / isPreviewable", () => {
   it("lower-cases an extension and drops the dot", () => {
     expect(extOf("a.MP4")).toBe("mp4");
@@ -312,6 +328,24 @@ describe("groupByFilm", () => {
     expect(groups.map((g) => g.heading)).toEqual(["Hero · v1", "Cutdown · v2"]);
     expect(groups[0].items.map((a) => a.name)).toEqual(["h1.png", "h2.png"]);
     expect(groups[1].items.map((a) => a.name)).toEqual(["c1.png"]);
+  });
+
+  it("merges every item under one heading even when they're not adjacent, rather than fragmenting into repeated groups", () => {
+    // Newest-first input: h1 (newest Hero·v1), c1 (Cutdown·v2) interleaved between two more
+    // Hero·v1 items. Fragmenting on adjacency alone would produce three groups (Hero·v1,
+    // Cutdown·v2, Hero·v1 again); grouping by heading must produce exactly two, the Hero one
+    // ordered first because its newest item (h1) came first in the input.
+    const items = [
+      asset({ name: "h1.png", video: "hero", version: "v1" }),
+      asset({ name: "c1.png", video: "cutdown", version: "v2" }),
+      asset({ name: "h2.png", video: "hero", version: "v1" }),
+      asset({ name: "c2.png", video: "cutdown", version: "v2" }),
+      asset({ name: "h3.png", video: "hero", version: "v1" }),
+    ];
+    const groups = groupByFilm(items, videos);
+    expect(groups.map((g) => g.heading)).toEqual(["Hero · v1", "Cutdown · v2"]);
+    expect(groups[0].items.map((a) => a.name)).toEqual(["h1.png", "h2.png", "h3.png"]);
+    expect(groups[1].items.map((a) => a.name)).toEqual(["c1.png", "c2.png"]);
   });
 
   it("gives an item with no film/version a null heading", () => {

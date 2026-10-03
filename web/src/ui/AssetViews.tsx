@@ -4,7 +4,7 @@
 // layout, state and keyboard handling.
 import { useEffect, useRef, useState } from "preact/hooks";
 import { api, mediaUrl } from "../api.js";
-import { extOf, formatBytes, fmt, OPEN_SAFE_EXT } from "../lib.js";
+import { extOf, formatBytes, fmt, metaLine, OPEN_SAFE_EXT } from "../lib.js";
 import type { Asset, Video } from "../types.js";
 import { Icon } from "./Icon.js";
 
@@ -189,6 +189,10 @@ export function AudioRow({
   asset: Asset; playing: boolean; paused: boolean; onToggle(asset: Asset): void; videos: Video[]; toast(message: string): void;
 }) {
   const isPlaying = playing && !paused;
+  // The take or variant's own name (e.g. "Deep house"), not the file name -- "name" stays the
+  // file's basename for Download/Save-as, so the display title reads asset.label first.
+  const title = asset.label ?? asset.name;
+  const secondary = metaLine(asset.laneName, asset.meta);
   return (
     <div class={`arow${asset.missing ? " missing" : ""}`}>
       <button
@@ -204,7 +208,8 @@ export function AudioRow({
         <Icon name={isPlaying ? "pause" : "play"} />
       </button>
       <div class="ainfo">
-        <div class="atitle">{asset.name}{asset.missing && <Missing />}</div>
+        <div class="atitle">{title}{asset.missing && <Missing />}</div>
+        {secondary && <div class="atrackmeta">{secondary}</div>}
         <div class="afolder mono">{asset.path}</div>
         {!asset.missing && <div class="ameta">{formatBytes(asset.size ?? 0)} · {shortDate(asset.modified)}</div>}
       </div>

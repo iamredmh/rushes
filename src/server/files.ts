@@ -41,6 +41,26 @@ export function contentType(path: string): string {
   return CONTENT_TYPES[extname(path).toLowerCase()] ?? "application/octet-stream";
 }
 
+/**
+ * Whether `type` (as `contentType()` returns it, e.g. "image/png" or "text/plain; charset=utf-8")
+ * is safe to serve inline from `/media` -- i.e. a browser rendering it directly could never run
+ * script or load further subresources from it. Only images other than SVG (an SVG can carry
+ * `<script>`), audio, video, plain text, Markdown and PDF qualify; everything else -- HTML, XML,
+ * SVG, or any type this server doesn't otherwise recognise -- is not, however it got onto disk
+ * (registered, auto-discovered in exports/, or otherwise).
+ */
+export function isInlineSafeType(type: string): boolean {
+  return /^(image\/(?!svg)|audio\/|video\/|text\/plain\b|text\/markdown\b|application\/pdf\b)/.test(type);
+}
+
+/** The security headers set on every /media response, safe or not: `sandbox` plus `default-src
+ *  'none'` means even a type this function is wrong about can't run script or fetch anything if
+ *  a browser is ever tricked into treating the response as a document, and `nosniff` stops the
+ *  browser from guessing past a deliberately generic `application/octet-stream`. */
+export function mediaSecurityHeaders(): Record<string, string> {
+  return { "content-security-policy": "sandbox; default-src 'none'", "x-content-type-options": "nosniff" };
+}
+
 /** Grab files the server itself writes: .rushes/grabs/<safe name>.png */
 export const GRAB_PATH = /^\.rushes\/grabs\/[a-z0-9][a-z0-9_-]*\.png$/;
 

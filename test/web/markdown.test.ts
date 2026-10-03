@@ -64,4 +64,30 @@ describe("safeMarkdownHtml", () => {
     const html = safeMarkdownHtml("```\n*not italic*\n<b>not bold</b>\n```");
     expect(html).toBe("<pre><code>*not italic*\n&lt;b&gt;not bold&lt;/b&gt;</code></pre>");
   });
+
+  it("renders one level of nested list, indented two or more spaces under a parent item", () => {
+    const html = safeMarkdownHtml("- Note one\n  - Reply: thanks!\n- Note two");
+    expect(html).toBe("<ul><li>Note one<ul><li>Reply: thanks!</li></ul></li><li>Note two</li></ul>");
+  });
+
+  it("nests an ordered list the same way, with its own marker", () => {
+    const html = safeMarkdownHtml("1. Step one\n  1. Detail a\n  2. Detail b\n2. Step two");
+    expect(html).toBe("<ol><li>Step one<ol><li>Detail a</li><li>Detail b</li></ol></li><li>Step two</li></ol>");
+  });
+
+  it("renders a blockquote, joining consecutive > lines into one paragraph", () => {
+    expect(safeMarkdownHtml("> First line\n> second line")).toBe("<blockquote><p>First line second line</p></blockquote>");
+  });
+
+  it("escapes a script tag inside a blockquote to inert text, never a real element", () => {
+    const html = safeMarkdownHtml("> <script>alert(1)</script>");
+    expect(html).not.toContain("<script>");
+    expect(html).toBe("<blockquote><p>&lt;script&gt;alert(1)&lt;/script&gt;</p></blockquote>");
+  });
+
+  it("escapes an onerror attribute inside a nested list item to inert text, never a real element", () => {
+    const html = safeMarkdownHtml("- top\n  - <img src=x onerror=alert(1)>");
+    expect(html).not.toContain("<img");
+    expect(html).toBe("<ul><li>top<ul><li>&lt;img src=x onerror=alert(1)&gt;</li></ul></li></ul>");
+  });
 });

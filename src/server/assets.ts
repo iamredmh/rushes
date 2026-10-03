@@ -23,6 +23,16 @@ export interface Asset {
   lane?: string;
   variant?: string;
   note?: string;
+  /** The human display name for a take or variant (its own name, or "Take N") -- `name` stays
+   *  the file's basename, since Download/Save-as need that for the real file; this is what the
+   *  dashboard shows instead when it's present. */
+  label?: string;
+  /** The lane's own name (distinct from `lane`, its id), for a voice/music/sfx row's secondary
+   *  text. */
+  laneName?: string;
+  /** A voice/music/sfx variant's own meta (e.g. {bpm: 120, key: "A minor"}), for the same
+   *  secondary text. Only present when the variant actually has any. */
+  meta?: Record<string, string | number>;
 }
 
 /**
@@ -118,7 +128,7 @@ async function fileAsset(
   store: Store,
   kind: AssetKind,
   path: string,
-  extra: Partial<Pick<Asset, "video" | "version" | "section" | "lane" | "variant" | "note">>,
+  extra: Partial<Pick<Asset, "video" | "version" | "section" | "lane" | "variant" | "note" | "label" | "laneName" | "meta">>,
 ): Promise<Asset> {
   const abs = fromManifestPath(store.root, path);
   const info = await statInfo(abs);
@@ -169,11 +179,12 @@ async function dirFileNames(store: Store, dir: string, exts?: ReadonlySet<string
  * because this only ever reads one directory level.
  */
 async function discoveredLibraryPaths(store: Store): Promise<{ doc: string[]; caption: string[]; export: string[] }> {
-  const [doc, caption, exportNames] = await Promise.all([
-    dirFileNames(store, ".", DOC_EXT),
-    dirFileNames(store, ".", CAPTION_EXT),
-    dirFileNames(store, "exports"),
-  ]);
+  // One readdir of the project root serves both doc and caption (§16.2's two root extension
+  // sets), rather than reading the same directory twice over just to apply a different filter.
+  const [rootNames, exportNames] = await Promise.all([dirFileNames(store, "."), dirFileNames(store, "exports")]);
+  const extOf = (n: string) => extname(n).toLowerCase().slice(1);
+  const doc = rootNames.filter((n) => DOC_EXT.has(extOf(n)));
+  const caption = rootNames.filter((n) => CAPTION_EXT.has(extOf(n)));
   return { doc, caption, export: exportNames.map((n) => `exports/${n}`) };
 }
 
@@ -197,10 +208,22 @@ async function libraryAssets(store: Store, project: Project): Promise<Asset[]> {
   return out;
 }
 
-function variantEntries(project: Project, stage: LaneStage): { lane: string; variant: string; file: string }[] {
+function variantEntries(
+  project: Project,
+  stage: LaneStage,
+): { lane: string; laneName: string; variant: string; label: string; meta: Record<string, string | number> | undefined; file: string }[] {
   return project.lanes
     .filter((lane) => lane.stage === stage)
-    .flatMap((lane) => lane.variants.map((variant) => ({ lane: lane.id, variant: variant.id, file: variant.file })));
+    .flatMap((lane) =>
+      lane.variants.map((variant) => ({
+        lane: lane.id,
+        laneName: lane.name,
+        variant: variant.id,
+        label: variant.name,
+        meta: Object.keys(variant.meta).length > 0 ? variant.meta : undefined,
+        file: variant.file,
+      })),
+    );
 }
 
 /**
@@ -213,15 +236,20 @@ export async function listAssets(store: Store, project: Project, script: Script)
   const cutEntries = project.videos.flatMap((video) =>
     [...video.versions].reverse().map((version) => ({ video: video.id, version: version.id, file: version.file })),
   );
-  const takeEntries = script.sections.flatMap((section) => section.takes.map((take) => ({ section: section.id, file: take.file })));
+  // A take has no name of its own in script.json (just an id and the text it was read against),
+  // so its label is its ordinal within the section -- "Take 1", "Take 2" -- rather than the file
+  // name Download/Save-as still need under `name`.
+  const takeEntries = script.sections.flatMap((section) =>
+    section.takes.map((take, i) => ({ section: section.id, file: take.file, label: `Take ${i + 1}` })),
+  );
 
   const [[freshNames, oldNames], cuts, takes, voice, music, sfx] = await Promise.all([
     Promise.all([pngNames(store, SCREENSHOT_DIRS[0][0]), pngNames(store, SCREENSHOT_DIRS[1][0])]),
     Promise.all(cutEntries.map((e) => fileAsset(store, "cut", e.file, { video: e.video, version: e.version }))),
-    Promise.all(takeEntries.map((e) => fileAsset(store, "take", e.file, { section: e.section }))),
-    Promise.all(variantEntries(project, "voice").map((e) => fileAsset(store, "voice", e.file, { lane: e.lane, variant: e.variant }))),
-    Promise.all(variantEntries(project, "music").map((e) => fileAsset(store, "music", e.file, { lane: e.lane, variant: e.variant }))),
-    Promise.all(variantEntries(project, "sfx").map((e) => fileAsset(store, "sfx", e.file, { lane: e.lane, variant: e.variant }))),
+    Promise.all(takeEntries.map((e) => fileAsset(store, "take", e.file, { section: e.section, label: e.label }))),
+    Promise.all(variantEntries(project, "voice").map((e) => fileAsset(store, "voice", e.file, { lane: e.lane, laneName: e.laneName, variant: e.variant, label: e.label, meta: e.meta }))),
+    Promise.all(variantEntries(project, "music").map((e) => fileAsset(store, "music", e.file, { lane: e.lane, laneName: e.laneName, variant: e.variant, label: e.label, meta: e.meta }))),
+    Promise.all(variantEntries(project, "sfx").map((e) => fileAsset(store, "sfx", e.file, { lane: e.lane, laneName: e.laneName, variant: e.variant, label: e.label, meta: e.meta }))),
   ]);
   const [fresh, old] = await Promise.all([
     scanScreenshotDir(store, freshNames, SCREENSHOT_DIRS[0][1], SCREENSHOT_DIRS[0][2], project),

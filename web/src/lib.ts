@@ -144,6 +144,23 @@ export function formatBytes(bytes: number): string {
 }
 
 /**
+ * A Voiceover/Music/Sound effects row's secondary line: the lane's own name, then each of the
+ * variant's meta entries, joined with " · ". A numeric entry gets its key as a unit suffix
+ * (`{bpm: 120}` -> "120 BPM"); a string entry is already self-explanatory and shown as-is
+ * (`{key: "A minor"}` -> "A minor"). Null when there's nothing to show.
+ */
+export function metaLine(laneName?: string, meta?: Record<string, string | number>): string | null {
+  const parts: string[] = [];
+  if (laneName) parts.push(laneName);
+  if (meta) {
+    for (const [key, value] of Object.entries(meta)) {
+      parts.push(typeof value === "number" ? `${value} ${key.toUpperCase()}` : String(value));
+    }
+  }
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+/**
  * §16.3: the only extensions Open will act on, lower-case and without the dot. A web-side copy of
  * src/server/reveal.ts's OPEN_SAFE_EXT (deliberately duplicated rather than imported, since the
  * web bundle never pulls in server code) -- a unit test asserts the two stay equal. svg is
@@ -240,20 +257,28 @@ export interface FilmGroup {
 }
 
 /**
- * Groups already-ordered items under "Film · vN" headings (§16.1), without reordering them --
- * a run of consecutive items sharing the same film and version becomes one group, so calling
- * this on output already sorted Newest/Oldest keeps that order intact.
+ * Groups every item under its "Film · vN" heading (§16.1) -- every item with that heading,
+ * never just a run of adjacent ones, so two screenshots of the same film and version taken
+ * apart in time still land in one group rather than fragmenting into two. `items` must already
+ * be sorted the way the caller wants (Newest or Oldest first, as `folderItems` leaves them):
+ * groups come out ordered by each one's first item in that order -- which is exactly the
+ * group's newest item under a Newest sort, or its oldest under Oldest -- and the items inside
+ * each group keep their relative order from the input, so they stay sorted too.
  */
 export function groupByFilm(items: Asset[], videos: Video[] = []): FilmGroup[] {
-  const groups: FilmGroup[] = [];
+  const byHeading = new Map<string, FilmGroup>();
   for (const a of items) {
     const video = videos.find((v) => v.id === a.video);
     const heading = video && a.version ? `${video.name} · ${a.version}` : null;
-    const last = groups[groups.length - 1];
-    if (last && last.heading === heading) last.items.push(a);
-    else groups.push({ heading, items: [a] });
+    const key = heading ?? "\u0000";
+    let group = byHeading.get(key);
+    if (!group) {
+      group = { heading, items: [] };
+      byHeading.set(key, group);
+    }
+    group.items.push(a);
   }
-  return groups;
+  return [...byHeading.values()];
 }
 
 /** Normalised box from two pointer positions inside an element of size w × h. */

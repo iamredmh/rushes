@@ -107,6 +107,11 @@ describe("media", () => {
     expect(whole.headers.get("content-type")).toBe("video/mp4");
     expect(whole.headers.get("accept-ranges")).toBe("bytes");
     expect(whole.headers.get("cross-origin-resource-policy")).toBe("same-origin");
+    // C1: an inline-safe type (video) still gets the CSP/nosniff pair every /media response
+    // carries, and isn't forced to a download.
+    expect(whole.headers.get("content-security-policy")).toBe("sandbox; default-src 'none'");
+    expect(whole.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(whole.headers.get("content-disposition")).toBeNull();
     expect((await whole.arrayBuffer()).byteLength).toBe(1000);
     const part = await call(`/media?path=${encodeURIComponent("renders/hero v1.mp4")}`, { headers: { range: "bytes=100-199" } });
     expect(part.status).toBe(206);
@@ -132,6 +137,43 @@ describe("media", () => {
     const res = await call("/media?path=brief.md");
     expect(res.status).toBe(200);
     expect(await res.text()).toBe("# Brief\n");
+  });
+
+  it("serves an image inline, with the CSP/nosniff pair, never forced to a download", async () => {
+    const { call, post, root } = await setup();
+    await writeFile(join(root, "image.png"), Buffer.alloc(16, 1));
+    await post("/api/files", { file: "image.png", kind: "image" });
+    const res = await call("/media?path=image.png");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/png");
+    expect(res.headers.get("content-disposition")).toBeNull();
+    expect(res.headers.get("content-security-policy")).toBe("sandbox; default-src 'none'");
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+  });
+
+  it("C1: never serves an exports/*.html file inline -- octet-stream, forced attachment, CSP", async () => {
+    const { call, root } = await setup();
+    await mkdir(join(root, "exports"), { recursive: true });
+    await writeFile(join(root, "exports", "x.html"), "<script>fetch('/api/shutdown',{method:'POST'})</script>");
+    const res = await call("/media?path=exports%2Fx.html");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("application/octet-stream");
+    expect(res.headers.get("content-disposition")).toContain("attachment");
+    expect(res.headers.get("content-disposition")).toContain('filename="x.html"');
+    expect(res.headers.get("content-security-policy")).toBe("sandbox; default-src 'none'");
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+  });
+
+  it("C1: never serves an exports/*.svg file inline -- octet-stream, forced attachment, CSP", async () => {
+    const { call, root } = await setup();
+    await mkdir(join(root, "exports"), { recursive: true });
+    await writeFile(join(root, "exports", "x.svg"), '<svg onload="alert(1)"></svg>');
+    const res = await call("/media?path=exports%2Fx.svg");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("application/octet-stream");
+    expect(res.headers.get("content-disposition")).toContain("attachment");
+    expect(res.headers.get("content-security-policy")).toBe("sandbox; default-src 'none'");
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
   });
 
   it("says when a registered file has gone missing", async () => {

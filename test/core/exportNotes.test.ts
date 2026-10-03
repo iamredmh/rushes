@@ -36,14 +36,18 @@ describe("notesMarkdown", () => {
     );
   });
 
-  it("groups Picture notes under a heading per film and version, in the project's own order", () => {
+  it("groups Picture notes under a heading per film and version, in the project's own order, sorted by time within a group (whole notes last)", () => {
     const p = project();
     addVersion(p, { video: "Hero 60s", file: "renders/hero_v1.mp4" });
     addVersion(p, { video: "Hero 60s", file: "renders/hero_v2.mp4" });
     addVersion(p, { video: "Teaser", file: "renders/teaser_v1.mp4" });
     const notes: NotesFile = { schema: 1, rev: 0, notes: [] };
     addNote(notes, { stage: "picture", video: "hero-60s", version: "v2", scope: "point", t: 12.4, text: "Logo hold is too short" });
+    // Hero 60s · v1 gets three notes, added out of timecode order and with a whole-track note
+    // in the middle, to prove sorting runs by t (whole last) rather than creation order.
     addNote(notes, { stage: "picture", video: "hero-60s", version: "v1", scope: "range", t: 31.05, tOut: 33.1, text: "Music swells too early" });
+    addNote(notes, { stage: "picture", video: "hero-60s", version: "v1", scope: "whole", text: "Overall pacing feels slow" });
+    addNote(notes, { stage: "picture", video: "hero-60s", version: "v1", scope: "point", t: 5, text: "Opening logo too dark" });
     addNote(notes, { stage: "picture", video: "teaser", version: "v1", scope: "whole", text: "Needs a stronger open" });
 
     const md = notesMarkdown(p, notes.notes, new Date(2026, 9, 3, 9, 0));
@@ -55,7 +59,9 @@ describe("notesMarkdown", () => {
         "## Picture",
         "",
         "### Hero 60s · v1",
+        "- **0:05.00** · to do — Opening logo too dark",
         "- **0:31.05–0:33.10** · to do — Music swells too early",
+        "- **Whole** · to do — Overall pacing feels slow",
         "",
         "### Hero 60s · v2",
         "- **0:12.40** · to do — Logo hold is too short",

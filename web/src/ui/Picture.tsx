@@ -264,6 +264,24 @@ export function Picture({ video, version, fps, notes, toast, onChanged, onPendin
   const rangeLabel = range.in === null ? null : range.out === null ? `${fmt(range.in)} →` : noteTime(range.in, range.out);
   const placeholder = range.in !== null && range.out === null ? "Set an Out point" : `Note at ${rangeLabel && range.out !== null ? rangeLabel : fmt(t)}`;
 
+  /** Duration, aspect and the once-only start seek, read off a <video> that's reached
+   *  HAVE_METADATA. Shared between the element's own onLoadedMetadata handler and the ref
+   *  callback below, which catches up on a video whose metadata was already available (a tiny
+   *  local file can finish loading before this component's listener is even attached, especially
+   *  under load -- loadedmetadata only ever fires once, so missing it would otherwise leave the
+   *  frame letterboxed at the 16:9 default forever). */
+  const applyMetadata = (v: HTMLVideoElement) => {
+    setDuration(v.duration || version.duration || 0);
+    if (v.videoWidth && v.videoHeight) setAspect(v.videoWidth / v.videoHeight);
+    if (!startApplied.current) {
+      startApplied.current = true;
+      if (startAt) {
+        v.currentTime = Math.min(startAt, v.duration || startAt);
+        setT(v.currentTime);
+      }
+    }
+  };
+
   return (
     <div class="split">
       <div class="stack">
@@ -272,22 +290,19 @@ export function Picture({ video, version, fps, notes, toast, onChanged, onPendin
             {broken && <div class="msg">This file won't play in a browser. Ask your agent for an H.264 MP4 of this cut.</div>}
             <video
               hidden={broken}
-              ref={(el) => { ref.current = el; if (playerRef) playerRef.current = el; }}
+              ref={(el) => {
+                ref.current = el;
+                if (playerRef) playerRef.current = el;
+                // Catches up a video that reached HAVE_METADATA (or further) before this ref ran
+                // -- see applyMetadata's comment. Harmless to repeat on every re-render once
+                // that's already happened: setDuration/setAspect bail out on an equal value, and
+                // startApplied guards the once-only seek.
+                if (el && el.readyState >= 1) applyMetadata(el);
+              }}
               src={mediaUrl(version.file)}
               preload="auto"
               playsInline
-              onLoadedMetadata={(e) => {
-                const v = e.target as HTMLVideoElement;
-                setDuration(v.duration || version.duration || 0);
-                if (v.videoWidth && v.videoHeight) setAspect(v.videoWidth / v.videoHeight);
-                if (!startApplied.current) {
-                  startApplied.current = true;
-                  if (startAt) {
-                    v.currentTime = Math.min(startAt, v.duration || startAt);
-                    setT(v.currentTime);
-                  }
-                }
-              }}
+              onLoadedMetadata={(e) => applyMetadata(e.target as HTMLVideoElement)}
               onTimeUpdate={(e) => !playing && setT((e.target as HTMLVideoElement).currentTime)}
               onSeeked={(e) => setT((e.target as HTMLVideoElement).currentTime)}
               onPlay={() => setPlaying(true)}

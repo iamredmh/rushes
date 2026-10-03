@@ -15,7 +15,7 @@ import { lstat, mkdir, readFile, rename, stat, writeFile } from "node:fs/promise
 import { existsSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { contentDisposition, contentType, inside, sendFile } from "./files.js";
+import { GRAB_PATH, SCREENSHOT_PATH, contentDisposition, contentType, inside, isInlineSafeType, mediaSecurityHeaders, registeredMedia, sendFile } from "./files.js";
 import { candidatePaths, listAssets, fpsFor, screenshotName } from "./assets.js";
 import { osRevealer, osOpener, OPEN_SAFE_EXT, type Revealer, type Opener } from "./reveal.js";
 import type { CorruptEvent } from "./watch.js";
@@ -285,16 +285,28 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   app.get("/media", async (c) => {
     const path = c.req.query("path") ?? "";
     const [project, script] = await Promise.all([store.read("project"), store.read("script")]);
-    // candidatePaths (§16's own allow-list, shared with /api/reveal and /api/open) is a superset
-    // of registeredMedia/GRAB_PATH/SCREENSHOT_PATH: it adds every auto-discovered doc, caption
-    // and export (§16.2) -- a project's own *.md at the root, say, was never registered through
-    // rushes_add_file, so it would otherwise 404 here even though the library lists it and Open
-    // and Reveal already treat it as a valid asset.
-    const candidates = await candidatePaths(store, project, script);
-    if (!candidates.has(path)) throw new NotFoundError("media", path);
-    const res = await sendFile(fromManifestPath(store.root, path), c.req.header("range"));
+    // Fast path (no filesystem reads beyond the file itself): registeredMedia is a project.json
+    // lookup, and GRAB_PATH/SCREENSHOT_PATH are plain regexes. This covers every cut, take,
+    // variant and registered library file, and every screenshot/grab -- by far the common case,
+    // and the one a byte-range video seek hits over and over. Only a path that misses all three
+    // falls through to candidatePaths, which does the readdir-backed discovery (§16.2's
+    // auto-discovered docs/captions/exports) that a registered path never needs.
+    const known = registeredMedia(project, script).has(path) || GRAB_PATH.test(path) || SCREENSHOT_PATH.test(path);
+    if (!known) {
+      const candidates = await candidatePaths(store, project, script);
+      if (!candidates.has(path)) throw new NotFoundError("media", path);
+    }
+    // C1: a type a browser could render as a document (HTML, XML, SVG -- an SVG can carry
+    // script -- or anything this server doesn't otherwise recognise) is never served inline,
+    // whatever asked for it: exports/ in particular takes any file with no extension filter, so
+    // without this an exports/x.html would be served as text/html on the dashboard's own origin,
+    // free to call its API. Forced to a generic download instead, regardless of ?download=1.
+    const type = contentType(path);
+    const inlineSafe = isInlineSafeType(type);
+    const res = await sendFile(fromManifestPath(store.root, path), c.req.header("range"), inlineSafe ? type : "application/octet-stream");
     res.headers.set("cross-origin-resource-policy", "same-origin");
-    if (res.status !== 404 && c.req.query("download") === "1") {
+    for (const [name, value] of Object.entries(mediaSecurityHeaders())) res.headers.set(name, value);
+    if (res.status !== 404 && (!inlineSafe || c.req.query("download") === "1")) {
       res.headers.set("content-disposition", contentDisposition(basename(path)));
     }
     return res;

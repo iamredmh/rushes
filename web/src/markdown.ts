@@ -40,18 +40,48 @@ function inlineFormat(text: string): string {
   return out;
 }
 
+interface ListItemMatch {
+  indent: number;
+  ordered: boolean;
+  content: string;
+}
+
+/** `  - text` / `1. text`, at any indent -- the caller decides whether the indent makes it a
+ *  top-level or (one level of) nested item. */
+function matchListItem(line: string): ListItemMatch | null {
+  const m = /^( *)([-*]|\d+\.)\s+(.*)$/.exec(line);
+  if (!m) return null;
+  return { indent: m[1].length, ordered: /\d/.test(m[2]), content: m[3] };
+}
+
+/** `> text`, or just `>` on its own, matched against ALREADY-ESCAPED text -- escapeHtml turns
+ *  every literal `>` into `&gt;` before this ever runs, `>` being one of the five characters it
+ *  escapes, so the marker to look for here is the escaped form, not a literal `>`. Only an
+ *  actual `>` in the source produces that exact sequence (a literal "&gt;" typed in the source
+ *  would itself have had its `&` escaped to `&amp;` first), so this never misfires. Returns the
+ *  quoted text, or null for a non-quote line. */
+function matchBlockquote(line: string): string | null {
+  const m = /^&gt;\s?(.*)$/.exec(line);
+  return m ? m[1] : null;
+}
+
 /**
  * Renders a small, safe Markdown subset to an HTML string: `#`-`###` headings, paragraphs,
- * `-`/`*` and `1.` lists, `**bold**`, `*italic*`, `` `code` `` and fenced code blocks. Escapes
+ * `-`/`*` and `1.` lists (with one level of nesting, indented two or more spaces under a list
+ * item), `> ` blockquotes, `**bold**`, `*italic*`, `` `code` `` and fenced code blocks. Escapes
  * all HTML first (see escapeHtml), so `<script>`, an `onerror` attribute or any other raw markup
- * in the source text always comes out as inert, visible text -- never a real element. Links
- * render as their text only; bare URLs are left as plain text, never auto-linked.
+ * in the source text always comes out as inert, visible text -- never a real element, including
+ * inside a blockquote or a nested list item. Links render as their text only; bare URLs are left
+ * as plain text, never auto-linked.
  */
 export function safeMarkdownHtml(text: string): string {
   const escaped = escapeHtml(text);
   const lines = escaped.split(/\r\n|\r|\n/);
   const html: string[] = [];
   let para: string[] = [];
+  // Each item already holds its fully-rendered inner HTML (inline-formatted text, plus any
+  // nested <ul>/<ol> appended) -- unlike `para`, which collects raw lines for flushPara to join
+  // and format once.
   let list: { ordered: boolean; items: string[] } | null = null;
 
   const flushPara = () => {
@@ -63,7 +93,7 @@ export function safeMarkdownHtml(text: string): string {
   const flushList = () => {
     if (list) {
       const tag = list.ordered ? "ol" : "ul";
-      html.push(`<${tag}>${list.items.map((item) => `<li>${inlineFormat(item)}</li>`).join("")}</${tag}>`);
+      html.push(`<${tag}>${list.items.map((item) => `<li>${item}</li>`).join("")}</${tag}>`);
       list = null;
     }
   };
@@ -96,18 +126,44 @@ export function safeMarkdownHtml(text: string): string {
       continue;
     }
 
-    const ordered = /^\d+\.\s+(.*)$/.exec(line);
-    const unordered = ordered ? null : /^[-*]\s+(.*)$/.exec(line);
-    if (ordered || unordered) {
+    const quoted = matchBlockquote(line);
+    if (quoted !== null) {
       flushPara();
-      const isOrdered = !!ordered;
-      const content = (ordered ?? unordered)![1];
-      if (!list || list.ordered !== isOrdered) {
-        flushList();
-        list = { ordered: isOrdered, items: [] };
-      }
-      list.items.push(content);
+      flushList();
+      const quotedLines = [quoted];
       i++;
+      let next: string | null;
+      while (i < lines.length && (next = matchBlockquote(lines[i])) !== null) {
+        quotedLines.push(next);
+        i++;
+      }
+      html.push(`<blockquote><p>${inlineFormat(quotedLines.join(" "))}</p></blockquote>`);
+      continue;
+    }
+
+    const item = matchListItem(line);
+    if (item && item.indent < 2) {
+      flushPara();
+      if (!list || list.ordered !== item.ordered) {
+        flushList();
+        list = { ordered: item.ordered, items: [] };
+      }
+      let inner = inlineFormat(item.content);
+      i++;
+      // One level of nesting: lines directly under this item, indented two or more spaces,
+      // that are themselves list items. A homogeneous nested run becomes one nested list,
+      // using whichever marker (-/* or N.) its own first line used.
+      const nested: ListItemMatch[] = [];
+      let nextItem: ListItemMatch | null;
+      while (i < lines.length && (nextItem = matchListItem(lines[i])) && nextItem.indent >= 2) {
+        nested.push(nextItem);
+        i++;
+      }
+      if (nested.length) {
+        const nestedTag = nested[0].ordered ? "ol" : "ul";
+        inner += `<${nestedTag}>${nested.map((n) => `<li>${inlineFormat(n.content)}</li>`).join("")}</${nestedTag}>`;
+      }
+      list.items.push(inner);
       continue;
     }
 

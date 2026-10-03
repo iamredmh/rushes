@@ -870,6 +870,35 @@ test("audio plays inline, one at a time, and stops when you leave the folder", a
   await expect.poll(() => audio.evaluate((el) => (el as HTMLAudioElement).paused)).toBe(true);
 });
 
+test("audio stops when you switch tabs (Assets → Picture and back)", async ({ page, rushes }) => {
+  await rushes.addCut();
+  await copyFile(CLIP, join(rushes.root, "bed.mp4"));
+  await rushes.api("POST", "/api/variants", { stage: "music", name: "Bed", file: "bed.mp4" });
+
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await page.keyboard.press("7");
+  // A cut also exists (to unlock Picture), so Cuts -- not Music -- is the default folder.
+  await page.getByRole("navigation", { name: "Folders" }).getByRole("button", { name: /^Music/ }).click();
+  await expect(page.locator(".aheader h2")).toContainText("Music");
+  await page.getByRole("button", { name: "Play" }).click();
+  await expect.poll(() => page.locator("audio").evaluate((el) => (el as HTMLAudioElement).paused)).toBe(false);
+
+  // Assets unmounts entirely on a tab switch, taking the shared <audio> element with it --
+  // there's nothing left in the DOM that could keep playing.
+  await page.keyboard.press("2");
+  await videoReady(page);
+  await expect(page.locator("audio")).toHaveCount(0);
+
+  // Back on Assets, Music gets a fresh player that never auto-resumes. (Cuts is the default
+  // folder again -- the selection isn't remembered across a tab round trip -- so select Music.)
+  await page.keyboard.press("7");
+  await page.getByRole("navigation", { name: "Folders" }).getByRole("button", { name: /^Music/ }).click();
+  await expect(page.locator(".aheader h2")).toContainText("Music");
+  await expect(page.locator("audio")).toHaveCount(1);
+  await expect.poll(() => page.locator("audio").evaluate((el) => (el as HTMLAudioElement).paused)).toBe(true);
+});
+
 test("Open is offered for a doc and not for an unsafe file, and Export notes adds a file to Exports", async ({ page, rushes }) => {
   await writeFile(join(rushes.root, "brief.md"), "# Brief\n");
   await writeFile(join(rushes.root, "x.command"), "#!/bin/sh\necho hi\n");

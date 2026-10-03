@@ -223,7 +223,7 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .afolder-btn { display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 0; background: transparent; color: var(--text-2); font: 500 15px/1.3 var(--sans); text-align: left; padding: 9px 10px; border-radius: var(--r); cursor: pointer; }
 .afolder-btn:hover { background: var(--hover); color: var(--text); }
 .afolder-btn[aria-current="true"] { background: var(--accent-soft); color: var(--accent-2); }
-.afolder-btn .count { background: transparent; color: inherit; min-width: 20px; height: 20px; font-size: 13px; line-height: 20px; opacity: 0.8; }
+.afolder-btn .count { background: transparent; color: inherit; min-width: 22px; height: 22px; font-size: 15px; line-height: 22px; opacity: 0.8; }
 .afolder-root { display: flex; align-items: center; gap: 8px; border: 0; background: transparent; color: var(--text-3); font: 500 14px/1.3 var(--sans); text-align: left; padding: 9px 10px; margin-top: 6px; border-top: 1px solid var(--line); border-radius: var(--r); cursor: pointer; }
 .afolder-root:hover { background: var(--hover); color: var(--text); }
 .afolder-root svg.ic { width: 16px; height: 16px; }
@@ -241,11 +241,14 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .abody.split .alist { overflow: auto; }
 .apreview { background: var(--raised); border-radius: var(--r-lg); padding: 20px; overflow: auto; max-height: 72vh; color: var(--text); }
 .apreview .markdown h1, .apreview .markdown h2, .apreview .markdown h3 { margin: 0 0 10px; }
-.apreview .markdown p, .apreview .markdown ul, .apreview .markdown ol, .apreview .markdown pre { margin: 0 0 12px; }
+.apreview .markdown p, .apreview .markdown ul, .apreview .markdown ol, .apreview .markdown pre, .apreview .markdown blockquote { margin: 0 0 12px; }
+.apreview .markdown ul ul, .apreview .markdown ol ol, .apreview .markdown ul ol, .apreview .markdown ol ul { margin: 6px 0 0; }
+.apreview .markdown blockquote { padding-left: 14px; border-left: 2px solid var(--line-2); color: var(--text-2); }
+.apreview .markdown blockquote p { margin: 0; }
 .apreview .markdown code { background: var(--app); border-radius: 4px; padding: 1px 5px; font-family: var(--mono); font-size: 0.92em; }
 .apreview .markdown pre { background: var(--app); border-radius: var(--r); padding: 12px; overflow: auto; }
 .apreview .markdown pre code { background: transparent; padding: 0; }
-.apreview .plain { margin: 0; white-space: pre-wrap; word-break: break-word; font-family: var(--mono); font-size: 14px; color: var(--text); }
+.apreview .plain { margin: 0; white-space: pre-wrap; word-break: break-word; font-family: var(--sans); font-size: 15px; color: var(--text); }
 .atrunc { margin-top: 12px; color: var(--text-3); font-size: 13px; }
 .aempty { color: var(--text-3); font-size: 15px; margin: 8px 0; }
 
@@ -266,6 +269,9 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .ainfo { display: grid; gap: 4px; min-width: 0; flex: 1; }
 .atitle { font-size: 15px; font-weight: 500; color: var(--text); display: flex; align-items: center; gap: 8px; overflow-wrap: anywhere; }
 .asub { font-size: 15px; color: var(--text-2); overflow-wrap: anywhere; }
+/* A voiceover/music/sfx row's lane + meta line (§16, v3): same size as .asub, but dimmer --
+   secondary to the track's own name, not a version note. */
+.atrackmeta { font: 15px/1.4 var(--sans); color: var(--text-3); overflow-wrap: anywhere; }
 .afolder { font-size: 13px; color: var(--text-3); }
 .ameta { font-size: 15px; color: var(--text-3); }
 .amiss { color: var(--over); font-size: 10px; line-height: 1; }

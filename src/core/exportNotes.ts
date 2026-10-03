@@ -67,7 +67,12 @@ export function notesMarkdown(project: Project, notes: Note[], now: Date): strin
     if (stage === "picture") {
       for (const video of project.videos) {
         for (const version of video.versions) {
-          const group = stageNotes.filter((n) => n.video === video.id && n.version === version.id);
+          const group = stageNotes
+            .filter((n) => n.video === video.id && n.version === version.id)
+            // By timecode within the film and version, a whole-track note (t === null) last --
+            // notes were otherwise listed in whatever order they happened to be created in,
+            // which usually isn't where they land on the timeline.
+            .sort((a, b) => (a.t === null ? 1 : b.t === null ? -1 : a.t - b.t));
           if (group.length === 0) continue;
           lines.push("", `### ${video.name} · ${version.id}`);
           for (const n of group) lines.push(...noteLines(n));

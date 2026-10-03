@@ -75,6 +75,10 @@ async function fetchPreview(path: string): Promise<{ text: string; truncated: bo
     }
     text += decoder.decode(value, { stream: true });
   }
+  // Flushes the decoder: with { stream: true } throughout, a multi-byte character split across
+  // the last two chunks (or across the 1 MB cut itself) stays buffered inside the decoder and
+  // would otherwise just vanish from the end of the text instead of decoding correctly.
+  text += decoder.decode();
   return { text, truncated };
 }
 
