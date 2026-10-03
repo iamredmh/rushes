@@ -293,6 +293,22 @@ describe("addVariant", () => {
   });
 });
 
+describe("addVariant rounds (§18.4)", () => {
+  it("creates a lane named for the round, slugged for its id", () => {
+    const p = empty();
+    const { lane } = addVariant(p, { stage: "voice", name: "Gerald", file: "media/g.wav", round: "Round 1 · Voices" });
+    expect(lane).toMatchObject({ id: "round-1-voices", name: "Round 1 · Voices", stage: "voice" });
+    const second = addVariant(p, { stage: "voice", name: "Jane", file: "media/j.wav", round: "Round 1 · Voices" });
+    expect(second.lane.id).toBe("round-1-voices");
+    expect(p.lanes).toHaveLength(1);
+  });
+  it("lets an explicit lane win over round", () => {
+    const p = empty();
+    const { lane } = addVariant(p, { stage: "voice", name: "Gerald", file: "media/g.wav", lane: "vo-a", round: "Round 9" });
+    expect(lane.id).toBe("vo-a");
+  });
+});
+
 describe("addFile", () => {
   it("defaults the name to the file's base name and stamps addedAt", () => {
     const p = empty();

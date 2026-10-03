@@ -89,8 +89,14 @@ function resolveVersion(video: Video, versionId: string | undefined): Version {
 
 export interface AddVariantInput {
   stage: LaneStage;
-  /** Lane id. Defaults to the stage name, e.g. "music". */
+  /** Lane id. Defaults to the round name, slugged, or the stage name, e.g. "music". Wins over `round`. */
   lane?: string;
+  /**
+   * Round name for voice reads, e.g. "Round 2 · Gerald, tone". Reads in one round are compared
+   * side by side; a new direction gets a new round. With no `lane`, the lane id is this name
+   * slugged, and a new lane is created on first use, named for it.
+   */
+  round?: string;
   name: string;
   file: string;
   meta?: Record<string, string | number>;
@@ -100,11 +106,11 @@ export interface AddVariantInput {
 const LANE_NAMES: Record<LaneStage, string> = { voice: "Voiceover", music: "Music", sfx: "Sound effects" };
 
 export function addVariant(p: Project, input: AddVariantInput): { lane: Lane; variant: Variant } {
-  const laneId = slugify(input.lane ?? input.stage);
+  const laneId = slugify(input.lane ?? input.round ?? input.stage);
   let lane = p.lanes.find((l) => l.id === laneId);
   if (lane && lane.stage !== input.stage) throw new InvalidError(`Lane "${laneId}" belongs to ${lane.stage}, not ${input.stage}`);
   if (!lane) {
-    lane = { id: laneId, stage: input.stage, name: input.lane ?? LANE_NAMES[input.stage], variants: [] };
+    lane = { id: laneId, stage: input.stage, name: input.round ?? input.lane ?? LANE_NAMES[input.stage], variants: [] };
     p.lanes.push(lane);
   }
   const cues: Cue[] = [];

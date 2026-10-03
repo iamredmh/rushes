@@ -32,7 +32,16 @@ describe("tabStates", () => {
     expect(unlocked(c)).toMatchObject({ music: true, mix: false });
     addVersion(c.project, { video: "Hero", file: "v1.mp4" });
     expect(unlocked(c)).toMatchObject({ picture: true, mix: true, voice: false, sfx: false });
+    addVariant(c.project, { stage: "voice", name: "Gerald", file: "g.wav", round: "Round 1" });
+    expect(unlocked(c).voice).toBe(true);
+  });
+
+  it("does not unlock Voiceover from script takes alone; only a voice lane with a read does (§18.4)", () => {
+    const c = ctx();
+    setSections(c.script, [{ start: 0, end: 10, current: "Line" }]);
     addTake(c.script, "s1", { file: "t.wav" });
+    expect(unlocked(c).voice).toBe(false);
+    addVariant(c.project, { stage: "voice", name: "Gerald", file: "g.wav", round: "Round 1" });
     expect(unlocked(c).voice).toBe(true);
   });
 
@@ -89,9 +98,9 @@ describe("createBatch", () => {
     expect(b.prompt).toContain("rushes_set_script");
   });
 
-  it("points an audio-stage batch (voice, music, sfx, mix) at the picks and the notes' marks (§17.7)", () => {
+  it("points an audio-stage batch (music, sfx, mix) at the picks and the notes' marks (§17.7)", () => {
     const c = ctx();
-    for (const stage of ["voice", "music", "sfx", "mix"] as const) {
+    for (const stage of ["music", "sfx", "mix"] as const) {
       addNote(c.notes, { stage, scope: "whole", text: "Fix it" });
       const b = createBatch(c, stage);
       expect(b.prompt).toContain(
@@ -100,11 +109,28 @@ describe("createBatch", () => {
     }
   });
 
+  it("points a voice batch at new whole reads by round, not at old marks-based fixes (§18.5)", () => {
+    const c = ctx();
+    addNote(c.notes, { stage: "voice", scope: "whole", text: "More sombre" });
+    const b = createBatch(c, "voice");
+    expect(b.prompt).toContain("new whole read");
+    expect(b.prompt).toContain("round");
+    expect(b.prompt).toContain("rushes_reply");
+  });
+
   it("keeps picture's own prompt wording (it doesn't go through picks)", () => {
     const c = ctx();
     addNote(c.notes, { stage: "picture", scope: "point", t: 1, text: "x" });
     const b = createBatch(c, "picture");
     expect(b.prompt).toContain("Use rushes_get_batch, fix each note, then rushes_reply with a fixT for each and rushes_add_version for the new cut.");
     expect(b.prompt).not.toContain("rushes_get_picks");
+  });
+
+  it("tells the script agent to re-record the picked voice as a new round when VO already exists (§18.5)", () => {
+    const c = ctx();
+    setSections(c.script, [{ start: 0, end: 5, current: "A" }]);
+    editSection(c.script, "s1", { proposed: "A2" });
+    const b = createBatch(c, "script");
+    expect(b.prompt).toContain("re-record the picked voice");
   });
 });

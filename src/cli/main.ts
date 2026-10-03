@@ -39,7 +39,7 @@ Usage
   rushes mcp                                        run the MCP server over stdio
   rushes status [dir]                               tabs and open items
   rushes add version <file> --video NAME [--note TEXT]
-  rushes add variant <music|sfx|voice> <file> --name NAME [--lane ID]
+  rushes add variant <music|sfx|voice> <file> --name NAME [--lane ID] [--round NAME]
   rushes add shots <file.json> --video NAME [--version V]
   rushes add file <path> --kind K [--name NAME] [--note TEXT] [--video V]
                                                     register a doc, image, caption, export, delivery or edit file
@@ -61,6 +61,7 @@ const OPTIONS = {
   video: { type: "string" },
   note: { type: "string" },
   lane: { type: "string" },
+  round: { type: "string" },
   stage: { type: "string" },
   status: { type: "string" },
   batch: { type: "string" },
@@ -265,7 +266,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         }
         if (what === "variant") {
           if (!a || !b || !o.name) return usage(io, "rushes add variant <music|sfx|voice> <file> --name NAME");
-          const r = await (await client()).post("/api/variants", { stage: a, file: resolve(io.cwd, b), name: o.name, lane: o.lane });
+          const r = await (await client()).post("/api/variants", { stage: a, file: resolve(io.cwd, b), name: o.name, lane: o.lane, round: o.round });
           io.out(`Added ${r.lane.name}: ${r.variant.name}`);
           return 0;
         }

@@ -14,7 +14,7 @@ function laneHasVariants(p: Project, stage: "voice" | "music" | "sfx"): boolean 
 
 export function tabStates(p: Project, s: Script, n: NotesFile): TabState[] {
   const picture = p.videos.some((v) => v.versions.length > 0);
-  const voice = s.sections.some((x) => x.takes.length > 0) || laneHasVariants(p, "voice");
+  const voice = laneHasVariants(p, "voice");
   const music = laneHasVariants(p, "music");
   const sfx = laneHasVariants(p, "sfx");
   const unlocked: Record<Stage, boolean> = {

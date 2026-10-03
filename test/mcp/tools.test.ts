@@ -90,6 +90,13 @@ describe("MCP tools", () => {
     await t.close();
   });
 
+  it("rushes_add_variant passes round through, naming and slugging the lane for it (§18.4)", async () => {
+    const t = await connect();
+    const r = await t.call("rushes_add_variant", { stage: "voice", name: "Gerald", file: "g.wav", round: "Round 1 · Voices" });
+    expect(r.json.lane).toMatchObject({ id: "round-1-voices", name: "Round 1 · Voices", stage: "voice" });
+    await t.close();
+  });
+
   it("rushes_open's url is the project's own dashboard address", async () => {
     const t = await connect();
     const r = await t.call("rushes_open", { browser: false });

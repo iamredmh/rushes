@@ -85,9 +85,10 @@ export interface MixInput {
 }
 
 /**
- * The take a section's read uses: its pick, else its newest; null with no takes. One rule for the
- * mix and the VO span here, and the same rule as the dashboard's `readTake` (web/src/lib.ts), which
- * a parity test holds to this one.
+ * The take a section's read uses: its pick, else its newest; null with no takes. Kept for
+ * compatibility (§18.4: the mix and the VO span no longer use it at all -- takes are never
+ * mixed), and still the same rule as the dashboard's `readTake` (web/src/lib.ts), which a parity
+ * test holds to this one.
  */
 export function readTake(s: Pick<Section, "id" | "takes">, picks: Pick<Picks, "sections">): Take | null {
   if (s.takes.length === 0) return null;
@@ -96,35 +97,28 @@ export function readTake(s: Pick<Section, "id" | "takes">, picks: Pick<Picks, "s
 }
 
 /**
- * What the voice part of the mix is, resolved once for both `mixInputs` and the VO span: a picked
- * whole-read voice variant (the first voice lane, in manifest order, whose pick names one of its
- * variants), else the assembled read -- each section's `readTake` at the section's start.
+ * What the voice part of the mix is, resolved once for both `mixInputs` and the VO span (§18.4):
+ * the pick of the newest `voice` lane (round) that has one, walked from the newest (last in
+ * `project.lanes`) to the oldest. Takes are never mixed, however many a script section has.
  */
-type VoiceSource =
-  | { kind: "variant"; variant: Variant }
-  | { kind: "read"; takes: { section: Pick<Section, "start" | "end">; take: Take }[] };
+type VoiceSource = { kind: "variant"; variant: Variant } | { kind: "none" };
 
-function voiceSource(project: Project, script: Script, picks: Picks): VoiceSource {
-  for (const lane of project.lanes) {
-    if (lane.stage !== "voice") continue;
-    const pickedId = picks.lanes[lane.id];
-    const variant = pickedId ? lane.variants.find((v) => v.id === pickedId) : undefined;
+function voiceSource(project: Project, picks: Picks): VoiceSource {
+  // §18.4: the newest round (lane) with a pick; takes are never mixed.
+  const voice = project.lanes.filter((l) => l.stage === "voice");
+  for (let i = voice.length - 1; i >= 0; i--) {
+    const pickedId = picks.lanes[voice[i].id];
+    const variant = pickedId ? voice[i].variants.find((v) => v.id === pickedId) : undefined;
     if (variant) return { kind: "variant", variant };
   }
-  const takes: { section: Section; take: Take }[] = [];
-  for (const s of script.sections) {
-    const take = readTake(s, picks);
-    if (take) takes.push({ section: s, take });
-  }
-  return { kind: "read", takes };
+  return { kind: "none" };
 }
 
 /**
- * The files and offsets a mix of `lanes` is made from (§17.6) -- exactly what the Mix tab plays:
- * - voice: a picked whole-read voice variant *replaces* the assembled read entirely; otherwise
- *   each script section's picked take (or its newest) at the section's start. A voice variant is
- *   never used just because it's the only one, or the first -- only an explicit pick swaps in a
- *   whole alternative read.
+ * The files and offsets a mix of `lanes` is made from (§17.6, §18.4) -- exactly what the Mix tab
+ * plays:
+ * - voice: the pick of the newest round (voice lane) that has one. With no round picked, there is
+ *   no voice input at all -- takes are never mixed, however many a script section has.
  * - music: the picked variant of each music lane, at 0;
  * - sfx: the picked variant of each sfx lane, at 0.
  *
@@ -141,9 +135,8 @@ export function mixInputs(project: Project, script: Script, picks: Picks, lanes:
   };
 
   if (want.has("voice")) {
-    const voice = voiceSource(project, script, picks);
+    const voice = voiceSource(project, picks);
     if (voice.kind === "variant") add(voice.variant.file, 0, "voice");
-    else for (const { section, take } of voice.takes) add(take.file, section.start, "voice");
   }
 
   for (const stage of ["music", "sfx"] as const) {
@@ -230,30 +223,20 @@ export type DurationProbe = (absFile: string) => Promise<number | null>;
 const probeDuration: DurationProbe = async (file) => (await probe(file)).duration;
 
 /**
- * The VO's own span, from the same `voiceSource` the mix uses:
- * - the assembled read: from 0 to the latest point any used take reaches, worked out from script
- *   data alone -- a take's known duration, or its section's length when the take's duration isn't
- *   known yet. Only a take whose file exists on disk counts, the same rule `mixInputs` applies, so
- *   a missing take never stretches (or shrinks) the span it isn't contributing to;
- * - a picked voice variant (at 0): its file's own length, probed only on a cache miss -- `null`
- *   when that length can't be told, so `musicUnderVo` is left unmeasured rather than guessed.
+ * The VO's own span, from the same `voiceSource` the mix uses (§18.4): the picked round's own
+ * file length, probed only on a cache miss -- or `null` with no round picked, so `musicUnderVo`
+ * is left unmeasured rather than measured against nothing.
  */
-type VoSpan = { kind: "read"; seconds: number } | { kind: "variant"; file: string };
+type VoSpan = { kind: "variant"; file: string } | null;
 
 function voSpan(project: Project, script: Script, picks: Picks, root: string): VoSpan {
-  const voice = voiceSource(project, script, picks);
+  const voice = voiceSource(project, picks);
   if (voice.kind === "variant") return { kind: "variant", file: fromManifestPath(root, voice.variant.file) };
-  let end = 0;
-  for (const { section, take } of voice.takes) {
-    if (!existsSync(fromManifestPath(root, take.file))) continue;
-    const duration = take.duration ?? section.end - section.start;
-    end = Math.max(end, section.start + duration);
-  }
-  return { kind: "read", seconds: end };
+  return null;
 }
 
 async function voSpanSeconds(span: VoSpan, durationOf: DurationProbe): Promise<number | null> {
-  if (span.kind === "read") return span.seconds;
+  if (span === null) return null;
   try {
     const d = await durationOf(span.file);
     return d !== null && Number.isFinite(d) && d > 0 ? d : null;
@@ -306,12 +289,13 @@ function cacheSet(run: LoudnessRunner, key: string, value: LoudnessResult): void
 }
 
 /**
- * Sorted (abs path, mtime, offset) for every input, plus the lanes asked for and the VO span the
- * music-under-VO pass is trimmed to (a section re-timed with no file change moves it) -- or `null`
- * when a file's `stat` fails (it existed a moment ago for `mixInputs`' own check, but could have
- * been removed since). `null` means "don't cache this one", never a thrown error: a loudness
- * request racing a file deletion must still get an answer, not a 500. A picked voice variant's
- * span is its file's length, already covered by that file's path and mtime among the inputs.
+ * Sorted (abs path, mtime, offset) for every input, plus the lanes asked for -- or `null` when a
+ * file's `stat` fails (it existed a moment ago for `mixInputs`' own check, but could have been
+ * removed since). `null` means "don't cache this one", never a thrown error: a loudness request
+ * racing a file deletion must still get an answer, not a 500. A picked round's span is its own
+ * file's length (§18.4), already covered by that file's path and mtime among the inputs; `span`
+ * distinguishes only whether one is in play at all, so a pick appearing or disappearing (with the
+ * same files otherwise) still gets its own cache entry.
  */
 async function cacheKey(inputs: MixInput[], lanes: LaneStage[], span: VoSpan): Promise<string | null> {
   const stats: { file: string; offset: number; mtimeMs: number }[] = [];
@@ -323,7 +307,7 @@ async function cacheKey(inputs: MixInput[], lanes: LaneStage[], span: VoSpan): P
     }
   }
   stats.sort((a, b) => a.file.localeCompare(b.file) || a.offset - b.offset);
-  return JSON.stringify({ lanes: [...lanes].sort(), inputs: stats, span: span.kind === "read" ? span.seconds : "variant" });
+  return JSON.stringify({ lanes: [...lanes].sort(), inputs: stats, span: span === null ? "none" : "variant" });
 }
 
 /**

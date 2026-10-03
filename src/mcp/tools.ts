@@ -127,6 +127,12 @@ export function createMcpServer(ctx: ToolContext): McpServer {
         name: z.string().describe("Shown on the lane, e.g. \"Deep house\"."),
         file: z.string(),
         lane: z.string().optional().describe("Lane id. Defaults to the stage."),
+        round: z
+          .string()
+          .optional()
+          .describe(
+            'Round name for voice reads, e.g. "Round 2 · Gerald, tone". Reads in one round are compared side by side; a new direction gets a new round.',
+          ),
         meta: z.record(z.string(), z.union([z.string(), z.number()])).optional().describe("e.g. {\"bpm\": 120, \"key\": \"A minor\"}"),
         cues: z.array(z.object({ name: z.string(), t: z.number().nonnegative() })).optional().describe("SFX cues with times in seconds."),
       },

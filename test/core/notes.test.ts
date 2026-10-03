@@ -212,6 +212,21 @@ describe("onLabel (what an audio note is on, for export and the CLI)", () => {
     // On Mix, a bare id shared by two stages prefers the picked one, as the dashboard prefers one being heard.
     expect(label("mix", "option-a")).toBe("Sound effects · Option A");
   });
+  it("names a round and its read by the round's name and the variant's name (§18.4)", () => {
+    const roundCtx: OnContext = {
+      project: {
+        lanes: [
+          { id: "round-1", stage: "voice", name: "Round 1", variants: [{ id: "gerald", name: "Gerald", file: "g.wav", meta: {}, cues: [] }] },
+          { id: "round-2", stage: "voice", name: "Round 2 · Gerald", variants: [{ id: "sombre", name: "more sombre", file: "s.wav", meta: {}, cues: [] }] },
+        ],
+      },
+      script: { sections: [{ id: "s2", start: 0, end: 4, current: "x", proposed: null, direction: "", status: "draft", takes: [take("t1")] }] },
+    };
+    expect(onLabel({ stage: "voice", on: "round-2/sombre" }, roundCtx)).toBe("Round 2 · Gerald · more sombre");
+    // A legacy take-scoped note keeps its old label, unaffected by rounds existing elsewhere.
+    expect(onLabel({ stage: "voice", on: "s2:t1" }, roundCtx)).toBe("S2 · Take 1");
+  });
+
   it("says nothing for Picture, or for something that's gone", () => {
     expect(label("picture", null)).toBeNull();
     expect(label("music", "music/gone")).toBeNull();

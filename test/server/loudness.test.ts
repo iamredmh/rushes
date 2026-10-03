@@ -243,14 +243,12 @@ async function fixture() {
 }
 
 describe("mixInputs", () => {
-  it("resolves each section's picked take or its newest and the picked music variant, leaves out an unpicked lane, and skips missing files", async () => {
+  it("leaves out voice entirely when no round has a pick (takes are never mixed, §18.4), and resolves the picked music variant, skipping missing files", async () => {
     const { root, project, script, picks } = await fixture();
     const inputs = mixInputs(project, script, picks, ["voice", "music", "sfx"], root);
     expect(inputs).toEqual([
-      { file: join(root, "audio", "s1-t2.wav"), offset: 0, stage: "voice" }, // s1: no pick -> newest (t2)
-      { file: join(root, "audio", "s2-u1.wav"), offset: 5, stage: "voice" }, // s2: picked (u1)
-      // s3's only take points nowhere on disk -- left out entirely.
       { file: join(root, "audio", "music-b.wav"), offset: 0, stage: "music" }, // picked music variant
+      // voice: no round has a pick, so nothing plays even though the sections have takes.
       // sfx has no pick: Mix plays nothing on it, so it's never stood in for by its first pass.
     ]);
   });
@@ -275,11 +273,11 @@ describe("mixInputs", () => {
     ]);
   });
 
-  it("never falls back to the first voice variant when none is picked -- the assembled read is used instead", async () => {
+  it("never falls back to the first voice variant when none is picked, and never to takes either (§18.4)", async () => {
     const { root, project, script, picks } = await fixture();
     const files = mixInputs(project, script, picks, ["voice"], root).map((i) => i.file);
     expect(files).not.toContain(join(root, "audio", "voice-alt.wav"));
-    expect(files).toEqual([join(root, "audio", "s1-t2.wav"), join(root, "audio", "s2-u1.wav")]);
+    expect(files).toEqual([]);
   });
 
   it("a picked voice variant replaces the assembled read entirely (controller ruling)", async () => {
@@ -302,6 +300,44 @@ describe("mixInputs", () => {
     project.lanes.push({ id: "empty-bed", stage: "music", name: "Empty", variants: [] });
     expect(mixInputs(project, script, picks, ["music"], root).map((i) => i.file)).toEqual([join(root, "audio", "music-b.wav")]);
   });
+
+  it("VO is the pick of the newest round that has one; takes are never used (§18.4)", async () => {
+    const { root, project, script } = await fixture();
+    project.lanes = project.lanes.filter((l) => l.stage !== "voice");
+    await mkdir(join(root, "audio"), { recursive: true });
+    await Promise.all([
+      writeFile(join(root, "audio", "gerald.wav"), "x"),
+      writeFile(join(root, "audio", "sombre.wav"), "x"),
+    ]);
+    project.lanes.push(
+      { id: "round-1", stage: "voice", name: "Round 1", variants: [{ id: "gerald", name: "Gerald", file: "audio/gerald.wav", meta: {}, cues: [] }] },
+      { id: "round-2", stage: "voice", name: "Round 2", variants: [{ id: "sombre", name: "More sombre", file: "audio/sombre.wav", meta: {}, cues: [] }] },
+    );
+    const inputs = mixInputs(project, script, { schema: 1, rev: 0, lanes: { "round-1": "gerald" }, sections: {} }, ["voice"], root);
+    expect(inputs.map((i) => i.file)).toEqual([join(root, "audio", "gerald.wav")]);
+  });
+
+  it("with no round picked there is no VO input, even when takes exist", async () => {
+    const { root, project, script } = await fixture();
+    const inputs = mixInputs(project, script, { schema: 1, rev: 0, lanes: {}, sections: {} }, ["voice"], root);
+    expect(inputs).toEqual([]);
+  });
+
+  it("a newer round's pick wins over an older one", async () => {
+    const { root, project, script } = await fixture();
+    project.lanes = project.lanes.filter((l) => l.stage !== "voice");
+    await mkdir(join(root, "audio"), { recursive: true });
+    await Promise.all([
+      writeFile(join(root, "audio", "gerald.wav"), "x"),
+      writeFile(join(root, "audio", "sombre.wav"), "x"),
+    ]);
+    project.lanes.push(
+      { id: "round-1", stage: "voice", name: "Round 1", variants: [{ id: "gerald", name: "Gerald", file: "audio/gerald.wav", meta: {}, cues: [] }] },
+      { id: "round-2", stage: "voice", name: "Round 2", variants: [{ id: "sombre", name: "More sombre", file: "audio/sombre.wav", meta: {}, cues: [] }] },
+    );
+    const inputs = mixInputs(project, script, { schema: 1, rev: 0, lanes: { "round-1": "gerald", "round-2": "sombre" }, sections: {} }, ["voice"], root);
+    expect(inputs.map((i) => i.file)).toEqual([join(root, "audio", "sombre.wav")]);
+  });
 });
 
 describe("measureMix", () => {
@@ -319,16 +355,16 @@ describe("measureMix", () => {
   });
 
   it("measures the full mix, and the VO and music alone over the VO's span, caching the result per runner", async () => {
-    const { root, project, script, picks } = await fixture();
-    const voAbs = join(root, "audio", "s1-t2.wav");
-    const vo2Abs = join(root, "audio", "s2-u1.wav");
+    const { root, project, script, picks: basePicks } = await fixture();
+    const picks: Picks = { ...basePicks, lanes: { ...basePicks.lanes, voice: "alt" } };
+    const voAbs = join(root, "audio", "voice-alt.wav");
     const musicAbs = join(root, "audio", "music-b.wav");
 
     const calls: string[][] = [];
     const run: LoudnessRunner = async (args) => {
       calls.push(args);
       if (args[0] === "-version") return { code: 0, stderr: "" };
-      const hasVoice = args.includes(voAbs) || args.includes(vo2Abs);
+      const hasVoice = args.includes(voAbs);
       const hasMusic = args.includes(musicAbs);
       if (hasVoice && hasMusic) return { code: 0, stderr: ebur(-20) };
       if (hasVoice) return { code: 0, stderr: ebur(-18) };
@@ -336,13 +372,13 @@ describe("measureMix", () => {
       return { code: 0, stderr: "" };
     };
 
-    const result = await measureMix(project, script, picks, ["voice", "music"], root, run);
+    const result = await measureMix(project, script, picks, ["voice", "music"], root, run, 60_000, async () => 2);
     expect(result).toEqual({ available: true, integrated: -20, truePeak: -6, musicUnderVo: 4, silent: false }); // -14 - (-18)
     // version probe, full mix, VO alone, music alone -- at most 3 ffmpeg invocations (ruling 2).
     expect(calls).toHaveLength(4);
 
     const callsSoFar = calls.length;
-    const again = await measureMix(project, script, picks, ["voice", "music"], root, run);
+    const again = await measureMix(project, script, picks, ["voice", "music"], root, run, 60_000, async () => 2);
     expect(again).toEqual(result);
     expect(calls).toHaveLength(callsSoFar); // cache hit: the runner isn't called again at all
   });
@@ -362,7 +398,8 @@ describe("measureMix", () => {
   });
 
   it("never lets a silent lane's -Infinity leak into musicUnderVo's subtraction", async () => {
-    const { root, project, script, picks } = await fixture();
+    const { root, project, script, picks: basePicks } = await fixture();
+    const picks: Picks = { ...basePicks, lanes: { ...basePicks.lanes, voice: "alt" } };
     const run: LoudnessRunner = async (args) => {
       if (args[0] === "-version") return { code: 0, stderr: "" };
       // Full mix: not silent. But the VO-alone and music-alone passes can't be told apart from
@@ -372,33 +409,19 @@ describe("measureMix", () => {
       if (inputCount === 1) return { code: 0, stderr: SYNTHETIC_FULLY_SILENT_SUMMARY };
       return { code: 0, stderr: ebur(-18) };
     };
-    const result = await measureMix(project, script, picks, ["voice", "music"], root, run);
+    const result = await measureMix(project, script, picks, ["voice", "music"], root, run, 60_000, async () => 2);
     expect(result.musicUnderVo).toBeNull();
   });
 
-  it("only counts a take whose file exists when working out the VO span used to trim the music-alone pass", async () => {
-    const { root, project, picks } = await fixture();
-    // s1 (on disk, duration 4) is the real span; s2's only take has a huge recorded duration but
-    // no file on disk at all, so it must never stretch the trim past s1's own 4 seconds.
-    const script: Script = {
-      schema: 1,
-      rev: 0,
-      wordsPerSecond: 2.6,
-      sections: [
-        { id: "s1", start: 0, end: 5, current: "A", proposed: null, direction: "", status: "draft", takes: [{ id: "t1", file: "audio/s1-t1.wav", duration: 4, forText: "A" }] },
-        { id: "s2", start: 5, end: 10, current: "B", proposed: null, direction: "", status: "draft", takes: [{ id: "u1", file: "audio/missing-span.wav", duration: 100, forText: "B" }] },
-      ],
-    };
-    const p: Picks = { ...picks, sections: {} };
-    let trimArgs: string[] | undefined;
-    const run: LoudnessRunner = async (args) => {
-      if (args[0] === "-version") return { code: 0, stderr: "" };
-      if (args.includes("-t")) trimArgs = args;
-      return { code: 0, stderr: ebur(-20) };
-    };
-    await measureMix(project, script, p, ["voice", "music"], root, run);
-    expect(trimArgs).toBeDefined();
-    expect(trimArgs![trimArgs!.indexOf("-t") + 1]).toBe("4.000");
+  it("excludes a round's pick whose file is missing from disk, leaving musicUnderVo unmeasured (§18.4)", async () => {
+    const { root, project, picks: basePicks } = await fixture();
+    project.lanes = project.lanes.filter((l) => l.stage !== "voice");
+    project.lanes.push({ id: "voice", stage: "voice", name: "Voiceover", variants: [{ id: "alt", name: "Alt read", file: "audio/does-not-exist-vo.wav", meta: {}, cues: [] }] });
+    const picks: Picks = { ...basePicks, lanes: { ...basePicks.lanes, voice: "alt" } };
+    const script: Script = { schema: 1, rev: 0, wordsPerSecond: 2.6, sections: [] };
+    const run: LoudnessRunner = async (args) => (args[0] === "-version" ? { code: 0, stderr: "" } : { code: 0, stderr: ebur(-20) });
+    const result = await measureMix(project, script, picks, ["voice", "music"], root, run);
+    expect(result.musicUnderVo).toBeNull();
   });
 
   it("trims music-under-VO to a picked voice variant's own length, not the takes' span (I1)", async () => {
@@ -450,23 +473,24 @@ describe("measureMix", () => {
     expect(calls.filter((a) => a.includes("-t"))).toEqual([]); // never trimmed to a guess
   });
 
-  it("re-measures when a section is re-timed with no file change, since the VO span moved (M1)", async () => {
-    const { root, project, picks } = await fixture();
-    const script = (end: number): Script => ({
-      schema: 1,
-      rev: 0,
-      wordsPerSecond: 2.6,
-      // No recorded duration: the span is the section's own length.
-      sections: [{ id: "s1", start: 0, end, current: "A", proposed: null, direction: "", status: "draft", takes: [{ id: "t1", file: "audio/s1-t1.wav", duration: null, forText: "A" }] }],
-    });
+  it("re-measures when a newer round's pick takes over, since the VO span moved (M1, §18.4)", async () => {
+    const { root, project, script, picks } = await fixture();
+    project.lanes = project.lanes.filter((l) => l.stage !== "voice");
+    project.lanes.push(
+      { id: "round-1", stage: "voice", name: "Round 1", variants: [{ id: "a", name: "A", file: "audio/voice-alt.wav", meta: {}, cues: [] }] },
+      { id: "round-2", stage: "voice", name: "Round 2", variants: [{ id: "b", name: "B", file: "audio/music-a.wav", meta: {}, cues: [] }] },
+    );
     const trims: string[] = [];
     const run: LoudnessRunner = async (args) => {
       if (args[0] === "-version") return { code: 0, stderr: "" };
       if (args.includes("-t")) trims.push(args[args.indexOf("-t") + 1]);
       return { code: 0, stderr: ebur(-20) };
     };
-    await measureMix(project, script(5), { ...picks, sections: {} }, ["voice", "music"], root, run);
-    await measureMix(project, script(6), { ...picks, sections: {} }, ["voice", "music"], root, run);
+    const durationOf = async (file: string) => (file.endsWith("voice-alt.wav") ? 5 : 6);
+    // Round 1 has the only pick: its variant's own length is the span.
+    await measureMix(project, script, { ...picks, lanes: { ...picks.lanes, "round-1": "a" } }, ["voice", "music"], root, run, 60_000, durationOf);
+    // Round 2 (newer) now has a pick too, so it wins and the span moves to its own length.
+    await measureMix(project, script, { ...picks, lanes: { ...picks.lanes, "round-1": "a", "round-2": "b" } }, ["voice", "music"], root, run, 60_000, durationOf);
     expect(trims).toEqual(["5.000", "6.000"]);
   });
 

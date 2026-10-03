@@ -133,6 +133,17 @@ describe("notesMarkdown", () => {
     expect(md).toContain("- **Whole** · Sound effects · Pass A · to do — Lane");
   });
 
+  it("names a voice round's read by its round and name (§18.5)", () => {
+    const p: Project = {
+      ...project(),
+      lanes: [{ id: "round-2", stage: "voice", name: "Round 2 · Gerald", variants: [{ id: "sombre", name: "more sombre", file: "s.wav", meta: {}, cues: [] }] }],
+    };
+    const notes: NotesFile = { schema: 1, rev: 0, notes: [] };
+    addNote(notes, { stage: "voice", on: "round-2/sombre", scope: "whole", text: "Loved this one" });
+    const md = notesMarkdown(p, notes.notes, new Date(2026, 9, 3, 9, 0));
+    expect(md).toContain("- **Whole** · Round 2 · Gerald · more sombre · to do — Loved this one");
+  });
+
   it("escapes nothing -- HTML, ampersands, Markdown emphasis and backticks all appear verbatim", () => {
     const notes: NotesFile = { schema: 1, rev: 0, notes: [] };
     const text = "Logo has <b>bold</b> & *stars* and a `code` span";

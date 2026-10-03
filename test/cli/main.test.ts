@@ -127,6 +127,15 @@ describe("cli", () => {
     await s.close();
   });
 
+  it("add variant --round posts the round name, naming the lane for it (§18.4)", async () => {
+    const { root } = await tmpProject("spring-launch");
+    const s = await startServer(root, { port: 0 });
+    const a = io(root);
+    expect(await main(["add", "variant", "voice", "audio/g.wav", "--name", "Gerald", "--round", "Round 1 · Voices"], a.x)).toBe(0);
+    expect(a.out.pop()).toBe("Added Round 1 · Voices: Gerald");
+    await s.close();
+  });
+
   it("add shots reads a JSON file and sets the cut's shot list", async () => {
     const { root } = await tmpProject();
     const s = await startServer(root, { port: 0 });

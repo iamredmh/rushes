@@ -49,10 +49,12 @@ export function buildPrompt(project: string, stage: Stage, batchId: string, note
   if (sections) parts.push(`${sections} script section${sections === 1 ? "" : "s"}`);
   const steps =
     stage === "script"
-      ? "Use rushes_get_batch, take each section's proposed line, then rushes_set_script with just those sections (it merges by id)."
-      : AUDIO_STAGES.includes(stage)
-        ? 'Use rushes_get_batch and rushes_get_picks, fix each note (marks such as "Fall" or "Quieter 3 dB" are part of the note), register the new variant or take, then rushes_reply.'
-        : "Use rushes_get_batch, fix each note, then rushes_reply with a fixT for each and rushes_add_version for the new cut.";
+      ? "Use rushes_get_batch, take each section's proposed line, then rushes_set_script with just those sections (it merges by id). If voiceover already exists, re-record the picked voice with the corrected script and register it with rushes_add_variant as a new read in a new round."
+      : stage === "voice"
+        ? "Use rushes_get_batch and rushes_get_picks. Answer the notes with new whole reads (rushes_add_variant, stage voice): a new round for a new direction, or the current round for a small fix to a marked word. Say in each read's description what changed. Then rushes_reply."
+        : AUDIO_STAGES.includes(stage)
+          ? 'Use rushes_get_batch and rushes_get_picks, fix each note (marks such as "Fall" or "Quieter 3 dB" are part of the note), register the new variant or take, then rushes_reply.'
+          : "Use rushes_get_batch, fix each note, then rushes_reply with a fixT for each and rushes_add_version for the new cut.";
   return `Work through ${STAGE_NAMES[stage]} batch ${batchId} on ${project}: ${parts.join(" and ")}.\n${steps}`;
 }
 

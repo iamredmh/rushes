@@ -16,7 +16,6 @@ import type { Lane } from "../../web/src/types.js";
 import { isTakeStale as serverIsTakeStale } from "../../src/core/script.js";
 import { mixInputs, readTake as serverReadTake } from "../../src/server/loudness.js";
 import type { Picks, Project, Script } from "../../src/core/schema.js";
-import { assembleRead } from "../../web/src/audio/timeline.js";
 import { tmpProject } from "../helpers/tmp.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
@@ -905,7 +904,7 @@ describe("the take-pick rule: server mix and dashboard agree (parity)", () => {
     { sections: {}, lanes: { alt: "gone" } },
   ];
 
-  it("resolves the same voice files at the same offsets, for every pick shape", async () => {
+  it("resolves the same voice files at the same offsets, for every pick shape (§18.4: takes are never mixed)", async () => {
     const { root } = await tmpProject("parity");
     await mkdir(join(root, "audio"), { recursive: true });
     await Promise.all(files.map((f) => writeFile(join(root, "audio", f), "x")));
@@ -914,9 +913,10 @@ describe("the take-pick rule: server mix and dashboard agree (parity)", () => {
     for (const c of cases) {
       const picks: Picks = { schema: 1, rev: 0, sections: c.sections, lanes: c.lanes };
       const server = mixInputs(project, script, picks, ["voice"], root).map((i) => [relative(root, i.file), i.offset]);
-      // The dashboard's VO, as Mix and Voiceover build it.
+      // The dashboard's VO, as Mix and Voiceover build it: a picked round's read, or nothing --
+      // never the assembled read from takes, which Rushes no longer mixes.
       const variant = pickedVoiceRow(variantRows(lanes, "voice"), c.lanes);
-      const client = variant ? [[variant.file, 0]] : assembleRead(sections, c.sections).map((clip) => [clip.path, clip.offset]);
+      const client = variant ? [[variant.file, 0]] : [];
       expect(client, JSON.stringify(c)).toEqual(server);
       for (const s of sections) expect(readTake(s, c.sections)?.id ?? null).toBe(serverReadTake(s, picks)?.id ?? null);
     }
