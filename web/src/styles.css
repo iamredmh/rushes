@@ -174,8 +174,12 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .input:focus { border-color: var(--accent); outline: none; }
 .input::placeholder { color: var(--text-3); }
 .cbox { position: relative; }
-.cbox .input { padding-right: 48px; }
-.cbox .send { position: absolute; right: 6px; bottom: 6px; }
+/* A <textarea> is inline-level by default, which leaves a baseline gap below it inside
+   .cbox; .send is then positioned against .cbox's box (gap included), not the textarea's
+   own bottom edge, and sits partly below it. display: block removes that gap, so .cbox's
+   box matches the textarea exactly and the button's inset is measured against it. */
+.cbox .input { display: block; padding-right: 48px; }
+.cbox .send { position: absolute; right: 8px; bottom: 8px; }
 .chipx { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 6px 0 10px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-2); font-size: 15px; font-weight: 500; }
 .chipx button { border: 0; background: transparent; color: inherit; cursor: pointer; padding: 2px; display: grid; }
 .chipx svg.ic { width: 14px; height: 14px; }
@@ -206,26 +210,30 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .dirin::placeholder { color: var(--text-3); }
 .ib.okd[aria-pressed="true"] { background: var(--done-soft); color: var(--done); }
 .ib.flagd[aria-pressed="true"] { background: var(--todo-soft); color: var(--todo); }
-.btn:disabled { opacity: 0.35; cursor: default; pointer-events: none; }
-a.btn[aria-disabled="true"] { opacity: 0.35; cursor: default; pointer-events: none; }
+/* A native `disabled` button never matches :hover in any browser (regardless of
+   pointer-events), so it could never show a tooltip -- every inert .btn in this app is
+   therefore marked with aria-disabled and a click guard instead, never the disabled
+   attribute, so its tooltip still works on hover. `pointer-events: none` here would break
+   that too (it stops :hover firing at all), hence just the dimmed look plus the cursor. */
+.btn:disabled, .btn[aria-disabled="true"] { opacity: 0.35; cursor: not-allowed; }
 
 /* assets */
 .assets { gap: 28px; }
 .asec h3 { margin: 0 0 12px; font-size: 16px; font-weight: 600; color: var(--text-2); }
 .shots-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; }
-.shot-tile { background: var(--raised); border-radius: var(--r-lg); padding: 10px; display: grid; gap: 8px; }
+.shot-tile { background: var(--raised); border-radius: var(--r-lg); padding: 10px; display: grid; gap: 10px; }
 .shot-tile.missing { opacity: 0.55; }
 .shot-thumb { border: 0; padding: 0; background: #000; border-radius: var(--r); aspect-ratio: 4 / 3; overflow: hidden; cursor: pointer; display: block; width: 100%; }
 .shot-thumb img { width: 100%; height: 100%; object-fit: contain; background: var(--bg); display: block; }
-.shot-meta { font-size: 13px; color: var(--text-2); display: grid; gap: 2px; }
+.shot-meta { font-size: 15px; color: var(--text-2); display: grid; gap: 4px; }
 .arows { display: grid; gap: 8px; }
-.arow { display: flex; align-items: center; gap: 14px; background: var(--raised); border-radius: var(--r); padding: 12px 14px; }
+.arow { display: flex; align-items: center; gap: 14px; background: var(--raised); border-radius: var(--r); padding: 14px 16px; }
 .arow.missing { opacity: 0.55; }
-.ainfo { display: grid; gap: 2px; min-width: 0; flex: 1; }
+.ainfo { display: grid; gap: 4px; min-width: 0; flex: 1; }
 .atitle { font-size: 15px; font-weight: 500; color: var(--text); display: flex; align-items: center; gap: 8px; overflow-wrap: anywhere; }
-.asub { font-size: 13px; color: var(--text-2); overflow-wrap: anywhere; }
+.asub { font-size: 15px; color: var(--text-2); overflow-wrap: anywhere; }
 .afolder { font-size: 13px; color: var(--text-3); }
-.ameta { font-size: 13px; color: var(--text-3); }
+.ameta { font-size: 15px; color: var(--text-3); }
 .amiss { color: var(--over); font-size: 10px; line-height: 1; }
 .aact { display: flex; gap: 4px; flex: none; }
 

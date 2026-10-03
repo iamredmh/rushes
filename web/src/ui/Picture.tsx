@@ -60,6 +60,11 @@ export function Picture({ video, version, fps, notes, toast, onChanged, onPendin
   // current shot changes, never merely because playback started or stopped.
   const playingRef = useRef(playing);
   useEffect(() => { playingRef.current = playing; }, [playing]);
+  // True until this Picture instance unmounts (a film switch: Picture is keyed by video id,
+  // so each film gets its own instance). Guards a grab whose POST is still in flight when you
+  // switch films: the response must never attach to whatever film is now on screen.
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
 
   // Tell the parent whether there's anything here it would be wrong to discard by
   // jumping to a newer cut: an In/Out, a box or a half-typed note. A grab alone is excluded:
@@ -151,13 +156,18 @@ export function Picture({ video, version, fps, notes, toast, onChanged, onPendin
     canvas.height = v.videoHeight;
     canvas.getContext("2d")!.drawImage(v, 0, 0);
     const frame = frameAt(now(), fps);
+    const forVideo = video.id;
     try {
       const r = await api.post<{ grab: string }>("/api/grabs", { video: video.id, version: version.id, frame, png: canvas.toDataURL("image/png") });
-      updateGrab(r.grab);
       toast(`Saved to ${r.grab}`);
       // The screenshot is a new asset on disk: refresh so the Assets tab unlocks and shows
       // it right away, without waiting for a server change event (grabs don't send one).
       onChanged();
+      // The file is saved either way, but only offer it as a pending attachment if you're
+      // still on the film it was taken on: a switch away while this request was in flight
+      // must never have it land in another film's note box (or this film's, on a later
+      // return -- by then nothing was watching to carry it across the switch).
+      if (mountedRef.current && video.id === forVideo) updateGrab(r.grab);
     } catch (e) {
       toast((e as Error).message);
     }

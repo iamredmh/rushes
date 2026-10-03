@@ -279,7 +279,8 @@ export function App() {
         </button>
         <button
           class="btn primary"
-          disabled={stage === "assets"}
+          aria-disabled={stage === "assets"}
+          tabIndex={stage === "assets" ? -1 : undefined}
           data-tip={stage === "assets" ? "Nothing to send from Assets" : undefined}
           onClick={() => void send()}
         >

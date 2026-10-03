@@ -84,15 +84,39 @@ function Actions({ asset, toast }: { asset: Asset; toast(message: string): void 
       >
         <Icon name="download" />
       </a>
+      {/* aria-disabled, not the native attribute, on all three: a native `disabled` button
+          never matches :hover in any browser, so it could never show a tooltip either way
+          -- the click guard below does the blocking instead. */}
       {canSaveAs && (
-        <button class="btn ghost ib" data-tip="Save as…" aria-label="Save as…" disabled={asset.missing || saving} onClick={() => void saveAs()}>
+        <button
+          class="btn ghost ib"
+          data-tip="Save as…"
+          aria-label="Save as…"
+          aria-disabled={asset.missing || saving}
+          tabIndex={asset.missing ? -1 : undefined}
+          onClick={() => { if (!asset.missing) void saveAs(); }}
+        >
           <Icon name="save" />
         </button>
       )}
-      <button class="btn ghost ib" data-tip={revealLabel()} aria-label={revealLabel()} disabled={asset.missing} onClick={() => void reveal()}>
+      <button
+        class="btn ghost ib"
+        data-tip={revealLabel()}
+        aria-label={revealLabel()}
+        aria-disabled={asset.missing}
+        tabIndex={asset.missing ? -1 : undefined}
+        onClick={() => { if (!asset.missing) void reveal(); }}
+      >
         <Icon name="folder" />
       </button>
-      <button class="btn ghost ib" data-tip="Copy path" aria-label="Copy path" disabled={asset.missing} onClick={() => void copyPath()}>
+      <button
+        class="btn ghost ib"
+        data-tip="Copy path"
+        aria-label="Copy path"
+        aria-disabled={asset.missing}
+        tabIndex={asset.missing ? -1 : undefined}
+        onClick={() => { if (!asset.missing) void copyPath(); }}
+      >
         <Icon name="copy" />
       </button>
     </div>
@@ -122,7 +146,8 @@ function AssetRow({ asset, videos, toast }: { asset: Asset; videos: Video[]; toa
         </div>
         {cut?.subtitle && <div class="asub">{cut.subtitle}</div>}
         <div class="afolder mono">{asset.path}</div>
-        <div class="ameta mono">{formatBytes(asset.size ?? 0)} · {shortDate(asset.modified)}</div>
+        {/* A missing file has no size or date to show -- just the mark above, no dangling "0 B · ". */}
+        {!asset.missing && <div class="ameta">{formatBytes(asset.size ?? 0)} · {shortDate(asset.modified)}</div>}
       </div>
       <Actions asset={asset} toast={toast} />
     </div>

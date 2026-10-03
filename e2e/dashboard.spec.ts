@@ -540,3 +540,73 @@ test("a deleted file is marked missing in Assets", async ({ page, rushes }) => {
   await expect(row).toHaveAttribute("aria-disabled", "true");
   await expect(row.getByRole("link", { name: "Download" })).toHaveAttribute("aria-disabled", "true");
 });
+
+test("the disabled Send to agent button on Assets still shows its tooltip", async ({ page, rushes }) => {
+  await rushes.addCut();
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await page.keyboard.press("7");
+  const button = page.getByRole("button", { name: "Send to agent" });
+  await expect(button).toBeDisabled();
+  // A disabled control must still show its tooltip on hover: `pointer-events: none` on the
+  // dimmed look would stop :hover (and so the tooltip) firing at all. The tooltip fades in
+  // over 0.12s (styles.css), so poll for it rather than reading the mid-transition value.
+  await button.hover();
+  await expect.poll(() => button.evaluate((el) => Number(getComputedStyle(el, "::after").opacity))).toBe(1);
+  const pointerEvents = await button.evaluate((el) => getComputedStyle(el).pointerEvents);
+  expect(pointerEvents).not.toBe("none");
+});
+
+test("a late grab doesn't attach to the wrong film", async ({ page, rushes }) => {
+  await rushes.addCut("hero cut");
+  await rushes.addCut("cutdown cut", "Cutdown");
+  await page.goto(rushes.url);
+  await videoReady(page);
+
+  let release: () => void = () => undefined;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  await page.route("**/api/grabs", async (route) => {
+    await gate;
+    await route.continue();
+  });
+
+  await page.keyboard.press("g");
+  // Switch films before the grab's POST resolves.
+  await page.keyboard.press("]");
+  const pack = page.getByRole("navigation", { name: "Films" });
+  await expect(pack.getByRole("button", { name: /Cutdown/ })).toHaveAttribute("aria-pressed", "true");
+  await videoReady(page);
+
+  release();
+  await expect(page.getByRole("status")).toContainText("Saved to screenshots/");
+
+  // The late grab must never attach to Cutdown's note box: it was taken on Hero.
+  await expect(page.locator(".comp .chipx", { hasText: "Frame" })).toHaveCount(0);
+
+  await page.keyboard.press("[");
+  await videoReady(page);
+  // Nor does it retroactively attach back on Hero on return: nothing was watching to carry
+  // it across the switch, so a grab that arrives after you've moved on is dropped from the
+  // "attach to the next note" convenience entirely. The file itself is still saved to disk
+  // (and still shows up in Assets) regardless.
+  await expect(page.locator(".comp .chipx", { hasText: "Frame" })).toHaveCount(0);
+});
+
+test("the note box's send button stays inside the box, empty and grown with text", async ({ page, rushes }) => {
+  await rushes.addCut();
+  await page.goto(rushes.url);
+  await videoReady(page);
+  const input = page.getByLabel("New note");
+  const send = page.getByRole("button", { name: "Add note" });
+
+  const expectSendInsideInput = async () => {
+    const inputBox = (await input.boundingBox())!;
+    const sendBox = (await send.boundingBox())!;
+    expect(sendBox.x + sendBox.width).toBeLessThanOrEqual(inputBox.x + inputBox.width - 4);
+    expect(sendBox.y + sendBox.height).toBeLessThanOrEqual(inputBox.y + inputBox.height - 4);
+  };
+
+  await expectSendInsideInput();
+  await input.fill("Line one\nLine two\nLine three\nLine four\nLine five");
+  await expectSendInsideInput();
+});
