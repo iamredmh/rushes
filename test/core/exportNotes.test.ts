@@ -90,6 +90,14 @@ describe("notesMarkdown", () => {
     expect(md).toContain("  - Screenshot: screenshots/hero_v1_00m12.40s_f372.png");
   });
 
+  it("escapes nothing -- HTML, ampersands, Markdown emphasis and backticks all appear verbatim", () => {
+    const notes: NotesFile = { schema: 1, rev: 0, notes: [] };
+    const text = "Logo has <b>bold</b> & *stars* and a `code` span";
+    addNote(notes, { stage: "mix", scope: "whole", text });
+    const md = notesMarkdown(project(), notes.notes, new Date(2026, 9, 3, 9, 0));
+    expect(md).toContain(text);
+  });
+
   it("is empty but valid when there are no notes", () => {
     const md = notesMarkdown(project(), [], new Date(2026, 9, 3, 9, 0));
     expect(md).toBe("# Spring Launch — notes\nExported 2026-10-03 09:00\n");

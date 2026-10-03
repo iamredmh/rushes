@@ -437,7 +437,7 @@ Once a project has hundreds of screenshots, the Assets tab as one long page buri
   - macOS: `open <abs>`;
   - Windows: `explorer.exe <abs>`;
   - elsewhere: `xdg-open <abs>`.
-- **Safe types only.** Open is offered and accepted only for these extensions: md, txt, pdf, srt, vtt, png, jpg, jpeg, gif, webp, svg, mp4, mov, m4v, webm, mkv, wav, mp3, m4a, aac, flac, ogg, prproj and drp.
+- **Safe types only.** Open is offered and accepted only for these extensions: md, txt, pdf, srt, vtt, png, jpg, jpeg, gif, webp, mp4, mov, m4v, webm, mkv, wav, mp3, m4a, aac, flac, ogg, prproj and drp.
   - Anything else gets no Open button, and the route answers 415 `unsafe_type`.
   - Rushes never opens scripts, apps or archives, because on macOS opening those can run code.
 - **Where it applies.** The path must be a listed asset, exactly as for reveal.

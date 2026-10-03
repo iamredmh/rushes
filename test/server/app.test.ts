@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { Store } from "../../src/core/store.js";
 import { tmpProject } from "../helpers/tmp.js";
@@ -541,6 +541,48 @@ describe("POST /api/open", () => {
     const added = await call("POST", "/api/files", { kind: "doc", file: "gone.md" });
     const r = await call("POST", "/api/open", { path: added.json.file });
     expect(r.status).toBe(404);
+    expect(opened).toEqual([]);
+  });
+
+  it("refuses a registered .svg with 415, never calling the opener", async () => {
+    const { call, root, opened } = await withOpener();
+    await writeFile(join(root, "icon.svg"), "<svg></svg>");
+    await call("POST", "/api/files", { kind: "image", file: "icon.svg" });
+    const r = await call("POST", "/api/open", { path: "icon.svg" });
+    expect(r.status).toBe(415);
+    expect(r.json).toMatchObject({ error: "unsafe_type" });
+    expect(opened).toEqual([]);
+  });
+
+  it("refuses a registered file that's a symlink to a directory, never calling the opener", async () => {
+    const { call, root, opened } = await withOpener();
+    await mkdir(join(root, "bundle.app"), { recursive: true });
+    await symlink(join(root, "bundle.app"), join(root, "brief2.md"));
+    await call("POST", "/api/files", { kind: "doc", file: "brief2.md" });
+    const r = await call("POST", "/api/open", { path: "brief2.md" });
+    expect(r.status).toBe(415);
+    expect(r.json).toMatchObject({ error: "unsafe_type" });
+    expect(opened).toEqual([]);
+  });
+
+  it("refuses a registered file that's a symlink to a regular, safe file -- no links at all", async () => {
+    const { call, root, opened } = await withOpener();
+    await writeFile(join(root, "real.md"), "# real");
+    await symlink(join(root, "real.md"), join(root, "linked.md"));
+    await call("POST", "/api/files", { kind: "doc", file: "linked.md" });
+    const r = await call("POST", "/api/open", { path: "linked.md" });
+    expect(r.status).toBe(415);
+    expect(r.json).toMatchObject({ error: "unsafe_type" });
+    expect(opened).toEqual([]);
+  });
+
+  it("refuses a registered real directory whose name merely ends in .md", async () => {
+    const { call, root, opened } = await withOpener();
+    await mkdir(join(root, "x.md"), { recursive: true });
+    await call("POST", "/api/files", { kind: "doc", file: "x.md" });
+    const r = await call("POST", "/api/open", { path: "x.md" });
+    expect(r.status).toBe(415);
+    expect(r.json).toMatchObject({ error: "unsafe_type" });
     expect(opened).toEqual([]);
   });
 });

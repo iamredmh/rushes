@@ -11,7 +11,7 @@ import { exportFileName, notesMarkdown } from "../core/exportNotes.js";
 import { tabStates } from "../core/tabs.js";
 import { fromManifestPath, toManifestPath } from "../core/paths.js";
 import { probe } from "../core/media.js";
-import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -360,8 +360,20 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     const ext = extname(b.path).toLowerCase().replace(/^\./, "");
     if (!OPEN_SAFE_EXT.has(ext)) throw new RushesError(`Rushes won't open "${b.path}": unsafe file type`, 415, "unsafe_type", { path: b.path });
     const abs = fromManifestPath(store.root, b.path);
-    const exists = await stat(abs).then(() => true, () => false);
-    if (!exists) throw new NotFoundError("asset", b.path);
+    // lstat, not stat: a symlink must never be followed here, whatever its own extension says --
+    // a "brief.md" that's really a link to an .app (or to any directory or executable) must be
+    // refused, not opened through to its target. Refused the same way an unsafe extension is
+    // (415 unsafe_type), so a bad target can't be told apart from a merely unsafe type; a file
+    // that simply isn't there any more stays 404.
+    let info;
+    try {
+      info = await lstat(abs);
+    } catch {
+      throw new NotFoundError("asset", b.path);
+    }
+    if (!info.isFile() || info.isSymbolicLink()) {
+      throw new RushesError(`Rushes won't open "${b.path}": unsafe file type`, 415, "unsafe_type", { path: b.path });
+    }
     await open(abs);
     return c.json({ ok: true });
   });
