@@ -100,6 +100,22 @@ describe("media", () => {
     return s;
   }
 
+  it("serves AIFF and Opus variants inline as audio, never as an octet-stream download (M9)", async () => {
+    const s = await setup();
+    await mkdir(join(s.root, "audio"), { recursive: true });
+    const cases: [string, string][] = [["bed.aif", "audio/aiff"], ["bed.AIFF", "audio/aiff"], ["read.opus", "audio/ogg"]];
+    for (const [name] of cases) {
+      await writeFile(join(s.root, "audio", name), Buffer.alloc(100, 1));
+      await s.post("/api/variants", { stage: "music", name, file: `audio/${name}` });
+    }
+    for (const [name, type] of cases) {
+      const res = await s.call(`/media?path=${encodeURIComponent(`audio/${name}`)}`);
+      expect(res.status, name).toBe(200);
+      expect(res.headers.get("content-type"), name).toBe(type);
+      expect(res.headers.get("content-disposition"), name).toBeNull();
+    }
+  });
+
   it("streams a registered file, whole or by byte range", async () => {
     const { call } = await withClip();
     const whole = await call(`/media?path=${encodeURIComponent("renders/hero v1.mp4")}`);
