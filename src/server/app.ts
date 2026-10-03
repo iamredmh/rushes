@@ -12,9 +12,11 @@ import { fromManifestPath, toManifestPath } from "../core/paths.js";
 import { probe } from "../core/media.js";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { GRAB_PATH, contentType, inside, registeredMedia, sendFile } from "./files.js";
+import { GRAB_PATH, SCREENSHOT_PATH, contentDisposition, contentType, inside, registeredMedia, sendFile } from "./files.js";
+import { listAssets, fpsFor, screenshotName } from "./assets.js";
+import { osRevealer, type Revealer } from "./reveal.js";
 import type { CorruptEvent } from "./watch.js";
 import { LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, ProjectIdSchema, ShotSchema, type Batch, type Note } from "../core/schema.js";
 
@@ -119,6 +121,8 @@ const GrabBody = z.object({
   png: z.string().min(1),
 });
 
+const RevealBody = z.object({ path: z.string().min(1) });
+
 const MAX_GRAB_BYTES = 25 * 1024 * 1024;
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
@@ -140,6 +144,8 @@ export interface AppOptions {
    * twice.
    */
   projectId?: string;
+  /** Reveals a file in the system file manager for POST /api/reveal. Defaults to osRevealer. */
+  reveal?: Revealer;
 }
 
 const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost"]);
@@ -158,6 +164,7 @@ const escapeHtml = (text: string) =>
 
 export function createApp(store: Store, opts: AppOptions = {}): Hono {
   const webDir = opts.webDir ?? DEFAULT_WEB_DIR;
+  const reveal = opts.reveal ?? osRevealer;
   const app = new Hono();
   // Every SSE client adds a change listener, so lift Node's default limit of ten.
   store.setMaxListeners(0);
@@ -262,13 +269,18 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     return res;
   });
 
-  // ---- media: only files the project registered, plus its own grabs ----
+  // ---- media: only files the project registered, plus its own screenshots and grabs ----
   app.get("/media", async (c) => {
     const path = c.req.query("path") ?? "";
     const [project, script] = await Promise.all([store.read("project"), store.read("script")]);
-    if (!registeredMedia(project, script).has(path) && !GRAB_PATH.test(path)) throw new NotFoundError("media", path);
+    if (!registeredMedia(project, script).has(path) && !GRAB_PATH.test(path) && !SCREENSHOT_PATH.test(path)) {
+      throw new NotFoundError("media", path);
+    }
     const res = await sendFile(fromManifestPath(store.root, path), c.req.header("range"));
     res.headers.set("cross-origin-resource-policy", "same-origin");
+    if (res.status !== 404 && c.req.query("download") === "1") {
+      res.headers.set("content-disposition", contentDisposition(basename(path)));
+    }
     return res;
   });
 
@@ -277,10 +289,33 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     const bytes = Buffer.from(b.png.replace(/^data:image\/png;base64,/, ""), "base64");
     if (bytes.length > MAX_GRAB_BYTES) throw new InvalidError(`Frame grab is over ${MAX_GRAB_BYTES / 1024 / 1024} MB`);
     if (!bytes.subarray(0, 8).equals(PNG_MAGIC)) throw new InvalidError("Frame grab must be a PNG");
-    const grab = `.rushes/grabs/${b.video}_${b.version}_f${b.frame}.png`;
-    await mkdir(join(store.dir, "grabs"), { recursive: true });
+    const project = await store.read("project");
+    const fps = fpsFor(project, b.video, b.version);
+    const grab = `screenshots/${screenshotName(b.video, b.version, b.frame, fps)}`;
+    await mkdir(join(store.root, "screenshots"), { recursive: true });
     await writeFile(fromManifestPath(store.root, grab), bytes);
     return c.json({ grab }, 201);
+  });
+
+  // ---- assets: the Assets tab and rushes_list_assets ----
+  app.get("/api/assets", async (c) => {
+    const [project, script] = await Promise.all([store.read("project"), store.read("script")]);
+    let assets = await listAssets(store, project, script);
+    const kind = c.req.query("kind");
+    if (kind) assets = assets.filter((a) => a.kind === kind);
+    return c.json({ assets });
+  });
+
+  app.post("/api/reveal", async (c) => {
+    const b = await body(c, RevealBody);
+    const [project, script] = await Promise.all([store.read("project"), store.read("script")]);
+    const assets = await listAssets(store, project, script);
+    // Exact string equality against a listed asset's own path: no path logic beyond this is
+    // needed to reject traversal, absolute paths and anything unregistered.
+    const asset = assets.find((a) => a.path === b.path);
+    if (!asset || asset.missing) throw new NotFoundError("asset", b.path);
+    await reveal(asset.abs);
+    return c.json({ ok: true });
   });
 
   app.post("/api/shutdown", (c) => {

@@ -57,10 +57,11 @@ test("In and Out make a range note, with a frame grab and a box attached", async
   await expect(page.locator(".note .t")).toHaveText("0:01.00–0:02.00");
   await expect(page.locator(".note img.thumb")).toBeVisible();
   const { notes } = await rushes.api("GET", "/api/notes?stage=picture");
-  expect(notes[0]).toMatchObject({ scope: "range", t: 1, tOut: 2, grab: ".rushes/grabs/hero_v1_f60.png" });
+  // The test clip is 30fps, so frame 60 is 00m02.00s.
+  expect(notes[0]).toMatchObject({ scope: "range", t: 1, tOut: 2, grab: "screenshots/hero_v1_00m02.00s_f60.png" });
   expect(notes[0].box.x).toBeCloseTo(0.25, 1);
   expect(notes[0].box.w).toBeCloseTo(0.5, 1);
-  await access(join(rushes.root, ".rushes", "grabs", "hero_v1_f60.png"));
+  await access(join(rushes.root, "screenshots", "hero_v1_00m02.00s_f60.png"));
 });
 
 test("a box on a vertical cut is measured against the picture, not the 16:9 frame", async ({ page, rushes }) => {

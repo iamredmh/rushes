@@ -45,7 +45,12 @@ async function start(port = 0): Promise<Started> {
   const tmpDir = await mkdtemp(join(tmpdir(), "rushes e2e "));
   const root = join(tmpDir, "My Film");
   await mkdir(join(root, "renders"), { recursive: true });
-  const child = spawn(process.execPath, [CLI, "serve", root, "--port", String(port)], { stdio: ["ignore", "pipe", "pipe"] });
+  // RUSHES_NO_REVEAL stops the dashboard's "Show in Finder" (added in Plan 2c) from ever
+  // actually opening Finder/Explorer during a test run.
+  const child = spawn(process.execPath, [CLI, "serve", root, "--port", String(port)], {
+    stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env, RUSHES_NO_REVEAL: "1" },
+  });
   const url = await new Promise<string>((ok, fail) => {
     let out = "";
     const timer = setTimeout(() => fail(new Error(`rushes serve didn't start:\n${out}`)), 10_000);

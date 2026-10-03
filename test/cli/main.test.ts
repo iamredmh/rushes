@@ -382,6 +382,30 @@ describe("cli", () => {
     expect(longRunningCommand([])).toBe(false);
   });
 
+  it("assets lists one line per asset, and --json prints the raw list", async () => {
+    const { root } = await tmpProject();
+    const s = await startServer(root, { port: 0 });
+    await fetch(`${s.url}/api/versions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ video: "Hero", file: "a.mp4" }),
+    });
+    const a = io(root);
+    expect(await main(["assets"], a.x)).toBe(0);
+    expect(a.out[0]).toContain("cut");
+    expect(a.out[0]).toContain("a.mp4");
+    expect(a.out[0]).toContain("missing"); // a.mp4 was never written to disk
+    const b = io(root);
+    await main(["assets", "--json"], b.x);
+    const parsed = JSON.parse(b.out[0]);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]).toMatchObject({ kind: "cut", video: "hero", version: "v1" });
+    const c = io(root);
+    await main(["assets", "--kind", "music"], c.x);
+    expect(c.out[0]).toBe("No assets");
+    await s.close();
+  });
+
   it("status reads the project folder it is given", async () => {
     const { root } = await tmpProject();
     const s = await startServer(root, { port: 0 });

@@ -1,21 +1,31 @@
 import { describe, expect, it } from "vitest";
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Store } from "../../src/core/store.js";
 import { tmpProject } from "../helpers/tmp.js";
-import { createApp } from "../../src/server/app.js";
+import { createApp, type AppOptions } from "../../src/server/app.js";
 import { ProjectIdSchema } from "../../src/core/schema.js";
 
-async function setup() {
+// The smallest valid PNG (1×1, transparent).
+const PNG_1PX = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+
+async function setup(opts: AppOptions = {}) {
   const { root, store } = await tmpProject("spring-launch");
-  const app = createApp(store);
-  const call = async (method: string, path: string, json?: unknown) => {
+  const app = createApp(store, opts);
+  const call = async (method: string, path: string, json?: unknown, init: RequestInit = {}) => {
     const res = await app.request(path, {
       method,
-      headers: json === undefined ? {} : { "content-type": "application/json" },
+      headers: json === undefined ? init.headers : { "content-type": "application/json", ...init.headers },
       body: json === undefined ? undefined : JSON.stringify(json),
     });
-    return { status: res.status, json: (await res.json()) as any };
+    let parsed: any = null;
+    const text = await res.text();
+    try {
+      parsed = text ? JSON.parse(text) : null;
+    } catch {
+      parsed = text;
+    }
+    return { status: res.status, json: parsed, headers: res.headers, res };
   };
   return { root, store, call };
 }
@@ -411,5 +421,109 @@ describe("API", () => {
     const after = await store.read("project");
     expect(after.rev).toBe(before.rev + 1);
     expect(after.id).toBe(ids[0]);
+  });
+});
+
+describe("GET /api/assets", () => {
+  it("lists registered media and filters by kind", async () => {
+    const { call, root } = await setup();
+    await call("POST", "/api/versions", { video: "Hero", file: `${root}/renders/hero.mp4` });
+    await call("POST", "/api/variants", { stage: "music", name: "Deep house", file: "audio/a.wav" });
+    const all = await call("GET", "/api/assets");
+    expect(all.status).toBe(200);
+    expect(all.json.assets.map((a: any) => a.kind).sort()).toEqual(["cut", "music"]);
+    const cuts = await call("GET", "/api/assets?kind=cut");
+    expect(cuts.json.assets).toHaveLength(1);
+    expect(cuts.json.assets[0]).toMatchObject({ kind: "cut", video: "hero", version: "v1" });
+  });
+
+  it("reports a cut whose file is gone from disk as missing", async () => {
+    const { call } = await setup();
+    await call("POST", "/api/versions", { video: "Hero", file: "renders/gone.mp4" });
+    const r = await call("GET", "/api/assets");
+    expect(r.json.assets[0]).toMatchObject({ missing: true, size: null, modified: null });
+  });
+});
+
+describe("POST /api/reveal", () => {
+  async function withRevealer() {
+    const revealed: string[] = [];
+    const fake = async (abs: string) => { revealed.push(abs); };
+    const { store, root } = await tmpProject("reveal");
+    const app = createApp(store, { reveal: fake });
+    const call = async (method: string, path: string, json?: unknown) => {
+      const res = await app.request(path, {
+        method,
+        headers: json === undefined ? {} : { "content-type": "application/json" },
+        body: json === undefined ? undefined : JSON.stringify(json),
+      });
+      const text = await res.text();
+      return { status: res.status, json: text ? JSON.parse(text) : null };
+    };
+    await mkdir(join(root, "renders"), { recursive: true });
+    await writeFile(join(root, "renders", "hero.mp4"), "x");
+    await call("POST", "/api/versions", { video: "Hero", file: "renders/hero.mp4" });
+    return { call, root, revealed };
+  }
+
+  it("calls the revealer with the asset's absolute path for a listed asset", async () => {
+    const { call, root, revealed } = await withRevealer();
+    const r = await call("POST", "/api/reveal", { path: "renders/hero.mp4" });
+    expect(r.status).toBe(200);
+    expect(r.json).toEqual({ ok: true });
+    expect(revealed).toEqual([join(root, "renders", "hero.mp4")]);
+  });
+
+  it("404s on traversal, an absolute path, an unregistered path and a path that only looks safe, never calling the revealer", async () => {
+    const { call, revealed } = await withRevealer();
+    const bad = ["../../etc/passwd", "/etc/passwd", "renders/not-registered.mp4", "screenshots/../.rushes/notes.json"];
+    for (const path of bad) {
+      expect((await call("POST", "/api/reveal", { path })).status).toBe(404);
+    }
+    expect(revealed).toEqual([]);
+  });
+
+  it("404s for a registered file that's missing from disk, without calling the revealer", async () => {
+    const { call, revealed } = await withRevealer();
+    await call("POST", "/api/versions", { video: "Hero", file: "renders/missing-take.mp4" });
+    const r = await call("POST", "/api/reveal", { path: "renders/missing-take.mp4" });
+    expect(r.status).toBe(404);
+    expect(revealed).toEqual([]);
+  });
+});
+
+describe("GET /media?download=1", () => {
+  async function withFile(name: string) {
+    const { call, root, store } = await setup();
+    await mkdir(join(root, "renders"), { recursive: true });
+    await writeFile(join(root, "renders", name), "x");
+    await call("POST", "/api/versions", { video: "Hero", file: `renders/${name}` });
+    return { call, store };
+  }
+
+  it("adds Content-Disposition with an ASCII fallback and a UTF-8 percent-encoded name", async () => {
+    const { call } = await withFile("clip with spaces.mp4");
+    const r = await call("GET", "/media?path=renders%2Fclip%20with%20spaces.mp4&download=1");
+    expect(r.status).toBe(200);
+    expect(r.headers.get("content-disposition")).toBe(
+      `attachment; filename="clip with spaces.mp4"; filename*=UTF-8''${encodeURIComponent("clip with spaces.mp4")}`,
+    );
+  });
+
+  it("replaces non-ASCII characters, quotes and backslashes in the ASCII fallback with _", async () => {
+    // café "clip"\.mp4 -- é, both quotes and the backslash each become _ in the fallback only.
+    const name = 'café "clip"\\.mp4';
+    const { call } = await withFile(name);
+    const r = await call("GET", `/media?path=${encodeURIComponent(`renders/${name}`)}&download=1`);
+    expect(r.status).toBe(200);
+    const disposition = r.headers.get("content-disposition")!;
+    expect(disposition).toContain('filename="caf_ _clip__.mp4"');
+    expect(disposition).toContain(`filename*=UTF-8''${encodeURIComponent(name)}`);
+  });
+
+  it("doesn't add Content-Disposition without download=1", async () => {
+    const { call } = await withFile("clip.mp4");
+    const r = await call("GET", "/media?path=renders%2Fclip.mp4");
+    expect(r.headers.get("content-disposition")).toBeNull();
   });
 });

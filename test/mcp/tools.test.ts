@@ -30,13 +30,13 @@ async function connect() {
 }
 
 describe("MCP tools", () => {
-  it("lists the thirteen tools", async () => {
+  it("lists the fourteen tools", async () => {
     const t = await connect();
     const { tools } = await t.client.listTools();
     expect(tools.map((x) => x.name).sort()).toEqual([
       "rushes_add_take", "rushes_add_variant", "rushes_add_version", "rushes_get_batch", "rushes_get_picks",
-      "rushes_get_script", "rushes_list_notes", "rushes_lock_picture", "rushes_open", "rushes_reply",
-      "rushes_set_script", "rushes_set_shots", "rushes_status",
+      "rushes_get_script", "rushes_list_assets", "rushes_list_notes", "rushes_lock_picture", "rushes_open",
+      "rushes_reply", "rushes_set_script", "rushes_set_shots", "rushes_status",
     ]);
     const set = tools.find((x) => x.name === "rushes_set_script")!;
     expect((set.inputSchema.properties as Record<string, { description?: string }>).replace.description).toMatch(/replace the whole script; default merges by id/);
@@ -127,6 +127,20 @@ describe("MCP tools", () => {
     expect(set.json.version.shots).toEqual([{ n: 1, name: "Wide", start: 0, tag: "" }]);
     const locked = await t.call("rushes_lock_picture", { video: "Hero 60s", version: "v1" });
     expect(locked.json.video.lockedVersion).toBe("v1");
+    await t.close();
+  });
+
+  it("rushes_list_assets round-trips the same list the API gives, and filters by kind", async () => {
+    const t = await connect();
+    await t.call("rushes_add_version", { video: "Hero 60s", file: "renders/hero_v1.mp4" });
+    await t.call("rushes_add_variant", { stage: "music", name: "Deep house", file: "a.wav" });
+    const api = new RushesClient(t.running.url);
+    const direct = await api.get<{ assets: any[] }>("/api/assets");
+    const viaTool = await t.call("rushes_list_assets");
+    expect(viaTool.json.assets).toEqual(direct.assets);
+    const cuts = await t.call("rushes_list_assets", { kind: "cut" });
+    expect(cuts.json.assets).toHaveLength(1);
+    expect(cuts.json.assets[0]).toMatchObject({ kind: "cut", video: "hero-60s", version: "v1" });
     await t.close();
   });
 

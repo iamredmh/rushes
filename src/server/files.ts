@@ -35,6 +35,9 @@ export function contentType(path: string): string {
 /** Grab files the server itself writes: .rushes/grabs/<safe name>.png */
 export const GRAB_PATH = /^\.rushes\/grabs\/[a-z0-9][a-z0-9_-]*\.png$/;
 
+/** Screenshots: screenshots/<safe name>.png. Dots are allowed, for names like "00m12.05s". */
+export const SCREENSHOT_PATH = /^screenshots\/[a-z0-9][a-z0-9._-]*\.png$/;
+
 /** Every media path the project has registered. Only these (and grabs) may be served. */
 export function registeredMedia(project: Project, script: Script): Set<string> {
   const files = new Set<string>();
@@ -94,4 +97,17 @@ export async function sendFile(absPath: string, rangeHeader: string | undefined,
 export function inside(dir: string, rel: string): string | null {
   const full = normalize(join(dir, rel));
   return full === dir || full.startsWith(dir.endsWith(sep) ? dir : dir + sep) ? full : null;
+}
+
+/**
+ * `Content-Disposition: attachment` for a download, per RFC 6266 and RFC 5987: an ASCII-safe
+ * `filename` fallback plus a UTF-8, percent-encoded `filename*` for browsers that use it. The
+ * fallback replaces every non-ASCII character, `"` and `\` with `_`, so the quoted string stays
+ * valid no matter what the real name contains.
+ */
+export function contentDisposition(filename: string): string {
+  let ascii = "";
+  for (const ch of filename) ascii += ch.codePointAt(0)! > 0x7f || ch === '"' || ch === "\\" ? "_" : ch;
+  const encoded = encodeURIComponent(filename).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encoded}`;
 }

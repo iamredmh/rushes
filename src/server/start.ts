@@ -7,6 +7,7 @@ import { ensureProjectIdOnce } from "../core/project.js";
 import { createApp, type AppOptions } from "./app.js";
 import { removeLock, writeLock } from "./lock.js";
 import { watchStore } from "./watch.js";
+import type { Revealer } from "./reveal.js";
 
 export const DEFAULT_PORT = 4580;
 
@@ -31,6 +32,8 @@ export interface StartOptions {
   webDir?: string;
   /** Close after this long with no requests and no open connections. Off by default. */
   idleMs?: number;
+  /** Reveals a file in the system file manager for POST /api/reveal. Defaults to osRevealer. */
+  reveal?: Revealer;
 }
 
 function listen(server: Server, port: number, host: string): Promise<number> {
@@ -64,7 +67,7 @@ export async function startServer(rootDir: string, opts: StartOptions = {}): Pro
   // `appOpts` is the exact object the app's closure reads `projectId` from on every request, so
   // setting it below (once this server has won the project's lock and ensured the id) reaches
   // the already-constructed app without recreating it.
-  const appOpts: AppOptions = { webDir: opts.webDir, onShutdown: () => void close() };
+  const appOpts: AppOptions = { webDir: opts.webDir, onShutdown: () => void close(), reveal: opts.reveal };
   const app = createApp(store, appOpts);
   const listener = getRequestListener(app.fetch);
   let lastRequest = Date.now();

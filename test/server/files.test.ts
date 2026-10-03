@@ -110,16 +110,30 @@ describe("media", () => {
 });
 
 describe("frame grabs", () => {
-  it("saves a PNG under .rushes/grabs and serves it back", async () => {
+  it("saves a PNG under screenshots/, named by time, and serves it back", async () => {
     const { post, call, root } = await setup();
+    // No version is registered, so fps falls back to the project default (30): 744/30 = 24.8s.
     const r = await post("/api/grabs", { video: "hero-60s", version: "v3", frame: 744, png: `data:image/png;base64,${PNG_1PX}` });
     expect(r.status).toBe(201);
     const { grab } = (await r.json()) as { grab: string };
-    expect(grab).toBe(".rushes/grabs/hero-60s_v3_f744.png");
+    expect(grab).toBe("screenshots/hero-60s_v3_00m24.80s_f744.png");
     expect((await readFile(join(root, grab))).subarray(1, 4).toString()).toBe("PNG");
     const back = await call(`/media?path=${encodeURIComponent(grab)}`);
     expect(back.status).toBe(200);
     expect(back.headers.get("content-type")).toBe("image/png");
+  });
+
+  it("uses the version's own fps over the project default", async () => {
+    const { post, call, store } = await setup();
+    await store.update("project", (p) => {
+      p.videos.push({ id: "hero-60s", name: "Hero 60s", lockedVersion: null, versions: [
+        { id: "v3", file: "renders/hero.mp4", duration: null, fps: 60, addedAt: new Date().toISOString(), note: "", shots: [] },
+      ] });
+    });
+    const r = await post("/api/grabs", { video: "hero-60s", version: "v3", frame: 726, png: `data:image/png;base64,${PNG_1PX}` });
+    const { grab } = (await r.json()) as { grab: string };
+    expect(grab).toBe("screenshots/hero-60s_v3_00m12.10s_f726.png");
+    expect((await call(`/media?path=${encodeURIComponent(grab)}`)).status).toBe(200);
   });
 
   it("rejects anything that isn't a PNG, and unsafe names", async () => {
@@ -131,5 +145,14 @@ describe("frame grabs", () => {
   it("rejects a frame number so large it would print in exponent form", async () => {
     const { post } = await setup();
     expect((await post("/api/grabs", { video: "hero", version: "v1", frame: 10_000_001, png: PNG_1PX })).status).toBe(400);
+  });
+
+  it("an old-style .rushes/grabs/*.png from Plans 1-2 is still served", async () => {
+    const { call, root } = await setup();
+    await mkdir(join(root, ".rushes", "grabs"), { recursive: true });
+    await writeFile(join(root, ".rushes", "grabs", "hero_v1_f60.png"), Buffer.from(PNG_1PX, "base64"));
+    const back = await call(`/media?path=${encodeURIComponent(".rushes/grabs/hero_v1_f60.png")}`);
+    expect(back.status).toBe(200);
+    expect(back.headers.get("content-type")).toBe("image/png");
   });
 });

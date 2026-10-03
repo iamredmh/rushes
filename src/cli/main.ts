@@ -43,6 +43,7 @@ Usage
   rushes unlock <video>                             unlock the picture
   rushes notes [--stage S] [--status todo|done] [--batch ID] [--json]
   rushes reply <note-id> <text> [--done] [--fix-t SECONDS] [--fix-version V]
+  rushes assets [--kind K] [--json]                 cuts, takes, variants and screenshots
 
 Options
   --dir DIR   project folder for commands that talk to the server (default: current folder)
@@ -58,6 +59,7 @@ const OPTIONS = {
   stage: { type: "string" },
   status: { type: "string" },
   batch: { type: "string" },
+  kind: { type: "string" },
   json: { type: "boolean" },
   done: { type: "boolean" },
   "fix-t": { type: "string" },
@@ -316,6 +318,16 @@ export async function main(argv: string[], io: Io): Promise<number> {
         if (!notes.length) io.out("No notes");
         return 0;
       }
+      case "assets": {
+        const q = o.kind ? `?kind=${encodeURIComponent(o.kind)}` : "";
+        const { assets } = await (await client()).get(`/api/assets${q}`);
+        if (o.json) return io.out(JSON.stringify(assets, null, 2)), 0;
+        for (const a of assets as { kind: string; path: string; size: number | null; missing: boolean }[]) {
+          io.out(`${a.kind.padEnd(10)} ${a.path} ${a.missing ? "missing" : humanSize(a.size ?? 0)}`);
+        }
+        if (!assets.length) io.out("No assets");
+        return 0;
+      }
       case "reply": {
         const [id, ...words] = rest;
         const replyUsage = "rushes reply <note-id> <text> [--done] [--fix-t SECONDS] [--fix-version V]";
@@ -358,6 +370,19 @@ function fmt(t: number): string {
   const m = Math.floor(cs / 6000);
   const s = ((cs - m * 6000) / 100).toFixed(2).padStart(5, "0");
   return `${m}:${s}`;
+}
+
+/** 1536 -> "1.5 KB". Bytes under 1 KB print as a whole number of bytes. */
+function humanSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let n = bytes / 1024;
+  let i = 0;
+  while (n >= 1024 && i < units.length - 1) {
+    n /= 1024;
+    i++;
+  }
+  return `${n.toFixed(1)} ${units[i]}`;
 }
 
 function when(n: { scope: string; t: number | null; tOut: number | null }): string {

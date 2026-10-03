@@ -12,6 +12,7 @@ export interface ToolContext {
 
 const project = z.string().optional().describe("Project folder. Defaults to the current working directory.");
 const stage = z.enum(["script", "picture", "voice", "music", "sfx", "mix"]);
+const assetKind = z.enum(["screenshot", "cut", "take", "music", "sfx", "voice"]);
 
 function ok(data: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
@@ -217,6 +218,16 @@ export function createMcpServer(ctx: ToolContext): McpServer {
       },
     },
     safe(async ({ project, replies }) => (await ctx.client(project)).post("/api/replies", { replies })),
+  );
+
+  server.registerTool(
+    "rushes_list_assets",
+    {
+      title: "List assets",
+      description: "Every file in the project: cuts, VO takes, music, SFX and screenshots, with absolute paths. Use it to find a screenshot the user grabbed.",
+      inputSchema: { project, kind: assetKind.optional() },
+    },
+    safe(async ({ project, kind }) => (await ctx.client(project)).get(`/api/assets${kind ? `?kind=${encodeURIComponent(kind)}` : ""}`)),
   );
 
   server.registerTool(
