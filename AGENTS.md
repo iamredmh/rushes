@@ -21,7 +21,7 @@ my-film/
     voiceover/          VO takes           s02_take3.wav
     music/              music beds         deep-house.wav
     sfx/                SFX passes         sfx_pass-a.wav
-  screenshots/          frame grabs        hero-60s_v3_00m12.05s_f726.png
+  screenshots/          frame grabs        hero-60s_v3_00m12.10s_f726.png
   exports/              (later) notes and markers for Premiere and Resolve
   .rushes/              Rushes' own records (hidden; not for editing by hand)
 ```
@@ -38,7 +38,7 @@ Save renders to `renders/`, VO takes to `audio/voiceover/`, music beds to `audio
    - The storyboard's shots, once you have the first cut: `rushes_set_shots` with `video`, optional `version` (defaults to the newest) and `shots` as `{start, name, tag?}`. Send new timings whenever a later cut moves them.
 2. **Open it for the user:** `rushes_open`. Each project's dashboard lives at its own address, `/p/<id>/` — safe to run more than one project at once. A tab unlocks as soon as it has something in it.
 3. **Wait for feedback.** The user presses **Send to agent**, which saves a batch and gives them a prompt to paste to you. Call `rushes_get_batch` to read the latest batch, its notes and any changed script sections.
-4. **Fix each note.** A note has `stage`, `scope` (`point`, `range` or `whole`), `t`, `tOut`, `on` (the lane, variant, take, cue or section it's about), `text`, and optionally `box` (normalised 0 to 1), `grab` (a PNG path in `.rushes/grabs/`) and `shot` (the shot it falls in, `{n, name}`, worked out by the server from the version's shots — not yours to set).
+4. **Fix each note.** A note has `stage`, `scope` (`point`, `range` or `whole`), `t`, `tOut`, `on` (the lane, variant, take, cue or section it's about), `text`, and optionally `box` (normalised 0 to 1), `grab` (a PNG path in `screenshots/`; older notes may point to `.rushes/grabs/`) and `shot` (the shot it falls in, `{n, name}`, worked out by the server from the version's shots — not yours to set).
 5. **Register the new cut** with `rushes_add_version` and note what changed. If the video is locked, the reply carries `warning: "Picture is locked at vN"`; the version is still added.
 6. **Reply to every note** in one `rushes_reply` call. For each, set `status: "done"`, a one-line `reply`, `fixT` (when the fix is visible in the new cut, in seconds) and `fixVersion`. If you didn't fix a note, leave it `todo` and say why in `reply`.
 7. **Script batches.** When a section's `proposed` differs from `current`, the user rewrote the line. Adopt it by calling `rushes_set_script` with just that section's `id`, `start`, `end` and the new `current`; the other sections stay as they are. The proposal then clears itself, and a flagged section goes back to draft. A changed line makes that section's existing takes stale, so record new takes and add them.

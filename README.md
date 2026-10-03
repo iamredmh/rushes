@@ -101,7 +101,7 @@ my-film/
     voiceover/          VO takes           s02_take3.wav
     music/              music beds         deep-house.wav
     sfx/                SFX passes         sfx_pass-a.wav
-  screenshots/          frame grabs        hero-60s_v3_00m12.05s_f726.png
+  screenshots/          frame grabs        hero-60s_v3_00m12.10s_f726.png
   exports/              (later) notes and markers for Premiere and Resolve
   .rushes/              Rushes' own records (hidden; not for editing by hand)
 ```
@@ -121,10 +121,9 @@ your-project/.rushes/
   notes.json     every note, with the agent's replies
   picks.json     which variant or take is in use
   batches.json   what you sent to the agent
-  grabs/         frame grabs
 ```
 
-Add `.rushes/` to git if you want your review history kept with the project. Rushes ignores its own temporary files.
+Add `.rushes/` to git if you want your review history kept with the project — and `screenshots/` alongside it, since notes point to the grabs there. Rushes ignores its own temporary files.
 
 ## Develop
 

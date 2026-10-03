@@ -352,7 +352,7 @@ my-film/
     voiceover/          VO takes           s02_take3.wav
     music/              music beds         deep-house.wav
     sfx/                SFX passes         sfx_pass-a.wav
-  screenshots/          frame grabs        hero-60s_v3_00m12.05s_f726.png
+  screenshots/          frame grabs        hero-60s_v3_00m12.10s_f726.png
   exports/              (later) notes and markers for Premiere and Resolve
   .rushes/              Rushes' own records (hidden; not for editing by hand)
 ```
@@ -360,7 +360,7 @@ my-film/
 Rushes creates `screenshots/` itself on the first grab. It never creates the other folders; they're a convention for agents.
 
 ### 15.2 Screenshots
-- **G and the camera button** save the frame as a PNG to `screenshots/{video}_{version}_{MM}m{SS.ss}s_f{frame}.png`. The time is `frame / fps`, using the version's fps, falling back to the project's. Minutes are zero-padded to two digits, seconds to `SS.ss`. An example is `hero-60s_v3_00m12.05s_f726.png`. Grabbing the same frame twice overwrites the same file.
+- **G and the camera button** save the frame as a PNG to `screenshots/{video}_{version}_{MM}m{SS.ss}s_f{frame}.png`. The time is `frame / fps`, using the version's fps, falling back to the project's. Minutes are zero-padded to two digits, seconds to `SS.ss`. An example is `hero-60s_v3_00m12.10s_f726.png`. Grabbing the same frame twice overwrites the same file.
 - **The toast** reads `Saved to screenshots/<name>`.
 - **Attaching to a note:** the grab is still offered on the note box as a chip you can remove. Because the file is already saved, a grab on its own no longer counts as pending (§14.2). Only In/Out, a box or typed text does.
 - **Old grabs:** notes that point at `.rushes/grabs/*.png` from Plans 1–2 keep working. `/media` serves both locations.

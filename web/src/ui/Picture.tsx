@@ -19,10 +19,12 @@ export interface PictureProps {
   onPendingChange?(pending: boolean): void;
   /** Where to seek to once this cut's metadata has loaded (restoring a film's playhead on return). */
   startAt?: number;
-  /** A grab from this film kept by the caller across a switch away and back. */
-  initialGrab?: string | null;
+  /** This film's pending grab, owned by the caller: the single source of truth, so a remount
+   *  (switching films, or leaving and returning to this tab) never has a stale copy to drift
+   *  against. */
+  grab: string | null;
   /** Tells the caller whenever the pending grab changes, so it can remember it per film. */
-  onGrabChange?(grab: string | null): void;
+  onGrabChange(video: string, grab: string | null): void;
   /** Forwards the underlying <video> element up, so a caller can read its live time or pause it directly. */
   playerRef?: { current: HTMLVideoElement | null };
 }
@@ -30,7 +32,7 @@ export interface PictureProps {
 const typing = (el: EventTarget | null) => el instanceof HTMLElement && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
 
 /** The cut, with notes down the right: frame stepping, In/Out ranges, a box on the frame and frame grabs. */
-export function Picture({ video, version, fps, notes, toast, onChanged, onPendingChange, startAt, initialGrab, onGrabChange, playerRef }: PictureProps) {
+export function Picture({ video, version, fps, notes, toast, onChanged, onPendingChange, startAt, grab, onGrabChange, playerRef }: PictureProps) {
   const ref = useRef<HTMLVideoElement>(null);
   const overlay = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
@@ -44,7 +46,6 @@ export function Picture({ video, version, fps, notes, toast, onChanged, onPendin
   const [boxMode, setBoxMode] = useState(false);
   const [drag, setDrag] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const [box, setBox] = useState<Box | null>(null);
-  const [grab, setGrab] = useState<string | null>(initialGrab ?? null);
   const [shown, setShown] = useState<Box | null>(null);
   const [noteHasText, setNoteHasText] = useState(false);
   // The click that ends a box drag shouldn't also start playback.
@@ -65,6 +66,12 @@ export function Picture({ video, version, fps, notes, toast, onChanged, onPendin
   // switch films: the response must never attach to whatever film is now on screen.
   const mountedRef = useRef(true);
   useEffect(() => () => { mountedRef.current = false; }, []);
+  // The version on screen right now, read by a grab whose POST is still in flight when the
+  // version changes under it (a new cut arriving, or picking another one by hand) -- without
+  // unmounting, since that only happens on a film switch. A grab started against v1 must never
+  // attach to v2's note box.
+  const versionRef = useRef(version.id);
+  useEffect(() => { versionRef.current = version.id; }, [version.id]);
 
   // Tell the parent whether there's anything here it would be wrong to discard by
   // jumping to a newer cut: an In/Out, a box or a half-typed note. A grab alone is excluded:
@@ -75,21 +82,12 @@ export function Picture({ video, version, fps, notes, toast, onChanged, onPendin
     return () => onPendingChange?.(false);
   }, [range.in, box, noteHasText]);
 
-  // Sets the pending grab and tells the caller synchronously, in the same tick: a caller
-  // reading the forwarded value (e.g. on a keypress that switches films) must never see a
-  // stale one. A plain useEffect keyed on `grab` would defer that notice to the next effect
-  // flush, which can still be pending when the very next keystroke reads it.
-  const updateGrab = (value: string | null) => {
-    setGrab(value);
-    onGrabChange?.(value);
-  };
-
   // A new cut: start again from the top, with nothing pending. A file the browser
   // can't decode can fail before any handler is attached, so check the element too.
   // The grab is the exception: on this component's first run (a fresh mount, e.g. after
-  // switching films) it keeps whatever initialGrab seeded it with, rather than being wiped
-  // by this same effect running on mount. Only a genuinely new cut arriving on an already
-  // -mounted film clears it.
+  // switching films) it keeps whatever the caller is holding for this film, rather than being
+  // wiped by this same effect running on mount. Only a genuinely new cut arriving on an
+  // already-mounted film clears it.
   const mountedFile = useRef<string | undefined>(undefined);
   useEffect(() => {
     setBroken(false);
@@ -97,7 +95,7 @@ export function Picture({ video, version, fps, notes, toast, onChanged, onPendin
     setAspect(16 / 9);
     setRange({ in: null, out: null });
     setBox(null);
-    if (mountedFile.current !== undefined) updateGrab(null);
+    if (mountedFile.current !== undefined) onGrabChange(video.id, null);
     mountedFile.current = version.file;
     setShown(null);
     const v = ref.current;
@@ -157,6 +155,7 @@ export function Picture({ video, version, fps, notes, toast, onChanged, onPendin
     canvas.getContext("2d")!.drawImage(v, 0, 0);
     const frame = frameAt(now(), fps);
     const forVideo = video.id;
+    const forVersion = version.id;
     try {
       const r = await api.post<{ grab: string }>("/api/grabs", { video: video.id, version: version.id, frame, png: canvas.toDataURL("image/png") });
       toast(`Saved to ${r.grab}`);
@@ -164,10 +163,11 @@ export function Picture({ video, version, fps, notes, toast, onChanged, onPendin
       // it right away, without waiting for a server change event (grabs don't send one).
       onChanged();
       // The file is saved either way, but only offer it as a pending attachment if you're
-      // still on the film it was taken on: a switch away while this request was in flight
-      // must never have it land in another film's note box (or this film's, on a later
-      // return -- by then nothing was watching to carry it across the switch).
-      if (mountedRef.current && video.id === forVideo) updateGrab(r.grab);
+      // still on the film and version it was taken on: a switch away while this request was
+      // in flight must never have it land in another film's note box (or this film's, on a
+      // later return -- by then nothing was watching to carry it across the switch), and nor
+      // must it attach to a different cut of the same film that's since come on screen.
+      if (mountedRef.current && forVersion === versionRef.current) onGrabChange(forVideo, r.grab);
     } catch (e) {
       toast((e as Error).message);
     }
@@ -190,7 +190,7 @@ export function Picture({ video, version, fps, notes, toast, onChanged, onPendin
     });
     clearRange();
     setBox(null);
-    updateGrab(null);
+    onGrabChange(video.id, null);
     onChanged();
   };
 
@@ -391,7 +391,7 @@ export function Picture({ video, version, fps, notes, toast, onChanged, onPendin
               <span class="chipx"><Icon name="box" />Box<button aria-label="Remove box" onClick={() => setBox(null)}><Icon name="x" /></button></span>
             )}
             {grab && (
-              <span class="chipx"><Icon name="image" />Frame {grab.match(/_f(\d+)\.png$/)?.[1]}<button aria-label="Remove frame" onClick={() => updateGrab(null)}><Icon name="x" /></button></span>
+              <span class="chipx"><Icon name="image" />Frame {grab.match(/_f(\d+)\.png$/)?.[1]}<button aria-label="Remove frame" onClick={() => onGrabChange(video.id, null)}><Icon name="x" /></button></span>
             )}
           </>
         )}

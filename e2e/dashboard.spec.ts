@@ -506,6 +506,35 @@ test("a grabbed frame is saved as a screenshot and shows up in Assets with its a
   expect(clipboard).toBe(assets[0].abs);
 });
 
+test("the lightbox moves focus to Close, traps Tab inside itself, and returns focus on close", async ({ page, rushes, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await rushes.addCut();
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await page.keyboard.press("g");
+  await expect(page.getByRole("status")).toContainText("Saved to screenshots/");
+  await page.keyboard.press("7");
+  const thumb = page.getByRole("button", { name: /full size/ });
+  await thumb.click();
+
+  const dialog = page.getByRole("dialog");
+  const close = dialog.getByRole("button", { name: "Close" });
+  await expect(close).toBeFocused();
+
+  // Tab from the last control (Close) wraps round to the first.
+  await page.keyboard.press("Tab");
+  const download = dialog.getByRole("link", { name: "Download" });
+  await expect(download).toBeFocused();
+
+  // Shift+Tab from the first control wraps back to Close.
+  await page.keyboard.press("Shift+Tab");
+  await expect(close).toBeFocused();
+
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(thumb).toBeFocused();
+});
+
 test("a grab alone doesn't stop you switching films", async ({ page, rushes }) => {
   await rushes.addCut("hero cut");
   await rushes.addCut("cutdown cut", "Cutdown");
@@ -536,8 +565,10 @@ test("a deleted file is marked missing in Assets", async ({ page, rushes }) => {
   await page.reload();
   await expect(page.getByRole("tab", { name: /Assets/ })).toHaveAttribute("aria-disabled", "false");
   await page.getByRole("tab", { name: /Assets/ }).click();
+  // The row itself isn't interactive, so it carries no aria-disabled -- just the "missing"
+  // class for its own styling. The controls inside it are what AT and :hover see as disabled.
   const row = page.locator(".arow", { hasText: "hero_v1.mp4" });
-  await expect(row).toHaveAttribute("aria-disabled", "true");
+  await expect(row).toHaveClass(/missing/);
   await expect(row.getByRole("link", { name: "Download" })).toHaveAttribute("aria-disabled", "true");
 });
 
@@ -590,6 +621,97 @@ test("a late grab doesn't attach to the wrong film", async ({ page, rushes }) =>
   // "attach to the next note" convenience entirely. The file itself is still saved to disk
   // (and still shows up in Assets) regardless.
   await expect(page.locator(".comp .chipx", { hasText: "Frame" })).toHaveCount(0);
+});
+
+test("a late grab doesn't attach to a newer cut of the same film", async ({ page, rushes }) => {
+  await rushes.addCut("first cut");
+  await page.goto(rushes.url);
+  await videoReady(page);
+
+  let release: () => void = () => undefined;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  await page.route("**/api/grabs", async (route) => {
+    await gate;
+    await route.continue();
+  });
+
+  await page.keyboard.press("g");
+  // A new cut on the same film lands before the grab's POST resolves. Nothing's pending (a
+  // grab alone doesn't count), so the player follows it straight away -- no held chip, just
+  // a new version prop under the same mounted Picture instance.
+  await rushes.addCut("tighter cut");
+  await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v2");
+
+  release();
+  await expect(page.getByRole("status")).toContainText("Saved to screenshots/");
+
+  // The late grab was taken against v1; it must never attach to v2's note box.
+  await expect(page.locator(".comp .chipx", { hasText: "Frame" })).toHaveCount(0);
+});
+
+test("a grab belongs to one film, never the next one you switch to", async ({ page, rushes }) => {
+  await rushes.addCut("hero cut");
+  await rushes.addCut("cutdown cut", "Cutdown");
+  await page.goto(rushes.url);
+  await videoReady(page);
+
+  const pack = page.getByRole("navigation", { name: "Films" });
+  const chip = page.locator(".comp .chipx", { hasText: "Frame" });
+  const goTo = async (key: string, name: RegExp) => {
+    await page.keyboard.press(key);
+    await expect(pack.getByRole("button", { name })).toHaveAttribute("aria-pressed", "true");
+    await videoReady(page);
+  };
+
+  await page.keyboard.press("g");
+  await expect(page.getByRole("status")).toContainText("Saved to screenshots/");
+
+  // G on Hero, then ], [, ]: Cutdown never shows Hero's chip, and Hero keeps its own.
+  await goTo("]", /Cutdown/);
+  await expect(chip).toHaveCount(0);
+  await goTo("[", /Hero/);
+  await expect(chip).toHaveCount(1);
+  await goTo("]", /Cutdown/);
+  await expect(chip).toHaveCount(0);
+
+  // Submitting the note on Hero clears its grab; it doesn't come back on a later return.
+  await goTo("[", /Hero/);
+  await page.keyboard.press("n");
+  await page.keyboard.type("Attached the grab before switching away.");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".note")).toHaveCount(1);
+  await page.keyboard.press("Escape");
+
+  await goTo("]", /Cutdown/);
+  await goTo("[", /Hero/);
+  await expect(chip).toHaveCount(0);
+});
+
+test("a grab survives leaving the Picture tab and coming back", async ({ page, rushes }) => {
+  await rushes.addCut();
+  await page.goto(rushes.url);
+  await videoReady(page);
+
+  const chip = page.locator(".comp .chipx", { hasText: "Frame" });
+  await page.keyboard.press("g");
+  await expect(page.getByRole("status")).toContainText("Saved to screenshots/");
+
+  await page.keyboard.press("7");
+  await expect(page.getByRole("tab", { name: /Assets/ })).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("2");
+  await videoReady(page);
+  await expect(chip).toHaveCount(1);
+
+  await page.keyboard.press("n");
+  await page.keyboard.type("Still has the grab after a tab round trip.");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".note")).toHaveCount(1);
+  await page.keyboard.press("Escape");
+
+  await page.keyboard.press("7");
+  await page.keyboard.press("2");
+  await videoReady(page);
+  await expect(chip).toHaveCount(0);
 });
 
 test("the note box's send button stays inside the box, empty and grown with text", async ({ page, rushes }) => {

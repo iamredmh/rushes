@@ -39,17 +39,20 @@ export function App() {
   const [held, setHeld] = useState(false);
   // Where the next film's player should seek to once loaded, restoring that film's playhead.
   const [startAt, setStartAt] = useState(0);
-  // A grab kept from this film the last time it was on screen, restored on switching back to it.
-  const [restoreGrab, setRestoreGrab] = useState<string | null>(null);
+  // Each film's pending grab (a screenshot waiting to be attached to its next note), keyed by
+  // video id. This is the single source of truth: Picture holds no copy of its own, so there's
+  // nothing for a remount to get stale against, and a film's entry survives a switch away and
+  // back, or a trip to another tab, without needing to be threaded through per-switch memory.
+  const [grabs, setGrabs] = useState<Record<string, string | null>>({});
   const toastTimer = useRef<number | undefined>(undefined);
-  // Per-film memory: playhead, version choice, hold state and a pending grab, so switching
-  // films and coming back doesn't lose your place. Keyed by video id.
-  const memory = useRef(new Map<string, { versionId: string | null; held: boolean; t: number; grab: string | null }>());
+  // Per-film memory: playhead, version choice and hold state, so switching films and coming
+  // back doesn't lose your place. Keyed by video id.
+  const memory = useRef(new Map<string, { versionId: string | null; held: boolean; t: number }>());
   // The playing <video> element, forwarded up from Picture, so a switch can read its live
   // currentTime directly (never stale) and pause it before it unmounts.
   const playerRef = useRef<HTMLVideoElement | null>(null);
-  // The current film's pending grab, forwarded up from Picture, read when switching films.
-  const grabRef = useRef<string | null>(null);
+  // Tells Picture whenever its pending grab changes, so App can remember it per film.
+  const setGrabFor = (forVideo: string, grab: string | null) => setGrabs((g) => ({ ...g, [forVideo]: grab }));
 
   const toast = (message: string) => {
     setToastText(message);
@@ -115,13 +118,12 @@ export function App() {
     const el = playerRef.current;
     el?.pause();
     const t = el ? snap(el.currentTime, fps) : (memory.current.get(video.id)?.t ?? 0);
-    memory.current.set(video.id, { versionId, held, t, grab: grabRef.current });
+    memory.current.set(video.id, { versionId, held, t });
     const saved = memory.current.get(newId);
     setVideoId(newId);
     setVersionId(saved?.versionId ?? null);
     setHeld(saved?.held ?? false);
     setStartAt(saved?.t ?? 0);
-    setRestoreGrab(saved?.grab ?? null);
   };
 
   const toggleLock = async () => {
@@ -376,8 +378,8 @@ export function App() {
             onChanged={() => void refresh()}
             onPendingChange={setPending}
             startAt={startAt}
-            initialGrab={restoreGrab}
-            onGrabChange={(g) => { grabRef.current = g; }}
+            grab={grabs[video.id] ?? null}
+            onGrabChange={setGrabFor}
             playerRef={playerRef}
           />
         ) : stage === "script" ? (

@@ -33,18 +33,23 @@ function Actions({ asset, toast }: { asset: Asset; toast(message: string): void 
   const saveAs = async () => {
     if (saving) return;
     setSaving(true);
+    // Set once the writable's open, so a failure after that point can abort it rather than
+    // leaving a half-written file with its handle never released.
+    let writable: FileSystemWritableFileStream | undefined;
     try {
       // showSaveFilePicker() throws AbortError on a user cancel; that's silent, not a toast.
       const handle = await (window as unknown as { showSaveFilePicker(opts: { suggestedName: string }): Promise<FileSystemFileHandle> }).showSaveFilePicker({
         suggestedName: asset.name,
       });
       const res = await fetch(mediaUrl(asset.path));
-      if (!res.ok) throw new Error(`Couldn't read ${asset.name}`);
-      const blob = await res.blob();
-      const writable = await (handle as unknown as { createWritable(): Promise<{ write(b: Blob): Promise<void>; close(): Promise<void> }> }).createWritable();
-      await writable.write(blob);
-      await writable.close();
+      if (!res.ok || !res.body) throw new Error(`Couldn't read ${asset.name}`);
+      // Streamed straight from the response into the file, rather than buffered whole into
+      // memory first: a multi-gigabyte render would otherwise hold its entire contents as a
+      // blob before a single byte reaches disk.
+      writable = await handle.createWritable();
+      await res.body.pipeTo(writable);
     } catch (e) {
+      if (writable) await writable.abort().catch(() => undefined);
       if ((e as Error).name !== "AbortError") toast((e as Error).message || `Couldn't save ${asset.name}`);
     } finally {
       setSaving(false);
@@ -137,8 +142,10 @@ function cutLabel(asset: Asset, videos: Video[]): { title: string; subtitle: str
 
 function AssetRow({ asset, videos, toast }: { asset: Asset; videos: Video[]; toast(message: string): void }) {
   const cut = asset.kind === "cut" ? cutLabel(asset, videos) : null;
+  // aria-disabled belongs on the controls inside (Actions), not here: a <div> isn't
+  // interactive, so AT has nothing to disable at this level.
   return (
-    <div class={`arow${asset.missing ? " missing" : ""}`} aria-disabled={asset.missing}>
+    <div class={`arow${asset.missing ? " missing" : ""}`}>
       <div class="ainfo">
         <div class="atitle">
           {cut ? cut.title : asset.name}
@@ -158,8 +165,9 @@ function ShotTile({ asset, videos, toast, onOpen }: { asset: Asset; videos: Vide
   const video = videos.find((v) => v.id === asset.video);
   const when = asset.t !== undefined && asset.frame !== undefined ? `${fmt(asset.t)} · f${asset.frame}` : asset.name;
   const film = video && asset.version ? `${video.name} · ${asset.version}` : null;
+  // Same as AssetRow: the controls carry aria-disabled, not this wrapper.
   return (
-    <div class={`shot-tile${asset.missing ? " missing" : ""}`} aria-disabled={asset.missing}>
+    <div class={`shot-tile${asset.missing ? " missing" : ""}`}>
       <button type="button" class="shot-thumb" aria-label={`Open ${asset.name} full size`} onClick={onOpen}>
         <img src={mediaUrl(asset.path)} alt={asset.name} loading="lazy" />
       </button>
@@ -172,24 +180,52 @@ function ShotTile({ asset, videos, toast, onOpen }: { asset: Asset; videos: Vide
   );
 }
 
+/** Every element inside `container` that's actually in the Tab order right now -- links and
+ *  buttons, minus anything disabled or pulled out of the order with `tabIndex={-1}` (a missing
+ *  asset's actions, say). */
+function tabbable(container: HTMLElement): HTMLElement[] {
+  return Array.from(container.querySelectorAll<HTMLElement>("a[href], button, [tabindex]")).filter((el) => {
+    if ((el as HTMLButtonElement).disabled) return false;
+    const ti = el.getAttribute("tabindex");
+    return ti === null || Number(ti) >= 0;
+  });
+}
+
 /** A simple modal dialog over the full-size image. Esc and a click on the backdrop both close
  *  it; both handlers live on this dialog (not on `window`), so Esc never also reaches the
- *  header's own Escape handling (closing the shortcuts popup, say). */
+ *  header's own Escape handling (closing the shortcuts popup, say). Opening moves focus to the
+ *  close button and traps Tab inside; closing is the caller's job to send it back to whatever
+ *  opened this. */
 function Lightbox({ asset, onClose, toast }: { asset: Asset; onClose(): void; toast(message: string): void }) {
   const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => { ref.current?.focus(); }, []);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => { closeRef.current?.focus(); }, []);
   return (
     <div
       class="lightbox"
       role="dialog"
       aria-modal="true"
       aria-label={asset.name}
-      tabIndex={-1}
       ref={ref}
       onKeyDown={(e) => {
         if (e.key === "Escape") {
           e.stopPropagation();
           onClose();
+          return;
+        }
+        if (e.key !== "Tab" || !ref.current) return;
+        const chain = tabbable(ref.current);
+        if (chain.length === 0) return;
+        const first = chain[0];
+        const last = chain[chain.length - 1];
+        // Only the two ends need handling: Tab and Shift+Tab between everything in the middle
+        // already behaves the way the browser's own order would, untouched.
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
         }
       }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
@@ -198,7 +234,7 @@ function Lightbox({ asset, onClose, toast }: { asset: Asset; onClose(): void; to
         <img src={mediaUrl(asset.path)} alt={asset.name} />
         <div class="lbactions">
           <Actions asset={asset} toast={toast} />
-          <button class="btn ghost ib" aria-label="Close" onClick={onClose}><Icon name="x" /></button>
+          <button ref={closeRef} class="btn ghost ib" aria-label="Close" onClick={onClose}><Icon name="x" /></button>
         </div>
       </div>
     </div>
@@ -208,7 +244,19 @@ function Lightbox({ asset, onClose, toast }: { asset: Asset; onClose(): void; to
 /** The Assets tab (§15.3): every registered file in one place, grouped by section. */
 export function Assets({ assets, videos, toast }: AssetsProps) {
   const [lightbox, setLightbox] = useState<Asset | null>(null);
+  // The element that had focus just before a tile opened the lightbox, so closing it (Esc,
+  // the backdrop, or the close button) can give focus back rather than dropping it to <body>.
+  const opener = useRef<HTMLElement | null>(null);
   const sections = assetSections(assets);
+
+  const open = (a: Asset) => {
+    opener.current = document.activeElement as HTMLElement | null;
+    setLightbox(a);
+  };
+  const close = () => {
+    setLightbox(null);
+    opener.current?.focus();
+  };
 
   return (
     <div class="col assets">
@@ -218,7 +266,7 @@ export function Assets({ assets, videos, toast }: AssetsProps) {
           {section.kind === "screenshot" ? (
             <div class="shots-grid">
               {section.items.map((a) => (
-                <ShotTile asset={a} videos={videos} toast={toast} onOpen={() => setLightbox(a)} />
+                <ShotTile asset={a} videos={videos} toast={toast} onOpen={() => open(a)} />
               ))}
             </div>
           ) : (
@@ -228,7 +276,7 @@ export function Assets({ assets, videos, toast }: AssetsProps) {
           )}
         </section>
       ))}
-      {lightbox && <Lightbox asset={lightbox} toast={toast} onClose={() => setLightbox(null)} />}
+      {lightbox && <Lightbox asset={lightbox} toast={toast} onClose={close} />}
     </div>
   );
 }
