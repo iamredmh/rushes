@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  boxFrom, defaultVersion, extOf, firstTab, fit, FOLDERS, fmt, folderItems, formatBytes, frameAt, groupByFilm,
+  boxFrom, cueRoom, defaultVersion, extOf, firstTab, fit, FOLDERS, fmt, folderItems, formatBytes, frameAt, groupByFilm,
   isChanged, isPreviewable, latest, metaLine, neighbourVideo, noteTime, OPEN_SAFE_EXT, placeNote, shotAt, shotLabel, shotSeek, snap, stepFrame,
 } from "../../web/src/lib.js";
 import type { Asset, Note, Section, Shot, TabState, Video } from "../../web/src/types.js";
@@ -920,5 +920,20 @@ describe("the take-pick rule: server mix and dashboard agree (parity)", () => {
       expect(client, JSON.stringify(c)).toEqual(server);
       for (const s of sections) expect(readTake(s, c.sections)?.id ?? null).toBe(serverReadTake(s, picks)?.id ?? null);
     }
+  });
+});
+
+describe("cueRoom", () => {
+  it("gives each cue label the width up to its nearest neighbour, as a fraction of the lane", () => {
+    const room = cueRoom([{ t: 10 }, { t: 14 }, { t: 40 }], 100);
+    expect(room[0]).toBeCloseTo(0.04);
+    expect(room[1]).toBeCloseTo(0.04);
+    expect(room[2]).toBeCloseTo(0.26);
+  });
+  it("works in any order and caps a lone cue", () => {
+    const room = cueRoom([{ t: 90 }, { t: 5 }], 100);
+    expect(room[0]).toBeCloseTo(0.4);
+    expect(room[1]).toBeCloseTo(0.4);
+    expect(cueRoom([{ t: 3 }], 0)).toEqual([0.4]);
   });
 });

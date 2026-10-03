@@ -426,6 +426,16 @@ export const variantOn = (r: Pick<VariantRow, "key">): string => r.key;
 /** The `on` a note on a cue saves: `"<lane id>/<variant id>:<cue id>"` (cue ids are only unique within a pass). */
 export const cueOn = (r: Pick<VariantRow, "key">, cueId: string): string => `${r.key}:${cueId}`;
 
+/** How wide each cue's label may be, as a fraction of the lane, in the order given: the gap to its
+ *  nearest neighbour, so labels centred on their cues never overlap. A cue with no neighbour gets 0.4. */
+export function cueRoom(cues: { t: number }[], length: number): number[] {
+  const ts = cues.map((c) => c.t);
+  return ts.map((t, i) => {
+    const gaps = ts.filter((_, j) => j !== i).map((u) => Math.abs(u - t));
+    return length > 0 && gaps.length ? Math.min(0.4, Math.min(...gaps) / length) : 0.4;
+  });
+}
+
 /** The On menu for variant rows: each variant, then (with `cues`) each cue as `Cue · Swipe`, saved as
  *  `on: "<lane id>/<pass id>:<cue id>"`. A cue name two passes share gets the pass's name too. */
 export function variantOnOptions(rows: VariantRow[], nameOf: (r: VariantRow) => string, cues = false): OnOption[] {

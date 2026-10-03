@@ -196,6 +196,21 @@ test("Blind hides the names and reveals them again", async ({ page, rushes }) =>
   await expect(page.locator(".lane").nth(0).locator("[data-meta]")).toHaveText("120 BPM · A minor");
 });
 
+test("cue labels close together never overlap, even in a narrow window", async ({ page, rushes }) => {
+  await page.setViewportSize({ width: 1000, height: 800 });
+  await rushes.addVariant("sfx", "Pass A", { seconds: 10, freq: 880, cues: [{ name: "Callout", t: 3 }, { name: "Composer", t: 3.6 }, { name: "Order", t: 4.2 }, { name: "Menu", t: 8 }] });
+  await page.goto(rushes.testUrl());
+  await openTab(page, /Sound effects/, "5");
+  await loaded(page, 1);
+  const cues = page.locator('.lane[data-row="sfx/pass-a"] .cue');
+  await expect(cues).toHaveText(["Callout", "Composer", "Order", "Menu"]);
+  const boxes = await cues.evaluateAll((els) => els.map((e) => e.getBoundingClientRect()).map((r) => ({ l: r.left, r: r.right })));
+  for (let i = 1; i < boxes.length; i++) expect(boxes[i].l).toBeGreaterThanOrEqual(boxes[i - 1].r);
+  // A label with room keeps its whole name; a squeezed one is cut short, never hidden.
+  expect(await cues.nth(3).evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(true);
+  expect(await cues.nth(1).evaluate((e) => e.clientWidth > 0)).toBe(true);
+});
+
 test("Sound effects labels cues, and a note on a cue saves the cue and its time", async ({ page, rushes }) => {
   await rushes.addVariant("sfx", "Pass A", { seconds: 3, freq: 880, meta: { description: "Subtle" }, cues: [{ name: "Whoosh", t: 0.4 }, { name: "Swipe", t: 1.5 }] });
   await rushes.addVariant("sfx", "Pass B", { seconds: 3, freq: 660 });

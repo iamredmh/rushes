@@ -8,6 +8,7 @@ import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { LoadResult } from "../audio/engine.js";
 import { type Clip, mediaKey } from "../audio/timeline.js";
+import { cueRoom } from "../lib.js";
 import { Missing } from "./AssetViews.js";
 import { Icon } from "./Icon.js";
 
@@ -153,6 +154,7 @@ export function Lanes({ rows, length, media, selected, marks, range, onSelect, o
     <div class="lanes">
       {rows.map((row) => {
         const current = row.key === selected;
+        const rooms = cueRoom(row.cues ?? [], length);
         const results = row.clips.map((c) => media[mediaKey(c)]);
         const streamed = results.some((r) => r !== undefined && r !== "error" && r.streamed);
         const broken = results.some((r) => r === "error");
@@ -199,7 +201,13 @@ export function Lanes({ rows, length, media, selected, marks, range, onSelect, o
             >
               <Wave segments={segments} length={length} color={row.color} />
               {(row.labels ?? []).map((l) => <span class="secmk" style={{ left: pct(l.t) }}>{l.text}</span>)}
-              {(row.cues ?? []).map((c) => <span class="cue" data-cue={c.id} style={{ left: pct(c.t), color: row.color }}>{c.name}</span>)}
+              {(row.cues ?? []).map((c, i) => <i class="cue-tick" style={{ left: pct(c.t), color: row.color }} key={`t${i}`} />)}
+              {(row.cues ?? []).map((c, i) => (
+                // Each label gets the gap to its nearest cue, so close cues are cut short rather than overlap.
+                <span class="cue" data-cue={c.id} key={`c${i}`} style={{ left: pct(c.t), color: row.color, maxWidth: `calc(${(rooms[i] * 100).toFixed(3)}% - 8px)` }}>
+                  {c.name}
+                </span>
+              ))}
               {laneMarks.map((m) => m.tOut !== null && <div class={`span ${m.status}`} data-note={m.id} style={{ left: pct(m.t), width: pct(m.tOut - m.t) }} />)}
               {laneMarks.map((m) => <div class={`mk ${m.status}`} data-note={m.id} style={{ left: pct(m.t) }} title={m.text} />)}
               {range.in !== null && (
