@@ -96,7 +96,7 @@ describe("safeMarkdownHtml", () => {
     // them; a long run of spaces and U+2028 is what made \s+(.*)$ backtrack one character at a
     // time across the whole run, in both the list-item and heading matchers.
     const manyBrackets = "[".repeat(300_000);
-    const u2028Line = `# ${"  ".repeat(200_000)}x`;
+    const u2028Line = `# ${" \u2028 ".repeat(100_000)}x\n- ${" \u2028".repeat(100_000)}y`;
     const input = `${manyBrackets}\n${u2028Line}\n${"a".repeat(500_000)}`;
     const start = performance.now();
     safeMarkdownHtml(input);
