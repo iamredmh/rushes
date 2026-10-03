@@ -34,16 +34,19 @@ export interface StageRow {
   picked?: boolean;
   /** Manifest position, for "the first lane" when nothing is picked or selected (display order may be shuffled). */
   order?: number;
-  /** Use / In use. */
-  use?: { inUse: boolean; onUse(): void };
+  /** Use / In use. `onUnpick`, when given, puts an Unpick button beside In use that clears the pick. */
+  use?: { inUse: boolean; onUse(): void; onUnpick?(): void };
   /** Other controls for the right-hand column (M / S on Mix). */
   controls?: ComponentChildren;
   /** The On menu value that clicking this lane selects. */
   on?: string;
   /** A VO take read from a line that has since changed. */
   stale?: boolean;
-  /** The lane's file isn't on disk: it shows the missing mark and has nothing to play. */
-  missing?: boolean;
+  /**
+   * The lane has nothing to play: its file isn't on disk (true: the mark's tooltip says "Missing"),
+   * or, on Mix, nothing is picked for it (a string: the tooltip to show instead).
+   */
+  missing?: boolean | string;
 }
 
 /** A note drawn on a lane: a marker at `t`, plus a span to `tOut` for a range. */
@@ -166,14 +169,14 @@ export function Lanes({ rows, length, media, selected, marks, range, onSelect, o
               class="nm"
               aria-current={current ? "true" : "false"}
               aria-label={row.name}
-              aria-description={row.missing ? "Missing" : row.stale ? "Stale: the line changed after this take" : undefined}
+              aria-description={row.missing ? (typeof row.missing === "string" ? row.missing : "Missing") : row.stale ? "Stale: the line changed after this take" : undefined}
               onClick={() => onSelect(row)}
             >
               <b>
                 {!row.sub && <i style={{ background: row.color }} />}
                 <span data-name>{row.name}</span>
                 {/* Beside the name, not in the meta line, which clips its tooltip. */}
-                {row.missing && <Missing />}
+                {row.missing && <Missing tip={typeof row.missing === "string" ? row.missing : undefined} />}
                 {row.stale && (
                   <span class="smk" data-stale data-tip="The line changed after this take"><Icon name="stale" /></span>
                 )}
@@ -217,6 +220,20 @@ export function Lanes({ rows, length, media, selected, marks, range, onSelect, o
                   }}
                 >
                   {row.use.inUse ? <><Icon name="check" />In use</> : "Use"}
+                </button>
+              )}
+              {row.use?.inUse && row.use.onUnpick && (
+                <button
+                  type="button"
+                  class="btn ghost ib sm unpick"
+                  data-tip="Unpick"
+                  aria-label={`Unpick ${row.name}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    row.use!.onUnpick!();
+                  }}
+                >
+                  <Icon name="x" />
                 </button>
               )}
               {row.controls}

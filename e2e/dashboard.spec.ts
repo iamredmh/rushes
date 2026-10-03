@@ -195,15 +195,6 @@ test("Send to agent batches this tab's open notes and shows the prompt to paste"
   await expect(page.getByRole("status")).toHaveText("Nothing open on Picture to send");
 });
 
-test("a tab that isn't built yet says so instead of showing an empty page", async ({ page, rushes }) => {
-  await rushes.addCut();
-  await rushes.api("POST", "/api/variants", { stage: "music", name: "Deep house", file: "renders/hero_v1.mp4" });
-  await page.goto(rushes.url);
-  // Music is built now (Plan 3); Mix, unlocked by the cut plus a music bed, isn't yet.
-  await page.getByRole("tab", { name: /Mix/ }).click();
-  await expect(page.getByText("This tab arrives in the next release", { exact: false })).toBeVisible();
-});
-
 test("a cut the browser can't play says so instead of showing a black frame", async ({ page, rushes }) => {
   await writeFile(join(rushes.root, "renders", "prores.mov"), Buffer.alloc(4096, 1));
   await rushes.api("POST", "/api/versions", { video: "Hero", file: "renders/prores.mov" });

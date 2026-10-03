@@ -69,22 +69,17 @@ export function Voice({ state, assets, video, toast, onChanged, onPendingChange 
     handle.current?.startNote(`Another take of ${sectionLabel(section.id)}: `, { on: `s:${section.id}`, scope: "whole" });
   };
 
-  const useTake = async (sectionId: string, takeId: string) => {
+  // A take or variant id sets the pick; null clears it (Unpick).
+  const setPick = async (body: { sections?: Record<string, string | null>; lanes?: Record<string, string | null> }, clearing: boolean) => {
     try {
-      await api.put("/api/picks", { sections: { [sectionId]: takeId } });
+      await api.put("/api/picks", body);
     } catch (e) {
-      toast(`Couldn't set the pick: ${(e as Error).message}`);
+      toast(`Couldn't ${clearing ? "clear" : "set"} the pick: ${(e as Error).message}`);
     }
     onChanged();
   };
-  const useVariant = async (lane: string, variant: string) => {
-    try {
-      await api.put("/api/picks", { lanes: { [lane]: variant } });
-    } catch (e) {
-      toast(`Couldn't set the pick: ${(e as Error).message}`);
-    }
-    onChanged();
-  };
+  const useTake = (sectionId: string, takeId: string | null) => setPick({ sections: { [sectionId]: takeId } }, takeId === null);
+  const useVariant = (lane: string, variant: string | null) => setPick({ lanes: { [lane]: variant } }, variant === null);
 
   // ---- what the engine plays: every take of every section, and every voice variant ----
   const clips: Clip[] = [];
@@ -122,7 +117,12 @@ export function Voice({ state, assets, video, toast, onChanged, onPendingChange 
       color: VO_COLOR,
       sub: true,
       clips: gone ? [] : [{ id: takeClipId(section!.id, t.id), lane: sectionLane(section!.id), path: t.file, offset: section!.start, duration: t.duration ?? 0, rev: rev(t.file) }],
-      use: { inUse: inRead?.id === t.id, onUse: () => void useTake(section!.id, t.id) },
+      // In use is the take the read uses (its pick, else the newest); only an explicit pick can be unpicked.
+      use: {
+        inUse: inRead?.id === t.id,
+        onUse: () => void useTake(section!.id, t.id),
+        onUnpick: state.picks.sections[section!.id] === t.id ? () => void useTake(section!.id, null) : undefined,
+      },
       on: `t:${takeClipId(section!.id, t.id)}`,
       stale: isTakeStale(t, section!),
       missing: gone,
@@ -135,7 +135,7 @@ export function Voice({ state, assets, video, toast, onChanged, onPendingChange 
     color: VO_COLOR,
     clips: missing(r.file) ? [] : [{ id: r.key, lane: voiceLane(r.lane), path: r.file, offset: 0, duration: 0, rev: rev(r.file) }],
     order: i,
-    use: { inUse: state.picks.lanes[r.lane] === r.variant, onUse: () => void useVariant(r.lane, r.variant) },
+    use: { inUse: state.picks.lanes[r.lane] === r.variant, onUse: () => void useVariant(r.lane, r.variant), onUnpick: () => void useVariant(r.lane, null) },
     on: `v:${r.key}`,
     missing: missing(r.file),
   }));

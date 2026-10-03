@@ -11,7 +11,7 @@ import { type AudioEngine, type EngineSnapshot, liveContexts } from "../audio/en
 import { type Clip, needsVideoSync, setStreamThreshold } from "../audio/timeline.js";
 import { useAudioStage } from "../audio/useAudioStage.js";
 import {
-  AUDIO_CHIPS, type AudioStageId, fmt, laneSelection, type Listening, noteTime, type OnOption, type Scope, snap, stepFrame, testFlags,
+  AUDIO_CHIPS, type AudioStageId, fmt, laneSelection, type Listening, notePending, noteTime, type OnOption, type Scope, snap, stepFrame, testFlags,
 } from "../lib.js";
 import type { Mark, Note } from "../types.js";
 import { Icon } from "./Icon.js";
@@ -148,11 +148,13 @@ export function AudioStage(props: AudioStageProps) {
   const [marks, setMarks] = useState<Mark[]>([]);
   const [noteHasText, setNoteHasText] = useState(false);
 
-  // Nothing pending is dropped: a half-typed note or a range holds the film, as on Picture. A layout
-  // effect, so the hold is in place before the next key (`]` straight after `I`) is handled.
+  // Nothing pending is dropped: a half-typed note, a range or ticked marks hold the film (and its
+  // cut), as on Picture. A layout effect, so the hold is in place before the next key (`]` straight
+  // after `I`) is handled.
+  const pending = notePending({ range, marks, hasText: noteHasText });
   useLayoutEffect(() => {
-    onPendingChange?.(range.in !== null || noteHasText);
-  }, [range.in, noteHasText]);
+    onPendingChange?.(pending);
+  }, [pending]);
   useEffect(() => () => onPendingChange?.(false), []);
 
   // ---- what's heard (§17.3, §17.5): the selected lane, else the picks ----
@@ -270,7 +272,7 @@ export function AudioStage(props: AudioStageProps) {
       startNote(text, opts = {}) {
         // Nothing pending is ever dropped: a half-typed note, a range or quick marks hold the
         // note box, so New take refuses rather than overwriting them.
-        if (range.in !== null || marks.length > 0 || noteHasText) {
+        if (pending) {
           toast("Finish or clear the note you're writing first.");
           return;
         }

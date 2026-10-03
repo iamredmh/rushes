@@ -659,3 +659,154 @@ describe("Voiceover", () => {
     });
   });
 });
+
+import {
+  levelText, loudnessLanes, loudnessReadout, MIX_LANES, type MixModel, mixNoteRows, mixNoteTarget, mixOnLabel, mixOnOptions, notePending,
+} from "../../web/src/lib.js";
+import type { LoudnessResult } from "../../web/src/types.js";
+
+describe("a note in the making (one definition of pending)", () => {
+  const none = { range: { in: null }, marks: [], hasText: false };
+  it("is nothing with no range, no marks and no text", () => {
+    expect(notePending(none)).toBe(false);
+  });
+  it("holds for a range, even an In point alone", () => {
+    expect(notePending({ ...none, range: { in: 1.5 } })).toBe(true);
+    expect(notePending({ ...none, range: { in: 0 } })).toBe(true);
+  });
+  it("holds for marks ticked without a range", () => {
+    expect(notePending({ ...none, marks: [{ kind: "fall" }] })).toBe(true);
+  });
+  it("holds for typed text", () => {
+    expect(notePending({ ...none, hasText: true })).toBe(true);
+  });
+});
+
+describe("Mix", () => {
+  const lanes: Lane[] = [
+    { id: "music", stage: "music", name: "Music", variants: [
+      { id: "a", name: "A · Deep house", file: "a.wav", meta: {}, cues: [] },
+      { id: "b", name: "B · Warm keys", file: "b.wav", meta: {}, cues: [] },
+    ] },
+    { id: "sfx", stage: "sfx", name: "Sound effects", variants: [
+      { id: "pass-a", name: "Pass A", file: "pa.wav", meta: {}, cues: [] },
+      { id: "pass-b", name: "Pass B", file: "pb.wav", meta: {}, cues: [] },
+    ] },
+  ];
+  const music = variantRows(lanes, "music");
+  const sfx = variantRows(lanes, "sfx");
+  const model = (heard: Partial<MixModel["heard"]> = {}): MixModel => ({
+    variants: { music, sfx },
+    heard: { vo: true, music: [music[1]], sfx: [sfx[0]], ...heard },
+  });
+
+  it("turns on Mix", () => {
+    expect(BUILT.mix).toBe(true);
+    expect(AUDIO_CHIPS.mix).toEqual(["Level", "Balance", "Loudness"]);
+  });
+
+  describe("which lanes are measured", () => {
+    const heard = { vo: true, music: true, sfx: true };
+    it("measures every lane that's heard and has something to play", () => {
+      expect(loudnessLanes(heard, { vo: 1, music: 1, sfx: 1 })).toEqual(["voice", "music", "sfx"]);
+    });
+    it("leaves out muted lanes, and lanes solo silences", () => {
+      expect(loudnessLanes(heard, { vo: 1, music: 0, sfx: 1 })).toEqual(["voice", "sfx"]);
+      expect(loudnessLanes(heard, { vo: 0, music: 1, sfx: 0 })).toEqual(["music"]);
+    });
+    it("leaves out a lane with nothing picked, or a missing file, even when it's soloed", () => {
+      expect(loudnessLanes({ ...heard, music: false }, { vo: 1, music: 1, sfx: 1 })).toEqual(["voice", "sfx"]);
+      expect(loudnessLanes({ ...heard, sfx: false }, { vo: 0, music: 0, sfx: 1 })).toEqual([]);
+    });
+  });
+
+  describe("notes", () => {
+    it("knows what a note is on", () => {
+      const m = model();
+      expect(mixNoteTarget(m, null)).toBe("mix");
+      expect(mixNoteTarget(m, "vo")).toBe("vo");
+      expect(mixNoteTarget(m, "b")).toBe("music");
+      expect(mixNoteTarget(m, "pass-a")).toBe("sfx");
+      // A variant no longer picked still belongs to its lane.
+      expect(mixNoteTarget(m, "a")).toBe("music");
+      expect(mixNoteTarget(m, "pass-b")).toBe("sfx");
+      expect(mixNoteTarget(m, "nowhere")).toBeNull();
+    });
+    it("draws a lane note on its lane, and a whole-mix (or orphaned) note on every lane", () => {
+      const m = model();
+      expect(mixNoteRows(m, "vo")).toEqual(["vo"]);
+      expect(mixNoteRows(m, "a")).toEqual(["music"]);
+      expect(mixNoteRows(m, "pass-a")).toEqual(["sfx"]);
+      expect(mixNoteRows(m, null)).toEqual([...MIX_LANES]);
+      expect(mixNoteRows(m, "nowhere")).toEqual([...MIX_LANES]);
+    });
+    it("lists the whole mix and each lane with something to play in the On menu", () => {
+      expect(mixOnOptions(model()).map((o) => [o.value, o.label, o.on, o.row ?? null])).toEqual([
+        ["mix", "Whole mix", null, null],
+        ["vo", "Voiceover", "vo", "vo"],
+        ["music:music/b", "Music · B · Warm keys", "b", "music"],
+        ["sfx:sfx/pass-a", "Sound effects · Pass A", "pass-a", "sfx"],
+      ]);
+      expect(mixOnOptions(model({ vo: false, music: [], sfx: [] })).map((o) => o.value)).toEqual(["mix"]);
+    });
+    it("labels a listed note", () => {
+      const m = model();
+      expect(mixOnLabel(m, null)).toBe("Whole mix");
+      expect(mixOnLabel(m, "vo")).toBe("Voiceover");
+      expect(mixOnLabel(m, "b")).toBe("Music · B · Warm keys");
+      expect(mixOnLabel(m, "a")).toBe("Music · A · Deep house");
+      expect(mixOnLabel(m, "pass-a")).toBe("Sound effects · Pass A");
+      expect(mixOnLabel(m, "nowhere")).toBeNull();
+    });
+  });
+
+  describe("the loudness readout", () => {
+    const result = (over: Partial<LoudnessResult> = {}) =>
+      ({ kind: "result" as const, result: { available: true, integrated: -14.08, truePeak: -1.24, musicUnderVo: -17.6, silent: false, ...over } as LoudnessResult });
+    const values = (s: Parameters<typeof loudnessReadout>[0]) => loudnessReadout(s).map((c) => c.value);
+    const tips = (s: Parameters<typeof loudnessReadout>[0]) => loudnessReadout(s).map((c) => c.tip);
+
+    it("formats levels with a real minus sign, one decimal, and never −0.0", () => {
+      expect(levelText(-14.08)).toBe("−14.1");
+      expect(levelText(0.42)).toBe("+0.4");
+      expect(levelText(-0.04)).toBe("0.0");
+      expect(levelText(0)).toBe("0.0");
+      expect(levelText(-17.6, 0)).toBe("−18");
+    });
+    it("shows LUFS integrated, dBTP true peak and music under VO", () => {
+      const cells = loudnessReadout(result());
+      expect(cells.map((c) => [c.id, c.label])).toEqual([
+        ["integrated", "LUFS integrated"], ["truePeak", "dBTP true peak"], ["musicUnderVo", "Music under VO"],
+      ]);
+      expect(cells.map((c) => c.value)).toEqual(["−14.1", "−1.2", "−18 dB"]);
+      expect(cells.map((c) => c.tip)).toEqual([null, null, null]);
+    });
+    it("shows — with the install tooltip when the server has no ffmpeg", () => {
+      const s = result({ available: false, integrated: null, truePeak: null, musicUnderVo: null });
+      expect(values(s)).toEqual(["—", "—", "—"]);
+      expect(tips(s)).toEqual(Array(3).fill("Install ffmpeg for loudness"));
+    });
+    it("shows — saying there's nothing to measure when no lane is left", () => {
+      expect(values({ kind: "empty" })).toEqual(["—", "—", "—"]);
+      expect(tips({ kind: "empty" })).toEqual(Array(3).fill("Nothing to measure"));
+    });
+    it("shows — with no tooltip until the first reading is back", () => {
+      expect(values({ kind: "waiting" })).toEqual(["—", "—", "—"]);
+      expect(tips({ kind: "waiting" })).toEqual([null, null, null]);
+    });
+    it("says why there's no reading when it timed out or failed", () => {
+      expect(tips({ kind: "timeout" })).toEqual(Array(3).fill("Measuring took too long"));
+      expect(tips({ kind: "error" })).toEqual(Array(3).fill("Couldn't measure loudness"));
+    });
+    it("shows music under VO as — when either is missing from the mix", () => {
+      const s = result({ musicUnderVo: null });
+      expect(values(s)).toEqual(["−14.1", "−1.2", "—"]);
+      expect(tips(s)[2]).toBe("Needs Voiceover and Music both playing");
+    });
+    it("shows a silent mix as −∞", () => {
+      const s = result({ silent: true, integrated: null, truePeak: null, musicUnderVo: null });
+      expect(values(s)).toEqual(["−∞", "−∞", "—"]);
+      expect(tips(s)[0]).toBe("The mix is silent");
+    });
+  });
+});

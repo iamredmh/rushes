@@ -719,3 +719,254 @@ test("a take whose file is missing shows the missing mark and leaves a gap", asy
   await expect(page.locator('.lane[data-row="take:s2:t1"] .amiss')).toHaveCount(0);
   expect((await inspect(page)).media.some((k) => k.includes(s2.takes[2].file))).toBe(false);
 });
+
+// ---- Picks can be cleared (Task 5) ----
+
+test("Unpick clears a pick: In use goes back to Use, and the pick is gone from disk", async ({ page, rushes }) => {
+  await twoBeds(page, rushes);
+  const useB = page.getByRole("button", { name: "Use B · Warm keys" });
+  // Nothing picked: no Unpick anywhere.
+  await expect(page.getByRole("button", { name: /^Unpick/ })).toHaveCount(0);
+  await useB.click();
+  await expect(useB).toHaveAttribute("aria-pressed", "true");
+  const unpick = page.getByRole("button", { name: "Unpick B · Warm keys" });
+  await expect(unpick).toHaveAttribute("data-tip", "Unpick");
+  await unpick.click();
+  await expect(useB).toHaveAttribute("aria-pressed", "false");
+  await expect(useB).toHaveText("Use");
+  await expect(unpick).toHaveCount(0);
+  expect((await rushes.api("GET", "/api/picks")).lanes).toEqual({});
+  // With no pick, the first bed in manifest order plays again.
+  await expect.poll(async () => (await inspect(page)).gains).toMatchObject({ "music/a-deep-house": 1, "music/b-warm-keys": 0 });
+});
+
+test("a take in use only because it's the newest has no Unpick; an explicit pick does", async ({ page, rushes }) => {
+  await voScript(rushes, { s2: "t1" });
+  await openVoice(page, rushes);
+  await section(page, "S2").click();
+  await expect(page.getByRole("button", { name: "Use S2 · Take 1" })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Unpick S2 · Take 1" }).click();
+  // Back to the newest take, which is in use but not picked.
+  await expect(page.getByRole("button", { name: "Use S2 · Take 3" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: /^Unpick/ })).toHaveCount(0);
+  expect((await rushes.api("GET", "/api/picks")).sections).toEqual({});
+  await expect.poll(() => heard(page)).toEqual(["s1:t1@0", "s2:t3@3", "s4:t1@9"]);
+});
+
+// ---- One definition of pending (Task 5) ----
+
+test("marks ticked without a range hold the film, as text and a range do", async ({ page, rushes }) => {
+  await rushes.addCut("hero", "Hero");
+  await rushes.addCut("cutdown", "Cutdown");
+  await rushes.addVariant("music", "Bed", { seconds: 2, freq: 220 });
+  await page.goto(rushes.testUrl());
+  await openTab(page, /Music/, "4");
+  await loaded(page, 1);
+  const films = page.getByRole("navigation", { name: "Films" });
+  await page.getByRole("group", { name: "Scope" }).getByRole("button", { name: "Range" }).click();
+  await page.getByRole("group", { name: "Marks" }).getByRole("button", { name: "Fall" }).click();
+  await expect(page.locator(".bar .chipx")).toHaveCount(0);
+  await page.keyboard.press("]");
+  await expect(page.getByRole("status")).toHaveText("Add or clear your note on Hero first");
+  await expect(films.getByRole("button", { name: /Hero/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("group", { name: "Marks" }).getByRole("button", { name: "Fall" })).toHaveAttribute("aria-pressed", "true");
+  // Untick it and the film can go.
+  await page.getByRole("group", { name: "Marks" }).getByRole("button", { name: "Fall" }).click();
+  await page.keyboard.press("]");
+  await expect(films.getByRole("button", { name: /Cutdown/ })).toHaveAttribute("aria-pressed", "true");
+});
+
+// ---- Mix (Task 5) ----
+
+/**
+ * A cut, a two-section script with a take each, a music bed and an SFX pass, both picked unless
+ * `pick` is false. Opens Mix with every file loaded.
+ */
+async function mixProject(page: Page, rushes: Rushes, opts: { pick?: { music?: boolean; sfx?: boolean } } = {}) {
+  await rushes.addCut();
+  await rushes.api("PUT", "/api/script", {
+    replace: true,
+    sections: [
+      { id: "s1", start: 0, end: 2, current: "Line one." },
+      { id: "s2", start: 2, end: 4, current: "Line two." },
+    ],
+  });
+  await rushes.addTake("s1", { seconds: 1.5, freq: 220 });
+  await rushes.addTake("s2", { seconds: 1.5, freq: 247 });
+  const bed = await rushes.addVariant("music", "Warm keys", { seconds: 4, freq: 330 });
+  const pass = await rushes.addVariant("sfx", "Pass A", { seconds: 4, freq: 880, cues: [{ name: "Swipe", t: 1 }] });
+  const lanes: Record<string, string> = {};
+  if (opts.pick?.music !== false) lanes[bed.lane.id] = bed.variant.id;
+  if (opts.pick?.sfx !== false) lanes[pass.lane.id] = pass.variant.id;
+  await rushes.api("PUT", "/api/picks", { lanes });
+  return { bed, pass };
+}
+
+async function openMix(page: Page, rushes: Rushes, files: number) {
+  // Every loudness request the page makes, in order.
+  const asked: string[][] = [];
+  page.on("request", (r) => {
+    if (r.url().endsWith("/api/mix/loudness") && r.method() === "POST") asked.push(r.postDataJSON().lanes);
+  });
+  await page.goto(rushes.testUrl());
+  await openTab(page, /Mix/, "6");
+  await expect(page.locator(".lane")).toHaveCount(3);
+  await loaded(page, files);
+  return asked;
+}
+
+const laneGainsOf = async (page: Page) => (await inspect(page)).lanes;
+
+test("Mix shows three lanes; mute and solo change the lane gains, and solo wins", async ({ page, rushes }) => {
+  await mixProject(page, rushes);
+  const asked = await openMix(page, rushes, 4);
+  await expect(page.locator(".lane [data-name]")).toHaveText(["Voiceover", "Music", "Sound effects"]);
+  await expect(page.locator('.lane[data-row="vo"] [data-meta]')).toHaveText("Assembled read");
+  await expect(page.locator('.lane[data-row="music"] [data-meta]')).toHaveText("Warm keys");
+  await expect(page.locator('.lane[data-row="sfx"] [data-meta]')).toHaveText("Pass A");
+  await expect(page.locator('.lane[data-row="vo"] .secmk')).toHaveText(["S1", "S2"]);
+  await expect(page.locator('.lane[data-row="sfx"] .cue')).toHaveText(["Swipe"]);
+  await expect.poll(() => laneGainsOf(page)).toEqual({ vo: 1, music: 1, sfx: 1 });
+  expect(await heard(page)).toEqual(["s1:t1@0", "music/warm-keys@0", "sfx/pass-a@0", "s2:t1@2"]);
+  await expect.poll(() => asked.at(-1)).toEqual(["voice", "music", "sfx"]);
+
+  const button = (name: string) => page.getByRole("button", { name, exact: true });
+  await button("Mute Music").click();
+  await expect(button("Mute Music")).toHaveAttribute("aria-pressed", "true");
+  await expect.poll(() => laneGainsOf(page)).toEqual({ vo: 1, music: 0, sfx: 1 });
+  await expect.poll(() => asked.at(-1)).toEqual(["voice", "sfx"]);
+
+  // Solo wins: only the soloed lane plays, even when it's also muted.
+  await button("Solo Voiceover").click();
+  await expect.poll(() => laneGainsOf(page)).toEqual({ vo: 1, music: 0, sfx: 0 });
+  await button("Mute Voiceover").click();
+  await expect.poll(() => laneGainsOf(page)).toEqual({ vo: 1, music: 0, sfx: 0 });
+  expect(await heard(page)).toEqual(["s1:t1@0", "s2:t1@2"]);
+  await expect.poll(() => asked.at(-1)).toEqual(["voice"]);
+  await button("Solo Sound effects").click();
+  await expect.poll(() => laneGainsOf(page)).toEqual({ vo: 1, music: 0, sfx: 1 });
+  // With no solo left, mute applies again.
+  await button("Solo Voiceover").click();
+  await button("Solo Sound effects").click();
+  await expect.poll(() => laneGainsOf(page)).toEqual({ vo: 0, music: 0, sfx: 1 });
+
+  // View state only: nothing is saved, and leaving the tab resets it.
+  const picks = await rushes.api("GET", "/api/picks");
+  expect(Object.keys(picks).sort()).toEqual(["lanes", "rev", "schema", "sections"]);
+  await page.keyboard.press("4");
+  await openTab(page, /Mix/, "6");
+  await loaded(page, 4);
+  await expect(page.locator('.ms[aria-pressed="true"]')).toHaveCount(0);
+  await expect.poll(() => laneGainsOf(page)).toEqual({ vo: 1, music: 1, sfx: 1 });
+});
+
+test("the loudness readout shows the three values (or — without ffmpeg), and a quiet mark while measuring", async ({ page, rushes }) => {
+  await mixProject(page, rushes);
+  // The same request the readout makes, so the test knows whether this server has ffmpeg.
+  const direct = await rushes.api("POST", "/api/mix/loudness", { lanes: ["voice", "music", "sfx"] });
+  await openMix(page, rushes, 4);
+  const values = page.locator(".meter [data-value]");
+  await expect(page.locator(".meter span:not([data-measuring])")).toHaveText(["LUFS integrated", "dBTP true peak", "Music under VO"]);
+  await expect(page.locator("[data-measuring]")).toHaveCount(0, { timeout: 15_000 });
+  if (direct.available) {
+    // Shape, not numbers: a signed level with one decimal, and music under VO in whole dB.
+    await expect(values.nth(0)).toHaveText(/^[−+]?\d+\.\d$/);
+    await expect(values.nth(1)).toHaveText(/^[−+]?\d+\.\d$/);
+    await expect(values.nth(2)).toHaveText(/^[−+]?\d+ dB$/);
+    for (let i = 0; i < 3; i++) await expect(values.nth(i)).not.toHaveAttribute("data-tip");
+  } else {
+    await expect(values).toHaveText(["—", "—", "—"]);
+    for (let i = 0; i < 3; i++) await expect(values.nth(i)).toHaveAttribute("data-tip", "Install ffmpeg for loudness");
+  }
+  // A change re-measures after the debounce, showing the quiet mark meanwhile.
+  await page.getByRole("button", { name: "Mute Music", exact: true }).click();
+  await expect(page.locator("[data-measuring]")).toBeVisible();
+  await expect(page.locator("[data-measuring]")).toHaveAttribute("data-tip", "Measuring");
+  await expect(page.locator("[data-measuring]")).toHaveCount(0, { timeout: 15_000 });
+  if (direct.available) {
+    // No music in the mix: nothing to compare the VO with.
+    await expect(values.nth(2)).toHaveText("—");
+    await expect(values.nth(2)).toHaveAttribute("data-tip", "Needs Voiceover and Music both playing");
+  }
+  // With every lane muted there's nothing to measure, whether or not there's ffmpeg.
+  await page.getByRole("button", { name: "Mute Voiceover", exact: true }).click();
+  await page.getByRole("button", { name: "Mute Sound effects", exact: true }).click();
+  await expect(values).toHaveText(["—", "—", "—"]);
+  for (let i = 0; i < 3; i++) await expect(values.nth(i)).toHaveAttribute("data-tip", "Nothing to measure");
+  await expect(page.locator("[data-measuring]")).toHaveCount(0);
+});
+
+test("a lane with nothing picked, or a missing file, is empty and left out of the loudness request", async ({ page, rushes }) => {
+  const { pass } = await mixProject(page, rushes, { pick: { music: false } });
+  await rm(join(rushes.root, (await rushes.api("GET", "/api/state")).project.lanes.find((l: { id: string }) => l.id === pass.lane.id).variants[0].file));
+  const asked = await openMix(page, rushes, 2);
+  await expect(page.locator('.lane[data-row="music"] .amiss')).toHaveAttribute("data-tip", "Nothing picked");
+  await expect(page.locator('.lane[data-row="sfx"] .amiss')).toHaveAttribute("data-tip", "Missing");
+  await expect(page.locator('.lane[data-row="vo"] .amiss')).toHaveCount(0);
+  expect(await heard(page)).toEqual(["s1:t1@0", "s2:t1@2"]);
+  await expect.poll(() => asked.at(-1)).toEqual(["voice"]);
+  // Soloing an empty lane leaves nothing to measure.
+  await page.getByRole("button", { name: "Solo Music", exact: true }).click();
+  await expect(page.locator(".meter [data-value]").first()).toHaveAttribute("data-tip", "Nothing to measure");
+});
+
+test("Mix's VO lane plays a picked voice variant instead of the read, as Voiceover does", async ({ page, rushes }) => {
+  await mixProject(page, rushes);
+  const alt = await rushes.addVariant("voice", "Warm read", { seconds: 4, freq: 196 });
+  await rushes.api("PUT", "/api/picks", { lanes: { [alt.lane.id]: alt.variant.id } });
+  await openMix(page, rushes, 3);
+  await expect(page.locator('.lane[data-row="vo"] [data-meta]')).toHaveText("Warm read");
+  expect(await heard(page)).toEqual([`${alt.lane.id}/${alt.variant.id}@0`, "music/warm-keys@0", "sfx/pass-a@0"]);
+});
+
+test("Mix notes: a range on Music saves the variant and marks, a whole-mix note saves no lane", async ({ page, rushes }) => {
+  const { bed } = await mixProject(page, rushes);
+  await openMix(page, rushes, 4);
+  const onMenuMix = page.getByRole("combobox", { name: "Note on" });
+  await expect(onMenuMix.locator("option:checked")).toHaveText("Whole mix");
+  await expect(onMenuMix.locator("option")).toHaveText(["Whole mix", "Voiceover", "Music · Warm keys", "Sound effects · Pass A"]);
+  await page.getByRole("button", { name: "Music", exact: true }).click();
+  await expect(onMenuMix.locator("option:checked")).toHaveText("Music · Warm keys");
+  await page.evaluate(() => window.__rushesAudio!.engine!.seek(1));
+  await page.keyboard.press("i");
+  await page.evaluate(() => window.__rushesAudio!.engine!.seek(2));
+  await page.keyboard.press("o");
+  await page.getByRole("group", { name: "Marks" }).getByRole("button", { name: "Quieter" }).click();
+  await page.keyboard.press("n");
+  await page.keyboard.type("Music creeps up under the line.");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".note")).toHaveCount(1);
+  let { notes } = await rushes.api("GET", "/api/notes?stage=mix");
+  expect(notes[0]).toMatchObject({ stage: "mix", on: bed.variant.id, scope: "range", t: 1, tOut: 2, marks: [{ kind: "quieter", db: 3 }] });
+  await expect(page.locator(`.lane[data-row="music"] .span[data-note="${notes[0].id}"]`)).toHaveCount(1);
+  await expect(page.locator(`.lane[data-row="vo"] [data-note="${notes[0].id}"]`)).toHaveCount(0);
+  await expect(page.locator(".note .on")).toHaveText("Music · Warm keys");
+
+  await onMenuMix.selectOption({ label: "Whole mix" });
+  await page.getByRole("textbox", { name: "New note" }).click();
+  await page.keyboard.type("A touch quiet overall.");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".note")).toHaveCount(2);
+  ({ notes } = await rushes.api("GET", "/api/notes?stage=mix"));
+  const whole = notes.find((n: { text: string }) => n.text === "A touch quiet overall.");
+  expect(whole).toMatchObject({ on: null, scope: "point", marks: [] });
+  // A point on the whole mix is drawn on every lane.
+  await expect(page.locator(`.lane .mk[data-note="${whole.id}"]`)).toHaveCount(3);
+});
+
+test("leaving Mix stops playback and releases its engine", async ({ page, rushes }) => {
+  await mixProject(page, rushes);
+  await openMix(page, rushes, 4);
+  await page.keyboard.press(" ");
+  await expect.poll(async () => (await inspect(page)).playing).toBe(true);
+  await page.evaluate(() => { (window as unknown as { __old: unknown }).__old = window.__rushesAudio!.engine; });
+  await page.keyboard.press("4");
+  await expect(page.getByRole("tab", { name: /Music/ })).toHaveAttribute("aria-selected", "true");
+  await loaded(page, 1);
+  const old = await page.evaluate(() => {
+    const e = (window as unknown as { __old: { playing: boolean; inspect(): Snapshot } }).__old;
+    return { playing: e.playing, sources: e.inspect().sources, live: window.__rushesAudio!.liveContexts() };
+  });
+  expect(old).toEqual({ playing: false, sources: 0, live: 1 });
+  expect(await page.evaluate(() => window.__rushesAudio!.engine!.playing)).toBe(false);
+});

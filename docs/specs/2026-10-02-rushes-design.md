@@ -487,6 +487,7 @@ This section builds the Voiceover, Music, Sound effects and Mix tabs, following 
 ### 17.3 Music
 - **Lanes.** One lane per variant of each `music` lane, in manifest order. The card shows the name, then `meta.description` (or BPM · key).
 - **Use** sets `picks.lanes[laneId] = variantId`.
+- **Unpick.** An icon button beside **In use** clears the pick: `PUT /api/picks { lanes: { laneId: null } }`. Sections clear the same way (`sections: { sectionId: null }`); on Voiceover only an explicitly picked take offers it, not one in use because it is the newest.
 - **Auditioning.** Clicking a lane auditions it: you hear that variant at the playhead, while the picked one stays marked **In use**.
 - **Blind** replaces the names with `Bed 1…n` in a shuffled order for the session, and hides the meta. Turning it off reveals them.
 
@@ -511,6 +512,9 @@ This section builds the Voiceover, Music, Sound effects and Mix tabs, following 
   - `musicUnderVo` is the music's level relative to the VO over the VO's span, in dB.
 
   Results are cached by their inputs. Without ffmpeg the readout shows `—`, with the tooltip "Install ffmpeg for loudness".
+- **Empty lanes.** A lane with nothing picked, or whose file is missing, shows the missing mark ("Nothing picked" or "Missing") and is left out of the loudness request. With no lane left to measure, the readout shows `—` with the tooltip "Nothing to measure".
+- **View state.** Mute and solo are never saved; they reset when you leave the tab. Only the lanes you hear are measured, 500 ms after the last change.
+- **Notes.** The On menu lists the whole mix (`on: null`, drawn on every lane), Voiceover (`on: "vo"`) and the picked music and sfx variants (`on` = the variant id).
 
 ### 17.7 Agent side
 - **Notes** carry `marks`. `rushes_get_batch`, `rushes_list_notes`, export notes and the CLI all show them, e.g. `Fall · Quieter 3 dB`.

@@ -5,6 +5,7 @@ import type { Batch, Stage, Video } from "../types.js";
 import { useRushes } from "../useRushes.js";
 import { Assets } from "./Assets.js";
 import { Icon, STAGE_ICONS } from "./Icon.js";
+import { Mix } from "./Mix.js";
 import { Picture } from "./Picture.js";
 import { Script } from "./Script.js";
 import { VariantTab } from "./VariantTab.js";
@@ -390,6 +391,17 @@ export function App() {
           // Its own engine, disposed (and stopped) when you leave, like the other audio tabs.
           <Voice
             key="voice"
+            state={state}
+            assets={assets}
+            video={video ?? null}
+            toast={toast}
+            onChanged={() => void refresh()}
+            onPendingChange={setPending}
+          />
+        ) : stage === "mix" ? (
+          // Mute and solo live here: leaving the tab resets them, and stops and releases its engine.
+          <Mix
+            key="mix"
             state={state}
             assets={assets}
             video={video ?? null}

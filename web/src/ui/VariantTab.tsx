@@ -42,11 +42,12 @@ export function VariantTab({ stage, state, assets, video, toast, onChanged, onPe
   const nameOf = (r: VariantRow) => (blind ? `Bed ${order.indexOf(r.key) + 1}` : r.name);
   const picks = state.picks.lanes;
 
-  const use = async (r: VariantRow) => {
+  // null clears the lane's pick (Unpick).
+  const use = async (r: VariantRow, variant: string | null) => {
     try {
-      await api.put("/api/picks", { lanes: { [r.lane]: r.variant } });
+      await api.put("/api/picks", { lanes: { [r.lane]: variant } });
     } catch (e) {
-      toast(`Couldn't set the pick: ${(e as Error).message}`);
+      toast(`Couldn't ${variant === null ? "clear" : "set"} the pick: ${(e as Error).message}`);
     }
     onChanged();
   };
@@ -66,7 +67,7 @@ export function VariantTab({ stage, state, assets, video, toast, onChanged, onPe
       picked,
       // Manifest order: with nothing picked or selected, the first bed plays, Blind or not.
       order: all.indexOf(r),
-      use: { inUse: picked, onUse: () => void use(r) },
+      use: { inUse: picked, onUse: () => void use(r, r.variant), onUnpick: () => void use(r, null) },
       on: `v:${r.key}`,
     };
   });

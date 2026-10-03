@@ -147,8 +147,8 @@ export function Actions({ asset, toast }: { asset: Asset; toast(message: string)
   );
 }
 
-export function Missing() {
-  return <span class="amiss" data-tip="Missing" aria-label="Missing">●</span>;
+export function Missing({ tip = "Missing" }: { tip?: string }) {
+  return <span class="amiss" data-tip={tip} aria-label={tip}>●</span>;
 }
 
 /** A cut or delivery's title and subtitle: "Film · vN" plus its version note, when it has one

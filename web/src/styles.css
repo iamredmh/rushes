@@ -302,7 +302,7 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 /* The tab's header sits at the top of the stage, so its tooltips open downwards. */
 .ahead [data-tip]::after { bottom: auto; top: calc(100% + 8px); }
 .lanes { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
-.lane { display: grid; grid-template-columns: 180px minmax(0, 1fr) 112px; gap: 16px; align-items: center; padding: 6px 0; border-radius: var(--r); }
+.lane { display: grid; grid-template-columns: 180px minmax(0, 1fr) 136px; gap: 16px; align-items: center; padding: 6px 0; border-radius: var(--r); }
 .lane .nm { display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; min-width: 0; text-align: left; border: 0; background: transparent; color: var(--text); padding: 6px 8px; margin: -6px -8px; border-radius: var(--r); cursor: pointer; }
 .lane .nm:hover { background: var(--raised); }
 .lane .nm b { display: flex; gap: 8px; align-items: center; min-width: 0; font-weight: 600; font-size: 15px; }
@@ -319,7 +319,10 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .lane.sub .nm { padding-left: 25px; }
 .lane.sub .nm b { font-weight: 500; }
 .lane[aria-current="true"] .track { box-shadow: inset 0 0 0 1.5px var(--accent); }
-.lane .ctl { display: flex; justify-content: flex-end; gap: 4px; }
+.lane .ctl { display: flex; justify-content: flex-end; align-items: center; gap: 4px; }
+/* Unpick: beside In use, quieter than it. */
+.unpick { color: var(--text-3); }
+.unpick svg.ic { width: 15px; height: 15px; }
 .track .wave { position: absolute; left: 0; top: 8px; width: 100%; height: calc(100% - 16px); pointer-events: none; }
 .smk { display: inline-grid; place-items: center; color: var(--todo); flex: none; }
 .smk.bad { color: var(--over); }
@@ -330,6 +333,13 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .use svg.ic { width: 14px; height: 14px; stroke-width: 2.5; }
 .ms { width: 32px; height: 32px; border: 0; border-radius: 8px; background: var(--raised); color: var(--text-3); font: 600 15px var(--sans); cursor: pointer; }
 .ms[aria-pressed="true"] { background: var(--todo-soft); color: var(--todo); }
+/* Mix: the loudness readout under the lanes. Figtree with tabular figures: mono is kept for timecodes and ids. */
+.meter { display: flex; align-items: flex-end; gap: 28px; flex-wrap: wrap; padding: 6px 0 0; }
+.meter > div { display: grid; gap: 2px; }
+.meter b { font: 600 20px/1.2 var(--sans); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; width: max-content; }
+.meter span { font-size: 15px; color: var(--text-3); }
+.meter[aria-busy="true"] b { color: var(--text-2); }
+.meter .measuring { align-self: center; color: var(--text-3); }
 /* Voiceover: the section switch and New take, under the lanes. */
 .vobar { gap: 10px; }
 .vobar .seg { flex-wrap: wrap; }

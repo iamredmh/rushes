@@ -1,5 +1,5 @@
 // Pure helpers for the dashboard. No DOM, so they're unit-tested in Node.
-import type { Asset, AssetKind, Cue, Lane, Mark, Note, Section, Shot, Stage, TabState, Take, Video, Version } from "./types.js";
+import type { Asset, AssetKind, Cue, Lane, LaneStage, LoudnessResult, Mark, Note, Section, Shot, Stage, TabState, Take, Video, Version } from "./types.js";
 
 /** 72.4 -> "1:12.40" (minutes, seconds, hundredths). */
 export function fmt(t: number): string {
@@ -80,7 +80,7 @@ export function neighbourVideo(videos: Video[], currentId: string | null, dir: -
 }
 
 /** Is this stage built in this release of the dashboard? Later releases add the audio tabs. */
-export const BUILT: Record<Stage, boolean> = { script: true, picture: true, voice: true, music: true, sfx: true, mix: false };
+export const BUILT: Record<Stage, boolean> = { script: true, picture: true, voice: true, music: true, sfx: true, mix: true };
 
 export const STAGE_NAMES: Record<Stage, string> = {
   script: "Script",
@@ -309,6 +309,15 @@ export function boxFrom(x0: number, y0: number, x1: number, y1: number, w: numbe
 export type AudioStageId = "voice" | "music" | "sfx" | "mix";
 export type Scope = "point" | "range" | "whole";
 export type MarkKind = Mark["kind"];
+
+/**
+ * Is a note in the making on an audio tab? A range (even just an In point), marks ticked (with or
+ * without a range) or typed text. One definition, for both the film hold and New take's refusal:
+ * nothing pending is ever dropped.
+ */
+export function notePending(p: { range: { in: number | null }; marks: readonly unknown[]; hasText: boolean }): boolean {
+  return p.range.in !== null || p.marks.length > 0 || p.hasText;
+}
 
 /** Quick-start chips per audio tab (§17.1). They only put a prefix in the note box. */
 export const AUDIO_CHIPS: Record<AudioStageId, string[]> = {
@@ -664,4 +673,116 @@ export function voiceOnLabel(m: Pick<VoiceModel, "sections" | "variants">, on: s
   if (target.kind === "section") return sectionLabel(target.section);
   if (target.kind === "take") return takeLabel(m.sections.find((s) => s.id === target.section)!, target.take);
   return m.variants.find((r) => r.key === target.row)?.name ?? null;
+}
+
+// ---- Mix (§17.6) ----
+
+/** The Mix tab's three lanes: their row keys and engine lanes. "vo" is also the `on` of a note on the VO lane. */
+export type MixLane = "vo" | "music" | "sfx";
+export const MIX_LANES: readonly MixLane[] = ["vo", "music", "sfx"];
+/** Each Mix lane's name in `POST /api/mix/loudness`. */
+export const MIX_STAGE: Record<MixLane, LaneStage> = { vo: "voice", music: "music", sfx: "sfx" };
+/** The On value of a note on the whole mix, saved with `on: null`. */
+export const WHOLE_MIX = "mix";
+
+export interface MixModel {
+  /** Every music and sfx variant, in manifest order. */
+  variants: { music: VariantRow[]; sfx: VariantRow[] };
+  /** What each lane plays: the VO lane has something, and the picked variants whose files are on disk. */
+  heard: { vo: boolean; music: VariantRow[]; sfx: VariantRow[] };
+}
+
+/** The lanes a loudness reading covers: those with something to play that are heard (solo wins over mute). */
+export function loudnessLanes(heard: Record<MixLane, boolean>, gains: Record<string, number>): LaneStage[] {
+  return MIX_LANES.filter((l) => heard[l] && (gains[l] ?? 1) > 0).map((l) => MIX_STAGE[l]);
+}
+
+/**
+ * What a Mix note is on: null is the whole mix, "vo" the VO lane, a variant id the Music or Sound
+ * effects lane (a variant being heard first, then any variant of either stage). Null if unknown.
+ */
+export function mixNoteTarget(m: MixModel, on: string | null): MixLane | typeof WHOLE_MIX | null {
+  if (on === null) return WHOLE_MIX;
+  if (on === READ_ROW) return "vo";
+  for (const lane of ["music", "sfx"] as const) if (m.heard[lane].some((r) => r.variant === on)) return lane;
+  for (const lane of ["music", "sfx"] as const) if (m.variants[lane].some((r) => r.variant === on)) return lane;
+  return null;
+}
+
+/** The lanes a Mix note is drawn on: its lane; a note on the whole mix (or on something gone) on every lane. */
+export function mixNoteRows(m: MixModel, on: string | null): MixLane[] {
+  const target = mixNoteTarget(m, on);
+  return target === null || target === WHOLE_MIX ? [...MIX_LANES] : [target];
+}
+
+const MIX_NAMES: Record<MixLane, string> = { vo: "Voiceover", music: "Music", sfx: "Sound effects" };
+
+/** What a listed Mix note is on: "Whole mix", "Voiceover", "Music · B · Warm keys", or null. */
+export function mixOnLabel(m: MixModel, on: string | null): string | null {
+  const target = mixNoteTarget(m, on);
+  if (target === null) return null;
+  if (target === WHOLE_MIX) return "Whole mix";
+  if (target === "vo") return MIX_NAMES.vo;
+  const row = m.heard[target].find((r) => r.variant === on) ?? m.variants[target].find((r) => r.variant === on);
+  return `${MIX_NAMES[target]} · ${row!.name}`;
+}
+
+/** The On menu on Mix: the whole mix, then each lane that has something to play. Values: "mix", "vo", "<lane>:<lane id>/<variant>". */
+export function mixOnOptions(m: MixModel): OnOption[] {
+  const out: OnOption[] = [{ value: WHOLE_MIX, label: "Whole mix", on: null }];
+  if (m.heard.vo) out.push({ value: "vo", label: MIX_NAMES.vo, on: READ_ROW, row: "vo" });
+  for (const lane of ["music", "sfx"] as const) {
+    for (const r of m.heard[lane]) out.push({ value: `${lane}:${r.key}`, label: `${MIX_NAMES[lane]} · ${r.name}`, on: r.variant, row: lane });
+  }
+  return out;
+}
+
+/** A level for the loudness readout: one decimal by default, a real minus sign, "+" above zero, never "−0.0". */
+export function levelText(n: number, digits = 1): string {
+  const fixed = Math.abs(n).toFixed(digits);
+  if (Number(fixed) === 0) return fixed;
+  return `${n < 0 ? "\u2212" : "+"}${fixed}`;
+}
+
+/** Where the loudness readout is (§17.6). `waiting`: the first reading isn't back yet. */
+export type LoudnessState =
+  | { kind: "empty" }
+  | { kind: "waiting" }
+  | { kind: "result"; result: LoudnessResult }
+  | { kind: "timeout" }
+  | { kind: "error" };
+
+export interface ReadoutCell {
+  id: "integrated" | "truePeak" | "musicUnderVo";
+  value: string;
+  label: string;
+  /** Why there's no number, or null when there is one. */
+  tip: string | null;
+}
+
+const DASH = "\u2014";
+const NO_FFMPEG = "Install ffmpeg for loudness";
+
+/**
+ * The three readout values: LUFS integrated, dBTP true peak and music under VO. A value that can't
+ * be shown is `—` with a tooltip saying why.
+ */
+export function loudnessReadout(s: LoudnessState): ReadoutCell[] {
+  const cells = (v: [string, string | null], p: [string, string | null], u: [string, string | null]): ReadoutCell[] => [
+    { id: "integrated", label: "LUFS integrated", value: v[0], tip: v[1] },
+    { id: "truePeak", label: "dBTP true peak", value: p[0], tip: p[1] },
+    { id: "musicUnderVo", label: "Music under VO", value: u[0], tip: u[1] },
+  ];
+  const all = (tip: string | null) => cells([DASH, tip], [DASH, tip], [DASH, tip]);
+  if (s.kind === "empty") return all("Nothing to measure");
+  if (s.kind === "waiting") return all(null);
+  if (s.kind === "timeout") return all("Measuring took too long");
+  if (s.kind === "error") return all("Couldn't measure loudness");
+  const r = s.result;
+  if (!r.available) return all(NO_FFMPEG);
+  const level = (n: number | null): [string, string | null] =>
+    r.silent ? ["\u2212\u221e", "The mix is silent"] : n === null ? [DASH, "Couldn't measure loudness"] : [levelText(n), null];
+  const under: [string, string | null] =
+    r.musicUnderVo === null ? [DASH, "Needs Voiceover and Music both playing"] : [`${levelText(r.musicUnderVo, 0)} dB`, null];
+  return cells(level(r.integrated), level(r.truePeak), under);
 }
