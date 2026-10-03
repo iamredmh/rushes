@@ -37,7 +37,7 @@ If your user asked you to use Rushes, do this:
 2. If it added anything, tell the user to restart the app (or start a new session) so the `rushes_*` tools load.
 3. From then on, follow [AGENTS.md](AGENTS.md). In short: register what you made, call `rushes_open`, wait for the user to press **Send to agent**, then `rushes_get_batch`, fix the notes, and `rushes_reply`.
 
-The MCP server has fourteen tools: `rushes_open`, `rushes_status`, `rushes_add_version`, `rushes_add_variant`, `rushes_set_script`, `rushes_get_script`, `rushes_add_take`, `rushes_list_notes`, `rushes_list_assets`, `rushes_get_batch`, `rushes_reply`, `rushes_get_picks`, `rushes_set_shots` and `rushes_lock_picture`.
+The MCP server has sixteen tools: `rushes_open`, `rushes_status`, `rushes_add_version`, `rushes_add_variant`, `rushes_set_script`, `rushes_get_script`, `rushes_add_take`, `rushes_list_notes`, `rushes_list_assets`, `rushes_get_batch`, `rushes_reply`, `rushes_get_picks`, `rushes_set_shots`, `rushes_lock_picture`, `rushes_add_file` and `rushes_export_notes`.
 
 If you can't run commands, give the user the matching line from **Manual setup** below.
 
@@ -88,9 +88,11 @@ Anywhere:
 - **?** shortcuts
 - **Esc** close
 
-## Screenshots and assets
+## Screenshots and the Assets library
 
-Press **G**, or the camera button, to grab the current frame. It's saved as a PNG to `screenshots/`, named for the film, version and timecode — grabbing the same frame twice overwrites the same file. Every screenshot, cut, take, bed and SFX pass you've registered shows up in the **Assets** tab (key `7`), the last tab, once the project has at least one of them. Each item downloads, saves to a folder of your choice (where the browser supports it), reveals in Finder (Explorer on Windows, the file manager on Linux), or copies its absolute path to paste into a chat with your agent.
+Press **G**, or the camera button, to grab the current frame. It's saved as a PNG to `screenshots/`, named for the film, version and timecode — grabbing the same frame twice overwrites the same file.
+
+The **Assets** tab (key `7`) is a library with a folder sidebar: Screenshots, Cuts, Voiceover, Music, Sound effects, Scripts & docs, Images, Captions, Exports, Delivery and Edit files. Each folder has search, a sort order, a film filter and a grid/list toggle; audio plays inline, one at a time, and Markdown or text files get a read-only preview. Every item has five actions: Download, Save as, Open, Show in Finder and Copy path. **Open** launches the file in its default app, but only for a fixed list of safe, non-executable types — nothing that could run code. Top-level `.md`, `.txt`, `.pdf`, `.srt` and `.vtt` files, plus anything in `exports/`, are picked up automatically; everything else your agent registers with `rushes_add_file`. The Exports folder also has an **Export notes** button, which writes every note to a dated Markdown file there.
 
 Rushes recommends this layout for a project folder:
 
@@ -102,7 +104,7 @@ my-film/
     music/              music beds         deep-house.wav
     sfx/                SFX passes         sfx_pass-a.wav
   screenshots/          frame grabs        hero-60s_v3_00m12.10s_f726.png
-  exports/              (later) notes and markers for Premiere and Resolve
+  exports/              exported notes, plus anything you save there
   .rushes/              Rushes' own records (hidden; not for editing by hand)
 ```
 

@@ -22,11 +22,28 @@ my-film/
     music/              music beds         deep-house.wav
     sfx/                SFX passes         sfx_pass-a.wav
   screenshots/          frame grabs        hero-60s_v3_00m12.10s_f726.png
-  exports/              (later) notes and markers for Premiere and Resolve
+  exports/              exported notes, plus anything you save there
   .rushes/              Rushes' own records (hidden; not for editing by hand)
 ```
 
 Save renders to `renders/`, VO takes to `audio/voiceover/`, music beds to `audio/music/` and SFX passes to `audio/sfx/`. Screenshots live in `screenshots/` — the user's G key and camera button grab there; Rushes creates the folder itself on the first grab. `rushes_list_assets` (optional `kind`) returns every registered asset plus every screenshot. Call it when the user refers to something they haven't given you a path for — "use the screenshot I just took" — instead of guessing the file name.
+
+## The Assets library
+
+The **Assets** tab is a library of every project file, organised into folders: Screenshots, Cuts, Voiceover, Music, Sound effects, Scripts & docs, Images, Captions, Exports, Delivery and Edit files.
+
+Some of it needs no registering. A `*.md`, `*.txt`, `*.pdf`, `*.srt` or `*.vtt` file directly in the project root, and anything saved directly into `exports/`, are found automatically.
+
+Everything else, register with `rushes_add_file` (`kind`, `file`, optional `name`, `note` and `video`):
+
+- **deliverables** — final masters and platform exports — as `delivery`;
+- **NLE project files** — `.prproj`, `.drp` — as `edit`;
+- **storyboards, references and logos** as `image`;
+- **briefs** as `doc`.
+
+The CLI equivalent is `rushes add file <path> --kind K [--name N] [--note T] [--video V]`.
+
+When the user wants to share notes with someone else, call `rushes_export_notes` (CLI: `rushes export notes`). It writes every note, grouped by stage and, for Picture, by film and version, to a dated Markdown file in `exports/`, and returns its path.
 
 ## The loop
 
@@ -45,7 +62,7 @@ Save renders to `renders/`, VO takes to `audio/voiceover/`, music beds to `audio
 
 ## Tools
 
-The MCP server has fourteen tools: `rushes_open`, `rushes_status`, `rushes_add_version`, `rushes_add_variant`, `rushes_set_script`, `rushes_get_script`, `rushes_add_take`, `rushes_list_notes`, `rushes_list_assets`, `rushes_get_batch`, `rushes_reply`, `rushes_get_picks`, `rushes_set_shots` and `rushes_lock_picture`. Each takes an optional `project` folder, which defaults to the folder the harness started in.
+The MCP server has sixteen tools: `rushes_open`, `rushes_status`, `rushes_add_version`, `rushes_add_variant`, `rushes_set_script`, `rushes_get_script`, `rushes_add_take`, `rushes_list_notes`, `rushes_list_assets`, `rushes_get_batch`, `rushes_reply`, `rushes_get_picks`, `rushes_set_shots`, `rushes_lock_picture`, `rushes_add_file` and `rushes_export_notes`. Each takes an optional `project` folder, which defaults to the folder the harness started in.
 
 ## Rules
 
@@ -65,6 +82,8 @@ npx -y github:iamredmh/rushes add version renders/hero_v2.mp4 --video "Hero 60s"
 npx -y github:iamredmh/rushes notes --stage picture --status todo --json
 npx -y github:iamredmh/rushes reply n_8f2k3a "Held the phone 0.5 s longer" --done --fix-t 12.9 --fix-version v2
 npx -y github:iamredmh/rushes add shots shots.json --video "Hero 60s" --version v2
+npx -y github:iamredmh/rushes add file brief.pdf --kind doc
+npx -y github:iamredmh/rushes export notes
 ```
 
 `shots.json` is a JSON array of `{name, start, tag?}`, or that array wrapped as `{"shots": [...]}`.
