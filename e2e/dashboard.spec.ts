@@ -832,12 +832,38 @@ test("a script previews as Markdown, safely", async ({ page, rushes }) => {
   await expect(page.getByRole("tab", { name: /Assets/ })).toHaveAttribute("aria-disabled", "false");
   await page.keyboard.press("7");
 
-  await page.locator(".arow.previewable", { hasText: "script.md" }).click();
+  // The title itself is the select control (I3), not the whole row.
+  await page.locator(".arow.previewable", { hasText: "script.md" }).getByRole("button", { name: "script.md" }).click();
   const preview = page.locator(".apreview");
   await expect(preview.locator("h1")).toHaveText("Title");
   await expect(preview).toContainText("<script>alert(1)</script>");
   // The literal text renders -- never a real <script> element inside the preview.
   await expect(preview.locator("script")).toHaveCount(0);
+});
+
+test("keyboard users can trigger a preview row's actions and select it (I3)", async ({ page, rushes, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await writeFile(join(rushes.root, "brief.md"), "# Brief\n");
+  await writeFile(join(rushes.root, "notes.md"), "# Notes\n");
+
+  await page.goto(rushes.url);
+  await expect(page.getByRole("tab", { name: /Assets/ })).toHaveAttribute("aria-disabled", "false");
+  await page.keyboard.press("7");
+  await expect(page.locator(".aheader h2")).toContainText("Scripts & docs");
+
+  // "brief.md" sorts first and previews by default; its Copy-path button must fire on a keyboard
+  // Enter the same as a click does (the old row-level keydown handler ate this).
+  const briefRow = page.locator(".arow.previewable", { hasText: "brief.md" });
+  await briefRow.getByRole("button", { name: "Copy path" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("status")).toHaveText("Path copied");
+
+  // The title is its own select control: Tab to "notes.md" and press Enter to preview it.
+  const notesSelect = page.locator(".arow.previewable", { hasText: "notes.md" }).getByRole("button", { name: "notes.md" });
+  await notesSelect.focus();
+  await page.keyboard.press("Enter");
+  await expect(notesSelect).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator(".apreview h1")).toHaveText("Notes");
 });
 
 test("audio plays inline, one at a time, and stops when you leave the folder", async ({ page, rushes }) => {
@@ -850,19 +876,28 @@ test("audio plays inline, one at a time, and stops when you leave the folder", a
   await expect(page.getByRole("tab", { name: /Assets/ })).toHaveAttribute("aria-disabled", "false");
   await page.keyboard.press("7");
   await expect(page.locator(".aheader h2")).toContainText("Music");
+  // A list-only folder never offers the grid/list toggle (I5) -- Music's tiles would be
+  // non-images under an <img>, and the Play button would vanish into the broken grid.
+  await expect(page.locator('.seg[aria-label="View"]')).toHaveCount(0);
 
   const rows = page.locator(".arow");
   await expect(rows).toHaveCount(2);
   const audio = page.locator("audio");
+  // Row order depends on modified time (Newest is the default sort), which isn't something to
+  // pin a test to -- just use whichever row comes first. The accessible name is stable
+  // ("Play <name>") regardless of state (M4); aria-pressed, not a swapped label, says whether
+  // it's currently playing.
+  const playA = rows.nth(0).getByRole("button", { name: /^Play / });
+  const playB = rows.nth(1).getByRole("button", { name: /^Play / });
 
-  await rows.nth(0).getByRole("button", { name: "Play" }).click();
+  await playA.click();
   await expect.poll(() => audio.evaluate((el) => (el as HTMLAudioElement).paused)).toBe(false);
-  await expect(rows.nth(0).getByRole("button", { name: "Pause" })).toBeVisible();
+  await expect(playA).toHaveAttribute("aria-pressed", "true");
 
   // Only one plays at a time: starting the second row's playback takes over the one shared player.
-  await rows.nth(1).getByRole("button", { name: "Play" }).click();
-  await expect(rows.nth(0).getByRole("button", { name: "Play" })).toBeVisible();
-  await expect(rows.nth(1).getByRole("button", { name: "Pause" })).toBeVisible();
+  await playB.click();
+  await expect(playA).toHaveAttribute("aria-pressed", "false");
+  await expect(playB).toHaveAttribute("aria-pressed", "true");
   await expect.poll(() => audio.evaluate((el) => (el as HTMLAudioElement).paused)).toBe(false);
 
   // Leaving the folder stops it.
@@ -881,7 +916,7 @@ test("audio stops when you switch tabs (Assets → Picture and back)", async ({ 
   // A cut also exists (to unlock Picture), so Cuts -- not Music -- is the default folder.
   await page.getByRole("navigation", { name: "Folders" }).getByRole("button", { name: /^Music/ }).click();
   await expect(page.locator(".aheader h2")).toContainText("Music");
-  await page.getByRole("button", { name: "Play" }).click();
+  await page.getByRole("button", { name: "Play Bed" }).click();
   await expect.poll(() => page.locator("audio").evaluate((el) => (el as HTMLAudioElement).paused)).toBe(false);
 
   // Assets unmounts entirely on a tab switch, taking the shared <audio> element with it --
@@ -897,6 +932,27 @@ test("audio stops when you switch tabs (Assets → Picture and back)", async ({ 
   await expect(page.locator(".aheader h2")).toContainText("Music");
   await expect(page.locator("audio")).toHaveCount(1);
   await expect.poll(() => page.locator("audio").evaluate((el) => (el as HTMLAudioElement).paused)).toBe(true);
+});
+
+test("a rejected play() resets the row and shows a toast, instead of claiming to be playing (M4)", async ({ page, rushes }) => {
+  await copyFile(CLIP, join(rushes.root, "bed.mp4"));
+  await rushes.api("POST", "/api/variants", { stage: "music", name: "Bed", file: "bed.mp4" });
+
+  // Forces every play() to reject, standing in for a browser blocking it or a bad file -- real
+  // media playback has nothing reliable to fail on in a test environment otherwise.
+  await page.addInitScript(() => {
+    HTMLMediaElement.prototype.play = () => Promise.reject(new Error("blocked"));
+  });
+
+  await page.goto(rushes.url);
+  await expect(page.getByRole("tab", { name: /Assets/ })).toHaveAttribute("aria-disabled", "false");
+  await page.keyboard.press("7");
+  await expect(page.locator(".aheader h2")).toContainText("Music");
+
+  const playBed = page.getByRole("button", { name: "Play Bed" });
+  await playBed.click();
+  await expect(page.getByRole("status")).toContainText("Couldn't play");
+  await expect(playBed).toHaveAttribute("aria-pressed", "false");
 });
 
 test("Open is offered for a doc and not for an unsafe file, and Export notes adds a file to Exports", async ({ page, rushes }) => {
@@ -928,6 +984,29 @@ test("Open is offered for a doc and not for an unsafe file, and Export notes add
   await expect(page.locator(".arow")).toContainText("-notes-");
 });
 
+test("a file dropped into the project root appears once something refreshes Assets (I7)", async ({ page, rushes }) => {
+  await writeFile(join(rushes.root, "existing.md"), "# Existing\n");
+  await page.goto(rushes.url);
+  await expect(page.getByRole("tab", { name: /Assets/ })).toHaveAttribute("aria-disabled", "false");
+  await page.keyboard.press("7");
+  await expect(page.locator(".aheader h2")).toContainText("Scripts & docs");
+  await expect(page.locator(".arow")).toHaveCount(1);
+
+  // The watcher only covers .rushes/, so a new root file needs one of I7's own triggers. Written
+  // only after the first render, so it's genuinely new to this tab, not just loaded late.
+  await writeFile(join(rushes.root, "notes2.md"), "# Notes 2\n");
+
+  // Switching folders and back is one of those triggers (Exports always shows, so it's always
+  // there to switch to).
+  const sidebar = page.getByRole("navigation", { name: "Folders" });
+  await sidebar.getByRole("button", { name: /Exports/ }).click();
+  await sidebar.getByRole("button", { name: /Scripts & docs/ }).click();
+  await expect(page.locator(".arow")).toHaveCount(2);
+  // Order isn't asserted here: the default sort is newest-first, so it depends on mtime.
+  await expect(page.locator(".arow", { hasText: "existing.md" })).toHaveCount(1);
+  await expect(page.locator(".arow", { hasText: "notes2.md" })).toHaveCount(1);
+});
+
 test("200 screenshots stay usable", async ({ page, rushes }) => {
   await mkdir(join(rushes.root, "screenshots"), { recursive: true });
   await Promise.all(
@@ -941,4 +1020,24 @@ test("200 screenshots stay usable", async ({ page, rushes }) => {
   const search = page.getByRole("searchbox", { name: "Search" });
   await search.fill("f199");
   await expect(page.locator(".shot-tile")).toHaveCount(1);
+});
+
+test("Cuts posters are lazy: not every tile loads a video before you scroll (I6)", async ({ page, rushes }) => {
+  // 40 versions of the same film, all pointing at one reused clip file.
+  await copyFile(CLIP, join(rushes.root, "renders", "hero.mp4"));
+  for (let i = 0; i < 40; i++) {
+    await rushes.api("POST", "/api/versions", { video: "Hero", file: "renders/hero.mp4" });
+  }
+  await page.goto(rushes.url);
+  await expect(page.getByRole("tab", { name: /Assets/ })).toHaveAttribute("aria-disabled", "false");
+  await page.keyboard.press("7");
+  await expect(page.locator(".aheader h2")).toContainText("Cuts");
+
+  const tiles = page.locator(".shot-tile");
+  await expect(tiles).toHaveCount(40);
+  // Every tile mounts a <video> element, but only the ones near the viewport get a src (§16.1 /
+  // I6) -- loading metadata for all 40 at once is exactly what this rule exists to prevent.
+  await expect(page.locator(".shot-tile video")).toHaveCount(40);
+  const withSrc = await page.locator(".shot-tile video[src]").count();
+  expect(withSrc).toBeLessThan(40);
 });

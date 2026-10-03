@@ -209,5 +209,5 @@ export const osRevealer: Revealer; // honours RUSHES_NO_REVEAL=1 (logs "reveal <
 - **SKILL.md:** the same essentials in a few lines.
 - **Verify:**
   - `npm run build && npx vitest run && npm run typecheck && npx playwright test` all pass.
-  - The fresh install `cd "$(mktemp -d)" && npx -y "git+file://$HOME/Developer/rushes#plan-2c-assets" --help | head -1` prints the help line.
+  - The fresh install `repo="git+file://$PWD#plan-2c-assets" && cd "$(mktemp -d)" && npx -y "$repo" --help | head -1` prints the help line.
 - [ ] Commit with `docs: screenshots, the Assets tab and the project folder layout`.

@@ -249,7 +249,8 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .apreview .markdown pre { background: var(--app); border-radius: var(--r); padding: 12px; overflow: auto; }
 .apreview .markdown pre code { background: transparent; padding: 0; }
 .apreview .plain { margin: 0; white-space: pre-wrap; word-break: break-word; font-family: var(--sans); font-size: 15px; color: var(--text); }
-.atrunc { margin-top: 12px; color: var(--text-3); font-size: 13px; }
+/* Figtree UI text is never under 15px (spec §10) -- M8. */
+.atrunc { margin-top: 12px; color: var(--text-3); font-size: 15px; }
 .aempty { color: var(--text-3); font-size: 15px; margin: 8px 0; }
 
 .afilm-group + .afilm-group { margin-top: 20px; }
@@ -260,14 +261,20 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .shot-thumb { border: 0; padding: 0; background: #000; border-radius: var(--r); aspect-ratio: 4 / 3; overflow: hidden; cursor: pointer; display: block; width: 100%; }
 .shot-thumb img, .shot-thumb video { width: 100%; height: 100%; object-fit: contain; background: var(--bg); display: block; }
 .shot-thumb.poster { cursor: default; }
+/* A non-video Delivery file's grid tile (I5): its extension, not a black poster box. */
+.file-tile { width: 100%; height: 100%; display: grid; place-items: center; background: var(--app); }
+.file-ext { font-size: 13px; color: var(--text-3); text-transform: uppercase; }
 .shot-meta { font-size: 15px; color: var(--text-2); display: grid; gap: 4px; }
 .arows { display: grid; gap: 8px; }
 .arow { display: flex; align-items: center; gap: 14px; background: var(--raised); border-radius: var(--r); padding: 14px 16px; }
 .arow.missing { opacity: 0.55; }
-.arow.previewable { cursor: pointer; }
 .arow.previewable.selected { background: var(--accent-soft); }
 .ainfo { display: grid; gap: 4px; min-width: 0; flex: 1; }
 .atitle { font-size: 15px; font-weight: 500; color: var(--text); display: flex; align-items: center; gap: 8px; overflow-wrap: anywhere; }
+/* The dedicated select control in a previewable row's title (I3): reset to look like plain text,
+   not a button, but keep real button keyboard/focus behaviour. */
+.aselect { background: none; border: 0; padding: 0; margin: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.aselect:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 .asub { font-size: 15px; color: var(--text-2); overflow-wrap: anywhere; }
 /* A voiceover/music/sfx row's lane + meta line (§16, v3): same size as .asub, but dimmer --
    secondary to the track's own name, not a version note. */

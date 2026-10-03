@@ -332,7 +332,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         const { assets } = await (await client()).get(`/api/assets${q}`);
         if (o.json) return io.out(JSON.stringify(assets, null, 2)), 0;
         for (const a of assets as { kind: string; path: string; size: number | null; missing: boolean }[]) {
-          io.out(`${a.kind.padEnd(10)} ${a.path} ${a.missing ? "missing" : humanSize(a.size ?? 0)}`);
+          io.out(`${a.kind.padEnd(10)} ${stripControl(a.path)} ${a.missing ? "missing" : humanSize(a.size ?? 0)}`);
         }
         if (!assets.length) io.out("No assets");
         return 0;
@@ -399,6 +399,15 @@ function humanSize(bytes: number): string {
     i++;
   }
   return `${n.toFixed(1)} ${units[i]}`;
+}
+
+/** Drops C0 control characters (U+0000-U+001F) and DEL (U+007F) from a name or path before it
+ *  reaches a terminal (M5): an odd hand-edit or agent mistake could otherwise move the cursor,
+ *  clear the line, or ring the bell when `rushes assets` prints it. --json is untouched -- a
+ *  consumer parsing JSON gets the real value, control characters and all. */
+function stripControl(s: string): string {
+  // eslint-disable-next-line no-control-regex -- the whole point is to match control characters.
+  return s.replace(/[\x00-\x1f\x7f]/g, "");
 }
 
 function when(n: { scope: string; t: number | null; tOut: number | null }): string {

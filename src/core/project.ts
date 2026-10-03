@@ -133,12 +133,34 @@ export interface AddFileInput {
   video?: string;
 }
 
+const FILE_NAME_MAX = 120;
+// Leaves room for uniqueId's "-2", "-3" ... suffix and the odd longer one, well inside the
+// schema's 64-character id cap.
+const FILE_SLUG_MAX = 58;
+
+/** `base`, cut to at most `max` characters, preferring to cut at a `-` so the id still reads as
+ *  whole words rather than stopping mid-word. */
+function trimSlugBase(base: string, max: number): string {
+  if (base.length <= max) return base;
+  const cut = base.slice(0, max);
+  const dash = cut.lastIndexOf("-");
+  return dash > max / 2 ? cut.slice(0, dash) : cut;
+}
+
 /** Registers a project file (a doc, image, caption, export, delivery or edit file) in the library. */
 export function addFile(p: Project, input: AddFileInput, now = new Date()): FileEntry {
-  const name = input.name?.trim() || basename(input.file);
+  const given = input.name?.trim();
+  let name: string;
+  if (given) {
+    if (given.length > FILE_NAME_MAX) throw new InvalidError("Name is over 120 characters");
+    name = given;
+  } else {
+    const base = basename(input.file);
+    name = base.length > FILE_NAME_MAX ? `${base.slice(0, FILE_NAME_MAX - 1)}…` : base;
+  }
   const video = input.video ? resolveVideo(p, input.video).id : null;
   const entry: FileEntry = {
-    id: uniqueId(slugify(name), p.files.map((f) => f.id)),
+    id: uniqueId(trimSlugBase(slugify(name), FILE_SLUG_MAX), p.files.map((f) => f.id)),
     kind: input.kind,
     file: input.file,
     name,

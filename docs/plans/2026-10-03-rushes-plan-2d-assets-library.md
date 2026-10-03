@@ -187,5 +187,5 @@ export function exportFileName(projectName: string, now: Date): string; // "<slu
 - **Check:** no local paths anywhere.
 - **Verify:**
   - the full suite passes;
-  - a fresh install with `cd "$(mktemp -d)" && npx -y "git+file://$HOME/Developer/rushes#plan-2d-assets-library" --help | head -1` works.
+  - a fresh install with `repo="git+file://$PWD#plan-2d-assets-library" && cd "$(mktemp -d)" && npx -y "$repo" --help | head -1` works.
 - [ ] Commit with `docs: the Assets library, Open, add_file and notes export`.

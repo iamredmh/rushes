@@ -222,7 +222,8 @@ describe("the Assets library (§16)", () => {
     const assets = await listAssets(store, project, script);
     const docs = assets.filter((a) => a.kind === "doc");
     expect(docs).toHaveLength(1);
-    expect(docs[0]).toMatchObject({ path: "brief.md", name: "Creative brief", note: "Approved v2", video: "hero" });
+    // name stays the file's basename (I2); the registered display name goes in label.
+    expect(docs[0]).toMatchObject({ path: "brief.md", name: "brief.md", label: "Creative brief", note: "Approved v2", video: "hero" });
   });
 
   it("includes registered library files in candidatePaths even though they're never auto-discovered (image, delivery, edit)", async () => {

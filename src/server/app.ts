@@ -12,6 +12,7 @@ import { tabStates } from "../core/tabs.js";
 import { fromManifestPath, toManifestPath } from "../core/paths.js";
 import { probe } from "../core/media.js";
 import { lstat, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -390,6 +391,12 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     if (!info.isFile() || info.isSymbolicLink()) {
       throw new RushesError(`Rushes won't open "${b.path}": unsafe file type`, 415, "unsafe_type", { path: b.path });
     }
+    // Refuse anything with an execute bit set (M6): a safe extension can still be a script
+    // someone chmod +x'd by hand, and Windows has no execute bit to check (file associations
+    // there run off the extension alone, already covered above), so this only applies elsewhere.
+    if (process.platform !== "win32" && (info.mode & 0o111) !== 0) {
+      throw new RushesError(`Rushes won't open "${b.path}": unsafe file type`, 415, "unsafe_type", { path: b.path });
+    }
     await open(abs);
     return c.json({ ok: true });
   });
@@ -410,8 +417,11 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     const dir = join(store.root, "exports");
     await mkdir(dir, { recursive: true });
     // Written to a temp name in the same directory, then renamed into place -- same atomic
-    // write the grabs route uses, so exporting again the same day cleanly replaces the file.
-    const tmp = join(dir, `.${name}.${process.pid}.tmp`);
+    // write the grabs route uses, so exporting again the same day cleanly replaces the file. A
+    // process id alone isn't unique enough here (M1): two concurrent exports in the same process
+    // -- two agents calling rushes_export_notes back to back, say -- would share one temp name
+    // and race each other's write. randomUUID() makes every export's temp name its own.
+    const tmp = join(dir, `.${name}.${process.pid}.${randomUUID()}.tmp`);
     await writeFile(tmp, md, "utf8");
     await rename(tmp, join(dir, name));
     return c.json({ path: `exports/${name}` }, 201);

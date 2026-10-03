@@ -138,7 +138,12 @@ async function fileAsset(
 async function registeredFileAsset(store: Store, f: FileEntry): Promise<Asset> {
   const abs = fromManifestPath(store.root, f.file);
   const info = await statInfo(abs);
-  const asset: Asset = { kind: f.kind, path: f.file, abs, name: f.name, size: info.size, modified: info.modified, missing: info.missing, note: f.note };
+  // `name` stays the file's own basename -- Download, Save-as and the dashboard's extension
+  // checks (isPreviewable, Open) all read it, the same as a take or variant already does -- and
+  // `f.name` (the display name the agent or CLI gave it) goes in `label` instead (I2).
+  const asset: Asset = {
+    kind: f.kind, path: f.file, abs, name: basename(f.file), label: f.name, size: info.size, modified: info.modified, missing: info.missing, note: f.note,
+  };
   if (f.video) asset.video = f.video;
   return asset;
 }

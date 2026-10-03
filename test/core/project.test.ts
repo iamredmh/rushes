@@ -322,6 +322,33 @@ describe("addFile", () => {
     expect(a.id).toBe("notes");
     expect(b.id).toBe("notes-2");
   });
+  it("registers a 90-character file name with an id of 64 characters or fewer (I1)", () => {
+    const p = empty();
+    const longName = `${"a".repeat(89)}.md`;
+    const f = addFile(p, { kind: "doc", file: `docs/${longName}` });
+    expect(f.name).toBe(longName);
+    expect(f.id.length).toBeLessThanOrEqual(64);
+  });
+  it("gives two long names that share a prefix unique ids (I1)", () => {
+    const p = empty();
+    const base = "a".repeat(90);
+    const a = addFile(p, { kind: "doc", file: "one.md", name: `${base} one` });
+    const b = addFile(p, { kind: "doc", file: "two.md", name: `${base} two` });
+    expect(a.id).not.toBe(b.id);
+    expect(a.id.length).toBeLessThanOrEqual(64);
+    expect(b.id.length).toBeLessThanOrEqual(64);
+  });
+  it("trims a default name over 120 characters, with an ellipsis (I1)", () => {
+    const p = empty();
+    const longBase = `${"b".repeat(130)}.md`;
+    const f = addFile(p, { kind: "doc", file: longBase });
+    expect(f.name.length).toBe(120);
+    expect(f.name.endsWith("…")).toBe(true);
+  });
+  it("rejects an explicit name over 120 characters with a 400, not a schema crash (I1)", () => {
+    const p = empty();
+    expect(() => addFile(p, { kind: "doc", file: "x.md", name: "c".repeat(121) })).toThrow(InvalidError);
+  });
 });
 
 describe("parseRate", () => {

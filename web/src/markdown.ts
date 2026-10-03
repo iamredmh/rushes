@@ -32,8 +32,12 @@ function inlineFormat(text: string): string {
   });
   // [text](url) -> text. The url is discarded outright: never rendered, never an href. The url
   // group tolerates one level of nested parens (e.g. "javascript:alert(1)") by matching a
-  // balanced inner group before requiring the link's own closing paren.
-  out = out.replace(/\[([^\]]*)\]\((?:[^()]|\([^()]*\))*\)/g, "$1");
+  // balanced inner group before requiring the link's own closing paren. The text group excludes
+  // `[` as well as `]` (I4): `[^\]]*` alone can span across an unmatched `[`, so a run of many
+  // `[` characters makes the engine rescan the same text from every one of them -- quadratic on
+  // an adversarial input. Excluding `[` too means a text group simply can't cross one, so each
+  // failed attempt is O(1) rather than restarting a scan.
+  out = out.replace(/\[([^\][]*)\]\((?:[^()]|\([^()]*\))*\)/g, "$1");
   out = out.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   out = out.replace(/\*([^*]+)\*/g, "<em>$1</em>");
   out = out.replace(/\u0000(\d+)\u0000/g, (_m, i: string) => codeSpans[Number(i)]);
@@ -49,7 +53,10 @@ interface ListItemMatch {
 /** `  - text` / `1. text`, at any indent -- the caller decides whether the indent makes it a
  *  top-level or (one level of) nested item. */
 function matchListItem(line: string): ListItemMatch | null {
-  const m = /^( *)([-*]|\d+\.)\s+(.*)$/.exec(line);
+  // [ \t]+, not \s+ (I4): \s includes U+2028/U+2029, which `.` never matches (they're line
+  // terminators, dotAll or not) -- a run of them after the marker would make `\s+` and `(.*)$`
+  // fight over the same characters, backtracking one at a time across the whole run.
+  const m = /^( *)([-*]|\d+\.)[ \t]+(.*)$/.exec(line);
   if (!m) return null;
   return { indent: m[1].length, ordered: /\d/.test(m[2]), content: m[3] };
 }
@@ -76,7 +83,10 @@ function matchBlockquote(line: string): string | null {
  */
 export function safeMarkdownHtml(text: string): string {
   const escaped = escapeHtml(text);
-  const lines = escaped.split(/\r\n|\r|\n/);
+  // U+2028 (line separator) and U+2029 (paragraph separator) split lines too (I4): both are
+  // valid line breaks in a text file, and leaving either inside a line is what made [ \t]+
+  // necessary above in the first place.
+  const lines = escaped.split(/\r\n|\r|\n|\u2028|\u2029/);
   const html: string[] = [];
   let para: string[] = [];
   // Each item already holds its fully-rendered inner HTML (inline-formatted text, plus any
@@ -116,7 +126,8 @@ export function safeMarkdownHtml(text: string): string {
       continue;
     }
 
-    const heading = /^(#{1,3})\s+(.*)$/.exec(line);
+    // Same [ \t]+ reasoning as matchListItem (I4).
+    const heading = /^(#{1,3})[ \t]+(.*)$/.exec(line);
     if (heading) {
       flushPara();
       flushList();

@@ -149,7 +149,8 @@ describe("MCP tools", () => {
     const added = await t.call("rushes_add_file", { kind: "doc", file: "brief.md", name: "Creative brief", note: "v2" });
     expect(added.json).toMatchObject({ kind: "doc", file: "brief.md", name: "Creative brief", note: "v2" });
     const assets = await t.call("rushes_list_assets", { kind: "doc" });
-    expect(assets.json.assets).toMatchObject([{ path: "brief.md", name: "Creative brief" }]);
+    // name is the file's own basename; the given display name goes in label (I2).
+    expect(assets.json.assets).toMatchObject([{ path: "brief.md", name: "brief.md", label: "Creative brief" }]);
     await t.close();
   });
 

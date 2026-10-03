@@ -416,7 +416,33 @@ describe("cli", () => {
     const b = io(root);
     await main(["assets", "--kind", "doc", "--json"], b.x);
     const assets = JSON.parse(b.out[0]);
-    expect(assets).toMatchObject([{ path: "brief.md", name: "Creative brief", note: "v2" }]);
+    // name is the file's own basename; the given display name goes in label (I2).
+    expect(assets).toMatchObject([{ path: "brief.md", name: "brief.md", label: "Creative brief", note: "v2" }]);
+    await s.close();
+  });
+
+  it("strips C0 control characters and DEL from paths in human-readable `assets` output, but not --json (M5)", async () => {
+    const { root } = await tmpProject();
+    const s = await startServer(root, { port: 0 });
+    // A bell and an ANSI escape, the kind of thing a hand-edited project.json could carry --
+    // never something a terminal should be asked to act on.
+    const evilPath = "notes\u0007\u001b[31m.md";
+    await fetch(`${s.url}/api/files`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ kind: "doc", file: evilPath }),
+    });
+    const a = io(root);
+    await main(["assets", "--kind", "doc"], a.x);
+    // eslint-disable-next-line no-control-regex
+    expect(a.out[0]).not.toMatch(/[\x00-\x1f\x7f]/);
+    expect(a.out[0]).toContain("notes");
+    expect(a.out[0]).toContain(".md");
+
+    const b = io(root);
+    await main(["assets", "--kind", "doc", "--json"], b.x);
+    const assets = JSON.parse(b.out[0]);
+    expect(assets[0].path).toBe(evilPath);
     await s.close();
   });
 

@@ -211,12 +211,18 @@ describe("extOf / isPreviewable", () => {
     expect(extOf("noext")).toBe("");
   });
   it("is previewable only for md, txt, srt and vtt", () => {
-    expect(isPreviewable({ name: "script.md" })).toBe(true);
-    expect(isPreviewable({ name: "notes.txt" })).toBe(true);
-    expect(isPreviewable({ name: "en.srt" })).toBe(true);
-    expect(isPreviewable({ name: "en.vtt" })).toBe(true);
-    expect(isPreviewable({ name: "brief.pdf" })).toBe(false);
-    expect(isPreviewable({ name: "x.command" })).toBe(false);
+    expect(isPreviewable({ path: "script.md" })).toBe(true);
+    expect(isPreviewable({ path: "notes.txt" })).toBe(true);
+    expect(isPreviewable({ path: "en.srt" })).toBe(true);
+    expect(isPreviewable({ path: "en.vtt" })).toBe(true);
+    expect(isPreviewable({ path: "brief.pdf" })).toBe(false);
+    expect(isPreviewable({ path: "x.command" })).toBe(false);
+  });
+  it("reads the extension from path, not a registered file's display name (I2)", () => {
+    // A registered file's display name can be anything ("Creative brief") and carries no
+    // extension at all once it's shown under `label` instead of `name` -- isPreviewable must
+    // never be fooled into thinking it's a non-previewable type (or vice versa).
+    expect(isPreviewable({ path: "docs/brief.md" })).toBe(true);
   });
 });
 
@@ -236,6 +242,11 @@ describe("FOLDERS", () => {
     expect(FOLDERS.find((f) => f.id === "export")?.filmFilter).toBe(false);
     expect(FOLDERS.find((f) => f.id === "cut")?.filmFilter).toBe(true);
     expect(FOLDERS.find((f) => f.id === "delivery")?.filmFilter).toBe(true);
+  });
+  it("only offers the grid/list toggle for Screenshots, Images, Cuts and Delivery (I5)", () => {
+    const withToggle = FOLDERS.filter((f) => f.gridToggle).map((f) => f.id).sort();
+    expect(withToggle).toEqual(["cut", "delivery", "image", "screenshot"].sort());
+    expect(FOLDERS.find((f) => f.id === "music")?.gridToggle).toBe(false);
   });
 });
 

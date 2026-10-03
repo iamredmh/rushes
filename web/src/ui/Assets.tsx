@@ -50,6 +50,15 @@ function saveView(id: FolderId, view: View): void {
   }
 }
 
+/** The view a folder should render in: always "list" for a folder with no grid toggle (I5),
+ *  whatever an older, stale localStorage value might still say -- otherwise the remembered
+ *  choice, or the folder's own default. */
+function viewFor(folder: FolderDef | null): View {
+  if (!folder) return "grid";
+  if (!folder.gridToggle) return "list";
+  return loadView(folder.id) ?? folder.view;
+}
+
 /** Fetches a previewable file's text via mediaUrl(), capped at 1 MB: reads the response stream
  *  and stops (cancelling it) once the cap is reached, rather than buffering the whole file only
  *  to throw most of it away. */
@@ -117,7 +126,7 @@ export function Assets({ assets, videos, toast, onChanged }: AssetsProps) {
   const [film, setFilm] = useState<string | null>(null);
   // Lazily seeded the same way selectedId is above, so the first paint already shows the right
   // view instead of a flash of the "grid" fallback while an effect catches up.
-  const [view, setView] = useState<View>(() => (folder ? (loadView(folder.id) ?? folder.view) : "grid"));
+  const [view, setView] = useState<View>(() => viewFor(folder));
 
   // A new folder gets a clean search/film/sort and its own remembered (or default) view -- a
   // search typed into Scripts & docs must never silently narrow Music too. This runs during
@@ -135,7 +144,7 @@ export function Assets({ assets, videos, toast, onChanged }: AssetsProps) {
     setQuery("");
     setFilm(null);
     setSort("newest");
-    setView(loadView(folder.id) ?? folder.view);
+    setView(viewFor(folder));
   }
 
   const items = useMemo(
@@ -144,7 +153,7 @@ export function Assets({ assets, videos, toast, onChanged }: AssetsProps) {
   );
 
   const changeView = (v: View) => {
-    if (!folder) return;
+    if (!folder || !folder.gridToggle) return;
     setView(v);
     saveView(folder.id, v);
   };
@@ -177,14 +186,39 @@ export function Assets({ assets, videos, toast, onChanged }: AssetsProps) {
       return;
     }
     if (audioState.path !== asset.path) audio.src = mediaUrl(asset.path);
-    void audio.play().catch(() => undefined);
     setAudioState({ path: asset.path, paused: false });
+    audio.play().catch(() => {
+      // M4: a rejected play() (the browser blocking it, a bad file) must not leave the row
+      // claiming to be playing when it isn't.
+      setAudioState({ path: asset.path, paused: true });
+      toast(`Couldn't play ${asset.label ?? asset.name}`);
+    });
   };
   // Stops on folder change and film-filter change; unmounting (a tab switch, since Assets is
   // only ever rendered while stage === "assets") drops the <audio> element itself, which stops
   // playback the same way.
   useEffect(() => stopAudio, [selectedId, film]);
   useEffect(() => stopAudio, []);
+
+  // ---- I7: auto-discovered files (a *.md dropped in the project root, say) only show up on the
+  // next SSE "change" event, and the watcher only watches .rushes/ -- so nothing ever tells the
+  // dashboard a plain file arrived. Ask for a refresh wherever that's likely to matter: the tab
+  // mounting, the folder selection changing (this fires on mount too, so it covers both at once),
+  // and the tab regaining visibility after being hidden (e.g. the window was backgrounded while
+  // an agent dropped a file). onChanged is a fresh function each render, same as elsewhere in
+  // this file -- it's not meant to be depended on, only called.
+  useEffect(() => {
+    onChanged();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId]);
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") onChanged();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ---- the Markdown/plain-text preview, for Scripts & docs, Captions, Exports and Edit files ----
   const [previewPath, setPreviewPath] = useState<string | null>(null);
@@ -310,6 +344,10 @@ export function Assets({ assets, videos, toast, onChanged }: AssetsProps) {
   };
 
   const previewExt = previewPath ? (previewPath.split(".").pop() ?? "").toLowerCase() : "";
+  // Memoised on the text itself (I4): re-running the renderer on every keystroke in the search
+  // box, say, would otherwise re-parse a large file for no reason, since nothing about its own
+  // rendered HTML depends on anything else that re-renders Assets.
+  const previewHtml = useMemo(() => safeMarkdownHtml(preview?.text ?? ""), [preview?.text]);
   const renderPreview = () => {
     if (!previewPath || !preview) return <p class="aempty">Select a file to preview it here.</p>;
     if (preview.loading) return <p class="aempty">Loading…</p>;
@@ -317,7 +355,7 @@ export function Assets({ assets, videos, toast, onChanged }: AssetsProps) {
     return (
       <>
         {previewExt === "md" ? (
-          <div class="markdown" dangerouslySetInnerHTML={{ __html: safeMarkdownHtml(preview.text) }} />
+          <div class="markdown" dangerouslySetInnerHTML={{ __html: previewHtml }} />
         ) : (
           <pre class="plain">{preview.text}</pre>
         )}
@@ -374,14 +412,16 @@ export function Assets({ assets, videos, toast, onChanged }: AssetsProps) {
                 <option value="oldest">Oldest</option>
                 <option value="name">Name</option>
               </select>
-              <div class="seg" role="group" aria-label="View">
-                <button type="button" aria-pressed={view === "grid"} aria-label="Grid view" data-tip="Grid" onClick={() => changeView("grid")}>
-                  <Icon name="grid" />
-                </button>
-                <button type="button" aria-pressed={view === "list"} aria-label="List view" data-tip="List" onClick={() => changeView("list")}>
-                  <Icon name="list" />
-                </button>
-              </div>
+              {folder.gridToggle && (
+                <div class="seg" role="group" aria-label="View">
+                  <button type="button" aria-pressed={view === "grid"} aria-label="Grid view" data-tip="Grid" onClick={() => changeView("grid")}>
+                    <Icon name="grid" />
+                  </button>
+                  <button type="button" aria-pressed={view === "list"} aria-label="List view" data-tip="List" onClick={() => changeView("list")}>
+                    <Icon name="list" />
+                  </button>
+                </div>
+              )}
               {folder.id === "export" && (
                 <button type="button" class="btn" onClick={() => void exportNotes()}>
                   <Icon name="script" />

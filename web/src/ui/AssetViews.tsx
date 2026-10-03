@@ -4,7 +4,7 @@
 // layout, state and keyboard handling.
 import { useEffect, useRef, useState } from "preact/hooks";
 import { api, mediaUrl } from "../api.js";
-import { extOf, formatBytes, fmt, metaLine, OPEN_SAFE_EXT } from "../lib.js";
+import { extOf, formatBytes, fmt, metaLine, OPEN_SAFE_EXT, VIDEO_EXT } from "../lib.js";
 import type { Asset, Video } from "../types.js";
 import { Icon } from "./Icon.js";
 
@@ -27,7 +27,9 @@ export function shortDate(iso: string | null): string {
  *  row and tile (§15.3, extended by §16.3's Open). */
 export function Actions({ asset, toast }: { asset: Asset; toast(message: string): void }) {
   const [saving, setSaving] = useState(false);
-  const canOpen = !asset.missing && OPEN_SAFE_EXT.has(extOf(asset.name));
+  // Extension read from path, not name (I2): a registered file's display name carries no
+  // extension at all once it's shown under `label` instead.
+  const canOpen = !asset.missing && OPEN_SAFE_EXT.has(extOf(asset.path));
 
   const saveAs = async () => {
     if (saving) return;
@@ -154,7 +156,9 @@ export function Missing() {
 export function cutLabel(asset: Asset, videos: Video[]): { title: string; subtitle: string | null } {
   const video = videos.find((v) => v.id === asset.video);
   const version = video?.versions.find((v) => v.id === asset.version);
-  const title = video && asset.version ? `${video.name} · ${asset.version}` : asset.name;
+  // label ?? name (I2): a registered delivery with no video match still shows its own display
+  // name rather than its bare file name.
+  const title = video && asset.version ? `${video.name} · ${asset.version}` : asset.label ?? asset.name;
   return { title, subtitle: version?.note || null };
 }
 
@@ -168,7 +172,7 @@ export function AssetRow({ asset, videos, toast }: { asset: Asset; videos: Video
     <div class={`arow${asset.missing ? " missing" : ""}`}>
       <div class="ainfo">
         <div class="atitle">
-          {cut ? cut.title : asset.name}
+          {cut ? cut.title : asset.label ?? asset.name}
           {asset.missing && <Missing />}
         </div>
         {cut?.subtitle && <div class="asub">{cut.subtitle}</div>}
@@ -199,7 +203,11 @@ export function AudioRow({
         type="button"
         class="btn ghost ib"
         data-tip={isPlaying ? "Pause" : "Play"}
-        aria-label={isPlaying ? "Pause" : "Play"}
+        // A stable name, not one that swaps with the state (M4): aria-pressed is what says
+        // whether it's playing right now, same as any other toggle button. Swapping the label
+        // too would mean a screen reader announces "Pause" for a control that, read on its own,
+        // never actually says what it's a pause button *for*.
+        aria-label={`Play ${title}`}
         aria-pressed={isPlaying}
         aria-disabled={asset.missing}
         tabIndex={asset.missing ? -1 : undefined}
@@ -218,25 +226,21 @@ export function AudioRow({
   );
 }
 
-/** A row in a previewable folder (Scripts & docs, Captions, Exports, Edit files): clicking
- *  anywhere on the row (other than its own action buttons) selects it for the preview pane. */
+/** A row in a previewable folder (Scripts & docs, Captions, Exports, Edit files). The title
+ *  itself is the select control (I3): the row is a plain, non-interactive wrapper, so Download,
+ *  Save as…, Open and Copy path -- all plain buttons/links inside it -- keep their own normal
+ *  keyboard and screen-reader behaviour instead of being nested inside another `role="button"`. */
 export function PreviewRow({
   asset, selected, onSelect, videos, toast,
 }: {
   asset: Asset; selected: boolean; onSelect(): void; videos: Video[]; toast(message: string): void;
 }) {
   return (
-    <div
-      class={`arow previewable${asset.missing ? " missing" : ""}${selected ? " selected" : ""}`}
-      role="button"
-      tabIndex={0}
-      aria-pressed={selected}
-      aria-label={`Preview ${asset.name}`}
-      onClick={onSelect}
-      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(); } }}
-    >
+    <div class={`arow previewable${asset.missing ? " missing" : ""}${selected ? " selected" : ""}`}>
       <div class="ainfo">
-        <div class="atitle">{asset.name}{asset.missing && <Missing />}</div>
+        <button type="button" class="aselect atitle" aria-pressed={selected} onClick={onSelect}>
+          {asset.label ?? asset.name}{asset.missing && <Missing />}
+        </button>
         {asset.note && <div class="asub">{asset.note}</div>}
         <div class="afolder mono">{asset.path}</div>
         {!asset.missing && <div class="ameta">{formatBytes(asset.size ?? 0)} · {shortDate(asset.modified)}</div>}
@@ -249,7 +253,7 @@ export function PreviewRow({
 /** A Screenshots/Images grid tile. */
 export function ShotTile({ asset, videos, toast, onOpen }: { asset: Asset; videos: Video[]; toast(message: string): void; onOpen(): void }) {
   const video = videos.find((v) => v.id === asset.video);
-  const when = asset.t !== undefined && asset.frame !== undefined ? `${fmt(asset.t)} · f${asset.frame}` : asset.name;
+  const when = asset.t !== undefined && asset.frame !== undefined ? `${fmt(asset.t)} · f${asset.frame}` : asset.label ?? asset.name;
   const film = video && asset.version ? `${video.name} · ${asset.version}` : null;
   // Same as AssetRow: the controls carry aria-disabled, not this wrapper.
   return (
@@ -266,16 +270,51 @@ export function ShotTile({ asset, videos, toast, onOpen }: { asset: Asset; video
   );
 }
 
+/** A poster frame's `<video>`, lazy (I6): the element mounts straight away -- so a folder's tile
+ *  count never depends on scroll position -- but `src` is set only once the tile comes within
+ *  200px of the viewport, via IntersectionObserver. Without this, a Cuts or Delivery folder with
+ *  hundreds of items would ask the browser to open and buffer metadata for every one of them at
+ *  once, which §16.1 rules out and which can starve the browser's connection pool. */
+function PosterVideo({ asset }: { asset: Asset }) {
+  const ref = useRef<HTMLVideoElement>(null);
+  const [inView, setInView] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (typeof IntersectionObserver === "undefined") {
+      setInView(true); // no observer available (e.g. an older test environment): just show it
+      return;
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setInView(true);
+          io.disconnect();
+        }
+      },
+      { rootMargin: "200px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+  return (
+    <video ref={ref} muted preload="metadata" src={inView ? `${mediaUrl(asset.path)}#t=0.5` : undefined} aria-label={`${asset.name} poster frame`} />
+  );
+}
+
 /** A Cuts/Delivery grid tile: a muted, metadata-only poster frame at the 0.5s mark (§16.1),
- *  never autoplaying. */
+ *  never autoplaying -- or, for a non-video file such as a PDF delivery, a plain file tile
+ *  showing its extension instead of a black box holding a <video> that can't play it (I5). Only
+ *  a video extension ever gets a poster (I6). */
 export function PosterTile({ asset, videos, toast }: { asset: Asset; videos: Video[]; toast(message: string): void }) {
   const { title, subtitle } = cutLabel(asset, videos);
+  const isVideo = VIDEO_EXT.has(extOf(asset.path));
   return (
     <div class={`shot-tile${asset.missing ? " missing" : ""}`}>
       <div class="shot-thumb poster">
-        {!asset.missing && (
-          <video muted preload="metadata" src={`${mediaUrl(asset.path)}#t=0.5`} aria-label={`${asset.name} poster frame`} />
-        )}
+        {!asset.missing && (isVideo ? <PosterVideo asset={asset} /> : (
+          <div class="file-tile"><span class="file-ext mono">{extOf(asset.path) || "file"}</span></div>
+        ))}
       </div>
       <div class="shot-meta">
         <div class="atitle">{title}{asset.missing && <Missing />}</div>

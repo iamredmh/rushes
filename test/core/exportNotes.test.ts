@@ -109,6 +109,47 @@ describe("notesMarkdown", () => {
     expect(md).toBe("# Spring Launch — notes\nExported 2026-10-03 09:00\n");
   });
 
+  it("indents a multi-line note and reply so they stay part of the list (M2)", () => {
+    const notes: NotesFile = { schema: 1, rev: 0, notes: [] };
+    addNote(notes, { stage: "mix", scope: "whole", text: "Line one\nLine two" });
+    notes.notes[0].reply = "Fixed in\nthe next pass";
+    const md = notesMarkdown(project(), notes.notes, new Date(2026, 9, 3, 9, 0));
+    expect(md).toContain("- **Whole** · to do — Line one\n  Line two");
+    expect(md).toContain("  - Reply: Fixed in\n    the next pass");
+  });
+
+  it("exports an orphaned note (its version no longer exists) under a (removed) group instead of dropping it (M3)", () => {
+    const p = project();
+    addVersion(p, { video: "Hero", file: "renders/hero_v1.mp4" });
+    const notes: NotesFile = { schema: 1, rev: 0, notes: [] };
+    addNote(notes, { stage: "picture", video: "hero", version: "v1", scope: "point", t: 1, text: "Still here" });
+    addNote(notes, { stage: "picture", video: "hero", version: "v2", scope: "point", t: 3, text: "Its cut was deleted" });
+    const md = notesMarkdown(p, notes.notes, new Date(2026, 9, 3, 9, 0));
+    expect(md).toBe(
+      [
+        "# Spring Launch — notes",
+        "Exported 2026-10-03 09:00",
+        "",
+        "## Picture",
+        "",
+        "### Hero · v1",
+        "- **0:01.00** · to do — Still here",
+        "",
+        "### Hero · v2 (removed)",
+        "- **0:03.00** · to do — Its cut was deleted",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  it("exports an orphaned note whose whole film no longer exists, under its own id (M3)", () => {
+    const notes: NotesFile = { schema: 1, rev: 0, notes: [] };
+    addNote(notes, { stage: "picture", video: "gone-film", version: "v1", scope: "whole", text: "Film was removed entirely" });
+    const md = notesMarkdown(project(), notes.notes, new Date(2026, 9, 3, 9, 0));
+    expect(md).toContain("### gone-film · v1 (removed)");
+    expect(md).toContain("- **Whole** · to do — Film was removed entirely");
+  });
+
   it("is stable: the same input always produces the same string", () => {
     const p = project();
     addVersion(p, { video: "Hero", file: "renders/hero_v1.mp4" });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { Store } from "../../src/core/store.js";
 import { tmpProject } from "../helpers/tmp.js";
@@ -585,6 +585,33 @@ describe("POST /api/open", () => {
     expect(r.json).toMatchObject({ error: "unsafe_type" });
     expect(opened).toEqual([]);
   });
+
+  it("refuses a registered, safe-extension file with any execute bit set (M6)", async () => {
+    const { call, root, opened } = await withOpener();
+    await writeFile(join(root, "runnable.md"), "# not actually safe");
+    await chmod(join(root, "runnable.md"), 0o755);
+    await call("POST", "/api/files", { kind: "doc", file: "runnable.md" });
+    const r = await call("POST", "/api/open", { path: "runnable.md" });
+    if (process.platform === "win32") {
+      // No execute bit to check on Windows -- the mode check is skipped there.
+      expect(r.status).toBe(200);
+      expect(opened).toEqual([join(root, "runnable.md")]);
+    } else {
+      expect(r.status).toBe(415);
+      expect(r.json).toMatchObject({ error: "unsafe_type" });
+      expect(opened).toEqual([]);
+    }
+  });
+
+  it("still opens a registered, safe-extension file with no execute bit set", async () => {
+    const { call, root, opened } = await withOpener();
+    await writeFile(join(root, "readable.md"), "# fine");
+    await chmod(join(root, "readable.md"), 0o644);
+    await call("POST", "/api/files", { kind: "doc", file: "readable.md" });
+    const r = await call("POST", "/api/open", { path: "readable.md" });
+    expect(r.status).toBe(200);
+    expect(opened).toEqual([join(root, "readable.md")]);
+  });
 });
 
 describe("GET /media?download=1", () => {
@@ -645,9 +672,12 @@ describe("POST /api/files", () => {
     const { call } = await setup();
     const r = await call("POST", "/api/files", { kind: "doc", file: "brief.md", name: "Creative brief", note: "v2" });
     expect(r.status).toBe(201);
+    // The manifest entry itself still keeps the display name the caller gave it.
     expect(r.json).toMatchObject({ kind: "doc", file: "brief.md", name: "Creative brief", note: "v2", video: null });
+    // But the asset served to the dashboard keeps `name` as the file's own basename -- Save-as,
+    // Open and the extension checks all read it -- and carries the display name in `label` (I2).
     const assets = await call("GET", "/api/assets?kind=doc");
-    expect(assets.json.assets).toMatchObject([{ path: "brief.md", name: "Creative brief", note: "v2" }]);
+    expect(assets.json.assets).toMatchObject([{ path: "brief.md", name: "brief.md", label: "Creative brief", note: "v2" }]);
   });
 
   it("resolves video by name and rejects an unknown one", async () => {
@@ -681,5 +711,16 @@ describe("POST /api/exports/notes", () => {
     const { readdir } = await import("node:fs/promises");
     const names = (await readdir(join(root, "exports"))).filter((n) => n.endsWith(".md"));
     expect(names).toEqual([basename(second.json.path)]);
+  });
+
+  it("two concurrent exports in the same process don't race each other's temp file (M1)", async () => {
+    const { call, root } = await setup();
+    // Same pid for both, since they're the same test process -- only a random temp name tells
+    // them apart. Both must still succeed and leave one valid file.
+    const [a, b] = await Promise.all([call("POST", "/api/exports/notes", {}), call("POST", "/api/exports/notes", {})]);
+    expect(a.status).toBe(201);
+    expect(b.status).toBe(201);
+    const written = await readFile(join(root, a.json.path), "utf8");
+    expect(written).toContain("notes");
   });
 });

@@ -174,6 +174,10 @@ export const OPEN_SAFE_EXT: ReadonlySet<string> = new Set([
   "prproj", "drp",
 ]);
 
+/** Extensions a Cut/Delivery grid tile will try to show a poster frame for (I5/I6); anything
+ *  else gets a plain file tile instead of a black box with a video element that can't play it. */
+export const VIDEO_EXT: ReadonlySet<string> = new Set(["mp4", "mov", "m4v", "webm", "mkv"]);
+
 /** The lower-case extension of a file name, without the dot ("a.MP4" -> "mp4"; "noext" -> ""). */
 export function extOf(name: string): string {
   const i = name.lastIndexOf(".");
@@ -190,21 +194,26 @@ export interface FolderDef {
   view: "grid" | "list";
   /** Whether the "All films / one film" filter applies to this folder (§16.1). */
   filmFilter: boolean;
+  /** Whether this folder offers the grid/list toggle at all (I5). Every other folder's items
+   *  (Voiceover, Music, Sound effects, Scripts & docs, Captions, Exports, Edit files) render
+   *  `<img>`/`<video>`-based tiles that only make sense for the four kinds listed here, so
+   *  they're always list, with no toggle shown. */
+  gridToggle: boolean;
 }
 
 /** §16.1's folders, in their fixed sidebar order. */
 export const FOLDERS: FolderDef[] = [
-  { id: "screenshot", title: "Screenshots", kinds: ["screenshot"], view: "grid", filmFilter: true },
-  { id: "cut", title: "Cuts", kinds: ["cut"], view: "grid", filmFilter: true },
-  { id: "voiceover", title: "Voiceover", kinds: ["take", "voice"], view: "list", filmFilter: false },
-  { id: "music", title: "Music", kinds: ["music"], view: "list", filmFilter: false },
-  { id: "sfx", title: "Sound effects", kinds: ["sfx"], view: "list", filmFilter: false },
-  { id: "doc", title: "Scripts & docs", kinds: ["doc"], view: "list", filmFilter: false },
-  { id: "image", title: "Images", kinds: ["image"], view: "grid", filmFilter: false },
-  { id: "caption", title: "Captions", kinds: ["caption"], view: "list", filmFilter: false },
-  { id: "export", title: "Exports", kinds: ["export"], view: "list", filmFilter: false },
-  { id: "delivery", title: "Delivery", kinds: ["delivery"], view: "grid", filmFilter: true },
-  { id: "edit", title: "Edit files", kinds: ["edit"], view: "list", filmFilter: false },
+  { id: "screenshot", title: "Screenshots", kinds: ["screenshot"], view: "grid", filmFilter: true, gridToggle: true },
+  { id: "cut", title: "Cuts", kinds: ["cut"], view: "grid", filmFilter: true, gridToggle: true },
+  { id: "voiceover", title: "Voiceover", kinds: ["take", "voice"], view: "list", filmFilter: false, gridToggle: false },
+  { id: "music", title: "Music", kinds: ["music"], view: "list", filmFilter: false, gridToggle: false },
+  { id: "sfx", title: "Sound effects", kinds: ["sfx"], view: "list", filmFilter: false, gridToggle: false },
+  { id: "doc", title: "Scripts & docs", kinds: ["doc"], view: "list", filmFilter: false, gridToggle: false },
+  { id: "image", title: "Images", kinds: ["image"], view: "grid", filmFilter: false, gridToggle: true },
+  { id: "caption", title: "Captions", kinds: ["caption"], view: "list", filmFilter: false, gridToggle: false },
+  { id: "export", title: "Exports", kinds: ["export"], view: "list", filmFilter: false, gridToggle: false },
+  { id: "delivery", title: "Delivery", kinds: ["delivery"], view: "grid", filmFilter: true, gridToggle: true },
+  { id: "edit", title: "Edit files", kinds: ["edit"], view: "list", filmFilter: false, gridToggle: false },
 ];
 
 /** Folders whose list view offers a read-only preview on the right (§16.1). */
@@ -212,8 +221,11 @@ export const PREVIEW_FOLDER_IDS: ReadonlySet<FolderId> = new Set(["doc", "captio
 /** Extensions the preview panel knows how to show (§16.1 / the brief). */
 export const PREVIEWABLE_EXT: ReadonlySet<string> = new Set(["md", "txt", "srt", "vtt"]);
 
-export function isPreviewable(asset: Pick<Asset, "name">): boolean {
-  return PREVIEWABLE_EXT.has(extOf(asset.name));
+// Reads the extension from path, not name (I2): a registered file's display name (e.g. "Creative
+// brief") carries no extension at all once I2 moves it to `label`, and even before that a caller
+// could give a registered file a name with a different, misleading extension.
+export function isPreviewable(asset: Pick<Asset, "path">): boolean {
+  return PREVIEWABLE_EXT.has(extOf(asset.path));
 }
 
 export interface FolderItemsOptions {
