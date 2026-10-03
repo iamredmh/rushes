@@ -518,6 +518,28 @@ async function openVoice(page: Page, rushes: Rushes, files = 5) {
 const section = (page: Page, label: string) => page.getByRole("group", { name: "Section" }).getByRole("button", { name: label, exact: true });
 const onMenu = (page: Page) => page.getByRole("combobox", { name: "Note on" }).locator("option:checked");
 
+test("section labels that don't fit their section are hidden, never overlapping", async ({ page, rushes }) => {
+  await page.setViewportSize({ width: 1000, height: 800 });
+  const sections = Array.from({ length: 18 }, (_, i) => ({ id: `s${i + 1}`, start: i * 2, end: i * 2 + 2, current: `Line ${i + 1}.` }));
+  sections.push({ id: "s19", start: 36, end: 60, current: "A long last line." });
+  await rushes.api("PUT", "/api/script", { replace: true, sections });
+  await rushes.addTake("s1", { seconds: 2, freq: 220 });
+  await openVoice(page, rushes, 1);
+  const labels = page.locator('.lane[data-row="vo"] .secmk-t');
+  await expect(labels).toHaveCount(19);
+  const shown = await labels.evaluateAll((els) =>
+    els.map((e) => {
+      const r = e.getBoundingClientRect();
+      const box = e.parentElement!.getBoundingClientRect();
+      return { l: r.left, r: r.right, visible: r.top < box.bottom && r.bottom > box.top };
+    }).filter((x) => x.visible),
+  );
+  // The long last section keeps its label; the squeezed ones don't pile up.
+  expect(shown.length).toBeGreaterThan(0);
+  expect(shown.length).toBeLessThan(19);
+  for (let i = 1; i < shown.length; i++) expect(shown[i].l).toBeGreaterThanOrEqual(shown[i - 1].r);
+});
+
 test("the assembled read places each section's picked take at its start, with a gap where there's none", async ({ page, rushes }) => {
   await voScript(rushes, { s2: "t2" });
   await openVoice(page, rushes);

@@ -200,7 +200,12 @@ export function Lanes({ rows, length, media, selected, marks, range, onSelect, o
               }}
             >
               <Wave segments={segments} length={length} color={row.color} />
-              {(row.labels ?? []).map((l) => <span class="secmk" style={{ left: pct(l.t) }}>{l.text}</span>)}
+              {(row.labels ?? []).map((l, i, all) => (
+                // Each label spans to the next one; a name that doesn't fit drops out of sight (see .secmk-row).
+                <span class="secmk" style={{ left: pct(l.t), width: pct((all[i + 1]?.t ?? length) - l.t) }}>
+                  <span class="secmk-row"><span class="secmk-t">{l.text}</span></span>
+                </span>
+              ))}
               {(row.cues ?? []).map((c, i) => <i class="cue-tick" style={{ left: pct(c.t), color: row.color }} key={`t${i}`} />)}
               {(row.cues ?? []).map((c, i) => (
                 // Each label gets the gap to its nearest cue, so close cues are cut short rather than overlap.
