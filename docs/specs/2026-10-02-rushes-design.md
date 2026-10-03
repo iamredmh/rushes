@@ -455,3 +455,63 @@ Once a project has hundreds of screenshots, the Assets tab as one long page buri
 ### 16.5 Tools
 - The MCP tools `rushes_add_file` and `rushes_export_notes` bring the total to 16. `rushes_list_assets` accepts the new kinds.
 - `POST /api/reveal { project: true }` reveals the project root.
+
+## 17. Plan 3 decisions: the audio tabs (3 October 2026)
+
+This section builds the Voiceover, Music, Sound effects and Mix tabs, following §6 and §8, §14.5 and the approved round-three mockup. Where the earlier sections leave a choice open, this section makes it, and it is binding.
+
+### 17.1 Shared layout (Voiceover, Music, Sound effects, Mix)
+- **Left: the tracks.** The tab title (with **Blind** on Music only), then the transport (back, play/pause, forward, timecode, In/Out, the range), then the lanes. Each lane has:
+  - a name column, with a colour swatch per stage (VO teal `#4FD1C5`, music violet `#A78BFA`, SFX orange `#FB923C`) and the meta beneath (`120 BPM · A minor`, or a variant's `description`);
+  - a waveform track 80px tall (52px for sub-lanes) carrying that lane's note markers and spans, and the playhead;
+  - a control column: **Use** / **In use** on Music, SFX and voice variants and on takes, or **M** / **S** (mute/solo) on Mix.
+- **Right: a picture preview and the notes.**
+  - The preview is small, muted and follows the audio clock. It plays the locked cut if there is one, otherwise the newest cut.
+  - The notes column is the existing Notes panel, plus three things:
+    - an **On** menu that defaults to the lane you last clicked;
+    - a **Point / Range / Whole** scope switch;
+    - quick-start chips (Music: Tempo, Key, Energy, Ending · Voiceover: Level, Pace, Pronunciation, Breath · SFX: Timing, Level, Swap sound, Remove · Mix: Level, Balance, Loudness).
+- **Quick marks (§14.5).** When the scope is Range on an audio tab, four toggle marks appear: **Rise**, **Fall**, **Louder**, **Quieter**. Louder and Quieter take a dB amount, chosen from 1, 2, 3, 6 or 9 dB with 3 as the default. They're saved on the note as `marks: [{ kind, db? }]`.
+- **Where notes are shown.** A note is drawn on the lane it's `on`. Whole notes are listed but not drawn. On the Mix tab, a note on a stage lane is drawn on that lane.
+- **Keyboard.** The same keys as Picture: Space, ←/→ to move one frame of the timeline at the project fps (Shift for ten), I and O, and N. Click a lane to select it.
+
+### 17.2 Playback engine (web)
+- **One clock.** A single `AudioContext` is the master clock. Every variant in a lane is decoded to an `AudioBuffer` and runs during playback through its own `GainNode`.
+- **Switching.** **Use**, and the lane you're auditioning, are gain changes ramped over 4 ms on the same clock. That makes switching sample-locked, and the playhead never moves.
+- **Seeking and stopping** restart every source at the new offset.
+- **Timeline length** is the duration of the cut being previewed, or the longest audio when there's no cut.
+- **Fallback for long files.** A file over 15 minutes, or one that won't decode, plays through a hidden `<audio>` element with drift correction instead. The lane's tooltip then says switching isn't sample-exact.
+- **Video sync.** The preview video is muted. Whenever it drifts more than one frame from the audio clock, it's seeked back.
+- **Waveforms.** Peaks are computed in the browser from the decoded buffer and cached per path for the session.
+
+### 17.3 Music
+- **Lanes.** One lane per variant of each `music` lane, in manifest order. The card shows the name, then `meta.description` (or BPM · key).
+- **Use** sets `picks.lanes[laneId] = variantId`.
+- **Auditioning.** Clicking a lane auditions it: you hear that variant at the playhead, while the picked one stays marked **In use**.
+- **Blind** replaces the names with `Bed 1…n` in a shuffled order for the session, and hides the meta. Turning it off reveals them.
+
+### 17.4 Sound effects
+- **Lanes.** Each `sfx` variant is a lane. Its cues are labelled on the waveform at their times.
+- **What a note can be on.** The On menu lists the passes and each cue (`Cue · Swipe`). A note on a cue is saved with `on` set to the cue id and `t` set to the cue's time.
+- **Use** works as it does on Music.
+
+### 17.5 Voiceover
+- **The assembled read.** The top lane is the assembled read: for each script section, its picked take (`picks.sections[sectionId]`), or its newest take when none is picked, placed at the section's `start`. Section labels (`S1`, `S2` …) mark the lane.
+- **Choosing a section.** A section switch (S1 … Sn) under the lanes picks a section. Its takes then appear as sub-lanes covering that section's span. **Use** on a sub-lane sets the pick.
+- **Stale takes.** A take whose text no longer matches the section's current line (`isTakeStale`) carries a "stale" mark, with the tooltip "The line changed after this take".
+- **Asking for a new take.** **New take** fills the note box with `Another take of S2: ` and sets On to that section.
+- **Voice variants.** Variants of a `voice` lane, such as whole alternative reads, appear as extra lanes with **Use**, like Music.
+
+### 17.6 Mix
+- **Lanes.** Three lanes: Voiceover (the assembled read), Music (the picked variant) and Sound effects (the picked pass), each with **M** and **S**.
+- **Mute and solo.** Solo wins over mute. With nothing soloed, every unmuted lane plays.
+- **Loudness.** A loudness readout appears when the server has ffmpeg. `POST /api/mix/loudness { lanes: ["voice","music","sfx"] }` mixes the picked files at their offsets and returns `{ available, integrated, truePeak, musicUnderVo }`:
+  - `integrated` is LUFS integrated;
+  - `truePeak` is dBTP;
+  - `musicUnderVo` is the music's level relative to the VO over the VO's span, in dB.
+
+  Results are cached by their inputs. Without ffmpeg the readout shows `—`, with the tooltip "Install ffmpeg for loudness".
+
+### 17.7 Agent side
+- **Notes** carry `marks`. `rushes_get_batch`, `rushes_list_notes`, export notes and the CLI all show them, e.g. `Fall · Quieter 3 dB`.
+- **The batch prompt** for an audio stage tells the agent to read the picks (`rushes_get_picks`), fix each note, register new variants or takes, and reply.
