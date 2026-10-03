@@ -1,7 +1,7 @@
 import type { ComponentChildren, RefObject } from "preact";
 import { type MutableRef, useRef, useState } from "preact/hooks";
 import { api, mediaUrl } from "../api.js";
-import { MARK_DB, type MarkKind, marksLabel, noteTime, type OnOption, placeNote, type Scope, setMarkDb, shotLabel, toggleMark } from "../lib.js";
+import { MARK_DB, type MarkKind, marksLabel, noteTime, type OnOption, placeNote, type Scope, scopeOptions, setMarkDb, shotLabel, toggleMark } from "../lib.js";
 import type { Mark, Note } from "../types.js";
 import { Icon } from "./Icon.js";
 
@@ -27,7 +27,7 @@ export interface NotesProps {
   /** The On menu: what the next note is about. */
   on?: { options: OnOption[]; value: string | null; onChange(value: string): void };
   /** The Point / Range / Whole switch. */
-  scope?: { value: Scope; onChange(scope: Scope): void };
+  scope?: { value: Scope; onChange(scope: Scope): void; options?: Scope[] };
   /** Quick-start chips: each puts "Chip: " in the note box, and never sends anything. */
   chips?: string[];
   /** Quick marks, offered only while the scope is Range. */
@@ -46,12 +46,6 @@ const MARK_KINDS: { kind: MarkKind; label: string }[] = [
   { kind: "louder", label: "Louder" },
   { kind: "quieter", label: "Quieter" },
 ];
-const SCOPES: { value: Scope; label: string }[] = [
-  { value: "point", label: "Point" },
-  { value: "range", label: "Range" },
-  { value: "whole", label: "Whole" },
-];
-
 /** The notes column used on every tab: list, filter, done circles and the note box. */
 export function Notes({
   notes, version, placeholder, attachments, inputRef, toast, onAdd, onSeek, onChanged, onTextChange, on, scope, chips, marks, onLabel, fixedTimes, starter,
@@ -172,7 +166,7 @@ export function Notes({
             <span class="sp" />
             {scope && (
               <div class="seg" role="group" aria-label="Scope">
-                {SCOPES.map((s) => (
+                {scopeOptions(scope.options).map((s) => (
                   <button type="button" aria-pressed={scope.value === s.value} onClick={() => scope.onChange(s.value)}>{s.label}</button>
                 ))}
               </div>

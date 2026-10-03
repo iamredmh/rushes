@@ -9,7 +9,7 @@ import type { Asset, Note, Section, Shot, TabState, Video } from "../../web/src/
 import { OPEN_SAFE_EXT as SERVER_OPEN_SAFE_EXT } from "../../src/server/reveal.js";
 import { markLabel as serverMarkLabel, type Mark } from "../../src/core/schema.js";
 import {
-  AUDIO_CHIPS, BUILT, blindOrder, laneSelection, markLabel, marksLabel, setMarkDb, testFlags, toggleMark, variantMeta,
+  AUDIO_CHIPS, BUILT, blindOrder, laneSelection, markLabel, marksLabel, scopeOptions, setMarkDb, testFlags, toggleMark, variantMeta,
   variantNoteRow, variantNoteTarget, variantOnLabel, variantOnOptions, variantRows,
 } from "../../web/src/lib.js";
 import type { Lane } from "../../web/src/types.js";
@@ -427,6 +427,13 @@ describe("audio tabs: marks", () => {
     const m: Mark[] = [{ kind: "fall" }, { kind: "quieter", db: 3 }];
     expect(setMarkDb(m, "quieter", 9)).toEqual([{ kind: "fall" }, { kind: "quieter", db: 9 }]);
     expect(setMarkDb(m, "fall", 9)).toEqual(m);
+  });
+});
+
+describe("scopeOptions", () => {
+  it("keeps the given order and drops unknown scopes", () => {
+    expect(scopeOptions(["whole", "point"])).toEqual([{ value: "whole", label: "Whole" }, { value: "point", label: "Point" }]);
+    expect(scopeOptions(undefined).map((s) => s.value)).toEqual(["point", "range", "whole"]);
   });
 });
 

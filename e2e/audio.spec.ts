@@ -108,6 +108,20 @@ test("Music shows a card per bed, and Use persists the pick", async ({ page, rus
   await expect(page.getByRole("button", { name: "Use B · Warm keys" })).toHaveAttribute("aria-pressed", "true");
 });
 
+// Regression guard for AudioStage's per-tab scopes/chips/marks (Plan 3b Task 2): Music passes
+// none of the new props, so it must keep all three scopes, its In/Out buttons and its Range marks.
+test("Music still offers Point, Range and Whole, In/Out, and Range marks", async ({ page, rushes }) => {
+  await twoBeds(page, rushes);
+  const scopeGroup = page.getByRole("group", { name: "Scope" });
+  await expect(scopeGroup.getByRole("button", { name: "Point" })).toBeVisible();
+  await expect(scopeGroup.getByRole("button", { name: "Range" })).toBeVisible();
+  await expect(scopeGroup.getByRole("button", { name: "Whole" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Set in point" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Set out point" })).toBeVisible();
+  await scopeGroup.getByRole("button", { name: "Range" }).click();
+  await expect(page.getByRole("group", { name: "Marks" })).toBeVisible();
+});
+
 test("switching beds mid-play doesn't move the playhead", async ({ page, rushes }) => {
   await twoBeds(page, rushes);
   await page.getByRole("button", { name: "A · Deep house", exact: true }).click();

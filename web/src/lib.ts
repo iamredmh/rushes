@@ -310,6 +310,14 @@ export type AudioStageId = "voice" | "music" | "sfx" | "mix";
 export type Scope = "point" | "range" | "whole";
 export type MarkKind = Mark["kind"];
 
+const SCOPE_LABELS: Record<Scope, string> = { point: "Point", range: "Range", whole: "Whole" };
+const ALL_SCOPES: Scope[] = ["point", "range", "whole"];
+
+/** The scope segments a tab offers, in the order given (Music/SFX/Mix: all three). */
+export function scopeOptions(allowed: Scope[] | undefined): { value: Scope; label: string }[] {
+  return (allowed ?? ALL_SCOPES).filter((s) => s in SCOPE_LABELS).map((s) => ({ value: s, label: SCOPE_LABELS[s] }));
+}
+
 /**
  * Is a note in the making on an audio tab? A range (even just an In point), marks ticked (with or
  * without a range) or typed text. One definition, for both the film hold and New take's refusal:

@@ -116,10 +116,19 @@ export interface AudioStageProps {
   handle?: MutableRef<StageHandle | null>;
   /** A lane was clicked. */
   onSelect?(row: StageRow): void;
+  /** The scope segments this tab offers, in order. Defaults to all three. */
+  scopes?: Scope[];
+  /** The scope selected before the user changes it. Defaults to "point". */
+  defaultScope?: Scope;
+  /** The quick-start chips for the current scope. Defaults to this stage's AUDIO_CHIPS. */
+  chipsFor?(scope: Scope): string[];
+  /** Whether Range offers quick marks (Rise/Fall/Louder/Quieter). Defaults to true. */
+  marks?: boolean;
 }
 
 const typing = (el: EventTarget | null) => el instanceof HTMLElement && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
 const NO_RANGE = { in: null, out: null } as { in: number | null; out: number | null };
+const ALL_SCOPES: Scope[] = ["point", "range", "whole"];
 
 export function AudioStage(props: AudioStageProps) {
   const { stage, title, headerExtra, belowLanes, rows, preview, fps, notes, onOptions, noteRow, onLabel, toast, onChanged, onPendingChange, listen } = props;
@@ -144,9 +153,10 @@ export function AudioStage(props: AudioStageProps) {
   }, [selected]);
   const [onValue, setOnValue] = useState<string | null>(null);
   const [range, setRange] = useState(NO_RANGE);
-  const [scope, setScope] = useState<Scope>("point");
+  const [scope, setScope] = useState<Scope>(props.defaultScope ?? "point");
   const [marks, setMarks] = useState<Mark[]>([]);
   const [noteHasText, setNoteHasText] = useState(false);
+  const hasRange = (props.scopes ?? ALL_SCOPES).includes("range");
 
   // Nothing pending is dropped: a half-typed note, a range or ticked marks hold the film (and its
   // cut), as on Picture. A layout effect, so the hold is in place before the next key (`]` straight
@@ -187,10 +197,12 @@ export function AudioStage(props: AudioStageProps) {
   const input = useRef<HTMLTextAreaElement>(null);
   const starter = useRef<((text: string) => void) | null>(null);
   const placeholderFor = (t: number) => {
-    if (scope === "whole") return "Note on the whole track";
-    if (range.in !== null && range.out === null) return "Set an Out point";
-    if (range.in !== null && range.out !== null) return `Note on ${noteTime(range.in, range.out)}`;
-    if (scope === "range") return "Set In and Out";
+    if (scope === "whole") return stage === "voice" ? "Note on the whole read" : "Note on the whole track";
+    if (hasRange) {
+      if (range.in !== null && range.out === null) return "Set an Out point";
+      if (range.in !== null && range.out !== null) return `Note on ${noteTime(range.in, range.out)}`;
+      if (scope === "range") return "Set In and Out";
+    }
     return `Note at ${fmt(option?.t ?? snap(t, fps))}`;
   };
   const paint = (t: number) => {
@@ -232,10 +244,12 @@ export function AudioStage(props: AudioStageProps) {
     engine.seek(stepFrame(engine.time, fps, n, engine.length));
   };
   const setIn = () => {
+    if (!hasRange) return;
     setRange({ in: snap(engine.time, fps), out: null });
     setScope("range");
   };
   const setOut = () => {
+    if (!hasRange) return;
     const at = snap(engine.time, fps);
     const start = range.in ?? 0;
     if (at <= start) return toast("Out has to come after In");
@@ -376,8 +390,12 @@ export function AudioStage(props: AudioStageProps) {
               <button aria-label="Clear range" onClick={clearRange}><Icon name="x" /></button>
             </span>
           )}
-          <button class="btn ghost ib" data-tip="Set in  I" aria-label="Set in point" onClick={setIn}><Icon name="in" /></button>
-          <button class="btn ghost ib" data-tip="Set out  O" aria-label="Set out point" onClick={setOut}><Icon name="out" /></button>
+          {hasRange && (
+            <>
+              <button class="btn ghost ib" data-tip="Set in  I" aria-label="Set in point" onClick={setIn}><Icon name="in" /></button>
+              <button class="btn ghost ib" data-tip="Set out  O" aria-label="Set out point" onClick={setOut}><Icon name="out" /></button>
+            </>
+          )}
         </div>
         <Lanes
           rows={rows}
@@ -433,9 +451,9 @@ export function AudioStage(props: AudioStageProps) {
           fixedTimes
           onSeek={(t) => engine.seek(t)}
           on={{ options: onOptions, value: onCurrent, onChange: setOnValue }}
-          scope={{ value: scope, onChange: changeScope }}
-          chips={AUDIO_CHIPS[stage]}
-          marks={{ value: marks, onChange: setMarks }}
+          scope={{ value: scope, onChange: changeScope, options: props.scopes }}
+          chips={(props.chipsFor ?? (() => AUDIO_CHIPS[stage]))(scope)}
+          marks={props.marks === false ? undefined : { value: marks, onChange: setMarks }}
           onLabel={onLabel}
           starter={starter}
         />
