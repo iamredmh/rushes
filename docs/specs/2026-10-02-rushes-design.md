@@ -399,3 +399,59 @@ Rushes creates `screenshots/` itself on the first grab. It never creates the oth
   It's spawned without a shell. Only paths that `/api/assets` would list are accepted; anything else is a 404. When `RUSHES_NO_REVEAL=1` is set, the server logs instead of opening anything. Tests set this.
 - **The MCP tool `rushes_list_assets`** (optional `kind`) returns the same list. The CLI command is `rushes assets [--kind K] [--json]`. There are now 14 tools.
 - **The project guard (§14.1)** applies to every one of these routes, as to any other.
+
+## 16. The Assets library (agreed 3 October 2026)
+
+Once a project has hundreds of screenshots, the Assets tab as one long page buries everything below them. Red also wants every project file in one place: music, scripts, images, captions, exports, deliverables and edit files, each one quick to find, open, download or locate on disk. This section is binding, and it wins over §15.3 where they differ.
+
+### 16.1 Layout
+- A **sidebar** on the left lists folders vertically, each with a count. Folders appear in this order: Screenshots, Cuts, Voiceover, Music, Sound effects, Scripts & docs, Images, Captions, Exports, Delivery, Edit files.
+  - A folder with nothing in it isn't shown. The exception is Exports, which always shows, because it holds the "Export notes" action.
+  - ↑ and ↓ move between folders while the sidebar has focus.
+  - At the foot of the sidebar, **Project folder** reveals the project root in the file manager.
+- The **main area** shows the selected folder. Its header holds the folder title and count, a search box, a sort control (Newest / Oldest / Name) and a grid/list toggle. A film filter appears too (All films, or one film) for Screenshots, Cuts and Delivery.
+  - Search matches the name, the folder path, the version note and the film name.
+  - Each folder remembers its grid/list choice for this browser (localStorage, wrapped in try/catch).
+- **Views:**
+  - Screenshots and Images default to a thumbnail grid. Screenshots are grouped under `Film · vN` headings when sorted by Newest or Oldest.
+  - Cuts and Delivery default to grid. Each tile shows a poster frame: a muted `<video preload="metadata">` at `#t=0.5`.
+  - Voiceover, Music and Sound effects default to list. Each row has an inline **Play/Pause** button. Only one plays at a time, and switching folders or tabs stops it.
+  - Scripts & docs, Captions, Exports and Edit files default to list. Selecting a Markdown, plain-text or caption file shows a read-only preview on the right. Markdown is rendered by a small built-in renderer that escapes all HTML first: headings, paragraphs, lists, bold, italic, inline code and code blocks; links are shown as text, never made clickable.
+- Thumbnails and posters load lazily, so a folder with hundreds of items stays responsive.
+
+### 16.2 New kinds and how files get in
+- **New asset kinds:** `doc`, `image`, `caption`, `export`, `delivery` and `edit`, alongside §15's `screenshot`, `cut`, `take`, `music`, `sfx` and `voice`.
+- **Registered files.** `project.json` gains `files: [{ id, kind, file, name, note, video, addedAt }]`.
+  - `video` is optional and ties a delivery or export to a film.
+  - The agent adds files with `rushes_add_file` (`kind`, `file`, optional `name`, `note` and `video`, the video given by id or name).
+  - The CLI equivalent is `rushes add file <path> --kind K [--name N] [--note T] [--video V]`.
+- **Found automatically:**
+  - every `*.md`, `*.txt` and `*.pdf` directly in the project root becomes a `doc`;
+  - every `*.srt` and `*.vtt` directly in the root becomes a `caption`;
+  - every file directly in `exports/` becomes an `export`.
+  - Hidden files and anything inside `.rushes/` never appear.
+- **Media types:** `/media` serves every listed asset, with content types added for `.md`, `.txt`, `.srt`, `.vtt`, `.pdf`, `.gif`, `.webp`, `.prproj` and `.drp`.
+
+### 16.3 Open in the default app
+- Every item gets an **Open** button (`POST /api/open { path }`). It runs the platform's open command, without a shell:
+  - macOS: `open <abs>`;
+  - Windows: `explorer.exe <abs>`;
+  - elsewhere: `xdg-open <abs>`.
+- **Safe types only.** Open is offered and accepted only for these extensions: md, txt, pdf, srt, vtt, png, jpg, jpeg, gif, webp, svg, mp4, mov, m4v, webm, mkv, wav, mp3, m4a, aac, flac, ogg, prproj and drp.
+  - Anything else gets no Open button, and the route answers 415 `unsafe_type`.
+  - Rushes never opens scripts, apps or archives, because on macOS opening those can run code.
+- **Where it applies.** The path must be a listed asset, exactly as for reveal.
+- **No side effects in tests.** `RUSHES_NO_REVEAL=1` also turns Open into a logged no-op, so tests open nothing.
+
+### 16.4 Export notes
+- **The button.** The Exports folder has an **Export notes** button (`POST /api/exports/notes`).
+- **What it writes.** It writes `exports/<project-slug>-notes-<YYYY-MM-DD>.md` and lists it in Exports. Exporting again on the same day overwrites that file.
+- **What the file contains:**
+  - a title and the export date;
+  - then one section per stage. Picture notes are grouped by film and version, each with its timecode or range, its shot when it has one, its status, its text, the agent's reply and the screenshot path.
+  - Script sections are not included; they live in `script.json`.
+- **For agents and the CLI.** `rushes_export_notes` and `rushes export notes` do the same and return the path.
+
+### 16.5 Tools
+- The MCP tools `rushes_add_file` and `rushes_export_notes` bring the total to 16. `rushes_list_assets` accepts the new kinds.
+- `POST /api/reveal { project: true }` reveals the project root.
