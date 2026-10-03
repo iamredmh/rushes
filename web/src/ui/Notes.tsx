@@ -46,6 +46,8 @@ const MARK_KINDS: { kind: MarkKind; label: string }[] = [
   { kind: "louder", label: "Louder" },
   { kind: "quieter", label: "Quieter" },
 ];
+const onFull = (on: NonNullable<NotesProps["on"]>): string | undefined => on.options.find((o) => o.value === on.value)?.full;
+
 /** The notes column used on every tab: list, filter, done circles and the note box. */
 export function Notes({
   notes, version, placeholder, attachments, inputRef, toast, onAdd, onSeek, onChanged, onTextChange, on, scope, chips, marks, onLabel, fixedTimes, starter,
@@ -146,10 +148,13 @@ export function Notes({
         {(on || scope) && (
           <div class="row">
             {on && (
-              <span class="onwrap">
+              // The selected entry's full name (its round, on Voiceover) as the tooltip. A <select>
+              // draws no ::after, so the wrapper shows it; the select carries it too, for reading.
+              <span class="onwrap" data-tip={onFull(on)}>
                 <select
                   class="sel onsel"
                   aria-label="Note on"
+                  data-tip={onFull(on)}
                   value={on.value ?? ""}
                   onChange={(e) => {
                     const el = e.target as HTMLSelectElement;

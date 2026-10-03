@@ -497,299 +497,280 @@ test("the preview keeps up during playback without repeated seeking", async ({ p
   expect(r.seeks).toBeLessThanOrEqual(2);
 });
 
-// ---- Voiceover (Task 4) ----
+// ---- Voiceover (§18): rounds of whole reads ----
 
 /** What the tab hears now, by clip id, in timeline order. */
 const heard = (page: Page) =>
   page.evaluate(() => window.__rushesAudio!.heard().sort((a, b) => a.offset - b.offset).map((c) => `${c.id}@${c.offset}`));
 
+const R1 = "Round 1 · Voices";
+const R2 = "Round 2 · Gerald, tone";
+/** Round 2's lane id: its name, slugged. */
+const R2_ID = "round-2-gerald-tone";
+/** 90 characters: far wider than the name column. */
+const LONG = "Based on more sombre, with a slower intro and longer pauses between each of three reasons.";
+
 /**
- * A four-section script (S1 0–3 s, S2 3–6 s, S3 6–9 s, S4 9–12 s). S1 and S4 have a take each,
- * S2 has three and S3 none. No cut, so the timeline is the audio's own length.
+ * Two rounds, no cut. Round 1 · Voices: Jane, Louise and Gerald, with Gerald picked. Round 2 ·
+ * Gerald, tone: more excited and more sombre, nothing picked (with `steadier`, a third read, steadier
+ * pace, whose description is LONG).
  */
-async function voScript(rushes: Rushes, picks: Record<string, string> = {}) {
-  await rushes.api("PUT", "/api/script", {
-    replace: true,
-    sections: [
-      { id: "s1", start: 0, end: 3, current: "Line one." },
-      { id: "s2", start: 3, end: 6, current: "Line two." },
-      { id: "s3", start: 6, end: 9, current: "Line three." },
-      { id: "s4", start: 9, end: 12, current: "Line four." },
-    ],
-  });
-  await rushes.addTake("s1", { seconds: 2, freq: 220 });
-  for (const freq of [330, 392, 440]) await rushes.addTake("s2", { seconds: 2, freq });
-  await rushes.addTake("s4", { seconds: 2, freq: 262 });
-  if (Object.keys(picks).length > 0) await rushes.api("PUT", "/api/picks", { sections: picks });
+async function twoRounds(rushes: Rushes, opts: { steadier?: boolean } = {}) {
+  const jane = await rushes.addVariant("voice", "Jane", { round: R1, seconds: 4, freq: 220, meta: { description: "Warm, conversational" } });
+  await rushes.addVariant("voice", "Louise", { round: R1, seconds: 4, freq: 247, meta: { description: "Bright, upbeat" } });
+  const gerald = await rushes.addVariant("voice", "Gerald", { round: R1, seconds: 4, freq: 262, meta: { description: "Low, measured" } });
+  await rushes.api("PUT", "/api/picks", { lanes: { [gerald.lane.id]: gerald.variant.id } });
+  const excited = await rushes.addVariant("voice", "more excited", { round: R2, seconds: 4, freq: 294, meta: { description: "Brighter, quicker" } });
+  const sombre = await rushes.addVariant("voice", "more sombre", { round: R2, seconds: 4, freq: 330, meta: { description: "Slower, lower" } });
+  if (opts.steadier) await rushes.addVariant("voice", "steadier pace", { round: R2, seconds: 4, freq: 349, meta: { description: LONG } });
+  return { jane, gerald, excited, sombre };
 }
 
-async function openVoice(page: Page, rushes: Rushes, files = 5) {
+async function openVoice(page: Page, rushes: Rushes, files: number) {
   await page.goto(rushes.testUrl());
   await openTab(page, /Voiceover/, "3");
   await loaded(page, files);
 }
 
-const section = (page: Page, label: string) => page.getByRole("group", { name: "Section" }).getByRole("button", { name: label, exact: true });
-const onMenu = (page: Page) => page.getByRole("combobox", { name: "Note on" }).locator("option:checked");
+const onMenu = (page: Page) => page.getByRole("combobox", { name: "Note on" });
 
-test("section labels that don't fit their section are hidden, never overlapping", async ({ page, rushes }) => {
-  await page.setViewportSize({ width: 1000, height: 800 });
-  const sections = Array.from({ length: 18 }, (_, i) => ({ id: `s${i + 1}`, start: i * 2, end: i * 2 + 2, current: `Line ${i + 1}.` }));
-  sections.push({ id: "s19", start: 36, end: 60, current: "A long last line." });
-  await rushes.api("PUT", "/api/script", { replace: true, sections });
-  await rushes.addTake("s1", { seconds: 2, freq: 220 });
-  await openVoice(page, rushes, 1);
-  const labels = page.locator('.lane[data-row="vo"] .secmk-t');
-  await expect(labels).toHaveCount(19);
-  const shown = await labels.evaluateAll((els) =>
-    els.map((e) => {
-      const r = e.getBoundingClientRect();
-      const box = e.parentElement!.getBoundingClientRect();
-      return { l: r.left, r: r.right, visible: r.top < box.bottom && r.bottom > box.top };
-    }).filter((x) => x.visible),
-  );
-  // The long last section keeps its label; the squeezed ones don't pile up.
-  expect(shown.length).toBeGreaterThan(0);
-  expect(shown.length).toBeLessThan(19);
-  for (let i = 1; i < shown.length; i++) expect(shown[i].l).toBeGreaterThanOrEqual(shown[i - 1].r);
+test("Voiceover shows the current round open under its name, and an older round folded into one row", async ({ page, rushes }) => {
+  await twoRounds(rushes);
+  await openVoice(page, rushes, 5);
+  await expect(page.locator(".rhead")).toHaveCount(1);
+  await expect(page.locator(".rhead .rname")).toHaveText(R2);
+  await expect(page.locator(".rhead .rtag")).toHaveText("current");
+  await expect(page.locator(".lane")).toHaveCount(2);
+  await expect(page.locator(".lane [data-name]")).toHaveText(["more excited", "more sombre"]);
+  await expect(page.locator(".lane [data-meta]")).toHaveText(["Brighter, quicker", "Slower, lower"]);
+  const fold = page.locator(".fold");
+  await expect(fold).toHaveText("Round 1 · Voices · 3 reads · picked Gerald");
+  await expect(fold).toHaveAttribute("aria-expanded", "false");
+  // Nothing of the assembled read is left: no section switch, read row or section marks.
+  await expect(page.locator('.vobar, .lane[data-row="vo"], .secmk')).toHaveCount(0);
+
+  await fold.click();
+  await expect(fold).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator(".lane")).toHaveCount(5);
+  await expect(page.locator(".lane [data-name]")).toHaveText(["more excited", "more sombre", "Jane", "Louise", "Gerald"]);
+  await expect(page.getByRole("button", { name: "Use Gerald" })).toHaveAttribute("aria-pressed", "true");
+  await fold.click();
+  await expect(page.locator(".lane")).toHaveCount(2);
 });
 
-test("the assembled read places each section's picked take at its start, with a gap where there's none", async ({ page, rushes }) => {
-  await voScript(rushes, { s2: "t2" });
-  await openVoice(page, rushes);
-  expect(await heard(page)).toEqual(["s1:t1@0", "s2:t2@3", "s4:t1@9"]);
-  const read = page.locator('.lane[data-row="vo"]');
-  await expect(read.locator("[data-name]")).toHaveText("Assembled read");
-  // S3 has no take, but keeps its label.
-  await expect(read.locator(".secmk")).toHaveText(["S1", "S2", "S3", "S4"]);
-  // The switch starts on the section under the playhead; its takes are the sub-lanes.
-  await expect(section(page, "S1")).toHaveAttribute("aria-pressed", "true");
-  await expect(page.locator(".lane.sub [data-name]")).toHaveText(["S1 · Take 1"]);
-  // Until you choose one, it follows the playhead.
-  await page.evaluate(() => window.__rushesAudio!.engine!.seek(9.5));
-  await expect(section(page, "S4")).toHaveAttribute("aria-pressed", "true");
-  await section(page, "S2").click();
-  await page.evaluate(() => window.__rushesAudio!.engine!.seek(1));
-  await expect(section(page, "S2")).toHaveAttribute("aria-pressed", "true");
-  await expect(page.locator(".lane.sub [data-name]")).toHaveText(["S2 · Take 1", "S2 · Take 2", "S2 · Take 3"]);
-  await expect(page.getByRole("button", { name: "Use S2 · Take 2" })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("button", { name: "Use S2 · Take 3" })).toHaveAttribute("aria-pressed", "false");
-  // Changing section points the On menu at it.
-  await expect(onMenu(page)).toHaveText("S2");
-  await expect(page.locator(".lane.sub").first().locator(".track")).toHaveCSS("height", "52px");
+test("a folded round shows a dot while one of its reads has an open note", async ({ page, rushes }) => {
+  const { jane } = await twoRounds(rushes);
+  const key = `${jane.lane.id}/${jane.variant.id}`;
+  const { note } = await rushes.api("POST", "/api/notes", { stage: "voice", on: key, scope: "point", t: 1, text: "Lovely warmth here." });
+  await openVoice(page, rushes, 5);
+  await expect(page.locator(".fold .fdot")).toHaveCount(1);
+  // Listed by its round and read, since Round 1 isn't the current round.
+  await expect(page.locator(`.note[data-note="${note.id}"] .on`)).toHaveText("Round 1 · Voices · Jane");
+  await page.locator(`.note[data-note="${note.id}"] .chk`).click();
+  await expect(page.locator(".fold .fdot")).toHaveCount(0);
+  // Opened, the round draws its point note on Jane's lane.
+  await page.locator(".fold").click();
+  await expect(page.locator(`.lane[data-row="${key}"] .mk[data-note="${note.id}"]`)).toHaveCount(1);
 });
 
-test("auditioning a take and Use swap the section's segment without moving the playhead", async ({ page, rushes }) => {
-  await voScript(rushes);
-  await openVoice(page, rushes);
-  await section(page, "S2").click();
-  // No pick: the newest take is in the read.
-  expect(await heard(page)).toEqual(["s1:t1@0", "s2:t3@3", "s4:t1@9"]);
-  await expect(page.getByRole("button", { name: "Use S2 · Take 3" })).toHaveAttribute("aria-pressed", "true");
+test("three reads in the current round and a folded round fit above the fold at 1440×900", async ({ page, rushes }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await rushes.addCut();
+  await twoRounds(rushes, { steadier: true });
+  await openVoice(page, rushes, 6);
+  await expect(page.locator(".lane")).toHaveCount(3);
+  const bottom = await page.locator(".fold").evaluate((el) => el.getBoundingClientRect().bottom);
+  expect(bottom).toBeLessThanOrEqual(900);
+});
+
+test("Voiceover plays one read at a time: the current round's first, then a clicked read, without moving the playhead", async ({ page, rushes }) => {
+  await twoRounds(rushes);
+  await openVoice(page, rushes, 5);
+  // Nothing picked in Round 2: its first read, not Round 1's pick.
+  await expect.poll(() => heard(page)).toEqual([`${R2_ID}/more-excited@0`]);
   await page.getByRole("button", { name: "Play" }).click();
   await expect.poll(async () => (await inspect(page)).time).toBeGreaterThan(0.5);
 
-  // Clicking a take auditions it in its section's place: a gain swap in the click, the same sources.
-  const r = await page.evaluate(() => {
+  // Clicking a read switches to it in the click: a gain swap, the same sources, the playhead running on.
+  const r = await page.evaluate((row) => {
     const e = window.__rushesAudio!.engine!;
     const before = e.inspect();
     const p0 = performance.now();
-    (document.querySelector('.lane[data-row="take:s2:t1"] .nm') as HTMLButtonElement).click();
+    (document.querySelector(`.lane[data-row="${row}"] .nm`) as HTMLButtonElement).click();
     const after = e.inspect();
-    return { before, after, wall: (performance.now() - p0) / 1000, heard: window.__rushesAudio!.heard().map((c) => c.id).sort() };
-  });
+    return { before, after, wall: (performance.now() - p0) / 1000, heard: window.__rushesAudio!.heard().map((c) => c.id) };
+  }, `${R2_ID}/more-sombre`);
   expect(r.after.playing).toBe(true);
   expect(r.after.time - r.before.time - r.wall).toBeLessThan(0.05);
   expect(r.after.time).toBeGreaterThanOrEqual(r.before.time);
   expect(r.after.sources).toBe(r.before.sources);
-  expect(r.heard).toEqual(["s1:t1", "s2:t1", "s4:t1"]);
-  await expect(page.locator('.lane[data-row="take:s2:t1"]')).toHaveAttribute("aria-current", "true");
-  await expect(onMenu(page)).toHaveText("S2 · Take 1");
+  expect(r.heard).toEqual([`${R2_ID}/more-sombre`]);
+  await expect(page.locator(`.lane[data-row="${R2_ID}/more-sombre"]`)).toHaveAttribute("aria-current", "true");
   // Auditioning isn't picking.
-  expect((await rushes.api("GET", "/api/picks")).sections).toEqual({});
+  expect((await rushes.api("GET", "/api/picks")).lanes[R2_ID]).toBeUndefined();
 
-  // Clicking the read goes back to the picks.
-  await page.getByRole("button", { name: "Assembled read", exact: true }).click();
-  expect(await heard(page)).toEqual(["s1:t1@0", "s2:t3@3", "s4:t1@9"]);
-
-  // Use on Take 2: the pick is saved and the read swaps it in, on the same clock.
-  const t0 = await page.evaluate(() => ({ t: window.__rushesAudio!.engine!.time, wall: performance.now() / 1000, sources: window.__rushesAudio!.inspect()!.sources }));
-  await page.getByRole("button", { name: "Use S2 · Take 2" }).click();
-  await expect(page.getByRole("button", { name: "Use S2 · Take 2" })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("button", { name: "Use S2 · Take 3" })).toHaveAttribute("aria-pressed", "false");
-  expect((await rushes.api("GET", "/api/picks")).sections).toEqual({ s2: "t2" });
-  await expect.poll(() => heard(page)).toEqual(["s1:t1@0", "s2:t2@3", "s4:t1@9"]);
-  const t1 = await page.evaluate(() => ({ t: window.__rushesAudio!.engine!.time, wall: performance.now() / 1000, playing: window.__rushesAudio!.engine!.playing, sources: window.__rushesAudio!.inspect()!.sources }));
+  // Use picks the read for its round, on the same clock.
+  const t0 = await page.evaluate(() => ({ t: window.__rushesAudio!.engine!.time, wall: performance.now() / 1000 }));
+  await page.getByRole("button", { name: "Use more sombre" }).click();
+  await expect(page.getByRole("button", { name: "Use more sombre" })).toHaveAttribute("aria-pressed", "true");
+  await expect.poll(async () => (await rushes.api("GET", "/api/picks")).lanes[R2_ID]).toBe("more-sombre");
+  const t1 = await page.evaluate(() => ({ t: window.__rushesAudio!.engine!.time, wall: performance.now() / 1000, playing: window.__rushesAudio!.engine!.playing }));
   expect(t1.playing).toBe(true);
   expect(Math.abs(t1.t - t0.t - (t1.wall - t0.wall))).toBeLessThan(0.1);
-  expect(t1.sources).toBe(t0.sources);
+  expect(await heard(page)).toEqual([`${R2_ID}/more-sombre@0`]);
 });
 
-test("a take shows the stale mark once the agent changes its line", async ({ page, rushes }) => {
-  await voScript(rushes);
-  await openVoice(page, rushes);
-  await section(page, "S2").click();
-  await expect(page.locator(".lane.sub")).toHaveCount(3);
-  await expect(page.locator(".lane [data-stale]")).toHaveCount(0);
-  // The agent rewrites S2's line (a merge, so the other sections stay).
-  await rushes.api("PUT", "/api/script", { sections: [{ id: "s2", start: 3, end: 6, current: "A new line two." }] });
-  await expect(page.locator(".lane.sub [data-stale]")).toHaveCount(3);
-  await expect(page.locator(".lane.sub [data-stale]").first()).toHaveAttribute("data-tip", "The line changed after this take");
-  // A take read from the new line isn't stale.
-  await rushes.addTake("s2", { seconds: 2, freq: 494 });
-  await expect(page.locator(".lane.sub")).toHaveCount(4);
-  await expect(page.locator('.lane[data-row="take:s2:t4"] [data-stale]')).toHaveCount(0);
-  await expect(page.locator(".lane.sub [data-stale]")).toHaveCount(3);
+test("Voiceover notes are Whole or Point, Whole first: no In/Out, no ranges, and chips for each scope", async ({ page, rushes }) => {
+  await twoRounds(rushes);
+  await openVoice(page, rushes, 5);
+  const scope = page.getByRole("group", { name: "Scope" });
+  await expect(scope.getByRole("button")).toHaveText(["Whole", "Point"]);
+  await expect(scope.getByRole("button", { name: "Whole" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Set in point" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Set out point" })).toHaveCount(0);
+  // I and O do nothing here.
+  await page.evaluate(() => window.__rushesAudio!.engine!.seek(1));
+  await page.keyboard.press("i");
+  await page.evaluate(() => window.__rushesAudio!.engine!.seek(2));
+  await page.keyboard.press("o");
+  await expect(page.locator(".bar .chipx")).toHaveCount(0);
+  await expect(page.locator(".lane .span")).toHaveCount(0);
+  await expect(scope.getByRole("button", { name: "Whole" })).toHaveAttribute("aria-pressed", "true");
+  const chips = page.getByRole("group", { name: "Start a note" }).getByRole("button");
+  await expect(chips).toHaveText(["Speaker", "Pacing", "Tone", "Overall"]);
+  await scope.getByRole("button", { name: "Point" }).click();
+  await expect(chips).toHaveText(["Fix this", "Keep this"]);
+  await expect(page.getByRole("group", { name: "Marks" })).toHaveCount(0);
 });
 
-test("the stale mark's tooltip isn't clipped by the name column's ellipsis", async ({ page, rushes }) => {
-  await voScript(rushes);
-  await openVoice(page, rushes);
-  await section(page, "S2").click();
-  await rushes.api("PUT", "/api/script", { sections: [{ id: "s2", start: 3, end: 6, current: "A new line two." }] });
-  const mark = page.locator(".lane.sub [data-stale]").first();
-  await expect(mark).toHaveCSS("overflow", "visible");
-  // Every box between the mark and its lane must stay unclipped too, or the tooltip is cut off
-  // even though the mark itself is fine.
-  const chain = await overflowChain(mark);
+test("a Point note draws on its read's lane only; a Whole note is listed and not drawn", async ({ page, rushes }) => {
+  await twoRounds(rushes);
+  await openVoice(page, rushes, 5);
+  const scope = page.getByRole("group", { name: "Scope" });
+  await page.getByRole("button", { name: "more excited", exact: true }).click();
+  await page.evaluate(() => window.__rushesAudio!.engine!.seek(1.5));
+  await scope.getByRole("button", { name: "Point" }).click();
+  await page.keyboard.press("n");
+  await page.keyboard.type("Clipped word here.");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".note")).toHaveCount(1);
+  let { notes } = await rushes.api("GET", "/api/notes?stage=voice");
+  expect(notes[0]).toMatchObject({ stage: "voice", scope: "point", on: `${R2_ID}/more-excited`, t: 1.5 });
+  await expect(page.locator(`.lane[data-row="${R2_ID}/more-excited"] .mk[data-note="${notes[0].id}"]`)).toHaveCount(1);
+  await expect(page.locator(`.lane [data-note="${notes[0].id}"]`)).toHaveCount(1);
+  await expect(page.locator(`.note[data-note="${notes[0].id}"] .on`)).toHaveText("more excited");
+  // A note sent, the scope goes back to Whole.
+  await expect(scope.getByRole("button", { name: "Whole" })).toHaveAttribute("aria-pressed", "true");
+
+  await page.getByRole("button", { name: "more sombre", exact: true }).click();
+  await page.keyboard.press("n");
+  await page.keyboard.type("A touch slow overall.");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".note")).toHaveCount(2);
+  ({ notes } = await rushes.api("GET", "/api/notes?stage=voice"));
+  const whole = notes.find((n: { text: string }) => n.text === "A touch slow overall.");
+  expect(whole).toMatchObject({ scope: "whole", t: null, on: `${R2_ID}/more-sombre` });
+  await expect(page.locator(`.lane [data-note="${whole.id}"]`)).toHaveCount(0);
+  await expect(page.locator(`.note[data-note="${whole.id}"] .on`)).toHaveText("more sombre");
+});
+
+test("Blind on Voiceover names reads Read 1…n and never reveals an older round's pick", async ({ page, rushes }) => {
+  await twoRounds(rushes);
+  await openVoice(page, rushes, 5);
+  await page.getByRole("button", { name: "Blind" }).click();
+  await expect(page.locator(".lane [data-name]")).toHaveText(["Read 1", "Read 2"]);
+  await expect(page.locator(".lane [data-meta]")).toHaveText(["·····", "·····"]);
+  await expect(page.locator(".fold")).toContainText("picked a read");
+  await expect(page.locator(".fold")).not.toContainText("Gerald");
+  await expect(onMenu(page).locator("option")).toHaveText(["Read 1", "Read 2", "Read 1", "Read 2", "Read 3"]);
+  // Opened, the older round's reads are blind too.
+  await page.locator(".fold").click();
+  await expect(page.locator(".lane [data-name]")).toHaveText(["Read 1", "Read 2", "Read 1", "Read 2", "Read 3"]);
+  await page.getByRole("button", { name: "Blind" }).click();
+  await expect(page.locator(".fold")).toContainText("picked Gerald");
+});
+
+test("a cut-off read description shows in full as a tooltip, and the On menu's tooltip names the round", async ({ page, rushes }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await twoRounds(rushes, { steadier: true });
+  await openVoice(page, rushes, 6);
+  const long = page.locator(`.lane[data-row="${R2_ID}/steadier-pace"] [data-meta]`);
+  expect(await long.locator("[data-meta-text]").evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+  await expect(long).toHaveAttribute("data-tip", LONG);
+  await expect(page.locator(`.lane[data-row="${R2_ID}/more-sombre"] [data-meta]`)).not.toHaveAttribute("data-tip");
+  await expect(page.locator(`.lane[data-row="${R2_ID}/more-sombre"] [data-name]`).locator("..")).not.toHaveAttribute("data-tip");
+  await page.getByRole("button", { name: "more sombre", exact: true }).click();
+  await expect(onMenu(page).locator("option:checked")).toHaveText("more sombre");
+  await expect(onMenu(page)).toHaveAttribute("data-tip", `${R2} · more sombre`);
+});
+
+test("a cut-off description's tooltip isn't clipped by the name column's ellipsis", async ({ page, rushes }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await twoRounds(rushes, { steadier: true });
+  await openVoice(page, rushes, 6);
+  const meta = page.locator(`.lane[data-row="${R2_ID}/steadier-pace"] [data-meta]`);
+  await expect(meta).toHaveAttribute("data-tip", LONG);
+  await expect(meta).toHaveCSS("overflow", "visible");
+  // Every box between the tooltip's element and its lane must stay unclipped too, or the tooltip is
+  // cut off even though the element itself is fine.
+  const chain = await overflowChain(meta);
   expect(chain.length).toBeGreaterThan(1);
   expect(chain.every((o) => o === "visible")).toBe(true);
-  // Hovering actually shows the tooltip (opacity: 1 once the 0.12s transition settles), and its
-  // content isn't suppressed.
-  await mark.hover();
-  await expect
-    .poll(() => mark.evaluate((el) => Number(getComputedStyle(el, "::after").opacity)))
-    .toBe(1);
-  const content = await mark.evaluate((el) => getComputedStyle(el, "::after").content);
-  expect(content).not.toBe("none");
+  // Hovering actually shows the tooltip (opacity: 1 once the 0.12s transition settles), with the full text.
+  await meta.hover();
+  await expect.poll(() => meta.evaluate((el) => Number(getComputedStyle(el, "::after").opacity))).toBe(1);
+  expect(await meta.evaluate((el) => getComputedStyle(el, "::after").content)).toBe(JSON.stringify(LONG));
 });
 
-test("New take starts a whole note on the section asking for another take", async ({ page, rushes }) => {
-  await voScript(rushes);
-  await openVoice(page, rushes);
-  await section(page, "S2").click();
-  await page.getByRole("button", { name: "New take" }).click();
-  const box = page.getByRole("textbox", { name: "New note" });
-  await expect(box).toHaveValue("Another take of S2: ");
-  await expect(box).toBeFocused();
-  expect(await box.evaluate((el: HTMLTextAreaElement) => [el.selectionStart, el.selectionEnd])).toEqual([20, 20]);
-  await expect(onMenu(page)).toHaveText("S2");
-  await expect(page.getByRole("group", { name: "Scope" }).getByRole("button", { name: "Whole" })).toHaveAttribute("aria-pressed", "true");
-  await page.keyboard.type("slower, and warmer on the last word.");
-  await page.keyboard.press("Enter");
-  await expect(page.locator(".note")).toHaveCount(1);
-  const { notes } = await rushes.api("GET", "/api/notes?stage=voice");
-  expect(notes[0]).toMatchObject({ stage: "voice", on: "s2", scope: "whole", t: null, tOut: null, text: "Another take of S2: slower, and warmer on the last word." });
-  await expect(page.locator(".note .on")).toHaveText("S2");
-  await expect(page.locator(".note .t")).toHaveText("Whole");
+test("a read added with no round shows under a Voiceover heading, and older notes are listed, not drawn", async ({ page, rushes }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await rushes.addVariant("voice", "A · Current", { seconds: 4, freq: 196 });
+  await rushes.api("PUT", "/api/script", { replace: true, sections: [{ id: "s1", start: 0, end: 4, current: "Line one." }] });
+  await rushes.api("POST", "/api/notes", { stage: "voice", on: "s1:t1", scope: "point", t: 1, text: "Dip the second word." });
+  await rushes.api("POST", "/api/notes", { stage: "voice", on: "vo", scope: "whole", text: "The read as a whole." });
+  await openVoice(page, rushes, 1);
+  await expect(page.locator(".rhead .rname")).toHaveText("Voiceover");
+  await expect(page.locator(".lane [data-name]")).toHaveText(["A · Current"]);
+  await expect(page.locator(".fold")).toHaveCount(0);
+  await expect(page.locator(".note")).toHaveCount(2);
+  await expect(page.locator(".note .on")).toHaveText(["Assembled read", "S1 · Take 1"]);
+  await expect(page.locator(".lane [data-note]")).toHaveCount(0);
+  expect(errors).toEqual([]);
 });
 
-test("New take refuses to drop a pending note, and shows a toast instead", async ({ page, rushes }) => {
-  await voScript(rushes);
-  await openVoice(page, rushes);
-  await section(page, "S2").click();
-  await page.keyboard.press("n");
-  await page.keyboard.type("Half a thought");
-  const scopePoint = page.getByRole("group", { name: "Scope" }).getByRole("button", { name: "Point" });
-  await expect(scopePoint).toHaveAttribute("aria-pressed", "true");
-  await page.getByRole("button", { name: "New take" }).click();
-  await expect(page.getByRole("status")).toHaveText("Finish or clear the note you're writing first.");
-  // Nothing about the pending note moved: the text, and the scope, are exactly as they were.
-  await expect(page.getByRole("textbox", { name: "New note" })).toHaveValue("Half a thought");
-  await expect(scopePoint).toHaveAttribute("aria-pressed", "true");
-  const { notes } = await rushes.api("GET", "/api/notes?stage=voice");
-  expect(notes).toHaveLength(0);
+test("another film starts Voiceover's notes on Whole again", async ({ page, rushes }) => {
+  await rushes.addCut("hero", "Hero");
+  await rushes.addCut("cutdown", "Cutdown");
+  await twoRounds(rushes);
+  await openVoice(page, rushes, 5);
+  const scope = page.getByRole("group", { name: "Scope" });
+  await scope.getByRole("button", { name: "Point" }).click();
+  await expect(scope.getByRole("button", { name: "Point" })).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("]");
+  await expect(page.getByRole("navigation", { name: "Films" }).getByRole("button", { name: /Cutdown/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(scope.getByRole("button", { name: "Whole" })).toHaveAttribute("aria-pressed", "true");
 });
 
-test("a range note on a section with Louder 2 dB saves and draws on the read", async ({ page, rushes }) => {
-  await voScript(rushes);
-  await openVoice(page, rushes);
-  await section(page, "S2").click();
-  await page.evaluate(() => window.__rushesAudio!.engine!.seek(3.5));
-  await page.keyboard.press("i");
-  await page.evaluate(() => window.__rushesAudio!.engine!.seek(5));
-  await page.keyboard.press("o");
-  await expect(page.locator(".bar .chipx")).toContainText("0:03.50–0:05.00");
-  const marks = page.getByRole("group", { name: "Marks" });
-  await marks.getByRole("button", { name: "Louder" }).click();
-  await marks.getByRole("combobox", { name: "Louder by" }).selectOption("2");
-  await expect(onMenu(page)).toHaveText("S2");
-  await page.keyboard.press("n");
-  await page.keyboard.type("It gets lost under the music here.");
-  await page.keyboard.press("Enter");
-  await expect(page.locator(".note")).toHaveCount(1);
-  const { notes } = await rushes.api("GET", "/api/notes?stage=voice");
-  expect(notes[0]).toMatchObject({ stage: "voice", on: "s2", scope: "range", t: 3.5, tOut: 5, marks: [{ kind: "louder", db: 2 }] });
-  await expect(page.locator(".note .nmarks")).toHaveText("Louder 2 dB");
-  await expect(page.locator(".note .on")).toHaveText("S2");
-  await expect(page.locator(`.lane[data-row="vo"] .span[data-note="${notes[0].id}"]`)).toHaveCount(1);
-  await expect(page.locator(".lane.sub [data-note]")).toHaveCount(0);
-});
-
-test("a take note draws on the read and on its own sub-lane while its section is shown", async ({ page, rushes }) => {
-  await voScript(rushes);
-  const { note } = await rushes.api("POST", "/api/notes", { stage: "voice", on: "s2:t1", scope: "point", t: 3.6, text: "Dip the second word." });
-  await openVoice(page, rushes);
-  await expect(page.locator(`.lane[data-row="vo"] .mk[data-note="${note.id}"]`)).toHaveCount(1);
-  await expect(page.locator(".lane.sub [data-note]")).toHaveCount(0);
-  await section(page, "S2").click();
-  await expect(page.locator(`.lane[data-row="take:s2:t1"] .mk[data-note="${note.id}"]`)).toHaveCount(1);
-  await expect(page.locator(`.lane[data-row="take:s2:t2"] [data-note]`)).toHaveCount(0);
-  await expect(page.locator(".note .on")).toHaveText("S2 · Take 1");
-});
-
-test("a picked voice variant replaces the read, until the read or a take is clicked", async ({ page, rushes }) => {
-  await voScript(rushes);
-  const alt = await rushes.addVariant("voice", "Warm read", { seconds: 11, freq: 196 });
-  const key = `${alt.lane.id}/${alt.variant.id}`;
-  await openVoice(page, rushes, 6);
-  // Not picked: the read plays, and the variant is a lane of its own with Use.
-  expect(await heard(page)).toEqual(["s1:t1@0", "s2:t3@3", "s4:t1@9"]);
-  await page.getByRole("button", { name: "Use Warm read" }).click();
-  await expect(page.getByRole("button", { name: "Use Warm read" })).toHaveAttribute("aria-pressed", "true");
-  expect((await rushes.api("GET", "/api/picks")).lanes).toEqual({ [alt.lane.id]: alt.variant.id });
-  await expect.poll(() => heard(page)).toEqual([`${key}@0`]);
-  await page.getByRole("button", { name: "Assembled read", exact: true }).click();
-  expect(await heard(page)).toEqual(["s1:t1@0", "s2:t3@3", "s4:t1@9"]);
-  await page.getByRole("button", { name: "Warm read", exact: true }).click();
-  expect(await heard(page)).toEqual([`${key}@0`]);
-  await page.getByRole("button", { name: "S1 · Take 1", exact: true }).click();
-  expect(await heard(page)).toEqual(["s1:t1@0", "s2:t3@3", "s4:t1@9"]);
-});
-
-test("with whole reads and no script, there's no Assembled read: the first read plays, and notes go on a read", async ({ page, rushes }) => {
-  const a = await rushes.addVariant("voice", "A · Current", { seconds: 4, freq: 196 });
-  await rushes.addVariant("voice", "B · Bold", { seconds: 4, freq: 247 });
-  await page.goto(rushes.testUrl());
-  await openTab(page, /Voiceover/, "2");
-  await loaded(page, 2);
-  await expect(page.locator(".lane [data-name]")).toHaveText(["A · Current", "B · Bold"]);
-  await expect(page.getByRole("button", { name: "Assembled read", exact: true })).toHaveCount(0);
-  await expect(page.locator(".vobar")).toHaveCount(0);
-  // Nothing picked: the first read is heard, not silence.
-  expect(await heard(page)).toEqual([`${a.lane.id}/${a.variant.id}@0`]);
-  const on = page.getByRole("combobox", { name: "Note on" });
-  await expect(on.locator("option")).not.toContainText(["Assembled read"]);
-  await page.keyboard.press("n");
-  await page.keyboard.type("Too fast here.");
-  await page.keyboard.press("Enter");
-  await expect(page.locator(".note .on")).toHaveText("A · Current");
-  const { notes } = await rushes.api("GET", "/api/notes?stage=voice");
-  expect(notes[0].on).toBe(`${a.lane.id}/${a.variant.id}`);
-});
-
-test("a take whose file is missing shows the missing mark and leaves a gap", async ({ page, rushes }) => {
-  await voScript(rushes);
-  const { script } = await rushes.api("GET", "/api/script");
-  const s2 = script.sections.find((s: { id: string }) => s.id === "s2");
-  await rm(join(rushes.root, s2.takes[2].file));
-  await openVoice(page, rushes, 4);
-  // Take 3 is S2's newest, so it's what the read uses: the section is silent rather than another take.
-  expect(await heard(page)).toEqual(["s1:t1@0", "s4:t1@9"]);
-  await section(page, "S2").click();
-  await expect(page.locator('.lane[data-row="take:s2:t3"] .amiss')).toHaveCount(1);
-  await expect(page.locator('.lane[data-row="take:s2:t1"] .amiss')).toHaveCount(0);
-  expect((await inspect(page)).media.some((k) => k.includes(s2.takes[2].file))).toBe(false);
+test("a round whose reads are all missing shows the missing marks and plays silence", async ({ page, rushes }) => {
+  const { excited, sombre } = await twoRounds(rushes);
+  const lanes = (await rushes.api("GET", "/api/state")).project.lanes;
+  const fileOf = (r: { lane: { id: string }; variant: { id: string } }) =>
+    lanes.find((l: { id: string }) => l.id === r.lane.id).variants.find((x: { id: string }) => x.id === r.variant.id).file as string;
+  const gone = [fileOf(excited), fileOf(sombre)];
+  for (const f of gone) await rm(join(rushes.root, f));
+  await openVoice(page, rushes, 3);
+  await expect(page.locator(`.lane[data-row="${R2_ID}/more-excited"] .amiss`)).toHaveCount(1);
+  await expect(page.locator(`.lane[data-row="${R2_ID}/more-sombre"] .amiss`)).toHaveCount(1);
+  // The current round's first read is what plays, and it isn't there: silence, not another round's read.
+  expect(await heard(page)).toEqual([]);
+  expect((await inspect(page)).media.some((k) => gone.some((f) => k.includes(f)))).toBe(false);
+  await page.getByRole("button", { name: "more sombre", exact: true }).click();
+  expect(await heard(page)).toEqual([]);
+  // The tab still works: the older round opens and plays.
+  await page.locator(".fold").click();
+  await page.getByRole("button", { name: "Gerald", exact: true }).click();
+  expect(await heard(page)).toEqual([`round-1-voices/gerald@0`]);
 });
 
 // ---- Picks can be cleared (Task 5) ----
@@ -810,19 +791,6 @@ test("Unpick clears a pick: In use goes back to Use, and the pick is gone from d
   expect((await rushes.api("GET", "/api/picks")).lanes).toEqual({});
   // With no pick, the first bed in manifest order plays again.
   await expect.poll(async () => (await inspect(page)).gains).toMatchObject({ "music/a-deep-house": 1, "music/b-warm-keys": 0 });
-});
-
-test("a take in use only because it's the newest has no Unpick; an explicit pick does", async ({ page, rushes }) => {
-  await voScript(rushes, { s2: "t1" });
-  await openVoice(page, rushes);
-  await section(page, "S2").click();
-  await expect(page.getByRole("button", { name: "Use S2 · Take 1" })).toHaveAttribute("aria-pressed", "true");
-  await page.getByRole("button", { name: "Unpick S2 · Take 1" }).click();
-  // Back to the newest take, which is in use but not picked.
-  await expect(page.getByRole("button", { name: "Use S2 · Take 3" })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("button", { name: /^Unpick/ })).toHaveCount(0);
-  expect((await rushes.api("GET", "/api/picks")).sections).toEqual({});
-  await expect.poll(() => heard(page)).toEqual(["s1:t1@0", "s2:t3@3", "s4:t1@9"]);
 });
 
 // ---- One definition of pending (Task 5) ----
@@ -896,28 +864,24 @@ test("switching tab, by 1–7 or by a click, refuses to drop a pending audio not
 // ---- Mix (Task 5) ----
 
 /**
- * A cut, a two-section script with a take each, a music bed and an SFX pass, both picked unless
- * `pick` is false. Opens Mix with every file loaded.
+ * A cut, a voice read (Gerald, in Round 1 · Voices), a music bed and an SFX pass, each picked unless
+ * `pick` says false. Three files in all.
  */
-async function mixProject(page: Page, rushes: Rushes, opts: { pick?: { music?: boolean; sfx?: boolean } } = {}) {
+async function mixProject(page: Page, rushes: Rushes, opts: { pick?: { voice?: boolean; music?: boolean; sfx?: boolean } } = {}) {
   await rushes.addCut();
-  await rushes.api("PUT", "/api/script", {
-    replace: true,
-    sections: [
-      { id: "s1", start: 0, end: 2, current: "Line one." },
-      { id: "s2", start: 2, end: 4, current: "Line two." },
-    ],
-  });
-  await rushes.addTake("s1", { seconds: 1.5, freq: 220 });
-  await rushes.addTake("s2", { seconds: 1.5, freq: 247 });
+  const read = await rushes.addVariant("voice", "Gerald", { round: "Round 1 · Voices", seconds: 4, freq: 220 });
   const bed = await rushes.addVariant("music", "Warm keys", { seconds: 4, freq: 330 });
   const pass = await rushes.addVariant("sfx", "Pass A", { seconds: 4, freq: 880, cues: [{ name: "Swipe", t: 1 }] });
   const lanes: Record<string, string> = {};
+  if (opts.pick?.voice !== false) lanes[read.lane.id] = read.variant.id;
   if (opts.pick?.music !== false) lanes[bed.lane.id] = bed.variant.id;
   if (opts.pick?.sfx !== false) lanes[pass.lane.id] = pass.variant.id;
   await rushes.api("PUT", "/api/picks", { lanes });
-  return { bed, pass };
+  return { read, bed, pass };
 }
+
+/** Gerald's clip id on Mix. */
+const VO_READ = "round-1-voices/gerald";
 
 async function openMix(page: Page, rushes: Rushes, files: number) {
   // Every loudness request the page makes, in order.
@@ -936,15 +900,15 @@ const laneGainsOf = async (page: Page) => (await inspect(page)).lanes;
 
 test("Mix shows three lanes; mute and solo change the lane gains, and solo wins", async ({ page, rushes }) => {
   await mixProject(page, rushes);
-  const asked = await openMix(page, rushes, 4);
+  const asked = await openMix(page, rushes, 3);
   await expect(page.locator(".lane [data-name]")).toHaveText(["Voiceover", "Music", "Sound effects"]);
-  await expect(page.locator('.lane[data-row="vo"] [data-meta]')).toHaveText("Assembled read");
+  await expect(page.locator('.lane[data-row="vo"] [data-meta]')).toHaveText("Gerald");
   await expect(page.locator('.lane[data-row="music"] [data-meta]')).toHaveText("Warm keys");
   await expect(page.locator('.lane[data-row="sfx"] [data-meta]')).toHaveText("Pass A");
-  await expect(page.locator('.lane[data-row="vo"] .secmk')).toHaveText(["S1", "S2"]);
+  await expect(page.locator('.lane[data-row="vo"] .secmk')).toHaveCount(0);
   await expect(page.locator('.lane[data-row="sfx"] .cue')).toHaveText(["Swipe"]);
   await expect.poll(() => laneGainsOf(page)).toEqual({ vo: 1, music: 1, sfx: 1 });
-  expect(await heard(page)).toEqual(["s1:t1@0", "music/warm-keys@0", "sfx/pass-a@0", "s2:t1@2"]);
+  expect(await heard(page)).toEqual([`${VO_READ}@0`, "music/warm-keys@0", "sfx/pass-a@0"]);
   await expect.poll(() => asked.at(-1)).toEqual(["voice", "music", "sfx"]);
 
   const button = (name: string) => page.getByRole("button", { name, exact: true });
@@ -958,7 +922,7 @@ test("Mix shows three lanes; mute and solo change the lane gains, and solo wins"
   await expect.poll(() => laneGainsOf(page)).toEqual({ vo: 1, music: 0, sfx: 0 });
   await button("Mute Voiceover").click();
   await expect.poll(() => laneGainsOf(page)).toEqual({ vo: 1, music: 0, sfx: 0 });
-  expect(await heard(page)).toEqual(["s1:t1@0", "s2:t1@2"]);
+  expect(await heard(page)).toEqual([`${VO_READ}@0`]);
   await expect.poll(() => asked.at(-1)).toEqual(["voice"]);
   await button("Solo Sound effects").click();
   await expect.poll(() => laneGainsOf(page)).toEqual({ vo: 1, music: 0, sfx: 1 });
@@ -972,7 +936,7 @@ test("Mix shows three lanes; mute and solo change the lane gains, and solo wins"
   expect(Object.keys(picks).sort()).toEqual(["lanes", "rev", "schema", "sections"]);
   await page.keyboard.press("4");
   await openTab(page, /Mix/, "6");
-  await loaded(page, 4);
+  await loaded(page, 3);
   await expect(page.locator('.ms[aria-pressed="true"]')).toHaveCount(0);
   await expect.poll(() => laneGainsOf(page)).toEqual({ vo: 1, music: 1, sfx: 1 });
 });
@@ -981,7 +945,7 @@ test("the loudness readout shows the three values (or — without ffmpeg), and a
   await mixProject(page, rushes);
   // The same request the readout makes, so the test knows whether this server has ffmpeg.
   const direct = await rushes.api("POST", "/api/mix/loudness", { lanes: ["voice", "music", "sfx"] });
-  await openMix(page, rushes, 4);
+  await openMix(page, rushes, 3);
   const values = page.locator(".meter [data-value]");
   await expect(page.locator(".meter span:not([data-measuring])")).toHaveText(["LUFS integrated", "dBTP true peak", "Music under VO"]);
   await expect(page.locator("[data-measuring]")).toHaveCount(0, { timeout: 15_000 });
@@ -1031,7 +995,7 @@ test("a timed-out reading says so, and a click on the readout measures again", a
   const seen = await fakeLoudness(page, () =>
     status === 504 ? { status, body: { error: "loudness_timeout", message: "ffmpeg didn't finish" } } : { status, body: READING },
   );
-  await openMix(page, rushes, 4);
+  await openMix(page, rushes, 3);
   const meter = page.getByRole("group", { name: "Loudness" });
   const values = meter.locator("[data-value]");
   await expect(values.first()).toHaveAttribute("data-tip", "Measuring took too long · click to retry");
@@ -1048,7 +1012,7 @@ test("a timed-out reading says so, and a click on the readout measures again", a
 test("a burst of mute and solo inside the debounce makes exactly one loudness request", async ({ page, rushes }) => {
   await mixProject(page, rushes);
   const seen = await fakeLoudness(page, () => ({ status: 200, body: READING }));
-  await openMix(page, rushes, 4);
+  await openMix(page, rushes, 3);
   await expect(page.getByRole("group", { name: "Loudness" }).locator("[data-value]").first()).toHaveText("−16.2");
   const start = seen.count;
   const button = (name: string) => page.getByRole("button", { name, exact: true });
@@ -1072,7 +1036,7 @@ test("unmuting after 'Nothing to measure' drops that reason while the new readin
     await held;
     return { status: 200, body: READING };
   });
-  await openMix(page, rushes, 4);
+  await openMix(page, rushes, 3);
   const values = page.getByRole("group", { name: "Loudness" }).locator("[data-value]");
   await expect(values.first()).toHaveText("−16.2");
   for (const lane of ["Voiceover", "Music", "Sound effects"]) await page.getByRole("button", { name: `Mute ${lane}`, exact: true }).click();
@@ -1089,19 +1053,19 @@ test("unmuting after 'Nothing to measure' drops that reason while the new readin
 test("a lane with nothing picked, or a missing file, is empty and left out of the loudness request", async ({ page, rushes }) => {
   const { pass } = await mixProject(page, rushes, { pick: { music: false } });
   await rm(join(rushes.root, (await rushes.api("GET", "/api/state")).project.lanes.find((l: { id: string }) => l.id === pass.lane.id).variants[0].file));
-  const asked = await openMix(page, rushes, 2);
+  const asked = await openMix(page, rushes, 1);
   await expect(page.locator('.lane[data-row="music"] .amiss')).toHaveAttribute("data-tip", "Nothing picked");
   await expect(page.locator('.lane[data-row="sfx"] .amiss')).toHaveAttribute("data-tip", "Missing");
   await expect(page.locator('.lane[data-row="vo"] .amiss')).toHaveCount(0);
-  expect(await heard(page)).toEqual(["s1:t1@0", "s2:t1@2"]);
+  expect(await heard(page)).toEqual([`${VO_READ}@0`]);
   await expect.poll(() => asked.at(-1)).toEqual(["voice"]);
   // Soloing an empty lane leaves nothing to measure.
   await page.getByRole("button", { name: "Solo Music", exact: true }).click();
   await expect(page.locator(".meter [data-value]").first()).toHaveAttribute("data-tip", "Nothing to measure");
 });
 
-test("Mix's VO lane plays a picked voice variant instead of the read, as Voiceover does", async ({ page, rushes }) => {
-  await mixProject(page, rushes);
+test("Mix's VO lane plays the picked voice read, as Voiceover does", async ({ page, rushes }) => {
+  await mixProject(page, rushes, { pick: { voice: false } });
   const alt = await rushes.addVariant("voice", "Warm read", { seconds: 4, freq: 196 });
   await rushes.api("PUT", "/api/picks", { lanes: { [alt.lane.id]: alt.variant.id } });
   await openMix(page, rushes, 3);
@@ -1111,7 +1075,7 @@ test("Mix's VO lane plays a picked voice variant instead of the read, as Voiceov
 
 test("Mix notes: a range on Music saves the variant and marks, a whole-mix note saves no lane", async ({ page, rushes }) => {
   const { bed } = await mixProject(page, rushes);
-  await openMix(page, rushes, 4);
+  await openMix(page, rushes, 3);
   const onMenuMix = page.getByRole("combobox", { name: "Note on" });
   await expect(onMenuMix.locator("option:checked")).toHaveText("Whole mix");
   await expect(onMenuMix.locator("option")).toHaveText(["Whole mix", "Voiceover", "Music · Warm keys", "Sound effects · Pass A"]);
@@ -1174,7 +1138,7 @@ test("a Mix note on an SFX pass named like the music bed lands on Sound effects,
 
 test("leaving Mix stops playback and releases its engine", async ({ page, rushes }) => {
   await mixProject(page, rushes);
-  await openMix(page, rushes, 4);
+  await openMix(page, rushes, 3);
   await page.keyboard.press(" ");
   await expect.poll(async () => (await inspect(page)).playing).toBe(true);
   await page.evaluate(() => { (window as unknown as { __old: unknown }).__old = window.__rushesAudio!.engine; });

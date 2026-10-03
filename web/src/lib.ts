@@ -1,5 +1,5 @@
 // Pure helpers for the dashboard. No DOM, so they're unit-tested in Node.
-import type { Asset, AssetKind, Cue, Lane, LaneStage, LoudnessResult, Mark, Note, Section, Shot, Stage, TabState, Take, Video, Version } from "./types.js";
+import type { Asset, AssetKind, Cue, Lane, LaneStage, LoudnessResult, Mark, Note, Section, Shot, Stage, TabState, Video, Version } from "./types.js";
 
 /** 72.4 -> "1:12.40" (minutes, seconds, hundredths). */
 export function fmt(t: number): string {
@@ -95,7 +95,7 @@ export const STAGE_NAMES: Record<Stage, string> = {
 export const UNLOCK_HINT: Record<Stage, string> = {
   script: "It unlocks when your agent adds a script with rushes_set_script.",
   picture: "It unlocks when your agent adds a cut with rushes_add_version.",
-  voice: "It unlocks when your agent adds a VO take with rushes_add_take.",
+  voice: "It unlocks when your agent adds a voice read with rushes_add_variant.",
   music: "It unlocks when your agent adds a music bed with rushes_add_variant.",
   sfx: "It unlocks when your agent adds an SFX pass with rushes_add_variant.",
   mix: "It unlocks once there's a cut and at least one audio stage.",
@@ -422,6 +422,8 @@ export interface OnOption {
   t?: number;
   /** The lane row this option belongs to, if any. */
   row?: string;
+  /** The full name, shown as the On menu's tooltip when the label alone is ambiguous ("Round 2 · Gerald, tone · more sombre"). */
+  full?: string;
 }
 
 /**
@@ -560,55 +562,35 @@ export function testFlags(search: string): { test: boolean; streamOver: boolean 
   return { test, streamOver: test && q.get("streamOver") === "1" };
 }
 
-// ---- Voiceover (§17.5) ----
+// ---- Voiceover (§18) ----
 
-/** A web copy of src/core/script.ts's isTakeStale (the web bundle imports types only from src/; a
- *  unit test asserts the two agree): a take is stale once its section's line no longer matches the
- *  text it was read from. */
-export function isTakeStale(take: Pick<Take, "forText">, s: Pick<Section, "current">): boolean {
-  return take.forText.trim() !== s.current.trim();
-}
-
-/** "S2": a section's name on every tab. */
+/** "S2": a section's name on every tab, and how an old Voiceover note on a section is listed. */
 export function sectionLabel(id: string): string {
   return id.toUpperCase();
 }
 
-/** "S2 · Take 1": a take is named by its place in its section, as Assets names it. */
-export function takeLabel(s: { id: string; takes: { id: string }[] }, takeId: string): string {
-  return `${sectionLabel(s.id)} · Take ${s.takes.findIndex((t) => t.id === takeId) + 1}`;
-}
-
-/** The take a section's read uses: its pick, else its newest; null with no takes. The same rule as the mix. */
+/**
+ * The take a section's assembled read uses: its pick, else its newest; null with no takes. Kept for
+ * Mix's VO lane (web/src/audio/timeline.ts assembleRead) until Mix moves to rounds, and for the
+ * server parity test.
+ */
 export function readTake<T extends { id: string }>(s: { id: string; takes: T[] }, picks: Record<string, string>): T | null {
   if (s.takes.length === 0) return null;
   return s.takes.find((t) => t.id === picks[s.id]) ?? s.takes[s.takes.length - 1];
 }
 
-/** The section whose span [start, end) holds `t`, or null in a gap. */
-export function sectionAt(sections: Pick<Section, "id" | "start" | "end">[], t: number): string | null {
-  return sections.find((s) => t >= s.start && t < s.end)?.id ?? null;
-}
-
 /**
- * The whole-read voice variant that replaces the assembled read, as in the mix: the first voice
- * lane, in manifest order, whose pick names one of its variants. Never just the only or first one.
+ * The first voice lane, in manifest order, whose pick names one of its variants. Kept for Mix's VO
+ * lane until Mix moves to `heardVoice` (the newest round's pick).
  */
 export function pickedVoiceRow(rows: VariantRow[], lanePicks: Record<string, string>): VariantRow | null {
   return rows.find((r) => lanePicks[r.lane] === r.variant) ?? null;
 }
 
-// The Voiceover tab's names. Row keys, engine lanes and On values each keep to their own namespace.
-/** The assembled read: its row key, and the `on` a note on it saves. */
+/** The `on` an old note on the assembled read saved; also Mix's VO row key. */
 export const READ_ROW = "vo";
-/** The engine lane holding one section's candidates: every take of it, at the section's start. */
-export const sectionLane = (sectionId: string): string => `sec:${sectionId}`;
-/** The engine lane holding one voice lane's variants. */
+/** The engine lane of a voice lane: each read plays in `${voiceLane(lane)}/${variant}`, a lane of its own. */
 export const voiceLane = (laneId: string): string => `var:${laneId}`;
-/** A take's engine clip id, and the `on` a note on it saves: "<section>:<take>", as assembleRead. */
-export const takeClipId = (sectionId: string, takeId: string): string => `${sectionId}:${takeId}`;
-/** A take sub-lane's row key. */
-export const takeRowKey = (sectionId: string, takeId: string): string => `take:${takeClipId(sectionId, takeId)}`;
 
 /** What an audio tab hears: per engine lane, the one clip that plays (null: all of them), and the lane's gain. */
 export interface Listening {
@@ -616,119 +598,130 @@ export interface Listening {
   gains: Record<string, number>;
 }
 
-export interface VoiceModel {
-  sections: Pick<Section, "id" | "start" | "end" | "takes">[];
-  /** picks.sections */
-  picks: Record<string, string>;
-  /** The voice lanes' variants, in manifest order (variantRows(lanes, "voice")). */
-  variants: VariantRow[];
-  /** picks.lanes */
-  lanePicks: Record<string, string>;
+/** A Voiceover round (§18.2): one `voice` lane, named for the round, with its own pick. */
+export interface VoiceRound {
+  /** The lane id. */
+  id: string;
+  /** The lane's name, e.g. "Round 2 · Gerald, tone". */
+  name: string;
+  /** Its reads, in manifest order. */
+  reads: VariantRow[];
+  /** The picked read's variant id, or null (no pick, or a pick naming a read that's gone). */
+  pick: string | null;
+  /** The newest round. */
+  current: boolean;
 }
 
-function takeByRow(sections: VoiceModel["sections"], key: string | null): { section: string; take: string } | null {
-  if (key === null) return null;
-  for (const s of sections) for (const t of s.takes) if (takeRowKey(s.id, t.id) === key) return { section: s.id, take: t.id };
+/** The voice lanes that have reads, as rounds in creation (manifest) order; the last is current. */
+export function voiceRounds(lanes: Lane[], picks: Record<string, string>): VoiceRound[] {
+  const voice = lanes.filter((l) => l.stage === "voice" && l.variants.length > 0);
+  return voice.map((l, i) => {
+    const reads = variantRows([l], "voice");
+    const pick = reads.some((r) => r.variant === picks[l.id]) ? picks[l.id] : null;
+    return { id: l.id, name: l.name, reads, pick, current: i === voice.length - 1 };
+  });
+}
+
+const pickedRead = (r: VoiceRound): VariantRow | null => r.reads.find((x) => x.variant === r.pick) ?? null;
+
+/** The VO the mix hears (§18.4): the newest round's pick, walking back past rounds with none; else null. */
+export function heardVoice(rounds: VoiceRound[]): VariantRow | null {
+  for (let i = rounds.length - 1; i >= 0; i--) {
+    const read = pickedRead(rounds[i]);
+    if (read) return read;
+  }
   return null;
 }
 
+/** What Voiceover plays with no lane clicked, and On's default: the current round's pick, else its first read. */
+export function voiceDefaultRead(rounds: VoiceRound[]): VariantRow | null {
+  const current = rounds.find((r) => r.current);
+  return current ? (pickedRead(current) ?? current.reads[0] ?? null) : null;
+}
+
+/** The engine lane one read plays in: every read is a lane of its own. */
+export const readLane = (r: Pick<VariantRow, "lane" | "variant">): string => `${voiceLane(r.lane)}/${r.variant}`;
+
 /**
- * What the Voiceover tab plays, given the selected row (§17.5).
- *
- * Each section is an engine lane (`sec:<id>`) holding every take of it at the section's start; its
- * selection is the one take heard. Each voice lane (`var:<id>`) holds its variants. One source
- * sounds at a time, switched by lane gains: the read (every section lane at 1) or one voice variant.
- * - Nothing selected: the read with the picks, or the picked voice variant instead (the mix rule).
- * - The read selected: the read with the picks.
- * - A take selected: the read, with that take in its section's place.
- * - A voice variant selected: that variant.
- * All of it is gains on one clock, so switching never moves the playhead.
+ * What Voiceover plays (§18.3): one read at a time, the selected one, else `voiceDefaultRead`. Every
+ * read sits in its own engine lane, so switching is lane gains on one clock and never moves the playhead.
  */
-export function voiceListening(m: VoiceModel, selected: string | null): Listening {
-  const variant = m.variants.find((r) => r.key === selected) ?? null;
-  const take = variant ? null : takeByRow(m.sections, selected);
-  const source = variant ?? (selected === READ_ROW || take ? null : pickedVoiceRow(m.variants, m.lanePicks));
+export function voiceListening(rounds: VoiceRound[], selected: string | null): Listening {
+  const reads = rounds.flatMap((r) => r.reads);
+  const heard = reads.find((r) => r.key === selected) ?? voiceDefaultRead(rounds);
   const select: Record<string, string | null> = {};
   const gains: Record<string, number> = {};
-  for (const s of m.sections) {
-    const picked = readTake(s, m.picks);
-    if (!picked) continue;
-    const heard = take && take.section === s.id ? take.take : picked.id;
-    select[sectionLane(s.id)] = takeClipId(s.id, heard);
-    gains[sectionLane(s.id)] = source ? 0 : 1;
-  }
-  for (const r of m.variants) {
-    const lane = voiceLane(r.lane);
-    if (lane in select) continue;
-    const inLane = m.variants.filter((x) => x.lane === r.lane);
-    const live = source?.lane === r.lane;
-    const heard = live ? source! : (inLane.find((x) => m.lanePicks[x.lane] === x.variant) ?? inLane[0]);
-    select[lane] = heard.key;
-    gains[lane] = live ? 1 : 0;
+  for (const r of reads) {
+    select[readLane(r)] = r.key;
+    gains[readLane(r)] = r.key === heard?.key ? 1 : 0;
   }
   return { select, gains };
 }
 
-export type VoiceTarget =
-  | { kind: "read" }
-  | { kind: "section"; section: string }
-  | { kind: "take"; section: string; take: string }
-  | { kind: "variant"; row: string };
-
-/**
- * What a Voiceover note is on, in this order: a lane-qualified voice variant (`"<lane>/<variant>"`),
- * "vo" (the read), "<section>:<take>" a take, a section id that section, else (legacy) a bare voice
- * variant id. A note with no `on` is about the read.
- */
-export function voiceNoteTarget(sections: VoiceModel["sections"], variants: VariantRow[], on: string | null): VoiceTarget | null {
-  const qualified = qualifiedTarget(variants, on);
-  if (qualified && qualified.cue === null) return { kind: "variant", row: qualified.row.key };
-  if (on === null || on === READ_ROW) return { kind: "read" };
-  for (const s of sections) for (const t of s.takes) if (takeClipId(s.id, t.id) === on) return { kind: "take", section: s.id, take: t.id };
-  if (sections.some((s) => s.id === on)) return { kind: "section", section: on };
-  const v = variants.find((r) => r.variant === on);
-  return v ? { kind: "variant", row: v.key } : null;
+/** What Voiceover's notes resolve against: the rounds, and the script's section ids (for older notes). */
+export interface VoiceNotes {
+  rounds: VoiceRound[];
+  sections?: string[];
 }
 
 /**
- * The rows a Voiceover note is drawn on: the read, for a note on the read, on a section or a take
- * (at its own time, even outside that section's span — a stray note, from an agent say, must never
- * appear only in the list); and a take note's own sub-lane while its section is shown.
+ * The read a Voiceover note is on: `"<lane>/<variant>"`, else (legacy) a bare variant id. Never the
+ * forms that came before rounds — "vo", a section id or "<section>:<take>" — which name no read.
  */
-export function voiceNoteRows(m: Pick<VoiceModel, "sections" | "variants">, note: Pick<Note, "on" | "t">, shown: string | null): string[] {
-  const target = voiceNoteTarget(m.sections, m.variants, note.on);
-  if (!target || note.t === null) return [];
-  if (target.kind === "read") return [READ_ROW];
-  if (target.kind === "variant") return [target.row];
-  const s = m.sections.find((x) => x.id === target.section)!;
-  const rows = [READ_ROW];
-  if (target.kind === "take" && shown === s.id) rows.push(takeRowKey(s.id, target.take));
-  return rows;
-}
-
-/**
- * The On menu on Voiceover: the read, each section (S1 …), the shown section's takes and each voice
- * variant. Values: "r", "s:<section>", "t:<section>:<take>", "v:<lane>/<variant>".
- */
-export function voiceOnOptions(m: Pick<VoiceModel, "sections" | "variants">, shown: string | null): OnOption[] {
-  const out: OnOption[] = [{ value: "r", label: "Assembled read", on: READ_ROW, row: READ_ROW }];
-  for (const s of m.sections) out.push({ value: `s:${s.id}`, label: sectionLabel(s.id), on: s.id, row: READ_ROW });
-  const sec = m.sections.find((s) => s.id === shown);
-  for (const t of sec?.takes ?? []) {
-    out.push({ value: `t:${takeClipId(sec!.id, t.id)}`, label: takeLabel(sec!, t.id), on: takeClipId(sec!.id, t.id), row: takeRowKey(sec!.id, t.id) });
+function voiceTarget(m: VoiceNotes, on: string | null): { round: VoiceRound; read: VariantRow } | null {
+  if (on === null) return null;
+  for (const round of m.rounds) {
+    const read = round.reads.find((r) => r.key === on);
+    if (read) return { round, read };
   }
-  for (const r of m.variants) out.push({ value: `v:${r.key}`, label: r.name, on: variantOn(r), row: r.key });
+  if (on.includes("/") || on.includes(":") || on === READ_ROW || m.sections?.includes(on)) return null;
+  for (const round of m.rounds) {
+    const read = round.reads.find((r) => r.variant === on);
+    if (read) return { round, read };
+  }
+  return null;
+}
+
+/**
+ * The lane a Voiceover note is drawn on: its read's row (the read's key), or null. Older notes on the
+ * assembled read, a section or a take name no read, so they're listed and never drawn. Whole notes
+ * aren't drawn either; AudioStage skips them.
+ */
+export function voiceNoteRows(m: VoiceNotes, note: Pick<Note, "on">): string | null {
+  return voiceTarget(m, note.on)?.read.key ?? null;
+}
+
+/**
+ * The On menu on Voiceover: one entry per read, the current round first, then older rounds newest
+ * first, each round's reads in the order given. The label is the read's name (`nameOf`, so Blind can
+ * hide it); `full` adds the round's name, for the tooltip. Values: "v:<lane>/<variant>".
+ */
+export function voiceOnOptions(rounds: VoiceRound[], nameOf: (r: VariantRow) => string = (r) => r.name): OnOption[] {
+  const out: OnOption[] = [];
+  for (const round of [...rounds].reverse()) {
+    for (const r of round.reads) out.push({ value: `v:${r.key}`, label: nameOf(r), full: `${round.name} · ${nameOf(r)}`, on: variantOn(r), row: r.key });
+  }
   return out;
 }
 
-/** What a listed Voiceover note is on: "Assembled read", "S2", "S2 · Take 1" or the variant's name. */
-export function voiceOnLabel(m: Pick<VoiceModel, "sections" | "variants">, on: string | null): string | null {
-  const target = voiceNoteTarget(m.sections, m.variants, on);
-  if (!target) return null;
-  if (target.kind === "read") return "Assembled read";
-  if (target.kind === "section") return sectionLabel(target.section);
-  if (target.kind === "take") return takeLabel(m.sections.find((s) => s.id === target.section)!, target.take);
-  return m.variants.find((r) => r.key === target.row)?.name ?? null;
+/** "Take 2" for take id "t2"; any other id as it is. */
+const takeName = (id: string): string => (/^t\d+$/.test(id) ? `Take ${id.slice(1)}` : id);
+
+/**
+ * What a listed Voiceover note is on: a read in the current round by its name, a read in an older
+ * round as "<round> · <read>"; older notes as "Assembled read", "S2" or "S2 · Take 1"; else null.
+ */
+export function voiceOnLabel(m: VoiceNotes, on: string | null, nameOf: (r: VariantRow) => string = (r) => r.name): string | null {
+  const target = voiceTarget(m, on);
+  if (target) return target.round.current ? nameOf(target.read) : `${target.round.name} · ${nameOf(target.read)}`;
+  if (on === null) return null;
+  if (on === READ_ROW) return "Assembled read";
+  if (m.sections?.includes(on)) return sectionLabel(on);
+  const i = on.indexOf(":");
+  if (i > 0 && !on.includes("/") && (m.sections === undefined || m.sections.includes(on.slice(0, i)))) {
+    return `${sectionLabel(on.slice(0, i))} · ${takeName(on.slice(i + 1))}`;
+  }
+  return null;
 }
 
 // ---- Mix (§17.6) ----

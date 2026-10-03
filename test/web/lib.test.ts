@@ -13,16 +13,17 @@ import {
   variantNoteRow, variantNoteTarget, variantOnLabel, variantOnOptions, variantRows,
 } from "../../web/src/lib.js";
 import type { Lane } from "../../web/src/types.js";
-import { isTakeStale as serverIsTakeStale } from "../../src/core/script.js";
 import { mixInputs, readTake as serverReadTake } from "../../src/server/loudness.js";
 import type { Picks, Project, Script } from "../../src/core/schema.js";
 import { tmpProject } from "../helpers/tmp.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import {
-  isTakeStale, pickedVoiceRow, READ_ROW, readTake, sectionAt, sectionLabel, takeLabel, voiceListening, type VoiceModel,
-  voiceNoteRows, voiceNoteTarget, voiceOnLabel, voiceOnOptions,
+  heardVoice, pickedVoiceRow, readTake, sectionLabel, voiceDefaultRead, voiceListening, voiceNoteRows, voiceOnLabel, voiceOnOptions, voiceRounds,
 } from "../../web/src/lib.js";
+
+/** A read with only an id: its name is the id, its file `media/<id>.wav`. */
+const v = (id: string) => ({ id, name: id, file: `media/${id}.wav`, meta: {}, cues: [] });
 
 const note = (over: Partial<Note>): Note => ({
   id: "n_1", stage: "picture", video: "hero", version: "v3", on: null, scope: "point", t: 12.4, tOut: null, frame: null,
@@ -571,147 +572,108 @@ describe("Voiceover", () => {
     ] },
   ];
   const variants = variantRows(voiceLanes, "voice");
-  const model = (over: Partial<VoiceModel> = {}): VoiceModel => ({ sections, picks: {}, variants, lanePicks: {}, ...over });
 
   it("turns on Voiceover", () => {
     expect(BUILT.voice).toBe(true);
-    expect(AUDIO_CHIPS.voice).toEqual(["Level", "Pace", "Pronunciation", "Breath"]);
   });
-  it("calls a take stale exactly as the server does", () => {
-    for (const [forText, current] of [["a", "a"], ["a ", " a"], ["a", "b"], ["", ""], ["one line", "one  line"]]) {
-      const s = sec("s", 0, 1, [], current);
-      const t = take("t", forText);
-      expect(isTakeStale(t, s)).toBe(serverIsTakeStale(t, s));
-    }
-    expect(isTakeStale(sections[1].takes[2], sections[1])).toBe(true);
-    expect(isTakeStale(sections[1].takes[0], sections[1])).toBe(false);
-  });
-  it("names sections and takes", () => {
+  it("names sections, for older notes", () => {
     expect(sectionLabel("s2")).toBe("S2");
-    expect(takeLabel(sections[1], "t3")).toBe("S2 · Take 3");
   });
-  it("reads a section's pick, else its newest take", () => {
+  it("reads a section's pick, else its newest take (Mix's assembled read, until it moves to rounds)", () => {
     expect(readTake(sections[1], {})?.id).toBe("t3");
     expect(readTake(sections[1], { s2: "t1" })?.id).toBe("t1");
     expect(readTake(sections[1], { s2: "gone" })?.id).toBe("t3");
     expect(readTake(sections[2], {})).toBeNull();
   });
-  it("finds the section under the playhead", () => {
-    expect(sectionAt(sections, 0)).toBe("s1");
-    expect(sectionAt(sections, 4)).toBe("s2");
-    expect(sectionAt(sections, 11.9)).toBe("s3");
-    expect(sectionAt(sections, 12)).toBeNull();
-  });
-  it("swaps in a voice variant only when one is picked, as the mix does", () => {
+  it("finds the first picked voice variant (Mix's VO, until it moves to heardVoice)", () => {
     expect(pickedVoiceRow(variants, {})).toBeNull();
     expect(pickedVoiceRow(variants, { alt: "nope" })).toBeNull();
     expect(pickedVoiceRow(variants, { alt: "dry" })?.key).toBe("alt/dry");
   });
+});
 
-  describe("what's heard", () => {
-    it("plays the read with the picks by default, every variant lane silent", () => {
-      expect(voiceListening(model({ picks: { s2: "t1" } }), null)).toEqual({
-        select: { "sec:s1": "s1:t1", "sec:s2": "s2:t1", "var:alt": "alt/warm" },
-        gains: { "sec:s1": 1, "sec:s2": 1, "var:alt": 0 },
-      });
-    });
-    it("plays the picked voice variant instead of the read", () => {
-      expect(voiceListening(model({ lanePicks: { alt: "dry" } }), null)).toEqual({
-        select: { "sec:s1": "s1:t1", "sec:s2": "s2:t3", "var:alt": "alt/dry" },
-        gains: { "sec:s1": 0, "sec:s2": 0, "var:alt": 1 },
-      });
-    });
-    it("auditions a take in its section's place, in the read", () => {
-      const heard = voiceListening(model({ lanePicks: { alt: "dry" } }), "take:s2:t1");
-      expect(heard.select).toMatchObject({ "sec:s1": "s1:t1", "sec:s2": "s2:t1" });
-      expect(heard.gains).toEqual({ "sec:s1": 1, "sec:s2": 1, "var:alt": 0 });
-    });
-    it("goes back to the picks when the read is clicked, even with a variant picked", () => {
-      const heard = voiceListening(model({ picks: { s2: "t2" }, lanePicks: { alt: "dry" } }), READ_ROW);
-      expect(heard.select).toMatchObject({ "sec:s2": "s2:t2" });
-      expect(heard.gains).toEqual({ "sec:s1": 1, "sec:s2": 1, "var:alt": 0 });
-    });
-    it("auditions a voice variant on its own", () => {
-      expect(voiceListening(model(), "alt/dry")).toEqual({
-        select: { "sec:s1": "s1:t1", "sec:s2": "s2:t3", "var:alt": "alt/dry" },
-        gains: { "sec:s1": 0, "sec:s2": 0, "var:alt": 1 },
-      });
-    });
-    it("gives a section with no takes no lane", () => {
-      expect(Object.keys(voiceListening(model(), null).select)).not.toContain("sec:s3");
-    });
+describe("voiceRounds (§18.2)", () => {
+  const lanes = [
+    { id: "round-1", stage: "voice", name: "Round 1 · Voices", variants: [v("jane"), v("louise"), v("gerald")] },
+    { id: "music", stage: "music", name: "Music", variants: [v("a")] },
+    { id: "round-2", stage: "voice", name: "Round 2 · Gerald, tone", variants: [v("excited"), v("sombre")] },
+  ] as Lane[];
+  it("orders rounds by creation and marks the last current", () => {
+    const r = voiceRounds(lanes, { "round-1": "gerald" });
+    expect(r.map((x) => [x.id, x.current, x.pick])).toEqual([["round-1", false, "gerald"], ["round-2", true, null]]);
+  });
+  it("hears the newest round's pick, walking back past rounds with none", () => {
+    expect(heardVoice(voiceRounds(lanes, { "round-1": "gerald" }))?.variant).toBe("gerald");
+    expect(heardVoice(voiceRounds(lanes, { "round-1": "gerald", "round-2": "sombre" }))?.variant).toBe("sombre");
+    expect(heardVoice(voiceRounds(lanes, {}))).toBeNull();
+  });
+  it("defaults to the current round's pick, else its first read", () => {
+    expect(voiceDefaultRead(voiceRounds(lanes, {}))?.variant).toBe("excited");
+    expect(voiceDefaultRead(voiceRounds(lanes, { "round-2": "sombre" }))?.variant).toBe("sombre");
+  });
+  it("labels legacy take and section notes without drawing them", () => {
+    const m = { rounds: voiceRounds(lanes, {}) };
+    expect(voiceNoteRows(m, { on: "s2:t1" } as Note)).toBeNull();
+    expect(voiceOnLabel(m, "vo")).toBe("Assembled read");
   });
 
-  describe("notes", () => {
-    const n = (on: string | null, t: number | null = 5) => ({ on, t });
-    it("resolves what a note is on", () => {
-      expect(voiceNoteTarget(sections, variants, "vo")).toEqual({ kind: "read" });
-      expect(voiceNoteTarget(sections, variants, null)).toEqual({ kind: "read" });
-      expect(voiceNoteTarget(sections, variants, "s2")).toEqual({ kind: "section", section: "s2" });
-      expect(voiceNoteTarget(sections, variants, "s2:t1")).toEqual({ kind: "take", section: "s2", take: "t1" });
-      expect(voiceNoteTarget(sections, variants, "alt/dry")).toEqual({ kind: "variant", row: "alt/dry" });
-      // Legacy: a bare voice variant id.
-      expect(voiceNoteTarget(sections, variants, "dry")).toEqual({ kind: "variant", row: "alt/dry" });
-      expect(voiceNoteTarget(sections, variants, "s2:t9")).toBeNull();
-      expect(voiceNoteTarget(sections, variants, "alt/gone")).toBeNull();
-    });
-    it("never reads a voice variant named like the read or a section as the read or that section (I3)", () => {
-      const clash = variantRows([{ id: "alt", stage: "voice", name: "Alt", variants: [
-        { id: "vo", name: "VO", file: "vo.wav", meta: {}, cues: [] },
-        { id: "s2", name: "S2", file: "s2.wav", meta: {}, cues: [] },
-      ] }], "voice");
-      const opts = voiceOnOptions({ sections, variants: clash }, null).filter((o) => o.value.startsWith("v:"));
-      expect(opts.map((o) => o.on)).toEqual(["alt/vo", "alt/s2"]);
-      expect(voiceNoteTarget(sections, clash, "alt/vo")).toEqual({ kind: "variant", row: "alt/vo" });
-      expect(voiceNoteTarget(sections, clash, "alt/s2")).toEqual({ kind: "variant", row: "alt/s2" });
-      expect(voiceNoteTarget(sections, clash, "vo")).toEqual({ kind: "read" });
-      expect(voiceNoteTarget(sections, clash, "s2")).toEqual({ kind: "section", section: "s2" });
-    });
-    it("draws read and section notes on the read", () => {
-      const m = model();
-      expect(voiceNoteRows(m, n("vo", 10), "s1")).toEqual(["vo"]);
-      expect(voiceNoteRows(m, n("s2", 5), "s1")).toEqual(["vo"]);
-      expect(voiceNoteRows(m, n("s2", null), "s2")).toEqual([]);
-    });
-    it("draws a section note on the read at its own time, even outside that section's span", () => {
-      const m = model();
-      // s2 spans [4, 8): t=9 is outside it, but the note must still draw on the read, not vanish
-      // into the list only.
-      expect(voiceNoteRows(m, n("s2", 9), "s2")).toEqual(["vo"]);
-      expect(voiceNoteRows(m, n("s2", 100), "s1")).toEqual(["vo"]);
-    });
-    it("draws a take note on the read, and on its sub-lane while its section is shown", () => {
-      const m = model();
-      expect(voiceNoteRows(m, n("s2:t1", 5), "s1")).toEqual(["vo"]);
-      expect(voiceNoteRows(m, n("s2:t1", 5), "s2")).toEqual(["vo", "take:s2:t1"]);
-    });
-    it("draws a variant note on its variant", () => {
-      expect(voiceNoteRows(model(), n("alt/warm", 1), "s1")).toEqual(["alt/warm"]);
-      expect(voiceNoteRows(model(), n("warm", 1), "s1")).toEqual(["alt/warm"]);
-    });
-    it("offers the read, each section, the shown section's takes and each variant", () => {
-      const opts = voiceOnOptions(model(), "s2");
-      expect(opts.map((o) => [o.value, o.label, o.on])).toEqual([
-        ["r", "Assembled read", "vo"],
-        ["s:s1", "S1", "s1"],
-        ["s:s2", "S2", "s2"],
-        ["s:s3", "S3", "s3"],
-        ["t:s2:t1", "S2 · Take 1", "s2:t1"],
-        ["t:s2:t2", "S2 · Take 2", "s2:t2"],
-        ["t:s2:t3", "S2 · Take 3", "s2:t3"],
-        ["v:alt/warm", "Warm read", "alt/warm"],
-        ["v:alt/dry", "Dry read", "alt/dry"],
-      ]);
-    });
-    it("labels a listed note", () => {
-      const m = model();
-      expect(voiceOnLabel(m, "vo")).toBe("Assembled read");
-      expect(voiceOnLabel(m, "s2")).toBe("S2");
-      expect(voiceOnLabel(m, "s2:t2")).toBe("S2 · Take 2");
-      expect(voiceOnLabel(m, "alt/dry")).toBe("Dry read");
-      expect(voiceOnLabel(m, "dry")).toBe("Dry read");
-      expect(voiceOnLabel(m, "nowhere")).toBeNull();
-    });
+  it("treats a pick naming a read that's gone as no pick, and skips voice lanes with no reads", () => {
+    const withEmpty = [...lanes, { id: "round-3", stage: "voice", name: "Round 3", variants: [] }] as Lane[];
+    const r = voiceRounds(withEmpty, { "round-2": "gone" });
+    expect(r.map((x) => x.id)).toEqual(["round-1", "round-2"]);
+    expect(r[1]).toMatchObject({ current: true, pick: null });
+    expect(heardVoice(r)).toBeNull();
+    expect(voiceDefaultRead([])).toBeNull();
+  });
+  it("plays one read at a time, each in its own engine lane: the selected one, else the default", () => {
+    const rounds = voiceRounds(lanes, { "round-1": "gerald" });
+    const none = voiceListening(rounds, null);
+    expect(Object.keys(none.select)).toEqual([
+      "var:round-1/jane", "var:round-1/louise", "var:round-1/gerald", "var:round-2/excited", "var:round-2/sombre",
+    ]);
+    expect(none.select["var:round-2/sombre"]).toBe("round-2/sombre");
+    // Nothing picked in the current round: its first read, not the older round's pick.
+    expect(Object.entries(none.gains).filter(([, g]) => g === 1).map(([k]) => k)).toEqual(["var:round-2/excited"]);
+    const jane = voiceListening(rounds, "round-1/jane");
+    expect(Object.entries(jane.gains).filter(([, g]) => g === 1).map(([k]) => k)).toEqual(["var:round-1/jane"]);
+    // The selection never changes, only the gains: switching is a ramp, never a restart.
+    expect(jane.select).toEqual(none.select);
+  });
+  it("draws a note on its read, by lane-qualified id or (legacy) a bare variant id", () => {
+    const m = { rounds: voiceRounds(lanes, {}), sections: ["s1", "s2"] };
+    expect(voiceNoteRows(m, { on: "round-2/sombre" })).toBe("round-2/sombre");
+    expect(voiceNoteRows(m, { on: "jane" })).toBe("round-1/jane");
+    for (const on of [null, "vo", "s2", "s2:t1", "round-2/gone", "nowhere"]) expect(voiceNoteRows(m, { on })).toBeNull();
+  });
+  it("never reads a section id or 'vo' as a read named like it", () => {
+    const clash = voiceRounds([{ id: "r", stage: "voice", name: "R", variants: [v("vo"), v("s2")] }] as Lane[], {});
+    const m = { rounds: clash, sections: ["s2"] };
+    expect(voiceNoteRows(m, { on: "vo" })).toBeNull();
+    expect(voiceNoteRows(m, { on: "s2" })).toBeNull();
+    expect(voiceNoteRows(m, { on: "r/s2" })).toBe("r/s2");
+    expect(voiceOnLabel(m, "s2")).toBe("S2");
+  });
+  it("offers each read in the On menu, the current round first, labelled by name with the round in full", () => {
+    const opts = voiceOnOptions(voiceRounds(lanes, {}));
+    expect(opts.map((o) => [o.value, o.label, o.full, o.on])).toEqual([
+      ["v:round-2/excited", "excited", "Round 2 · Gerald, tone · excited", "round-2/excited"],
+      ["v:round-2/sombre", "sombre", "Round 2 · Gerald, tone · sombre", "round-2/sombre"],
+      ["v:round-1/jane", "jane", "Round 1 · Voices · jane", "round-1/jane"],
+      ["v:round-1/louise", "louise", "Round 1 · Voices · louise", "round-1/louise"],
+      ["v:round-1/gerald", "gerald", "Round 1 · Voices · gerald", "round-1/gerald"],
+    ]);
+    expect(voiceOnOptions(voiceRounds(lanes, {}), () => "Read").map((o) => o.label)).toEqual(Array(5).fill("Read"));
+  });
+  it("lists a note by its read, an older round's with the round, and older notes by what they were on", () => {
+    const m = { rounds: voiceRounds(lanes, {}), sections: ["s1", "s2"] };
+    expect(voiceOnLabel(m, "round-2/sombre")).toBe("sombre");
+    expect(voiceOnLabel(m, "round-1/jane")).toBe("Round 1 · Voices · jane");
+    expect(voiceOnLabel(m, "round-1/jane", () => "Read 2")).toBe("Round 1 · Voices · Read 2");
+    expect(voiceOnLabel(m, "vo")).toBe("Assembled read");
+    expect(voiceOnLabel(m, "s2")).toBe("S2");
+    expect(voiceOnLabel(m, "s2:t2")).toBe("S2 · Take 2");
+    expect(voiceOnLabel(m, null)).toBeNull();
+    expect(voiceOnLabel(m, "nowhere")).toBeNull();
   });
 });
 

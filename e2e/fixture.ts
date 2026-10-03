@@ -18,8 +18,10 @@ export interface VariantOptions {
   freq: number;
   meta?: Record<string, string | number>;
   cues?: { name: string; t: number }[];
-  /** Lane name; defaults to the stage's own lane. */
+  /** Lane id; defaults to the round, slugged, else the stage's own lane. */
   lane?: string;
+  /** Voice only: the round's name, e.g. "Round 2 · Gerald, tone" (§18.2). */
+  round?: string;
 }
 
 export interface Rushes {
@@ -154,7 +156,7 @@ export const test = base.extend<{ rushes: Rushes }>({
       const file = `audio/${stage}-${++wavs}-${slug}.wav`;
       await mkdir(join(root, "audio"), { recursive: true });
       await writeFile(join(root, file), makeWav({ seconds: opts.seconds, freq: opts.freq }));
-      return api("POST", "/api/variants", { stage, name, file, lane: opts.lane, meta: opts.meta, cues: opts.cues });
+      return api("POST", "/api/variants", { stage, name, file, lane: opts.lane, round: opts.round, meta: opts.meta, cues: opts.cues });
     };
     const addTake = async (sectionId: string, opts: { seconds: number; freq: number }) => {
       const file = `audio/take-${++wavs}-${sectionId.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.wav`;

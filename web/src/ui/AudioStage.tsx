@@ -71,7 +71,7 @@ export interface Preview {
   duration: number | null;
 }
 
-/** What a tab can do to its stage from outside (Voiceover's section switch and New take). */
+/** What a tab can do to its stage from outside: point the On menu, or start a note. */
 export interface StageHandle {
   engine: AudioEngine;
   /** Point the On menu at one of its values. */
@@ -85,7 +85,7 @@ export interface AudioStageProps {
   title: string;
   /** Beside the title, e.g. Blind on Music. */
   headerExtra?: ComponentChildren;
-  /** Under the lanes, e.g. the section switch on Voiceover or the loudness readout on Mix. */
+  /** Under the lanes, e.g. the loudness readout on Mix. */
   belowLanes?: ComponentChildren;
   rows: StageRow[];
   /** Everything the engine plays. Defaults to every row's clips. */
@@ -157,6 +157,16 @@ export function AudioStage(props: AudioStageProps) {
   const [marks, setMarks] = useState<Mark[]>([]);
   const [noteHasText, setNoteHasText] = useState(false);
   const hasRange = (props.scopes ?? ALL_SCOPES).includes("range");
+  const baseScope: Scope = props.defaultScope ?? "point";
+  // Another film or cut starts from the tab's own scope again. (A pending note refuses the switch,
+  // so nothing in progress is dropped here.)
+  const previewKey = `${preview?.video ?? ""}/${preview?.version ?? ""}`;
+  const seenPreview = useRef(previewKey);
+  useLayoutEffect(() => {
+    if (seenPreview.current === previewKey) return;
+    seenPreview.current = previewKey;
+    setScope(baseScope);
+  }, [previewKey]);
 
   // Nothing pending is dropped: a half-typed note, a range or ticked marks hold the film (and its
   // cut), as on Picture. A layout effect, so the hold is in place before the next key (`]` straight
@@ -167,7 +177,7 @@ export function AudioStage(props: AudioStageProps) {
   }, [pending]);
   useEffect(() => () => onPendingChange?.(false), []);
 
-  // ---- what's heard (§17.3, §17.5): the selected lane, else the picks ----
+  // ---- what's heard (§17.3, §18.3): the selected lane, else the picks ----
   const plan = (sel: string | null): Listening => (listen ? listen(sel) : { select: laneSelection(rows, sel), gains: {} });
   const applied = useRef<Listening>({ select: {}, gains: {} });
   // Only what changed is applied: each is a 4 ms gain ramp on the clock, never a restart.
@@ -259,9 +269,11 @@ export function AudioStage(props: AudioStageProps) {
   const clearRange = () => {
     setRange(NO_RANGE);
     setMarks([]);
-    if (scope === "range") setScope("point");
+    if (scope === "range") setScope(baseScope);
   };
   const changeScope = (s: Scope) => {
+    // A tab that doesn't offer Range never enters it, whoever asks.
+    if (s === "range" && !hasRange) return;
     setScope(s);
     if (s !== "range") {
       setRange(NO_RANGE);
@@ -285,7 +297,7 @@ export function AudioStage(props: AudioStageProps) {
       setOn: setOnValue,
       startNote(text, opts = {}) {
         // Nothing pending is ever dropped: a half-typed note, a range or quick marks hold the
-        // note box, so New take refuses rather than overwriting them.
+        // note box, so the caller's request is refused rather than overwriting them.
         if (pending) {
           toast("Finish or clear the note you're writing first.");
           return;
@@ -353,7 +365,7 @@ export function AudioStage(props: AudioStageProps) {
     });
     setRange(NO_RANGE);
     setMarks([]);
-    setScope("point");
+    setScope(baseScope);
     onChanged();
   };
 
@@ -375,8 +387,8 @@ export function AudioStage(props: AudioStageProps) {
       <div class="stack">
         <div class="ahead">
           <h2>{title}</h2>
-          <span class="sp" />
           {headerExtra}
+          <span class="sp" />
         </div>
         <div class="bar">
           <button class="btn ghost ib" data-tip="Back one frame  ←" aria-label="Back one frame" onClick={() => step(-1)}><Icon name="prev" /></button>

@@ -1,11 +1,12 @@
 // The lanes of an audio tab (§17.1): a name column with a swatch and the meta, an 80px waveform
 // track carrying the lane's note markers, spans and the playhead, and a control column (Use / In use,
-// or M / S on Mix). Shared by every audio tab through AudioStage.
+// or M / S on Mix). Shared by every audio tab through AudioStage. A row can carry a heading above it
+// (a Voiceover round's name) or be a fold: one full-width button standing for a folded round.
 //
 // Nothing here re-renders per frame. The playheads are plain elements AudioStage moves through a
 // ref, and a waveform canvas redraws only when its peaks, its size or the timeline length change.
-import type { ComponentChildren } from "preact";
-import { useEffect, useRef, useState } from "preact/hooks";
+import { type ComponentChildren, Fragment } from "preact";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { LoadResult } from "../audio/engine.js";
 import { type Clip, mediaKey } from "../audio/timeline.js";
 import { cueRoom } from "../lib.js";
@@ -21,13 +22,20 @@ export interface StageRow {
   meta?: string | null;
   /** The stage colour, for the swatch and the waveform. */
   color: string;
-  /** A sub-lane (a VO take): shorter, indented, no swatch. */
-  sub?: boolean;
+  /** A group heading drawn before this row (a Voiceover round's name). */
+  heading?: string;
+  /** A small pill beside the heading, e.g. "current". */
+  tag?: string;
+  /**
+   * Draw this row as one full-width button instead of a lane (a folded Voiceover round): no clips,
+   * track or controls. `dot` marks open notes inside it.
+   */
+  fold?: { label: ComponentChildren; open: boolean; dot: boolean; onToggle(): void };
   /** The clips drawn on this lane's waveform. */
   clips: Clip[];
   /** SFX cues, labelled on the waveform at their times. */
   cues?: { id: string; name: string; t: number }[];
-  /** Labels along the top of the track (VO section marks: S1, S2 …). */
+  /** Labels along the top of the track (Mix's VO section marks: S1, S2 …). */
   labels?: { t: number; text: string }[];
   /** Clicking the lane auditions this clip in this engine lane. */
   audition?: { lane: string; clip: string };
@@ -41,8 +49,6 @@ export interface StageRow {
   controls?: ComponentChildren;
   /** The On menu value that clicking this lane selects. */
   on?: string;
-  /** A VO take read from a line that has since changed. */
-  stale?: boolean;
   /**
    * The lane has nothing to play: its file isn't on disk (true: the mark's tooltip says "Missing"),
    * or, on Mix, nothing is picked for it (a string: the tooltip to show instead).
@@ -148,12 +154,77 @@ export interface LanesProps {
   onSeek(t: number, row: StageRow): void;
 }
 
+/** Which rows have their name ("n") or meta ("m") cut off by the column, by row key. */
+type Cut = Record<string, string>;
+
+function measureCut(root: HTMLElement): Cut {
+  const out: Cut = {};
+  const over = (el: Element | null) => el !== null && el.scrollWidth > el.clientWidth;
+  for (const lane of root.querySelectorAll<HTMLElement>(".lane[data-row]")) {
+    const flags = (over(lane.querySelector("[data-name]")) ? "n" : "") + (over(lane.querySelector("[data-meta-text]")) ? "m" : "");
+    if (flags) out[lane.dataset.row!] = flags;
+  }
+  return out;
+}
+
+const sameCut = (a: Cut, b: Cut) => {
+  const ka = Object.keys(a);
+  return ka.length === Object.keys(b).length && ka.every((k) => a[k] === b[k]);
+};
+
 export function Lanes({ rows, length, media, selected, marks, range, onSelect, onSeek }: LanesProps) {
   const pct = (s: number) => `${length > 0 ? (s / length) * 100 : 0}%`;
+
+  // A name or meta line cut off by its column shows in full as a tooltip. Measured when the rows'
+  // text changes or the window resizes, never per frame.
+  const root = useRef<HTMLDivElement>(null);
+  const [cut, setCut] = useState<Cut>({});
+  const measure = () => {
+    if (root.current) {
+      const next = measureCut(root.current);
+      setCut((prev) => (sameCut(prev, next) ? prev : next));
+    }
+  };
+  const shape = JSON.stringify(rows.map((r) => [r.key, r.name, r.meta ?? "", !!r.fold, r.missing ?? false]));
+  useLayoutEffect(measure, [shape]);
+  useEffect(() => {
+    window.addEventListener("resize", measure);
+    // Text measured before the web font lands is the fallback font's width.
+    void document.fonts?.ready.then(measure);
+    return () => window.removeEventListener("resize", measure);
+  }, []);
+
   return (
-    <div class="lanes">
+    <div class="lanes" ref={root}>
       {rows.map((row) => {
+        const heading = row.heading !== undefined && (
+          <div class="rhead" data-heading={row.key}>
+            <span class="rname">{row.heading}</span>
+            {row.tag && <span class="rtag">{row.tag}</span>}
+          </div>
+        );
+        if (row.fold) {
+          const f = row.fold;
+          return (
+            <Fragment key={row.key}>
+              {heading}
+              <button
+                type="button"
+                class="fold"
+                data-row={row.key}
+                aria-expanded={f.open}
+                aria-description={f.dot ? "Open notes" : undefined}
+                onClick={f.onToggle}
+              >
+                <Icon name="chev" />
+                <span class="flabel">{f.label}</span>
+                {f.dot && <span class="fdot" data-dot data-tip="Open notes" />}
+              </button>
+            </Fragment>
+          );
+        }
         const current = row.key === selected;
+        const flags = cut[row.key] ?? "";
         const rooms = cueRoom(row.cues ?? [], length);
         const results = row.clips.map((c) => media[mediaKey(c)]);
         const streamed = results.some((r) => r !== undefined && r !== "error" && r.streamed);
@@ -165,25 +236,25 @@ export function Lanes({ rows, length, media, selected, marks, range, onSelect, o
         });
         const laneMarks = marks[row.key] ?? [];
         return (
-          <div class={`lane${row.sub ? " sub" : ""}`} data-row={row.key} aria-current={current ? "true" : undefined}>
+          <Fragment key={row.key}>
+          {heading}
+          <div class="lane" data-row={row.key} aria-current={current ? "true" : undefined}>
             <button
               type="button"
               class="nm"
               aria-current={current ? "true" : "false"}
               aria-label={row.name}
-              aria-description={row.missing ? (typeof row.missing === "string" ? row.missing : "Missing") : row.stale ? "Stale: the line changed after this take" : undefined}
+              aria-description={row.missing ? (typeof row.missing === "string" ? row.missing : "Missing") : undefined}
               onClick={() => onSelect(row)}
             >
-              <b>
-                {!row.sub && <i style={{ background: row.color }} />}
+              {/* The tooltip sits on the unclipped line, not on the ellipsised text, which would clip it. */}
+              <b data-tip={flags.includes("n") ? row.name : undefined}>
+                <i style={{ background: row.color }} />
                 <span data-name>{row.name}</span>
                 {/* Beside the name, not in the meta line, which clips its tooltip. */}
                 {row.missing && <Missing tip={typeof row.missing === "string" ? row.missing : undefined} />}
-                {row.stale && (
-                  <span class="smk" data-stale data-tip="The line changed after this take"><Icon name="stale" /></span>
-                )}
               </b>
-              <small data-meta>
+              <small data-meta data-tip={flags.includes("m") && row.meta ? row.meta : undefined}>
                 {broken ? (
                   <span class="smk bad" data-tip="This file won't play in a browser"><Icon name="alert" /></span>
                 ) : streamed ? (
@@ -252,6 +323,7 @@ export function Lanes({ rows, length, media, selected, marks, range, onSelect, o
               {row.controls}
             </div>
           </div>
+          </Fragment>
         );
       })}
     </div>

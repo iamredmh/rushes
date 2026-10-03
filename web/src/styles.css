@@ -314,10 +314,23 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
    span inside it ellipsises. */
 .lane .nm small { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 15px; color: var(--text-3); white-space: nowrap; }
 .lane .nm small span[data-meta-text] { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A name or meta line cut off by its column: the full text, left-aligned below it (the line itself stays readable), wrapping
+   if it's longer than the tooltip's width. */
+.lane .nm > [data-tip]::after { left: 0; bottom: auto; top: calc(100% + 6px); transform: translateY(-2px); width: max-content; max-width: min(520px, 80vw); white-space: normal; line-height: 1.3; text-align: left; }
+.lane .nm > [data-tip]:hover::after { transform: none; }
 .lane .track { height: 80px; }
-.lane.sub .track { height: 52px; }
-.lane.sub .nm { padding-left: 25px; }
-.lane.sub .nm b { font-weight: 500; }
+/* Voiceover rounds (§18.3): the current round's heading, and each older round folded into one row. */
+.rhead { display: flex; align-items: center; gap: 10px; min-width: 0; font-size: 15px; font-weight: 600; color: var(--text-2); }
+.rhead .rname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rtag { flex: none; font-weight: 500; color: var(--accent-2); background: var(--accent-soft); padding: 1px 9px; border-radius: 999px; }
+.fold { display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; text-align: left; border: 0; padding: 12px 14px; border-radius: var(--r); background: var(--raised); color: var(--text-2); font-size: 15px; cursor: pointer; }
+.fold:hover { background: var(--hover); }
+.fold .flabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fold b { color: var(--text); font-weight: 600; }
+.fold .fpk { color: var(--done); }
+.fold svg.ic { width: 14px; height: 14px; color: var(--text-3); transform: rotate(-90deg); transition: transform 0.15s; }
+.fold[aria-expanded="true"] svg.ic { transform: none; }
+.fold .fdot { width: 8px; height: 8px; border-radius: 50%; background: var(--todo); margin-left: auto; flex: none; }
 .lane[aria-current="true"] .track { box-shadow: inset 0 0 0 1.5px var(--accent); }
 .lane .ctl { display: flex; justify-content: flex-end; align-items: center; gap: 4px; }
 /* Unpick: beside In use, quieter than it. */
@@ -342,9 +355,7 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .meter .measuring { align-self: center; color: var(--text-3); }
 .meter.retry { cursor: pointer; }
 .meter.retry > .btn { align-self: center; }
-/* Voiceover: the section switch and New take, under the lanes. */
-.vobar { gap: 10px; }
-.vobar .seg { flex-wrap: wrap; }
+/* Mix: section marks along the VO lane. */
 .secmk { position: absolute; top: 6px; height: calc(100% - 12px); padding-left: 6px; border-left: 1px solid var(--line-2); font: 600 15px/1 var(--sans); color: var(--text-3); z-index: 1; pointer-events: none; }
 /* One line tall: a zero-width first item holds the line, so a name wider than its section wraps
    onto a second line, which is out of sight. Short sections keep their marker line, not a clipped name. */
