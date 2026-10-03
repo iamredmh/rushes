@@ -304,6 +304,24 @@ test("switching films with a note half-typed is refused, and the note is kept", 
   await expect(page.getByLabel("New note")).toHaveValue("Still deciding what this is about.");
 });
 
+test("tooltips in the header open below their button, inside the window", async ({ page, rushes }) => {
+  await rushes.addCut();
+  await page.goto(rushes.url);
+  await videoReady(page);
+  for (const name of [/Lock picture at v1/, /Keyboard shortcuts/]) {
+    const button = page.getByRole("button", { name });
+    await button.hover();
+    const tip = await button.evaluate((el) => {
+      const after = getComputedStyle(el, "::after");
+      const box = el.getBoundingClientRect();
+      // The tooltip's top edge, from the pseudo-element's computed top (in px, relative to the button).
+      return { top: box.top + parseFloat(after.top), buttonBottom: box.bottom, content: after.content };
+    });
+    expect(tip.content).not.toBe("none");
+    expect(tip.top).toBeGreaterThanOrEqual(tip.buttonBottom);
+  }
+});
+
 test("a locked picture opens on the locked cut", async ({ page, rushes }) => {
   const { version: v1 } = await rushes.addCut("first cut");
   await rushes.addCut("second cut");

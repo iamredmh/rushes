@@ -60,7 +60,9 @@ svg.ic { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-wid
 [data-tip] { position: relative; }
 [data-tip]::after { content: attr(data-tip); position: absolute; left: 50%; bottom: calc(100% + 8px); transform: translateX(-50%) translateY(2px); background: #000; color: #fff; font: 500 15px/1 var(--sans); padding: 7px 9px; border-radius: 7px; white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity 0.12s, transform 0.12s; z-index: 30; }
 [data-tip]:hover::after, [data-tip]:focus-visible::after { opacity: 1; transform: translateX(-50%); }
-.tip-below[data-tip]::after { bottom: auto; top: calc(100% + 8px); }
+.tip-below[data-tip]::after,
+/* Everything in the header sits at the top of the window, so its tooltips open downwards. */
+.head [data-tip]::after { bottom: auto; top: calc(100% + 8px); }
 
 /* frame */
 .shell { min-height: 100%; display: flex; flex-direction: column; }
