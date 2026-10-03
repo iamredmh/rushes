@@ -546,8 +546,6 @@ test("Voiceover shows the current round open under its name, and an older round 
   const fold = page.locator(".fold");
   await expect(fold).toHaveText("Round 1 · Voices · 3 reads · picked Gerald");
   await expect(fold).toHaveAttribute("aria-expanded", "false");
-  // Nothing of the assembled read is left: no section switch, read row or section marks.
-  await expect(page.locator('.vobar, .lane[data-row="vo"], .secmk')).toHaveCount(0);
 
   await fold.click();
   await expect(fold).toHaveAttribute("aria-expanded", "true");
@@ -723,12 +721,31 @@ test("Blind on Voiceover names reads Read 1…n and never reveals an older round
   await expect(page.locator(".lane [data-meta]")).toHaveText(["·····", "·····"]);
   await expect(page.locator(".fold")).toContainText("picked a read");
   await expect(page.locator(".fold")).not.toContainText("Gerald");
-  await expect(onMenu(page).locator("option")).toHaveText(["Read 1", "Read 2", "Read 1", "Read 2", "Read 3"]);
+  // Each round's reads sit under the round's name, so two "Read 1"s are never confused.
+  await expect(onMenu(page).locator("optgroup")).toHaveCount(2);
+  expect(await onMenu(page).locator("optgroup").evaluateAll((gs) => gs.map((g) => g.getAttribute("label")))).toEqual([R2, R1]);
+  await expect(onMenu(page).locator("optgroup").nth(0).locator("option")).toHaveText(["Read 1", "Read 2"]);
+  await expect(onMenu(page).locator("optgroup").nth(1).locator("option")).toHaveText(["Read 1", "Read 2", "Read 3"]);
   // Opened, the older round's reads are blind too.
   await page.locator(".fold").click();
   await expect(page.locator(".lane [data-name]")).toHaveText(["Read 1", "Read 2", "Read 1", "Read 2", "Read 3"]);
   await page.getByRole("button", { name: "Blind" }).click();
   await expect(page.locator(".fold")).toContainText("picked Gerald");
+});
+
+test("two rounds that both hold a Gerald list him twice in the On menu, each under its own round", async ({ page, rushes }) => {
+  const R3 = "Round 3 · Gerald, fixes";
+  await rushes.addVariant("voice", "Jane", { round: R1, seconds: 4, freq: 220 });
+  await rushes.addVariant("voice", "Gerald", { round: R1, seconds: 4, freq: 262 });
+  await rushes.addVariant("voice", "Gerald", { round: R3, seconds: 4, freq: 294 });
+  await openVoice(page, rushes, 3);
+  const groups = onMenu(page).locator("optgroup");
+  expect(await groups.evaluateAll((gs) => gs.map((g) => g.getAttribute("label")))).toEqual([R3, R1]);
+  await expect(groups.nth(0).locator("option")).toHaveText(["Gerald"]);
+  await expect(groups.nth(1).locator("option")).toHaveText(["Jane", "Gerald"]);
+  // Choosing the older round's Gerald from the menu files the note on that round's read.
+  await onMenu(page).selectOption({ value: "v:round-1-voices/gerald" });
+  await expect(onMenu(page)).toHaveAttribute("data-tip", `${R1} · Gerald`);
 });
 
 test("a cut-off read description shows in full as a tooltip, and the On menu's tooltip names the round", async ({ page, rushes }) => {

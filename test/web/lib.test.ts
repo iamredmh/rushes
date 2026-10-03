@@ -19,7 +19,7 @@ import { tmpProject } from "../helpers/tmp.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import {
-  heardVoice, readTake, sectionLabel, voiceDefaultRead, voiceListening, voiceNoteRows, voiceOnLabel, voiceOnOptions, voiceRounds,
+  heardVoice, onOptionGroups, readTake, sectionLabel, voiceDefaultRead, voiceListening, voiceNoteRows, voiceOnLabel, voiceOnOptions, voiceRounds,
 } from "../../web/src/lib.js";
 
 /** A read with only an id: its name is the id, its file `media/<id>.wav`. */
@@ -650,6 +650,28 @@ describe("voiceRounds (§18.2)", () => {
       ["v:round-1/gerald", "gerald", "Round 1 · Voices · gerald", "round-1/gerald"],
     ]);
     expect(voiceOnOptions(voiceRounds(lanes, {}), () => "Read").map((o) => o.label)).toEqual(Array(5).fill("Read"));
+  });
+  it("groups the On menu by round, so two reads with one name stay apart (§18.3: the round is shown by the group)", () => {
+    const twice = [
+      { id: "round-1", stage: "voice", name: "Round 1 · Voices", variants: [v("jane"), v("gerald")] },
+      { id: "round-3", stage: "voice", name: "Round 3 · Gerald, fixes", variants: [v("gerald")] },
+    ] as Lane[];
+    const opts = voiceOnOptions(voiceRounds(twice, {}));
+    expect(opts.map((o) => [o.group, o.label])).toEqual([
+      ["Round 3 · Gerald, fixes", "gerald"],
+      ["Round 1 · Voices", "jane"],
+      ["Round 1 · Voices", "gerald"],
+    ]);
+    expect(onOptionGroups(opts).map((g) => [g.group, g.options.map((o) => o.value)])).toEqual([
+      ["Round 3 · Gerald, fixes", ["v:round-3/gerald"]],
+      ["Round 1 · Voices", ["v:round-1/jane", "v:round-1/gerald"]],
+    ]);
+    // Other tabs pass no group: one run, rendered as plain options.
+    const flat = [{ value: "a", label: "A", on: null }, { value: "b", label: "B", on: null }];
+    expect(onOptionGroups(flat)).toEqual([{ group: undefined, options: flat }]);
+    // Ungrouped options either side of a group stay where they are.
+    const mixed = [{ value: "w", label: "Whole", on: null }, ...opts.slice(0, 1)];
+    expect(onOptionGroups(mixed).map((g) => [g.group, g.options.length])).toEqual([[undefined, 1], ["Round 3 · Gerald, fixes", 1]]);
   });
   it("lists a note by its read, an older round's with the round, and older notes by what they were on", () => {
     const m = { rounds: voiceRounds(lanes, {}), sections: ["s1", "s2"] };

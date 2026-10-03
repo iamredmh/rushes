@@ -424,6 +424,19 @@ export interface OnOption {
   row?: string;
   /** The full name, shown as the On menu's tooltip when the label alone is ambiguous ("Round 2 · Gerald, tone · more sombre"). */
   full?: string;
+  /** The menu group this option sits in: its round, on Voiceover. Other tabs leave it out. */
+  group?: string;
+}
+
+/** The On menu's options as runs of consecutive options sharing a group; ungrouped runs render as plain options. */
+export function onOptionGroups(options: OnOption[]): { group: string | undefined; options: OnOption[] }[] {
+  const out: { group: string | undefined; options: OnOption[] }[] = [];
+  for (const o of options) {
+    const last = out[out.length - 1];
+    if (last && last.group === o.group) last.options.push(o);
+    else out.push({ group: o.group, options: [o] });
+  }
+  return out;
 }
 
 /**
@@ -685,13 +698,14 @@ export function voiceNoteRows(m: VoiceNotes, note: Pick<Note, "on">): string | n
 
 /**
  * The On menu on Voiceover: one entry per read, the current round first, then older rounds newest
- * first, each round's reads in the order given. The label is the read's name (`nameOf`, so Blind can
- * hide it); `full` adds the round's name, for the tooltip. Values: "v:<lane>/<variant>".
+ * first, each round's reads in the order given, grouped by round (`group`, an <optgroup>). The label
+ * is the read's name (`nameOf`, so Blind can hide it); `full` adds the round's name, for the tooltip.
+ * Values: "v:<lane>/<variant>".
  */
 export function voiceOnOptions(rounds: VoiceRound[], nameOf: (r: VariantRow) => string = (r) => r.name): OnOption[] {
   const out: OnOption[] = [];
   for (const round of [...rounds].reverse()) {
-    for (const r of round.reads) out.push({ value: `v:${r.key}`, label: nameOf(r), full: `${round.name} · ${nameOf(r)}`, on: variantOn(r), row: r.key });
+    for (const r of round.reads) out.push({ value: `v:${r.key}`, label: nameOf(r), full: `${round.name} · ${nameOf(r)}`, group: round.name, on: variantOn(r), row: r.key });
   }
   return out;
 }

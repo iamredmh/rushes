@@ -1,7 +1,7 @@
 import type { ComponentChildren, RefObject } from "preact";
 import { useRef, useState } from "preact/hooks";
 import { api, mediaUrl } from "../api.js";
-import { MARK_DB, type MarkKind, marksLabel, noteTime, type OnOption, placeNote, type Scope, scopeOptions, setMarkDb, shotLabel, toggleMark } from "../lib.js";
+import { MARK_DB, type MarkKind, marksLabel, noteTime, onOptionGroups, type OnOption, placeNote, type Scope, scopeOptions, setMarkDb, shotLabel, toggleMark } from "../lib.js";
 import type { Mark, Note } from "../types.js";
 import { Icon } from "./Icon.js";
 
@@ -160,7 +160,11 @@ export function Notes({
                     el.blur();
                   }}
                 >
-                  {on.options.map((o) => <option value={o.value}>{o.label}</option>)}
+                  {onOptionGroups(on.options).map((g) =>
+                    g.group === undefined
+                      ? g.options.map((o) => <option value={o.value}>{o.label}</option>)
+                      : <optgroup label={g.group}>{g.options.map((o) => <option value={o.value}>{o.label}</option>)}</optgroup>,
+                  )}
                 </select>
                 <Icon name="chev" />
               </span>
