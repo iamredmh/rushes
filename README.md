@@ -13,7 +13,7 @@ Your notes are saved as plain files in your project. The agent reads them, fixes
 
 It runs on your machine. There's no account, no API key and no server to sign up for. You need [Node.js](https://nodejs.org) 20.19 or newer (or 22.12+ on the 22 line), and git (needed to install straight from GitHub until Rushes is on npm).
 
-> Status: early. The Script and Picture tabs, the MCP tools and the CLI work today. The audio tabs (Voiceover, Music, Sound effects, Mix) are next.
+> Status: early. The Script, Picture, Voiceover, Music, Sound effects and Mix tabs, the MCP tools and the CLI all work today.
 
 ## Get started
 
@@ -81,6 +81,13 @@ In the Picture tab:
 - **G** grab a frame
 - **N** new note
 
+In the Voiceover, Music, Sound effects and Mix tabs:
+
+- **Space** play or pause
+- **←/→** step one frame (Shift: ten)
+- **I/O** set in and out
+- **N** new note
+
 Anywhere:
 
 - **1–7** switch tab (7: Assets)
@@ -113,6 +120,15 @@ Rushes creates `screenshots/` itself on the first grab. It never creates the oth
 ## Packs, picture lock and shots
 
 A project with more than one film gets numbered pills in the header — `[`/`]` switch between them, and each film remembers its own version and playhead. The header reads **Picture vN**, with a lock button beside it: lock a film at a cut and the dashboard opens on that cut until you unlock it. A version can carry a shot list from the storyboard, shown as a strip under the timeline, and every Picture note records the shot it falls in.
+
+## Audio review
+
+The Voiceover, Music, Sound effects and Mix tabs share one audio engine, so switching what you hear is instant and never restarts playback or knocks picture out of sync.
+
+- **Use** picks a music bed, SFX pass or VO take — shown as **In use**. Clicking a lane auditions it without changing the pick. An **Unpick** button beside In use clears the pick back to the default (the first bed or pass, or on Voiceover the newest take).
+- **Blind** (Music only) renames the beds `Bed 1`, `Bed 2`… in a shuffled order and masks their descriptions, so you can compare without knowing which is which.
+- A note on an audio tab can carry marks: toggle **Rise**, **Fall**, **Louder** or **Quieter** (with a dB amount, 3 by default) to say how a range should change — "Fall" or "Quieter 3 dB".
+- **Mix** shows a loudness readout — integrated LUFS, true peak, and the music's level under the VO. It needs **ffmpeg** on your PATH; without it, the readout shows "—".
 
 ## What gets saved
 

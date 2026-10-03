@@ -11,10 +11,10 @@ Rushes shows your work to the user stage by stage (script, picture, voiceover, m
    - `rushes_add_version` for a render;
    - `rushes_set_script` for the VO script. It merges by `id`, so send only the sections you changed; sections you leave out are kept. `rushes_get_script` reads the whole script;
    - `rushes_add_take` for each VO take;
-   - `rushes_add_variant` for each music bed or SFX pass;
+   - `rushes_add_variant` for each music bed or SFX pass, with `meta.description` for its lane card;
    - `rushes_set_shots` for the storyboard's shots, once you have the first cut; send new timings when a later cut moves them.
 2. Call `rushes_open` and tell the user it's ready. Each project's dashboard lives at its own address, `/p/<id>/`.
-3. When the user sends a batch, call `rushes_get_batch` and fix every note in it. A note carries the `shot` it falls in.
+3. When the user sends a batch, call `rushes_get_batch` and fix every note in it. A note carries the `shot` it falls in; on an audio stage, call `rushes_get_picks` first and treat `marks` (e.g. "Fall", "Quieter 3 dB") as part of the note. Picks are set from the dashboard only — no tool or CLI command sets one.
 4. Register the new cut with `rushes_add_version`. On a locked video the reply carries a `warning`.
 5. Reply to all the notes in one `rushes_reply` call. For each note set `status: "done"`, a one-line `reply`, `fixT` (when the fix is visible in the new cut, in seconds) and `fixVersion`.
 6. For script batches: when a section's `proposed` differs from `current`, adopt it with `rushes_set_script`, sending just that section with its `id`. Then make new takes for it.
