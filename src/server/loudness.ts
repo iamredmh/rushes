@@ -4,7 +4,7 @@ import { stat } from "node:fs/promises";
 import { RushesError } from "../core/errors.js";
 import { probe } from "../core/media.js";
 import { fromManifestPath } from "../core/paths.js";
-import type { LaneStage, Picks, Project, Script, Variant } from "../core/schema.js";
+import type { LaneStage, Picks, Project, Variant } from "../core/schema.js";
 
 export interface LoudnessRunner {
   (args: string[], signal?: AbortSignal): Promise<{ code: number; stderr: string }>;
@@ -114,7 +114,7 @@ function voiceSource(project: Project, picks: Picks): VoiceSource {
  * Mix plays only explicit picks, so the readout must measure only them. A manifest entry whose
  * file is missing from disk is left out too, rather than handed to ffmpeg.
  */
-export function mixInputs(project: Project, script: Script, picks: Picks, lanes: LaneStage[], root: string): MixInput[] {
+export function mixInputs(project: Project, picks: Picks, lanes: LaneStage[], root: string): MixInput[] {
   const want = new Set(lanes);
   const out: MixInput[] = [];
   const add = (file: string, offset: number, stage: LaneStage) => {
@@ -217,7 +217,7 @@ const probeDuration: DurationProbe = async (file) => (await probe(file)).duratio
  */
 type VoSpan = { kind: "variant"; file: string } | null;
 
-function voSpan(project: Project, script: Script, picks: Picks, root: string): VoSpan {
+function voSpan(project: Project, picks: Picks, root: string): VoSpan {
   const voice = voiceSource(project, picks);
   if (voice.kind === "variant") return { kind: "variant", file: fromManifestPath(root, voice.variant.file) };
   return null;
@@ -313,7 +313,6 @@ async function cacheKey(inputs: MixInput[], lanes: LaneStage[], span: VoSpan): P
  */
 export async function measureMix(
   project: Project,
-  script: Script,
   picks: Picks,
   lanes: LaneStage[],
   root: string,
@@ -323,10 +322,10 @@ export async function measureMix(
 ): Promise<LoudnessResult> {
   if (!(await ffmpegAvailable(run))) return { available: false, ...NOT_MEASURED };
 
-  const inputs = mixInputs(project, script, picks, lanes, root);
+  const inputs = mixInputs(project, picks, lanes, root);
   if (inputs.length === 0) return { available: true, ...NOT_MEASURED };
 
-  const span = voSpan(project, script, picks, root);
+  const span = voSpan(project, picks, root);
   const key = await cacheKey(inputs, lanes, span);
   if (key === null) return (await measure(inputs, span, run, timeoutMs, durationOf)).result;
   const cached = cacheGet(run, key);

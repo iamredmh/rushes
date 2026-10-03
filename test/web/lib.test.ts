@@ -14,7 +14,7 @@ import {
 } from "../../web/src/lib.js";
 import type { Lane } from "../../web/src/types.js";
 import { mixInputs } from "../../src/server/loudness.js";
-import type { Picks, Project, Script } from "../../src/core/schema.js";
+import type { Picks, Project } from "../../src/core/schema.js";
 import { tmpProject } from "../helpers/tmp.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
@@ -848,13 +848,7 @@ describe("Mix", () => {
 });
 
 describe("the VO pick rule: server mix and dashboard agree (parity)", () => {
-  const files = ["s1-a.wav", "s1-b.wav", "s2-a.wav", "s2-b.wav", "s2-c.wav", "dry.wav", "warm.wav", "cool.wav"];
-  const take = (id: string, file: string) => ({ id, file: `audio/${file}`, duration: 2, forText: "x" });
-  const sections: Section[] = [
-    { id: "s1", start: 0, end: 3, current: "x", proposed: null, direction: "", status: "draft", takes: [take("t1", "s1-a.wav"), take("t2", "s1-b.wav")] },
-    { id: "s2", start: 3, end: 7, current: "x", proposed: null, direction: "", status: "draft", takes: [take("t1", "s2-a.wav"), take("t2", "s2-b.wav"), take("t3", "s2-c.wav")] },
-    { id: "s3", start: 7, end: 9, current: "x", proposed: null, direction: "", status: "draft", takes: [] },
-  ];
+  const files = ["dry.wav", "warm.wav", "cool.wav"];
   // Two voice rounds, round-2 the newer, so the suite can mirror Task 1's three mixInputs cases
   // (an older round picked, a newer pick wins, nothing picked) on the client side too.
   const lanes: Lane[] = [
@@ -883,10 +877,9 @@ describe("the VO pick rule: server mix and dashboard agree (parity)", () => {
     await mkdir(join(root, "audio"), { recursive: true });
     await Promise.all(files.map((f) => writeFile(join(root, "audio", f), "x")));
     const project: Project = { schema: 1, rev: 0, name: "p", fps: 30, videos: [], files: [], lanes };
-    const script: Script = { schema: 1, rev: 0, wordsPerSecond: 2.6, sections };
     for (const c of cases) {
       const picks: Picks = { schema: 1, rev: 0, sections: c.sections, lanes: c.lanes };
-      const server = mixInputs(project, script, picks, ["voice"], root).map((i) => [relative(root, i.file), i.offset]);
+      const server = mixInputs(project, picks, ["voice"], root).map((i) => [relative(root, i.file), i.offset]);
       // The dashboard's VO, as Mix plays it: the newest round's pick, walking back past rounds with
       // none -- never the assembled read from takes, which Rushes no longer mixes.
       const variant = heardVoice(voiceRounds(lanes, c.lanes));

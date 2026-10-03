@@ -578,9 +578,9 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   // ---- mix loudness (§17.6) ----
   app.post("/api/mix/loudness", async (c) => {
     const b = await body(c, MixLoudnessBody);
-    const [project, script, picks] = await Promise.all([store.read("project"), store.read("script"), store.read("picks")]);
+    const [project, picks] = await Promise.all([store.read("project"), store.read("picks")]);
     const run = opts.loudnessRunner ?? defaultRunner;
-    const result = await measureMix(project, script, picks, b.lanes, store.root, run, opts.loudnessTimeoutMs);
+    const result = await measureMix(project, picks, b.lanes, store.root, run, opts.loudnessTimeoutMs);
     return c.json(result);
   });
 
