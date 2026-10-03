@@ -184,7 +184,7 @@ export const osRevealer: Revealer; // honours RUSHES_NO_REVEAL=1 (logs "reveal <
   2. Press `]` and expect the second film's pill to be pressed.
   3. Go back, type a note and press Enter. The note was saved with `grab` set.
 - **e2e "a deleted file is marked missing in Assets":** add a cut, delete its file on disk, open Assets, then expect the row to be marked missing and its Download link disabled (`aria-disabled`).
-- **Screenshot:** save one of the Assets tab with two screenshots and two cuts to `/private/tmp/claude-501/-Users-redmh-Documents-Projects-Video-Production/cf3f6bb8-8add-4421-80dd-acf0e51cb4c0/scratchpad/assets-tab.png`.
+- **Screenshot:** save one of the Assets tab with two screenshots and two cuts to a scratch folder outside the repo (e.g. `$TMPDIR/assets-tab.png`).
 
 - [ ] Write the tests and see them fail.
 - [ ] Implement.
