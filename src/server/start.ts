@@ -108,7 +108,7 @@ export async function startServer(rootDir: string, opts: StartOptions = {}): Pro
   const id = await ensureProjectIdOnce(store);
   appOpts.projectId = id;
   const url = `http://${host}:${port}`;
-  const stopWatching = watchStore(store);
+  const stopWatching = await watchStore(store);
   let idleTimer: NodeJS.Timeout | undefined;
   let done: () => void = () => undefined;
   const closed = new Promise<void>((ok) => { done = ok; });

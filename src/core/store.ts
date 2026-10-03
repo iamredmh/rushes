@@ -112,6 +112,11 @@ export class Store extends EventEmitter {
     this.announced.delete(key);
   }
 
+  /** Record `rev` as already announced for `key`, without emitting. Used to seed a freshly attached watcher with a file's starting state, so it isn't mistaken for a hand edit. */
+  seed(key: FileKey, rev: number): void {
+    this.announced.set(key, rev);
+  }
+
   async backup(key: FileKey): Promise<string> {
     const to = this.path(key) + ".bak";
     await copyFile(this.path(key), to);
