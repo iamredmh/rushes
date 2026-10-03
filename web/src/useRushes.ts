@@ -28,6 +28,12 @@ export function useRushes(): Live {
   // Guards refresh() calls made from an EventSource error so a burst of them (the
   // browser retries every few seconds) never overlaps or piles up.
   const refreshingFromError = useRef(false);
+  // Self-heals a transient fetch failure (a local dev server that's momentarily slow to accept
+  // or reset a connection -- common when many Rushes servers and browser tabs are competing for
+  // the same CPU) without waiting on the next SSE "change" event, which may never come if nothing
+  // else writes to the project afterwards. Single timer: only the most recently applied refresh()
+  // gets to schedule or clear it, so a burst of concurrent calls can't pile up retries.
+  const retryTimer = useRef<number | undefined>(undefined);
 
   const refresh = async () => {
     const id = ++seq.current;
@@ -40,22 +46,31 @@ export function useRushes(): Live {
       ),
       api.get<{ assets: Asset[] }>("/api/assets").then(
         (data) => ({ ok: true as const, assets: data.assets }),
-        () => ({ ok: false as const }),
+        (e) => ({ ok: false as const, error: e as Error }),
       ),
     ]);
     if (id < applied.current) return;
     applied.current = id;
+    let wrongProjectNow = false;
     if (stateResult.ok) {
       setState(stateResult.data);
       setProblem(null);
       setWrongProject(false);
     } else if (stateResult.error instanceof ApiError && stateResult.error.code === "wrong_project") {
-      // The last good state stays on screen; this stops being an ordinary "problem".
+      // The last good state stays on screen; this stops being an ordinary "problem", and isn't
+      // something retrying will fix -- the project really is gone from this port.
       setWrongProject(true);
+      wrongProjectNow = true;
     } else {
       setProblem(stateResult.error.message);
     }
     if (assetsResult.ok) setAssets(assetsResult.assets);
+
+    clearTimeout(retryTimer.current);
+    const settled = (stateResult.ok || wrongProjectNow) && assetsResult.ok;
+    if (!settled) {
+      retryTimer.current = window.setTimeout(() => void refresh(), 750);
+    }
   };
 
   useEffect(() => {
@@ -83,6 +98,7 @@ export function useRushes(): Live {
     return () => {
       events.close();
       clearTimeout(timer.current);
+      clearTimeout(retryTimer.current);
     };
   }, []);
 

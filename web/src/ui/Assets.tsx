@@ -93,26 +93,50 @@ export function Assets({ assets, videos, toast, onChanged }: AssetsProps) {
   // Lazily seeded from the very first render's folders, so the first paint already shows the
   // right folder instead of a one-frame flash of "nothing selected" while an effect catches up.
   const [selectedId, setSelectedId] = useState<FolderId | null>(() => visibleFolders[0]?.id ?? null);
+  // Whether selectedId was ever set by an explicit sidebar pick (click or arrow key), as opposed
+  // to the default-following effect below. Until it has, the default must keep following
+  // visibleFolders[0] even as the list grows -- e.g. a screenshot grabbed just before switching
+  // to Assets often isn't in `assets` yet on this component's first render (Picture's onChanged()
+  // after a grab is fire-and-forget, racing the keypress that opens this tab), so Cuts can be the
+  // only folder visible for a beat before Screenshots (which sorts first) joins it. Without this,
+  // the effect below would see its previously-picked "cut" is still present and never promote
+  // Screenshots to the front, leaving the folder stuck on the wrong one for the rest of the visit.
+  const pickedByHand = useRef(false);
   useEffect(() => {
-    if (selectedId && visibleFolders.some((f) => f.id === selectedId)) return;
+    if (pickedByHand.current && selectedId && visibleFolders.some((f) => f.id === selectedId)) return;
     setSelectedId(visibleFolders[0]?.id ?? null);
   }, [visibleFolders, selectedId]);
+  const selectFolder = (id: FolderId) => {
+    pickedByHand.current = true;
+    setSelectedId(id);
+  };
   const folder: FolderDef | null = visibleFolders.find((f) => f.id === selectedId) ?? null;
 
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<Sort>("newest");
   const [film, setFilm] = useState<string | null>(null);
-  const [view, setView] = useState<View>("grid");
+  // Lazily seeded the same way selectedId is above, so the first paint already shows the right
+  // view instead of a flash of the "grid" fallback while an effect catches up.
+  const [view, setView] = useState<View>(() => (folder ? (loadView(folder.id) ?? folder.view) : "grid"));
 
-  // A new folder gets a clean search/film/sort and its own remembered (or default) view --
-  // a search typed into Scripts & docs must never silently narrow Music too.
-  useEffect(() => {
-    if (!folder) return;
+  // A new folder gets a clean search/film/sort and its own remembered (or default) view -- a
+  // search typed into Scripts & docs must never silently narrow Music too. This runs during
+  // render (the "adjust state while rendering" pattern: react.dev/learn/you-might-not-need-an-effect),
+  // not in a useEffect: an effect's flush is deferred past the next paint, and a keystroke landing
+  // in that gap -- easy right after opening Assets, since a screenshot grabbed a beat earlier can
+  // still be arriving and only then promoting Screenshots to front (see pickedByHand above) --
+  // would have its setQuery("hero") silently overwritten by this reset's setQuery(""), because an
+  // effect-based reset has no way to know query also changed in the meantime. Doing the reset
+  // synchronously here means both updates land in the same commit, in call order, so nothing from
+  // outside this render can land in between.
+  const lastFolderId = useRef<FolderId | null>(folder?.id ?? null);
+  if (folder && folder.id !== lastFolderId.current) {
+    lastFolderId.current = folder.id;
     setQuery("");
     setFilm(null);
     setSort("newest");
     setView(loadView(folder.id) ?? folder.view);
-  }, [folder?.id]);
+  }
 
   const items = useMemo(
     () => (folder ? folderItems(assets, folder, { query, sort, film, videos }) : []),
@@ -311,7 +335,7 @@ export function Assets({ assets, videos, toast, onChanged }: AssetsProps) {
             class="afolder-btn"
             key={f.id}
             aria-current={f.id === selectedId ? "true" : undefined}
-            onClick={() => setSelectedId(f.id)}
+            onClick={() => selectFolder(f.id)}
           >
             <span>{f.title}</span>
             <span class="count">{countFor(f)}</span>
