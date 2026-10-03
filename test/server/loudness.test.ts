@@ -338,6 +338,32 @@ describe("mixInputs", () => {
     const inputs = mixInputs(project, script, { schema: 1, rev: 0, lanes: { "round-1": "gerald", "round-2": "sombre" }, sections: {} }, ["voice"], root);
     expect(inputs.map((i) => i.file)).toEqual([join(root, "audio", "sombre.wav")]);
   });
+
+  it("falls through to an older round when the newest round's pick is stale (names a variant that no longer exists) (§18.4)", async () => {
+    const { root, project, script, picks: basePicks } = await fixture();
+    project.lanes = project.lanes.filter((l) => l.stage !== "voice");
+    await writeFile(join(root, "audio", "gerald.wav"), "x");
+    project.lanes.push(
+      { id: "round-1", stage: "voice", name: "Round 1", variants: [{ id: "gerald", name: "Gerald", file: "audio/gerald.wav", meta: {}, cues: [] }] },
+      { id: "round-2", stage: "voice", name: "Round 2", variants: [] }, // the variant this round's pick named is gone
+    );
+    const picks: Picks = { ...basePicks, lanes: { ...basePicks.lanes, "round-1": "gerald", "round-2": "gone" } };
+    const inputs = mixInputs(project, script, picks, ["voice"], root);
+    expect(inputs.map((i) => i.file)).toEqual([join(root, "audio", "gerald.wav")]);
+
+    // The same fall-through on the voSpan/musicUnderVo path: round 1's Gerald is still the VO
+    // span the music-under-VO pass is trimmed to, even though the newest round's pick is stale.
+    let trimArgs: string[] | undefined;
+    const run: LoudnessRunner = async (args) => {
+      if (args[0] === "-version") return { code: 0, stderr: "" };
+      if (args.includes("-t")) trimArgs = args;
+      return { code: 0, stderr: ebur(-20) };
+    };
+    const result = await measureMix(project, script, picks, ["voice", "music"], root, run, 60_000, async () => 3);
+    expect(trimArgs).toBeDefined();
+    expect(trimArgs![trimArgs!.indexOf("-t") + 1]).toBe("3.000");
+    expect(result.musicUnderVo).not.toBeNull();
+  });
 });
 
 describe("measureMix", () => {

@@ -307,6 +307,20 @@ describe("addVariant rounds (§18.4)", () => {
     const { lane } = addVariant(p, { stage: "voice", name: "Gerald", file: "media/g.wav", lane: "vo-a", round: "Round 9" });
     expect(lane.id).toBe("vo-a");
   });
+  it("gives a round that slugs to nothing a stable, non-empty id, keeping the round's own name (I1)", () => {
+    const p = empty();
+    const first = addVariant(p, { stage: "voice", name: "Gerald", file: "media/g.wav", round: "!!!" });
+    expect(first.lane.id).not.toBe("");
+    expect(first.lane.name).toBe("!!!");
+    const second = addVariant(p, { stage: "voice", name: "Jane", file: "media/j.wav", round: "!!!" });
+    expect(second.lane.id).toBe(first.lane.id);
+    expect(p.lanes).toHaveLength(1);
+  });
+  it("throws when a round's slug clashes with another stage's lane", () => {
+    const p = empty();
+    addVariant(p, { stage: "music", lane: "round-1", name: "A", file: "a.wav" });
+    expect(() => addVariant(p, { stage: "voice", name: "Gerald", file: "media/g.wav", round: "Round 1" })).toThrow(/belongs to music/);
+  });
 });
 
 describe("addFile", () => {
