@@ -30,7 +30,7 @@ export interface StageRow {
    * Draw this row as one full-width button instead of a lane (a folded Voiceover round): no clips,
    * track or controls. `dot` marks open notes inside it.
    */
-  fold?: { label: ComponentChildren; open: boolean; dot: boolean; onToggle(): void };
+  fold?: { label: ComponentChildren; text: string; open: boolean; dot: boolean; onToggle(): void };
   /** The clips drawn on this lane's waveform. */
   clips: Clip[];
   /** SFX cues, labelled on the waveform at their times. */
@@ -152,7 +152,10 @@ export interface LanesProps {
   onSeek(t: number, row: StageRow): void;
 }
 
-/** Which rows have their name ("n") or meta ("m") cut off by the column, by row key. */
+/**
+ * What's cut off by its column. By row key: which lanes have their name ("n") or meta ("m") cut;
+ * by "h:<row key>", a cut round heading; by "f:<row key>", a cut fold row.
+ */
 type Cut = Record<string, string>;
 
 function measureCut(root: HTMLElement): Cut {
@@ -161,6 +164,12 @@ function measureCut(root: HTMLElement): Cut {
   for (const lane of root.querySelectorAll<HTMLElement>(".lane[data-row]")) {
     const flags = (over(lane.querySelector("[data-name]")) ? "n" : "") + (over(lane.querySelector("[data-meta-text]")) ? "m" : "");
     if (flags) out[lane.dataset.row!] = flags;
+  }
+  for (const head of root.querySelectorAll<HTMLElement>(".rhead[data-heading]")) {
+    if (over(head.querySelector(".rname"))) out[`h:${head.dataset.heading}`] = "h";
+  }
+  for (const fold of root.querySelectorAll<HTMLElement>(".fold[data-row]")) {
+    if (over(fold.querySelector(".flabel"))) out[`f:${fold.dataset.row}`] = "f";
   }
   return out;
 }
@@ -183,7 +192,12 @@ export function Lanes({ rows, length, media, selected, marks, range, onSelect, o
       setCut((prev) => (sameCut(prev, next) ? prev : next));
     }
   };
-  const shape = JSON.stringify(rows.map((r) => [r.key, r.name, r.meta ?? "", !!r.fold, r.missing ?? false]));
+  // The long-file and won't-play marks join a meta line once its media loads, and can cut it off.
+  const mediaMarks = rows.map((r) => {
+    const results = r.clips.map((c) => media[mediaKey(c)]);
+    return (results.some((x) => x !== undefined && x !== "error" && x.streamed) ? "s" : "") + (results.some((x) => x === "error") ? "b" : "");
+  });
+  const shape = JSON.stringify(rows.map((r, i) => [r.key, r.name, r.meta ?? "", r.heading ?? "", r.fold ? r.fold.text : null, r.missing ?? false, mediaMarks[i]]));
   useLayoutEffect(measure, [shape]);
   useEffect(() => {
     window.addEventListener("resize", measure);
@@ -196,7 +210,7 @@ export function Lanes({ rows, length, media, selected, marks, range, onSelect, o
     <div class="lanes" ref={root}>
       {rows.map((row) => {
         const heading = row.heading !== undefined && (
-          <div class="rhead" data-heading={row.key}>
+          <div class="rhead" data-heading={row.key} data-tip={cut[`h:${row.key}`] ? row.heading : undefined}>
             <span class="rname">{row.heading}</span>
             {row.tag && <span class="rtag">{row.tag}</span>}
           </div>
@@ -210,6 +224,7 @@ export function Lanes({ rows, length, media, selected, marks, range, onSelect, o
                 type="button"
                 class="fold"
                 data-row={row.key}
+                data-tip={cut[`f:${row.key}`] ? f.text : undefined}
                 aria-expanded={f.open}
                 aria-description={f.dot ? "Open notes" : undefined}
                 onClick={f.onToggle}

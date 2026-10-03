@@ -128,6 +128,7 @@ export function Voice({ state, assets, video, toast, onChanged, onPendingChange 
             {picked ? <span class="fpk">picked {blind ? "a read" : picked.name}</span> : "nothing picked"}
           </>
         ),
+        text: `${round.name} · ${n} ${n === 1 ? "read" : "reads"} · ${picked ? `picked ${blind ? "a read" : picked.name}` : "nothing picked"}`,
         open: isOpen,
         dot: notes.some((note) => note.status === "todo" && keys.has(voiceNoteRows(model, note) ?? "")),
         onToggle: () => toggle(round.id),

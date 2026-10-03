@@ -789,6 +789,73 @@ test("an older Range note on a read draws on Voiceover as a point at its In, nev
   await expect(row.locator(`.span[data-note="${note.id}"]`)).toHaveCount(0);
 });
 
+test("a cut-off round heading, fold row and On menu name show in full as tooltips, inside the window", async ({ page, rushes }) => {
+  // A narrow window, and long round names (64 characters: a lane id, the name slugged, holds no more).
+  await page.setViewportSize({ width: 1024, height: 900 });
+  const OLD = `Round 1 · ${"WARM, MELLOW, MOODY MALE VOICES ".repeat(2)}`.slice(0, 64).trim();
+  const NEW = `Round 2 · ${"WOMEN'S VOICES, WARMER, SLOWER, MORE WONDER ".repeat(2)}`.slice(0, 64).trim();
+  await rushes.addVariant("voice", "Gerald", { round: OLD, seconds: 4, freq: 262 });
+  await rushes.addVariant("voice", "more sombre", { round: NEW, seconds: 4, freq: 330 });
+  await openVoice(page, rushes, 2);
+  const head = page.locator(".rhead");
+  expect(await head.locator(".rname").evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+  await expect(head).toHaveAttribute("data-tip", NEW);
+  const fold = page.locator(".fold");
+  await expect(fold).toHaveAttribute("data-tip", `${OLD} · 1 read · nothing picked`);
+  for (const el of [head, fold]) {
+    await el.hover();
+    await expect.poll(() => el.evaluate((e) => Number(getComputedStyle(e, "::after").opacity))).toBe(1);
+    expect(await el.evaluate((e) => getComputedStyle(e, "::after").whiteSpace)).toBe("normal");
+  }
+  await page.getByRole("button", { name: "more sombre", exact: true }).click();
+  const on = page.locator(".onwrap");
+  await expect(on).toHaveAttribute("data-tip", `${NEW} · more sombre`);
+  // The On menu's tooltip wraps and stays inside the window rather than running off its right edge.
+  const box = await on.evaluate((e) => {
+    const after = getComputedStyle(e, "::after");
+    return { left: e.getBoundingClientRect().left, width: parseFloat(after.width), ws: after.whiteSpace, vw: window.innerWidth };
+  });
+  expect(box.ws).toBe("normal");
+  expect(box.left + box.width).toBeLessThanOrEqual(box.vw);
+});
+
+test("a description cut off only once its long-file mark appears still gets its tooltip", async ({ page, rushes }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  // Probe the meta line's room with and without the mark, then pick a description that fits only without it.
+  await rushes.addVariant("voice", "Probe", { round: R1, seconds: 3, freq: 220, meta: { description: "x" } });
+  await page.goto(rushes.testUrl("streamOver=1"));
+  await openTab(page, /Voiceover/, "3");
+  await loaded(page, 1);
+  const probe = page.locator(".lane [data-meta]").first();
+  await expect(probe.locator(".smk")).toHaveCount(1);
+  const description = await probe.evaluate((el) => {
+    const text = el.querySelector("[data-meta-text]") as HTMLElement;
+    // The text is a flex item that shrinks: its room is the line, less the mark and the gap.
+    const without = el.clientWidth;
+    const withMark = without - (el.querySelector(".smk") as HTMLElement).offsetWidth - parseFloat(getComputedStyle(el).columnGap);
+    const ruler = text.cloneNode() as HTMLElement;
+    Object.assign(ruler.style, { position: "absolute", visibility: "hidden", overflow: "visible", width: "auto" });
+    el.appendChild(ruler);
+    let s = "";
+    for (let n = 1; n < 400; n++) {
+      ruler.textContent = "m".repeat(n);
+      const w = ruler.scrollWidth;
+      if (w > withMark + 1 && w < without - 1) { s = ruler.textContent; break; }
+    }
+    ruler.remove();
+    return s;
+  });
+  expect(description.length).toBeGreaterThan(0);
+  const read = await rushes.addVariant("voice", "Fits", { round: R1, seconds: 3, freq: 247, meta: { description } });
+  await page.reload();
+  await openTab(page, /Voiceover/, "3");
+  await loaded(page, 2);
+  const meta = page.locator(`.lane[data-row="${read.lane.id}/${read.variant.id}"] [data-meta]`);
+  await expect(meta.locator(".smk")).toHaveCount(1);
+  expect(await meta.locator("[data-meta-text]").evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+  await expect(meta).toHaveAttribute("data-tip", description);
+});
+
 test("a read added with no round shows under a Voiceover heading, and older notes are listed, not drawn", async ({ page, rushes }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
