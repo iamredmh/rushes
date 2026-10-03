@@ -1,0 +1,183 @@
+import { describe, expect, it } from "vitest";
+import {
+  activeVariantGain, assembleRead, type Clip, computePeaks, laneGains, MAX_DECODED_SECONDS, mixPeaks, needsVideoSync,
+  peakBuckets, resolveDurations, shouldStream, startPlan, streamStep, timelineLength, variantGains,
+} from "../../web/src/audio/timeline.js";
+import type { Section, Take } from "../../web/src/types.js";
+
+const clip = (id: string, offset: number, duration: number, lane = "music"): Clip => ({ id, lane, path: `${id}.wav`, offset, duration });
+
+describe("laneGains", () => {
+  it("plays every lane when nothing is muted or soloed", () => {
+    expect(laneGains([{ id: "vo" }, { id: "music" }, { id: "sfx" }])).toEqual({ vo: 1, music: 1, sfx: 1 });
+  });
+  it("silences a muted lane", () => {
+    expect(laneGains([{ id: "vo" }, { id: "music", muted: true }, { id: "sfx" }])).toEqual({ vo: 1, music: 0, sfx: 1 });
+  });
+  it("plays only the soloed lanes", () => {
+    expect(laneGains([{ id: "vo", solo: true }, { id: "music" }, { id: "sfx", solo: true }])).toEqual({ vo: 1, music: 0, sfx: 1 });
+  });
+  it("lets solo win over mute, on the same lane and across lanes", () => {
+    expect(laneGains([{ id: "vo", solo: true, muted: true }, { id: "music", muted: true }, { id: "sfx" }]))
+      .toEqual({ vo: 1, music: 0, sfx: 0 });
+  });
+  it("handles no lanes", () => {
+    expect(laneGains([])).toEqual({});
+  });
+});
+
+describe("variant gains", () => {
+  it("is 1 for the selected variant and 0 for the rest", () => {
+    expect(activeVariantGain("b", "b")).toBe(1);
+    expect(activeVariantGain("b", "a")).toBe(0);
+  });
+  it("selects one clip per lane, and plays every clip of a lane with no selection", () => {
+    const clips = [clip("a", 0, 4), clip("b", 0, 4), clip("s1", 0, 2, "vo"), clip("s2", 2, 2, "vo")];
+    expect(variantGains(clips, { music: "b" })).toEqual({ a: 0, b: 1, s1: 1, s2: 1 });
+    expect(variantGains(clips, {})).toEqual({ a: 1, b: 1, s1: 1, s2: 1 });
+  });
+});
+
+describe("startPlan", () => {
+  it("starts a clip under the playhead now, at the matching point in its buffer", () => {
+    expect(startPlan([clip("a", 0, 4)], 1.5)).toEqual([{ id: "a", when: 0, offset: 1.5 }]);
+  });
+  it("starts a later clip after a delay, from its beginning", () => {
+    expect(startPlan([clip("c", 3, 1)], 1)).toEqual([{ id: "c", when: 2, offset: 0 }]);
+  });
+  it("skips clips that already ended, and handles a mix", () => {
+    const plan = startPlan([clip("old", 0, 1), clip("a", 0, 4), clip("b", 1, 2), clip("c", 5, 1)], 2);
+    expect(plan).toEqual([
+      { id: "a", when: 0, offset: 2 },
+      { id: "b", when: 0, offset: 1 },
+      { id: "c", when: 3, offset: 0 },
+    ]);
+  });
+  it("treats a clip's end as exclusive and its start as inclusive", () => {
+    expect(startPlan([clip("a", 0, 2)], 2)).toEqual([]);
+    expect(startPlan([clip("b", 2, 1)], 2)).toEqual([{ id: "b", when: 0, offset: 0 }]);
+  });
+  it("skips clips with no length", () => {
+    expect(startPlan([clip("z", 0, 0)], 0)).toEqual([]);
+  });
+});
+
+describe("needsVideoSync", () => {
+  it("leaves the picture alone within one frame", () => {
+    expect(needsVideoSync(2, 2, 30)).toBe(false);
+    expect(needsVideoSync(2 + 1 / 30, 2, 30)).toBe(false);
+    expect(needsVideoSync(2 - 1 / 30, 2, 30)).toBe(false);
+  });
+  it("seeks the picture once it's more than a frame off, either way", () => {
+    expect(needsVideoSync(2 + 1 / 30 + 0.001, 2, 30)).toBe(true);
+    expect(needsVideoSync(2 - 1 / 30 - 0.001, 2, 30)).toBe(true);
+    expect(needsVideoSync(1.05, 1, 25)).toBe(true);
+    expect(needsVideoSync(1.03, 1, 25)).toBe(false);
+  });
+});
+
+describe("peaks", () => {
+  it("takes the largest absolute sample per bucket", () => {
+    const signal = new Float32Array([0.1, -0.5, 0.2, 0.3, -0.9, 0.4, 0, 0]);
+    const peaks = Array.from(computePeaks(signal, 4));
+    [0.5, 0.3, 0.9, 0].forEach((want, i) => expect(peaks[i]).toBeCloseTo(want, 6));
+  });
+  it("finds the amplitude of a known sine", () => {
+    const n = 22050;
+    const sine = new Float32Array(n);
+    for (let i = 0; i < n; i++) sine[i] = 0.5 * Math.sin((2 * Math.PI * 440 * i) / 22050);
+    const peaks = computePeaks(sine, 10);
+    expect(peaks).toHaveLength(10);
+    for (const p of peaks) expect(p).toBeCloseTo(0.5, 2);
+  });
+  it("never leaves a bucket empty when there are fewer samples than buckets", () => {
+    expect(Array.from(computePeaks(new Float32Array([0.25, -0.75]), 4))).toEqual([0.25, 0.25, 0.75, 0.75]);
+  });
+  it("handles empty input", () => {
+    expect(Array.from(computePeaks(new Float32Array(0), 3))).toEqual([0, 0, 0]);
+    expect(computePeaks(new Float32Array([1]), 0)).toHaveLength(0);
+  });
+  it("takes the max across channels", () => {
+    const l = new Float32Array([0.1, 0.9, 0, 0]);
+    const r = new Float32Array([-0.5, 0, 0, -0.2]);
+    const peaks = mixPeaks([l, r], 2);
+    expect(peaks).toHaveLength(2);
+    expect(peaks[0]).toBeCloseTo(0.9, 6);
+    expect(peaks[1]).toBeCloseTo(0.2, 6);
+    expect(mixPeaks([], 2)).toHaveLength(2);
+  });
+  it("sizes peaks to the file, at least one bucket and capped", () => {
+    expect(peakBuckets(0)).toBe(1);
+    expect(peakBuckets(2)).toBe(100);
+    expect(peakBuckets(60 * 60 * 10)).toBeLessThanOrEqual(60_000);
+  });
+});
+
+describe("streaming fallback", () => {
+  it("decodes files up to 15 minutes and streams longer or undecodable ones", () => {
+    expect(MAX_DECODED_SECONDS).toBe(15 * 60);
+    expect(shouldStream(30, true)).toBe(false);
+    expect(shouldStream(15 * 60, true)).toBe(false);
+    expect(shouldStream(15 * 60 + 1, true)).toBe(true);
+    expect(shouldStream(null, false)).toBe(true);
+    expect(shouldStream(10, false)).toBe(true);
+    expect(shouldStream(null, true)).toBe(false);
+  });
+  it("starts, corrects drift past 50 ms, and stops a streamed element", () => {
+    // In range and paused: start it.
+    expect(streamStep(1, 10, { time: 0, paused: true })).toBe("play");
+    // Playing and within 50 ms: leave it.
+    expect(streamStep(1, 10, { time: 1.04, paused: false })).toBe("none");
+    expect(streamStep(1, 10, { time: 0.951, paused: false })).toBe("none");
+    // Playing and off by more than 50 ms: seek.
+    expect(streamStep(1, 10, { time: 1.06, paused: false })).toBe("seek");
+    expect(streamStep(1, 10, { time: 0.9, paused: false })).toBe("seek");
+    // Out of the clip: pause it if it's playing, otherwise nothing.
+    expect(streamStep(-0.5, 10, { time: 0, paused: false })).toBe("pause");
+    expect(streamStep(10, 10, { time: 9.99, paused: false })).toBe("pause");
+    expect(streamStep(-0.5, 10, { time: 0, paused: true })).toBe("none");
+  });
+});
+
+describe("durations", () => {
+  it("fills a clip with no known length from the decoded file", () => {
+    const clips = [clip("a", 0, 0), clip("b", 1, 3), { ...clip("c", 2, Number.NaN) }];
+    expect(resolveDurations(clips, { "a.wav": 5, "c.wav": 2 }).map((c) => c.duration)).toEqual([5, 3, 2]);
+    expect(resolveDurations([clip("d", 0, 0)], {}).map((c) => c.duration)).toEqual([0]);
+  });
+  it("uses the cut's length when there is one, else the longest audio", () => {
+    expect(timelineLength(12.5, [clip("a", 0, 30)])).toBe(12.5);
+    expect(timelineLength(null, [clip("a", 0, 4), clip("b", 3, 5)])).toBe(8);
+    expect(timelineLength(0, [clip("a", 1, 4)])).toBe(5);
+    expect(timelineLength(null, [])).toBe(0);
+  });
+});
+
+describe("assembleRead", () => {
+  const take = (id: string, file: string, duration: number | null = 2): Take => ({ id, file, duration, forText: "x" });
+  const section = (id: string, start: number, end: number, takes: Take[]): Section => ({
+    id, start, end, current: "x", proposed: null, direction: "", status: "draft", takes,
+  });
+  const sections = [
+    section("s1", 0, 3, [take("t1", "vo/s1-a.wav"), take("t2", "vo/s1-b.wav", 2.5)]),
+    section("s2", 3, 6, [take("t1", "vo/s2-a.wav"), take("t2", "vo/s2-b.wav", null)]),
+    section("s3", 6, 9, []),
+  ];
+
+  it("places the picked take at the section's start", () => {
+    const read = assembleRead(sections, { s1: "t1" });
+    expect(read[0]).toEqual({ id: "s1:t1", lane: "vo", path: "vo/s1-a.wav", offset: 0, duration: 2, section: "s1", take: "t1" });
+  });
+  it("uses the newest take when none is picked, or the pick no longer exists", () => {
+    expect(assembleRead(sections, {})[0].take).toBe("t2");
+    expect(assembleRead(sections, { s1: "gone" })[0].take).toBe("t2");
+  });
+  it("leaves out a section with no takes, and marks an unknown length as 0 (the file's own)", () => {
+    const read = assembleRead(sections, { s1: "t1" });
+    expect(read.map((c) => c.section)).toEqual(["s1", "s2"]);
+    expect(read[1]).toMatchObject({ id: "s2:t2", offset: 3, duration: 0, path: "vo/s2-b.wav" });
+  });
+  it("puts the clips on the lane it's given", () => {
+    expect(assembleRead(sections, {}, "read").every((c) => c.lane === "read")).toBe(true);
+  });
+});

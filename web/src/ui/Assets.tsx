@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { api, mediaUrl } from "../api.js";
+import { claim, release } from "../audio/bus.js";
 import {
   FOLDERS, type FolderDef, type FolderId, folderItems, groupByFilm, isPreviewable, PREVIEW_FOLDER_IDS,
 } from "../lib.js";
@@ -173,8 +174,11 @@ export function Assets({ assets, videos, toast, onChanged }: AssetsProps) {
   // ---- inline audio: one shared <audio>, owned here (§16.1) ----
   const audioRef = useRef<HTMLAudioElement>(null);
   const [audioState, setAudioState] = useState<{ path: string | null; paused: boolean }>({ path: null, paused: true });
+  // This player's identity on the one-player bus: it and an audio tab never play together.
+  const busOwner = useRef({});
   const stopAudio = () => {
     audioRef.current?.pause();
+    release(busOwner.current);
     setAudioState({ path: null, paused: true });
   };
   const toggleAudio = (asset: Asset) => {
@@ -182,14 +186,21 @@ export function Assets({ assets, videos, toast, onChanged }: AssetsProps) {
     if (!audio) return;
     if (audioState.path === asset.path && !audioState.paused) {
       audio.pause();
+      release(busOwner.current);
       setAudioState({ path: asset.path, paused: true });
       return;
     }
     if (audioState.path !== asset.path) audio.src = mediaUrl(asset.path);
+    // Another player (an audio tab's engine) stops; if one claims later, this one pauses in place.
+    claim(busOwner.current, () => {
+      audioRef.current?.pause();
+      setAudioState((s) => ({ ...s, paused: true }));
+    });
     setAudioState({ path: asset.path, paused: false });
     audio.play().catch(() => {
       // M4: a rejected play() (the browser blocking it, a bad file) must not leave the row
       // claiming to be playing when it isn't.
+      release(busOwner.current);
       setAudioState({ path: asset.path, paused: true });
       toast(`Couldn't play ${asset.label ?? asset.name}`);
     });
@@ -445,7 +456,13 @@ export function Assets({ assets, videos, toast, onChanged }: AssetsProps) {
       )}
 
       {/* The one shared player every Play/Pause button in Voiceover/Music/Sound effects drives. */}
-      <audio ref={audioRef} onEnded={() => setAudioState((s) => ({ ...s, paused: true }))} />
+      <audio
+        ref={audioRef}
+        onEnded={() => {
+          release(busOwner.current);
+          setAudioState((s) => ({ ...s, paused: true }));
+        }}
+      />
       {lightbox && <Lightbox asset={lightbox} toast={toast} onClose={closeLightbox} />}
     </div>
   );
