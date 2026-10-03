@@ -295,6 +295,26 @@ describe("API", () => {
     expect(picks.json.lanes).toEqual({ music: "deep-house" });
   });
 
+  it("picks: null clears a lane or section pick, and leaves the rest", async () => {
+    const { call, store } = await setup();
+    await call("PUT", "/api/picks", { lanes: { music: "deep-house", sfx: "pass-a", voice: "warm" }, sections: { s1: "t1", s2: "t3" } });
+    const cleared = await call("PUT", "/api/picks", { lanes: { music: null, voice: null }, sections: { s2: null } });
+    expect(cleared.status).toBe(200);
+    expect(cleared.json.lanes).toEqual({ sfx: "pass-a" });
+    expect(cleared.json.sections).toEqual({ s1: "t1" });
+    // Cleared keys are gone from disk, not saved as null: picks.json stays a map of strings.
+    const saved = await store.read("picks");
+    expect(saved.lanes).toEqual({ sfx: "pass-a" });
+    expect(Object.keys(saved.sections)).toEqual(["s1"]);
+    // Clearing what isn't picked is a no-op, and a set and a clear can share one request.
+    const mixed = await call("PUT", "/api/picks", { lanes: { music: null, sfx: "pass-b" }, sections: { s9: null } });
+    expect(mixed.json.lanes).toEqual({ sfx: "pass-b" });
+    expect(mixed.json.sections).toEqual({ s1: "t1" });
+    // Anything other than a string or null is still refused.
+    expect((await call("PUT", "/api/picks", { lanes: { music: 3 } })).status).toBe(400);
+    expect((await call("PUT", "/api/picks", { sections: { s1: false } })).status).toBe(400);
+  });
+
   it("batches: send the tab's open notes once, then 409 when nothing is left", async () => {
     const { call } = await setup();
     const n = (await call("POST", "/api/notes", { stage: "picture", scope: "point", t: 1, text: "x" })).json.note;

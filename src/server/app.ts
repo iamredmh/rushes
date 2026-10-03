@@ -99,7 +99,9 @@ const SectionEditBody = z.object({
   status: SectionStatusSchema.optional(),
 });
 const TakeBody = z.object({ file: z.string().min(1) });
-const PicksBody = z.object({ lanes: z.record(z.string(), z.string()).optional(), sections: z.record(z.string(), z.string()).optional() });
+// A pick is a variant or take id; null clears it. picks.json itself only ever holds strings.
+const PickMap = z.record(z.string(), z.string().nullable());
+const PicksBody = z.object({ lanes: PickMap.optional(), sections: PickMap.optional() });
 const BatchBody = z.object({ stage: StageSchema });
 
 const NoteQuery = z.object({
@@ -556,9 +558,16 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
 
   app.put("/api/picks", async (c) => {
     const b = await body(c, PicksBody);
+    // Merged key by key: a string sets that pick, null removes it, anything not named is kept.
+    const merge = (into: Record<string, string>, from: Record<string, string | null> = {}) => {
+      for (const [k, v] of Object.entries(from)) {
+        if (v === null) delete into[k];
+        else into[k] = v;
+      }
+    };
     const { data } = await store.update("picks", (p) => {
-      Object.assign(p.lanes, b.lanes ?? {});
-      Object.assign(p.sections, b.sections ?? {});
+      merge(p.lanes, b.lanes);
+      merge(p.sections, b.sections);
     });
     return c.json(data);
   });
