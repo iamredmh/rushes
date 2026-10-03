@@ -742,7 +742,7 @@ describe("POST /api/mix/loudness (§17.6)", () => {
     const { call } = await withVariant(run);
     const r = await call("POST", "/api/mix/loudness", { lanes: ["music"] });
     expect(r.status).toBe(200);
-    expect(r.json).toEqual({ available: true, integrated: -20, truePeak: -6, musicUnderVo: null });
+    expect(r.json).toEqual({ available: true, integrated: -20, truePeak: -6, musicUnderVo: null, silent: false });
   });
 
   it("caches: the runner isn't called again for a second, identical request", async () => {
@@ -755,7 +755,7 @@ describe("POST /api/mix/loudness (§17.6)", () => {
     await call("POST", "/api/mix/loudness", { lanes: ["music"] });
     const callsAfterFirst = calls;
     const second = await call("POST", "/api/mix/loudness", { lanes: ["music"] });
-    expect(second.json).toEqual({ available: true, integrated: -20, truePeak: -6, musicUnderVo: null });
+    expect(second.json).toEqual({ available: true, integrated: -20, truePeak: -6, musicUnderVo: null, silent: false });
     expect(calls).toBe(callsAfterFirst);
   });
 
@@ -767,11 +767,30 @@ describe("POST /api/mix/loudness (§17.6)", () => {
     expect(r.json).toMatchObject({ available: false });
   });
 
-  it("returns 504 when a run hangs past the timeout", async () => {
-    const run: LoudnessRunner = (args) => (args[0] === "-version" ? Promise.resolve({ code: 0, stderr: "" }) : new Promise(() => {}));
+  it("returns silence as null + silent: true, not a bare -Infinity (I1)", async () => {
+    const silentSummary = "  Integrated loudness:\n    I:         -inf LUFS\n\n  True peak:\n    Peak:       -inf dBFS\n";
+    const run: LoudnessRunner = async (args) => (args[0] === "-version" ? { code: 0, stderr: "" } : { code: 0, stderr: silentSummary });
+    const { call } = await withVariant(run);
+    const r = await call("POST", "/api/mix/loudness", { lanes: ["music"] });
+    expect(r.status).toBe(200);
+    expect(r.json).toEqual({ available: true, integrated: null, truePeak: null, musicUnderVo: null, silent: true });
+  });
+
+  it("returns 504 and aborts the runner's signal when a run hangs past the timeout (C1)", async () => {
+    let aborted = false;
+    const run: LoudnessRunner = (args, signal) => {
+      if (args[0] === "-version") return Promise.resolve({ code: 0, stderr: "" });
+      return new Promise((resolve) => {
+        signal?.addEventListener("abort", () => {
+          aborted = true;
+          setTimeout(() => resolve({ code: 137, stderr: "" }), 0);
+        });
+      });
+    };
     const { call } = await withVariant(run, { loudnessTimeoutMs: 50 });
     const r = await call("POST", "/api/mix/loudness", { lanes: ["music"] });
     expect(r.status).toBe(504);
     expect(r.json).toMatchObject({ error: "loudness_timeout" });
+    expect(aborted).toBe(true);
   });
 });
