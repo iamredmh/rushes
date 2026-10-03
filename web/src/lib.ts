@@ -416,10 +416,20 @@ export interface OnOption {
   row?: string;
 }
 
+/**
+ * The `on` a note on a variant saves: `"<lane id>/<variant id>"` (the row's key). Variant ids are
+ * only unique within their lane, and lane ids are unique project-wide, so qualifying by lane keeps
+ * a music bed and an SFX pass both called "Option A" apart. Both ids are slugs (`[a-z0-9-]`), so the
+ * `/` can never be part of either, nor clash with `"vo"`, a take (`"<section>:<take>"`) or a section id.
+ */
+export const variantOn = (r: Pick<VariantRow, "key">): string => r.key;
+/** The `on` a note on a cue saves: `"<lane id>/<variant id>:<cue id>"` (cue ids are only unique within a pass). */
+export const cueOn = (r: Pick<VariantRow, "key">, cueId: string): string => `${r.key}:${cueId}`;
+
 /** The On menu for variant rows: each variant, then (with `cues`) each cue as `Cue · Swipe`, saved as
- *  `on: "<pass id>:<cue id>"`. A cue name two passes share gets the pass's name too. */
+ *  `on: "<lane id>/<pass id>:<cue id>"`. A cue name two passes share gets the pass's name too. */
 export function variantOnOptions(rows: VariantRow[], nameOf: (r: VariantRow) => string, cues = false): OnOption[] {
-  const out: OnOption[] = rows.map((r) => ({ value: `v:${r.key}`, label: nameOf(r), on: r.variant, row: r.key }));
+  const out: OnOption[] = rows.map((r) => ({ value: `v:${r.key}`, label: nameOf(r), on: variantOn(r), row: r.key }));
   if (!cues) return out;
   const seen = new Set(out.map((o) => o.label));
   for (const r of rows) {
@@ -427,30 +437,55 @@ export function variantOnOptions(rows: VariantRow[], nameOf: (r: VariantRow) => 
       let label = `Cue · ${c.name}`;
       if (seen.has(label)) label = `${label} · ${nameOf(r)}`;
       seen.add(label);
-      // `<pass id>:<cue id>`: cue ids are only unique within a pass (§17.4).
-      out.push({ value: `c:${r.key}:${c.id}`, label, on: `${r.variant}:${c.id}`, t: c.t, row: r.key });
+      out.push({ value: `c:${r.key}:${c.id}`, label, on: cueOn(r, c.id), t: c.t, row: r.key });
     }
   }
   return out;
 }
 
 /**
- * What a note is `on`: a variant (`"pass-b"`), or a cue on a pass (`"pass-b:swipe"`). An older bare
- * cue id (`"swipe"`) falls back to the first pass holding that cue.
+ * The exact lane-qualified variant or cue an `on` names, or null: `"<lane>/<variant>"` or
+ * `"<lane>/<variant>:<cue>"`. Never matches a bare (legacy) id, which has no `/`.
  */
-export function variantNoteTarget(rows: VariantRow[], on: string | null): { row: string; cue: string | null } | null {
-  if (on === null) return null;
+export function qualifiedTarget(rows: VariantRow[], on: string | null): { row: VariantRow; cue: string | null } | null {
+  if (on === null || !on.includes("/")) return null;
+  const variant = rows.find((r) => variantOn(r) === on);
+  if (variant) return { row: variant, cue: null };
+  const i = on.indexOf(":", on.indexOf("/"));
+  if (i === -1) return null;
+  const key = on.slice(0, i);
+  const cue = on.slice(i + 1);
+  const pass = rows.find((r) => r.key === key && r.cues.some((c) => c.id === cue));
+  return pass ? { row: pass, cue } : null;
+}
+
+/**
+ * The legacy forms, from before `on` was lane-qualified: a bare variant id (the first row with it,
+ * in the order given), a bare `"<pass id>:<cue id>"`, or a bare cue id (the first pass holding it).
+ * Kept so older notes draw exactly where they always have.
+ */
+function legacyVariantTarget(rows: VariantRow[], on: string): { row: VariantRow; cue: string | null } | null {
   const variant = rows.find((r) => r.variant === on);
-  if (variant) return { row: variant.key, cue: null };
+  if (variant) return { row: variant, cue: null };
   const i = on.indexOf(":");
   if (i > 0) {
     const v = on.slice(0, i);
     const cue = on.slice(i + 1);
     const pass = rows.find((r) => r.variant === v && r.cues.some((c) => c.id === cue));
-    if (pass) return { row: pass.key, cue };
+    if (pass) return { row: pass, cue };
   }
   const pass = rows.find((r) => r.cues.some((c) => c.id === on));
-  return pass ? { row: pass.key, cue: on } : null;
+  return pass ? { row: pass, cue: on } : null;
+}
+
+/**
+ * What a note is `on` among variant rows: the exact lane-qualified variant (`"sfx/pass-b"`) or cue
+ * (`"sfx/pass-b:swipe"`) first, then the legacy bare forms (`"pass-b"`, `"pass-b:swipe"`, `"swipe"`).
+ */
+export function variantNoteTarget(rows: VariantRow[], on: string | null): { row: string; cue: string | null } | null {
+  if (on === null) return null;
+  const t = qualifiedTarget(rows, on) ?? legacyVariantTarget(rows, on);
+  return t ? { row: t.row.key, cue: t.cue } : null;
 }
 
 /** The row a note is drawn on (see variantNoteTarget). */
@@ -623,10 +658,13 @@ export type VoiceTarget =
   | { kind: "variant"; row: string };
 
 /**
- * What a Voiceover note is on: "vo" is the read, "<section>:<take>" a take, a section id that
- * section, else a voice variant's id. A note with no `on` is about the read.
+ * What a Voiceover note is on, in this order: a lane-qualified voice variant (`"<lane>/<variant>"`),
+ * "vo" (the read), "<section>:<take>" a take, a section id that section, else (legacy) a bare voice
+ * variant id. A note with no `on` is about the read.
  */
 export function voiceNoteTarget(sections: VoiceModel["sections"], variants: VariantRow[], on: string | null): VoiceTarget | null {
+  const qualified = qualifiedTarget(variants, on);
+  if (qualified && qualified.cue === null) return { kind: "variant", row: qualified.row.key };
   if (on === null || on === READ_ROW) return { kind: "read" };
   for (const s of sections) for (const t of s.takes) if (takeClipId(s.id, t.id) === on) return { kind: "take", section: s.id, take: t.id };
   if (sections.some((s) => s.id === on)) return { kind: "section", section: on };
@@ -661,7 +699,7 @@ export function voiceOnOptions(m: Pick<VoiceModel, "sections" | "variants">, sho
   for (const t of sec?.takes ?? []) {
     out.push({ value: `t:${takeClipId(sec!.id, t.id)}`, label: takeLabel(sec!, t.id), on: takeClipId(sec!.id, t.id), row: takeRowKey(sec!.id, t.id) });
   }
-  for (const r of m.variants) out.push({ value: `v:${r.key}`, label: r.name, on: r.variant, row: r.key });
+  for (const r of m.variants) out.push({ value: `v:${r.key}`, label: r.name, on: variantOn(r), row: r.key });
   return out;
 }
 
@@ -697,16 +735,36 @@ export function loudnessLanes(heard: Record<MixLane, boolean>, gains: Record<str
   return MIX_LANES.filter((l) => heard[l] && (gains[l] ?? 1) > 0).map((l) => MIX_STAGE[l]);
 }
 
+/** The Music or Sound effects row a Mix note's `on` names: lane-qualified first, then (legacy) a bare variant id. */
+function mixNoteVariant(m: MixModel, on: string): { lane: "music" | "sfx"; row: VariantRow } | null {
+  for (const lane of ["music", "sfx"] as const) {
+    const q = qualifiedTarget(m.variants[lane], on);
+    if (q) return { lane, row: q.row };
+  }
+  if (on.includes("/")) return null;
+  // Legacy: a bare variant id, a variant being heard first, then any variant of either stage.
+  for (const lane of ["music", "sfx"] as const) {
+    const row = m.heard[lane].find((r) => r.variant === on);
+    if (row) return { lane, row };
+  }
+  for (const lane of ["music", "sfx"] as const) {
+    const row = m.variants[lane].find((r) => r.variant === on);
+    if (row) return { lane, row };
+  }
+  return null;
+}
+
 /**
- * What a Mix note is on: null is the whole mix, "vo" the VO lane, a variant id the Music or Sound
- * effects lane (a variant being heard first, then any variant of either stage). Null if unknown.
+ * What a Mix note is on: null is the whole mix; a lane-qualified variant (`"<lane>/<variant>"`) the
+ * Music or Sound effects lane it belongs to; "vo" the VO lane; then (legacy) a bare variant id, a
+ * variant being heard first, then any variant of either stage. Null if unknown.
  */
 export function mixNoteTarget(m: MixModel, on: string | null): MixLane | typeof WHOLE_MIX | null {
   if (on === null) return WHOLE_MIX;
+  const qualified = on.includes("/") ? mixNoteVariant(m, on) : null;
+  if (qualified) return qualified.lane;
   if (on === READ_ROW) return "vo";
-  for (const lane of ["music", "sfx"] as const) if (m.heard[lane].some((r) => r.variant === on)) return lane;
-  for (const lane of ["music", "sfx"] as const) if (m.variants[lane].some((r) => r.variant === on)) return lane;
-  return null;
+  return mixNoteVariant(m, on)?.lane ?? null;
 }
 
 /** The lanes a Mix note is drawn on: its lane; a note on the whole mix (or on something gone) on every lane. */
@@ -723,16 +781,18 @@ export function mixOnLabel(m: MixModel, on: string | null): string | null {
   if (target === null) return null;
   if (target === WHOLE_MIX) return "Whole mix";
   if (target === "vo") return MIX_NAMES.vo;
-  const row = m.heard[target].find((r) => r.variant === on) ?? m.variants[target].find((r) => r.variant === on);
-  return `${MIX_NAMES[target]} · ${row!.name}`;
+  return `${MIX_NAMES[target]} · ${mixNoteVariant(m, on!)!.row.name}`;
 }
 
-/** The On menu on Mix: the whole mix, then each lane that has something to play. Values: "mix", "vo", "<lane>:<lane id>/<variant>". */
+/**
+ * The On menu on Mix: the whole mix, then each lane that has something to play. Values: "mix", "vo",
+ * "<stage>:<lane id>/<variant>"; a variant's note saves `on: "<lane id>/<variant>"`.
+ */
 export function mixOnOptions(m: MixModel): OnOption[] {
   const out: OnOption[] = [{ value: WHOLE_MIX, label: "Whole mix", on: null }];
   if (m.heard.vo) out.push({ value: "vo", label: MIX_NAMES.vo, on: READ_ROW, row: "vo" });
   for (const lane of ["music", "sfx"] as const) {
-    for (const r of m.heard[lane]) out.push({ value: `${lane}:${r.key}`, label: `${MIX_NAMES[lane]} · ${r.name}`, on: r.variant, row: lane });
+    for (const r of m.heard[lane]) out.push({ value: `${lane}:${r.key}`, label: `${MIX_NAMES[lane]} · ${r.name}`, on: variantOn(r), row: lane });
   }
   return out;
 }

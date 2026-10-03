@@ -459,11 +459,34 @@ describe("audio tabs: lanes", () => {
     const rows = variantRows(lanes, "sfx");
     const opts = variantOnOptions(rows, (r) => r.name, true);
     expect(opts.map((o) => o.label)).toEqual(["Pass A", "Pass B", "Cue · Swipe", "Cue · Tap", "Cue · Swipe · Pass B"]);
-    expect(opts[2]).toMatchObject({ on: "pass-a:swipe", t: 1.5, row: "sfx/pass-a" });
-    expect(opts[4]).toMatchObject({ on: "pass-b:swipe", t: 1.6, row: "sfx/pass-b" });
+    // Lane-qualified (I3): "<lane>/<pass>" for a pass, "<lane>/<pass>:<cue>" for a cue.
+    expect(opts[0]).toMatchObject({ on: "sfx/pass-a", row: "sfx/pass-a" });
+    expect(opts[2]).toMatchObject({ on: "sfx/pass-a:swipe", t: 1.5, row: "sfx/pass-a" });
+    expect(opts[4]).toMatchObject({ on: "sfx/pass-b:swipe", t: 1.6, row: "sfx/pass-b" });
     expect(variantOnOptions(rows, (r) => r.name).length).toBe(2);
   });
-  it("draws a note on its variant, or on the pass holding its cue", () => {
+  it("draws a lane-qualified note on its exact variant or cue", () => {
+    const sfx = variantRows(lanes, "sfx");
+    expect(variantNoteRow(sfx, "sfx/pass-b")).toBe("sfx/pass-b");
+    expect(variantNoteTarget(sfx, "sfx/pass-b:swipe")).toEqual({ row: "sfx/pass-b", cue: "swipe" });
+    expect(variantNoteTarget(sfx, "sfx/pass-a:tap")).toEqual({ row: "sfx/pass-a", cue: "tap" });
+    // A qualified cue the pass no longer has, or an unknown lane, is never drawn on some other pass.
+    expect(variantNoteRow(sfx, "sfx/pass-b:tap")).toBeNull();
+    expect(variantNoteRow(sfx, "other/pass-b")).toBeNull();
+  });
+  it("tells apart same-named variants on two lanes of one stage (I3)", () => {
+    const two: Lane[] = [
+      { id: "bed", stage: "music", name: "Bed", variants: [{ id: "a", name: "A", file: "bed-a.wav", meta: {}, cues: [] }] },
+      { id: "sting", stage: "music", name: "Sting", variants: [{ id: "a", name: "A", file: "sting-a.wav", meta: {}, cues: [] }] },
+    ];
+    const rows = variantRows(two, "music");
+    expect(variantOnOptions(rows, (r) => r.laneName).map((o) => o.on)).toEqual(["bed/a", "sting/a"]);
+    expect(variantNoteRow(rows, "sting/a")).toBe("sting/a");
+    expect(variantNoteRow(rows, "bed/a")).toBe("bed/a");
+    // A legacy bare id still draws where it always did: the first row with it.
+    expect(variantNoteRow(rows, "a")).toBe("bed/a");
+  });
+  it("still draws an older note's bare variant id, bare pass:cue or bare cue where it always did", () => {
     const sfx = variantRows(lanes, "sfx");
     expect(variantNoteRow(sfx, "pass-b")).toBe("sfx/pass-b");
     expect(variantNoteRow(sfx, "pass-b:swipe")).toBe("sfx/pass-b");
@@ -479,6 +502,9 @@ describe("audio tabs: lanes", () => {
   it("labels what a note is on, naming the pass when two share a cue", () => {
     const sfx = variantRows(lanes, "sfx");
     const opts = variantOnOptions(sfx, (r) => r.name, true);
+    expect(variantOnLabel(sfx, opts, "sfx/pass-b:swipe")).toBe("Cue · Swipe · Pass B");
+    expect(variantOnLabel(sfx, opts, "sfx/pass-a:swipe")).toBe("Cue · Swipe");
+    expect(variantOnLabel(sfx, opts, "sfx/pass-b")).toBe("Pass B");
     expect(variantOnLabel(sfx, opts, "pass-b:swipe")).toBe("Cue · Swipe · Pass B");
     expect(variantOnLabel(sfx, opts, "pass-a:swipe")).toBe("Cue · Swipe");
     expect(variantOnLabel(sfx, opts, "swipe")).toBe("Cue · Swipe");
@@ -617,8 +643,23 @@ describe("Voiceover", () => {
       expect(voiceNoteTarget(sections, variants, null)).toEqual({ kind: "read" });
       expect(voiceNoteTarget(sections, variants, "s2")).toEqual({ kind: "section", section: "s2" });
       expect(voiceNoteTarget(sections, variants, "s2:t1")).toEqual({ kind: "take", section: "s2", take: "t1" });
+      expect(voiceNoteTarget(sections, variants, "alt/dry")).toEqual({ kind: "variant", row: "alt/dry" });
+      // Legacy: a bare voice variant id.
       expect(voiceNoteTarget(sections, variants, "dry")).toEqual({ kind: "variant", row: "alt/dry" });
       expect(voiceNoteTarget(sections, variants, "s2:t9")).toBeNull();
+      expect(voiceNoteTarget(sections, variants, "alt/gone")).toBeNull();
+    });
+    it("never reads a voice variant named like the read or a section as the read or that section (I3)", () => {
+      const clash = variantRows([{ id: "alt", stage: "voice", name: "Alt", variants: [
+        { id: "vo", name: "VO", file: "vo.wav", meta: {}, cues: [] },
+        { id: "s2", name: "S2", file: "s2.wav", meta: {}, cues: [] },
+      ] }], "voice");
+      const opts = voiceOnOptions({ sections, variants: clash }, null).filter((o) => o.value.startsWith("v:"));
+      expect(opts.map((o) => o.on)).toEqual(["alt/vo", "alt/s2"]);
+      expect(voiceNoteTarget(sections, clash, "alt/vo")).toEqual({ kind: "variant", row: "alt/vo" });
+      expect(voiceNoteTarget(sections, clash, "alt/s2")).toEqual({ kind: "variant", row: "alt/s2" });
+      expect(voiceNoteTarget(sections, clash, "vo")).toEqual({ kind: "read" });
+      expect(voiceNoteTarget(sections, clash, "s2")).toEqual({ kind: "section", section: "s2" });
     });
     it("draws read and section notes on the read", () => {
       const m = model();
@@ -639,6 +680,7 @@ describe("Voiceover", () => {
       expect(voiceNoteRows(m, n("s2:t1", 5), "s2")).toEqual(["vo", "take:s2:t1"]);
     });
     it("draws a variant note on its variant", () => {
+      expect(voiceNoteRows(model(), n("alt/warm", 1), "s1")).toEqual(["alt/warm"]);
       expect(voiceNoteRows(model(), n("warm", 1), "s1")).toEqual(["alt/warm"]);
     });
     it("offers the read, each section, the shown section's takes and each variant", () => {
@@ -651,8 +693,8 @@ describe("Voiceover", () => {
         ["t:s2:t1", "S2 · Take 1", "s2:t1"],
         ["t:s2:t2", "S2 · Take 2", "s2:t2"],
         ["t:s2:t3", "S2 · Take 3", "s2:t3"],
-        ["v:alt/warm", "Warm read", "warm"],
-        ["v:alt/dry", "Dry read", "dry"],
+        ["v:alt/warm", "Warm read", "alt/warm"],
+        ["v:alt/dry", "Dry read", "alt/dry"],
       ]);
     });
     it("labels a listed note", () => {
@@ -660,6 +702,7 @@ describe("Voiceover", () => {
       expect(voiceOnLabel(m, "vo")).toBe("Assembled read");
       expect(voiceOnLabel(m, "s2")).toBe("S2");
       expect(voiceOnLabel(m, "s2:t2")).toBe("S2 · Take 2");
+      expect(voiceOnLabel(m, "alt/dry")).toBe("Dry read");
       expect(voiceOnLabel(m, "dry")).toBe("Dry read");
       expect(voiceOnLabel(m, "nowhere")).toBeNull();
     });
@@ -737,6 +780,26 @@ describe("Mix", () => {
       expect(mixNoteTarget(m, "a")).toBe("music");
       expect(mixNoteTarget(m, "pass-b")).toBe("sfx");
       expect(mixNoteTarget(m, "nowhere")).toBeNull();
+      // Lane-qualified (I3).
+      expect(mixNoteTarget(m, "music/b")).toBe("music");
+      expect(mixNoteTarget(m, "sfx/pass-b")).toBe("sfx");
+      expect(mixNoteTarget(m, "sfx/gone")).toBeNull();
+    });
+    it("never confuses a music bed and an SFX pass with the same name (I3)", () => {
+      const clash: Lane[] = [
+        { id: "music", stage: "music", name: "Music", variants: [{ id: "option-a", name: "Option A", file: "m.wav", meta: {}, cues: [] }] },
+        { id: "sfx", stage: "sfx", name: "Sound effects", variants: [{ id: "option-a", name: "Option A", file: "s.wav", meta: {}, cues: [] }] },
+      ];
+      const mm = variantRows(clash, "music");
+      const ss = variantRows(clash, "sfx");
+      const m: MixModel = { variants: { music: mm, sfx: ss }, heard: { vo: false, music: mm, sfx: ss } };
+      const sfxOption = mixOnOptions(m).find((o) => o.value === "sfx:sfx/option-a")!;
+      expect(sfxOption.on).toBe("sfx/option-a");
+      expect(mixNoteRows(m, sfxOption.on)).toEqual(["sfx"]);
+      expect(mixOnLabel(m, sfxOption.on)).toBe("Sound effects · Option A");
+      expect(mixNoteRows(m, "music/option-a")).toEqual(["music"]);
+      // Legacy bare id: where it always drew (the first heard match, Music).
+      expect(mixNoteRows(m, "option-a")).toEqual(["music"]);
     });
     it("draws a lane note on its lane, and a whole-mix (or orphaned) note on every lane", () => {
       const m = model();
@@ -750,8 +813,8 @@ describe("Mix", () => {
       expect(mixOnOptions(model()).map((o) => [o.value, o.label, o.on, o.row ?? null])).toEqual([
         ["mix", "Whole mix", null, null],
         ["vo", "Voiceover", "vo", "vo"],
-        ["music:music/b", "Music · B · Warm keys", "b", "music"],
-        ["sfx:sfx/pass-a", "Sound effects · Pass A", "pass-a", "sfx"],
+        ["music:music/b", "Music · B · Warm keys", "music/b", "music"],
+        ["sfx:sfx/pass-a", "Sound effects · Pass A", "sfx/pass-a", "sfx"],
       ]);
       expect(mixOnOptions(model({ vo: false, music: [], sfx: [] })).map((o) => o.value)).toEqual(["mix"]);
     });
@@ -762,6 +825,8 @@ describe("Mix", () => {
       expect(mixOnLabel(m, "b")).toBe("Music · B · Warm keys");
       expect(mixOnLabel(m, "a")).toBe("Music · A · Deep house");
       expect(mixOnLabel(m, "pass-a")).toBe("Sound effects · Pass A");
+      expect(mixOnLabel(m, "music/a")).toBe("Music · A · Deep house");
+      expect(mixOnLabel(m, "sfx/pass-b")).toBe("Sound effects · Pass B");
       expect(mixOnLabel(m, "nowhere")).toBeNull();
     });
   });

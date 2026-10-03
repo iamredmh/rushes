@@ -50,10 +50,17 @@ export interface SetSectionsOptions {
  */
 export function setSections(script: Script, input: SectionInput[], { replace = false }: SetSectionsOptions = {}): Section[] {
   const seen = new Set<string>();
+  const existing = new Set(script.sections.map((s) => s.id));
   for (const s of input) {
     if (!(s.end > s.start)) throw new InvalidError(`Section at ${s.start}s must end after it starts`);
     if (s.id === undefined) continue;
     if (seen.has(s.id)) throw new InvalidError(`Section id "${s.id}" appears twice`);
+    // A note's `on` reads "vo" as the read, "<section>:<take>" as a take and "<lane>/<variant>" as
+    // a variant, so a new section can't take an id that would read as one of those. Only new ids
+    // are checked: a script saved before this rule still loads and updates.
+    if (!existing.has(s.id) && (s.id === "vo" || /[:/]/.test(s.id))) {
+      throw new InvalidError(`Section id "${s.id}" can't be "vo" or contain ":" or "/"`);
+    }
     seen.add(s.id);
   }
 

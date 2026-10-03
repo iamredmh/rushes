@@ -147,7 +147,16 @@ export const NoteSchema = z
     stage: StageSchema,
     video: z.string().nullable().default(null),
     version: z.string().nullable().default(null),
-    on: z.string().nullable().default(null),
+    // What the note is about (§5, §17): null on Picture (and the whole mix on Mix); "<lane>/<variant>"
+    // for a variant; "<lane>/<variant>:<cue>" for an SFX cue; "vo" for the assembled read (or Mix's
+    // VO lane); "<section>:<take>" for a take; a section id for a section. Older notes may carry a
+    // bare variant id, "<variant>:<cue>" or a bare cue id; they still resolve. Not checked here,
+    // so every older file still loads.
+    on: z
+      .string()
+      .nullable()
+      .default(null)
+      .describe('What the note is about: null (Picture, or the whole mix), "<lane>/<variant>", "<lane>/<variant>:<cue>", "vo", "<section>:<take>" or a section id.'),
     scope: z.enum(["point", "range", "whole"]),
     t: seconds.nullable().default(null),
     tOut: seconds.nullable().default(null),

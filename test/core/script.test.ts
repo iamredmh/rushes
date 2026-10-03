@@ -28,6 +28,18 @@ describe("setSections", () => {
     expect(() => setSections(s, [{ start: 5, end: 5, current: "A" }])).toThrow(/end after/);
   });
 
+  it("refuses a new section id that would read as the read, a take or a variant in a note's `on` (I3)", () => {
+    const s = empty();
+    for (const id of ["vo", "s1:t1", "music/a"]) {
+      expect(() => setSections(s, [{ id, start: 0, end: 5, current: "A" }])).toThrow(/can't be "vo"/);
+    }
+    expect(s.sections).toEqual([]);
+    // A script saved before the rule still loads, and its odd id can still be updated.
+    s.sections = [{ id: "a:b", start: 0, end: 5, current: "A", proposed: null, direction: "", status: "draft", takes: [] }];
+    setSections(s, [{ id: "a:b", start: 0, end: 6, current: "B" }]);
+    expect(s.sections[0]).toMatchObject({ id: "a:b", end: 6, current: "B" });
+  });
+
   it("keeps the user's proposal, direction and takes when the agent re-sends a section", () => {
     const s = empty();
     setSections(s, [{ start: 0, end: 10, current: "Old line." }]);

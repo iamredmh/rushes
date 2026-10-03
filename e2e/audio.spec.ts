@@ -159,7 +159,7 @@ test("a range note with Fall and Quieter 3 dB saves its marks and draws on its l
   await page.keyboard.press("Enter");
   await expect(page.locator(".note")).toHaveCount(1);
   const { notes } = await rushes.api("GET", "/api/notes?stage=music");
-  expect(notes[0]).toMatchObject({ stage: "music", on: "b-warm-keys", scope: "range", t: 0.5, tOut: 1.5, marks: [{ kind: "fall" }, { kind: "quieter", db: 3 }] });
+  expect(notes[0]).toMatchObject({ stage: "music", on: "music/b-warm-keys", scope: "range", t: 0.5, tOut: 1.5, marks: [{ kind: "fall" }, { kind: "quieter", db: 3 }] });
   await expect(page.locator(".note .nmarks")).toHaveText("Fall · Quieter 3 dB");
   await expect(page.locator(".note .on")).toHaveText("B · Warm keys");
   await expect(page.locator(`.lane[data-row="music/b-warm-keys"] .span[data-note="${notes[0].id}"]`)).toHaveCount(1);
@@ -177,7 +177,7 @@ test("a whole note sends no time and is listed but not drawn", async ({ page, ru
   await page.keyboard.press("Enter");
   await expect(page.locator(".note .t")).toHaveText("Whole");
   const { notes } = await rushes.api("GET", "/api/notes?stage=music");
-  expect(notes[0]).toMatchObject({ scope: "whole", t: null, tOut: null, on: "a-deep-house", text: "Tempo: 110 BPM, keep the bassline.", marks: [] });
+  expect(notes[0]).toMatchObject({ scope: "whole", t: null, tOut: null, on: "music/a-deep-house", text: "Tempo: 110 BPM, keep the bassline.", marks: [] });
   await expect(page.locator(".lane [data-note]")).toHaveCount(0);
 });
 
@@ -211,8 +211,8 @@ test("Sound effects labels cues, and a note on a cue saves the cue and its time"
   await page.keyboard.press("Enter");
   await expect(page.locator(".note .on")).toHaveText("Cue · Swipe");
   const { notes } = await rushes.api("GET", "/api/notes?stage=sfx");
-  // §17.4 (amended): a cue note names its pass, `<pass id>:<cue id>`.
-  expect(notes[0]).toMatchObject({ stage: "sfx", on: "pass-a:swipe", scope: "point", t: 1.5, tOut: null });
+  // §17.4: a cue note names its lane and pass, `<lane id>/<pass id>:<cue id>`.
+  expect(notes[0]).toMatchObject({ stage: "sfx", on: "sfx/pass-a:swipe", scope: "point", t: 1.5, tOut: null });
   await expect(page.locator(`.lane[data-row="sfx/pass-a"] .mk[data-note="${notes[0].id}"]`)).toHaveCount(1);
   // Use works as on Music.
   await page.getByRole("button", { name: "Use Pass B" }).click();
@@ -348,7 +348,7 @@ test("a note on a cue two passes share names its pass, and an old bare cue id st
   await expect(page.locator(".note")).toHaveCount(2);
   const { notes } = await rushes.api("GET", "/api/notes?stage=sfx");
   const added = notes.find((n: { text: string }) => n.text === "Too bright on B.");
-  expect(added).toMatchObject({ on: "pass-b:swipe", scope: "point", t: 2.2 });
+  expect(added).toMatchObject({ on: "sfx/pass-b:swipe", scope: "point", t: 2.2 });
   await expect(page.locator(`.lane[data-row="sfx/pass-b"] .mk[data-note="${added.id}"]`)).toHaveCount(1);
   await expect(page.locator(`.lane[data-row="sfx/pass-a"] .mk[data-note="${added.id}"]`)).toHaveCount(0);
   await expect(page.locator(`.note[data-note="${added.id}"] .on`)).toHaveText("Cue · Swipe · Pass B");
@@ -937,7 +937,7 @@ test("Mix notes: a range on Music saves the variant and marks, a whole-mix note 
   await page.keyboard.press("Enter");
   await expect(page.locator(".note")).toHaveCount(1);
   let { notes } = await rushes.api("GET", "/api/notes?stage=mix");
-  expect(notes[0]).toMatchObject({ stage: "mix", on: bed.variant.id, scope: "range", t: 1, tOut: 2, marks: [{ kind: "quieter", db: 3 }] });
+  expect(notes[0]).toMatchObject({ stage: "mix", on: `${bed.lane.id}/${bed.variant.id}`, scope: "range", t: 1, tOut: 2, marks: [{ kind: "quieter", db: 3 }] });
   await expect(page.locator(`.lane[data-row="music"] .span[data-note="${notes[0].id}"]`)).toHaveCount(1);
   await expect(page.locator(`.lane[data-row="vo"] [data-note="${notes[0].id}"]`)).toHaveCount(0);
   await expect(page.locator(".note .on")).toHaveText("Music · Warm keys");
@@ -952,6 +952,34 @@ test("Mix notes: a range on Music saves the variant and marks, a whole-mix note 
   expect(whole).toMatchObject({ on: null, scope: "point", marks: [] });
   // A point on the whole mix is drawn on every lane.
   await expect(page.locator(`.lane .mk[data-note="${whole.id}"]`)).toHaveCount(3);
+});
+
+test("a Mix note on an SFX pass named like the music bed lands on Sound effects, and an old bare id still draws where it did", async ({ page, rushes }) => {
+  await rushes.addCut();
+  const bed = await rushes.addVariant("music", "Option A", { seconds: 4, freq: 330 });
+  const pass = await rushes.addVariant("sfx", "Option A", { seconds: 4, freq: 880 });
+  expect(bed.variant.id).toBe(pass.variant.id); // the clash: both "option-a"
+  await rushes.api("PUT", "/api/picks", { lanes: { [bed.lane.id]: bed.variant.id, [pass.lane.id]: pass.variant.id } });
+  // A note saved before `on` was lane-qualified: drawn on Music, the first lane heard with that id.
+  const old = (await rushes.api("POST", "/api/notes", { stage: "mix", on: "option-a", scope: "point", t: 1, text: "Old style." })).note;
+  await page.goto(rushes.testUrl());
+  await openTab(page, /Mix/, "6");
+  await loaded(page, 2);
+  await expect(page.locator(`.lane[data-row="music"] .mk[data-note="${old.id}"]`)).toHaveCount(1);
+  await expect(page.locator(`.lane[data-row="sfx"] .mk[data-note="${old.id}"]`)).toHaveCount(0);
+
+  await page.getByRole("combobox", { name: "Note on" }).selectOption({ label: "Sound effects · Option A" });
+  await page.evaluate(() => window.__rushesAudio!.engine!.seek(2));
+  await page.getByRole("textbox", { name: "New note" }).click();
+  await page.keyboard.type("Too loud here.");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".note")).toHaveCount(2);
+  const { notes } = await rushes.api("GET", "/api/notes?stage=mix");
+  const added = notes.find((n: { text: string }) => n.text === "Too loud here.");
+  expect(added).toMatchObject({ on: "sfx/option-a", scope: "point", t: 2 });
+  await expect(page.locator(`.lane[data-row="sfx"] .mk[data-note="${added.id}"]`)).toHaveCount(1);
+  await expect(page.locator(`.lane[data-row="music"] .mk[data-note="${added.id}"]`)).toHaveCount(0);
+  await expect(page.locator(`.note[data-note="${added.id}"] .on`)).toHaveText("Sound effects · Option A");
 });
 
 test("leaving Mix stops playback and releases its engine", async ({ page, rushes }) => {

@@ -119,7 +119,8 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     "rushes_add_variant",
     {
       title: "Add an audio variant",
-      description: "Add a music bed, SFX pass or VO lane variant for side-by-side review.",
+      description:
+        "Add a music bed, SFX pass or VO lane variant for side-by-side review. Returns its lane and variant ids: a note on it is `on` \"<lane id>/<variant id>\".",
       inputSchema: {
         project,
         stage: z.enum(["voice", "music", "sfx"]),
@@ -173,7 +174,8 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     "rushes_list_notes",
     {
       title: "List notes",
-      description: "Notes left in Rushes, filtered by tab, status, batch or version.",
+      description:
+        "Notes left in Rushes, filtered by tab, status, batch or version. A note's `on` says what it's about: null on Picture or for the whole mix, \"<lane>/<variant>\" for a music bed, SFX pass or voice variant, \"<lane>/<variant>:<cue>\" for an SFX cue, \"vo\" for the assembled read (Mix: the VO lane), \"<section>:<take>\" for a take, or a section id. Older notes may carry a bare variant id.",
       inputSchema: {
         project,
         stage: stage.optional(),
@@ -192,7 +194,8 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     "rushes_get_batch",
     {
       title: "Get a batch",
-      description: "The batch the user sent with Send to agent (latest by default), with its notes and script sections.",
+      description:
+        "The batch the user sent with Send to agent (latest by default), with its notes and script sections. A note's `on` says what it's about: null on Picture or for the whole mix, \"<lane>/<variant>\" for a music bed, SFX pass or voice variant, \"<lane>/<variant>:<cue>\" for an SFX cue, \"vo\" for the assembled read (Mix: the VO lane), \"<section>:<take>\" for a take, or a section id. Older notes may carry a bare variant id.",
       inputSchema: { project, id: z.string().optional() },
     },
     safe(async ({ project, id }) => (await ctx.client(project)).get(`/api/batches/${encodeURIComponent(id ?? "latest")}`)),
