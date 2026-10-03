@@ -836,8 +836,9 @@ export function loudnessReadout(s: LoudnessState): ReadoutCell[] {
   const all = (tip: string | null) => cells([DASH, tip], [DASH, tip], [DASH, tip]);
   if (s.kind === "empty") return all("Nothing to measure");
   if (s.kind === "waiting") return all(null);
-  if (s.kind === "timeout") return all("Measuring took too long");
-  if (s.kind === "error") return all("Couldn't measure loudness");
+  // Neither is cached by the server, so a click on the readout measures again.
+  if (s.kind === "timeout") return all("Measuring took too long · click to retry");
+  if (s.kind === "error") return all("Couldn't measure loudness · click to retry");
   const r = s.result;
   if (!r.available) return all(NO_FFMPEG);
   const level = (n: number | null): [string, string | null] =>

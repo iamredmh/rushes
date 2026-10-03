@@ -64,10 +64,30 @@ export function liveContexts(): number {
   return live;
 }
 
-// Waveform peaks, by mediaKey (path#rev), for the session (§17.2).
+// Waveform peaks, by mediaKey (path#rev), for the session (§17.2). Up to about 240 KB a file
+// revision, so it's an LRU capped at PEAKS_CACHE_LIMIT entries: an agent re-rendering in place all
+// session would otherwise grow it without end. A hit moves the entry to the newest end.
+export const PEAKS_CACHE_LIMIT = 200;
 const peaksCache = new Map<string, Float32Array>();
 export function clearPeaksCache(): void {
   peaksCache.clear();
+}
+/** How many files' peaks are cached. */
+export function peaksCacheSize(): number {
+  return peaksCache.size;
+}
+function cachedPeaks(key: string): Float32Array | undefined {
+  const peaks = peaksCache.get(key);
+  if (peaks) {
+    peaksCache.delete(key);
+    peaksCache.set(key, peaks);
+  }
+  return peaks;
+}
+function cachePeaks(key: string, peaks: Float32Array): void {
+  peaksCache.delete(key);
+  peaksCache.set(key, peaks);
+  while (peaksCache.size > PEAKS_CACHE_LIMIT) peaksCache.delete(peaksCache.keys().next().value!);
 }
 
 interface Media {
@@ -282,12 +302,12 @@ export class AudioEngine {
 
     let result: LoadResult;
     if (buffer && !shouldStream(buffer.duration, true)) {
-      let peaks = peaksCache.get(key);
+      let peaks = cachedPeaks(key);
       if (!peaks) {
         const channels: Float32Array[] = [];
         for (let i = 0; i < buffer.numberOfChannels; i++) channels.push(buffer.getChannelData(i));
         peaks = mixPeaks(channels, peakBuckets(buffer.duration));
-        peaksCache.set(key, peaks);
+        cachePeaks(key, peaks);
       }
       this.media.set(key, { duration: buffer.duration, buffer, streamed: false });
       result = { duration: buffer.duration, peaks, streamed: false };

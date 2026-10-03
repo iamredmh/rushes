@@ -109,6 +109,10 @@ export function Mix({ state, assets, video, toast, onChanged, onPendingChange }:
   const signature = JSON.stringify({ want, clips: MIX_LANES.map((l) => clipsOf[l].map((c) => [c.path, c.rev ?? "", c.offset])) });
   const [loudness, setLoudness] = useState<LoudnessState>({ kind: "waiting" });
   const [measuring, setMeasuring] = useState(false);
+  // Bumped by clicking the readout after a timeout or an error: the server never caches either, so
+  // asking again with unchanged data really measures again.
+  const [retry, setRetry] = useState(0);
+  const retryable = loudness.kind === "timeout" || loudness.kind === "error";
   const asked = useRef(0);
   useEffect(() => {
     const ask = ++asked.current;
@@ -117,6 +121,9 @@ export function Mix({ state, assets, video, toast, onChanged, onPendingChange }:
       setMeasuring(false);
       return;
     }
+    // A reason there's no number ("Nothing to measure", a timeout, an error) is stale the moment a
+    // new reading is on its way: show the plain dash until it lands.
+    setLoudness((s) => (s.kind === "empty" || s.kind === "timeout" || s.kind === "error" ? { kind: "waiting" } : s));
     setMeasuring(true);
     const timer = window.setTimeout(() => {
       api.post<LoudnessResult>("/api/mix/loudness", { lanes: want }).then(
@@ -131,12 +138,18 @@ export function Mix({ state, assets, video, toast, onChanged, onPendingChange }:
       });
     }, LOUDNESS_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
-  }, [signature]);
+  }, [signature, retry]);
   // A reading that lands after you've left the tab is dropped.
   useEffect(() => () => void ++asked.current, []);
 
   const readout = (
-    <div class="meter" aria-label="Loudness" aria-busy={measuring}>
+    <div
+      class={retryable ? "meter retry" : "meter"}
+      role="group"
+      aria-label="Loudness"
+      aria-busy={measuring}
+      onClick={retryable ? () => setRetry((n) => n + 1) : undefined}
+    >
       {loudnessReadout(loudness).map((c) => (
         <div data-cell={c.id}>
           <b data-value data-tip={c.tip ?? undefined} aria-description={c.tip ?? undefined}>{c.value}</b>
@@ -145,6 +158,10 @@ export function Mix({ state, assets, video, toast, onChanged, onPendingChange }:
       ))}
       {measuring && (
         <span class="smk measuring" data-measuring data-tip="Measuring" aria-label="Measuring"><Icon name="gauge" /></span>
+      )}
+      {retryable && !measuring && (
+        // The keyboard's way to the same retry; a click on it bubbles to the readout's own handler.
+        <button type="button" class="btn ghost ib" data-tip="Measure again" aria-label="Measure again"><Icon name="gauge" /></button>
       )}
     </div>
   );

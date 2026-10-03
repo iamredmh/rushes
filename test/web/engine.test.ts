@@ -3,7 +3,9 @@
 // The real-browser checks live in the Music tab's e2e tests (Task 3).
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { claim, owner, release } from "../../web/src/audio/bus.js";
-import { AudioEngine, clearPeaksCache, liveContexts, RAMP_SECONDS, START_LEAD, type EngineOptions } from "../../web/src/audio/engine.js";
+import {
+  AudioEngine, clearPeaksCache, liveContexts, PEAKS_CACHE_LIMIT, peaksCacheSize, RAMP_SECONDS, START_LEAD, type EngineOptions,
+} from "../../web/src/audio/engine.js";
 import type { Clip } from "../../web/src/audio/timeline.js";
 
 type Call = [string, ...number[]];
@@ -538,6 +540,26 @@ describe("AudioEngine: fix round 1", () => {
     expect(fetches[0].signal?.aborted).toBe(true);
     gates["/m/slow.wav"].open();
     await expect(loading).rejects.toThrow();
+  });
+
+  it("caps the peak cache, dropping the least recently used file revision first (M5)", async () => {
+    const engine = new AudioEngine(undefined, options());
+    const r0 = (await engine.load("a.wav", "r0")).peaks;
+    const r1 = (await engine.load("a.wav", "r1")).peaks;
+    for (let i = 2; i < PEAKS_CACHE_LIMIT; i++) await engine.load("a.wav", `r${i}`);
+    expect(peaksCacheSize()).toBe(PEAKS_CACHE_LIMIT);
+    engine.dispose();
+    // r0 is used again (a hit), so r1 is now the least recently used; one more revision evicts it.
+    const next = new AudioEngine(undefined, options());
+    expect((await next.load("a.wav", "r0")).peaks).toBe(r0);
+    await next.load("a.wav", "new");
+    expect(peaksCacheSize()).toBe(PEAKS_CACHE_LIMIT);
+    next.dispose();
+    const later = new AudioEngine(undefined, options());
+    expect((await later.load("a.wav", "r0")).peaks).toBe(r0);
+    // r1's peaks were dropped, so they're worked out afresh.
+    expect((await later.load("a.wav", "r1")).peaks).not.toBe(r1);
+    later.dispose();
   });
 
   it("keys files on their revision: a re-render in place decodes afresh with new peaks", async () => {

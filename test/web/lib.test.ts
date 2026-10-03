@@ -866,8 +866,8 @@ describe("Mix", () => {
       expect(tips({ kind: "waiting" })).toEqual([null, null, null]);
     });
     it("says why there's no reading when it timed out or failed", () => {
-      expect(tips({ kind: "timeout" })).toEqual(Array(3).fill("Measuring took too long"));
-      expect(tips({ kind: "error" })).toEqual(Array(3).fill("Couldn't measure loudness"));
+      expect(tips({ kind: "timeout" })).toEqual(Array(3).fill("Measuring took too long · click to retry"));
+      expect(tips({ kind: "error" })).toEqual(Array(3).fill("Couldn't measure loudness · click to retry"));
     });
     it("shows music under VO as — when either is missing from the mix", () => {
       const s = result({ musicUnderVo: null });
