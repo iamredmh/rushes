@@ -1,5 +1,5 @@
 import type { ComponentChildren, RefObject } from "preact";
-import { useRef, useState } from "preact/hooks";
+import { type MutableRef, useRef, useState } from "preact/hooks";
 import { api, mediaUrl } from "../api.js";
 import { MARK_DB, type MarkKind, marksLabel, noteTime, type OnOption, placeNote, type Scope, setMarkDb, shotLabel, toggleMark } from "../lib.js";
 import type { Mark, Note } from "../types.js";
@@ -36,6 +36,8 @@ export interface NotesProps {
   onLabel?(note: Note): string | null;
   /** Times are shown as saved, never placed on another cut, and with no "from vN" (audio tabs). */
   fixedTimes?: boolean;
+  /** Set to a function that starts a note with the given text (caret at the end), as a chip does. */
+  starter?: MutableRef<((text: string) => void) | null>;
 }
 
 const MARK_KINDS: { kind: MarkKind; label: string }[] = [
@@ -52,7 +54,7 @@ const SCOPES: { value: Scope; label: string }[] = [
 
 /** The notes column used on every tab: list, filter, done circles and the note box. */
 export function Notes({
-  notes, version, placeholder, attachments, inputRef, toast, onAdd, onSeek, onChanged, onTextChange, on, scope, chips, marks, onLabel, fixedTimes,
+  notes, version, placeholder, attachments, inputRef, toast, onAdd, onSeek, onChanged, onTextChange, on, scope, chips, marks, onLabel, fixedTimes, starter,
 }: NotesProps) {
   const [filter, setFilter] = useState<Filter>("all");
   const ownInput = useRef<HTMLTextAreaElement>(null);
@@ -90,9 +92,8 @@ export function Notes({
     }
   };
 
-  /** A chip starts a note: "Tempo: " in the box, caret at the end. */
-  const start = (chip: string) => {
-    const value = `${chip}: `;
+  /** Start a note with `value` in the box, caret at the end. A chip starts "Tempo: ". */
+  const begin = (value: string) => {
     setText(value);
     onTextChange?.(true);
     const el = box.current;
@@ -102,6 +103,7 @@ export function Notes({
       el.setSelectionRange(value.length, value.length);
     }
   };
+  if (starter) starter.current = begin;
 
   return (
     <aside class="panel side" aria-label="Notes">
@@ -180,7 +182,7 @@ export function Notes({
         {/* In Range, the marks row takes the chips' place, so the composer never grows by a row. */}
         {chips && chips.length > 0 && !(marks && scope?.value === "range") && (
           <div class="row" role="group" aria-label="Start a note">
-            {chips.map((c) => <button type="button" class="chip" onClick={() => start(c)}>{c}</button>)}
+            {chips.map((c) => <button type="button" class="chip" onClick={() => begin(`${c}: `)}>{c}</button>)}
           </div>
         )}
         {marks && scope?.value === "range" && (

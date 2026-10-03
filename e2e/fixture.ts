@@ -38,6 +38,8 @@ export interface Rushes {
   addVerticalCut(note?: string): Promise<{ version: { id: string } }>;
   /** Write a generated sine WAV into the project and register it as a variant on `stage`. */
   addVariant(stage: "voice" | "music" | "sfx", name: string, opts: VariantOptions): Promise<{ lane: { id: string }; variant: { id: string; cues: { id: string; name: string; t: number }[] } }>;
+  /** Write a generated sine WAV into the project and register it as a take of script section `sectionId`. */
+  addTake(sectionId: string, opts: { seconds: number; freq: number }): Promise<{ take: { id: string; file: string; duration: number | null; forText: string } }>;
   /**
    * Stop this project's server and start a different, fresh project on exactly the
    * same port, simulating port reuse after `rushes stop`. Updates `url`, `base` and
@@ -154,6 +156,12 @@ export const test = base.extend<{ rushes: Rushes }>({
       await writeFile(join(root, file), makeWav({ seconds: opts.seconds, freq: opts.freq }));
       return api("POST", "/api/variants", { stage, name, file, lane: opts.lane, meta: opts.meta, cues: opts.cues });
     };
+    const addTake = async (sectionId: string, opts: { seconds: number; freq: number }) => {
+      const file = `audio/take-${++wavs}-${sectionId.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.wav`;
+      await mkdir(join(root, "audio"), { recursive: true });
+      await writeFile(join(root, file), makeWav({ seconds: opts.seconds, freq: opts.freq }));
+      return api("POST", `/api/script/${encodeURIComponent(sectionId)}/takes`, { file });
+    };
     const swapProject = async () => {
       const port = Number(new URL(url).port);
       await stop(child);
@@ -175,6 +183,7 @@ export const test = base.extend<{ rushes: Rushes }>({
       addCut,
       addVerticalCut,
       addVariant,
+      addTake,
       swapProject,
     });
 

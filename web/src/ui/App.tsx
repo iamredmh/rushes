@@ -8,6 +8,7 @@ import { Icon, STAGE_ICONS } from "./Icon.js";
 import { Picture } from "./Picture.js";
 import { Script } from "./Script.js";
 import { VariantTab } from "./VariantTab.js";
+import { Voice } from "./Voice.js";
 
 const ORDER: Stage[] = ["script", "picture", "voice", "music", "sfx", "mix"];
 // Assets isn't a review stage (§15.3): it's a dashboard-only tab after the six stages, so it's
@@ -385,6 +386,17 @@ export function App() {
           />
         ) : stage === "script" ? (
           <Script script={state.script} toast={toast} onChanged={() => void refresh()} />
+        ) : stage === "voice" ? (
+          // Its own engine, disposed (and stopped) when you leave, like the other audio tabs.
+          <Voice
+            key="voice"
+            state={state}
+            assets={assets}
+            video={video ?? null}
+            toast={toast}
+            onChanged={() => void refresh()}
+            onPendingChange={setPending}
+          />
         ) : stage === "music" || stage === "sfx" ? (
           // Keyed by stage: each audio tab gets its own engine, disposed (and stopped) when you leave.
           <VariantTab

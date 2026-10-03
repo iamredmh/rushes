@@ -13,6 +13,11 @@ import {
   variantNoteRow, variantNoteTarget, variantOnLabel, variantOnOptions, variantRows,
 } from "../../web/src/lib.js";
 import type { Lane } from "../../web/src/types.js";
+import { isTakeStale as serverIsTakeStale } from "../../src/core/script.js";
+import {
+  isTakeStale, pickedVoiceRow, READ_ROW, readTake, sectionAt, sectionLabel, takeLabel, voiceListening, type VoiceModel,
+  voiceNoteRows, voiceNoteTarget, voiceOnLabel, voiceOnOptions,
+} from "../../web/src/lib.js";
 
 const note = (over: Partial<Note>): Note => ({
   id: "n_1", stage: "picture", video: "hero", version: "v3", on: null, scope: "point", t: 12.4, tOut: null, frame: null,
@@ -508,5 +513,143 @@ describe("audio tabs: lanes", () => {
     expect(testFlags("?test=1")).toEqual({ test: true, streamOver: false });
     expect(testFlags("?test=1&streamOver=1")).toEqual({ test: true, streamOver: true });
     expect(testFlags("?streamOver=1")).toEqual({ test: false, streamOver: false });
+  });
+});
+
+describe("Voiceover", () => {
+  const take = (id: string, forText = "line", duration: number | null = 3) => ({ id, file: `audio/${id}.wav`, duration, forText });
+  const sec = (id: string, start: number, end: number, takes: ReturnType<typeof take>[], current = "line"): Section => ({
+    id, start, end, current, proposed: null, direction: "", status: "draft", takes,
+  });
+  const sections = [
+    sec("s1", 0, 4, [take("t1")]),
+    sec("s2", 4, 8, [take("t1"), take("t2"), take("t3", "old line")]),
+    sec("s3", 8, 12, []),
+  ];
+  const voiceLanes: Lane[] = [
+    { id: "alt", stage: "voice", name: "Alt reads", variants: [
+      { id: "warm", name: "Warm read", file: "audio/warm.wav", meta: {}, cues: [] },
+      { id: "dry", name: "Dry read", file: "audio/dry.wav", meta: {}, cues: [] },
+    ] },
+  ];
+  const variants = variantRows(voiceLanes, "voice");
+  const model = (over: Partial<VoiceModel> = {}): VoiceModel => ({ sections, picks: {}, variants, lanePicks: {}, ...over });
+
+  it("turns on Voiceover", () => {
+    expect(BUILT.voice).toBe(true);
+    expect(AUDIO_CHIPS.voice).toEqual(["Level", "Pace", "Pronunciation", "Breath"]);
+  });
+  it("calls a take stale exactly as the server does", () => {
+    for (const [forText, current] of [["a", "a"], ["a ", " a"], ["a", "b"], ["", ""], ["one line", "one  line"]]) {
+      const s = sec("s", 0, 1, [], current);
+      const t = take("t", forText);
+      expect(isTakeStale(t, s)).toBe(serverIsTakeStale(t, s));
+    }
+    expect(isTakeStale(sections[1].takes[2], sections[1])).toBe(true);
+    expect(isTakeStale(sections[1].takes[0], sections[1])).toBe(false);
+  });
+  it("names sections and takes", () => {
+    expect(sectionLabel("s2")).toBe("S2");
+    expect(takeLabel(sections[1], "t3")).toBe("S2 · Take 3");
+  });
+  it("reads a section's pick, else its newest take", () => {
+    expect(readTake(sections[1], {})?.id).toBe("t3");
+    expect(readTake(sections[1], { s2: "t1" })?.id).toBe("t1");
+    expect(readTake(sections[1], { s2: "gone" })?.id).toBe("t3");
+    expect(readTake(sections[2], {})).toBeNull();
+  });
+  it("finds the section under the playhead", () => {
+    expect(sectionAt(sections, 0)).toBe("s1");
+    expect(sectionAt(sections, 4)).toBe("s2");
+    expect(sectionAt(sections, 11.9)).toBe("s3");
+    expect(sectionAt(sections, 12)).toBeNull();
+  });
+  it("swaps in a voice variant only when one is picked, as the mix does", () => {
+    expect(pickedVoiceRow(variants, {})).toBeNull();
+    expect(pickedVoiceRow(variants, { alt: "nope" })).toBeNull();
+    expect(pickedVoiceRow(variants, { alt: "dry" })?.key).toBe("alt/dry");
+  });
+
+  describe("what's heard", () => {
+    it("plays the read with the picks by default, every variant lane silent", () => {
+      expect(voiceListening(model({ picks: { s2: "t1" } }), null)).toEqual({
+        select: { "sec:s1": "s1:t1", "sec:s2": "s2:t1", "var:alt": "alt/warm" },
+        gains: { "sec:s1": 1, "sec:s2": 1, "var:alt": 0 },
+      });
+    });
+    it("plays the picked voice variant instead of the read", () => {
+      expect(voiceListening(model({ lanePicks: { alt: "dry" } }), null)).toEqual({
+        select: { "sec:s1": "s1:t1", "sec:s2": "s2:t3", "var:alt": "alt/dry" },
+        gains: { "sec:s1": 0, "sec:s2": 0, "var:alt": 1 },
+      });
+    });
+    it("auditions a take in its section's place, in the read", () => {
+      const heard = voiceListening(model({ lanePicks: { alt: "dry" } }), "take:s2:t1");
+      expect(heard.select).toMatchObject({ "sec:s1": "s1:t1", "sec:s2": "s2:t1" });
+      expect(heard.gains).toEqual({ "sec:s1": 1, "sec:s2": 1, "var:alt": 0 });
+    });
+    it("goes back to the picks when the read is clicked, even with a variant picked", () => {
+      const heard = voiceListening(model({ picks: { s2: "t2" }, lanePicks: { alt: "dry" } }), READ_ROW);
+      expect(heard.select).toMatchObject({ "sec:s2": "s2:t2" });
+      expect(heard.gains).toEqual({ "sec:s1": 1, "sec:s2": 1, "var:alt": 0 });
+    });
+    it("auditions a voice variant on its own", () => {
+      expect(voiceListening(model(), "alt/dry")).toEqual({
+        select: { "sec:s1": "s1:t1", "sec:s2": "s2:t3", "var:alt": "alt/dry" },
+        gains: { "sec:s1": 0, "sec:s2": 0, "var:alt": 1 },
+      });
+    });
+    it("gives a section with no takes no lane", () => {
+      expect(Object.keys(voiceListening(model(), null).select)).not.toContain("sec:s3");
+    });
+  });
+
+  describe("notes", () => {
+    const n = (on: string | null, t: number | null = 5) => ({ on, t });
+    it("resolves what a note is on", () => {
+      expect(voiceNoteTarget(sections, variants, "vo")).toEqual({ kind: "read" });
+      expect(voiceNoteTarget(sections, variants, null)).toEqual({ kind: "read" });
+      expect(voiceNoteTarget(sections, variants, "s2")).toEqual({ kind: "section", section: "s2" });
+      expect(voiceNoteTarget(sections, variants, "s2:t1")).toEqual({ kind: "take", section: "s2", take: "t1" });
+      expect(voiceNoteTarget(sections, variants, "dry")).toEqual({ kind: "variant", row: "alt/dry" });
+      expect(voiceNoteTarget(sections, variants, "s2:t9")).toBeNull();
+    });
+    it("draws read and section notes on the read, inside the section's span", () => {
+      const m = model();
+      expect(voiceNoteRows(m, n("vo", 10), "s1")).toEqual(["vo"]);
+      expect(voiceNoteRows(m, n("s2", 5), "s1")).toEqual(["vo"]);
+      expect(voiceNoteRows(m, n("s2", 9), "s2")).toEqual([]);
+      expect(voiceNoteRows(m, n("s2", null), "s2")).toEqual([]);
+    });
+    it("draws a take note on the read, and on its sub-lane while its section is shown", () => {
+      const m = model();
+      expect(voiceNoteRows(m, n("s2:t1", 5), "s1")).toEqual(["vo"]);
+      expect(voiceNoteRows(m, n("s2:t1", 5), "s2")).toEqual(["vo", "take:s2:t1"]);
+    });
+    it("draws a variant note on its variant", () => {
+      expect(voiceNoteRows(model(), n("warm", 1), "s1")).toEqual(["alt/warm"]);
+    });
+    it("offers the read, each section, the shown section's takes and each variant", () => {
+      const opts = voiceOnOptions(model(), "s2");
+      expect(opts.map((o) => [o.value, o.label, o.on])).toEqual([
+        ["r", "Assembled read", "vo"],
+        ["s:s1", "S1", "s1"],
+        ["s:s2", "S2", "s2"],
+        ["s:s3", "S3", "s3"],
+        ["t:s2:t1", "S2 · Take 1", "s2:t1"],
+        ["t:s2:t2", "S2 · Take 2", "s2:t2"],
+        ["t:s2:t3", "S2 · Take 3", "s2:t3"],
+        ["v:alt/warm", "Warm read", "warm"],
+        ["v:alt/dry", "Dry read", "dry"],
+      ]);
+    });
+    it("labels a listed note", () => {
+      const m = model();
+      expect(voiceOnLabel(m, "vo")).toBe("Assembled read");
+      expect(voiceOnLabel(m, "s2")).toBe("S2");
+      expect(voiceOnLabel(m, "s2:t2")).toBe("S2 · Take 2");
+      expect(voiceOnLabel(m, "dry")).toBe("Dry read");
+      expect(voiceOnLabel(m, "nowhere")).toBeNull();
+    });
   });
 });

@@ -1,5 +1,5 @@
 // Pure helpers for the dashboard. No DOM, so they're unit-tested in Node.
-import type { Asset, AssetKind, Cue, Lane, Mark, Note, Section, Shot, Stage, TabState, Video, Version } from "./types.js";
+import type { Asset, AssetKind, Cue, Lane, Mark, Note, Section, Shot, Stage, TabState, Take, Video, Version } from "./types.js";
 
 /** 72.4 -> "1:12.40" (minutes, seconds, hundredths). */
 export function fmt(t: number): string {
@@ -80,7 +80,7 @@ export function neighbourVideo(videos: Video[], currentId: string | null, dir: -
 }
 
 /** Is this stage built in this release of the dashboard? Later releases add the audio tabs. */
-export const BUILT: Record<Stage, boolean> = { script: true, picture: true, voice: false, music: true, sfx: true, mix: false };
+export const BUILT: Record<Stage, boolean> = { script: true, picture: true, voice: true, music: true, sfx: true, mix: false };
 
 export const STAGE_NAMES: Record<Stage, string> = {
   script: "Script",
@@ -496,4 +496,174 @@ export function testFlags(search: string): { test: boolean; streamOver: boolean 
   const q = new URLSearchParams(search);
   const test = q.get("test") === "1";
   return { test, streamOver: test && q.get("streamOver") === "1" };
+}
+
+// ---- Voiceover (§17.5) ----
+
+/** A web copy of src/core/script.ts's isTakeStale (the web bundle imports types only from src/; a
+ *  unit test asserts the two agree): a take is stale once its section's line no longer matches the
+ *  text it was read from. */
+export function isTakeStale(take: Pick<Take, "forText">, s: Pick<Section, "current">): boolean {
+  return take.forText.trim() !== s.current.trim();
+}
+
+/** "S2": a section's name on every tab. */
+export function sectionLabel(id: string): string {
+  return id.toUpperCase();
+}
+
+/** "S2 · Take 1": a take is named by its place in its section, as Assets names it. */
+export function takeLabel(s: { id: string; takes: { id: string }[] }, takeId: string): string {
+  return `${sectionLabel(s.id)} · Take ${s.takes.findIndex((t) => t.id === takeId) + 1}`;
+}
+
+/** The take a section's read uses: its pick, else its newest; null with no takes. The same rule as the mix. */
+export function readTake<T extends { id: string }>(s: { id: string; takes: T[] }, picks: Record<string, string>): T | null {
+  if (s.takes.length === 0) return null;
+  return s.takes.find((t) => t.id === picks[s.id]) ?? s.takes[s.takes.length - 1];
+}
+
+/** The section whose span [start, end) holds `t`, or null in a gap. */
+export function sectionAt(sections: Pick<Section, "id" | "start" | "end">[], t: number): string | null {
+  return sections.find((s) => t >= s.start && t < s.end)?.id ?? null;
+}
+
+/**
+ * The whole-read voice variant that replaces the assembled read, as in the mix: the first voice
+ * lane, in manifest order, whose pick names one of its variants. Never just the only or first one.
+ */
+export function pickedVoiceRow(rows: VariantRow[], lanePicks: Record<string, string>): VariantRow | null {
+  return rows.find((r) => lanePicks[r.lane] === r.variant) ?? null;
+}
+
+// The Voiceover tab's names. Row keys, engine lanes and On values each keep to their own namespace.
+/** The assembled read: its row key, and the `on` a note on it saves. */
+export const READ_ROW = "vo";
+/** The engine lane holding one section's candidates: every take of it, at the section's start. */
+export const sectionLane = (sectionId: string): string => `sec:${sectionId}`;
+/** The engine lane holding one voice lane's variants. */
+export const voiceLane = (laneId: string): string => `var:${laneId}`;
+/** A take's engine clip id, and the `on` a note on it saves: "<section>:<take>", as assembleRead. */
+export const takeClipId = (sectionId: string, takeId: string): string => `${sectionId}:${takeId}`;
+/** A take sub-lane's row key. */
+export const takeRowKey = (sectionId: string, takeId: string): string => `take:${takeClipId(sectionId, takeId)}`;
+
+/** What an audio tab hears: per engine lane, the one clip that plays (null: all of them), and the lane's gain. */
+export interface Listening {
+  select: Record<string, string | null>;
+  gains: Record<string, number>;
+}
+
+export interface VoiceModel {
+  sections: Pick<Section, "id" | "start" | "end" | "takes">[];
+  /** picks.sections */
+  picks: Record<string, string>;
+  /** The voice lanes' variants, in manifest order (variantRows(lanes, "voice")). */
+  variants: VariantRow[];
+  /** picks.lanes */
+  lanePicks: Record<string, string>;
+}
+
+function takeByRow(sections: VoiceModel["sections"], key: string | null): { section: string; take: string } | null {
+  if (key === null) return null;
+  for (const s of sections) for (const t of s.takes) if (takeRowKey(s.id, t.id) === key) return { section: s.id, take: t.id };
+  return null;
+}
+
+/**
+ * What the Voiceover tab plays, given the selected row (§17.5).
+ *
+ * Each section is an engine lane (`sec:<id>`) holding every take of it at the section's start; its
+ * selection is the one take heard. Each voice lane (`var:<id>`) holds its variants. One source
+ * sounds at a time, switched by lane gains: the read (every section lane at 1) or one voice variant.
+ * - Nothing selected: the read with the picks, or the picked voice variant instead (the mix rule).
+ * - The read selected: the read with the picks.
+ * - A take selected: the read, with that take in its section's place.
+ * - A voice variant selected: that variant.
+ * All of it is gains on one clock, so switching never moves the playhead.
+ */
+export function voiceListening(m: VoiceModel, selected: string | null): Listening {
+  const variant = m.variants.find((r) => r.key === selected) ?? null;
+  const take = variant ? null : takeByRow(m.sections, selected);
+  const source = variant ?? (selected === READ_ROW || take ? null : pickedVoiceRow(m.variants, m.lanePicks));
+  const select: Record<string, string | null> = {};
+  const gains: Record<string, number> = {};
+  for (const s of m.sections) {
+    const picked = readTake(s, m.picks);
+    if (!picked) continue;
+    const heard = take && take.section === s.id ? take.take : picked.id;
+    select[sectionLane(s.id)] = takeClipId(s.id, heard);
+    gains[sectionLane(s.id)] = source ? 0 : 1;
+  }
+  for (const r of m.variants) {
+    const lane = voiceLane(r.lane);
+    if (lane in select) continue;
+    const inLane = m.variants.filter((x) => x.lane === r.lane);
+    const live = source?.lane === r.lane;
+    const heard = live ? source! : (inLane.find((x) => m.lanePicks[x.lane] === x.variant) ?? inLane[0]);
+    select[lane] = heard.key;
+    gains[lane] = live ? 1 : 0;
+  }
+  return { select, gains };
+}
+
+export type VoiceTarget =
+  | { kind: "read" }
+  | { kind: "section"; section: string }
+  | { kind: "take"; section: string; take: string }
+  | { kind: "variant"; row: string };
+
+/**
+ * What a Voiceover note is on: "vo" is the read, "<section>:<take>" a take, a section id that
+ * section, else a voice variant's id. A note with no `on` is about the read.
+ */
+export function voiceNoteTarget(sections: VoiceModel["sections"], variants: VariantRow[], on: string | null): VoiceTarget | null {
+  if (on === null || on === READ_ROW) return { kind: "read" };
+  for (const s of sections) for (const t of s.takes) if (takeClipId(s.id, t.id) === on) return { kind: "take", section: s.id, take: t.id };
+  if (sections.some((s) => s.id === on)) return { kind: "section", section: on };
+  const v = variants.find((r) => r.variant === on);
+  return v ? { kind: "variant", row: v.key } : null;
+}
+
+/**
+ * The rows a Voiceover note is drawn on: the read, for a note on the read, or on a section or take
+ * whose time falls in that section; and a take note's own sub-lane while its section is shown.
+ */
+export function voiceNoteRows(m: Pick<VoiceModel, "sections" | "variants">, note: Pick<Note, "on" | "t">, shown: string | null): string[] {
+  const target = voiceNoteTarget(m.sections, m.variants, note.on);
+  if (!target || note.t === null) return [];
+  if (target.kind === "read") return [READ_ROW];
+  if (target.kind === "variant") return [target.row];
+  const s = m.sections.find((x) => x.id === target.section)!;
+  const take = target.kind === "take" ? s.takes.find((t) => t.id === target.take) : undefined;
+  // A take can run past its section's end; a note on that overrun is still on the take.
+  const end = Math.max(s.end, s.start + (take?.duration ?? 0));
+  const rows = note.t >= s.start && note.t <= end ? [READ_ROW] : [];
+  if (target.kind === "take" && shown === s.id) rows.push(takeRowKey(s.id, target.take));
+  return rows;
+}
+
+/**
+ * The On menu on Voiceover: the read, each section (S1 …), the shown section's takes and each voice
+ * variant. Values: "r", "s:<section>", "t:<section>:<take>", "v:<lane>/<variant>".
+ */
+export function voiceOnOptions(m: Pick<VoiceModel, "sections" | "variants">, shown: string | null): OnOption[] {
+  const out: OnOption[] = [{ value: "r", label: "Assembled read", on: READ_ROW, row: READ_ROW }];
+  for (const s of m.sections) out.push({ value: `s:${s.id}`, label: sectionLabel(s.id), on: s.id, row: READ_ROW });
+  const sec = m.sections.find((s) => s.id === shown);
+  for (const t of sec?.takes ?? []) {
+    out.push({ value: `t:${takeClipId(sec!.id, t.id)}`, label: takeLabel(sec!, t.id), on: takeClipId(sec!.id, t.id), row: takeRowKey(sec!.id, t.id) });
+  }
+  for (const r of m.variants) out.push({ value: `v:${r.key}`, label: r.name, on: r.variant, row: r.key });
+  return out;
+}
+
+/** What a listed Voiceover note is on: "Assembled read", "S2", "S2 · Take 1" or the variant's name. */
+export function voiceOnLabel(m: Pick<VoiceModel, "sections" | "variants">, on: string | null): string | null {
+  const target = voiceNoteTarget(m.sections, m.variants, on);
+  if (!target) return null;
+  if (target.kind === "read") return "Assembled read";
+  if (target.kind === "section") return sectionLabel(target.section);
+  if (target.kind === "take") return takeLabel(m.sections.find((s) => s.id === target.section)!, target.take);
+  return m.variants.find((r) => r.key === target.row)?.name ?? null;
 }

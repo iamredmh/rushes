@@ -1,17 +1,17 @@
 // The shared layout of the audio tabs (§17.1): the tracks on the left (title, transport, lanes), a
-// muted picture preview and the notes on the right. Music and Sound effects use it now; Voiceover
-// and Mix reuse it.
+// muted picture preview and the notes on the right. Music, Sound effects and Voiceover use it; Mix
+// reuses it.
 //
 // One AudioEngine per mount (useAudioStage) is the clock. Nothing re-renders per frame: the
 // playheads, the timecode and the preview follow `engine.subscribe` through refs.
 import type { ComponentChildren } from "preact";
-import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { type MutableRef, useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, mediaUrl } from "../api.js";
 import { type AudioEngine, type EngineSnapshot, liveContexts } from "../audio/engine.js";
 import { type Clip, needsVideoSync, setStreamThreshold } from "../audio/timeline.js";
 import { useAudioStage } from "../audio/useAudioStage.js";
 import {
-  AUDIO_CHIPS, type AudioStageId, fmt, laneSelection, noteTime, type OnOption, type Scope, snap, stepFrame, testFlags,
+  AUDIO_CHIPS, type AudioStageId, fmt, laneSelection, type Listening, noteTime, type OnOption, type Scope, snap, stepFrame, testFlags,
 } from "../lib.js";
 import type { Mark, Note } from "../types.js";
 import { Icon } from "./Icon.js";
@@ -33,6 +33,9 @@ export interface AudioTestHook {
   /** Waveform draws since the page loaded. */
   draws(): number;
   liveContexts(): number;
+  /** The clips the mounted tab plays: every one, and those heard now (variant gain × lane gain > 0). */
+  clips: Clip[];
+  heard(): { id: string; lane: string; path: string; offset: number }[];
 }
 declare global {
   interface Window {
@@ -48,6 +51,14 @@ const hook: AudioTestHook | null = FLAGS.test
       renders: 0,
       draws: waveDraws,
       liveContexts,
+      clips: [],
+      heard() {
+        const s = this.engine?.inspect();
+        if (!s) return [];
+        return this.clips
+          .filter((c) => (s.gains[c.id] ?? 1) * (s.lanes[c.lane] ?? 1) > 0)
+          .map((c) => ({ id: c.id, lane: c.lane, path: c.path, offset: c.offset }));
+      },
     }
   : null;
 if (hook) window.__rushesAudio = hook;
@@ -58,6 +69,15 @@ export interface Preview {
   version: string;
   file: string;
   duration: number | null;
+}
+
+/** What a tab can do to its stage from outside (Voiceover's section switch and New take). */
+export interface StageHandle {
+  engine: AudioEngine;
+  /** Point the On menu at one of its values. */
+  setOn(value: string): void;
+  /** Start a note: `text` in the box with the caret at the end, and On and the scope set. */
+  startNote(text: string, opts?: { on?: string; scope?: Scope }): void;
 }
 
 export interface AudioStageProps {
@@ -77,21 +97,32 @@ export interface AudioStageProps {
   notes: Note[];
   /** The On menu. A row's `on` names one of these. */
   onOptions: OnOption[];
-  /** The row a note is drawn on, or null (whole notes are never drawn). */
-  noteRow(note: Note): string | null;
+  /** The row (or rows) a note is drawn on, or null (whole notes are never drawn). */
+  noteRow(note: Note): string | string[] | null;
   /** What a listed note is on, for the notes column. */
   onLabel(note: Note): string | null;
   toast(message: string): void;
   onChanged(): void;
   /** A half-typed note or a range is waiting (as on Picture): the caller refuses a film switch meanwhile. */
   onPendingChange?(pending: boolean): void;
+  /**
+   * What's heard with a row selected (null: none). Defaults to one variant per engine lane, from
+   * each row's `audition` and `picked` (laneSelection). Applied as gain ramps, never a restart.
+   */
+  listen?(selected: string | null): Listening;
+  /** The On menu's value until a lane is clicked. Defaults to the picked row's, else the first row's. */
+  defaultOn?: string;
+  /** Filled with the stage's handle on every render. */
+  handle?: MutableRef<StageHandle | null>;
+  /** A lane was clicked. */
+  onSelect?(row: StageRow): void;
 }
 
 const typing = (el: EventTarget | null) => el instanceof HTMLElement && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
 const NO_RANGE = { in: null, out: null } as { in: number | null; out: number | null };
 
 export function AudioStage(props: AudioStageProps) {
-  const { stage, title, headerExtra, belowLanes, rows, preview, fps, notes, onOptions, noteRow, onLabel, toast, onChanged, onPendingChange } = props;
+  const { stage, title, headerExtra, belowLanes, rows, preview, fps, notes, onOptions, noteRow, onLabel, toast, onChanged, onPendingChange, listen } = props;
   if (hook) hook.renders++;
   const clips = props.clips ?? dedupe(rows.flatMap((r) => r.clips));
 
@@ -105,7 +136,12 @@ export function AudioStage(props: AudioStageProps) {
   const videoDuration = preview ? (preview.duration ?? loadedDuration) : null;
   const { engine, playing, length, media } = useAudioStage(clips, videoDuration);
 
-  const [selected, setSelected] = useState<string | null>(null);
+  const [picked, setSelected] = useState<string | null>(null);
+  // A selected lane that's gone (another section's take, a removed variant) selects nothing.
+  const selected = rows.some((r) => r.key === picked) ? picked : null;
+  useLayoutEffect(() => {
+    if (picked !== null && selected === null) setSelected(null);
+  }, [selected]);
   const [onValue, setOnValue] = useState<string | null>(null);
   const [range, setRange] = useState(NO_RANGE);
   const [scope, setScope] = useState<Scope>("point");
@@ -119,21 +155,24 @@ export function AudioStage(props: AudioStageProps) {
   }, [range.in, noteHasText]);
   useEffect(() => () => onPendingChange?.(false), []);
 
-  // ---- which variant each lane plays (§17.3): the selected lane, else the pick ----
-  const selection = laneSelection(rows, selected);
-  const applied = useRef<Record<string, string>>({});
+  // ---- what's heard (§17.3, §17.5): the selected lane, else the picks ----
+  const plan = (sel: string | null): Listening => (listen ? listen(sel) : { select: laneSelection(rows, sel), gains: {} });
+  const applied = useRef<Listening>({ select: {}, gains: {} });
+  // Only what changed is applied: each is a 4 ms gain ramp on the clock, never a restart.
+  const apply = (next: Listening) => {
+    const was = applied.current;
+    for (const [lane, clip] of Object.entries(next.select)) if (!(lane in was.select) || was.select[lane] !== clip) engine.selectVariant(lane, clip);
+    for (const [lane, gain] of Object.entries(next.gains)) if (was.gains[lane] !== gain) engine.setLaneGain(lane, gain);
+    applied.current = { select: { ...was.select, ...next.select }, gains: { ...was.gains, ...next.gains } };
+  };
+  const listening = plan(selected);
   // A layout effect, so what you hear changes in the same commit that marks a new pick In use.
-  // The engine keeps a lane's selection apart from its clips, so this may run before setClips.
-  useLayoutEffect(() => {
-    for (const [lane, clip] of Object.entries(selection)) {
-      if (applied.current[lane] !== clip) engine.selectVariant(lane, clip);
-    }
-    applied.current = selection;
-  }, [engine, JSON.stringify(selection)]);
+  // The engine keeps a lane's selection and gain apart from its clips, so this may run before setClips.
+  useLayoutEffect(() => apply(listening), [engine, JSON.stringify(listening)]);
 
   // The On menu defaults to the lane you last clicked, else the pick, else the first entry; an
   // entry that's gone (a variant removed, say) falls back the same way.
-  const fallbackOn = rows.find((r) => r.picked)?.on ?? rows[0]?.on ?? onOptions[0]?.value ?? null;
+  const fallbackOn = props.defaultOn ?? rows.find((r) => r.picked)?.on ?? rows[0]?.on ?? onOptions[0]?.value ?? null;
   const onCurrent = onOptions.some((o) => o.value === onValue) ? onValue : fallbackOn;
   const option = onOptions.find((o) => o.value === onCurrent) ?? null;
 
@@ -144,6 +183,7 @@ export function AudioStage(props: AudioStageProps) {
   const pvTc = useRef<HTMLDivElement>(null);
   const video = useRef<HTMLVideoElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
+  const starter = useRef<((text: string) => void) | null>(null);
   const placeholderFor = (t: number) => {
     if (scope === "whole") return "Note on the whole track";
     if (range.in !== null && range.out === null) return "Set an Out point";
@@ -217,12 +257,23 @@ export function AudioStage(props: AudioStageProps) {
   // untouched) and points the On menu at it.
   const select = (row: StageRow) => {
     setSelected(row.key);
-    if (row.audition) {
-      engine.selectVariant(row.audition.lane, row.audition.clip);
-      applied.current = { ...applied.current, [row.audition.lane]: row.audition.clip };
-    }
+    // Heard in the click itself, not a render later.
+    apply(plan(row.key));
     if (row.on) setOnValue(row.on);
+    props.onSelect?.(row);
   };
+
+  if (props.handle) {
+    props.handle.current = {
+      engine,
+      setOn: setOnValue,
+      startNote(text, opts = {}) {
+        if (opts.on !== undefined) setOnValue(opts.on);
+        if (opts.scope !== undefined) changeScope(opts.scope);
+        starter.current?.(text);
+      },
+    };
+  }
 
   // ---- keyboard: Space, ←/→ (Shift: ten), I, O, N ----
   const onKeyRef = useRef<(e: KeyboardEvent) => void>(() => undefined);
@@ -244,6 +295,9 @@ export function AudioStage(props: AudioStageProps) {
   }, []);
 
   // ---- the test hook (only with ?test=1) ----
+  useLayoutEffect(() => {
+    if (hook) hook.clips = clips;
+  });
   useEffect(() => {
     if (!hook) return;
     hook.engine = engine;
@@ -286,9 +340,10 @@ export function AudioStage(props: AudioStageProps) {
   const drawn: Record<string, LaneMark[]> = {};
   for (const n of notes) {
     if (n.scope === "whole" || n.t === null) continue;
-    const row = noteRow(n);
-    if (!row) continue;
-    (drawn[row] ??= []).push({ id: n.id, t: n.t, tOut: n.tOut, status: n.status, text: n.text });
+    const at = noteRow(n);
+    for (const row of at === null ? [] : typeof at === "string" ? [at] : at) {
+      (drawn[row] ??= []).push({ id: n.id, t: n.t, tOut: n.tOut, status: n.status, text: n.text });
+    }
   }
 
   const rangeLabel = range.in === null ? null : range.out === null ? `${fmt(range.in)} →` : noteTime(range.in, range.out);
@@ -374,6 +429,7 @@ export function AudioStage(props: AudioStageProps) {
           chips={AUDIO_CHIPS[stage]}
           marks={{ value: marks, onChange: setMarks }}
           onLabel={onLabel}
+          starter={starter}
         />
       </div>
     </div>

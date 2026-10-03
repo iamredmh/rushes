@@ -325,6 +325,9 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .use svg.ic { width: 14px; height: 14px; stroke-width: 2.5; }
 .ms { width: 32px; height: 32px; border: 0; border-radius: 8px; background: var(--raised); color: var(--text-3); font: 600 15px var(--sans); cursor: pointer; }
 .ms[aria-pressed="true"] { background: var(--todo-soft); color: var(--todo); }
+/* Voiceover: the section switch and New take, under the lanes. */
+.vobar { gap: 10px; }
+.vobar .seg { flex-wrap: wrap; }
 .secmk { position: absolute; top: 6px; height: calc(100% - 12px); padding-left: 6px; border-left: 1px solid var(--line-2); font: 600 15px/1 var(--sans); color: var(--text-3); z-index: 1; pointer-events: none; }
 .cue { position: absolute; bottom: 4px; transform: translateX(-50%); font: 500 15px/1 var(--sans); color: var(--sfx); white-space: nowrap; z-index: 2; pointer-events: none; text-shadow: 0 0 4px var(--raised), 0 0 2px var(--raised); }
 .cue::before { content: ""; position: absolute; left: 50%; bottom: calc(100% + 4px); width: 1px; height: 46px; background: currentColor; opacity: 0.45; }

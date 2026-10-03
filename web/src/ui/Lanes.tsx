@@ -8,6 +8,7 @@ import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { LoadResult } from "../audio/engine.js";
 import { type Clip, mediaKey } from "../audio/timeline.js";
+import { Missing } from "./AssetViews.js";
 import { Icon } from "./Icon.js";
 
 /** One lane on an audio tab. */
@@ -39,6 +40,10 @@ export interface StageRow {
   controls?: ComponentChildren;
   /** The On menu value that clicking this lane selects. */
   on?: string;
+  /** A VO take read from a line that has since changed. */
+  stale?: boolean;
+  /** The lane's file isn't on disk: it shows the missing mark and has nothing to play. */
+  missing?: boolean;
 }
 
 /** A note drawn on a lane: a marker at `t`, plus a span to `tOut` for a range. */
@@ -156,10 +161,22 @@ export function Lanes({ rows, length, media, selected, marks, range, onSelect, o
         const laneMarks = marks[row.key] ?? [];
         return (
           <div class={`lane${row.sub ? " sub" : ""}`} data-row={row.key} aria-current={current ? "true" : undefined}>
-            <button type="button" class="nm" aria-current={current ? "true" : "false"} aria-label={row.name} onClick={() => onSelect(row)}>
+            <button
+              type="button"
+              class="nm"
+              aria-current={current ? "true" : "false"}
+              aria-label={row.name}
+              aria-description={row.missing ? "Missing" : row.stale ? "Stale: the line changed after this take" : undefined}
+              onClick={() => onSelect(row)}
+            >
               <b>
                 {!row.sub && <i style={{ background: row.color }} />}
                 <span data-name>{row.name}</span>
+                {/* Beside the name, not in the meta line, which clips its tooltip. */}
+                {row.missing && <Missing />}
+                {row.stale && (
+                  <span class="smk" data-stale data-tip="The line changed after this take"><Icon name="stale" /></span>
+                )}
               </b>
               <small data-meta>
                 {broken ? (
