@@ -502,6 +502,7 @@ This section builds the Voiceover, Music, Sound effects and Mix tabs, following 
 - **Stale takes.** A take whose text no longer matches the section's current line (`isTakeStale`) carries a "stale" mark, with the tooltip "The line changed after this take".
 - **Asking for a new take.** **New take** fills the note box with `Another take of S2: ` and sets On to that section.
 - **Voice variants.** Variants of a `voice` lane, such as whole alternative reads, appear as extra lanes with **Use**, like Music.
+- **No script, no read.** The assembled read and the section switch appear only once the script has sections, or a note already sits on the read. With whole reads only, the tab shows just those reads; the picked one, else the first, plays, and On defaults to it.
 - **Unpick.** As on Music (§17.3), a take's pick clears with `PUT /api/picks { sections: { sectionId: null } }`. Only an explicitly picked take offers it, not one in use because it is the newest.
 - **What a note can be on.** The read saves `on: "vo"`, a section its id, a take `"<section id>:<take id>"` and a voice variant `"<lane id>/<variant id>"`.
 

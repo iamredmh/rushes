@@ -721,6 +721,27 @@ test("a picked voice variant replaces the read, until the read or a take is clic
   expect(await heard(page)).toEqual(["s1:t1@0", "s2:t3@3", "s4:t1@9"]);
 });
 
+test("with whole reads and no script, there's no Assembled read: the first read plays, and notes go on a read", async ({ page, rushes }) => {
+  const a = await rushes.addVariant("voice", "A · Current", { seconds: 4, freq: 196 });
+  await rushes.addVariant("voice", "B · Bold", { seconds: 4, freq: 247 });
+  await page.goto(rushes.testUrl());
+  await openTab(page, /Voiceover/, "2");
+  await loaded(page, 2);
+  await expect(page.locator(".lane [data-name]")).toHaveText(["A · Current", "B · Bold"]);
+  await expect(page.getByRole("button", { name: "Assembled read", exact: true })).toHaveCount(0);
+  await expect(page.locator(".vobar")).toHaveCount(0);
+  // Nothing picked: the first read is heard, not silence.
+  expect(await heard(page)).toEqual([`${a.lane.id}/${a.variant.id}@0`]);
+  const on = page.getByRole("combobox", { name: "Note on" });
+  await expect(on.locator("option")).not.toContainText(["Assembled read"]);
+  await page.keyboard.press("n");
+  await page.keyboard.type("Too fast here.");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".note .on")).toHaveText("A · Current");
+  const { notes } = await rushes.api("GET", "/api/notes?stage=voice");
+  expect(notes[0].on).toBe(`${a.lane.id}/${a.variant.id}`);
+});
+
 test("a take whose file is missing shows the missing mark and leaves a gap", async ({ page, rushes }) => {
   await voScript(rushes);
   const { script } = await rushes.api("GET", "/api/script");

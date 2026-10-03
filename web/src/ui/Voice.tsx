@@ -10,7 +10,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { api } from "../api.js";
 import { assembleRead, assetRev, type Clip } from "../audio/timeline.js";
 import {
-  defaultVersion, isTakeStale, READ_ROW, readTake, sectionAt, sectionLabel, sectionLane, STAGE_NAMES, takeClipId, takeLabel,
+  defaultVersion, isTakeStale, pickedVoiceRow, READ_ROW, readTake, sectionAt, sectionLabel, sectionLane, STAGE_NAMES, takeClipId, takeLabel,
   takeRowKey, variantRows, type VoiceModel, voiceLane, voiceListening, voiceNoteRows, voiceOnLabel, voiceOnOptions,
 } from "../lib.js";
 import type { Asset, State, Video } from "../types.js";
@@ -102,7 +102,7 @@ export function Voice({ state, assets, video, toast, onChanged, onPendingChange 
   const read: StageRow = {
     key: READ_ROW,
     name: "Assembled read",
-    meta: "Picked take per section",
+    meta: sections.some((s) => s.takes.length > 0) ? "Picked take per section" : "No takes yet",
     color: VO_COLOR,
     // Drawn only: a section with no take, or a missing one, is a gap.
     clips: assembleRead(sections, state.picks.sections).filter((c) => !missing(c.path)).map((c) => ({ ...c, rev: rev(c.path) })),
@@ -141,9 +141,13 @@ export function Voice({ state, assets, video, toast, onChanged, onPendingChange 
     on: `v:${r.key}`,
     missing: missing(r.file),
   }));
-  const rows = [read, ...takes, ...alternates];
-
   const notes = state.notes.notes.filter((n) => n.stage === "voice");
+  // The read exists once there's a script to assemble (or a note already sits on it). With whole
+  // reads only, the tab is just those reads, and the picked one (else the first) is what plays.
+  const hasRead = sections.length > 0 || notes.some((n) => voiceNoteRows(model, n, shown).includes(READ_ROW));
+  const rows = hasRead ? [read, ...takes, ...alternates] : alternates;
+  const firstRead = hasRead ? null : (pickedVoiceRow(variants, state.picks.lanes) ?? variants[0] ?? null);
+  const onOptions = voiceOnOptions(model, shown).filter((o) => hasRead || o.row !== READ_ROW);
   const cut = defaultVersion(video ?? undefined);
   const preview: Preview | null = video && cut ? { video: video.id, version: cut.id, file: cut.file, duration: cut.duration } : null;
   const fps = state.project.fps || 30;
@@ -167,9 +171,9 @@ export function Voice({ state, assets, video, toast, onChanged, onPendingChange 
       preview={preview}
       fps={fps}
       notes={notes}
-      onOptions={voiceOnOptions(model, shown)}
-      defaultOn="r"
-      listen={(selected) => voiceListening(model, selected)}
+      onOptions={onOptions}
+      defaultOn={hasRead ? "r" : firstRead ? `v:${firstRead.key}` : undefined}
+      listen={(selected) => voiceListening(model, selected ?? firstRead?.key ?? null)}
       noteRow={(n) => voiceNoteRows(model, n, shown)}
       onLabel={(n) => voiceOnLabel(model, n.on)}
       handle={handle}
