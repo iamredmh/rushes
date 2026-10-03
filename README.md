@@ -125,10 +125,10 @@ A project with more than one film gets numbered pills in the header — `[`/`]` 
 
 The Voiceover, Music, Sound effects and Mix tabs share one audio engine, so switching what you hear is instant and never restarts playback or knocks picture out of sync.
 
-- **Use** picks a music bed, SFX pass or VO take — shown as **In use**. Clicking a lane auditions it without changing the pick. An **Unpick** button beside In use clears the pick back to the default (the first bed or pass, or on Voiceover the newest take).
+- **Use** picks a music bed, SFX pass or VO take — shown as **In use**. Clicking a lane auditions it without changing the pick. An **Unpick** button beside In use clears the pick. On Music and Sound effects the first bed or pass is auditioned; on Mix the lane is empty; on Voiceover the section's newest take is used.
 - **Blind** (Music only) renames the beds `Bed 1`, `Bed 2`… in a shuffled order and masks their descriptions, so you can compare without knowing which is which.
 - A note on an audio tab can carry marks: toggle **Rise**, **Fall**, **Louder** or **Quieter** (with a dB amount, 3 by default) to say how a range should change — "Fall" or "Quieter 3 dB".
-- **Mix** shows a loudness readout — integrated LUFS, true peak, and the music's level under the VO. It needs **ffmpeg** on your PATH; without it, the readout shows "—".
+- **Mix** shows a loudness readout — integrated LUFS, true peak, and the music's level under the VO — measured over exactly what Mix plays. It needs **ffmpeg** on your PATH; without it, the readout shows "—". After a timeout or an error, click the readout to measure again.
 
 ## What gets saved
 

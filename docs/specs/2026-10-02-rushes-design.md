@@ -142,7 +142,7 @@ The files are plain JSON with two-space indentation and stable key order, so dif
 }
 ```
 - `stage` is one of `script | picture | voice | music | sfx | mix`.
-- `on` names what the note is about. It's `null` for picture, or a lane, variant, take, cue or section id on the other tabs.
+- `on` names what the note is about. It's `null` for picture (and for the whole mix on Mix). On the audio tabs it's `"<lane id>/<variant id>"` for a variant, `"<lane id>/<variant id>:<cue id>"` for an SFX cue, `"vo"` for the assembled read (or Mix's VO lane), `"<section id>:<take id>"` for a take, or a section id. Lane and variant ids are slugs, so the `/` and `:` never clash, and lane ids are unique across the project, so two lanes' same-named variants stay apart (§17.8).
 - `scope` is `point | range | whole`.
 - `box` holds normalised coordinates `{x,y,w,h}` from 0 to 1.
 - **Field ownership** keeps conflicts away. The user owns `text`, `box`, `grab`, `scope`, `t` and `tOut`. The agent owns `reply`, `fixT` and `fixVersion`. Either side can set `status`.
@@ -327,7 +327,7 @@ Red often runs several projects at once, in different conversations. Each projec
 
 ### 14.5 Audio choices on locked picture (Plan 3)
 These are recorded here, and Plan 3 builds them.
-- Variant cards carry a name and a one-line description (`meta.description`), like the Night Drive set. Switching variants keeps the playhead.
+- Variant cards carry a name and a one-line description (`meta.description`), like a set of named alternates. Switching variants keeps the playhead.
 - A range note on an audio tab can carry quick marks: **Rise**, **Fall**, **Louder**, **Quieter**. Louder and Quieter take a dB amount. These are stored as `marks: [{ kind, db? }]`, so "0:12–0:15 · Fall · −3 dB" reaches the agent as data, not just prose.
 
 ### 14.6 New MCP tools and CLI
@@ -482,40 +482,49 @@ This section builds the Voiceover, Music, Sound effects and Mix tabs, following 
 - **Timeline length** is the duration of the cut being previewed, or the longest audio when there's no cut.
 - **Fallback for long files.** A file over 15 minutes, or one that won't decode, plays through a hidden `<audio>` element with drift correction instead. The lane's tooltip then says switching isn't sample-exact.
 - **Video sync.** The preview video is muted. Whenever it drifts more than one frame from the audio clock, it's seeked back.
-- **Waveforms.** Peaks are computed in the browser from the decoded buffer and cached per path for the session.
+- **Waveforms.** Peaks are computed in the browser from the decoded buffer and cached per file revision for the session, keeping the 200 most recently used.
 
 ### 17.3 Music
 - **Lanes.** One lane per variant of each `music` lane, in manifest order. The card shows the name, then `meta.description` (or BPM · key).
 - **Use** sets `picks.lanes[laneId] = variantId`.
-- **Unpick.** An icon button beside **In use** clears the pick: `PUT /api/picks { lanes: { laneId: null } }`. Sections clear the same way (`sections: { sectionId: null }`); on Voiceover only an explicitly picked take offers it, not one in use because it is the newest.
+- **Unpick.** An icon button beside **In use** clears the pick: `PUT /api/picks { lanes: { laneId: null } }`. With nothing picked, the first bed is auditioned again.
 - **Auditioning.** Clicking a lane auditions it: you hear that variant at the playhead, while the picked one stays marked **In use**.
 - **Blind** replaces the names with `Bed 1…n` in a shuffled order for the session, and hides the meta. Turning it off reveals them.
 
 ### 17.4 Sound effects
 - **Lanes.** Each `sfx` variant is a lane. Its cues are labelled on the waveform at their times.
-- **What a note can be on.** The On menu lists the passes and each cue (`Cue · Swipe`). A note on a cue is saved with `on` set to `<pass id>:<cue id>` and `t` set to the cue's time. An older note whose `on` is a bare cue id is drawn on the first pass with that cue.
+- **What a note can be on.** The On menu lists the passes and each cue (`Cue · Swipe`). A note on a pass is saved with `on` set to `<lane id>/<pass id>`; a note on a cue with `<lane id>/<pass id>:<cue id>` and `t` set to the cue's time. Older notes are still drawn where they always were (§17.8).
 - **Use** works as it does on Music.
 
 ### 17.5 Voiceover
-- **The assembled read.** The top lane is the assembled read: for each script section, its picked take (`picks.sections[sectionId]`), or its newest take when none is picked, placed at the section's `start`. Section labels (`S1`, `S2` …) mark the lane.
+- **The assembled read.** The top lane is the assembled read: for each script section, its picked take (`picks.sections[sectionId]`), or its newest take when none is picked, placed at the section's `start` and played to the end of its file. Section labels (`S1`, `S2` …) mark the lane.
 - **Choosing a section.** A section switch (S1 … Sn) under the lanes picks a section. Its takes then appear as sub-lanes covering that section's span. **Use** on a sub-lane sets the pick.
 - **Stale takes.** A take whose text no longer matches the section's current line (`isTakeStale`) carries a "stale" mark, with the tooltip "The line changed after this take".
 - **Asking for a new take.** **New take** fills the note box with `Another take of S2: ` and sets On to that section.
 - **Voice variants.** Variants of a `voice` lane, such as whole alternative reads, appear as extra lanes with **Use**, like Music.
+- **Unpick.** As on Music (§17.3), a take's pick clears with `PUT /api/picks { sections: { sectionId: null } }`. Only an explicitly picked take offers it, not one in use because it is the newest.
+- **What a note can be on.** The read saves `on: "vo"`, a section its id, a take `"<section id>:<take id>"` and a voice variant `"<lane id>/<variant id>"`.
 
 ### 17.6 Mix
-- **Lanes.** Three lanes: Voiceover (the assembled read), Music (the picked variant) and Sound effects (the picked pass), each with **M** and **S**.
+- **Lanes.** Three lanes: Voiceover (the assembled read, or a picked voice variant in its place), Music (the picked variant) and Sound effects (the picked pass), each with **M** and **S**. Only explicit picks play: an unpicked Music or Sound effects lane is empty, never stood in for by its first variant.
 - **Mute and solo.** Solo wins over mute. With nothing soloed, every unmuted lane plays.
 - **Loudness.** A loudness readout appears when the server has ffmpeg. `POST /api/mix/loudness { lanes: ["voice","music","sfx"] }` mixes the picked files at their offsets and returns `{ available, integrated, truePeak, musicUnderVo }`:
   - `integrated` is LUFS integrated;
   - `truePeak` is dBTP;
   - `musicUnderVo` is the music's level relative to the VO over the VO's span, in dB.
 
-  Results are cached by their inputs. Without ffmpeg the readout shows `—`, with the tooltip "Install ffmpeg for loudness".
+  The server measures exactly what the tab plays: the same picked voice variant or assembled read, the same picked music and SFX variants, and the same gaps for missing files. With a picked voice variant, the VO's span is that file's own length. Results are cached by their inputs and the VO span; a failed or timed-out run is never cached, and two requests for the same inputs share one run. Without ffmpeg the readout shows `—`, with the tooltip "Install ffmpeg for loudness". After a timeout or an error, clicking the readout measures again.
 - **Empty lanes.** A lane with nothing picked, or whose file is missing, shows the missing mark ("Nothing picked" or "Missing") and is left out of the loudness request. With no lane left to measure, the readout shows `—` with the tooltip "Nothing to measure".
 - **View state.** Mute and solo are never saved; they reset when you leave the tab. Only the lanes you hear are measured, 500 ms after the last change.
-- **Notes.** The On menu lists the whole mix (`on: null`, drawn on every lane), Voiceover (`on: "vo"`) and the picked music and sfx variants (`on` = the variant id).
+- **Notes.** The On menu lists the whole mix (`on: null`, drawn on every lane), Voiceover (`on: "vo"`) and the picked music and sfx variants (`on: "<lane id>/<variant id>"`).
 
 ### 17.7 Agent side
 - **Notes** carry `marks`. `rushes_get_batch`, `rushes_list_notes`, export notes and the CLI all show them, e.g. `Fall · Quieter 3 dB`.
 - **The batch prompt** for an audio stage tells the agent to read the picks (`rushes_get_picks`), fix each note, register new variants or takes, and reply.
+- **Export and the CLI** say what an audio note is on, in words: `Music · Warm keys`, `Sound effects · Pass A · Cue · Swipe`, `S2 · Take 1`, `Whole mix`.
+
+### 17.8 What a note is `on` (conventions)
+- **Values.** `null` (Picture, or the whole mix on Mix); `"<lane id>/<variant id>"` for a variant on Music, Sound effects, Voiceover or Mix; `"<lane id>/<variant id>:<cue id>"` for an SFX cue; `"vo"` for the assembled read, or Mix's VO lane; `"<section id>:<take id>"` for a take; a section id for a section.
+- **Why lane-qualified.** Variant ids are unique only within their lane. Lane ids are unique across the project, and both are slugs (`[a-z0-9-]`), so `/` and `:` can't be part of either. A music bed and an SFX pass both called "Option A", or two music lanes each with an "A", can't be confused, and no variant `on` can equal `"vo"` or a section id.
+- **Resolution order.** 1. the exact lane-qualified variant or cue; 2. `"vo"`; 3. a take; 4. a section; 5. the older bare forms: a bare variant id (the first lane with it; on Mix, a variant being heard first), a bare `"<pass id>:<cue id>"`, or a bare cue id (the first pass with it). Older notes draw exactly where they did before.
+- **Section ids.** `rushes_set_script` refuses a new section id of `"vo"` or one containing `:` or `/`. Existing ids still load and update, and the stored schema doesn't check `on` at all.

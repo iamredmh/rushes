@@ -88,14 +88,14 @@ describe("ensureProjectIdOnce", () => {
 });
 
 describe("manifest paths", () => {
-  const root = "/Users/red/My Project";
+  const root = "/Users/you/My Project";
   it("stores files inside the project as relative, forward-slash paths", () => {
-    expect(toManifestPath(root, "/Users/red/My Project/renders/hero v3.mp4")).toBe("renders/hero v3.mp4");
+    expect(toManifestPath(root, "/Users/you/My Project/renders/hero v3.mp4")).toBe("renders/hero v3.mp4");
     expect(toManifestPath(root, "renders/hero.mp4")).toBe("renders/hero.mp4");
   });
   it("keeps files outside the project absolute", () => {
     expect(toManifestPath(root, "/Volumes/Extreme SSD/out.mov")).toBe("/Volumes/Extreme SSD/out.mov");
-    expect(toManifestPath(root, "../elsewhere/a.mp4")).toBe("/Users/red/elsewhere/a.mp4");
+    expect(toManifestPath(root, "../elsewhere/a.mp4")).toBe("/Users/you/elsewhere/a.mp4");
   });
   it("round-trips back to an absolute path", () => {
     expect(fromManifestPath(root, "renders/hero v3.mp4")).toBe(join(root, "renders", "hero v3.mp4"));
