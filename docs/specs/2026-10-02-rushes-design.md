@@ -534,59 +534,82 @@ This section builds the Voiceover, Music, Sound effects and Mix tabs, following 
 
 ## 18. Voiceover rounds (agreed 3 October 2026)
 
-**Why.** Red found the Plan 3 Voiceover tab too detailed. The assembled read, the take sub-lanes and an S1–S18 switch below the fold buried the actual job, which is listening to reads and giving feedback. Real VO work moves in rounds:
+**Why.** Red found the Plan 3 Voiceover tab too detailed. The assembled read, the take sub-lanes and an S1–S18 switch below the fold buried the actual job.
+
+By the time there is voiceover, the script has already been corrected on the Script tab. So the Voiceover tab only judges whole reads:
+- Does the track work overall?
+- Do we like the speaker?
+- Is the pacing right?
+- Is the tone right?
+
+Markers are only for the odd garbled word or phrase.
+
+Real VO work moves in rounds:
 1. the same script read by several voices (e.g. Jane, Louise, Gerald);
 2. one voice picked;
-3. variations of that voice (more excited, more sombre, a reworded line).
+3. variations of that voice (more excited, more sombre).
 
 This section is binding and replaces §17.5.
 
 ### 18.1 Two tabs, two jobs
-- **Script is what's said.** To change a word or the end of a sentence, edit that line (your version beside the agent's) and add a direction if you like ("lift at the end"). **Send to agent** batches the changed rows, as now.
-- **Voiceover is how it sounds.** It holds whole reads only. Notes on a read (point, range or whole, with the Level / Pace / Pronunciation / Breath chips and the Range marks) go to the agent with **Send to agent**.
-- **Either way, a fix comes back as a new whole read.** For script edits, the agent re-records only the changed lines in the picked voice, stitches them into the read they were based on, and registers the result. Rushes never assembles audio itself.
+- **Script is what's said.** Wording is fixed there before or between VO rounds. Edit a line (your version beside the agent's) and add a direction if you like. **Send to agent** batches the changed rows, as now.
+- **Voiceover is how it sounds.** It holds whole reads only. Every fix comes back as a new whole read. Rushes never assembles audio itself.
 
 ### 18.2 Rounds
-- **A round is a `voice` lane**, and the lane's name is the round's name, e.g. "Round 1 · Voices" or "Round 2 · Gerald, tone".
+- **A round is a `voice` lane.** The lane's name is the round's name, e.g. "Round 1 · Voices" or "Round 2 · Gerald, tone".
 - **Rounds are ordered by creation.** The newest is the current round.
-- **Each round has its own pick** (`picks.lanes[laneId]`), set with **Use** and cleared with Unpick, as now.
+- **Each round has its own pick** (`picks.lanes[laneId]`). It is set with **Use** and cleared with Unpick, as now.
 
 ### 18.3 The tab
-- **The header, top to bottom:** the title, **Blind** (now on Voiceover as well as Music, so voices are judged without names), then the transport.
-- **The script ruler.** If the script has sections, a thin ruler under the transport shows S1, S2 … at their starts. A label that doesn't fit its section is hidden and keeps its line. With no script, there is no ruler.
+- **The header** shows the title and **Blind** (now on Voiceover as well as Music, so voices are judged without names), then the transport. There is no script ruler.
 - **The current round is open.**
   - Its name heads the group.
-  - Each read is one lane: a name (e.g. "Gerald · more sombre"), its one-line `description` beneath, the waveform, then **Use** or **In use** with Unpick.
-- **Changed lines.** A read with `changes` (section ids) shows each changed section's span as a highlighted band on its own waveform, with the tooltip "S7 changed". Clicking a band moves the playhead to that section's start.
-- **Earlier rounds are folded.** Each one is a single row reading "Round 1 · Voices · 3 reads · picked Gerald". Clicking it opens the round's lanes beneath it, and they play like any other lane. More than one round can be open at once.
-- **Gone from view:** the assembled read, take sub-lanes, the section switch and New take.
+  - Each read is one lane with the name (e.g. "Gerald · more sombre") and its one-line `description` beneath, the waveform, then **Use** or **In use** with Unpick.
+  - A name or description too long for its column is cut with an ellipsis and shows in full in a tooltip on hover.
+- **Earlier rounds are folded.**
+  - Each one is a single row, e.g. "Round 1 · Voices · 3 reads · picked Gerald".
+  - Clicking it opens the round's lanes beneath it, and they play like any other lane.
+  - More than one round can be open at once.
+  - The row shows a dot when the round has open notes.
+- **Gone from view:** the assembled read, take sub-lanes, the section switch, New take, any script ruler, and range spans.
 - **Playback.**
   - One read is heard at a time.
   - Clicking a lane switches to it, sample-locked, with the playhead unchanged.
-  - With nothing clicked, the current round's pick plays, else its first read.
-- **Notes.**
-  - **On** defaults to the lane you last clicked, else the current round's pick or first read.
+  - With nothing clicked, the current round's pick plays, otherwise its first read.
+- **Notes.** Voiceover notes take one of two scopes, **Whole** (the default) or **Point**. There is no Range scope and there are no Rise/Fall/Louder/Quieter marks on this tab.
+  - A Whole note is about the read as a whole: speaker, pacing, tone, or whether it works.
+  - A Point note puts a marker on the read at the playhead: a garbled word, or a bit to keep.
+- **Chips.**
+  - With Whole, the chips are **Speaker**, **Pacing**, **Tone** and **Overall**.
+  - With Point, they are **Fix this** and **Keep this**.
+- **On.**
+  - On defaults to the lane you last clicked; otherwise it is the current round's pick, otherwise the first read.
+  - Its label is the read's name only. The round is shown by the group, and the full "Round 2 · Gerald · more sombre" is in the tooltip.
   - `on` is `"<lane id>/<variant id>"` (§17.8).
-  - Notes are drawn on their read's lane, including in a folded round once it's opened.
-  - The fold row shows a dot when the round has open notes.
+- **Where notes show.** Point notes are drawn as markers on their read's lane, including in a folded round once it's opened. Whole notes are listed and not drawn.
 - **Fits on one screen.** With up to four reads in the current round, everything sits above the fold at 1440 × 900.
 
 ### 18.4 Data
-- **Variants gain two optional fields:**
-  - `basedOn`: the `"<lane id>/<variant id>"` this read was made from;
-  - `changes`: the section ids it re-recorded.
-
-  Both default to empty, so existing files load unchanged.
-- **Naming a round.** `rushes_add_variant` gains `round`, the round's name. With `round` and no `lane`, the lane id is the round name slugged, and a new lane is created on first use with `round` as its name. `lane` still works and wins. The CLI gains `--round NAME`, `--based-on KEY` and `--changes s7,s12`.
-- **Takes.** Takes and `rushes_add_take` stay in the file format and API for compatibility. The dashboard and the mix ignore them. AGENTS.md and SKILL.md stop recommending them. Plan 4 decides whether to remove them.
+- **Naming rounds.** `rushes_add_variant` gains `round`, the round's name.
+  - With `round` and no `lane`, the lane id is the round name slugged.
+  - A new lane is created on first use, with `round` as its name.
+  - `lane` still works and wins.
+  - The CLI gains `--round NAME`.
+- **No new fields on variants.** What a read is based on goes in its `description`, e.g. "Based on more sombre, slower intro".
+- **Takes.**
+  - Takes and `rushes_add_take` stay in the file format and API for compatibility.
+  - The dashboard and the mix ignore them, and AGENTS.md and SKILL.md stop recommending them.
+  - Plan 4 decides whether to remove them.
 - **Mix (§17.6).**
   - The VO lane plays the pick of the newest round that has one.
   - If no round has a pick, the lane shows "Nothing picked" and is left out of loudness, like Music and SFX.
-  - The loudness span for VO is that read's own length.
+  - The VO span used for music under VO is that read's own length.
 - **Unlocking.** The tab unlocks when a `voice` lane has at least one read (§6).
 
 ### 18.5 Agent side
-- **The Voiceover batch prompt** says: read the picks; answer each note with a new whole read in a new round, or in the current one for a small fix; set `round`, `basedOn` and `changes`; then reply.
-- **The Script batch prompt** says: re-record only the changed rows in the picked voice; stitch them into the picked read; register it with `basedOn` and `changes`, in a new round named for the edit (e.g. "Round 3 · S7 reworded"); then reply.
-- **Export and the CLI** name a voice note's read by round and name, e.g. `Round 2 · Gerald · more sombre`.
-
+- **The Voiceover batch prompt** says:
+  1. Read the picks.
+  2. Answer the notes with new whole reads: in a new round for a new direction (other voices, a tone), or in the current round for a small fix to a marked word. Say in each read's `description` what changed.
+  3. Reply.
+- **The Script batch prompt** is unchanged, apart from this: when VO already exists, the agent re-records the picked voice with the corrected script and registers it as a new read in a new round.
+- **Export and the CLI** name a voice note's read by its round and name, e.g. `Round 2 · Gerald · more sombre`.
