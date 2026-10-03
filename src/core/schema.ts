@@ -59,6 +59,20 @@ export const LaneSchema = z.object({
 });
 export type Lane = z.infer<typeof LaneSchema>;
 
+export const FileKindSchema = z.enum(["doc", "image", "caption", "export", "delivery", "edit"]);
+export type FileKind = z.infer<typeof FileKindSchema>;
+
+export const FileEntrySchema = z.object({
+  id,
+  kind: FileKindSchema,
+  file: z.string().min(1),
+  name: z.string().min(1).max(120),
+  note: z.string().max(500).default(""),
+  video: z.string().nullable().default(null),
+  addedAt: z.string(),
+});
+export type FileEntry = z.infer<typeof FileEntrySchema>;
+
 export const ProjectSchema = z.object({
   schema: z.literal(1),
   rev: z.number().int().nonnegative(),
@@ -67,6 +81,7 @@ export const ProjectSchema = z.object({
   fps: z.number().positive().default(30),
   videos: z.array(VideoSchema).default([]),
   lanes: z.array(LaneSchema).default([]),
+  files: z.array(FileEntrySchema).default([]),
 });
 export type Project = z.infer<typeof ProjectSchema>;
 

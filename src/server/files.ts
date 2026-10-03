@@ -26,6 +26,15 @@ export const CONTENT_TYPES: Record<string, string> = {
   ".woff2": "font/woff2",
   ".woff": "font/woff",
   ".json": "application/json",
+  ".md": "text/markdown; charset=utf-8",
+  ".txt": "text/plain; charset=utf-8",
+  ".srt": "text/plain; charset=utf-8",
+  ".vtt": "text/vtt; charset=utf-8",
+  ".pdf": "application/pdf",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".prproj": "application/octet-stream",
+  ".drp": "application/octet-stream",
 };
 
 export function contentType(path: string): string {
@@ -44,6 +53,7 @@ export function registeredMedia(project: Project, script: Script): Set<string> {
   for (const v of project.videos) for (const ver of v.versions) files.add(ver.file);
   for (const l of project.lanes) for (const variant of l.variants) files.add(variant.file);
   for (const s of script.sections) for (const t of s.takes) files.add(t.file);
+  for (const f of project.files) files.add(f.file);
   return files;
 }
 

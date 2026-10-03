@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { join } from "node:path";
-import { addVariant, addVersion, ensureProjectId, ensureProjectIdOnce, latestVersion, lockPicture, resolveVideo, setShots, shotAt } from "../../src/core/project.js";
+import { addFile, addVariant, addVersion, ensureProjectId, ensureProjectIdOnce, latestVersion, lockPicture, resolveVideo, setShots, shotAt } from "../../src/core/project.js";
 import { fromManifestPath, toManifestPath } from "../../src/core/paths.js";
 import { newProjectId, PROJECT_ID_ALPHABET, slugify, uniqueId } from "../../src/core/ids.js";
 import { parseRate } from "../../src/core/media.js";
@@ -8,7 +8,7 @@ import { ProjectSchema, type Project, type Shot } from "../../src/core/schema.js
 import { InvalidError, NotFoundError } from "../../src/core/errors.js";
 import { tmpProject } from "../helpers/tmp.js";
 
-const empty = (): Project => ({ schema: 1, rev: 0, name: "demo", fps: 30, videos: [], lanes: [] });
+const empty = (): Project => ({ schema: 1, rev: 0, name: "demo", fps: 30, videos: [], lanes: [], files: [] });
 
 describe("ids", () => {
   it("slugifies names, keeping digits and dropping accents", () => {
@@ -59,6 +59,11 @@ describe("ensureProjectId", () => {
     const plan2Fixture = { schema: 1, rev: 0, name: "demo", fps: 30, videos: [], lanes: [] };
     const parsed = ProjectSchema.parse(plan2Fixture);
     expect(parsed.id).toBeUndefined();
+  });
+  it("a project parsed from an older JSON fixture with no files still validates, defaulting to an empty list", () => {
+    const olderFixture = { schema: 1, rev: 0, name: "demo", fps: 30, videos: [], lanes: [] };
+    const parsed = ProjectSchema.parse(olderFixture);
+    expect(parsed.files).toEqual([]);
   });
 });
 
@@ -285,6 +290,37 @@ describe("addVariant", () => {
     const p = empty();
     addVariant(p, { stage: "sfx", lane: "fx", name: "A", file: "a.wav" });
     expect(() => addVariant(p, { stage: "music", lane: "fx", name: "B", file: "b.wav" })).toThrow(/belongs to sfx/);
+  });
+});
+
+describe("addFile", () => {
+  it("defaults the name to the file's base name and stamps addedAt", () => {
+    const p = empty();
+    const f = addFile(p, { kind: "doc", file: "README.md" }, new Date("2026-10-03T09:00:00Z"));
+    expect(f).toMatchObject({ kind: "doc", file: "README.md", name: "README.md", note: "", video: null, addedAt: "2026-10-03T09:00:00.000Z" });
+    expect(p.files).toEqual([f]);
+  });
+  it("uses a given name and note over the default", () => {
+    const p = empty();
+    const f = addFile(p, { kind: "doc", file: "docs/brief.md", name: "Creative brief", note: "v2, approved" });
+    expect(f).toMatchObject({ name: "Creative brief", note: "v2, approved" });
+  });
+  it("resolves video by id or name to the video's id", () => {
+    const p = empty();
+    addVersion(p, { video: "Hero 60s", file: "renders/hero_v1.mp4" });
+    expect(addFile(p, { kind: "delivery", file: "exports/hero.mov", video: "Hero 60s" }).video).toBe("hero-60s");
+    expect(addFile(p, { kind: "delivery", file: "exports/hero2.mov", video: "hero-60s" }).video).toBe("hero-60s");
+  });
+  it("throws for an unknown video", () => {
+    const p = empty();
+    expect(() => addFile(p, { kind: "delivery", file: "x.mov", video: "nope" })).toThrow(NotFoundError);
+  });
+  it("gives files with the same name unique ids", () => {
+    const p = empty();
+    const a = addFile(p, { kind: "doc", file: "a/notes.md", name: "Notes" });
+    const b = addFile(p, { kind: "doc", file: "b/notes.md", name: "Notes" });
+    expect(a.id).toBe("notes");
+    expect(b.id).toBe("notes-2");
   });
 });
 

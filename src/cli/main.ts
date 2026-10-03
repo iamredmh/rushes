@@ -39,11 +39,14 @@ Usage
   rushes add version <file> --video NAME [--note TEXT]
   rushes add variant <music|sfx|voice> <file> --name NAME [--lane ID]
   rushes add shots <file.json> --video NAME [--version V]
+  rushes add file <path> --kind K [--name NAME] [--note TEXT] [--video V]
+                                                    register a doc, image, caption, export, delivery or edit file
   rushes lock <video> <version>                     lock the picture at a cut
   rushes unlock <video>                             unlock the picture
   rushes notes [--stage S] [--status todo|done] [--batch ID] [--json]
   rushes reply <note-id> <text> [--done] [--fix-t SECONDS] [--fix-version V]
-  rushes assets [--kind K] [--json]                 cuts, takes, variants and screenshots
+  rushes assets [--kind K] [--json]                 cuts, takes, variants, screenshots and library files
+  rushes export notes                               write notes to exports/<slug>-notes-<date>.md
 
 Options
   --dir DIR   project folder for commands that talk to the server (default: current folder)
@@ -290,7 +293,13 @@ export async function main(argv: string[], io: Io): Promise<number> {
           io.out(`Shots set on ${o.video} ${r.version.id}: ${r.version.shots.length}`);
           return 0;
         }
-        return usage(io, "rushes add version|variant|shots ...");
+        if (what === "file") {
+          if (!a || !o.kind) return usage(io, "rushes add file <path> --kind K [--name NAME] [--note TEXT] [--video V]");
+          const r = await (await client()).post("/api/files", { kind: o.kind, file: resolve(io.cwd, a), name: o.name, note: o.note, video: o.video });
+          io.out(`Added ${r.kind}: ${r.name}`);
+          return 0;
+        }
+        return usage(io, "rushes add version|variant|shots|file ...");
       }
       case "lock": {
         const [video, lockVersion] = rest;
@@ -326,6 +335,13 @@ export async function main(argv: string[], io: Io): Promise<number> {
           io.out(`${a.kind.padEnd(10)} ${a.path} ${a.missing ? "missing" : humanSize(a.size ?? 0)}`);
         }
         if (!assets.length) io.out("No assets");
+        return 0;
+      }
+      case "export": {
+        const [what] = rest;
+        if (what !== "notes") return usage(io, "rushes export notes");
+        const r = await (await client()).post("/api/exports/notes", {});
+        io.out(`Exported notes to ${r.path}`);
         return 0;
       }
       case "reply": {

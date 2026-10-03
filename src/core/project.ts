@@ -1,4 +1,5 @@
-import type { Cue, Lane, LaneStage, Project, Shot, Variant, Version, Video } from "./schema.js";
+import { basename } from "node:path";
+import type { Cue, FileEntry, FileKind, Lane, LaneStage, Project, Shot, Variant, Version, Video } from "./schema.js";
 import { newProjectId, slugify, uniqueId } from "./ids.js";
 import { InvalidError, NotFoundError } from "./errors.js";
 import type { Store } from "./store.js";
@@ -119,6 +120,34 @@ export function addVariant(p: Project, input: AddVariantInput): { lane: Lane; va
   };
   lane.variants.push(variant);
   return { lane, variant };
+}
+
+export interface AddFileInput {
+  kind: FileKind;
+  /** Manifest path (already passed through toManifestPath). */
+  file: string;
+  /** Shown in the library. Defaults to the file's base name. */
+  name?: string;
+  note?: string;
+  /** Video id or name this file belongs to, e.g. a delivery or export for a specific film. */
+  video?: string;
+}
+
+/** Registers a project file (a doc, image, caption, export, delivery or edit file) in the library. */
+export function addFile(p: Project, input: AddFileInput, now = new Date()): FileEntry {
+  const name = input.name?.trim() || basename(input.file);
+  const video = input.video ? resolveVideo(p, input.video).id : null;
+  const entry: FileEntry = {
+    id: uniqueId(slugify(name), p.files.map((f) => f.id)),
+    kind: input.kind,
+    file: input.file,
+    name,
+    note: input.note ?? "",
+    video,
+    addedAt: now.toISOString(),
+  };
+  p.files.push(entry);
+  return entry;
 }
 
 export function findVideo(p: Project, id: string): Video {

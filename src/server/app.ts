@@ -3,22 +3,23 @@ import { streamSSE } from "hono/streaming";
 import { z } from "zod";
 import type { Store, ChangeEvent } from "../core/store.js";
 import { RushesError, InvalidError, NotFoundError } from "../core/errors.js";
-import { addVariant, addVersion, ensureProjectIdOnce, lockPicture, setShots, shotAt } from "../core/project.js";
+import { addFile, addVariant, addVersion, ensureProjectIdOnce, lockPicture, setShots, shotAt } from "../core/project.js";
 import { addTake, editSection, setSections } from "../core/script.js";
 import { addNote, applyReply, applyUserEdit, filterNotes } from "../core/notes.js";
 import { createBatch, latestBatch } from "../core/batches.js";
+import { exportFileName, notesMarkdown } from "../core/exportNotes.js";
 import { tabStates } from "../core/tabs.js";
 import { fromManifestPath, toManifestPath } from "../core/paths.js";
 import { probe } from "../core/media.js";
 import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { GRAB_PATH, SCREENSHOT_PATH, contentDisposition, contentType, inside, registeredMedia, sendFile } from "./files.js";
 import { candidatePaths, listAssets, fpsFor, screenshotName } from "./assets.js";
-import { osRevealer, type Revealer } from "./reveal.js";
+import { osRevealer, osOpener, OPEN_SAFE_EXT, type Revealer, type Opener } from "./reveal.js";
 import type { CorruptEvent } from "./watch.js";
-import { LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, ProjectIdSchema, ShotSchema, type Batch, type Note } from "../core/schema.js";
+import { LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, FileKindSchema, ProjectIdSchema, ShotSchema, type Batch, type Note } from "../core/schema.js";
 
 export const VERSION = "0.1.0";
 
@@ -121,7 +122,15 @@ const GrabBody = z.object({
   png: z.string().min(1),
 });
 
-const RevealBody = z.object({ path: z.string().min(1) });
+const RevealBody = z.union([z.object({ path: z.string().min(1) }), z.object({ project: z.literal(true) })]);
+const OpenBody = z.object({ path: z.string().min(1) });
+const AddFileBody = z.object({
+  kind: FileKindSchema,
+  file: z.string().min(1),
+  name: z.string().min(1).max(120).optional(),
+  note: z.string().max(500).optional(),
+  video: z.string().optional(),
+});
 
 const MAX_GRAB_BYTES = 25 * 1024 * 1024;
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -146,6 +155,8 @@ export interface AppOptions {
   projectId?: string;
   /** Reveals a file in the system file manager for POST /api/reveal. Defaults to osRevealer. */
   reveal?: Revealer;
+  /** Opens a file in its default application for POST /api/open. Defaults to osOpener. */
+  open?: Opener;
 }
 
 const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost"]);
@@ -165,6 +176,7 @@ const escapeHtml = (text: string) =>
 export function createApp(store: Store, opts: AppOptions = {}): Hono {
   const webDir = opts.webDir ?? DEFAULT_WEB_DIR;
   const reveal = opts.reveal ?? osRevealer;
+  const open = opts.open ?? osOpener;
   const app = new Hono();
   // Every SSE client adds a change listener, so lift Node's default limit of ten.
   store.setMaxListeners(0);
@@ -318,6 +330,12 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
 
   app.post("/api/reveal", async (c) => {
     const b = await body(c, RevealBody);
+    // §16.5: { project: true } reveals the project root itself, with no asset-list check --
+    // it's always the folder this server is running for, never user-supplied.
+    if ("project" in b) {
+      await reveal(store.root);
+      return c.json({ ok: true });
+    }
     const [project, script] = await Promise.all([store.read("project"), store.read("script")]);
     // Exact string equality against a path /api/assets would list: no path logic beyond this is
     // needed to reject traversal, absolute paths and anything unregistered. candidatePaths is
@@ -330,6 +348,45 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     if (!exists) throw new NotFoundError("asset", b.path);
     await reveal(abs);
     return c.json({ ok: true });
+  });
+
+  // §16.3: open a listed asset in its default app. The listed-path check and the safe-extension
+  // check both happen before any stat or spawn, so an unsafe or unlisted path never touches disk.
+  app.post("/api/open", async (c) => {
+    const b = await body(c, OpenBody);
+    const [project, script] = await Promise.all([store.read("project"), store.read("script")]);
+    const candidates = await candidatePaths(store, project, script);
+    if (!candidates.has(b.path)) throw new NotFoundError("asset", b.path);
+    const ext = extname(b.path).toLowerCase().replace(/^\./, "");
+    if (!OPEN_SAFE_EXT.has(ext)) throw new RushesError(`Rushes won't open "${b.path}": unsafe file type`, 415, "unsafe_type", { path: b.path });
+    const abs = fromManifestPath(store.root, b.path);
+    const exists = await stat(abs).then(() => true, () => false);
+    if (!exists) throw new NotFoundError("asset", b.path);
+    await open(abs);
+    return c.json({ ok: true });
+  });
+
+  // ---- library: §16.2 registered files, and §16.4 notes export ----
+  app.post("/api/files", async (c) => {
+    const b = await body(c, AddFileBody);
+    const file = toManifestPath(store.root, b.file);
+    const { result } = await store.update("project", (p) => addFile(p, { ...b, file }));
+    return c.json(result, 201);
+  });
+
+  app.post("/api/exports/notes", async (c) => {
+    const [project, notesFile] = await Promise.all([store.read("project"), store.read("notes")]);
+    const now = new Date();
+    const md = notesMarkdown(project, notesFile.notes, now);
+    const name = exportFileName(project.name, now);
+    const dir = join(store.root, "exports");
+    await mkdir(dir, { recursive: true });
+    // Written to a temp name in the same directory, then renamed into place -- same atomic
+    // write the grabs route uses, so exporting again the same day cleanly replaces the file.
+    const tmp = join(dir, `.${name}.${process.pid}.tmp`);
+    await writeFile(tmp, md, "utf8");
+    await rename(tmp, join(dir, name));
+    return c.json({ path: `exports/${name}` }, 201);
   });
 
   app.post("/api/shutdown", (c) => {

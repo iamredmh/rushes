@@ -12,7 +12,8 @@ export interface ToolContext {
 
 const project = z.string().optional().describe("Project folder. Defaults to the current working directory.");
 const stage = z.enum(["script", "picture", "voice", "music", "sfx", "mix"]);
-const assetKind = z.enum(["screenshot", "cut", "take", "music", "sfx", "voice"]);
+const fileKind = z.enum(["doc", "image", "caption", "export", "delivery", "edit"]);
+const assetKind = z.enum(["screenshot", "cut", "take", "music", "sfx", "voice", "doc", "image", "caption", "export", "delivery", "edit"]);
 
 function ok(data: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
@@ -238,6 +239,35 @@ export function createMcpServer(ctx: ToolContext): McpServer {
       inputSchema: { project },
     },
     safe(async ({ project }) => (await ctx.client(project)).get("/api/picks")),
+  );
+
+  server.registerTool(
+    "rushes_add_file",
+    {
+      title: "Add a file to the library",
+      description:
+        "Register a project file (a doc, image, caption, export, delivery or edit file) in the Assets library, so it's listed, can be revealed, downloaded and opened. Docs, text and PDFs at the project root, captions at the root, and anything in exports/ are found automatically; other files need this.",
+      inputSchema: {
+        project,
+        kind: fileKind,
+        file: z.string().describe("Path to the file, absolute or relative to the project."),
+        name: z.string().optional().describe("Shown in the library. Defaults to the file's name."),
+        note: z.string().optional(),
+        video: z.string().optional().describe("Video id or name this file belongs to, e.g. a delivery or export for a specific film."),
+      },
+    },
+    safe(async ({ project, ...b }) => (await ctx.client(project)).post("/api/files", b)),
+  );
+
+  server.registerTool(
+    "rushes_export_notes",
+    {
+      title: "Export notes",
+      description:
+        "Write every note to exports/<project-slug>-notes-<date>.md, grouped by stage and, for Picture, by film and version. Exporting again the same day overwrites it. Returns the path.",
+      inputSchema: { project },
+    },
+    safe(async ({ project }) => (await ctx.client(project)).post("/api/exports/notes", {})),
   );
 
   return server;

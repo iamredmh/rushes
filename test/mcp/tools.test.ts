@@ -30,13 +30,13 @@ async function connect() {
 }
 
 describe("MCP tools", () => {
-  it("lists the fourteen tools", async () => {
+  it("lists the sixteen tools", async () => {
     const t = await connect();
     const { tools } = await t.client.listTools();
     expect(tools.map((x) => x.name).sort()).toEqual([
-      "rushes_add_take", "rushes_add_variant", "rushes_add_version", "rushes_get_batch", "rushes_get_picks",
-      "rushes_get_script", "rushes_list_assets", "rushes_list_notes", "rushes_lock_picture", "rushes_open",
-      "rushes_reply", "rushes_set_script", "rushes_set_shots", "rushes_status",
+      "rushes_add_file", "rushes_add_take", "rushes_add_variant", "rushes_add_version", "rushes_export_notes",
+      "rushes_get_batch", "rushes_get_picks", "rushes_get_script", "rushes_list_assets", "rushes_list_notes",
+      "rushes_lock_picture", "rushes_open", "rushes_reply", "rushes_set_script", "rushes_set_shots", "rushes_status",
     ]);
     const set = tools.find((x) => x.name === "rushes_set_script")!;
     expect((set.inputSchema.properties as Record<string, { description?: string }>).replace.description).toMatch(/replace the whole script; default merges by id/);
@@ -141,6 +141,24 @@ describe("MCP tools", () => {
     const cuts = await t.call("rushes_list_assets", { kind: "cut" });
     expect(cuts.json.assets).toHaveLength(1);
     expect(cuts.json.assets[0]).toMatchObject({ kind: "cut", video: "hero-60s", version: "v1" });
+    await t.close();
+  });
+
+  it("rushes_add_file registers a file, listed by rushes_list_assets under its kind", async () => {
+    const t = await connect();
+    const added = await t.call("rushes_add_file", { kind: "doc", file: "brief.md", name: "Creative brief", note: "v2" });
+    expect(added.json).toMatchObject({ kind: "doc", file: "brief.md", name: "Creative brief", note: "v2" });
+    const assets = await t.call("rushes_list_assets", { kind: "doc" });
+    expect(assets.json.assets).toMatchObject([{ path: "brief.md", name: "Creative brief" }]);
+    await t.close();
+  });
+
+  it("rushes_export_notes writes the file and returns its path", async () => {
+    const t = await connect();
+    const r = await t.call("rushes_export_notes");
+    expect(r.json.path).toMatch(/^exports\/spring-launch-notes-\d{4}-\d{2}-\d{2}\.md$/);
+    const exported = await readFile(join(t.root, r.json.path), "utf8");
+    expect(exported).toContain("spring-launch — notes");
     await t.close();
   });
 

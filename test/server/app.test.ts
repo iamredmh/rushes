@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { basename, join } from "node:path";
 import { Store } from "../../src/core/store.js";
 import { tmpProject } from "../helpers/tmp.js";
 import { createApp, type AppOptions } from "../../src/server/app.js";
@@ -490,6 +490,59 @@ describe("POST /api/reveal", () => {
     expect(r.status).toBe(404);
     expect(revealed).toEqual([]);
   });
+
+  it("{ project: true } reveals the project root, with no listed-path check", async () => {
+    const { call, root, revealed } = await withRevealer();
+    const r = await call("POST", "/api/reveal", { project: true });
+    expect(r.status).toBe(200);
+    expect(r.json).toEqual({ ok: true });
+    expect(revealed).toEqual([root]);
+  });
+});
+
+describe("POST /api/open", () => {
+  async function withOpener() {
+    const opened: string[] = [];
+    const fake = async (abs: string) => { opened.push(abs); };
+    const { store, root, call: baseCall } = await setup({ open: fake });
+    await mkdir(join(root, "renders"), { recursive: true });
+    await writeFile(join(root, "renders", "hero.mp4"), "x");
+    await writeFile(join(root, "brief.md"), "# brief");
+    await baseCall("POST", "/api/versions", { video: "Hero", file: "renders/hero.mp4" });
+    await baseCall("POST", "/api/files", { kind: "edit", file: "evil.command", name: "evil" });
+    return { call: baseCall, root, store, opened };
+  }
+
+  it("calls the opener with a listed .md's absolute path", async () => {
+    const { call, root, opened } = await withOpener();
+    const r = await call("POST", "/api/open", { path: "brief.md" });
+    expect(r.status).toBe(200);
+    expect(r.json).toEqual({ ok: true });
+    expect(opened).toEqual([join(root, "brief.md")]);
+  });
+
+  it("returns 415 unsafe_type for a registered but unsafe extension, and never calls the opener (no stat needed: evil.command doesn't exist on disk)", async () => {
+    const { call, opened } = await withOpener();
+    const r = await call("POST", "/api/open", { path: "evil.command" });
+    expect(r.status).toBe(415);
+    expect(r.json).toMatchObject({ error: "unsafe_type" });
+    expect(opened).toEqual([]);
+  });
+
+  it("returns 404 for an unlisted .md, never calling the opener", async () => {
+    const { call, opened } = await withOpener();
+    const r = await call("POST", "/api/open", { path: "unlisted.md" });
+    expect(r.status).toBe(404);
+    expect(opened).toEqual([]);
+  });
+
+  it("returns 404 for a listed, safe path that's missing from disk", async () => {
+    const { call, opened } = await withOpener();
+    const added = await call("POST", "/api/files", { kind: "doc", file: "gone.md" });
+    const r = await call("POST", "/api/open", { path: added.json.file });
+    expect(r.status).toBe(404);
+    expect(opened).toEqual([]);
+  });
 });
 
 describe("GET /media?download=1", () => {
@@ -542,5 +595,49 @@ describe("GET /media?download=1", () => {
     const disposition = r.headers.get("content-disposition")!;
     expect(disposition).not.toContain("\n");
     expect(disposition).toContain('filename="evil_file.mp4"');
+  });
+});
+
+describe("POST /api/files", () => {
+  it("registers a file and it appears in /api/assets under its kind", async () => {
+    const { call } = await setup();
+    const r = await call("POST", "/api/files", { kind: "doc", file: "brief.md", name: "Creative brief", note: "v2" });
+    expect(r.status).toBe(201);
+    expect(r.json).toMatchObject({ kind: "doc", file: "brief.md", name: "Creative brief", note: "v2", video: null });
+    const assets = await call("GET", "/api/assets?kind=doc");
+    expect(assets.json.assets).toMatchObject([{ path: "brief.md", name: "Creative brief", note: "v2" }]);
+  });
+
+  it("resolves video by name and rejects an unknown one", async () => {
+    const { call } = await setup();
+    await call("POST", "/api/versions", { video: "Hero", file: "renders/hero.mp4" });
+    const ok = await call("POST", "/api/files", { kind: "delivery", file: "exports/hero.mov", video: "Hero" });
+    expect(ok.json.video).toBe("hero");
+    const bad = await call("POST", "/api/files", { kind: "delivery", file: "exports/x.mov", video: "nope" });
+    expect(bad.status).toBe(404);
+  });
+});
+
+describe("POST /api/exports/notes", () => {
+  it("writes exports/<slug>-notes-<date>.md and the file then appears under kind export", async () => {
+    const { call, root } = await setup();
+    await call("POST", "/api/notes", { stage: "mix", scope: "whole", text: "Loudness check" });
+    const r = await call("POST", "/api/exports/notes", {});
+    expect(r.status).toBe(201);
+    expect(r.json.path).toMatch(/^exports\/spring-launch-notes-\d{4}-\d{2}-\d{2}\.md$/);
+    const written = await readFile(join(root, r.json.path), "utf8");
+    expect(written).toContain("# spring-launch — notes");
+    expect(written).toContain("Loudness check");
+    const assets = await call("GET", "/api/assets?kind=export");
+    expect(assets.json.assets.map((a: { path: string }) => a.path)).toContain(r.json.path);
+  });
+
+  it("exporting again the same day overwrites the file rather than leaving two", async () => {
+    const { call, root } = await setup();
+    await call("POST", "/api/exports/notes", {});
+    const second = await call("POST", "/api/exports/notes", {});
+    const { readdir } = await import("node:fs/promises");
+    const names = (await readdir(join(root, "exports"))).filter((n) => n.endsWith(".md"));
+    expect(names).toEqual([basename(second.json.path)]);
   });
 });

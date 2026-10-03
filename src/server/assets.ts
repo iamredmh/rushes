@@ -1,11 +1,11 @@
 import { readdir, stat } from "node:fs/promises";
-import { basename, join } from "node:path";
-import type { LaneStage, Project, Script } from "../core/schema.js";
+import { basename, extname, join } from "node:path";
+import type { FileEntry, FileKind, LaneStage, Project, Script } from "../core/schema.js";
 import type { Store } from "../core/store.js";
 import { fromManifestPath } from "../core/paths.js";
 import { GRAB_PATH, SCREENSHOT_PATH, registeredMedia } from "./files.js";
 
-export type AssetKind = "screenshot" | "cut" | "take" | "music" | "sfx" | "voice";
+export type AssetKind = "screenshot" | "cut" | "take" | "music" | "sfx" | "voice" | FileKind;
 
 export interface Asset {
   kind: AssetKind;
@@ -22,6 +22,7 @@ export interface Asset {
   section?: string;
   lane?: string;
   variant?: string;
+  note?: string;
 }
 
 /**
@@ -117,11 +118,83 @@ async function fileAsset(
   store: Store,
   kind: AssetKind,
   path: string,
-  extra: Partial<Pick<Asset, "video" | "version" | "section" | "lane" | "variant">>,
+  extra: Partial<Pick<Asset, "video" | "version" | "section" | "lane" | "variant" | "note">>,
 ): Promise<Asset> {
   const abs = fromManifestPath(store.root, path);
   const info = await statInfo(abs);
   return { kind, path, abs, name: basename(path), size: info.size, modified: info.modified, missing: info.missing, ...extra };
+}
+
+async function registeredFileAsset(store: Store, f: FileEntry): Promise<Asset> {
+  const abs = fromManifestPath(store.root, f.file);
+  const info = await statInfo(abs);
+  const asset: Asset = { kind: f.kind, path: f.file, abs, name: f.name, size: info.size, modified: info.modified, missing: info.missing, note: f.note };
+  if (f.video) asset.video = f.video;
+  return asset;
+}
+
+/** §16.2's new kinds, in the order the library shows them. */
+const LIBRARY_KINDS: FileKind[] = ["doc", "image", "caption", "export", "delivery", "edit"];
+
+const DOC_EXT = new Set(["md", "txt", "pdf"]);
+const CAPTION_EXT = new Set(["srt", "vtt"]);
+
+/**
+ * Names (not full paths) of every regular file directly inside `dir`, optionally filtered to
+ * `exts` (lower-case, no dot). Never recurses, never follows a symlink, and skips hidden names,
+ * the same cheap, one-level readdir the screenshot scan already does. Empty when `dir` doesn't
+ * exist. Sorted by name, so auto-discovered files always list in a stable order.
+ */
+async function dirFileNames(store: Store, dir: string, exts?: ReadonlySet<string>): Promise<string[]> {
+  let entries;
+  try {
+    entries = await readdir(join(store.root, dir), { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const names: string[] = [];
+  for (const d of entries) {
+    if (d.isSymbolicLink() || d.isDirectory() || !d.isFile()) continue;
+    if (d.name.startsWith(".")) continue;
+    if (exts && !exts.has(extname(d.name).toLowerCase().slice(1))) continue;
+    names.push(d.name);
+  }
+  return names.sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * §16.2's auto-discovered paths: every *.md/.txt/.pdf directly in the project root (`doc`), every
+ * *.srt/.vtt directly in the root (`caption`), and every file directly in `exports/` (`export`).
+ * Hidden files, anything inside `.rushes/`, and anything in a deeper sub-folder never appear,
+ * because this only ever reads one directory level.
+ */
+async function discoveredLibraryPaths(store: Store): Promise<{ doc: string[]; caption: string[]; export: string[] }> {
+  const [doc, caption, exportNames] = await Promise.all([
+    dirFileNames(store, ".", DOC_EXT),
+    dirFileNames(store, ".", CAPTION_EXT),
+    dirFileNames(store, "exports"),
+  ]);
+  return { doc, caption, export: exportNames.map((n) => `exports/${n}`) };
+}
+
+/**
+ * The library assets (doc, image, caption, export, delivery, edit), one kind at a time in
+ * LIBRARY_KINDS order. Within a kind, registered files come first in manifest order, then
+ * auto-discovered files sorted by name; a path that's both registered and auto-discovered is
+ * listed once, with the registered metadata (§16.2).
+ */
+async function libraryAssets(store: Store, project: Project): Promise<Asset[]> {
+  const discovered = await discoveredLibraryPaths(store);
+  const autoByKind: Partial<Record<FileKind, string[]>> = { doc: discovered.doc, caption: discovered.caption, export: discovered.export };
+  const out: Asset[] = [];
+  for (const kind of LIBRARY_KINDS) {
+    const registered = project.files.filter((f) => f.kind === kind);
+    out.push(...(await Promise.all(registered.map((f) => registeredFileAsset(store, f)))));
+    const registeredPaths = new Set(registered.map((f) => f.file));
+    const auto = (autoByKind[kind] ?? []).filter((path) => !registeredPaths.has(path));
+    out.push(...(await Promise.all(auto.map((path) => fileAsset(store, kind, path, {})))));
+  }
+  return out;
 }
 
 function variantEntries(project: Project, stage: LaneStage): { lane: string; variant: string; file: string }[] {
@@ -155,8 +228,9 @@ export async function listAssets(store: Store, project: Project, script: Script)
     scanScreenshotDir(store, oldNames, SCREENSHOT_DIRS[1][1], SCREENSHOT_DIRS[1][2], project),
   ]);
   const screenshots = [...fresh, ...old].sort((a, b) => b.mtimeMs - a.mtimeMs).map((x) => x.asset);
+  const library = await libraryAssets(store, project);
 
-  return [...screenshots, ...cuts, ...takes, ...voice, ...music, ...sfx];
+  return [...screenshots, ...cuts, ...takes, ...voice, ...music, ...sfx, ...library];
 }
 
 /**
@@ -176,5 +250,7 @@ export async function candidatePaths(store: Store, project: Project, script: Scr
       if (safe.test(path)) paths.add(path);
     }
   }
+  const discovered = await discoveredLibraryPaths(store);
+  for (const path of [...discovered.doc, ...discovered.caption, ...discovered.export]) paths.add(path);
   return paths;
 }

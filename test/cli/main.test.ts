@@ -406,6 +406,40 @@ describe("cli", () => {
     await s.close();
   });
 
+  it("add file registers a library file, listed by assets under its kind", async () => {
+    const { root } = await tmpProject();
+    await writeFile(join(root, "brief.md"), "# Brief");
+    const s = await startServer(root, { port: 0 });
+    const a = io(root);
+    expect(await main(["add", "file", "brief.md", "--kind", "doc", "--name", "Creative brief", "--note", "v2"], a.x)).toBe(0);
+    expect(a.out[0]).toBe("Added doc: Creative brief");
+    const b = io(root);
+    await main(["assets", "--kind", "doc", "--json"], b.x);
+    const assets = JSON.parse(b.out[0]);
+    expect(assets).toMatchObject([{ path: "brief.md", name: "Creative brief", note: "v2" }]);
+    await s.close();
+  });
+
+  it("add file needs --kind", async () => {
+    const { root } = await tmpProject();
+    const s = await startServer(root, { port: 0 });
+    const a = io(root);
+    expect(await main(["add", "file", "brief.md"], a.x)).toBe(2);
+    expect(a.err[0]).toContain("rushes add file");
+    await s.close();
+  });
+
+  it("export notes writes the file and prints its path", async () => {
+    const { root } = await tmpProject();
+    const s = await startServer(root, { port: 0 });
+    const a = io(root);
+    expect(await main(["export", "notes"], a.x)).toBe(0);
+    expect(a.out[0]).toMatch(/^Exported notes to exports\/demo-notes-\d{4}-\d{2}-\d{2}\.md$/);
+    const path = a.out[0].replace("Exported notes to ", "");
+    await access(join(root, path));
+    await s.close();
+  });
+
   it("status reads the project folder it is given", async () => {
     const { root } = await tmpProject();
     const s = await startServer(root, { port: 0 });

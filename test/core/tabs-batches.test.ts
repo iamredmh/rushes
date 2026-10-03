@@ -7,7 +7,7 @@ import { addNote } from "../../src/core/notes.js";
 import type { BatchesFile, NotesFile, Project, Script } from "../../src/core/schema.js";
 
 function ctx() {
-  const project: Project = { schema: 1, rev: 0, name: "spring-launch", fps: 30, videos: [], lanes: [] };
+  const project: Project = { schema: 1, rev: 0, name: "spring-launch", fps: 30, videos: [], lanes: [], files: [] };
   const script: Script = { schema: 1, rev: 0, wordsPerSecond: 2.6, sections: [] };
   const notes: NotesFile = { schema: 1, rev: 0, notes: [] };
   const batches: BatchesFile = { schema: 1, rev: 0, batches: [] };
