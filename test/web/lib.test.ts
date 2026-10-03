@@ -19,7 +19,7 @@ import { tmpProject } from "../helpers/tmp.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import {
-  heardVoice, pickedVoiceRow, readTake, sectionLabel, voiceDefaultRead, voiceListening, voiceNoteRows, voiceOnLabel, voiceOnOptions, voiceRounds,
+  heardVoice, readTake, sectionLabel, voiceDefaultRead, voiceListening, voiceNoteRows, voiceOnLabel, voiceOnOptions, voiceRounds,
 } from "../../web/src/lib.js";
 
 /** A read with only an id: its name is the id, its file `media/<id>.wav`. */
@@ -565,30 +565,17 @@ describe("Voiceover", () => {
     sec("s2", 4, 8, [take("t1"), take("t2"), take("t3", "old line")]),
     sec("s3", 8, 12, []),
   ];
-  const voiceLanes: Lane[] = [
-    { id: "alt", stage: "voice", name: "Alt reads", variants: [
-      { id: "warm", name: "Warm read", file: "audio/warm.wav", meta: {}, cues: [] },
-      { id: "dry", name: "Dry read", file: "audio/dry.wav", meta: {}, cues: [] },
-    ] },
-  ];
-  const variants = variantRows(voiceLanes, "voice");
-
   it("turns on Voiceover", () => {
     expect(BUILT.voice).toBe(true);
   });
   it("names sections, for older notes", () => {
     expect(sectionLabel("s2")).toBe("S2");
   });
-  it("reads a section's pick, else its newest take (Mix's assembled read, until it moves to rounds)", () => {
+  it("reads a section's pick, else its newest take (audio/timeline.ts's assembleRead and the server parity test; Mix itself no longer mixes takes, §18.4)", () => {
     expect(readTake(sections[1], {})?.id).toBe("t3");
     expect(readTake(sections[1], { s2: "t1" })?.id).toBe("t1");
     expect(readTake(sections[1], { s2: "gone" })?.id).toBe("t3");
     expect(readTake(sections[2], {})).toBeNull();
-  });
-  it("finds the first picked voice variant (Mix's VO, until it moves to heardVoice)", () => {
-    expect(pickedVoiceRow(variants, {})).toBeNull();
-    expect(pickedVoiceRow(variants, { alt: "nope" })).toBeNull();
-    expect(pickedVoiceRow(variants, { alt: "dry" })?.key).toBe("alt/dry");
   });
 });
 
@@ -851,26 +838,34 @@ describe("Mix", () => {
 });
 
 describe("the take-pick rule: server mix and dashboard agree (parity)", () => {
-  const files = ["s1-a.wav", "s1-b.wav", "s2-a.wav", "s2-b.wav", "s2-c.wav", "dry.wav", "warm.wav"];
+  const files = ["s1-a.wav", "s1-b.wav", "s2-a.wav", "s2-b.wav", "s2-c.wav", "dry.wav", "warm.wav", "cool.wav"];
   const take = (id: string, file: string) => ({ id, file: `audio/${file}`, duration: 2, forText: "x" });
   const sections: Section[] = [
     { id: "s1", start: 0, end: 3, current: "x", proposed: null, direction: "", status: "draft", takes: [take("t1", "s1-a.wav"), take("t2", "s1-b.wav")] },
     { id: "s2", start: 3, end: 7, current: "x", proposed: null, direction: "", status: "draft", takes: [take("t1", "s2-a.wav"), take("t2", "s2-b.wav"), take("t3", "s2-c.wav")] },
     { id: "s3", start: 7, end: 9, current: "x", proposed: null, direction: "", status: "draft", takes: [] },
   ];
+  // Two voice rounds, round-2 the newer, so the suite can mirror Task 1's three mixInputs cases
+  // (an older round picked, a newer pick wins, nothing picked) on the client side too.
   const lanes: Lane[] = [
     { id: "music", stage: "music", name: "Music", variants: [] },
-    { id: "alt", stage: "voice", name: "Alt reads", variants: [
+    { id: "round-1", stage: "voice", name: "Round 1", variants: [
       { id: "dry", name: "Dry", file: "audio/dry.wav", meta: {}, cues: [] },
       { id: "warm", name: "Warm", file: "audio/warm.wav", meta: {}, cues: [] },
     ] },
+    { id: "round-2", stage: "voice", name: "Round 2", variants: [
+      { id: "cool", name: "Cool", file: "audio/cool.wav", meta: {}, cues: [] },
+    ] },
   ];
   const cases: { sections: Record<string, string>; lanes: Record<string, string> }[] = [
-    { sections: {}, lanes: {} },
-    { sections: { s1: "t1", s2: "t2" }, lanes: {} },
+    { sections: {}, lanes: {} }, // nothing picked
+    { sections: { s1: "t1", s2: "t2" }, lanes: {} }, // takes picked, but no round: still nothing
     { sections: { s2: "gone" }, lanes: {} },
-    { sections: { s1: "t1" }, lanes: { alt: "warm" } },
-    { sections: {}, lanes: { alt: "gone" } },
+    { sections: { s1: "t1" }, lanes: { "round-1": "warm" } }, // the only round picked
+    { sections: {}, lanes: { "round-1": "gone" } }, // a stale pick is no pick
+    { sections: {}, lanes: { "round-1": "dry" } }, // an older round picked, the newer round has none
+    { sections: {}, lanes: { "round-1": "dry", "round-2": "cool" } }, // a newer pick wins over an older one
+    { sections: {}, lanes: { "round-1": "dry", "round-2": "gone" } }, // falls through a stale newer pick to the older one
   ];
 
   it("resolves the same voice files at the same offsets, for every pick shape (§18.4: takes are never mixed)", async () => {
@@ -882,9 +877,9 @@ describe("the take-pick rule: server mix and dashboard agree (parity)", () => {
     for (const c of cases) {
       const picks: Picks = { schema: 1, rev: 0, sections: c.sections, lanes: c.lanes };
       const server = mixInputs(project, script, picks, ["voice"], root).map((i) => [relative(root, i.file), i.offset]);
-      // The dashboard's VO, as Mix and Voiceover build it: a picked round's read, or nothing --
-      // never the assembled read from takes, which Rushes no longer mixes.
-      const variant = pickedVoiceRow(variantRows(lanes, "voice"), c.lanes);
+      // The dashboard's VO, as Mix plays it: the newest round's pick, walking back past rounds with
+      // none -- never the assembled read from takes, which Rushes no longer mixes.
+      const variant = heardVoice(voiceRounds(lanes, c.lanes));
       const client = variant ? [[variant.file, 0]] : [];
       expect(client, JSON.stringify(c)).toEqual(server);
       for (const s of sections) expect(readTake(s, c.sections)?.id ?? null).toBe(serverReadTake(s, picks)?.id ?? null);

@@ -1,19 +1,18 @@
 // Mix (§17.6): three lanes (Voiceover, Music, Sound effects), each with M and S, and a loudness
 // readout under them.
 //
-// The VO lane plays exactly what the Voiceover tab calls the picks: a picked whole-read voice
-// variant, else the assembled read (each section's pick, else its newest take). Music and Sound
-// effects play their picked variants; a lane with nothing picked, or whose file is missing, is an
-// empty lane with the missing mark and is never measured.
+// The VO lane plays the newest voice round's pick, walking back past rounds with none (§18.4),
+// matching the server. Music and Sound effects play their picked variants; a lane with nothing
+// picked, or whose file is missing, is an empty lane with the missing mark and is never measured.
 //
 // Mute and solo are view state: lane gains on the one clock (solo wins), never saved, and reset when
 // you leave the tab. Only the lanes you hear are sent to the loudness readout.
 import { useEffect, useRef, useState } from "preact/hooks";
 import { api, ApiError } from "../api.js";
-import { assembleRead, assetRev, type Clip, laneGains } from "../audio/timeline.js";
+import { assetRev, type Clip, laneGains } from "../audio/timeline.js";
 import {
-  defaultVersion, loudnessLanes, type LoudnessState, loudnessReadout, MIX_LANES, type MixLane, type MixModel, mixNoteRows,
-  mixOnLabel, mixOnOptions, pickedVoiceRow, sectionLabel, STAGE_NAMES, type VariantRow, variantRows, WHOLE_MIX,
+  defaultVersion, heardVoice, loudnessLanes, type LoudnessState, loudnessReadout, MIX_LANES, type MixLane, type MixModel, mixNoteRows,
+  mixOnLabel, mixOnOptions, STAGE_NAMES, type VariantRow, variantRows, voiceRounds, WHOLE_MIX,
 } from "../lib.js";
 import type { Asset, LoudnessResult, State, Video } from "../types.js";
 import { AudioStage, type Preview } from "./AudioStage.js";
@@ -49,14 +48,12 @@ export function Mix({ state, assets, video, toast, onChanged, onPendingChange }:
   const lanePicks = state.picks.lanes;
 
   // ---- what each lane plays ----
-  // VO: the picked whole-read variant replaces the read, as on Voiceover and in the server's mix.
-  const sections = state.script.sections;
-  const voiceVariant = pickedVoiceRow(variantRows(state.project.lanes, "voice"), lanePicks);
-  const readClips = assembleRead(sections, state.picks.sections, "vo");
-  const voClips: Clip[] = voiceVariant
-    ? missing(voiceVariant.file) ? [] : [{ id: voiceVariant.key, lane: "vo", path: voiceVariant.file, offset: 0, duration: 0, rev: rev(voiceVariant.file) }]
-    : readClips.filter((c) => !missing(c.path)).map((c) => ({ ...c, rev: rev(c.path) }));
-  const voGone = voiceVariant ? missing(voiceVariant.file) : readClips.length > 0 && voClips.length === 0;
+  // VO: the newest voice round's pick, walking back past rounds with none (§18.4), as the server mixes it.
+  const voiceRead = heardVoice(voiceRounds(state.project.lanes, lanePicks));
+  const voClips: Clip[] = voiceRead && !missing(voiceRead.file)
+    ? [{ id: voiceRead.key, lane: "vo", path: voiceRead.file, offset: 0, duration: 0, rev: rev(voiceRead.file) }]
+    : [];
+  const voGone = voiceRead ? missing(voiceRead.file) : false;
 
   const variants = { music: variantRows(state.project.lanes, "music"), sfx: variantRows(state.project.lanes, "sfx") };
   const picked = (rows: VariantRow[]) => rows.filter((r) => lanePicks[r.lane] === r.variant);
@@ -77,7 +74,7 @@ export function Mix({ state, assets, video, toast, onChanged, onPendingChange }:
 
   // ---- the lanes ----
   const metaOf = (lane: MixLane): string | null => {
-    if (lane === "vo") return voiceVariant ? voiceVariant.name : readClips.length > 0 ? "Assembled read" : null;
+    if (lane === "vo") return voiceRead ? `${voiceRead.laneName} · ${voiceRead.name}` : null;
     return pickedRows[lane].map((r) => r.name).join(" · ") || null;
   };
   const emptyTip = (lane: MixLane): string | null => {
@@ -91,7 +88,6 @@ export function Mix({ state, assets, video, toast, onChanged, onPendingChange }:
     meta: metaOf(lane),
     color: COLOR[lane],
     clips: clipsOf[lane],
-    labels: lane === "vo" && !voiceVariant ? sections.map((s) => ({ t: s.start, text: sectionLabel(s.id) })) : undefined,
     cues: lane === "sfx" ? heardRows.sfx.flatMap((r) => r.cues) : undefined,
     on: options.find((o) => o.row === lane)?.value,
     missing: emptyTip(lane) ?? undefined,
@@ -178,6 +174,7 @@ export function Mix({ state, assets, video, toast, onChanged, onPendingChange }:
       belowLanes={readout}
       rows={rows}
       preview={preview}
+      film={video?.id ?? null}
       fps={fps}
       notes={notes}
       onOptions={options}

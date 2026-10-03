@@ -928,12 +928,14 @@ test("switching tab, by 1–7 or by a click, refuses to drop a pending audio not
 // ---- Mix (Task 5) ----
 
 /**
- * A cut, a voice read (Gerald, in Round 1 · Voices), a music bed and an SFX pass, each picked unless
- * `pick` says false. Three files in all.
+ * A cut, two voice rounds (Round 1 · Voices: Gerald, picked; Round 2 · Gerald, tone: more sombre,
+ * left unpicked -- the newest round has none, so Mix falls back to Round 1, as the server does), a
+ * music bed and an SFX pass, each picked unless `pick` says false. Three files heard by default.
  */
 async function mixProject(page: Page, rushes: Rushes, opts: { pick?: { voice?: boolean; music?: boolean; sfx?: boolean } } = {}) {
   await rushes.addCut();
   const read = await rushes.addVariant("voice", "Gerald", { round: "Round 1 · Voices", seconds: 4, freq: 220 });
+  const read2 = await rushes.addVariant("voice", "more sombre", { round: "Round 2 · Gerald, tone", seconds: 4, freq: 240 });
   const bed = await rushes.addVariant("music", "Warm keys", { seconds: 4, freq: 330 });
   const pass = await rushes.addVariant("sfx", "Pass A", { seconds: 4, freq: 880, cues: [{ name: "Swipe", t: 1 }] });
   const lanes: Record<string, string> = {};
@@ -941,11 +943,13 @@ async function mixProject(page: Page, rushes: Rushes, opts: { pick?: { voice?: b
   if (opts.pick?.music !== false) lanes[bed.lane.id] = bed.variant.id;
   if (opts.pick?.sfx !== false) lanes[pass.lane.id] = pass.variant.id;
   await rushes.api("PUT", "/api/picks", { lanes });
-  return { read, bed, pass };
+  return { read, read2, bed, pass };
 }
 
 /** Gerald's clip id on Mix. */
 const VO_READ = "round-1-voices/gerald";
+/** "more sombre"'s clip id on Mix, once Round 2 is picked. */
+const VO_READ_2 = "round-2-gerald-tone/more-sombre";
 
 async function openMix(page: Page, rushes: Rushes, files: number) {
   // Every loudness request the page makes, in order.
@@ -966,10 +970,9 @@ test("Mix shows three lanes; mute and solo change the lane gains, and solo wins"
   await mixProject(page, rushes);
   const asked = await openMix(page, rushes, 3);
   await expect(page.locator(".lane [data-name]")).toHaveText(["Voiceover", "Music", "Sound effects"]);
-  await expect(page.locator('.lane[data-row="vo"] [data-meta]')).toHaveText("Gerald");
+  await expect(page.locator('.lane[data-row="vo"] [data-meta]')).toHaveText("Round 1 · Voices · Gerald");
   await expect(page.locator('.lane[data-row="music"] [data-meta]')).toHaveText("Warm keys");
   await expect(page.locator('.lane[data-row="sfx"] [data-meta]')).toHaveText("Pass A");
-  await expect(page.locator('.lane[data-row="vo"] .secmk')).toHaveCount(0);
   await expect(page.locator('.lane[data-row="sfx"] .cue')).toHaveText(["Swipe"]);
   await expect.poll(() => laneGainsOf(page)).toEqual({ vo: 1, music: 1, sfx: 1 });
   expect(await heard(page)).toEqual([`${VO_READ}@0`, "music/warm-keys@0", "sfx/pass-a@0"]);
@@ -1128,13 +1131,25 @@ test("a lane with nothing picked, or a missing file, is empty and left out of th
   await expect(page.locator(".meter [data-value]").first()).toHaveAttribute("data-tip", "Nothing to measure");
 });
 
-test("Mix's VO lane plays the picked voice read, as Voiceover does", async ({ page, rushes }) => {
-  await mixProject(page, rushes, { pick: { voice: false } });
-  const alt = await rushes.addVariant("voice", "Warm read", { seconds: 4, freq: 196 });
-  await rushes.api("PUT", "/api/picks", { lanes: { [alt.lane.id]: alt.variant.id } });
-  await openMix(page, rushes, 3);
-  await expect(page.locator('.lane[data-row="vo"] [data-meta]')).toHaveText("Warm read");
-  expect(await heard(page)).toEqual([`${alt.lane.id}/${alt.variant.id}@0`, "music/warm-keys@0", "sfx/pass-a@0"]);
+test("Mix's VO lane plays the newest round's pick, matching the server (§18.4)", async ({ page, rushes }) => {
+  const { read, read2 } = await mixProject(page, rushes);
+  const asked = await openMix(page, rushes, 3);
+  // Round 1 is picked, Round 2 isn't: Mix falls back to the older round, the newest with a pick.
+  await expect(page.locator('.lane[data-row="vo"] [data-meta]')).toHaveText("Round 1 · Voices · Gerald");
+  expect(await heard(page)).toEqual([`${VO_READ}@0`, "music/warm-keys@0", "sfx/pass-a@0"]);
+
+  // Picking Round 2's "more sombre" makes it the newest round with a pick: it takes over, and the
+  // mix changed, so the loudness readout asks again.
+  const before = asked.length;
+  await rushes.api("PUT", "/api/picks", { lanes: { [read2.lane.id]: read2.variant.id } });
+  await expect(page.locator('.lane[data-row="vo"] [data-meta]')).toHaveText("Round 2 · Gerald, tone · more sombre");
+  await expect.poll(() => heard(page)).toEqual([`${VO_READ_2}@0`, "music/warm-keys@0", "sfx/pass-a@0"]);
+  await expect.poll(() => asked.length).toBeGreaterThan(before);
+
+  // With no pick left in either round, the VO lane shows "Nothing picked" again.
+  await rushes.api("PUT", "/api/picks", { lanes: { [read.lane.id]: null, [read2.lane.id]: null } });
+  await expect(page.locator('.lane[data-row="vo"] .amiss')).toHaveAttribute("data-tip", "Nothing picked");
+  await expect.poll(() => heard(page)).toEqual(["music/warm-keys@0", "sfx/pass-a@0"]);
 });
 
 test("Mix notes: a range on Music saves the variant and marks, a whole-mix note saves no lane", async ({ page, rushes }) => {

@@ -355,14 +355,6 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .meter .measuring { align-self: center; color: var(--text-3); }
 .meter.retry { cursor: pointer; }
 .meter.retry > .btn { align-self: center; }
-/* Mix: section marks along the VO lane. */
-.secmk { position: absolute; top: 6px; height: calc(100% - 12px); padding-left: 6px; border-left: 1px solid var(--line-2); font: 600 15px/1 var(--sans); color: var(--text-3); z-index: 1; pointer-events: none; }
-/* One line tall: a zero-width first item holds the line, so a name wider than its section wraps
-   onto a second line, which is out of sight. Short sections keep their marker line, not a clipped name. */
-.secmk { box-sizing: border-box; }
-.secmk-row { display: flex; flex-wrap: wrap; height: 15px; overflow: hidden; padding-right: 4px; }
-.secmk-row::before { content: ""; width: 0; height: 15px; }
-.secmk-t { white-space: nowrap; }
 .cue { position: absolute; bottom: 4px; transform: translateX(-50%); font: 500 15px/1.15 var(--sans); color: var(--sfx); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 1ch; z-index: 2; pointer-events: none; text-shadow: 0 0 4px var(--raised), 0 0 2px var(--raised); }
 .cue-tick { position: absolute; bottom: 25px; transform: translateX(-50%); width: 1px; height: 46px; background: currentColor; opacity: 0.45; z-index: 2; pointer-events: none; }
 /* The mockup's 780px floor for the preview + notes column, less what the header, tabs and body padding

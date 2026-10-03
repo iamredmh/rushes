@@ -570,21 +570,13 @@ export function sectionLabel(id: string): string {
 }
 
 /**
- * The take a section's assembled read uses: its pick, else its newest; null with no takes. Kept for
- * Mix's VO lane (web/src/audio/timeline.ts assembleRead) until Mix moves to rounds, and for the
- * server parity test.
+ * The take a section's assembled read uses: its pick, else its newest; null with no takes. Mix no
+ * longer mixes takes (§18.4); kept for `web/src/audio/timeline.ts`'s `assembleRead` and the server
+ * parity test.
  */
 export function readTake<T extends { id: string }>(s: { id: string; takes: T[] }, picks: Record<string, string>): T | null {
   if (s.takes.length === 0) return null;
   return s.takes.find((t) => t.id === picks[s.id]) ?? s.takes[s.takes.length - 1];
-}
-
-/**
- * The first voice lane, in manifest order, whose pick names one of its variants. Kept for Mix's VO
- * lane until Mix moves to `heardVoice` (the newest round's pick).
- */
-export function pickedVoiceRow(rows: VariantRow[], lanePicks: Record<string, string>): VariantRow | null {
-  return rows.find((r) => lanePicks[r.lane] === r.variant) ?? null;
 }
 
 /** The `on` an old note on the assembled read saved; also Mix's VO row key. */
