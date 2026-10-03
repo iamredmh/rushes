@@ -73,6 +73,7 @@ The MCP server has sixteen tools: `rushes_open`, `rushes_status`, `rushes_add_ve
 
 - Never edit `.rushes/*.json` by hand while the server is running. Use the tools, or the CLI (`rushes add`, `rushes notes`, `rushes reply`).
 - Picks — which variant is in use per lane — are set from the dashboard only (**Use** / **Unpick**). No tool or CLI command sets one; read them with `rushes_get_picks`. Section take picks remain in the file format for compatibility only; nothing sets them any more.
+- A project whose voiceover exists only as takes from before rounds keeps Voiceover locked until a voice read exists, but open notes on those takes still count towards Send to agent and can be answered with `rushes_reply`.
 - You own a note's `reply`, `fixT` and `fixVersion`. The user owns its text, times and box. Either of you can set `status`.
 - After the first cut, send the storyboard's shots with `rushes_set_shots`; when a new cut moves them, send new timings.
 - Lock picture with `rushes_lock_picture` only when the user says picture is locked. Pass `version: null` to unlock.
