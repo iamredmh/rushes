@@ -3,11 +3,16 @@ import { api, ApiError } from "../api.js";
 import { BUILT, STAGE_NAMES, UNLOCK_HINT, defaultVersion, firstTab, latest, neighbourVideo, snap } from "../lib.js";
 import type { Batch, Stage, Video } from "../types.js";
 import { useRushes } from "../useRushes.js";
+import { Assets } from "./Assets.js";
 import { Icon, STAGE_ICONS } from "./Icon.js";
 import { Picture } from "./Picture.js";
 import { Script } from "./Script.js";
 
 const ORDER: Stage[] = ["script", "picture", "voice", "music", "sfx", "mix"];
+// Assets isn't a review stage (§15.3): it's a dashboard-only tab after the six stages, so it's
+// kept out of Stage and ORDER entirely and handled as its own case throughout this file.
+type View = Stage | "assets";
+const ASSETS_HINT = "It unlocks once the project has a cut, a take, a track or a screenshot.";
 const typing = (el: EventTarget | null) => el instanceof HTMLElement && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
 
 function Empty({ stage, unlocked }: { stage: Stage; unlocked: boolean }) {
@@ -21,8 +26,8 @@ function Empty({ stage, unlocked }: { stage: Stage; unlocked: boolean }) {
 }
 
 export function App() {
-  const { state, problem, wrongProject, refresh } = useRushes();
-  const [stage, setStage] = useState<Stage | null>(null);
+  const { state, assets, problem, wrongProject, refresh } = useRushes();
+  const [stage, setStage] = useState<View | null>(null);
   const [videoId, setVideoId] = useState<string | null>(null);
   const [versionId, setVersionId] = useState<string | null>(null);
   const [toastText, setToastText] = useState<string | null>(null);
@@ -34,13 +39,17 @@ export function App() {
   const [held, setHeld] = useState(false);
   // Where the next film's player should seek to once loaded, restoring that film's playhead.
   const [startAt, setStartAt] = useState(0);
+  // A grab kept from this film the last time it was on screen, restored on switching back to it.
+  const [restoreGrab, setRestoreGrab] = useState<string | null>(null);
   const toastTimer = useRef<number | undefined>(undefined);
-  // Per-film memory: playhead, version choice and hold state, so switching films and coming
-  // back doesn't lose your place. Keyed by video id.
-  const memory = useRef(new Map<string, { versionId: string | null; held: boolean; t: number }>());
+  // Per-film memory: playhead, version choice, hold state and a pending grab, so switching
+  // films and coming back doesn't lose your place. Keyed by video id.
+  const memory = useRef(new Map<string, { versionId: string | null; held: boolean; t: number; grab: string | null }>());
   // The playing <video> element, forwarded up from Picture, so a switch can read its live
   // currentTime directly (never stale) and pause it before it unmounts.
   const playerRef = useRef<HTMLVideoElement | null>(null);
+  // The current film's pending grab, forwarded up from Picture, read when switching films.
+  const grabRef = useRef<string | null>(null);
 
   const toast = (message: string) => {
     setToastText(message);
@@ -106,12 +115,13 @@ export function App() {
     const el = playerRef.current;
     el?.pause();
     const t = el ? snap(el.currentTime, fps) : (memory.current.get(video.id)?.t ?? 0);
-    memory.current.set(video.id, { versionId, held, t });
+    memory.current.set(video.id, { versionId, held, t, grab: grabRef.current });
     const saved = memory.current.get(newId);
     setVideoId(newId);
     setVersionId(saved?.versionId ?? null);
     setHeld(saved?.held ?? false);
     setStartAt(saved?.t ?? 0);
+    setRestoreGrab(saved?.grab ?? null);
   };
 
   const toggleLock = async () => {
@@ -126,9 +136,15 @@ export function App() {
 
   const tabs = state?.tabs ?? [];
   const tab = (s: Stage) => tabs.find((t) => t.stage === s);
+  const assetsUnlocked = assets.length > 0;
   const show = (s: Stage) => {
     if (!tab(s)?.unlocked) return toast(`Nothing to review in ${STAGE_NAMES[s]} yet`);
     setStage(s);
+    setSent(null);
+  };
+  const showAssets = () => {
+    if (!assetsUnlocked) return toast("Nothing to review in Assets yet");
+    setStage("assets");
     setSent(null);
   };
 
@@ -141,6 +157,7 @@ export function App() {
       if (typing(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
       const n = Number(e.key);
       if (n >= 1 && n <= 6) show(ORDER[n - 1]);
+      else if (n === 7) showAssets();
       if ((e.key === "[" || e.key === "]") && state) {
         const nxt = neighbourVideo(state.project.videos, videoId, e.key === "]" ? 1 : -1);
         if (nxt) switchFilm(nxt);
@@ -156,7 +173,7 @@ export function App() {
   });
 
   const send = async () => {
-    if (!stage) return;
+    if (!stage || stage === "assets") return;
     setKeysOpen(false);
     try {
       const { batch } = await api.post<{ batch: Batch }>("/api/batches", { stage });
@@ -187,8 +204,8 @@ export function App() {
 
   const pictureNotes = state.notes.notes.filter((n) => n.stage === "picture" && (!n.video || n.video === video?.id));
   const hasTodo = (vid: string) => state.notes.notes.some((n) => n.stage === "picture" && n.status === "todo" && (!n.video || n.video === vid));
-  const unlocked = tab(stage)?.unlocked ?? false;
-  const open = tab(stage)?.todo ?? 0;
+  const unlocked = stage === "assets" ? assetsUnlocked : (tab(stage)?.unlocked ?? false);
+  const open = stage === "assets" ? 0 : (tab(stage)?.todo ?? 0);
 
   return (
     <div class="shell">
@@ -260,7 +277,12 @@ export function App() {
         <button class="btn ghost ib tip-below" data-tip="Shortcuts  ?" aria-label="Keyboard shortcuts" onClick={() => { setSent(null); setKeysOpen(!keysOpen); }}>
           <Icon name="kbd" />
         </button>
-        <button class="btn primary" onClick={() => void send()}>
+        <button
+          class="btn primary"
+          disabled={stage === "assets"}
+          data-tip={stage === "assets" ? "Nothing to send from Assets" : undefined}
+          onClick={() => void send()}
+        >
           Send to agent{open > 0 && <span class="count">{open}</span>}
         </button>
       </header>
@@ -292,7 +314,7 @@ export function App() {
             <span><kbd>B</kbd></span><span>Draw a box</span>
             <span><kbd>G</kbd></span><span>Grab frame</span>
             <span><kbd>N</kbd></span><span>New note</span>
-            <span><kbd>1</kbd>–<kbd>6</kbd></span><span>Switch tab</span>
+            <span><kbd>1</kbd>–<kbd>7</kbd></span><span>Switch tab</span>
             <span><kbd>[</kbd> <kbd>]</kbd></span><span>Previous or next film</span>
             <span><kbd>?</kbd></span><span>Shortcuts</span>
             <span><kbd>Esc</kbd></span><span>Close</span>
@@ -319,11 +341,28 @@ export function App() {
             </button>
           );
         })}
+        {/* Assets: the last tab, after Mix. Not a review stage, so it's never counted in ORDER
+            and never shows a to-do dot — just locked, or not. */}
+        <button class="tab" role="tab" aria-selected={stage === "assets"} aria-disabled={!assetsUnlocked} onClick={() => showAssets()}>
+          <Icon name="grid" />
+          Assets
+          {!assetsUnlocked && <Icon name="lock" class="lk" />}
+        </button>
       </nav>
       {problem && !wrongProject && <div class="banner"><Icon name="alert" />{problem}</div>}
 
       <main class="body">
-        {!unlocked || !BUILT[stage] ? (
+        {stage === "assets" ? (
+          unlocked ? (
+            <Assets assets={assets} videos={state.project.videos} toast={toast} />
+          ) : (
+            <div class="empty">
+              <Icon name="lock" />
+              <h2>Nothing to review in Assets yet</h2>
+              <p>{ASSETS_HINT}</p>
+            </div>
+          )
+        ) : !unlocked || !BUILT[stage] ? (
           <Empty stage={stage} unlocked={unlocked} />
         ) : stage === "picture" && video && version ? (
           <Picture
@@ -336,6 +375,8 @@ export function App() {
             onChanged={() => void refresh()}
             onPendingChange={setPending}
             startAt={startAt}
+            initialGrab={restoreGrab}
+            onGrabChange={(g) => { grabRef.current = g; }}
             playerRef={playerRef}
           />
         ) : stage === "script" ? (

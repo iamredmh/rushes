@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { api, ApiError, eventsUrl } from "./api.js";
-import type { State } from "./types.js";
+import type { Asset, State } from "./types.js";
 
 export interface Live {
   state: State | null;
+  /** Every asset in the project (screenshots, cuts, takes, voice, music, sfx), for the Assets tab. */
+  assets: Asset[];
   /** Set when the server can't be reached or a data file is broken. */
   problem: string | null;
   /** Set once a request comes back `wrong_project`: this tab belongs to a project that
@@ -16,6 +18,7 @@ export interface Live {
 /** The project's state, kept current from the server's change events. */
 export function useRushes(): Live {
   const [state, setState] = useState<State | null>(null);
+  const [assets, setAssets] = useState<Asset[]>([]);
   const [problem, setProblem] = useState<string | null>(null);
   const [wrongProject, setWrongProject] = useState(false);
   const timer = useRef<number | undefined>(undefined);
@@ -28,23 +31,31 @@ export function useRushes(): Live {
 
   const refresh = async () => {
     const id = ++seq.current;
-    try {
-      const data = await api.get<State>("/api/state");
-      if (id < applied.current) return;
-      applied.current = id;
-      setState(data);
+    // State and assets are fetched together but handled independently: a failed assets
+    // fetch must never blank the state (or vice versa), so each settles on its own.
+    const [stateResult, assetsResult] = await Promise.all([
+      api.get<State>("/api/state").then(
+        (data) => ({ ok: true as const, data }),
+        (e) => ({ ok: false as const, error: e as Error }),
+      ),
+      api.get<{ assets: Asset[] }>("/api/assets").then(
+        (data) => ({ ok: true as const, assets: data.assets }),
+        () => ({ ok: false as const }),
+      ),
+    ]);
+    if (id < applied.current) return;
+    applied.current = id;
+    if (stateResult.ok) {
+      setState(stateResult.data);
       setProblem(null);
       setWrongProject(false);
-    } catch (e) {
-      if (id < applied.current) return;
-      applied.current = id;
-      if (e instanceof ApiError && e.code === "wrong_project") {
-        // The last good state stays on screen; this stops being an ordinary "problem".
-        setWrongProject(true);
-        return;
-      }
-      setProblem((e as Error).message);
+    } else if (stateResult.error instanceof ApiError && stateResult.error.code === "wrong_project") {
+      // The last good state stays on screen; this stops being an ordinary "problem".
+      setWrongProject(true);
+    } else {
+      setProblem(stateResult.error.message);
     }
+    if (assetsResult.ok) setAssets(assetsResult.assets);
   };
 
   useEffect(() => {
@@ -75,5 +86,5 @@ export function useRushes(): Live {
     };
   }, []);
 
-  return { state, problem, wrongProject, refresh };
+  return { state, assets, problem, wrongProject, refresh };
 }

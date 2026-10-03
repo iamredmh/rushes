@@ -1,4 +1,4 @@
-import { access, writeFile } from "node:fs/promises";
+import { access, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, test, videoReady } from "./fixture.js";
 
@@ -476,4 +476,67 @@ test("a tab left open after its project stops never writes into the project that
 
   const { notes } = await rushes.api("GET", "/api/notes");
   expect(notes).toEqual([]);
+});
+
+test("a grabbed frame is saved as a screenshot and shows up in Assets with its actions", async ({ page, rushes, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await rushes.addCut();
+  await page.goto(rushes.url);
+  await videoReady(page);
+  for (let i = 0; i < 30; i++) await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("g");
+  await expect(page.getByRole("status")).toHaveText("Saved to screenshots/hero_v1_00m01.00s_f30.png");
+
+  await expect(page.getByRole("tab", { name: /Assets/ })).toHaveAttribute("aria-disabled", "false");
+  await page.keyboard.press("7");
+  const tile = page.locator(".shot-tile");
+  await expect(tile).toHaveCount(1);
+  await expect(tile.locator("img")).toBeVisible();
+  const dl = tile.getByRole("link", { name: "Download" });
+  await expect(dl).toHaveAttribute("href", /download=1/);
+  await expect(tile.getByRole("button", { name: "Save as…" })).toBeVisible();
+
+  await tile.getByRole("button", { name: /Show in Finder|Show in Explorer|Open folder/ }).click();
+  await expect(page.getByRole("status")).toBeHidden();
+
+  await tile.getByRole("button", { name: "Copy path" }).click();
+  await expect(page.getByRole("status")).toHaveText("Path copied");
+  const clipboard = await page.evaluate(() => navigator.clipboard.readText());
+  const { assets } = await rushes.api("GET", "/api/assets");
+  expect(clipboard).toBe(assets[0].abs);
+});
+
+test("a grab alone doesn't stop you switching films", async ({ page, rushes }) => {
+  await rushes.addCut("hero cut");
+  await rushes.addCut("cutdown cut", "Cutdown");
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await page.keyboard.press("g");
+  await expect(page.getByRole("status")).toContainText("Saved to screenshots/");
+  await page.keyboard.press("]");
+  const pack = page.getByRole("navigation", { name: "Films" });
+  await expect(pack.getByRole("button", { name: /Cutdown/ })).toHaveAttribute("aria-pressed", "true");
+  await videoReady(page);
+  await page.keyboard.press("[");
+  await expect(pack.getByRole("button", { name: /Hero/ })).toHaveAttribute("aria-pressed", "true");
+  await videoReady(page);
+  await page.keyboard.press("n");
+  await page.keyboard.type("Kept the grab after switching films.");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".note")).toHaveCount(1);
+  const { notes } = await rushes.api("GET", "/api/notes?stage=picture");
+  expect(notes[0].grab).toMatch(/^screenshots\/hero_v1_/);
+});
+
+test("a deleted file is marked missing in Assets", async ({ page, rushes }) => {
+  await rushes.addCut();
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await rm(join(rushes.root, "renders", "hero_v1.mp4"));
+  await page.reload();
+  await expect(page.getByRole("tab", { name: /Assets/ })).toHaveAttribute("aria-disabled", "false");
+  await page.getByRole("tab", { name: /Assets/ }).click();
+  const row = page.locator(".arow", { hasText: "hero_v1.mp4" });
+  await expect(row).toHaveAttribute("aria-disabled", "true");
+  await expect(row.getByRole("link", { name: "Download" })).toHaveAttribute("aria-disabled", "true");
 });

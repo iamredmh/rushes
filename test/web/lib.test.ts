@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { boxFrom, defaultVersion, firstTab, fit, fmt, frameAt, isChanged, latest, neighbourVideo, noteTime, placeNote, shotAt, shotLabel, shotSeek, snap, stepFrame } from "../../web/src/lib.js";
-import type { Note, Section, Shot, TabState, Video } from "../../web/src/types.js";
+import { assetSections, boxFrom, defaultVersion, firstTab, fit, fmt, formatBytes, frameAt, isChanged, latest, neighbourVideo, noteTime, placeNote, shotAt, shotLabel, shotSeek, snap, stepFrame } from "../../web/src/lib.js";
+import type { Asset, Note, Section, Shot, TabState, Video } from "../../web/src/types.js";
 
 const note = (over: Partial<Note>): Note => ({
   id: "n_1", stage: "picture", video: "hero", version: "v3", on: null, scope: "point", t: 12.4, tOut: null, frame: null,
@@ -158,6 +158,58 @@ describe("shotAt (web)", () => {
   });
   it("returns null for an empty list", () => {
     expect(shotAt([], 5)).toBeNull();
+  });
+});
+
+describe("formatBytes", () => {
+  it("prints bytes under 1 KB as a whole number", () => {
+    expect(formatBytes(0)).toBe("0 B");
+    expect(formatBytes(512)).toBe("512 B");
+    expect(formatBytes(1023)).toBe("1023 B");
+  });
+  it("prints KB as a whole number, rounded", () => {
+    expect(formatBytes(1024)).toBe("1 KB");
+    expect(formatBytes(2048)).toBe("2 KB");
+    expect(formatBytes(1600)).toBe("2 KB");
+  });
+  it("prints MB and GB with one decimal", () => {
+    expect(formatBytes(1024 * 1024)).toBe("1.0 MB");
+    expect(formatBytes(1.5 * 1024 * 1024)).toBe("1.5 MB");
+    expect(formatBytes(1024 * 1024 * 1024)).toBe("1.0 GB");
+    expect(formatBytes(2.5 * 1024 * 1024 * 1024)).toBe("2.5 GB");
+  });
+});
+
+describe("assetSections", () => {
+  const asset = (over: Partial<Asset>): Asset => ({
+    kind: "screenshot",
+    path: "screenshots/a.png",
+    abs: "/tmp/a.png",
+    name: "a.png",
+    size: 100,
+    modified: "2026-10-02T00:00:00Z",
+    missing: false,
+    ...over,
+  });
+
+  it("groups assets into sections in spec order, with Voiceover holding takes and voice variants", () => {
+    const assets: Asset[] = [
+      asset({ kind: "screenshot", name: "s1.png" }),
+      asset({ kind: "cut", name: "c1.mp4" }),
+      asset({ kind: "take", name: "t1.wav" }),
+      asset({ kind: "voice", name: "v1.wav" }),
+      asset({ kind: "music", name: "m1.wav" }),
+      asset({ kind: "sfx", name: "f1.wav" }),
+    ];
+    const sections = assetSections(assets);
+    expect(sections.map((s) => s.title)).toEqual(["Screenshots", "Cuts", "Voiceover", "Music", "Sound effects"]);
+    expect(sections.find((s) => s.title === "Voiceover")?.items.map((a) => a.name)).toEqual(["t1.wav", "v1.wav"]);
+  });
+
+  it("leaves out sections with nothing in them", () => {
+    const assets: Asset[] = [asset({ kind: "music", name: "m1.wav" })];
+    expect(assetSections(assets).map((s) => s.title)).toEqual(["Music"]);
+    expect(assetSections([])).toEqual([]);
   });
 });
 

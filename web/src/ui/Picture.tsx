@@ -14,10 +14,15 @@ export interface PictureProps {
   notes: Note[];
   toast(message: string): void;
   onChanged(): void;
-  /** Whether an In/Out, box, grab or half-typed note is waiting to be submitted. */
+  /** Whether an In/Out, box or half-typed note is waiting to be submitted. A grab alone
+   *  doesn't count: the file is already saved, so there's nothing left to lose. */
   onPendingChange?(pending: boolean): void;
   /** Where to seek to once this cut's metadata has loaded (restoring a film's playhead on return). */
   startAt?: number;
+  /** A grab from this film kept by the caller across a switch away and back. */
+  initialGrab?: string | null;
+  /** Tells the caller whenever the pending grab changes, so it can remember it per film. */
+  onGrabChange?(grab: string | null): void;
   /** Forwards the underlying <video> element up, so a caller can read its live time or pause it directly. */
   playerRef?: { current: HTMLVideoElement | null };
 }
@@ -25,7 +30,7 @@ export interface PictureProps {
 const typing = (el: EventTarget | null) => el instanceof HTMLElement && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
 
 /** The cut, with notes down the right: frame stepping, In/Out ranges, a box on the frame and frame grabs. */
-export function Picture({ video, version, fps, notes, toast, onChanged, onPendingChange, startAt, playerRef }: PictureProps) {
+export function Picture({ video, version, fps, notes, toast, onChanged, onPendingChange, startAt, initialGrab, onGrabChange, playerRef }: PictureProps) {
   const ref = useRef<HTMLVideoElement>(null);
   const overlay = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
@@ -39,7 +44,7 @@ export function Picture({ video, version, fps, notes, toast, onChanged, onPendin
   const [boxMode, setBoxMode] = useState(false);
   const [drag, setDrag] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const [box, setBox] = useState<Box | null>(null);
-  const [grab, setGrab] = useState<string | null>(null);
+  const [grab, setGrab] = useState<string | null>(initialGrab ?? null);
   const [shown, setShown] = useState<Box | null>(null);
   const [noteHasText, setNoteHasText] = useState(false);
   // The click that ends a box drag shouldn't also start playback.
@@ -57,22 +62,38 @@ export function Picture({ video, version, fps, notes, toast, onChanged, onPendin
   useEffect(() => { playingRef.current = playing; }, [playing]);
 
   // Tell the parent whether there's anything here it would be wrong to discard by
-  // jumping to a newer cut: an In/Out, a box, a grab or a half-typed note.
+  // jumping to a newer cut: an In/Out, a box or a half-typed note. A grab alone is excluded:
+  // the frame is already saved to screenshots/, so nothing is lost if a newer cut arrives.
   useEffect(() => {
-    const pending = range.in !== null || box !== null || grab !== null || noteHasText;
+    const pending = range.in !== null || box !== null || noteHasText;
     onPendingChange?.(pending);
     return () => onPendingChange?.(false);
-  }, [range.in, box, grab, noteHasText]);
+  }, [range.in, box, noteHasText]);
+
+  // Sets the pending grab and tells the caller synchronously, in the same tick: a caller
+  // reading the forwarded value (e.g. on a keypress that switches films) must never see a
+  // stale one. A plain useEffect keyed on `grab` would defer that notice to the next effect
+  // flush, which can still be pending when the very next keystroke reads it.
+  const updateGrab = (value: string | null) => {
+    setGrab(value);
+    onGrabChange?.(value);
+  };
 
   // A new cut: start again from the top, with nothing pending. A file the browser
   // can't decode can fail before any handler is attached, so check the element too.
+  // The grab is the exception: on this component's first run (a fresh mount, e.g. after
+  // switching films) it keeps whatever initialGrab seeded it with, rather than being wiped
+  // by this same effect running on mount. Only a genuinely new cut arriving on an already
+  // -mounted film clears it.
+  const mountedFile = useRef<string | undefined>(undefined);
   useEffect(() => {
     setBroken(false);
     setT(0);
     setAspect(16 / 9);
     setRange({ in: null, out: null });
     setBox(null);
-    setGrab(null);
+    if (mountedFile.current !== undefined) updateGrab(null);
+    mountedFile.current = version.file;
     setShown(null);
     const v = ref.current;
     if (!v) return;
@@ -132,8 +153,11 @@ export function Picture({ video, version, fps, notes, toast, onChanged, onPendin
     const frame = frameAt(now(), fps);
     try {
       const r = await api.post<{ grab: string }>("/api/grabs", { video: video.id, version: version.id, frame, png: canvas.toDataURL("image/png") });
-      setGrab(r.grab);
-      toast(`Frame ${frame} saved`);
+      updateGrab(r.grab);
+      toast(`Saved to ${r.grab}`);
+      // The screenshot is a new asset on disk: refresh so the Assets tab unlocks and shows
+      // it right away, without waiting for a server change event (grabs don't send one).
+      onChanged();
     } catch (e) {
       toast((e as Error).message);
     }
@@ -156,7 +180,7 @@ export function Picture({ video, version, fps, notes, toast, onChanged, onPendin
     });
     clearRange();
     setBox(null);
-    setGrab(null);
+    updateGrab(null);
     onChanged();
   };
 
@@ -357,7 +381,7 @@ export function Picture({ video, version, fps, notes, toast, onChanged, onPendin
               <span class="chipx"><Icon name="box" />Box<button aria-label="Remove box" onClick={() => setBox(null)}><Icon name="x" /></button></span>
             )}
             {grab && (
-              <span class="chipx"><Icon name="image" />Frame {grab.match(/_f(\d+)\.png$/)?.[1]}<button aria-label="Remove frame" onClick={() => setGrab(null)}><Icon name="x" /></button></span>
+              <span class="chipx"><Icon name="image" />Frame {grab.match(/_f(\d+)\.png$/)?.[1]}<button aria-label="Remove frame" onClick={() => updateGrab(null)}><Icon name="x" /></button></span>
             )}
           </>
         )}

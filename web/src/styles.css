@@ -206,6 +206,34 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .dirin::placeholder { color: var(--text-3); }
 .ib.okd[aria-pressed="true"] { background: var(--done-soft); color: var(--done); }
 .ib.flagd[aria-pressed="true"] { background: var(--todo-soft); color: var(--todo); }
+.btn:disabled { opacity: 0.35; cursor: default; pointer-events: none; }
+a.btn[aria-disabled="true"] { opacity: 0.35; cursor: default; pointer-events: none; }
+
+/* assets */
+.assets { gap: 28px; }
+.asec h3 { margin: 0 0 12px; font-size: 16px; font-weight: 600; color: var(--text-2); }
+.shots-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; }
+.shot-tile { background: var(--raised); border-radius: var(--r-lg); padding: 10px; display: grid; gap: 8px; }
+.shot-tile.missing { opacity: 0.55; }
+.shot-thumb { border: 0; padding: 0; background: #000; border-radius: var(--r); aspect-ratio: 4 / 3; overflow: hidden; cursor: pointer; display: block; width: 100%; }
+.shot-thumb img { width: 100%; height: 100%; object-fit: contain; background: var(--bg); display: block; }
+.shot-meta { font-size: 13px; color: var(--text-2); display: grid; gap: 2px; }
+.arows { display: grid; gap: 8px; }
+.arow { display: flex; align-items: center; gap: 14px; background: var(--raised); border-radius: var(--r); padding: 12px 14px; }
+.arow.missing { opacity: 0.55; }
+.ainfo { display: grid; gap: 2px; min-width: 0; flex: 1; }
+.atitle { font-size: 15px; font-weight: 500; color: var(--text); display: flex; align-items: center; gap: 8px; overflow-wrap: anywhere; }
+.asub { font-size: 13px; color: var(--text-2); overflow-wrap: anywhere; }
+.afolder { font-size: 13px; color: var(--text-3); }
+.ameta { font-size: 13px; color: var(--text-3); }
+.amiss { color: var(--over); font-size: 10px; line-height: 1; }
+.aact { display: flex; gap: 4px; flex: none; }
+
+/* lightbox */
+.lightbox { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.72); display: grid; place-items: center; z-index: 50; padding: 24px; }
+.lbinner { display: grid; gap: 12px; max-width: min(92vw, 1100px); max-height: 90vh; }
+.lbinner img { max-width: 100%; max-height: 78vh; border-radius: var(--r-lg); background: #000; object-fit: contain; display: block; margin: 0 auto; }
+.lbactions { display: flex; align-items: center; justify-content: center; gap: 4px; }
 
 @media (max-width: 1000px) {
   .split { grid-template-columns: minmax(0, 1fr); }

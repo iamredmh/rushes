@@ -1,5 +1,5 @@
 // Pure helpers for the dashboard. No DOM, so they're unit-tested in Node.
-import type { Note, Section, Shot, Stage, TabState, Video, Version } from "./types.js";
+import type { Asset, AssetKind, Note, Section, Shot, Stage, TabState, Video, Version } from "./types.js";
 
 /** 72.4 -> "1:12.40" (minutes, seconds, hundredths). */
 export function fmt(t: number): string {
@@ -133,6 +133,35 @@ export function shotLabel(n: number): string {
  */
 export function shotSeek(start: number, fps: number): number {
   return Math.ceil(start * fps - 1e-9) / fps;
+}
+
+/** "1536 -> 2 KB", "1587200 -> 1.5 MB". Whole numbers up to KB; one decimal from MB up. */
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+export interface AssetSection {
+  title: string;
+  kind: "screenshot" | "cut" | "voiceover" | "music" | "sfx";
+  items: Asset[];
+}
+
+const ASSET_SECTIONS: { title: AssetSection["title"]; kind: AssetSection["kind"]; match: (k: AssetKind) => boolean }[] = [
+  { title: "Screenshots", kind: "screenshot", match: (k) => k === "screenshot" },
+  { title: "Cuts", kind: "cut", match: (k) => k === "cut" },
+  { title: "Voiceover", kind: "voiceover", match: (k) => k === "take" || k === "voice" },
+  { title: "Music", kind: "music", match: (k) => k === "music" },
+  { title: "Sound effects", kind: "sfx", match: (k) => k === "sfx" },
+];
+
+/** Assets grouped into the Assets tab's sections, in spec order, dropping any section with nothing in it. */
+export function assetSections(assets: Asset[]): AssetSection[] {
+  return ASSET_SECTIONS.map(({ title, kind, match }) => ({ title, kind, items: assets.filter((a) => match(a.kind)) })).filter(
+    (s) => s.items.length > 0,
+  );
 }
 
 /** Normalised box from two pointer positions inside an element of size w × h. */
