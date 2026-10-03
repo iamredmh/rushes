@@ -107,7 +107,7 @@ Rushes recommends this layout for a project folder:
 my-film/
   renders/              cuts               hero-60s_v3.mp4
   audio/
-    voiceover/          VO takes           s02_take3.wav
+    voiceover/          voice reads        gerald.wav
     music/              music beds         deep-house.wav
     sfx/                SFX passes         sfx_pass-a.wav
   screenshots/          frame grabs        hero-60s_v3_00m12.10s_f726.png
@@ -125,10 +125,13 @@ A project with more than one film gets numbered pills in the header — `[`/`]` 
 
 The Voiceover, Music, Sound effects and Mix tabs share one audio engine, so switching what you hear is instant and never restarts playback or knocks picture out of sync.
 
-- **Use** picks a music bed, SFX pass or VO take — shown as **In use**. Clicking a lane auditions it without changing the pick. An **Unpick** button beside In use clears the pick. On Music and Sound effects the first bed or pass is auditioned; on Mix the lane is empty; on Voiceover the section's newest take is used.
-- **Blind** (Music only) renames the beds `Bed 1`, `Bed 2`… in a shuffled order and masks their descriptions, so you can compare without knowing which is which.
-- A note on an audio tab can carry marks: toggle **Rise**, **Fall**, **Louder** or **Quieter** (with a dB amount, 3 by default) to say how a range should change — "Fall" or "Quieter 3 dB".
-- **Mix** shows a loudness readout — integrated LUFS, true peak, and the music's level under the VO — measured over exactly what Mix plays. It needs **ffmpeg** on your PATH; without it, the readout shows "—". After a timeout or an error, click the readout to measure again.
+Voiceover works in rounds: the same script read by a few voices, then variations of whichever one you pick. The current round is open; earlier rounds fold into one row each, and clicking a row opens it so its reads play too.
+
+- **Use** picks a music bed, SFX pass or voice read — shown as **In use**. Clicking a lane auditions it without changing the pick. An **Unpick** button beside In use clears the pick. On Music and Sound effects the first bed or pass is auditioned; on Mix the lane is empty; on Voiceover, with nothing clicked, the current round's pick plays, or else its first read.
+- **Blind** (Music and Voiceover) renames the beds or reads `Bed 1`, `Bed 2`… in a shuffled order and masks their descriptions, so you can compare without knowing which is which.
+- On Voiceover, a note is **Whole** (`Speaker`, `Pacing`, `Tone` or `Overall` — the read as a whole) or **Point** (`Fix this` or `Keep this`, marked at the playhead). There's no Range scope and no Rise/Fall/Louder/Quieter marks there.
+- On Music, Sound effects and Mix, a note can carry marks: toggle **Rise**, **Fall**, **Louder** or **Quieter** (with a dB amount, 3 by default) to say how a range should change — "Fall" or "Quieter 3 dB".
+- **Mix** shows a loudness readout — integrated LUFS, true peak, and the music's level under the VO — measured over exactly what Mix plays, using the newest round's picked voice read. It needs **ffmpeg** on your PATH; without it, the readout shows "—". After a timeout or an error, click the readout to measure again.
 
 ## What gets saved
 
