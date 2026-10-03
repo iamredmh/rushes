@@ -1,7 +1,7 @@
 // Audio tab tests. The engine's own logic is unit-tested (test/web/timeline.test.ts and
 // engine.test.ts); the full in-browser engine checks arrive with the Music tab (Task 3).
 import type { Page } from "@playwright/test";
-import { rm } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { makeWav } from "./fixtures/wav.js";
 import { expect, type Rushes, test } from "./fixture.js";
@@ -556,6 +556,47 @@ test("Voiceover shows the current round open under its name, and an older round 
   await expect(page.getByRole("button", { name: "Use Gerald" })).toHaveAttribute("aria-pressed", "true");
   await fold.click();
   await expect(page.locator(".lane")).toHaveCount(2);
+
+  // Toggling a fold mid-play neither restarts nor stops anything: every read is already loaded.
+  await page.getByRole("button", { name: "Play" }).click();
+  await expect.poll(async () => (await inspect(page)).time).toBeGreaterThan(0.3);
+  const before = await inspect(page);
+  await fold.click();
+  await expect(page.locator(".lane")).toHaveCount(5);
+  await fold.click();
+  await expect(page.locator(".lane")).toHaveCount(2);
+  const after = await inspect(page);
+  expect(after.sources).toBe(before.sources);
+  expect(after.playing).toBe(true);
+  expect(after.time).toBeGreaterThan(before.time);
+
+  // A read heard from a round that's then folded away stops being heard: the default read takes over.
+  await fold.click();
+  await page.getByRole("button", { name: "Jane", exact: true }).click();
+  await expect.poll(() => heard(page)).toEqual(["round-1-voices/jane@0"]);
+  await fold.click();
+  await expect(page.locator(".lane")).toHaveCount(2);
+  await expect.poll(() => heard(page)).toEqual([`${R2_ID}/more-excited@0`]);
+  await expect(onMenu(page).locator("option:checked")).toHaveText("more excited");
+});
+
+test("which rounds are open is kept per film", async ({ page, rushes }) => {
+  await rushes.addCut("hero", "Hero");
+  await rushes.addCut("cutdown", "Cutdown");
+  await twoRounds(rushes);
+  await openVoice(page, rushes, 5);
+  const fold = page.locator(".fold");
+  const film = (name: RegExp) => page.getByRole("navigation", { name: "Films" }).getByRole("button", { name });
+  await fold.click();
+  await expect(fold).toHaveAttribute("aria-expanded", "true");
+  await page.keyboard.press("]");
+  await expect(film(/Cutdown/)).toHaveAttribute("aria-pressed", "true");
+  await expect(fold).toHaveAttribute("aria-expanded", "false");
+  await expect(page.locator(".lane")).toHaveCount(2);
+  await page.keyboard.press("[");
+  await expect(film(/Hero/)).toHaveAttribute("aria-pressed", "true");
+  await expect(fold).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator(".lane")).toHaveCount(5);
 });
 
 test("a folded round shows a dot while one of its reads has an open note", async ({ page, rushes }) => {
@@ -749,6 +790,29 @@ test("another film starts Voiceover's notes on Whole again", async ({ page, rush
   await expect(scope.getByRole("button", { name: "Point" })).toHaveAttribute("aria-pressed", "true");
   await page.keyboard.press("]");
   await expect(page.getByRole("navigation", { name: "Films" }).getByRole("button", { name: /Cutdown/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(scope.getByRole("button", { name: "Whole" })).toHaveAttribute("aria-pressed", "true");
+});
+
+test("another film starts Voiceover's notes on Whole again, even when neither film has a cut", async ({ page, rushes }) => {
+  await twoRounds(rushes);
+  // Two films with no cut yet, as a hand edit of the project file can leave them: no preview at all.
+  const file = join(rushes.root, ".rushes", "project.json");
+  const project = JSON.parse(await readFile(file, "utf8"));
+  project.videos = [
+    { id: "hero", name: "Hero", versions: [], lockedVersion: null },
+    { id: "cutdown", name: "Cutdown", versions: [], lockedVersion: null },
+  ];
+  project.rev += 1;
+  await writeFile(file, JSON.stringify(project, null, 2));
+  await openVoice(page, rushes, 5);
+  const films = page.getByRole("navigation", { name: "Films" });
+  await expect(films.getByRole("button", { name: /Hero/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByLabel("No cut yet")).toBeVisible();
+  const scope = page.getByRole("group", { name: "Scope" });
+  await scope.getByRole("button", { name: "Point" }).click();
+  await expect(scope.getByRole("button", { name: "Point" })).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("]");
+  await expect(films.getByRole("button", { name: /Cutdown/ })).toHaveAttribute("aria-pressed", "true");
   await expect(scope.getByRole("button", { name: "Whole" })).toHaveAttribute("aria-pressed", "true");
 });
 

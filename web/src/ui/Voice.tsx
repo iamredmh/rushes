@@ -29,6 +29,7 @@ const BLIND_SEED = Math.floor(Math.random() * 2 ** 31);
 let blindSession = false;
 // Which older rounds are open, per film, for the session.
 const openRounds = new Map<string, Set<string>>();
+const NONE_OPEN: ReadonlySet<string> = new Set();
 
 export interface VoiceProps {
   state: State;
@@ -48,14 +49,15 @@ export function Voice({ state, assets, video, toast, onChanged, onPendingChange 
     setBlindState(on);
   };
   const film = video?.id ?? "";
-  const [open, setOpen] = useState<Set<string>>(() => openRounds.get(film) ?? new Set());
-  const opened = openRounds.get(film) ?? open;
+  // The open rounds live in openRounds, per film; this state only re-renders after a toggle.
+  const [, rerender] = useState(0);
+  const opened = openRounds.get(film) ?? NONE_OPEN;
   const toggle = (round: string) => {
     const next = new Set(opened);
     if (next.has(round)) next.delete(round);
     else next.add(round);
     openRounds.set(film, next);
-    setOpen(next);
+    rerender((n) => n + 1);
   };
 
   const asset = (path: string) => assets.find((a) => a.path === path);
@@ -143,6 +145,7 @@ export function Voice({ state, assets, video, toast, onChanged, onPendingChange 
   return (
     <AudioStage
       stage="voice"
+      film={video?.id ?? null}
       title={STAGE_NAMES.voice}
       headerExtra={
         <button

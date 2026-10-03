@@ -1,5 +1,5 @@
 import type { ComponentChildren, RefObject } from "preact";
-import { type MutableRef, useRef, useState } from "preact/hooks";
+import { useRef, useState } from "preact/hooks";
 import { api, mediaUrl } from "../api.js";
 import { MARK_DB, type MarkKind, marksLabel, noteTime, type OnOption, placeNote, type Scope, scopeOptions, setMarkDb, shotLabel, toggleMark } from "../lib.js";
 import type { Mark, Note } from "../types.js";
@@ -36,8 +36,6 @@ export interface NotesProps {
   onLabel?(note: Note): string | null;
   /** Times are shown as saved, never placed on another cut, and with no "from vN" (audio tabs). */
   fixedTimes?: boolean;
-  /** Set to a function that starts a note with the given text (caret at the end), as a chip does. */
-  starter?: MutableRef<((text: string) => void) | null>;
 }
 
 const MARK_KINDS: { kind: MarkKind; label: string }[] = [
@@ -50,7 +48,7 @@ const onFull = (on: NonNullable<NotesProps["on"]>): string | undefined => on.opt
 
 /** The notes column used on every tab: list, filter, done circles and the note box. */
 export function Notes({
-  notes, version, placeholder, attachments, inputRef, toast, onAdd, onSeek, onChanged, onTextChange, on, scope, chips, marks, onLabel, fixedTimes, starter,
+  notes, version, placeholder, attachments, inputRef, toast, onAdd, onSeek, onChanged, onTextChange, on, scope, chips, marks, onLabel, fixedTimes,
 }: NotesProps) {
   const [filter, setFilter] = useState<Filter>("all");
   const ownInput = useRef<HTMLTextAreaElement>(null);
@@ -99,7 +97,6 @@ export function Notes({
       el.setSelectionRange(value.length, value.length);
     }
   };
-  if (starter) starter.current = begin;
 
   return (
     <aside class="panel side" aria-label="Notes">

@@ -82,6 +82,7 @@ export function VariantTab({ stage, state, assets, video, toast, onChanged, onPe
   return (
     <AudioStage
       stage={stage}
+      film={video?.id ?? null}
       title={STAGE_NAMES[stage]}
       headerExtra={stage === "music" && (
         <button

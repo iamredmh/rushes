@@ -5,7 +5,7 @@
 // One AudioEngine per mount (useAudioStage) is the clock. Nothing re-renders per frame: the
 // playheads, the timecode and the preview follow `engine.subscribe` through refs.
 import type { ComponentChildren } from "preact";
-import { type MutableRef, useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, mediaUrl } from "../api.js";
 import { type AudioEngine, type EngineSnapshot, liveContexts } from "../audio/engine.js";
 import { type Clip, needsVideoSync, setStreamThreshold } from "../audio/timeline.js";
@@ -71,17 +71,10 @@ export interface Preview {
   duration: number | null;
 }
 
-/** What a tab can do to its stage from outside: point the On menu, or start a note. */
-export interface StageHandle {
-  engine: AudioEngine;
-  /** Point the On menu at one of its values. */
-  setOn(value: string): void;
-  /** Start a note: `text` in the box with the caret at the end, and On and the scope set. */
-  startNote(text: string, opts?: { on?: string; scope?: Scope }): void;
-}
-
 export interface AudioStageProps {
   stage: AudioStageId;
+  /** The film being reviewed (null: none). Another film starts the notes on `defaultScope` again. Defaults to the preview's film. */
+  film?: string | null;
   title: string;
   /** Beside the title, e.g. Blind on Music. */
   headerExtra?: ComponentChildren;
@@ -112,8 +105,6 @@ export interface AudioStageProps {
   listen?(selected: string | null): Listening;
   /** The On menu's value until a lane is clicked. Defaults to the picked row's, else the first row's. */
   defaultOn?: string;
-  /** Filled with the stage's handle on every render. */
-  handle?: MutableRef<StageHandle | null>;
   /** A lane was clicked. */
   onSelect?(row: StageRow): void;
   /** The scope segments this tab offers, in order. Defaults to all three. */
@@ -146,27 +137,33 @@ export function AudioStage(props: AudioStageProps) {
   const { engine, playing, length, media } = useAudioStage(clips, videoDuration);
 
   const [picked, setSelected] = useState<string | null>(null);
-  // A selected lane that's gone (another section's take, a removed variant) selects nothing.
+  const [onValue, setOnValue] = useState<string | null>(null);
+  // The On value the selected lane set, so it can go with the lane.
+  const selectedOn = useRef<string | null>(null);
+  // A selected lane that's gone (a removed variant, a folded Voiceover round) selects nothing: the
+  // default is heard again, and On goes back to its default too, unless you've pointed it elsewhere since.
   const selected = rows.some((r) => r.key === picked) ? picked : null;
   useLayoutEffect(() => {
-    if (picked !== null && selected === null) setSelected(null);
+    if (picked === null || selected !== null) return;
+    setSelected(null);
+    if (selectedOn.current !== null && onValue === selectedOn.current) setOnValue(null);
+    selectedOn.current = null;
   }, [selected]);
-  const [onValue, setOnValue] = useState<string | null>(null);
   const [range, setRange] = useState(NO_RANGE);
   const [scope, setScope] = useState<Scope>(props.defaultScope ?? "point");
   const [marks, setMarks] = useState<Mark[]>([]);
   const [noteHasText, setNoteHasText] = useState(false);
   const hasRange = (props.scopes ?? ALL_SCOPES).includes("range");
   const baseScope: Scope = props.defaultScope ?? "point";
-  // Another film or cut starts from the tab's own scope again. (A pending note refuses the switch,
-  // so nothing in progress is dropped here.)
-  const previewKey = `${preview?.video ?? ""}/${preview?.version ?? ""}`;
-  const seenPreview = useRef(previewKey);
+  // Another film (or another cut of it) starts from the tab's own scope again, with or without a
+  // preview. A pending note refuses the switch, so nothing in progress is dropped here.
+  const filmKey = `${props.film !== undefined ? (props.film ?? "") : (preview?.video ?? "")}/${preview?.version ?? ""}`;
+  const seenFilm = useRef(filmKey);
   useLayoutEffect(() => {
-    if (seenPreview.current === previewKey) return;
-    seenPreview.current = previewKey;
+    if (seenFilm.current === filmKey) return;
+    seenFilm.current = filmKey;
     setScope(baseScope);
-  }, [previewKey]);
+  }, [filmKey]);
 
   // Nothing pending is dropped: a half-typed note, a range or ticked marks hold the film (and its
   // cut), as on Picture. A layout effect, so the hold is in place before the next key (`]` straight
@@ -205,7 +202,6 @@ export function AudioStage(props: AudioStageProps) {
   const pvTc = useRef<HTMLDivElement>(null);
   const video = useRef<HTMLVideoElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
-  const starter = useRef<((text: string) => void) | null>(null);
   const placeholderFor = (t: number) => {
     if (scope === "whole") return stage === "voice" ? "Note on the whole read" : "Note on the whole track";
     if (hasRange) {
@@ -287,27 +283,10 @@ export function AudioStage(props: AudioStageProps) {
     setSelected(row.key);
     // Heard in the click itself, not a render later.
     apply(plan(row.key));
+    selectedOn.current = row.on ?? null;
     if (row.on) setOnValue(row.on);
     props.onSelect?.(row);
   };
-
-  if (props.handle) {
-    props.handle.current = {
-      engine,
-      setOn: setOnValue,
-      startNote(text, opts = {}) {
-        // Nothing pending is ever dropped: a half-typed note, a range or quick marks hold the
-        // note box, so the caller's request is refused rather than overwriting them.
-        if (pending) {
-          toast("Finish or clear the note you're writing first.");
-          return;
-        }
-        if (opts.on !== undefined) setOnValue(opts.on);
-        if (opts.scope !== undefined) changeScope(opts.scope);
-        starter.current?.(text);
-      },
-    };
-  }
 
   // ---- keyboard: Space, ←/→ (Shift: ten), I, O, N ----
   const onKeyRef = useRef<(e: KeyboardEvent) => void>(() => undefined);
@@ -467,7 +446,6 @@ export function AudioStage(props: AudioStageProps) {
           chips={(props.chipsFor ?? (() => AUDIO_CHIPS[stage]))(scope)}
           marks={props.marks === false ? undefined : { value: marks, onChange: setMarks }}
           onLabel={onLabel}
-          starter={starter}
         />
       </div>
     </div>
