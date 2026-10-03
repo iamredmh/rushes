@@ -11,7 +11,7 @@ import { type AudioEngine, type EngineSnapshot, liveContexts } from "../audio/en
 import { type Clip, needsVideoSync, setStreamThreshold } from "../audio/timeline.js";
 import { useAudioStage } from "../audio/useAudioStage.js";
 import {
-  AUDIO_CHIPS, type AudioStageId, fmt, laneSelection, noteTime, type OnOption, placeNote, type Scope, snap, stepFrame, testFlags,
+  AUDIO_CHIPS, type AudioStageId, fmt, laneSelection, noteTime, type OnOption, type Scope, snap, stepFrame, testFlags,
 } from "../lib.js";
 import type { Mark, Note } from "../types.js";
 import { Icon } from "./Icon.js";
@@ -83,13 +83,15 @@ export interface AudioStageProps {
   onLabel(note: Note): string | null;
   toast(message: string): void;
   onChanged(): void;
+  /** A half-typed note or a range is waiting (as on Picture): the caller refuses a film switch meanwhile. */
+  onPendingChange?(pending: boolean): void;
 }
 
 const typing = (el: EventTarget | null) => el instanceof HTMLElement && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
 const NO_RANGE = { in: null, out: null } as { in: number | null; out: number | null };
 
 export function AudioStage(props: AudioStageProps) {
-  const { stage, title, headerExtra, belowLanes, rows, preview, fps, notes, onOptions, noteRow, onLabel, toast, onChanged } = props;
+  const { stage, title, headerExtra, belowLanes, rows, preview, fps, notes, onOptions, noteRow, onLabel, toast, onChanged, onPendingChange } = props;
   if (hook) hook.renders++;
   const clips = props.clips ?? dedupe(rows.flatMap((r) => r.clips));
 
@@ -108,6 +110,14 @@ export function AudioStage(props: AudioStageProps) {
   const [range, setRange] = useState(NO_RANGE);
   const [scope, setScope] = useState<Scope>("point");
   const [marks, setMarks] = useState<Mark[]>([]);
+  const [noteHasText, setNoteHasText] = useState(false);
+
+  // Nothing pending is dropped: a half-typed note or a range holds the film, as on Picture. A layout
+  // effect, so the hold is in place before the next key (`]` straight after `I`) is handled.
+  useLayoutEffect(() => {
+    onPendingChange?.(range.in !== null || noteHasText);
+  }, [range.in, noteHasText]);
+  useEffect(() => () => onPendingChange?.(false), []);
 
   // ---- which variant each lane plays (§17.3): the selected lane, else the pick ----
   const selection = laneSelection(rows, selected);
@@ -226,7 +236,8 @@ export function AudioStage(props: AudioStageProps) {
     else if (k === "o") setOut();
     else if (k === "n") { e.preventDefault(); input.current?.focus(); }
   };
-  useEffect(() => {
+  // Bound in a layout effect, so a key pressed straight after switching to the tab is never missed.
+  useLayoutEffect(() => {
     const onKey = (e: KeyboardEvent) => onKeyRef.current(e);
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -271,14 +282,13 @@ export function AudioStage(props: AudioStageProps) {
   };
 
   const version = preview?.version ?? null;
+  // Audio times are the audio's own: they don't move with the cut, so they're drawn as saved.
   const drawn: Record<string, LaneMark[]> = {};
   for (const n of notes) {
     if (n.scope === "whole" || n.t === null) continue;
     const row = noteRow(n);
     if (!row) continue;
-    const at = placeNote(n, version);
-    if (at.t === null) continue;
-    (drawn[row] ??= []).push({ id: n.id, t: at.t, tOut: at.tOut, status: n.status, text: n.text });
+    (drawn[row] ??= []).push({ id: n.id, t: n.t, tOut: n.tOut, status: n.status, text: n.text });
   }
 
   const rangeLabel = range.in === null ? null : range.out === null ? `${fmt(range.in)} →` : noteTime(range.in, range.out);
@@ -356,6 +366,8 @@ export function AudioStage(props: AudioStageProps) {
           toast={toast}
           onAdd={add}
           onChanged={onChanged}
+          onTextChange={setNoteHasText}
+          fixedTimes
           onSeek={(t) => engine.seek(t)}
           on={{ options: onOptions, value: onCurrent, onChange: setOnValue }}
           scope={{ value: scope, onChange: changeScope }}

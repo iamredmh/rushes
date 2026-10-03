@@ -10,7 +10,7 @@ import { OPEN_SAFE_EXT as SERVER_OPEN_SAFE_EXT } from "../../src/server/reveal.j
 import { markLabel as serverMarkLabel, type Mark } from "../../src/core/schema.js";
 import {
   AUDIO_CHIPS, BUILT, blindOrder, laneSelection, markLabel, marksLabel, setMarkDb, testFlags, toggleMark, variantMeta,
-  variantNoteRow, variantOnOptions, variantRows,
+  variantNoteRow, variantNoteTarget, variantOnLabel, variantOnOptions, variantRows,
 } from "../../web/src/lib.js";
 import type { Lane } from "../../web/src/types.js";
 
@@ -448,15 +448,41 @@ describe("audio tabs: lanes", () => {
     const rows = variantRows(lanes, "sfx");
     const opts = variantOnOptions(rows, (r) => r.name, true);
     expect(opts.map((o) => o.label)).toEqual(["Pass A", "Pass B", "Cue · Swipe", "Cue · Tap", "Cue · Swipe · Pass B"]);
-    expect(opts[2]).toMatchObject({ on: "swipe", t: 1.5, row: "sfx/pass-a" });
+    expect(opts[2]).toMatchObject({ on: "pass-a:swipe", t: 1.5, row: "sfx/pass-a" });
+    expect(opts[4]).toMatchObject({ on: "pass-b:swipe", t: 1.6, row: "sfx/pass-b" });
     expect(variantOnOptions(rows, (r) => r.name).length).toBe(2);
   });
   it("draws a note on its variant, or on the pass holding its cue", () => {
     const sfx = variantRows(lanes, "sfx");
     expect(variantNoteRow(sfx, "pass-b")).toBe("sfx/pass-b");
+    expect(variantNoteRow(sfx, "pass-b:swipe")).toBe("sfx/pass-b");
+    expect(variantNoteRow(sfx, "pass-a:swipe")).toBe("sfx/pass-a");
+    // An older bare cue id: the first pass holding it.
     expect(variantNoteRow(sfx, "tap")).toBe("sfx/pass-a");
+    expect(variantNoteRow(sfx, "swipe")).toBe("sfx/pass-a");
+    // A pass-qualified cue the pass no longer has is not drawn on some other pass.
+    expect(variantNoteRow(sfx, "pass-b:tap")).toBeNull();
     expect(variantNoteRow(sfx, null)).toBeNull();
     expect(variantNoteRow(sfx, "nope")).toBeNull();
+  });
+  it("labels what a note is on, naming the pass when two share a cue", () => {
+    const sfx = variantRows(lanes, "sfx");
+    const opts = variantOnOptions(sfx, (r) => r.name, true);
+    expect(variantOnLabel(sfx, opts, "pass-b:swipe")).toBe("Cue · Swipe · Pass B");
+    expect(variantOnLabel(sfx, opts, "pass-a:swipe")).toBe("Cue · Swipe");
+    expect(variantOnLabel(sfx, opts, "swipe")).toBe("Cue · Swipe");
+    expect(variantOnLabel(sfx, opts, "pass-b")).toBe("Pass B");
+    expect(variantOnLabel(sfx, opts, "gone")).toBeNull();
+    expect(variantNoteTarget(sfx, "pass-b:swipe")).toEqual({ row: "sfx/pass-b", cue: "swipe" });
+  });
+  it("falls back to the first in manifest order, whatever the display order", () => {
+    const shown = [
+      { key: "c", audition: { lane: "m", clip: "c" }, order: 2 },
+      { key: "a", audition: { lane: "m", clip: "a" }, order: 0 },
+      { key: "b", audition: { lane: "m", clip: "b" }, order: 1 },
+    ];
+    expect(laneSelection(shown, null)).toEqual({ m: "a" });
+    expect(laneSelection([{ ...shown[0] }, { ...shown[2], picked: true }, shown[1]], null)).toEqual({ m: "b" });
   });
   it("hears the selected row, else the pick, else the first, per engine lane", () => {
     const rows = [

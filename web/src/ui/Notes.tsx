@@ -34,6 +34,8 @@ export interface NotesProps {
   marks?: { value: Mark[]; onChange(marks: Mark[]): void };
   /** What a listed note is on ("B · Warm keys", "Cue · Swipe"), shown beside its time. */
   onLabel?(note: Note): string | null;
+  /** Times are shown as saved, never placed on another cut, and with no "from vN" (audio tabs). */
+  fixedTimes?: boolean;
 }
 
 const MARK_KINDS: { kind: MarkKind; label: string }[] = [
@@ -50,7 +52,7 @@ const SCOPES: { value: Scope; label: string }[] = [
 
 /** The notes column used on every tab: list, filter, done circles and the note box. */
 export function Notes({
-  notes, version, placeholder, attachments, inputRef, toast, onAdd, onSeek, onChanged, onTextChange, on, scope, chips, marks, onLabel,
+  notes, version, placeholder, attachments, inputRef, toast, onAdd, onSeek, onChanged, onTextChange, on, scope, chips, marks, onLabel, fixedTimes,
 }: NotesProps) {
   const [filter, setFilter] = useState<Filter>("all");
   const ownInput = useRef<HTMLTextAreaElement>(null);
@@ -59,7 +61,7 @@ export function Notes({
   const [busy, setBusy] = useState(false);
   const todo = notes.filter((n) => n.status === "todo").length;
   const placed = notes
-    .map((n) => ({ n, at: placeNote(n, version) }))
+    .map((n) => ({ n, at: fixedTimes ? { t: n.t, tOut: n.tOut, from: null } : placeNote(n, version) }))
     .filter(({ n }) => filter === "all" || n.status === filter)
     .sort((a, b) => (a.at.t ?? -1) - (b.at.t ?? -1));
 
@@ -175,7 +177,8 @@ export function Notes({
             )}
           </div>
         )}
-        {chips && chips.length > 0 && (
+        {/* In Range, the marks row takes the chips' place, so the composer never grows by a row. */}
+        {chips && chips.length > 0 && !(marks && scope?.value === "range") && (
           <div class="row" role="group" aria-label="Start a note">
             {chips.map((c) => <button type="button" class="chip" onClick={() => start(c)}>{c}</button>)}
           </div>

@@ -190,7 +190,8 @@ test("Sound effects labels cues, and a note on a cue saves the cue and its time"
   await page.keyboard.press("Enter");
   await expect(page.locator(".note .on")).toHaveText("Cue · Swipe");
   const { notes } = await rushes.api("GET", "/api/notes?stage=sfx");
-  expect(notes[0]).toMatchObject({ stage: "sfx", on: "swipe", scope: "point", t: 1.5, tOut: null });
+  // §17.4 (amended): a cue note names its pass, `<pass id>:<cue id>`.
+  expect(notes[0]).toMatchObject({ stage: "sfx", on: "pass-a:swipe", scope: "point", t: 1.5, tOut: null });
   await expect(page.locator(`.lane[data-row="sfx/pass-a"] .mk[data-note="${notes[0].id}"]`)).toHaveCount(1);
   // Use works as on Music.
   await page.getByRole("button", { name: "Use Pass B" }).click();
@@ -300,4 +301,142 @@ test("the engine is never exposed without ?test=1", async ({ page, rushes }) => 
   await openTab(page, /Music/, "4");
   await expect(page.locator(".lane")).toHaveCount(1);
   expect(await page.evaluate(() => "__rushesAudio" in window)).toBe(false);
+});
+
+// ---- Fix round 1 ----
+
+test("a note on a cue two passes share names its pass, and an old bare cue id still draws", async ({ page, rushes }) => {
+  await rushes.addVariant("sfx", "Pass A", { seconds: 3, freq: 880, cues: [{ name: "Swipe", t: 1.5 }] });
+  await rushes.addVariant("sfx", "Pass B", { seconds: 3, freq: 660, cues: [{ name: "Swipe", t: 2.2 }] });
+  // A note from before the amendment: a bare cue id, drawn on the first pass holding it.
+  const old = (await rushes.api("POST", "/api/notes", { stage: "sfx", on: "swipe", scope: "point", t: 1.5, text: "Old style." })).note;
+  await page.goto(rushes.testUrl());
+  await openTab(page, /Sound effects/, "5");
+  await loaded(page, 2);
+  await expect(page.locator(`.lane[data-row="sfx/pass-a"] .mk[data-note="${old.id}"]`)).toHaveCount(1);
+  await page.getByRole("combobox", { name: "Note on" }).selectOption({ label: "Cue · Swipe · Pass B" });
+  await page.keyboard.press("n");
+  await page.keyboard.type("Too bright on B.");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".note")).toHaveCount(2);
+  const { notes } = await rushes.api("GET", "/api/notes?stage=sfx");
+  const added = notes.find((n: { text: string }) => n.text === "Too bright on B.");
+  expect(added).toMatchObject({ on: "pass-b:swipe", scope: "point", t: 2.2 });
+  await expect(page.locator(`.lane[data-row="sfx/pass-b"] .mk[data-note="${added.id}"]`)).toHaveCount(1);
+  await expect(page.locator(`.lane[data-row="sfx/pass-a"] .mk[data-note="${added.id}"]`)).toHaveCount(0);
+  await expect(page.locator(`.note[data-note="${added.id}"] .on`)).toHaveText("Cue · Swipe · Pass B");
+  await expect(page.locator(`.note[data-note="${old.id}"] .on`)).toHaveText("Cue · Swipe");
+});
+
+test("the notes column shows three marked notes in full above the composer, at 1440×900", async ({ page, rushes }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await rushes.addCut();
+  const a = await rushes.addVariant("music", "A · Deep house", { seconds: 4, freq: 220, meta: { bpm: 120, key: "A minor" } });
+  await rushes.addVariant("music", "B · Warm keys", { seconds: 4, freq: 330 });
+  const marks = [[{ kind: "fall" }, { kind: "quieter", db: 3 }], [{ kind: "rise" }], [{ kind: "louder", db: 6 }]];
+  for (const [i, m] of marks.entries()) {
+    await rushes.api("POST", "/api/notes", {
+      stage: "music", on: a.variant.id, scope: "range", t: i, tOut: i + 0.5, marks: m,
+      text: ["Drop the arp under the line.", "Swell into the logo.", "Lift the bass a touch."][i],
+    });
+  }
+  await page.goto(rushes.testUrl());
+  await openTab(page, /Music/, "4");
+  await expect(page.locator(".note")).toHaveCount(3);
+  const comp = page.locator(".comp");
+  const pointHeight = (await comp.boundingBox())!.height;
+  // Range swaps the chips for the marks: the composer doesn't grow.
+  await page.getByRole("group", { name: "Scope" }).getByRole("button", { name: "Range" }).click();
+  await expect(page.getByRole("group", { name: "Marks" })).toBeVisible();
+  await expect(page.getByRole("group", { name: "Start a note" })).toHaveCount(0);
+  expect(Math.abs((await comp.boundingBox())!.height - pointHeight)).toBeLessThanOrEqual(1);
+  const list = (await page.locator(".side .list").boundingBox())!;
+  const compTop = (await comp.boundingBox())!.y;
+  for (let i = 0; i < 3; i++) {
+    const box = (await page.locator(".note").nth(i).boundingBox())!;
+    expect(box.y).toBeGreaterThanOrEqual(list.y - 0.5);
+    expect(box.y + box.height).toBeLessThanOrEqual(list.y + list.height + 0.5);
+    expect(box.y + box.height).toBeLessThanOrEqual(compTop + 0.5);
+    await expect(page.locator(".note").nth(i).locator(".nmarks")).toBeVisible();
+  }
+  // And the column ends inside the window.
+  expect(compTop + (await comp.boundingBox())!.height).toBeLessThanOrEqual(900);
+});
+
+test("Blind never changes the bed being heard", async ({ page, rushes }) => {
+  for (const [i, name] of ["A · One", "B · Two", "C · Three", "D · Four"].entries()) {
+    await rushes.addVariant("music", name, { seconds: 2, freq: 200 + i * 50 });
+  }
+  await page.goto(rushes.testUrl());
+  await openTab(page, /Music/, "4");
+  await loaded(page, 4);
+  const gains = async () => (await inspect(page)).gains;
+  const before = await gains();
+  expect(before).toEqual({ "music/a-one": 1, "music/b-two": 0, "music/c-three": 0, "music/d-four": 0 });
+  await page.getByRole("button", { name: "Blind" }).click();
+  await expect(page.locator(".lane [data-name]").first()).toHaveText("Bed 1");
+  expect(await gains()).toEqual(before);
+  await page.getByRole("button", { name: "Blind" }).click();
+  await expect(page.locator(".lane [data-name]").first()).toHaveText("A · One");
+  expect(await gains()).toEqual(before);
+});
+
+test("a half-typed music note holds the film", async ({ page, rushes }) => {
+  await rushes.addCut("hero", "Hero");
+  await rushes.addCut("cutdown", "Cutdown");
+  await rushes.addVariant("music", "Bed", { seconds: 2, freq: 220 });
+  await page.goto(rushes.testUrl());
+  await openTab(page, /Music/, "4");
+  await loaded(page, 1);
+  const films = page.getByRole("navigation", { name: "Films" });
+  await expect(films.getByRole("button", { name: /Hero/ })).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("n");
+  await page.keyboard.type("Half a thought");
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("]");
+  await expect(page.getByRole("status")).toHaveText("Add or clear your note on Hero first");
+  await expect(films.getByRole("button", { name: /Hero/ })).toHaveAttribute("aria-pressed", "true");
+  await films.getByRole("button", { name: /Cutdown/ }).click();
+  await expect(films.getByRole("button", { name: /Hero/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("textbox", { name: "New note" })).toHaveValue("Half a thought");
+  // A range alone holds it too; clearing both lets the film go.
+  await page.getByRole("textbox", { name: "New note" }).fill("");
+  await page.getByRole("textbox", { name: "New note" }).blur();
+  await page.keyboard.press("i");
+  await page.keyboard.press("]");
+  await expect(films.getByRole("button", { name: /Hero/ })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Clear range" }).click();
+  await page.keyboard.press("]");
+  await expect(films.getByRole("button", { name: /Cutdown/ })).toHaveAttribute("aria-pressed", "true");
+});
+
+test("an audio note never says it came from another cut", async ({ page, rushes }) => {
+  await rushes.addCut();
+  const bed = await rushes.addVariant("music", "Bed", { seconds: 4, freq: 220 });
+  await rushes.api("POST", "/api/notes", { stage: "music", video: "hero", version: "v1", on: bed.variant.id, scope: "point", t: 1.25, text: "On v1." });
+  await rushes.addCut();
+  await page.goto(rushes.testUrl());
+  await openTab(page, /Music/, "4");
+  await expect(page.locator(".note .t")).toHaveText("0:01.25");
+  await expect(page.locator(".note .from")).toHaveCount(0);
+});
+
+test("the preview keeps up during playback without repeated seeking", async ({ page, rushes }) => {
+  await rushes.addCut();
+  await rushes.addVariant("music", "Bed", { seconds: 4, freq: 220 });
+  await page.goto(rushes.testUrl());
+  await openTab(page, /Music/, "4");
+  await loaded(page, 1);
+  const pv = page.locator(".pv video");
+  await expect.poll(() => pv.evaluate((v: HTMLVideoElement) => v.readyState)).toBeGreaterThanOrEqual(2);
+  await pv.evaluate((v: HTMLVideoElement) => {
+    (window as unknown as { __seeks: number }).__seeks = 0;
+    v.addEventListener("seeking", () => (window as unknown as { __seeks: number }).__seeks++);
+  });
+  await page.keyboard.press(" ");
+  await expect.poll(async () => (await inspect(page)).playing).toBe(true);
+  await page.waitForTimeout(1500);
+  const r = await page.evaluate(() => ({ seeks: (window as unknown as { __seeks: number }).__seeks, t: window.__rushesAudio!.engine!.time }));
+  expect(r.t).toBeGreaterThan(1);
+  expect(r.seeks).toBeLessThanOrEqual(2);
 });

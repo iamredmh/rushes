@@ -328,8 +328,12 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .secmk { position: absolute; top: 6px; height: calc(100% - 12px); padding-left: 6px; border-left: 1px solid var(--line-2); font: 600 15px/1 var(--sans); color: var(--text-3); z-index: 1; pointer-events: none; }
 .cue { position: absolute; bottom: 4px; transform: translateX(-50%); font: 500 15px/1 var(--sans); color: var(--sfx); white-space: nowrap; z-index: 2; pointer-events: none; text-shadow: 0 0 4px var(--raised), 0 0 2px var(--raised); }
 .cue::before { content: ""; position: absolute; left: 50%; bottom: calc(100% + 4px); width: 1px; height: 46px; background: currentColor; opacity: 0.45; }
-.acol { display: flex; flex-direction: column; gap: 14px; height: 0; min-height: max(100%, 560px, calc(100vh - 170px)); }
+/* The mockup's 780px floor for the preview + notes column, less what the header, tabs and body padding
+   (about 162px) take, so on a short window it ends at the window's edge instead of scrolling the page. */
+.acol { display: flex; flex-direction: column; gap: 12px; height: 0; min-height: max(100%, min(780px, calc(100vh - 162px))); }
 .acol .panel.side { flex: 1; height: auto; min-height: 0; }
+/* A tighter notes header than Picture's, so three notes fit above the taller audio composer at 900px. */
+.acol .ph { padding: 10px 16px 6px; }
 .pv .frame { border-radius: var(--r); max-height: none; }
 .pvempty { position: absolute; inset: 0; display: grid; place-items: center; background: var(--app); color: var(--line-2); }
 .pvempty svg.ic { width: 28px; height: 28px; }
@@ -340,6 +344,10 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .chip[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-2); }
 .markc { display: inline-flex; align-items: center; gap: 4px; }
 .onwrap { position: relative; display: inline-flex; align-items: center; min-width: 0; max-width: 100%; }
+/* The On menu shares its row with the scope switch and gives way to it, so the row never wraps. */
+.comp .row > .onwrap { flex: 1 1 0; }
+.comp .row > .onwrap .onsel { width: 100%; }
+.comp .row > .onwrap + .sp { flex: 0 0 0; }
 .onwrap svg.ic { position: absolute; right: 9px; width: 14px; height: 14px; color: var(--text-2); pointer-events: none; }
 .sel.onsel, .sel.dbsel { background: var(--app); color: var(--text); padding: 0 30px 0 12px; max-width: 100%; text-overflow: ellipsis; }
 .sel.dbsel { height: 30px; padding: 0 28px 0 10px; }

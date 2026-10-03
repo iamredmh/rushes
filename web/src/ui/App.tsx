@@ -387,7 +387,16 @@ export function App() {
           <Script script={state.script} toast={toast} onChanged={() => void refresh()} />
         ) : stage === "music" || stage === "sfx" ? (
           // Keyed by stage: each audio tab gets its own engine, disposed (and stopped) when you leave.
-          <VariantTab key={stage} stage={stage} state={state} assets={assets} video={video ?? null} toast={toast} onChanged={() => void refresh()} />
+          <VariantTab
+            key={stage}
+            stage={stage}
+            state={state}
+            assets={assets}
+            video={video ?? null}
+            toast={toast}
+            onChanged={() => void refresh()}
+            onPendingChange={setPending}
+          />
         ) : (
           <Empty stage={stage} unlocked={unlocked} />
         )}

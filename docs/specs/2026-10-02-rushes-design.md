@@ -492,7 +492,7 @@ This section builds the Voiceover, Music, Sound effects and Mix tabs, following 
 
 ### 17.4 Sound effects
 - **Lanes.** Each `sfx` variant is a lane. Its cues are labelled on the waveform at their times.
-- **What a note can be on.** The On menu lists the passes and each cue (`Cue · Swipe`). A note on a cue is saved with `on` set to the cue id and `t` set to the cue's time.
+- **What a note can be on.** The On menu lists the passes and each cue (`Cue · Swipe`). A note on a cue is saved with `on` set to `<pass id>:<cue id>` and `t` set to the cue's time. An older note whose `on` is a bare cue id is drawn on the first pass with that cue.
 - **Use** works as it does on Music.
 
 ### 17.5 Voiceover

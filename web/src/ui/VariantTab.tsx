@@ -4,7 +4,7 @@
 import { useState } from "preact/hooks";
 import { api } from "../api.js";
 import { assetRev, type Clip } from "../audio/timeline.js";
-import { blindOrder, defaultVersion, STAGE_NAMES, type VariantRow, variantNoteRow, variantOnOptions, variantRows } from "../lib.js";
+import { blindOrder, defaultVersion, STAGE_NAMES, type VariantRow, variantNoteRow, variantOnLabel, variantOnOptions, variantRows } from "../lib.js";
 import type { Asset, State, Video } from "../types.js";
 import { AudioStage, type Preview } from "./AudioStage.js";
 import { Icon } from "./Icon.js";
@@ -25,9 +25,11 @@ export interface VariantTabProps {
   video: Video | null;
   toast(message: string): void;
   onChanged(): void;
+  /** A half-typed note or a range is waiting: the caller refuses a film switch meanwhile. */
+  onPendingChange?(pending: boolean): void;
 }
 
-export function VariantTab({ stage, state, assets, video, toast, onChanged }: VariantTabProps) {
+export function VariantTab({ stage, state, assets, video, toast, onChanged, onPendingChange }: VariantTabProps) {
   const [blind, setBlindState] = useState(stage === "music" && blindSession);
   const setBlind = (on: boolean) => {
     blindSession = on;
@@ -62,6 +64,8 @@ export function VariantTab({ stage, state, assets, video, toast, onChanged }: Va
       cues: stage === "sfx" ? r.cues : undefined,
       audition: { lane: r.lane, clip: r.key },
       picked,
+      // Manifest order: with nothing picked or selected, the first bed plays, Blind or not.
+      order: all.indexOf(r),
       use: { inUse: picked, onUse: () => void use(r) },
       on: `v:${r.key}`,
     };
@@ -95,14 +99,10 @@ export function VariantTab({ stage, state, assets, video, toast, onChanged }: Va
       notes={notes}
       onOptions={options}
       noteRow={(n) => variantNoteRow(rows, n.on)}
-      onLabel={(n) => {
-        if (n.on === null) return null;
-        const row = rows.find((r) => r.variant === n.on);
-        if (row) return nameOf(row);
-        return options.find((o) => o.on === n.on && o.value.startsWith("c:"))?.label ?? null;
-      }}
+      onLabel={(n) => variantOnLabel(rows, options, n.on)}
       toast={toast}
       onChanged={onChanged}
+      onPendingChange={onPendingChange}
     />
   );
 }

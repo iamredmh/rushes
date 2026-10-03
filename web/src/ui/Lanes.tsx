@@ -31,6 +31,8 @@ export interface StageRow {
   audition?: { lane: string; clip: string };
   /** This lane's clip is the pick: heard when no lane is selected. */
   picked?: boolean;
+  /** Manifest position, for "the first lane" when nothing is picked or selected (display order may be shuffled). */
+  order?: number;
   /** Use / In use. */
   use?: { inUse: boolean; onUse(): void };
   /** Other controls for the right-hand column (M / S on Mix). */

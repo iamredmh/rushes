@@ -407,7 +407,8 @@ export interface OnOption {
   row?: string;
 }
 
-/** The On menu for variant rows: each variant, then (with `cues`) each cue as `Cue · Swipe`. */
+/** The On menu for variant rows: each variant, then (with `cues`) each cue as `Cue · Swipe`, saved as
+ *  `on: "<pass id>:<cue id>"`. A cue name two passes share gets the pass's name too. */
 export function variantOnOptions(rows: VariantRow[], nameOf: (r: VariantRow) => string, cues = false): OnOption[] {
   const out: OnOption[] = rows.map((r) => ({ value: `v:${r.key}`, label: nameOf(r), on: r.variant, row: r.key }));
   if (!cues) return out;
@@ -417,29 +418,58 @@ export function variantOnOptions(rows: VariantRow[], nameOf: (r: VariantRow) => 
       let label = `Cue · ${c.name}`;
       if (seen.has(label)) label = `${label} · ${nameOf(r)}`;
       seen.add(label);
-      out.push({ value: `c:${r.key}:${c.id}`, label, on: c.id, t: c.t, row: r.key });
+      // `<pass id>:<cue id>`: cue ids are only unique within a pass (§17.4).
+      out.push({ value: `c:${r.key}:${c.id}`, label, on: `${r.variant}:${c.id}`, t: c.t, row: r.key });
     }
   }
   return out;
 }
 
-/** The row a note is drawn on: the variant it's `on`, else the pass holding the cue it's `on`. */
-export function variantNoteRow(rows: VariantRow[], on: string | null): string | null {
+/**
+ * What a note is `on`: a variant (`"pass-b"`), or a cue on a pass (`"pass-b:swipe"`). An older bare
+ * cue id (`"swipe"`) falls back to the first pass holding that cue.
+ */
+export function variantNoteTarget(rows: VariantRow[], on: string | null): { row: string; cue: string | null } | null {
   if (on === null) return null;
-  return rows.find((r) => r.variant === on)?.key ?? rows.find((r) => r.cues.some((c) => c.id === on))?.key ?? null;
+  const variant = rows.find((r) => r.variant === on);
+  if (variant) return { row: variant.key, cue: null };
+  const i = on.indexOf(":");
+  if (i > 0) {
+    const v = on.slice(0, i);
+    const cue = on.slice(i + 1);
+    const pass = rows.find((r) => r.variant === v && r.cues.some((c) => c.id === cue));
+    if (pass) return { row: pass.key, cue };
+  }
+  const pass = rows.find((r) => r.cues.some((c) => c.id === on));
+  return pass ? { row: pass.key, cue: on } : null;
+}
+
+/** The row a note is drawn on (see variantNoteTarget). */
+export function variantNoteRow(rows: VariantRow[], on: string | null): string | null {
+  return variantNoteTarget(rows, on)?.row ?? null;
+}
+
+/** The On menu's label for what a note is on, e.g. `Cue · Swipe · Pass B`, or null. */
+export function variantOnLabel(rows: VariantRow[], options: OnOption[], on: string | null): string | null {
+  const target = variantNoteTarget(rows, on);
+  if (!target) return null;
+  const value = target.cue === null ? `v:${target.row}` : `c:${target.row}:${target.cue}`;
+  return options.find((o) => o.value === value)?.label ?? null;
 }
 
 /**
  * Which clip each engine lane plays: the selected row's clip in its lane, else the picked one,
- * else the lane's first. Audition and Use can differ (§17.3).
+ * else the lane's first in manifest order (`order`, else array order). Audition and Use can differ (§17.3).
  */
 export function laneSelection(
-  rows: { key: string; audition?: { lane: string; clip: string }; picked?: boolean }[],
+  rows: { key: string; audition?: { lane: string; clip: string }; picked?: boolean; order?: number }[],
   selected: string | null,
 ): Record<string, string> {
   const out: Record<string, string> = {};
   const sel = rows.find((r) => r.key === selected)?.audition;
-  for (const r of rows) {
+  // "First" means manifest order (`order`), never display order, so Blind's shuffle can't change what plays.
+  const ordered = rows.map((r, i) => ({ r, i })).sort((a, b) => (a.r.order ?? a.i) - (b.r.order ?? b.i)).map((x) => x.r);
+  for (const r of ordered) {
     const a = r.audition;
     if (!a || out[a.lane] !== undefined) continue;
     if (sel && sel.lane === a.lane) out[a.lane] = sel.clip;
