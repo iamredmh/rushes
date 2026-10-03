@@ -82,12 +82,14 @@ export function Voice({ state, assets, video, toast, onChanged, onPendingChange 
   const useVariant = (lane: string, variant: string | null) => setPick({ lanes: { [lane]: variant } }, variant === null);
 
   // ---- what the engine plays: every take of every section, and every voice variant ----
+  // Every clip plays its whole file (`duration: 0`), as the server's mix does: a take re-rendered
+  // in place can change length without the script's recorded duration knowing.
   const clips: Clip[] = [];
   for (const s of sections) {
     for (const t of s.takes) {
       if (missing(t.file)) continue;
       clips.push({
-        id: takeClipId(s.id, t.id), lane: sectionLane(s.id), path: t.file, offset: s.start, duration: t.duration ?? 0,
+        id: takeClipId(s.id, t.id), lane: sectionLane(s.id), path: t.file, offset: s.start, duration: 0,
         section: s.id, take: t.id, rev: rev(t.file),
       });
     }
@@ -116,7 +118,7 @@ export function Voice({ state, assets, video, toast, onChanged, onPendingChange 
       meta: t.duration !== null ? `${t.duration.toFixed(1)} s` : null,
       color: VO_COLOR,
       sub: true,
-      clips: gone ? [] : [{ id: takeClipId(section!.id, t.id), lane: sectionLane(section!.id), path: t.file, offset: section!.start, duration: t.duration ?? 0, rev: rev(t.file) }],
+      clips: gone ? [] : [{ id: takeClipId(section!.id, t.id), lane: sectionLane(section!.id), path: t.file, offset: section!.start, duration: 0, rev: rev(t.file) }],
       // In use is the take the read uses (its pick, else the newest); only an explicit pick can be unpicked.
       use: {
         inUse: inRead?.id === t.id,

@@ -214,7 +214,11 @@ describe("assembleRead", () => {
 
   it("places the picked take at the section's start", () => {
     const read = assembleRead(sections, { s1: "t1" });
-    expect(read[0]).toEqual({ id: "s1:t1", lane: "vo", path: "vo/s1-a.wav", offset: 0, duration: 2, section: "s1", take: "t1" });
+    expect(read[0]).toEqual({ id: "s1:t1", lane: "vo", path: "vo/s1-a.wav", offset: 0, duration: 0, section: "s1", take: "t1" });
+  });
+  it("plays each take's whole file, never trimmed at the script's recorded duration, as the server's mix does (M6)", () => {
+    // s1's t2 is recorded as 2.5 s long; a re-render in place could have changed that.
+    expect(assembleRead(sections, {}).map((c) => c.duration)).toEqual([0, 0]);
   });
   it("uses the newest take when none is picked, or the pick no longer exists", () => {
     expect(assembleRead(sections, {})[0].take).toBe("t2");

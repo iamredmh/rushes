@@ -754,8 +754,23 @@ describe("POST /api/mix/loudness (§17.6)", () => {
     await mkdir(join(root, "audio"), { recursive: true });
     await writeFile(join(root, "audio", "a.wav"), "not real audio");
     await call("POST", "/api/variants", { stage: "music", name: "Deep house", file: "audio/a.wav" });
+    // Only picked variants are measured, as only they play on Mix (I2).
+    await call("PUT", "/api/picks", { lanes: { music: "deep-house" } });
     return { call };
   }
+
+  it("measures nothing on a lane with nothing picked, as Mix plays nothing there (I2)", async () => {
+    const calls: string[][] = [];
+    const run: LoudnessRunner = async (args) => {
+      calls.push(args);
+      return args[0] === "-version" ? { code: 0, stderr: "" } : { code: 0, stderr: EBUR128 };
+    };
+    const { call } = await withVariant(run);
+    await call("PUT", "/api/picks", { lanes: { music: null } });
+    const r = await call("POST", "/api/mix/loudness", { lanes: ["music"] });
+    expect(r.json).toEqual({ available: true, integrated: null, truePeak: null, musicUnderVo: null, silent: false });
+    expect(calls.filter((a) => a[0] !== "-version")).toEqual([]);
+  });
 
   it("returns the measured loudness, available: true", async () => {
     const run: LoudnessRunner = async (args) => (args[0] === "-version" ? { code: 0, stderr: "" } : { code: 0, stderr: EBUR128 });

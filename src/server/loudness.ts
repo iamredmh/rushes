@@ -2,8 +2,9 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { RushesError } from "../core/errors.js";
+import { probe } from "../core/media.js";
 import { fromManifestPath } from "../core/paths.js";
-import type { LaneStage, Picks, Project, Script } from "../core/schema.js";
+import type { LaneStage, Picks, Project, Script, Section, Take, Variant } from "../core/schema.js";
 
 export interface LoudnessRunner {
   (args: string[], signal?: AbortSignal): Promise<{ code: number; stderr: string }>;
@@ -84,15 +85,52 @@ export interface MixInput {
 }
 
 /**
- * The files and offsets a mix of `lanes` is made from (§17.6):
+ * The take a section's read uses: its pick, else its newest; null with no takes. One rule for the
+ * mix and the VO span here, and the same rule as the dashboard's `readTake` (web/src/lib.ts), which
+ * a parity test holds to this one.
+ */
+export function readTake(s: Pick<Section, "id" | "takes">, picks: Pick<Picks, "sections">): Take | null {
+  if (s.takes.length === 0) return null;
+  const pickedId = picks.sections[s.id];
+  return s.takes.find((t) => t.id === pickedId) ?? s.takes[s.takes.length - 1];
+}
+
+/**
+ * What the voice part of the mix is, resolved once for both `mixInputs` and the VO span: a picked
+ * whole-read voice variant (the first voice lane, in manifest order, whose pick names one of its
+ * variants), else the assembled read -- each section's `readTake` at the section's start.
+ */
+type VoiceSource =
+  | { kind: "variant"; variant: Variant }
+  | { kind: "read"; takes: { section: Pick<Section, "start" | "end">; take: Take }[] };
+
+function voiceSource(project: Project, script: Script, picks: Picks): VoiceSource {
+  for (const lane of project.lanes) {
+    if (lane.stage !== "voice") continue;
+    const pickedId = picks.lanes[lane.id];
+    const variant = pickedId ? lane.variants.find((v) => v.id === pickedId) : undefined;
+    if (variant) return { kind: "variant", variant };
+  }
+  const takes: { section: Section; take: Take }[] = [];
+  for (const s of script.sections) {
+    const take = readTake(s, picks);
+    if (take) takes.push({ section: s, take });
+  }
+  return { kind: "read", takes };
+}
+
+/**
+ * The files and offsets a mix of `lanes` is made from (§17.6) -- exactly what the Mix tab plays:
  * - voice: a picked whole-read voice variant *replaces* the assembled read entirely; otherwise
  *   each script section's picked take (or its newest) at the section's start. A voice variant is
  *   never used just because it's the only one, or the first -- only an explicit pick swaps in a
  *   whole alternative read.
- * - music: the picked (or first) variant of each music lane, at 0;
- * - sfx: the picked (or first) variant of each sfx lane, at 0.
+ * - music: the picked variant of each music lane, at 0;
+ * - sfx: the picked variant of each sfx lane, at 0.
  *
- * A manifest entry whose file is missing from disk is left out rather than handed to ffmpeg.
+ * A music or sfx lane with nothing picked is left out, never stood in for by its first variant:
+ * Mix plays only explicit picks, so the readout must measure only them. A manifest entry whose
+ * file is missing from disk is left out too, rather than handed to ffmpeg.
  */
 export function mixInputs(project: Project, script: Script, picks: Picks, lanes: LaneStage[], root: string): MixInput[] {
   const want = new Set(lanes);
@@ -103,35 +141,18 @@ export function mixInputs(project: Project, script: Script, picks: Picks, lanes:
   };
 
   if (want.has("voice")) {
-    let pickedVoiceVariant: { file: string } | undefined;
-    for (const lane of project.lanes) {
-      if (lane.stage !== "voice") continue;
-      const pickedId = picks.lanes[lane.id];
-      const variant = pickedId ? lane.variants.find((v) => v.id === pickedId) : undefined;
-      if (variant) {
-        pickedVoiceVariant = variant;
-        break;
-      }
-    }
-    if (pickedVoiceVariant) {
-      add(pickedVoiceVariant.file, 0, "voice");
-    } else {
-      for (const s of script.sections) {
-        if (s.takes.length === 0) continue;
-        const pickedId = picks.sections[s.id];
-        const take = (pickedId && s.takes.find((t) => t.id === pickedId)) || s.takes[s.takes.length - 1];
-        add(take.file, s.start, "voice");
-      }
-    }
+    const voice = voiceSource(project, script, picks);
+    if (voice.kind === "variant") add(voice.variant.file, 0, "voice");
+    else for (const { section, take } of voice.takes) add(take.file, section.start, "voice");
   }
 
   for (const stage of ["music", "sfx"] as const) {
     if (!want.has(stage)) continue;
     for (const lane of project.lanes) {
-      if (lane.stage !== stage || lane.variants.length === 0) continue;
+      if (lane.stage !== stage) continue;
       const pickedId = picks.lanes[lane.id];
-      const variant = (pickedId && lane.variants.find((v) => v.id === pickedId)) || lane.variants[0];
-      add(variant.file, 0, stage);
+      const variant = pickedId ? lane.variants.find((v) => v.id === pickedId) : undefined;
+      if (variant) add(variant.file, 0, stage);
     }
   }
 
@@ -203,22 +224,42 @@ async function runWithTimeout(run: LoudnessRunner, args: string[], timeoutMs: nu
   }
 }
 
-/** The VO's own span: from 0 to the latest point any used take reaches, worked out from script
- *  data alone (never a probe) -- a take's known duration, or its section's length when the
- *  take's duration isn't known yet. Only counts a section whose resolved take file actually
- *  exists on disk, the same rule `mixInputs` applies, so a missing take never stretches (or
- *  shrinks) the span it's not actually contributing to the mix. */
-function voSpanSeconds(script: Script, picks: Picks, root: string): number {
+/** A file's length in seconds, or null when it can't be told. Defaults to ffprobe; tests inject a fake. */
+export type DurationProbe = (absFile: string) => Promise<number | null>;
+
+const probeDuration: DurationProbe = async (file) => (await probe(file)).duration;
+
+/**
+ * The VO's own span, from the same `voiceSource` the mix uses:
+ * - the assembled read: from 0 to the latest point any used take reaches, worked out from script
+ *   data alone -- a take's known duration, or its section's length when the take's duration isn't
+ *   known yet. Only a take whose file exists on disk counts, the same rule `mixInputs` applies, so
+ *   a missing take never stretches (or shrinks) the span it isn't contributing to;
+ * - a picked voice variant (at 0): its file's own length, probed only on a cache miss -- `null`
+ *   when that length can't be told, so `musicUnderVo` is left unmeasured rather than guessed.
+ */
+type VoSpan = { kind: "read"; seconds: number } | { kind: "variant"; file: string };
+
+function voSpan(project: Project, script: Script, picks: Picks, root: string): VoSpan {
+  const voice = voiceSource(project, script, picks);
+  if (voice.kind === "variant") return { kind: "variant", file: fromManifestPath(root, voice.variant.file) };
   let end = 0;
-  for (const s of script.sections) {
-    if (s.takes.length === 0) continue;
-    const pickedId = picks.sections[s.id];
-    const take = (pickedId && s.takes.find((t) => t.id === pickedId)) || s.takes[s.takes.length - 1];
+  for (const { section, take } of voice.takes) {
     if (!existsSync(fromManifestPath(root, take.file))) continue;
-    const duration = take.duration ?? s.end - s.start;
-    end = Math.max(end, s.start + duration);
+    const duration = take.duration ?? section.end - section.start;
+    end = Math.max(end, section.start + duration);
   }
-  return end;
+  return { kind: "read", seconds: end };
+}
+
+async function voSpanSeconds(span: VoSpan, durationOf: DurationProbe): Promise<number | null> {
+  if (span.kind === "read") return span.seconds;
+  try {
+    const d = await durationOf(span.file);
+    return d !== null && Number.isFinite(d) && d > 0 ? d : null;
+  } catch {
+    return null;
+  }
 }
 
 export interface LoudnessResult {
@@ -265,12 +306,14 @@ function cacheSet(run: LoudnessRunner, key: string, value: LoudnessResult): void
 }
 
 /**
- * Sorted (abs path, mtime, offset) for every input, plus the lanes asked for -- or `null` when a
- * file's `stat` fails (it existed a moment ago for `mixInputs`' own check, but could have been
- * removed since). `null` means "don't cache this one", never a thrown error: a loudness request
- * racing a file deletion must still get an answer, not a 500.
+ * Sorted (abs path, mtime, offset) for every input, plus the lanes asked for and the VO span the
+ * music-under-VO pass is trimmed to (a section re-timed with no file change moves it) -- or `null`
+ * when a file's `stat` fails (it existed a moment ago for `mixInputs`' own check, but could have
+ * been removed since). `null` means "don't cache this one", never a thrown error: a loudness
+ * request racing a file deletion must still get an answer, not a 500. A picked voice variant's
+ * span is its file's length, already covered by that file's path and mtime among the inputs.
  */
-async function cacheKey(inputs: MixInput[], lanes: LaneStage[]): Promise<string | null> {
+async function cacheKey(inputs: MixInput[], lanes: LaneStage[], span: VoSpan): Promise<string | null> {
   const stats: { file: string; offset: number; mtimeMs: number }[] = [];
   for (const i of inputs) {
     try {
@@ -280,7 +323,7 @@ async function cacheKey(inputs: MixInput[], lanes: LaneStage[]): Promise<string 
     }
   }
   stats.sort((a, b) => a.file.localeCompare(b.file) || a.offset - b.offset);
-  return JSON.stringify({ lanes: [...lanes].sort(), inputs: stats });
+  return JSON.stringify({ lanes: [...lanes].sort(), inputs: stats, span: span.kind === "read" ? span.seconds : "variant" });
 }
 
 /**
@@ -290,8 +333,11 @@ async function cacheKey(inputs: MixInput[], lanes: LaneStage[]): Promise<string 
  * among the inputs. Runs at most three ffmpeg invocations, each through `run`; each is aborted,
  * and its process killed, if it runs past `timeoutMs`, rather than left running in the
  * background. Results are cached per `run`, by the inputs' paths, mtimes and offsets plus the
- * lanes asked for (skipped when a file can't be stat'ed any more). Returns
- * `{ available: false, ... }` without touching the filesystem further when ffmpeg isn't on PATH.
+ * lanes asked for and the VO span (skipped when a file can't be stat'ed any more, and never for a
+ * run ffmpeg failed: a nonzero exit with nothing parsed, as an older ffmpeg without
+ * `amix normalize` gives). Two requests for the same key while one is measuring share that one
+ * run rather than starting a second ffmpeg chain. Returns `{ available: false, ... }` without
+ * touching the filesystem further when ffmpeg isn't on PATH.
  */
 export async function measureMix(
   project: Project,
@@ -301,17 +347,59 @@ export async function measureMix(
   root: string,
   run: LoudnessRunner = defaultRunner,
   timeoutMs = 60_000,
+  durationOf: DurationProbe = probeDuration,
 ): Promise<LoudnessResult> {
   if (!(await ffmpegAvailable(run))) return { available: false, ...NOT_MEASURED };
 
   const inputs = mixInputs(project, script, picks, lanes, root);
   if (inputs.length === 0) return { available: true, ...NOT_MEASURED };
 
-  const key = await cacheKey(inputs, lanes);
-  const cached = key ? cacheGet(run, key) : undefined;
+  const span = voSpan(project, script, picks, root);
+  const key = await cacheKey(inputs, lanes, span);
+  if (key === null) return (await measure(inputs, span, run, timeoutMs, durationOf)).result;
+  const cached = cacheGet(run, key);
   if (cached) return cached;
 
-  const full = parseEbur128((await runWithTimeout(run, loudnessArgs(inputs), timeoutMs)).stderr);
+  let flights = inFlight.get(run);
+  if (!flights) {
+    flights = new Map();
+    inFlight.set(run, flights);
+  }
+  const running = flights.get(key);
+  if (running) return running;
+  const flight = measure(inputs, span, run, timeoutMs, durationOf).then(({ result, failed }) => {
+    if (!failed) cacheSet(run, key, result);
+    return result;
+  });
+  flights.set(key, flight);
+  const done = () => {
+    if (flights.get(key) === flight) flights.delete(key);
+  };
+  flight.then(done, done);
+  return flight;
+}
+
+// The measurement running for each cache key right now, per runner: a second request for the same
+// mix while the first is still measuring waits on it instead of spawning its own ffmpeg chain.
+const inFlight = new WeakMap<LoudnessRunner, Map<string, Promise<LoudnessResult>>>();
+
+/** The ffmpeg runs behind one reading. `failed`: a run exited nonzero with nothing parsed, so don't cache it. */
+async function measure(
+  inputs: MixInput[],
+  span: VoSpan,
+  run: LoudnessRunner,
+  timeoutMs: number,
+  durationOf: DurationProbe,
+): Promise<{ result: LoudnessResult; failed: boolean }> {
+  let failed = false;
+  const reading = async (args: string[]) => {
+    const r = await runWithTimeout(run, args, timeoutMs);
+    const parsed = parseEbur128(r.stderr);
+    if (r.code !== 0 && parsed.integrated === null && parsed.truePeak === null) failed = true;
+    return parsed;
+  };
+
+  const full = await reading(loudnessArgs(inputs));
   // Either reading hitting -inf means there's nothing there to measure -- treat the whole
   // full-mix reading as silence rather than keeping a merely-finite other field (ffmpeg's own
   // integrated-loudness gate floors at -70 LUFS even when the true peak is genuinely -inf), which
@@ -322,12 +410,12 @@ export async function measureMix(
   const musicInputs = inputs.filter((i) => i.stage === "music");
   let musicUnderVo: number | null = null;
   if (voiceInputs.length > 0 && musicInputs.length > 0) {
-    const span = voSpanSeconds(script, picks, root);
-    const vo = finite(parseEbur128((await runWithTimeout(run, loudnessArgs(voiceInputs), timeoutMs)).stderr).integrated);
-    const music = finite(
-      parseEbur128((await runWithTimeout(run, loudnessArgsTrimmed(musicInputs, span), timeoutMs)).stderr).integrated,
-    );
-    if (vo !== null && music !== null) musicUnderVo = music - vo;
+    const seconds = await voSpanSeconds(span, durationOf);
+    if (seconds !== null) {
+      const vo = finite((await reading(loudnessArgs(voiceInputs))).integrated);
+      const music = finite((await reading(loudnessArgsTrimmed(musicInputs, seconds))).integrated);
+      if (vo !== null && music !== null) musicUnderVo = music - vo;
+    }
   }
 
   const result: LoudnessResult = {
@@ -337,6 +425,5 @@ export async function measureMix(
     musicUnderVo,
     silent,
   };
-  if (key) cacheSet(run, key, result);
-  return result;
+  return { result, failed };
 }

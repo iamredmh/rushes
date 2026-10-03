@@ -243,7 +243,7 @@ async function fixture() {
 }
 
 describe("mixInputs", () => {
-  it("resolves each section's picked take or its newest, the picked/first music and sfx variant, and skips missing files", async () => {
+  it("resolves each section's picked take or its newest and the picked music variant, leaves out an unpicked lane, and skips missing files", async () => {
     const { root, project, script, picks } = await fixture();
     const inputs = mixInputs(project, script, picks, ["voice", "music", "sfx"], root);
     expect(inputs).toEqual([
@@ -251,7 +251,27 @@ describe("mixInputs", () => {
       { file: join(root, "audio", "s2-u1.wav"), offset: 5, stage: "voice" }, // s2: picked (u1)
       // s3's only take points nowhere on disk -- left out entirely.
       { file: join(root, "audio", "music-b.wav"), offset: 0, stage: "music" }, // picked music variant
-      { file: join(root, "audio", "sfx-pass1.wav"), offset: 0, stage: "sfx" }, // sfx: no pick -> first
+      // sfx has no pick: Mix plays nothing on it, so it's never stood in for by its first pass.
+    ]);
+  });
+
+  it("with two music lanes and only one picked, uses just the picked one, as Mix plays (I2)", async () => {
+    const { root, project, script, picks } = await fixture();
+    project.lanes.push({
+      id: "sting",
+      stage: "music",
+      name: "Sting",
+      variants: [{ id: "a", name: "A", file: "audio/music-a.wav", meta: {}, cues: [] }],
+    });
+    // "music" (the bed) is picked; "sting" isn't.
+    expect(mixInputs(project, script, picks, ["music"], root)).toEqual([
+      { file: join(root, "audio", "music-b.wav"), offset: 0, stage: "music" },
+    ]);
+    // Picking the sting too adds it.
+    const both: Picks = { ...picks, lanes: { ...picks.lanes, sting: "a" } };
+    expect(mixInputs(project, script, both, ["music"], root).map((i) => i.file)).toEqual([
+      join(root, "audio", "music-b.wav"),
+      join(root, "audio", "music-a.wav"),
     ]);
   });
 
@@ -379,6 +399,115 @@ describe("measureMix", () => {
     await measureMix(project, script, p, ["voice", "music"], root, run);
     expect(trimArgs).toBeDefined();
     expect(trimArgs![trimArgs!.indexOf("-t") + 1]).toBe("4.000");
+  });
+
+  it("trims music-under-VO to a picked voice variant's own length, not the takes' span (I1)", async () => {
+    const { root, project, script, picks } = await fixture();
+    const withPick: Picks = { ...picks, lanes: { ...picks.lanes, voice: "alt" } };
+    const probed: string[] = [];
+    const durationOf = async (file: string) => {
+      probed.push(file);
+      return 7.5;
+    };
+    let trimArgs: string[] | undefined;
+    const run: LoudnessRunner = async (args) => {
+      if (args[0] === "-version") return { code: 0, stderr: "" };
+      if (args.includes("-t")) trimArgs = args;
+      return { code: 0, stderr: ebur(args.includes("-t") ? -14 : -18) };
+    };
+    const result = await measureMix(project, script, withPick, ["voice", "music"], root, run, 60_000, durationOf);
+    expect(probed).toEqual([join(root, "audio", "voice-alt.wav")]);
+    // The takes would give 8 s (s2 at 5, plus its 3 s); the variant read is 7.5 s.
+    expect(trimArgs![trimArgs!.indexOf("-t") + 1]).toBe("7.500");
+    expect(result.musicUnderVo).toBe(4);
+  });
+
+  it("measures music under a whole-read voice variant even with no takes at all (I1)", async () => {
+    const { root, project, picks } = await fixture();
+    const noTakes: Script = { schema: 1, rev: 0, wordsPerSecond: 2.6, sections: [] };
+    const withPick: Picks = { ...picks, lanes: { ...picks.lanes, voice: "alt" } };
+    let trimArgs: string[] | undefined;
+    const run: LoudnessRunner = async (args) => {
+      if (args[0] === "-version") return { code: 0, stderr: "" };
+      if (args.includes("-t")) trimArgs = args;
+      return { code: 0, stderr: ebur(args.includes("-t") ? -14 : -18) };
+    };
+    const result = await measureMix(project, noTakes, withPick, ["voice", "music"], root, run, 60_000, async () => 12);
+    expect(trimArgs![trimArgs!.indexOf("-t") + 1]).toBe("12.000");
+    expect(result.musicUnderVo).toBe(4);
+  });
+
+  it("leaves music-under-VO null when a picked voice variant's length can't be told", async () => {
+    const { root, project, script, picks } = await fixture();
+    const withPick: Picks = { ...picks, lanes: { ...picks.lanes, voice: "alt" } };
+    const calls: string[][] = [];
+    const run: LoudnessRunner = async (args) => {
+      calls.push(args);
+      return args[0] === "-version" ? { code: 0, stderr: "" } : { code: 0, stderr: ebur(-16) };
+    };
+    const result = await measureMix(project, script, withPick, ["voice", "music"], root, run, 60_000, async () => null);
+    expect(result).toEqual({ available: true, integrated: -16, truePeak: -6, musicUnderVo: null, silent: false });
+    expect(calls.filter((a) => a.includes("-t"))).toEqual([]); // never trimmed to a guess
+  });
+
+  it("re-measures when a section is re-timed with no file change, since the VO span moved (M1)", async () => {
+    const { root, project, picks } = await fixture();
+    const script = (end: number): Script => ({
+      schema: 1,
+      rev: 0,
+      wordsPerSecond: 2.6,
+      // No recorded duration: the span is the section's own length.
+      sections: [{ id: "s1", start: 0, end, current: "A", proposed: null, direction: "", status: "draft", takes: [{ id: "t1", file: "audio/s1-t1.wav", duration: null, forText: "A" }] }],
+    });
+    const trims: string[] = [];
+    const run: LoudnessRunner = async (args) => {
+      if (args[0] === "-version") return { code: 0, stderr: "" };
+      if (args.includes("-t")) trims.push(args[args.indexOf("-t") + 1]);
+      return { code: 0, stderr: ebur(-20) };
+    };
+    await measureMix(project, script(5), { ...picks, sections: {} }, ["voice", "music"], root, run);
+    await measureMix(project, script(6), { ...picks, sections: {} }, ["voice", "music"], root, run);
+    expect(trims).toEqual(["5.000", "6.000"]);
+  });
+
+  it("never caches a run ffmpeg failed, so a later request measures again (M2)", async () => {
+    const { root, project, script, picks } = await fixture();
+    let attempts = 0;
+    const run: LoudnessRunner = async (args) => {
+      if (args[0] === "-version") return { code: 0, stderr: "" };
+      attempts++;
+      // First attempt: an older ffmpeg rejecting the filter graph -- nonzero, nothing parsed.
+      return attempts === 1 ? { code: 1, stderr: "Option 'normalize' not found" } : { code: 0, stderr: ebur(-16) };
+    };
+    const first = await measureMix(project, script, picks, ["music"], root, run);
+    expect(first.integrated).toBeNull();
+    const second = await measureMix(project, script, picks, ["music"], root, run);
+    expect(second.integrated).toBe(-16);
+    expect(attempts).toBe(2);
+    // A good reading is cached as before.
+    await measureMix(project, script, picks, ["music"], root, run);
+    expect(attempts).toBe(2);
+  });
+
+  it("two requests for the same mix while it's measuring share one ffmpeg run (M3)", async () => {
+    const { root, project, script, picks } = await fixture();
+    let runs = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((ok) => (release = ok));
+    const run: LoudnessRunner = async (args) => {
+      if (args[0] === "-version") return { code: 0, stderr: "" };
+      runs++;
+      await gate;
+      return { code: 0, stderr: ebur(-16) };
+    };
+    const a = measureMix(project, script, picks, ["music"], root, run);
+    const b = measureMix(project, script, picks, ["music"], root, run);
+    // Let both requests get past their stat() and cache lookups before the run finishes.
+    await new Promise((r) => setTimeout(r, 20));
+    release();
+    const [ra, rb] = await Promise.all([a, b]);
+    expect(ra).toEqual(rb);
+    expect(runs).toBe(1);
   });
 
   it("aborts the runner's signal on timeout, so a hung ffmpeg is actually killed, and rejects with a 504", async () => {

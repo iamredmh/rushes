@@ -1,5 +1,6 @@
 // The audio engine's pure half (spec §17.2, §17.5): gains, scheduling, drift, peaks and the
 // assembled VO read. Nothing here touches Web Audio or the DOM, so all of it is unit-tested.
+import { readTake } from "../lib.js";
 import type { Section } from "../types.js";
 
 /** One piece of audio on the timeline. */
@@ -199,9 +200,13 @@ export function timelineLength(videoDuration: number | null, clips: Clip[]): num
 }
 
 /**
- * The assembled read (§17.5): for each section, its picked take, or its newest when none is picked
- * (or the pick is gone), placed at the section's start. Sections without takes are left out.
- * Take ids are only unique within a section, so a clip's id is `section:take`.
+ * The assembled read (§17.5): for each section, its `readTake` (its picked take, or its newest when
+ * none is picked or the pick is gone), placed at the section's start. Sections without takes are
+ * left out. Take ids are only unique within a section, so a clip's id is `section:take`.
+ *
+ * Each clip's length is the file's own (`duration: 0`), never the script's recorded `duration`:
+ * the server mixes the whole file, and a take re-rendered in place can change length without the
+ * script knowing.
  */
 export function assembleRead(
   sections: Pick<Section, "id" | "start" | "takes">[],
@@ -210,11 +215,9 @@ export function assembleRead(
 ): Clip[] {
   const out: Clip[] = [];
   for (const s of sections) {
-    if (s.takes.length === 0) continue;
-    const take = s.takes.find((t) => t.id === picks[s.id]) ?? s.takes[s.takes.length - 1];
-    out.push({
-      id: `${s.id}:${take.id}`, lane, path: take.file, offset: s.start, duration: take.duration ?? 0, section: s.id, take: take.id,
-    });
+    const take = readTake(s, picks);
+    if (!take) continue;
+    out.push({ id: `${s.id}:${take.id}`, lane, path: take.file, offset: s.start, duration: 0, section: s.id, take: take.id });
   }
   return out;
 }

@@ -782,7 +782,8 @@ export function loudnessReadout(s: LoudnessState): ReadoutCell[] {
   if (!r.available) return all(NO_FFMPEG);
   const level = (n: number | null): [string, string | null] =>
     r.silent ? ["\u2212\u221e", "The mix is silent"] : n === null ? [DASH, "Couldn't measure loudness"] : [levelText(n), null];
-  const under: [string, string | null] =
-    r.musicUnderVo === null ? [DASH, "Needs Voiceover and Music both playing"] : [`${levelText(r.musicUnderVo, 0)} dB`, null];
+  const under: [string, string | null] = r.silent
+    ? ["−∞", "The mix is silent"]
+    : r.musicUnderVo === null ? [DASH, "Needs Voiceover and Music both playing"] : [`${levelText(r.musicUnderVo, 0)} dB`, null];
   return cells(level(r.integrated), level(r.truePeak), under);
 }
