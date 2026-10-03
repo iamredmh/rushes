@@ -8,7 +8,8 @@
 import { mediaUrl } from "../api.js";
 import { claim, release } from "./bus.js";
 import {
-  type Clip, mixPeaks, peakBuckets, resolveDurations, shouldStream, startPlan, streamStep, timelineLength, variantGains,
+  type Clip, mediaKey, mixPeaks, peakBuckets, resolveDurations, shouldStream, startPlan, streamStep, timelineLength,
+  tooLargeToDecode, variantGains,
 } from "./timeline.js";
 
 /** Sources are scheduled this far ahead of `currentTime`, so all of them land on the same sample. */
@@ -31,13 +32,15 @@ export interface EngineSnapshot {
   playing: boolean;
   time: number;
   length: number;
-  /** Buffer sources held for the current run. */
+  /** Live buffer sources: started for this run and not yet ended. */
   sources: number;
   /** Each clip's variant gain target (0 or 1). */
   gains: Record<string, number>;
   /** Lane gain targets that have been set. */
   lanes: Record<string, number>;
-  /** Paths playing through `<audio>`. */
+  /** Files held, by `mediaKey` (path, or path#rev). */
+  media: string[];
+  /** Of those, the ones playing through `<audio>`. */
   streamed: string[];
 }
 
@@ -47,8 +50,8 @@ export interface EngineOptions {
   /** Path to a URL the browser can fetch. Defaults to `mediaUrl`, which carries the project id. */
   url?: (path: string) => string;
   fetch?: typeof fetch;
-  /** A file's duration from its metadata alone, or null. */
-  probe?: (url: string) => Promise<number | null>;
+  /** A file's duration from its metadata alone, or null. Should give up when `signal` aborts. */
+  probe?: (url: string, signal: AbortSignal) => Promise<number | null>;
   createMedia?: (url: string) => HTMLAudioElement;
   raf?: (cb: FrameRequestCallback) => number;
   caf?: (id: number) => void;
@@ -61,7 +64,7 @@ export function liveContexts(): number {
   return live;
 }
 
-// Waveform peaks, per path, for the session (§17.2).
+// Waveform peaks, by mediaKey (path#rev), for the session (§17.2).
 const peaksCache = new Map<string, Float32Array>();
 export function clearPeaksCache(): void {
   peaksCache.clear();
@@ -72,24 +75,44 @@ interface Media {
   buffer: AudioBuffer | null;
   streamed: boolean;
 }
+interface Load {
+  promise: Promise<LoadResult>;
+  /** Cancels the fetch, the probe and the decode's result (eviction, dispose). */
+  abort: AbortController;
+}
 /** A clip's persistent nodes: its variant gain, and for a streamed file its element. */
 interface ClipNodes {
   gain: GainNode;
   el?: HTMLAudioElement;
   elSource?: MediaElementAudioSourceNode;
+  /** Context time of the element's last seek, for the drift-correction cooldown. */
+  seekedAt: number;
+}
+
+function cancelled(): Error {
+  const e = new Error("The load was cancelled");
+  e.name = "AbortError";
+  return e;
 }
 
 function defaultProbe(createMedia: (url: string) => HTMLAudioElement) {
-  return (url: string) =>
+  return (url: string, signal: AbortSignal) =>
     new Promise<number | null>((resolve) => {
       const el = createMedia(url);
       let timer: ReturnType<typeof setTimeout> | undefined;
+      let settled = false;
       const done = (d: number | null) => {
+        if (settled) return;
+        settled = true;
         clearTimeout(timer);
+        signal.removeEventListener("abort", onAbort);
         el.removeAttribute("src");
         el.load();
         resolve(d);
       };
+      const onAbort = () => done(null);
+      if (signal.aborted) return done(null);
+      signal.addEventListener("abort", onAbort);
       el.preload = "metadata";
       el.addEventListener("loadedmetadata", () => done(Number.isFinite(el.duration) ? el.duration : null), { once: true });
       el.addEventListener("error", () => done(null), { once: true });
@@ -104,13 +127,14 @@ export class AudioEngine {
 
   private clips: Clip[] = [];
   private videoDuration: number | null = null;
+  /** Decoded or streamed files, by mediaKey. */
   private readonly media = new Map<string, Media>();
-  private readonly loads = new Map<string, Promise<LoadResult>>();
+  private readonly loads = new Map<string, Load>();
   private selection: Record<string, string> = {};
   private readonly laneTargets: Record<string, number> = {};
   private readonly laneNodes = new Map<string, GainNode>();
   private readonly clipNodes = new Map<string, ClipNodes>();
-  /** Buffer sources started for the current run, by clip id. */
+  /** Live buffer sources for the current run, by clip id. */
   private readonly voices = new Map<string, AudioBufferSourceNode>();
 
   private _playing = false;
@@ -169,10 +193,12 @@ export class AudioEngine {
       sources: this.voices.size,
       gains: variantGains(this.clips, this.selection),
       lanes: { ...this.laneTargets },
-      streamed: [...this.media].filter(([, m]) => m.streamed).map(([p]) => p),
+      media: [...this.media.keys()],
+      streamed: [...this.media].filter(([, m]) => m.streamed).map(([k]) => k),
     };
   }
 
+  /** Every animation frame while playing, with the time. */
   onTick(cb: (t: number) => void): () => void {
     this.tickListeners.add(cb);
     return () => this.tickListeners.delete(cb);
@@ -186,87 +212,128 @@ export class AudioEngine {
     this.changeListeners.add(cb);
     return () => this.changeListeners.delete(cb);
   }
+  /** The time, whenever it moves: every frame while playing, and on every change (a seek while paused, say).
+   *  For a playhead or timecode that updates through a ref rather than re-rendering. */
+  subscribe(cb: (t: number) => void): () => void {
+    const offTick = this.onTick(cb);
+    const offChange = this.onChange(() => cb(this.time));
+    return () => {
+      offTick();
+      offChange();
+    };
+  }
 
   // ---- loading ----
 
-  /** Decode a file (or fall back to streaming it) and compute its peaks. Repeat calls share one load. */
-  load(path: string): Promise<LoadResult> {
+  /** Decode a file (or fall back to streaming it) and compute its peaks. Repeat calls for the same
+   *  path and revision share one load. */
+  load(path: string, rev?: string): Promise<LoadResult> {
     if (this.disposed) return Promise.reject(new Error("The audio engine was disposed"));
-    let p = this.loads.get(path);
-    if (!p) {
-      p = this.loadOnce(path);
-      this.loads.set(path, p);
-      p.catch(() => this.loads.delete(path));
-    }
-    return p;
+    const key = mediaKey({ path, rev });
+    const existing = this.loads.get(key);
+    if (existing) return existing.promise;
+    const abort = new AbortController();
+    const promise = this.loadOnce(path, key, abort.signal);
+    const entry: Load = { promise, abort };
+    this.loads.set(key, entry);
+    promise.catch(() => {
+      if (this.loads.get(key) === entry) this.loads.delete(key);
+    });
+    return promise;
   }
 
-  private async loadOnce(path: string): Promise<LoadResult> {
+  private async loadOnce(path: string, key: string, signal: AbortSignal): Promise<LoadResult> {
     const ctx = this.ensureContext();
     const url = this.opts.url(path);
+    // The fetch is aborted when the load is cancelled, or as soon as we know the file will stream.
+    const fetchAbort = new AbortController();
+    const onCancel = () => fetchAbort.abort();
+    signal.addEventListener("abort", onCancel);
+    let streamNow = false;
+    const goStream = () => {
+      streamNow = true;
+      fetchAbort.abort();
+    };
     // Read the duration from metadata alongside the fetch, so a long file is never fully decoded.
-    const abort = new AbortController();
-    const probe = this.opts.probe(url).then(
+    const probe = this.opts.probe(url, signal).then(
       (d) => {
-        if (shouldStream(d, true)) abort.abort();
+        if (shouldStream(d, true)) goStream();
         return d;
       },
       () => null,
     );
     let buffer: AudioBuffer | null = null;
     try {
-      const res = await this.opts.fetch(url, { signal: abort.signal });
+      const res = await this.opts.fetch(url, { signal: fetchAbort.signal });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      buffer = await ctx.decodeAudioData(await res.arrayBuffer());
+      const header = res.headers?.get("content-length") ?? null;
+      const bytes = header !== null && Number.isFinite(Number(header)) ? Number(header) : null;
+      if (tooLargeToDecode(bytes)) goStream();
+      if (!streamNow) {
+        const data = await res.arrayBuffer();
+        if (!streamNow && !signal.aborted) buffer = await ctx.decodeAudioData(data);
+      }
     } catch {
       buffer = null;
+    } finally {
+      signal.removeEventListener("abort", onCancel);
     }
-    if (this.disposed) throw new Error("The audio engine was disposed");
+    if (signal.aborted || this.disposed) throw cancelled();
 
     let result: LoadResult;
     if (buffer && !shouldStream(buffer.duration, true)) {
-      let peaks = peaksCache.get(path);
+      let peaks = peaksCache.get(key);
       if (!peaks) {
         const channels: Float32Array[] = [];
         for (let i = 0; i < buffer.numberOfChannels; i++) channels.push(buffer.getChannelData(i));
         peaks = mixPeaks(channels, peakBuckets(buffer.duration));
-        peaksCache.set(path, peaks);
+        peaksCache.set(key, peaks);
       }
-      this.media.set(path, { duration: buffer.duration, buffer, streamed: false });
+      this.media.set(key, { duration: buffer.duration, buffer, streamed: false });
       result = { duration: buffer.duration, peaks, streamed: false };
     } else {
       const duration = buffer ? buffer.duration : await probe;
-      if (this.disposed) throw new Error("The audio engine was disposed");
+      if (signal.aborted || this.disposed) throw cancelled();
       if (duration === null || !(duration > 0)) throw new Error(`Couldn't load ${path}`);
-      this.media.set(path, { duration, buffer: null, streamed: true });
+      this.media.set(key, { duration, buffer: null, streamed: true });
       result = { duration, peaks: new Float32Array(0), streamed: true };
     }
-    this.afterLoad(path);
+    this.afterLoad(key);
     return result;
   }
 
   /** A file arriving mid-play joins in, locked to the clock. */
-  private afterLoad(path: string): void {
+  private afterLoad(key: string): void {
     if (this._playing) {
-      for (const c of this.resolved()) if (c.path === path && !this.voices.has(c.id)) this.startLate(c);
-      this.syncStreams(this.time);
+      for (const c of this.resolved()) if (mediaKey(c) === key && !this.voices.has(c.id)) this.startLate(c);
+      this.syncStreams(this.rawClock());
     }
     this.emitChange();
   }
 
   // ---- the clip list and gains ----
 
+  /** Replace the clips. Unchanged clips keep playing; new ones join on the clock. Files no clip
+   *  uses any more are freed, and their loads in flight aborted. */
   setClips(clips: Clip[]): void {
     const next = new Map(clips.map((c) => [c.id, c]));
     for (const old of this.clips) {
       const now = next.get(old.id);
-      const same = now && now.lane === old.lane && now.path === old.path && now.offset === old.offset && now.duration === old.duration;
+      const same = now && now.lane === old.lane && now.path === old.path && now.rev === old.rev
+        && now.offset === old.offset && now.duration === old.duration;
       if (!same) this.dropClip(old.id);
     }
+    const used = new Set(clips.map(mediaKey));
+    for (const [key, load] of this.loads) {
+      if (used.has(key)) continue;
+      load.abort.abort();
+      this.loads.delete(key);
+    }
+    for (const key of [...this.media.keys()]) if (!used.has(key)) this.media.delete(key);
     this.clips = clips.slice();
     if (this._playing) {
       for (const c of this.resolved()) if (!this.voices.has(c.id)) this.startLate(c);
-      this.syncStreams(this.time);
+      this.syncStreams(this.rawClock());
     }
     this.emitChange();
   }
@@ -333,17 +400,18 @@ export class AudioEngine {
     this.emitChange();
   }
 
-  /** Stops sources, disconnects every node, closes the context. The engine is unusable afterwards. */
+  /** Aborts loads, stops sources, disconnects every node, closes the context. The engine is unusable afterwards. */
   dispose(): void {
     if (this.disposed) return;
     this._playing = false;
     this.stopLoop();
     this.stopVoices();
+    for (const load of this.loads.values()) load.abort.abort();
+    this.loads.clear();
     for (const id of [...this.clipNodes.keys()]) this.dropClip(id);
     for (const node of this.laneNodes.values()) node.disconnect();
     this.laneNodes.clear();
     this.media.clear();
-    this.loads.clear();
     release(this);
     this.tickListeners.clear();
     this.endedListeners.clear();
@@ -369,7 +437,7 @@ export class AudioEngine {
 
   private resolved(): Clip[] {
     const durations: Record<string, number> = {};
-    for (const [path, m] of this.media) durations[path] = m.duration;
+    for (const [key, m] of this.media) durations[key] = m.duration;
     return resolveDurations(this.clips, durations);
   }
 
@@ -377,6 +445,13 @@ export class AudioEngine {
     const len = this.length;
     const lo = Math.max(0, Number.isFinite(t) ? t : 0);
     return len > 0 ? Math.min(lo, len) : lo;
+  }
+
+  /** The clock without the START_LEAD hold: just after play it sits up to START_LEAD before
+   *  `startOffset`, so a streamed element started now lines up with the buffer sources. */
+  private rawClock(): number {
+    if (!this._playing || !this.ctx) return this.startOffset;
+    return this.startOffset + (this.ctx.currentTime - this.startedAt);
   }
 
   /** Stop the run and start every source again from timeline time `at`, all on one origin. */
@@ -387,11 +462,9 @@ export class AudioEngine {
     this.startedAt = ctx.currentTime + START_LEAD;
     const clips = this.resolved();
     const byId = new Map(clips.map((c) => [c.id, c]));
-    for (const p of startPlan(clips, at)) {
-      const c = byId.get(p.id)!;
-      this.startVoice(c, this.startedAt + p.when, p.offset);
-    }
-    this.syncStreams(at);
+    for (const p of startPlan(clips, at)) this.startVoice(byId.get(p.id)!, this.startedAt + p.when, p.offset);
+    // A transport move: put streamed elements where they belong now, whatever their state.
+    this.syncStreams(this.rawClock(), true);
   }
 
   /** Start one clip mid-run, on the same origin as the rest. */
@@ -404,42 +477,61 @@ export class AudioEngine {
   }
 
   private startVoice(c: Clip, when: number, offset: number): void {
-    const m = this.media.get(c.path);
+    const m = this.media.get(mediaKey(c));
     if (!this.ctx || !m || m.streamed || !m.buffer) return;
     const src = this.ctx.createBufferSource();
     src.buffer = m.buffer;
     src.connect(this.nodesFor(c).gain);
+    // A source that plays out drops from the live set (and the graph).
+    src.onended = () => {
+      if (this.voices.get(c.id) !== src) return;
+      this.voices.delete(c.id);
+      src.disconnect();
+    };
     src.start(when, offset, c.duration - offset);
     this.voices.set(c.id, src);
   }
 
-  private stopVoices(): void {
-    for (const src of this.voices.values()) {
-      try {
-        src.stop();
-      } catch {
-        // Already stopped.
-      }
-      src.disconnect();
+  private stopSource(src: AudioBufferSourceNode): void {
+    src.onended = null;
+    try {
+      src.stop();
+    } catch {
+      // Already stopped.
     }
+    src.disconnect();
+  }
+
+  private stopVoices(): void {
+    for (const src of this.voices.values()) this.stopSource(src);
     this.voices.clear();
   }
 
-  /** Streamed clips: start, stop and drift-correct their elements against the clock. */
-  private syncStreams(t: number): void {
+  /**
+   * Streamed clips: start, stop and drift-correct their elements against the clock `t`. With
+   * `force` (play and seek), an element in range is put at its place now, skipping the
+   * drift-correction guards that stop a slow seek turning into a seek loop.
+   */
+  private syncStreams(t: number, force = false): void {
+    const now = this.ctx?.currentTime ?? 0;
     for (const c of this.resolved()) {
-      const m = this.media.get(c.path);
-      if (!m?.streamed) continue;
-      const existing = this.clipNodes.get(c.id)?.el;
+      if (!this.media.get(mediaKey(c))?.streamed) continue;
+      const existing = this.clipNodes.get(c.id);
+      const el = existing?.el;
       const expected = t - c.offset;
-      const step = streamStep(expected, c.duration, existing ? { time: existing.currentTime, paused: existing.paused } : { time: 0, paused: true });
+      const state = el ? { time: el.currentTime, paused: el.paused, seeking: el.seeking, readyState: el.readyState } : { time: 0, paused: true };
+      let step = streamStep(expected, c.duration, state, existing ? now - existing.seekedAt : Number.POSITIVE_INFINITY);
+      if (force && expected >= 0 && expected < c.duration) step = state.paused ? "play" : "seek";
       if (step === "none") continue;
-      const el = existing ?? this.nodesFor(c).el!;
-      if (step === "pause") el.pause();
-      else {
-        el.currentTime = expected;
-        if (step === "play") el.play().catch(() => {});
+      const nodes = existing ?? this.nodesFor(c);
+      const target = nodes.el!;
+      if (step === "pause") {
+        target.pause();
+        continue;
       }
+      target.currentTime = expected;
+      nodes.seekedAt = now;
+      if (step === "play") target.play().catch(() => {});
     }
   }
 
@@ -465,8 +557,8 @@ export class AudioEngine {
       const gain = ctx.createGain();
       gain.gain.value = variantGains([c], this.selection)[c.id];
       gain.connect(this.laneNode(c.lane));
-      nodes = { gain };
-      if (this.media.get(c.path)?.streamed) {
+      nodes = { gain, seekedAt: Number.NEGATIVE_INFINITY };
+      if (this.media.get(mediaKey(c))?.streamed) {
         const el = this.opts.createMedia(this.opts.url(c.path));
         el.preload = "auto";
         nodes.el = el;
@@ -481,12 +573,7 @@ export class AudioEngine {
   private dropClip(id: string): void {
     const src = this.voices.get(id);
     if (src) {
-      try {
-        src.stop();
-      } catch {
-        // Already stopped.
-      }
-      src.disconnect();
+      this.stopSource(src);
       this.voices.delete(id);
     }
     const nodes = this.clipNodes.get(id);
@@ -501,11 +588,16 @@ export class AudioEngine {
     this.clipNodes.delete(id);
   }
 
-  /** A 4 ms linear ramp from the current value, starting now on the context clock. */
+  /** A 4 ms linear ramp from the current value, starting now on the context clock. Where the
+   *  browser has cancelAndHoldAtTime it holds the value mid-ramp, so overlapping ramps don't jump. */
   private ramp(param: AudioParam, target: number): void {
     const now = this.ctx!.currentTime;
-    param.cancelScheduledValues(now);
-    param.setValueAtTime(param.value, now);
+    const p = param as AudioParam & { cancelAndHoldAtTime?: (t: number) => AudioParam };
+    if (typeof p.cancelAndHoldAtTime === "function") p.cancelAndHoldAtTime(now);
+    else {
+      param.cancelScheduledValues(now);
+      param.setValueAtTime(param.value, now);
+    }
     param.linearRampToValueAtTime(target, now + RAMP_SECONDS);
   }
 
@@ -521,19 +613,33 @@ export class AudioEngine {
   private readonly tick = (): void => {
     this.frame = null;
     if (!this._playing) return;
-    const t = this.time;
-    this.syncStreams(t);
-    for (const cb of this.tickListeners) cb(t);
     const len = this.length;
-    if (len > 0 && t >= len) {
+    if (len <= 0) {
+      // Every clip went away mid-play: nothing left to play.
       this.pause();
-      for (const cb of this.endedListeners) cb();
       return;
     }
-    if (this._playing) this.frame = this.opts.raf(this.tick);
+    const t = this.time;
+    this.syncStreams(this.rawClock());
+    for (const cb of this.tickListeners) safely(() => cb(t));
+    if (t >= len) {
+      this.pause();
+      for (const cb of this.endedListeners) safely(cb);
+      return;
+    }
+    if (this._playing && this.frame === null) this.frame = this.opts.raf(this.tick);
   };
 
   private emitChange(): void {
-    for (const cb of this.changeListeners) cb();
+    for (const cb of this.changeListeners) safely(cb);
+  }
+}
+
+/** One throwing listener must never kill the tick loop or block the others. */
+function safely(fn: () => void): void {
+  try {
+    fn();
+  } catch (err) {
+    console.error(err);
   }
 }

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  activeVariantGain, assembleRead, type Clip, computePeaks, laneGains, MAX_DECODED_SECONDS, mixPeaks, needsVideoSync,
-  peakBuckets, resolveDurations, shouldStream, startPlan, streamStep, timelineLength, variantGains,
+  activeVariantGain, assembleRead, assetRev, type Clip, computePeaks, HAVE_FUTURE_DATA, laneGains, MAX_DECODE_BYTES,
+  MAX_DECODED_SECONDS, mediaKey, mixPeaks, needsVideoSync, peakBuckets, resolveDurations, SEEK_COOLDOWN_SECONDS,
+  shouldStream, startPlan, streamStep, timelineLength, tooLargeToDecode, variantGains,
 } from "../../web/src/audio/timeline.js";
 import type { Section, Take } from "../../web/src/types.js";
 
@@ -136,6 +137,43 @@ describe("streaming fallback", () => {
     expect(streamStep(-0.5, 10, { time: 0, paused: false })).toBe("pause");
     expect(streamStep(10, 10, { time: 9.99, paused: false })).toBe("pause");
     expect(streamStep(-0.5, 10, { time: 0, paused: true })).toBe("none");
+  });
+  it("never re-seeks an element that's still seeking or buffering", () => {
+    expect(streamStep(1, 10, { time: 3, paused: false, seeking: true, readyState: 4 })).toBe("none");
+    expect(streamStep(1, 10, { time: 3, paused: false, seeking: false, readyState: 2 })).toBe("none");
+    expect(streamStep(1, 10, { time: 3, paused: false, seeking: false, readyState: HAVE_FUTURE_DATA })).toBe("seek");
+    // Still stops one that's left its clip, seeking or not.
+    expect(streamStep(11, 10, { time: 3, paused: false, seeking: true, readyState: 1 })).toBe("pause");
+  });
+  it("waits out a cooldown after a seek before seeking again", () => {
+    expect(SEEK_COOLDOWN_SECONDS).toBeGreaterThanOrEqual(0.25);
+    const drifted = { time: 3, paused: false, seeking: false, readyState: 4 };
+    expect(streamStep(1, 10, drifted, 0.1)).toBe("none");
+    expect(streamStep(1, 10, drifted, SEEK_COOLDOWN_SECONDS - 0.001)).toBe("none");
+    expect(streamStep(1, 10, drifted, SEEK_COOLDOWN_SECONDS)).toBe("seek");
+    expect(streamStep(1, 10, drifted)).toBe("seek");
+  });
+  it("streams a file too big to have been under 15 minutes, before downloading it", () => {
+    expect(tooLargeToDecode(null)).toBe(false);
+    expect(tooLargeToDecode(50 * 1024 * 1024)).toBe(false);
+    expect(tooLargeToDecode(MAX_DECODE_BYTES)).toBe(false);
+    expect(tooLargeToDecode(MAX_DECODE_BYTES + 1)).toBe(true);
+  });
+});
+
+describe("revisions", () => {
+  it("keys a file on its path and revision", () => {
+    expect(mediaKey({ path: "music/a.wav" })).toBe("music/a.wav");
+    expect(mediaKey({ path: "music/a.wav", rev: "2026-10-03T10:00:00Z" })).toBe("music/a.wav#2026-10-03T10:00:00Z");
+  });
+  it("takes an asset's modified time, else its size", () => {
+    expect(assetRev({ modified: "2026-10-03T10:00:00Z", size: 10 })).toBe("2026-10-03T10:00:00Z");
+    expect(assetRev({ modified: null, size: 1234 })).toBe("1234");
+    expect(assetRev({ modified: null, size: null })).toBeUndefined();
+  });
+  it("fills durations by revision", () => {
+    const c = { ...clip("a", 0, 0), rev: "r2" };
+    expect(resolveDurations([c], { "a.wav#r1": 3, "a.wav#r2": 5 })[0].duration).toBe(5);
   });
 });
 

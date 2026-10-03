@@ -197,7 +197,10 @@ export function Assets({ assets, videos, toast, onChanged }: AssetsProps) {
       setAudioState((s) => ({ ...s, paused: true }));
     });
     setAudioState({ path: asset.path, paused: false });
-    audio.play().catch(() => {
+    audio.play().catch((err: unknown) => {
+      // An AbortError means the play was interrupted by a pause (an audio tab claiming the bus,
+      // or the user moving on), not that it failed: the interrupter has already set the state.
+      if (err instanceof Error && err.name === "AbortError") return;
       // M4: a rejected play() (the browser blocking it, a bad file) must not leave the row
       // claiming to be playing when it isn't.
       release(busOwner.current);

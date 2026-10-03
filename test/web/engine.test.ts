@@ -15,13 +15,20 @@ class FakeParam {
   setValueAtTime(v: number, t: number) { this.calls.push(["set", v, t]); this.value = v; }
   linearRampToValueAtTime(v: number, t: number) { this.calls.push(["ramp", v, t]); this.value = v; }
 }
+/** A param with cancelAndHoldAtTime, as Chromium has. */
+class HoldParam extends FakeParam {
+  cancelAndHoldAtTime(t: number) { this.calls.push(["hold", t]); }
+}
 class FakeNode {
   out: FakeNode[] = [];
   disconnected = false;
   connect(n: FakeNode) { this.out.push(n); this.disconnected = false; return n; }
   disconnect() { this.out = []; this.disconnected = true; }
 }
-class FakeGain extends FakeNode { gain = new FakeParam(1); }
+class FakeGain extends FakeNode {
+  gain: FakeParam;
+  constructor(hold = false) { super(); this.gain = hold ? new HoldParam(1) : new FakeParam(1); }
+}
 class FakeSource extends FakeNode {
   buffer: FakeBuffer | null = null;
   started: [number, number, number] | null = null;
@@ -34,6 +41,8 @@ interface FakeBuffer { duration: number; numberOfChannels: number; getChannelDat
 class FakeMedia {
   currentTime = 0;
   paused = true;
+  seeking = false;
+  readyState = 4;
   src: string;
   preload = "";
   constructor(url: string) { this.src = url; }
@@ -51,11 +60,14 @@ class FakeCtx {
   gains: FakeGain[] = [];
   sources: FakeSource[] = [];
   elementSources: FakeElementSource[] = [];
-  createGain() { const g = new FakeGain(); this.gains.push(g); return g; }
+  decodes = 0;
+  holdParams = false;
+  createGain() { const g = new FakeGain(this.holdParams); this.gains.push(g); return g; }
   createBufferSource() { const s = new FakeSource(); this.sources.push(s); return s; }
   createMediaElementSource(el: FakeMedia) { const s = new FakeElementSource(el); this.elementSources.push(s); return s; }
   // The fake "file" is its duration as text; "bad" won't decode.
   decodeAudioData(bytes: ArrayBuffer): Promise<FakeBuffer> {
+    this.decodes++;
     const tag = new TextDecoder().decode(bytes);
     if (tag.startsWith("bad")) return Promise.reject(new Error("EncodingError"));
     const duration = Number(tag);
@@ -72,19 +84,43 @@ let frames: Map<number, FrameRequestCallback>;
 let nextFrame: number;
 const files: Record<string, string> = {
   "/m/a.wav": "4", "/m/b.wav": "4", "/m/c.wav": "1", "/m/d.wav": "6", "/m/bad.wav": "bad", "/m/long.wav": "1000",
+  "/m/huge.wav": "2000", "/m/slow.wav": "2",
 };
-const probed: Record<string, number> = { "/m/bad.wav": 3, "/m/long.wav": 1000 };
+const probed: Record<string, number> = { "/m/bad.wav": 3, "/m/long.wav": 1000, "/m/huge.wav": 2000 };
+const sizes: Record<string, number> = { "/m/huge.wav": 400 * 1024 * 1024 };
+
+interface FetchCall { url: string; signal?: AbortSignal; bodyRead: boolean }
+let fetches: FetchCall[];
+/** Fetches of these URLs wait until the test opens the gate. */
+let gates: Record<string, { wait: Promise<void>; open(): void }>;
+function gate(url: string) {
+  let open!: () => void;
+  const wait = new Promise<void>((r) => { open = r; });
+  gates[url] = { wait, open };
+}
 
 function options(): EngineOptions {
   return {
     createContext: () => { const c = new FakeCtx(); ctxs.push(c); return c as unknown as AudioContext; },
     url: (path) => `/m/${path}`,
-    fetch: (async (url: string) => ({
-      ok: url in files,
-      status: url in files ? 200 : 404,
-      arrayBuffer: async () => new TextEncoder().encode(files[url]).buffer,
-    })) as unknown as typeof fetch,
-    probe: async (url) => probed[url] ?? null,
+    fetch: (async (url: string, init?: RequestInit) => {
+      const call: FetchCall = { url, signal: init?.signal ?? undefined, bodyRead: false };
+      fetches.push(call);
+      if (gates[url]) await gates[url].wait;
+      await Promise.resolve();
+      if (init?.signal?.aborted) throw new DOMException("aborted", "AbortError");
+      return {
+        ok: url in files,
+        status: url in files ? 200 : 404,
+        headers: { get: (h: string) => (h === "content-length" && sizes[url] ? String(sizes[url]) : null) },
+        arrayBuffer: async () => { call.bodyRead = true; return new TextEncoder().encode(files[url]).buffer; },
+      };
+    }) as unknown as typeof fetch,
+    probe: async (url) => {
+      // huge.wav's metadata is slow, so only its size can send it straight to streaming.
+      if (url === "/m/huge.wav") await new Promise((r) => setTimeout(r, 5));
+      return probed[url] ?? null;
+    },
     createMedia: (url) => { const m = new FakeMedia(url); media.push(m); return m as unknown as HTMLAudioElement; },
     raf: (cb) => { const id = ++nextFrame; frames.set(id, cb); return id; },
     caf: (id) => { frames.delete(id); },
@@ -103,6 +139,8 @@ beforeEach(() => {
   media = [];
   frames = new Map();
   nextFrame = 0;
+  fetches = [];
+  gates = {};
   clearPeaksCache();
 });
 afterEach(() => {
@@ -112,7 +150,7 @@ afterEach(() => {
 async function ready(clips: Clip[]) {
   const engine = new AudioEngine(undefined, options());
   engine.setClips(clips);
-  await Promise.all([...new Set(clips.map((c) => c.path))].map((p) => engine.load(p)));
+  await Promise.all([...new Map(clips.map((c) => [`${c.path}#${c.rev}`, c])).values()].map((c) => engine.load(c.path, c.rev)));
   return { engine, ctx: ctxs[0] };
 }
 
@@ -370,7 +408,8 @@ describe("AudioEngine: loading", () => {
     const el = media.at(-1)!;
     expect(ctx.elementSources.map((s) => s.el)).toContain(el);
     expect(el.paused).toBe(false);
-    expect(el.currentTime).toBe(1);
+    // It starts now, START_LEAD early in its file, so it lines up when the buffer sources start.
+    expect(el.currentTime).toBeCloseTo(1 - START_LEAD, 9);
     // It drifts 200 ms: the next tick seeks it back.
     ctx.currentTime = 10 + START_LEAD + 0.5;
     el.currentTime = 1.7;
@@ -380,6 +419,25 @@ describe("AudioEngine: loading", () => {
     el.currentTime = 1.53;
     frame();
     expect(el.currentTime).toBe(1.53);
+    // Drifted again, but inside the cooldown after that seek: left alone.
+    ctx.currentTime += 0.1;
+    el.currentTime = 2.5;
+    frame();
+    expect(el.currentTime).toBe(2.5);
+    // Past the cooldown but still seeking or buffering: left alone, every frame.
+    ctx.currentTime += 0.5;
+    el.seeking = true;
+    frame();
+    frame();
+    expect(el.currentTime).toBe(2.5);
+    el.seeking = false;
+    el.readyState = 2;
+    frame();
+    expect(el.currentTime).toBe(2.5);
+    // Ready again: one seek back to the clock.
+    el.readyState = 4;
+    frame();
+    expect(el.currentTime).toBeCloseTo(engine.time - 1, 9);
     engine.pause();
     expect(el.paused).toBe(true);
     expect(engine.inspect().streamed).toEqual(["bad.wav"]);
@@ -440,5 +498,145 @@ describe("AudioEngine: the one-player bus and disposal", () => {
     engine.play(0);
     expect(engine.playing).toBe(false);
     expect(ticks).not.toHaveBeenCalled();
+  });
+});
+
+describe("AudioEngine: fix round 1", () => {
+  it("frees a lane's old files when its clips are replaced", async () => {
+    const { engine } = await ready([clip("a", 0, 4), clip("b", 0, 4)]);
+    expect(engine.inspect().media.sort()).toEqual(["a.wav", "b.wav"]);
+    engine.setClips([clip("c", 0, 1)]);
+    expect(engine.inspect().media).toEqual([]);
+    await engine.load("c.wav");
+    expect(engine.inspect().media).toEqual(["c.wav"]);
+    // Reloading a freed path fetches it again.
+    engine.setClips([clip("a", 0, 4)]);
+    await engine.load("a.wav");
+    expect(fetches.filter((f) => f.url === "/m/a.wav")).toHaveLength(2);
+  });
+
+  it("aborts a load in flight when its path is dropped", async () => {
+    const engine = new AudioEngine(undefined, options());
+    gate("/m/slow.wav");
+    engine.setClips([clip("slow", 0, 2)]);
+    const loading = engine.load("slow.wav");
+    await Promise.resolve();
+    engine.setClips([]);
+    expect(fetches[0].signal?.aborted).toBe(true);
+    gates["/m/slow.wav"].open();
+    await expect(loading).rejects.toThrow();
+    expect(engine.inspect().media).toEqual([]);
+    engine.dispose();
+  });
+
+  it("aborts every load in flight on dispose", async () => {
+    const engine = new AudioEngine(undefined, options());
+    gate("/m/slow.wav");
+    const loading = engine.load("slow.wav");
+    await Promise.resolve();
+    engine.dispose();
+    expect(fetches[0].signal?.aborted).toBe(true);
+    gates["/m/slow.wav"].open();
+    await expect(loading).rejects.toThrow();
+  });
+
+  it("keys files on their revision: a re-render in place decodes afresh with new peaks", async () => {
+    const { engine } = await ready([{ ...clip("a", 0, 4), rev: "r1" }]);
+    const first = await engine.load("a.wav", "r1");
+    engine.setClips([{ ...clip("a", 0, 4), rev: "r2" }]);
+    expect(engine.inspect().media).toEqual([]);
+    const second = await engine.load("a.wav", "r2");
+    expect(second).not.toBe(first);
+    expect(second.peaks).not.toBe(first.peaks);
+    expect(engine.inspect().media).toEqual(["a.wav#r2"]);
+    expect(fetches.filter((f) => f.url === "/m/a.wav")).toHaveLength(2);
+    // The same revision in a later engine reuses the cached peaks.
+    const other = new AudioEngine(undefined, options());
+    expect((await other.load("a.wav", "r2")).peaks).toBe(second.peaks);
+    other.dispose();
+  });
+
+  it("streams a file whose size rules out 15 minutes, without downloading or decoding it", async () => {
+    const engine = new AudioEngine(undefined, options());
+    expect(await engine.load("huge.wav")).toMatchObject({ duration: 2000, streamed: true });
+    expect(fetches[0].bodyRead).toBe(false);
+    expect(ctxs[0].decodes).toBe(0);
+    engine.dispose();
+  });
+
+  it("streams without decoding when the metadata says it's long first", async () => {
+    const engine = new AudioEngine(undefined, options());
+    expect(await engine.load("long.wav")).toMatchObject({ duration: 1000, streamed: true });
+    expect(ctxs[0].decodes).toBe(0);
+    engine.dispose();
+  });
+
+  it("stops when the timeline's length drops to 0 mid-play", async () => {
+    const { engine, ctx } = await ready([clip("a", 0, 4)]);
+    ctx.currentTime = 10;
+    engine.play(0);
+    engine.setClips([]);
+    frame();
+    expect(engine.playing).toBe(false);
+    expect(frames.size).toBe(0);
+  });
+
+  it("keeps ticking when one listener throws", async () => {
+    const { engine, ctx } = await ready([clip("a", 0, 4)]);
+    const good = vi.fn();
+    engine.onTick(() => { throw new Error("listener"); });
+    engine.onTick(good);
+    ctx.currentTime = 10;
+    engine.play(0);
+    ctx.currentTime = 10.5;
+    expect(() => frame()).not.toThrow();
+    frame();
+    expect(good).toHaveBeenCalledTimes(2);
+    expect(engine.playing).toBe(true);
+  });
+
+  it("counts only live sources: one that ends drops out", async () => {
+    const { engine, ctx } = await ready([clip("a", 0, 4), clip("c", 0, 1, "sfx")]);
+    ctx.currentTime = 10;
+    engine.play(0);
+    expect(engine.inspect().sources).toBe(2);
+    ctx.sources[1].onended!();
+    expect(engine.inspect().sources).toBe(1);
+    expect(ctx.sources[1].disconnected).toBe(true);
+  });
+
+  it("holds the current value with cancelAndHoldAtTime where the browser has it", async () => {
+    const given = new FakeCtx();
+    given.holdParams = true;
+    const engine = new AudioEngine(given as unknown as AudioContext, options());
+    engine.setClips([clip("a", 0, 4), clip("b", 0, 4)]);
+    await engine.load("a.wav");
+    await engine.load("b.wav");
+    given.currentTime = 10;
+    engine.play(0);
+    given.currentTime = 11;
+    engine.selectVariant("music", "b");
+    const ga = given.sources[0].out[0] as FakeGain;
+    expect(ga.gain.calls.slice(-2)).toEqual([["hold", 11], ["ramp", 0, 11 + RAMP_SECONDS]]);
+    engine.setLaneGain("music", 0.5);
+    expect((ga.out[0] as FakeGain).gain.calls.slice(-2)).toEqual([["hold", 11], ["ramp", 0.5, 11 + RAMP_SECONDS]]);
+    engine.dispose();
+  });
+
+  it("tells a subscriber the time on every tick and on a seek while paused", async () => {
+    const { engine, ctx } = await ready([clip("a", 0, 4)]);
+    const seen: number[] = [];
+    const off = engine.subscribe((t) => seen.push(t));
+    engine.seek(1.25);
+    expect(seen.at(-1)).toBe(1.25);
+    ctx.currentTime = 10;
+    engine.play(1.25);
+    ctx.currentTime = 10 + START_LEAD + 0.25;
+    frame();
+    expect(seen.at(-1)).toBeCloseTo(1.5, 9);
+    off();
+    const n = seen.length;
+    frame();
+    expect(seen).toHaveLength(n);
   });
 });

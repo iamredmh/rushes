@@ -17,6 +17,20 @@ export interface Clip {
   /** For the assembled read: the script section and take this clip came from. */
   section?: string;
   take?: string;
+  /** The file's revision (an asset's `modified` time, else its size). A file re-rendered in place
+   *  gets a new revision, so it's decoded afresh with fresh peaks. */
+  rev?: string;
+}
+
+/** The cache key for a clip's file: its path, plus its revision when it has one. */
+export function mediaKey(c: { path: string; rev?: string }): string {
+  return c.rev ? `${c.path}#${c.rev}` : c.path;
+}
+
+/** A revision for an asset: its modified time, else its size. */
+export function assetRev(a: { modified: string | null; size: number | null }): string | undefined {
+  if (a.modified) return a.modified;
+  return a.size !== null ? String(a.size) : undefined;
 }
 
 /** One source to start: `when` is the delay from the shared start time, `offset` is into the buffer. */
@@ -30,6 +44,15 @@ export interface PlannedStart {
 export const MAX_DECODED_SECONDS = 15 * 60;
 /** A streamed element further than this from the audio clock is seeked back. */
 export const STREAM_DRIFT_SECONDS = 0.05;
+/** After seeking a streamed element, wait this long before seeking it again. */
+export const SEEK_COOLDOWN_SECONDS = 0.25;
+/** HTMLMediaElement.HAVE_FUTURE_DATA: below this an element is still buffering. */
+export const HAVE_FUTURE_DATA = 3;
+/**
+ * A file bigger than this can't be under 15 minutes in any format we'd decode: it's what 15
+ * minutes of 48 kHz stereo costs decoded (32-bit float), and no encoded file is larger than that.
+ */
+export const MAX_DECODE_BYTES = MAX_DECODED_SECONDS * 48_000 * 2 * 4;
 /** Waveform resolution, and the most buckets a file ever gets. */
 export const PEAKS_PER_SECOND = 50;
 export const MAX_PEAK_BUCKETS = 60_000;
@@ -119,24 +142,44 @@ export function shouldStream(duration: number | null, decoded: boolean): boolean
   return !decoded || (duration !== null && duration > MAX_DECODED_SECONDS);
 }
 
+/** Skip downloading a file whose size (from `content-length`) rules out 15 minutes. */
+export function tooLargeToDecode(bytes: number | null): boolean {
+  return bytes !== null && bytes > MAX_DECODE_BYTES;
+}
+
+/** A streamed element's state, as `streamStep` reads it. */
+export interface StreamedElement {
+  time: number;
+  paused: boolean;
+  seeking?: boolean;
+  /** HTMLMediaElement.readyState; missing counts as ready. */
+  readyState?: number;
+}
+
 /**
  * What to do with a streamed `<audio>` element this tick. `expected` is where it should be in its
  * file (timeline time minus the clip's offset); outside [0, duration) it shouldn't be playing.
+ * A drift correction never fires while the element is seeking or buffering, nor within
+ * SEEK_COOLDOWN_SECONDS of the last seek (`sinceSeek`), so a slow seek can't turn into a seek loop.
  */
 export function streamStep(
   expected: number,
   duration: number,
-  el: { time: number; paused: boolean },
+  el: StreamedElement,
+  sinceSeek = Number.POSITIVE_INFINITY,
   tolerance = STREAM_DRIFT_SECONDS,
 ): "play" | "pause" | "seek" | "none" {
   if (expected < 0 || expected >= duration) return el.paused ? "none" : "pause";
   if (el.paused) return "play";
+  if (el.seeking) return "none";
+  if (el.readyState !== undefined && el.readyState < HAVE_FUTURE_DATA) return "none";
+  if (sinceSeek < SEEK_COOLDOWN_SECONDS) return "none";
   return Math.abs(el.time - expected) > tolerance ? "seek" : "none";
 }
 
-/** Clips with an unknown length take their file's decoded length (0 while it isn't known). */
+/** Clips with an unknown length take their file's decoded length (0 while it isn't known), by `mediaKey`. */
 export function resolveDurations(clips: Clip[], durations: Record<string, number | undefined>): Clip[] {
-  return clips.map((c) => (c.duration > 0 ? c : { ...c, duration: durations[c.path] ?? 0 }));
+  return clips.map((c) => (c.duration > 0 ? c : { ...c, duration: durations[mediaKey(c)] ?? 0 }));
 }
 
 /** The cut's length when there is one, otherwise the end of the longest audio. */
