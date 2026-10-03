@@ -1,7 +1,5 @@
-// The audio engine's pure half (spec §17.2, §17.5): gains, scheduling, drift, peaks and the
-// assembled VO read. Nothing here touches Web Audio or the DOM, so all of it is unit-tested.
-import { readTake } from "../lib.js";
-import type { Section } from "../types.js";
+// The audio engine's pure half (spec §17.2): gains, scheduling, drift and peaks. Nothing here
+// touches Web Audio or the DOM, so all of it is unit-tested.
 
 /** One piece of audio on the timeline. */
 export interface Clip {
@@ -15,9 +13,6 @@ export interface Clip {
   offset: number;
   /** Its length in seconds. 0 (or not finite) means "unknown": the engine uses the file's own length. */
   duration: number;
-  /** For the assembled read: the script section and take this clip came from. */
-  section?: string;
-  take?: string;
   /** The file's revision (an asset's `modified` time, else its size). A file re-rendered in place
    *  gets a new revision, so it's decoded afresh with fresh peaks. */
   rev?: string;
@@ -197,27 +192,4 @@ export function timelineLength(videoDuration: number | null, clips: Clip[]): num
   let end = 0;
   for (const c of clips) if (c.duration > 0) end = Math.max(end, c.offset + c.duration);
   return end;
-}
-
-/**
- * The assembled read (§17.5): for each section, its `readTake` (its picked take, or its newest when
- * none is picked or the pick is gone), placed at the section's start. Sections without takes are
- * left out. Take ids are only unique within a section, so a clip's id is `section:take`.
- *
- * Each clip's length is the file's own (`duration: 0`), never the script's recorded `duration`:
- * the server mixes the whole file, and a take re-rendered in place can change length without the
- * script knowing.
- */
-export function assembleRead(
-  sections: Pick<Section, "id" | "start" | "takes">[],
-  picks: Record<string, string>,
-  lane = "vo",
-): Clip[] {
-  const out: Clip[] = [];
-  for (const s of sections) {
-    const take = readTake(s, picks);
-    if (!take) continue;
-    out.push({ id: `${s.id}:${take.id}`, lane, path: take.file, offset: s.start, duration: 0, section: s.id, take: take.id });
-  }
-  return out;
 }

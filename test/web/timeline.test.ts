@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  activeVariantGain, assembleRead, assetRev, type Clip, computePeaks, HAVE_FUTURE_DATA, laneGains, MAX_DECODE_BYTES,
+  activeVariantGain, assetRev, type Clip, computePeaks, HAVE_FUTURE_DATA, laneGains, MAX_DECODE_BYTES,
   MAX_DECODED_SECONDS, mediaKey, mixPeaks, needsVideoSync, peakBuckets, resolveDurations, SEEK_COOLDOWN_SECONDS,
   setStreamThreshold, shouldStream, startPlan, streamStep, timelineLength, tooLargeToDecode, variantGains,
 } from "../../web/src/audio/timeline.js";
-import type { Section, Take } from "../../web/src/types.js";
 
 const clip = (id: string, offset: number, duration: number, lane = "music"): Clip => ({ id, lane, path: `${id}.wav`, offset, duration });
 
@@ -198,38 +197,5 @@ describe("durations", () => {
     expect(timelineLength(null, [clip("a", 0, 4), clip("b", 3, 5)])).toBe(8);
     expect(timelineLength(0, [clip("a", 1, 4)])).toBe(5);
     expect(timelineLength(null, [])).toBe(0);
-  });
-});
-
-describe("assembleRead", () => {
-  const take = (id: string, file: string, duration: number | null = 2): Take => ({ id, file, duration, forText: "x" });
-  const section = (id: string, start: number, end: number, takes: Take[]): Section => ({
-    id, start, end, current: "x", proposed: null, direction: "", status: "draft", takes,
-  });
-  const sections = [
-    section("s1", 0, 3, [take("t1", "vo/s1-a.wav"), take("t2", "vo/s1-b.wav", 2.5)]),
-    section("s2", 3, 6, [take("t1", "vo/s2-a.wav"), take("t2", "vo/s2-b.wav", null)]),
-    section("s3", 6, 9, []),
-  ];
-
-  it("places the picked take at the section's start", () => {
-    const read = assembleRead(sections, { s1: "t1" });
-    expect(read[0]).toEqual({ id: "s1:t1", lane: "vo", path: "vo/s1-a.wav", offset: 0, duration: 0, section: "s1", take: "t1" });
-  });
-  it("plays each take's whole file, never trimmed at the script's recorded duration, as the server's mix does (M6)", () => {
-    // s1's t2 is recorded as 2.5 s long; a re-render in place could have changed that.
-    expect(assembleRead(sections, {}).map((c) => c.duration)).toEqual([0, 0]);
-  });
-  it("uses the newest take when none is picked, or the pick no longer exists", () => {
-    expect(assembleRead(sections, {})[0].take).toBe("t2");
-    expect(assembleRead(sections, { s1: "gone" })[0].take).toBe("t2");
-  });
-  it("leaves out a section with no takes, and marks an unknown length as 0 (the file's own)", () => {
-    const read = assembleRead(sections, { s1: "t1" });
-    expect(read.map((c) => c.section)).toEqual(["s1", "s2"]);
-    expect(read[1]).toMatchObject({ id: "s2:t2", offset: 3, duration: 0, path: "vo/s2-b.wav" });
-  });
-  it("puts the clips on the lane it's given", () => {
-    expect(assembleRead(sections, {}, "read").every((c) => c.lane === "read")).toBe(true);
   });
 });

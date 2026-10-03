@@ -8,7 +8,7 @@ import { useState } from "preact/hooks";
 import { api } from "../api.js";
 import { assetRev, type Clip } from "../audio/timeline.js";
 import {
-  blindOrder, defaultVersion, readLane, type Scope, STAGE_NAMES, type VariantRow, voiceDefaultRead, voiceListening, type VoiceNotes, voiceNoteRows,
+  AUDIO_CHIPS, blindOrder, defaultVersion, readLane, type Scope, STAGE_NAMES, type VariantRow, voiceDefaultRead, voiceListening, type VoiceNotes, voiceNoteRows,
   voiceOnLabel, voiceOnOptions, type VoiceRound, voiceRounds,
 } from "../lib.js";
 import type { Asset, State, Video } from "../types.js";
@@ -19,7 +19,7 @@ import type { StageRow } from "./Lanes.js";
 const VO_COLOR = "#4FD1C5";
 const SCOPES: Scope[] = ["whole", "point"];
 const CHIPS: Record<"whole" | "point", string[]> = {
-  whole: ["Speaker", "Pacing", "Tone", "Overall"],
+  whole: AUDIO_CHIPS.voice,
   point: ["Fix this", "Keep this"],
 };
 

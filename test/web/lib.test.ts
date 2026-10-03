@@ -13,13 +13,13 @@ import {
   variantNoteRow, variantNoteTarget, variantOnLabel, variantOnOptions, variantRows,
 } from "../../web/src/lib.js";
 import type { Lane } from "../../web/src/types.js";
-import { mixInputs, readTake as serverReadTake } from "../../src/server/loudness.js";
+import { mixInputs } from "../../src/server/loudness.js";
 import type { Picks, Project, Script } from "../../src/core/schema.js";
 import { tmpProject } from "../helpers/tmp.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import {
-  heardVoice, onOptionGroups, readTake, sectionLabel, voiceDefaultRead, voiceListening, voiceNoteRows, voiceOnLabel, voiceOnOptions, voiceRounds,
+  heardVoice, onOptionGroups, sectionLabel, voiceDefaultRead, voiceListening, voiceNoteRows, voiceOnLabel, voiceOnOptions, voiceRounds,
 } from "../../web/src/lib.js";
 
 /** A read with only an id: its name is the id, its file `media/<id>.wav`. */
@@ -556,26 +556,14 @@ describe("audio tabs: lanes", () => {
 });
 
 describe("Voiceover", () => {
-  const take = (id: string, forText = "line", duration: number | null = 3) => ({ id, file: `audio/${id}.wav`, duration, forText });
-  const sec = (id: string, start: number, end: number, takes: ReturnType<typeof take>[], current = "line"): Section => ({
-    id, start, end, current, proposed: null, direction: "", status: "draft", takes,
-  });
-  const sections = [
-    sec("s1", 0, 4, [take("t1")]),
-    sec("s2", 4, 8, [take("t1"), take("t2"), take("t3", "old line")]),
-    sec("s3", 8, 12, []),
-  ];
   it("turns on Voiceover", () => {
     expect(BUILT.voice).toBe(true);
   });
+  it("keeps Voiceover's chips as the Whole chips Voice shows (§18.3), not the old §17.1 set", () => {
+    expect(AUDIO_CHIPS.voice).toEqual(["Speaker", "Pacing", "Tone", "Overall"]);
+  });
   it("names sections, for older notes", () => {
     expect(sectionLabel("s2")).toBe("S2");
-  });
-  it("reads a section's pick, else its newest take (audio/timeline.ts's assembleRead and the server parity test; Mix itself no longer mixes takes, §18.4)", () => {
-    expect(readTake(sections[1], {})?.id).toBe("t3");
-    expect(readTake(sections[1], { s2: "t1" })?.id).toBe("t1");
-    expect(readTake(sections[1], { s2: "gone" })?.id).toBe("t3");
-    expect(readTake(sections[2], {})).toBeNull();
   });
 });
 
@@ -859,7 +847,7 @@ describe("Mix", () => {
   });
 });
 
-describe("the take-pick rule: server mix and dashboard agree (parity)", () => {
+describe("the VO pick rule: server mix and dashboard agree (parity)", () => {
   const files = ["s1-a.wav", "s1-b.wav", "s2-a.wav", "s2-b.wav", "s2-c.wav", "dry.wav", "warm.wav", "cool.wav"];
   const take = (id: string, file: string) => ({ id, file: `audio/${file}`, duration: 2, forText: "x" });
   const sections: Section[] = [
@@ -904,7 +892,6 @@ describe("the take-pick rule: server mix and dashboard agree (parity)", () => {
       const variant = heardVoice(voiceRounds(lanes, c.lanes));
       const client = variant ? [[variant.file, 0]] : [];
       expect(client, JSON.stringify(c)).toEqual(server);
-      for (const s of sections) expect(readTake(s, c.sections)?.id ?? null).toBe(serverReadTake(s, picks)?.id ?? null);
     }
   });
 });

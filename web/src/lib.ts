@@ -327,9 +327,9 @@ export function notePending(p: { range: { in: number | null }; marks: readonly u
   return p.range.in !== null || p.marks.length > 0 || p.hasText;
 }
 
-/** Quick-start chips per audio tab (§17.1). They only put a prefix in the note box. */
+/** Quick-start chips per audio tab (§17.1; Voiceover's are its Whole chips, §18.3). They only put a prefix in the note box. */
 export const AUDIO_CHIPS: Record<AudioStageId, string[]> = {
-  voice: ["Level", "Pace", "Pronunciation", "Breath"],
+  voice: ["Speaker", "Pacing", "Tone", "Overall"],
   music: ["Tempo", "Key", "Energy", "Ending"],
   sfx: ["Timing", "Level", "Swap sound", "Remove"],
   mix: ["Level", "Balance", "Loudness"],
@@ -580,16 +580,6 @@ export function testFlags(search: string): { test: boolean; streamOver: boolean 
 /** "S2": a section's name on every tab, and how an old Voiceover note on a section is listed. */
 export function sectionLabel(id: string): string {
   return id.toUpperCase();
-}
-
-/**
- * The take a section's assembled read uses: its pick, else its newest; null with no takes. Mix no
- * longer mixes takes (§18.4); kept for `web/src/audio/timeline.ts`'s `assembleRead` and the server
- * parity test.
- */
-export function readTake<T extends { id: string }>(s: { id: string; takes: T[] }, picks: Record<string, string>): T | null {
-  if (s.takes.length === 0) return null;
-  return s.takes.find((t) => t.id === picks[s.id]) ?? s.takes[s.takes.length - 1];
 }
 
 /** The `on` an old note on the assembled read saved; also Mix's VO row key. */

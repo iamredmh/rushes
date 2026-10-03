@@ -4,7 +4,7 @@ import { stat } from "node:fs/promises";
 import { RushesError } from "../core/errors.js";
 import { probe } from "../core/media.js";
 import { fromManifestPath } from "../core/paths.js";
-import type { LaneStage, Picks, Project, Script, Section, Take, Variant } from "../core/schema.js";
+import type { LaneStage, Picks, Project, Script, Variant } from "../core/schema.js";
 
 export interface LoudnessRunner {
   (args: string[], signal?: AbortSignal): Promise<{ code: number; stderr: string }>;
@@ -82,18 +82,6 @@ export interface MixInput {
   /** Seconds from the start of the mix. */
   offset: number;
   stage: LaneStage;
-}
-
-/**
- * The take a section's read uses: its pick, else its newest; null with no takes. Kept for
- * compatibility (§18.4: the mix and the VO span no longer use it at all -- takes are never
- * mixed), and still the same rule as the dashboard's `readTake` (web/src/lib.ts), which a parity
- * test holds to this one.
- */
-export function readTake(s: Pick<Section, "id" | "takes">, picks: Pick<Picks, "sections">): Take | null {
-  if (s.takes.length === 0) return null;
-  const pickedId = picks.sections[s.id];
-  return s.takes.find((t) => t.id === pickedId) ?? s.takes[s.takes.length - 1];
 }
 
 /**
