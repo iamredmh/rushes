@@ -337,3 +337,65 @@ These are recorded here, and Plan 3 builds them.
 | `rushes_lock_picture` | Locks a video's picture at a version, or unlocks it with `version: null` |
 
 CLI: `rushes add shots <file.json> --video NAME [--version V]`, `rushes lock <video> <version>` and `rushes unlock <video>`.
+
+## 15. Screenshots and the Assets tab (agreed 3 October 2026)
+
+Red uses Grab Frame to save a still: to share with a colleague, to hand to the agent, or to keep. Files made during a project are hard to find again. So grabs go somewhere visible, and an Assets tab gathers everything in one place. This section is binding, and it wins over §5 and Plan 2 wherever they differ.
+
+### 15.1 Project folders
+Rushes recommends this layout. AGENTS.md tells agents to follow it. Rushes still finds any file an agent registers, wherever it lives.
+
+```
+my-film/
+  renders/              cuts               hero-60s_v3.mp4
+  audio/
+    voiceover/          VO takes           s02_take3.wav
+    music/              music beds         deep-house.wav
+    sfx/                SFX passes         sfx_pass-a.wav
+  screenshots/          frame grabs        hero-60s_v3_00m12.05s_f726.png
+  exports/              (later) notes and markers for Premiere and Resolve
+  .rushes/              Rushes' own records (hidden; not for editing by hand)
+```
+
+Rushes creates `screenshots/` itself on the first grab. It never creates the other folders; they're a convention for agents.
+
+### 15.2 Screenshots
+- **G and the camera button** save the frame as a PNG to `screenshots/{video}_{version}_{MM}m{SS.ss}s_f{frame}.png`. The time is `frame / fps`, using the version's fps, falling back to the project's. Minutes are zero-padded to two digits, seconds to `SS.ss`. An example is `hero-60s_v3_00m12.05s_f726.png`. Grabbing the same frame twice overwrites the same file.
+- **The toast** reads `Saved to screenshots/<name>`.
+- **Attaching to a note:** the grab is still offered on the note box as a chip you can remove. Because the file is already saved, a grab on its own no longer counts as pending (§14.2). Only In/Out, a box or typed text does.
+- **Old grabs:** notes that point at `.rushes/grabs/*.png` from Plans 1–2 keep working. `/media` serves both locations.
+
+### 15.3 The Assets tab
+- **Placement:** always the last tab, after Mix, with key `7`. It unlocks once the project has at least one asset: a cut, take, variant or screenshot.
+- **Sections, in order:**
+  - **Screenshots:** a thumbnail grid, newest first. Clicking a thumbnail shows it full size; Esc closes it.
+  - **Cuts:** grouped by film, newest version first.
+  - **Voiceover:** VO takes and voice variants.
+  - **Music**
+  - **Sound effects**
+  - A section with nothing in it isn't shown.
+- **Each row or tile** shows the file name, its folder (in mono), its size and when it was made. A file that's gone from disk is marked missing, and its actions are disabled.
+- **Actions** are icon buttons with tooltips:
+  - **Download:** a normal browser download, to Downloads.
+  - **Save as…:** choose the folder and name. Shown only where the browser supports `showSaveFilePicker` (Chrome, Edge).
+  - **Show in Finder:** "Show in Explorer" on Windows, "Open folder" on Linux.
+  - **Copy path:** the absolute path, so you can paste it into a chat with your agent.
+
+### 15.4 Server and agent
+- **`GET /api/assets`** returns `{ assets: Asset[] }`. Each asset has:
+  - `kind`: `screenshot`, `cut`, `take`, `music`, `sfx` or `voice`;
+  - `path`: manifest-relative;
+  - `abs`: the absolute path;
+  - `name`;
+  - `size` and `modified` (null when the file is missing);
+  - `missing`;
+  - plus `video`/`version`/`frame`/`t` for screenshots and cuts, `section` for takes, and `lane`/`variant` for variants.
+  It covers every registered media file plus every `*.png` directly inside `screenshots/` and `.rushes/grabs/`.
+- **`/media?path=…&download=1`** adds `Content-Disposition: attachment` with the file name, encoded per RFC 6266 and 5987. `/media` also serves `screenshots/<safe name>.png`.
+- **`POST /api/reveal { path }`** reveals a file in the system file manager:
+  - macOS: `open -R <abs>`;
+  - Windows: `explorer.exe /select,<abs>`;
+  - other platforms: `xdg-open <dir>`.
+  It's spawned without a shell. Only paths that `/api/assets` would list are accepted; anything else is a 404. When `RUSHES_NO_REVEAL=1` is set, the server logs instead of opening anything. Tests set this.
+- **The MCP tool `rushes_list_assets`** (optional `kind`) returns the same list. The CLI command is `rushes assets [--kind K] [--json]`. There are now 14 tools.
+- **The project guard (§14.1)** applies to every one of these routes, as to any other.
