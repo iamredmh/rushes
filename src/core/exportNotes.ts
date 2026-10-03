@@ -1,5 +1,6 @@
 import { slugify } from "./ids.js";
-import { markLabel, type Note, type Project, type Stage } from "./schema.js";
+import { onLabel, type OnContext } from "./notes.js";
+import { markLabel, type Note, type Picks, type Project, type Script, type Stage } from "./schema.js";
 
 // Picture notes are grouped by film and version; the other stages list straight through.
 // Script isn't included here -- script edits live in script.json, not notes.json.
@@ -48,11 +49,14 @@ function continued(text: string, indent: string): string {
   return text.split("\n").join(`\n${indent}`);
 }
 
-function noteLines(n: Note): string[] {
+function noteLines(n: Note, ctx: OnContext): string[] {
+  // What an audio note is on (M4): "Music · Warm keys", "S2 · Take 1", "Whole mix" ...
+  const label = onLabel(n, ctx);
+  const on = label ? ` · ${label}` : "";
   const marks = n.marks.length ? ` · ${n.marks.map(markLabel).join(" · ")}` : "";
   const shot = n.shot ? ` · shot ${pad(n.shot.n)}` : "";
   const status = n.status === "done" ? "done" : "to do";
-  const lines = [`- **${noteTime(n.t, n.tOut)}**${marks}${shot} · ${status} — ${continued(n.text, "  ")}`];
+  const lines = [`- **${noteTime(n.t, n.tOut)}**${on}${marks}${shot} · ${status} — ${continued(n.text, "  ")}`];
   if (n.reply) lines.push(`  - Reply: ${continued(n.reply, "    ")}`);
   if (n.grab) lines.push(`  - Screenshot: ${n.grab}`);
   return lines;
@@ -72,10 +76,18 @@ function byTimecode(a: Note, b: Note): number {
  * version that has notes, in the project's own video/version order. A note whose video or
  * version no longer exists in the project (hand-edited away, say) is never dropped (M3): it's
  * still exported, grouped under `### <Film> · <version> (removed)`, in the order those groups
- * were first seen among the orphaned notes. Nothing is escaped (this is a file, not HTML), and
- * the same input always produces the same string.
+ * were first seen among the orphaned notes. An audio note says what it's on ("Music · Warm keys",
+ * "S2 · Take 1"), resolved against `script` and `picks` as the dashboard resolves it. Nothing is
+ * escaped (this is a file, not HTML), and the same input always produces the same string.
  */
-export function notesMarkdown(project: Project, notes: Note[], now: Date): string {
+export function notesMarkdown(
+  project: Project,
+  notes: Note[],
+  now: Date,
+  script: Pick<Script, "sections"> = { sections: [] },
+  picks?: Pick<Picks, "lanes">,
+): string {
+  const ctx: OnContext = { project, script, picks };
   const lines: string[] = [`# ${project.name} — notes`, `Exported ${localDateTime(now)}`];
 
   for (const stage of STAGE_ORDER) {
@@ -93,7 +105,7 @@ export function notesMarkdown(project: Project, notes: Note[], now: Date): strin
           if (group.length === 0) continue;
           lines.push("", `### ${video.name} · ${version.id}`);
           for (const n of group) {
-            lines.push(...noteLines(n));
+            lines.push(...noteLines(n, ctx));
             matched.add(n);
           }
         }
@@ -112,10 +124,10 @@ export function notesMarkdown(project: Project, notes: Note[], now: Date): strin
       }
       for (const g of orphanGroups.values()) {
         lines.push("", `### ${g.label} (removed)`);
-        for (const n of [...g.notes].sort(byTimecode)) lines.push(...noteLines(n));
+        for (const n of [...g.notes].sort(byTimecode)) lines.push(...noteLines(n, ctx));
       }
     } else {
-      for (const n of stageNotes) lines.push(...noteLines(n));
+      for (const n of stageNotes) lines.push(...noteLines(n, ctx));
     }
   }
 

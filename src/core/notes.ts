@@ -1,4 +1,6 @@
-import { NoteSchema, type Note, type NotesFile, type Stage } from "./schema.js";
+import {
+  NoteSchema, type Lane, type LaneStage, type Note, type NotesFile, type Picks, type Project, type Script, type Stage, type Variant,
+} from "./schema.js";
 import { InvalidError, NotFoundError } from "./errors.js";
 import { newId } from "./ids.js";
 
@@ -83,6 +85,71 @@ export function applyUserEdit(file: NotesFile, e: UserEdit): Note {
   reopen(n, e.status);
   Object.assign(n, { ...parsed.data, batch: n.batch });
   return n;
+}
+
+/** What `onLabel` needs to resolve a note's `on`. `picks` only steers an older bare id on Mix. */
+export interface OnContext {
+  project: Pick<Project, "lanes">;
+  script: Pick<Script, "sections">;
+  picks?: Pick<Picks, "lanes">;
+}
+
+/**
+ * What an audio note is `on`, in words, for export and the CLI (§17): the lane and variant
+ * ("Music · Warm keys"), a cue ("Sound effects · Pass A · Cue · Swipe"), a take ("S2 · Take 1"), a
+ * section ("S2"), the read ("Assembled read") or, on Mix, "Whole mix" / "Voiceover". Resolved in
+ * the same order as the dashboard: the exact lane-qualified variant (`"<lane>/<variant>"`) or cue
+ * (`"<lane>/<variant>:<cue>"`) first, then `"vo"`, a take (`"<section>:<take>"`), a section id, and
+ * last the older bare forms (a bare variant id, `"<variant>:<cue>"` or a bare cue id). Null on
+ * Picture and Script, or when `on` names nothing that's still there.
+ */
+export function onLabel(note: Pick<Note, "stage" | "on">, ctx: OnContext): string | null {
+  const { stage, on } = note;
+  if (stage !== "voice" && stage !== "music" && stage !== "sfx" && stage !== "mix") return null;
+  if (on === null) return stage === "mix" ? "Whole mix" : stage === "voice" ? "Assembled read" : null;
+
+  // Mix's own Music and Sound effects lanes; every other tab looks at its own stage only.
+  const stages: LaneStage[] = stage === "mix" ? ["music", "sfx"] : [stage];
+  const lanes = ctx.project.lanes.filter((l) => stages.includes(l.stage));
+  const variantLabel = (l: Lane, v: Variant) => `${l.name} · ${v.name}`;
+  const cueLabel = (l: Lane, v: Variant, cueId: string) => {
+    const cue = v.cues.find((c) => c.id === cueId);
+    return cue ? `${variantLabel(l, v)} · Cue · ${cue.name}` : null;
+  };
+
+  // 1. Lane-qualified variant or cue. Lane and variant ids are slugs, so `/` and `:` split cleanly.
+  const slash = on.indexOf("/");
+  if (slash > 0) {
+    const colon = on.indexOf(":", slash);
+    const laneId = on.slice(0, slash);
+    const variantId = on.slice(slash + 1, colon === -1 ? undefined : colon);
+    const lane = lanes.find((l) => l.id === laneId);
+    const variant = lane?.variants.find((v) => v.id === variantId);
+    const label = lane && variant ? (colon === -1 ? variantLabel(lane, variant) : cueLabel(lane, variant, on.slice(colon + 1))) : null;
+    if (label) return label;
+  }
+  // 2–4. The read, a take, a section.
+  if (on === "vo" && (stage === "voice" || stage === "mix")) return stage === "mix" ? "Voiceover" : "Assembled read";
+  if (stage === "voice") {
+    for (const s of ctx.script.sections) {
+      const i = s.takes.findIndex((t) => `${s.id}:${t.id}` === on);
+      if (i !== -1) return `${s.id.toUpperCase()} · Take ${i + 1}`;
+    }
+    if (ctx.script.sections.some((s) => s.id === on)) return on.toUpperCase();
+  }
+  // 5. Older bare forms. On Mix, a picked variant first, as the dashboard prefers one being heard.
+  const picked = (l: Lane, v: Variant) => ctx.picks?.lanes[l.id] === v.id;
+  const pairs = lanes.flatMap((l) => l.variants.map((v) => ({ l, v })));
+  const ordered = stage === "mix" ? [...pairs.filter((p) => picked(p.l, p.v)), ...pairs.filter((p) => !picked(p.l, p.v))] : pairs;
+  const bare = ordered.find((p) => p.v.id === on);
+  if (bare) return variantLabel(bare.l, bare.v);
+  const colon = on.indexOf(":");
+  if (colon > 0) {
+    const pass = pairs.find((p) => p.v.id === on.slice(0, colon) && p.v.cues.some((c) => c.id === on.slice(colon + 1)));
+    if (pass) return cueLabel(pass.l, pass.v, on.slice(colon + 1));
+  }
+  const withCue = pairs.find((p) => p.v.cues.some((c) => c.id === on));
+  return withCue ? cueLabel(withCue.l, withCue.v, on) : null;
 }
 
 export interface NoteFilter {

@@ -421,9 +421,11 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   });
 
   app.post("/api/exports/notes", async (c) => {
-    const [project, notesFile] = await Promise.all([store.read("project"), store.read("notes")]);
+    const [project, notesFile, script, picks] = await Promise.all([
+      store.read("project"), store.read("notes"), store.read("script"), store.read("picks"),
+    ]);
     const now = new Date();
-    const md = notesMarkdown(project, notesFile.notes, now);
+    const md = notesMarkdown(project, notesFile.notes, now, script, picks);
     const name = exportFileName(project.name, now);
     const dir = join(store.root, "exports");
     await mkdir(dir, { recursive: true });

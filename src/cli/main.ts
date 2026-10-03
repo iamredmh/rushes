@@ -8,7 +8,8 @@ import { AlreadyRunningError, canonicalRoot } from "../server/lock.js";
 import { ApiError, RushesClient, dashboardUrlFor } from "../mcp/client.js";
 import { openBrowser, runStdio } from "../mcp/stdio.js";
 import { VERSION } from "../server/app.js";
-import { markLabel, type Mark } from "../core/schema.js";
+import { markLabel, type Mark, type Note } from "../core/schema.js";
+import { onLabel, type OnContext } from "../core/notes.js";
 import { setup, type SetupEnv } from "../setup/setup.js";
 import { realSetupEnv } from "../setup/env.js";
 import type { HarnessId } from "../setup/harnesses.js";
@@ -319,12 +320,17 @@ export async function main(argv: string[], io: Io): Promise<number> {
       case "notes": {
         const q = new URLSearchParams();
         for (const k of ["stage", "status", "batch"] as const) if (o[k]) q.set(k, o[k]!);
-        const { notes } = await (await client()).get(`/api/notes${q.size ? `?${q}` : ""}`);
+        const c = await client();
+        const { notes } = await c.get(`/api/notes${q.size ? `?${q}` : ""}`);
         if (o.json) return io.out(JSON.stringify(notes, null, 2)), 0;
+        // What an audio note is on (M4), resolved against the project, script and picks.
+        const ctx: OnContext | null = (notes as Note[]).some((n) => n.stage !== "picture" && n.stage !== "script") ? await c.get("/api/state") : null;
         for (const n of notes) {
+          const label = ctx ? onLabel(n, ctx) : null;
+          const on = label ? `${stripControl(label)}  ` : "";
           const shot = n.shot ? `shot ${String(n.shot.n).padStart(2, "0")} ` : "";
           const marks = (n.marks as Mark[] | undefined)?.length ? `${(n.marks as Mark[]).map(markLabel).join(" · ")}  ` : "";
-          io.out(`${n.id}  ${n.status === "done" ? "done" : "todo"}  ${n.stage.padEnd(7)} ${when(n).padEnd(17)} ${marks}${shot}${n.text}`);
+          io.out(`${n.id}  ${n.status === "done" ? "done" : "todo"}  ${n.stage.padEnd(7)} ${when(n).padEnd(17)} ${on}${marks}${shot}${n.text}`);
         }
         if (!notes.length) io.out("No notes");
         return 0;

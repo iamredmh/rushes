@@ -30,7 +30,7 @@ describe("notesMarkdown", () => {
         "- **Whole** · to do — Tempo feels slow",
         "",
         "## Mix",
-        "- **Whole** · to do — Loudness check",
+        "- **Whole** · Whole mix · to do — Loudness check",
         "",
       ].join("\n"),
     );
@@ -110,6 +110,29 @@ describe("notesMarkdown", () => {
     expect(md).toContain("- **0:12.00–0:15.00** · Fall · Quieter 3 dB · to do — Bring the bed down here");
   });
 
+  it("says what each audio note is on: lane and variant, cue, take, section or the whole mix (M4)", () => {
+    const p: Project = {
+      ...project(),
+      lanes: [
+        { id: "music", stage: "music", name: "Music", variants: [{ id: "warm-keys", name: "Warm keys", file: "m.wav", meta: {}, cues: [] }] },
+        { id: "sfx", stage: "sfx", name: "Sound effects", variants: [{ id: "pass-a", name: "Pass A", file: "s.wav", meta: {}, cues: [{ id: "swipe", name: "Swipe", t: 1.5 }] }] },
+      ],
+    };
+    const script = { sections: [{ id: "s2", start: 3, end: 7, current: "x", proposed: null, direction: "", status: "draft" as const, takes: [{ id: "t1", file: "t.wav", duration: 2, forText: "x" }] }] };
+    const notes: NotesFile = { schema: 1, rev: 0, notes: [] };
+    addNote(notes, { stage: "music", on: "music/warm-keys", scope: "range", t: 12, tOut: 15, text: "Bed", marks: [{ kind: "fall" }] });
+    addNote(notes, { stage: "sfx", on: "sfx/pass-a:swipe", scope: "point", t: 1.5, text: "Cue" });
+    addNote(notes, { stage: "voice", on: "s2:t1", scope: "point", t: 4, text: "Take" });
+    addNote(notes, { stage: "voice", on: "s2", scope: "whole", text: "Section" });
+    addNote(notes, { stage: "mix", on: "sfx/pass-a", scope: "whole", text: "Lane" });
+    const md = notesMarkdown(p, notes.notes, new Date(2026, 9, 3, 9, 0), script);
+    expect(md).toContain("- **0:12.00–0:15.00** · Music · Warm keys · Fall · to do — Bed");
+    expect(md).toContain("- **0:01.50** · Sound effects · Pass A · Cue · Swipe · to do — Cue");
+    expect(md).toContain("- **0:04.00** · S2 · Take 1 · to do — Take");
+    expect(md).toContain("- **Whole** · S2 · to do — Section");
+    expect(md).toContain("- **Whole** · Sound effects · Pass A · to do — Lane");
+  });
+
   it("escapes nothing -- HTML, ampersands, Markdown emphasis and backticks all appear verbatim", () => {
     const notes: NotesFile = { schema: 1, rev: 0, notes: [] };
     const text = "Logo has <b>bold</b> & *stars* and a `code` span";
@@ -125,7 +148,7 @@ describe("notesMarkdown", () => {
 
   it("indents a multi-line note and reply so they stay part of the list (M2)", () => {
     const notes: NotesFile = { schema: 1, rev: 0, notes: [] };
-    addNote(notes, { stage: "mix", scope: "whole", text: "Line one\nLine two" });
+    addNote(notes, { stage: "music", scope: "whole", text: "Line one\nLine two" });
     notes.notes[0].reply = "Fixed in\nthe next pass";
     const md = notesMarkdown(project(), notes.notes, new Date(2026, 9, 3, 9, 0));
     expect(md).toContain("- **Whole** · to do — Line one\n  Line two");

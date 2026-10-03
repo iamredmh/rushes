@@ -317,6 +317,19 @@ describe("cli", () => {
     await s.close();
   });
 
+  it("shows what an audio note is on: its lane and variant (M4)", async () => {
+    const { root } = await tmpProject();
+    const s = await startServer(root, { port: 0 });
+    const post = (path: string, body: unknown) =>
+      fetch(`${s.url}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    await post("/api/variants", { stage: "music", name: "Warm keys", file: "audio/warm.wav" });
+    await post("/api/notes", { stage: "music", on: "music/warm-keys", scope: "range", t: 12, tOut: 15, text: "Bring it down", marks: [{ kind: "fall" }] });
+    const a = io(root);
+    expect(await main(["notes", "--stage", "music"], a.x)).toBe(0);
+    expect(a.out[0]).toContain("Music · Warm keys  Fall  Bring it down");
+    await s.close();
+  });
+
   it("carries 59.999 s into the next minute instead of printing 0:60.00", async () => {
     const { root } = await tmpProject();
     const s = await startServer(root, { port: 0 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { addNote, applyReply, applyUserEdit, filterNotes } from "../../src/core/notes.js";
-import { markLabel, NoteSchema, type NotesFile } from "../../src/core/schema.js";
+import { addNote, applyReply, applyUserEdit, filterNotes, onLabel, type OnContext } from "../../src/core/notes.js";
+import { markLabel, NoteSchema, type Note, type NotesFile } from "../../src/core/schema.js";
 
 const empty = (): NotesFile => ({ schema: 1, rev: 0, notes: [] });
 
@@ -168,5 +168,54 @@ describe("filterNotes", () => {
     expect(filterNotes(f.notes, { stage: "picture", status: "todo" }).map((n) => n.text)).toEqual(["a"]);
     expect(filterNotes(f.notes, { version: "v2" }).map((n) => n.text)).toEqual(["b"]);
     expect(filterNotes(f.notes)).toHaveLength(3);
+  });
+});
+
+describe("onLabel (what an audio note is on, for export and the CLI)", () => {
+  const take = (id: string) => ({ id, file: `${id}.wav`, duration: 2, forText: "x" });
+  const ctx: OnContext = {
+    project: {
+      lanes: [
+        { id: "music", stage: "music", name: "Music", variants: [{ id: "option-a", name: "Option A", file: "m.wav", meta: {}, cues: [] }] },
+        { id: "sting", stage: "music", name: "Sting", variants: [{ id: "a", name: "A", file: "s.wav", meta: {}, cues: [] }] },
+        { id: "sfx", stage: "sfx", name: "Sound effects", variants: [
+          { id: "option-a", name: "Option A", file: "x.wav", meta: {}, cues: [{ id: "swipe", name: "Swipe", t: 1 }] },
+        ] },
+        { id: "alt", stage: "voice", name: "Alt reads", variants: [{ id: "vo", name: "VO", file: "v.wav", meta: {}, cues: [] }] },
+      ],
+    },
+    script: { sections: [{ id: "s2", start: 0, end: 4, current: "x", proposed: null, direction: "", status: "draft", takes: [take("t1"), take("t2")] }] },
+    picks: { lanes: { sfx: "option-a" } },
+  };
+  const label = (stage: Note["stage"], on: string | null) => onLabel({ stage, on }, ctx);
+
+  it("names a lane-qualified variant or cue by its lane and name", () => {
+    expect(label("music", "music/option-a")).toBe("Music · Option A");
+    expect(label("music", "sting/a")).toBe("Sting · A");
+    expect(label("sfx", "sfx/option-a")).toBe("Sound effects · Option A");
+    expect(label("sfx", "sfx/option-a:swipe")).toBe("Sound effects · Option A · Cue · Swipe");
+    expect(label("mix", "sfx/option-a")).toBe("Sound effects · Option A");
+    expect(label("voice", "alt/vo")).toBe("Alt reads · VO");
+  });
+  it("names the read, takes and sections on Voiceover, and the whole mix and VO lane on Mix", () => {
+    expect(label("voice", "vo")).toBe("Assembled read");
+    expect(label("voice", null)).toBe("Assembled read");
+    expect(label("voice", "s2:t2")).toBe("S2 · Take 2");
+    expect(label("voice", "s2")).toBe("S2");
+    expect(label("mix", null)).toBe("Whole mix");
+    expect(label("mix", "vo")).toBe("Voiceover");
+  });
+  it("still names an older note's bare id", () => {
+    expect(label("music", "a")).toBe("Sting · A");
+    expect(label("sfx", "option-a:swipe")).toBe("Sound effects · Option A · Cue · Swipe");
+    expect(label("sfx", "swipe")).toBe("Sound effects · Option A · Cue · Swipe");
+    // On Mix, a bare id shared by two stages prefers the picked one, as the dashboard prefers one being heard.
+    expect(label("mix", "option-a")).toBe("Sound effects · Option A");
+  });
+  it("says nothing for Picture, or for something that's gone", () => {
+    expect(label("picture", null)).toBeNull();
+    expect(label("music", "music/gone")).toBeNull();
+    expect(label("sfx", "sfx/option-a:gone")).toBeNull();
+    expect(label("voice", "s9")).toBeNull();
   });
 });
