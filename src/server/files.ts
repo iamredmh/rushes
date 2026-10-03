@@ -106,12 +106,25 @@ export function inside(dir: string, rel: string): string | null {
  * with `_`, so the quoted string stays valid (and never injects a header-breaking newline) no
  * matter what the real name contains. `filename*` is already percent-encoded, so it's safe as is.
  */
+// String.prototype.toWellFormed() is ES2024; this project's configured lib is ES2022, even
+// though Node 20.19+ and 22.12+ (its floor) both have the method at runtime. Called through
+// this narrow cast rather than bumping the whole project's lib target (which would also drop
+// the DOM globals -- fetch, Response, … -- bundled implicitly into the default ES2022 lib).
+function toWellFormed(s: string): string {
+  return (s as unknown as { toWellFormed(): string }).toWellFormed();
+}
+
 export function contentDisposition(filename: string): string {
+  // toWellFormed() swaps any unpaired UTF-16 surrogate for U+FFFD. A lone surrogate is legal
+  // in a JS string (and so in a filename read off disk) but isn't valid UTF-8, so
+  // encodeURIComponent() throws on one outright -- before this ever gets as far as deciding
+  // whether the name is safe to serve.
+  const safe = toWellFormed(filename);
   let ascii = "";
-  for (const ch of filename) {
+  for (const ch of safe) {
     const code = ch.codePointAt(0)!;
     ascii += code <= 0x1f || code >= 0x7f || ch === '"' || ch === "\\" ? "_" : ch;
   }
-  const encoded = encodeURIComponent(filename).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+  const encoded = encodeURIComponent(safe).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
   return `attachment; filename="${ascii}"; filename*=UTF-8''${encoded}`;
 }

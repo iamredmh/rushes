@@ -11,15 +11,22 @@ export interface CorruptEvent {
 
 const BY_NAME = new Map<string, FileKey>(Object.entries(FILES).map(([key, f]) => [f.name as string, key as FileKey]));
 
-/** A cheap fingerprint of a file's on-disk state. `null` means it doesn't exist. */
+/**
+ * A cheap fingerprint of a file's on-disk state. `null` means it doesn't exist. `ino` and
+ * `ctimeMs` catch an atomic rename-replace (a common write pattern), which changes the inode
+ * but can otherwise land on the same mtime and size as the file it replaced, on a volume with
+ * coarse timestamp resolution.
+ */
 interface Snap {
   mtimeMs: number;
+  ctimeMs: number;
   size: number;
+  ino: number;
 }
 
 function sameSnap(a: Snap | null, b: Snap | null): boolean {
   if (a === null || b === null) return a === b;
-  return a.mtimeMs === b.mtimeMs && a.size === b.size;
+  return a.mtimeMs === b.mtimeMs && a.ctimeMs === b.ctimeMs && a.size === b.size && a.ino === b.ino;
 }
 
 /**
@@ -46,13 +53,21 @@ export async function watchStore(store: Store, debounceMs = 80, pollMs = 500): P
   const statOf = async (key: FileKey): Promise<Snap | null> => {
     try {
       const st = await stat(store.path(key));
-      return { mtimeMs: st.mtimeMs, size: st.size };
+      return { mtimeMs: st.mtimeMs, ctimeMs: st.ctimeMs, size: st.size, ino: st.ino };
     } catch {
       return null;
     }
   };
 
   const check = async (key: FileKey) => {
+    // Stat before reading, and record that stat as the snapshot below -- not one taken after
+    // the read. An edit landing between a read-then-stat order would be invisible forever: its
+    // write could complete after the read but before the stat, so the recorded snapshot would
+    // match the file's new (already-edited) state even though the content just read was the
+    // old one, and no later poll tick would ever see a difference to re-check. Stat-first means
+    // the recorded snapshot can only be as fresh as what was actually read, so a write landing
+    // in the gap always leaves the live file's stat different from it, and the next tick retries.
+    const pre = await statOf(key);
     try {
       const data = await store.read(key);
       store.announce(key, data.rev);
@@ -63,18 +78,21 @@ export async function watchStore(store: Store, debounceMs = 80, pollMs = 500): P
         store.emit("corrupt", { file: FILES[key].name, message: e.message } satisfies CorruptEvent);
       }
     } finally {
-      // Record the state we just processed, whatever it was, so the poll
-      // doesn't reprocess the same unchanged (including still-broken) file.
-      snaps.set(key, await statOf(key));
+      // Record the state from before the read, whatever it was, so the poll doesn't reprocess
+      // the same unchanged (including still-broken) file.
+      snaps.set(key, pre);
     }
   };
 
   // Seed the starting rev and stat snapshot for every file, so the poll below
   // treats "nothing has changed since the server started" as nothing changed,
-  // rather than announcing every file's current state as a fresh edit. This is
-  // awaited before the server can take any request, so no real hand edit can
-  // land in the gap. A file already broken at startup is left for a later edit
-  // to surface, same as before this watcher existed.
+  // rather than announcing every file's current state as a fresh edit. Seeding
+  // happens after the server is already listening, not before, so a real hand
+  // edit can in principle land in that narrow gap -- but the worst case is one
+  // duplicate change event once this seed and fs.watch both notice it, and
+  // `announce` already deduplicates by rev, so nothing is lost or double-sent.
+  // A file already broken at startup is left for a later edit to surface, same
+  // as before this watcher existed.
   await Promise.all(
     (Object.keys(FILES) as FileKey[]).map(async (key) => {
       snaps.set(key, await statOf(key));
@@ -100,16 +118,26 @@ export async function watchStore(store: Store, debounceMs = 80, pollMs = 500): P
   }
 
   let pollTimer: NodeJS.Timeout | undefined;
+  // Set for the duration of one poll tick's stat sweep, so a hung stat (a dropped network
+  // drive, say) can never cause ticks to pile up on top of each other -- the next tick is still
+  // scheduled on time below, but it sees this flag set and skips its own sweep entirely.
+  let polling = false;
   const poll = () => {
     if (stopped) return;
-    void (async () => {
-      for (const key of Object.keys(FILES) as FileKey[]) {
-        const current = await statOf(key);
-        if (!sameSnap(current, snaps.get(key) ?? null)) void check(key);
-      }
-    })();
     pollTimer = setTimeout(poll, pollMs);
     pollTimer.unref?.();
+    if (polling) return;
+    polling = true;
+    void (async () => {
+      try {
+        for (const key of Object.keys(FILES) as FileKey[]) {
+          const current = await statOf(key);
+          if (!sameSnap(current, snaps.get(key) ?? null)) void check(key);
+        }
+      } finally {
+        polling = false;
+      }
+    })();
   };
   pollTimer = setTimeout(poll, pollMs);
   pollTimer.unref?.();

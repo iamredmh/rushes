@@ -50,6 +50,15 @@ describe("contentDisposition", () => {
     const header = contentDisposition(name);
     expect(header).toBe(`attachment; filename="caf_ _clip__.mp4___"; filename*=UTF-8''${encodeURIComponent(name)}`);
   });
+
+  it("replaces an unpaired UTF-16 surrogate instead of letting encodeURIComponent throw", () => {
+    const name = "clip_\uD800_end.mp4"; // a lone high surrogate: invalid UTF-16 on its own
+    expect(() => contentDisposition(name)).not.toThrow();
+    const header = contentDisposition(name);
+    // The replaced surrogate is non-ASCII too, so it collapses to its own "_" in the fallback.
+    expect(header).toContain('filename="clip___end.mp4"');
+    expect(header).toContain("filename*=UTF-8''clip_%EF%BF%BD_end.mp4");
+  });
 });
 
 describe("inside", () => {

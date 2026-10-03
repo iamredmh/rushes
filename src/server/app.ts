@@ -10,7 +10,7 @@ import { createBatch, latestBatch } from "../core/batches.js";
 import { tabStates } from "../core/tabs.js";
 import { fromManifestPath, toManifestPath } from "../core/paths.js";
 import { probe } from "../core/media.js";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -291,9 +291,19 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     if (!bytes.subarray(0, 8).equals(PNG_MAGIC)) throw new InvalidError("Frame grab must be a PNG");
     const project = await store.read("project");
     const fps = fpsFor(project, b.video, b.version);
-    const grab = `screenshots/${screenshotName(b.video, b.version, b.frame, fps)}`;
+    const name = screenshotName(b.video, b.version, b.frame, fps);
+    const grab = `screenshots/${name}`;
     await mkdir(join(store.root, "screenshots"), { recursive: true });
-    await writeFile(fromManifestPath(store.root, grab), bytes);
+    // Written to a temp name in the same directory, then renamed into place. Writing the
+    // final name directly would follow a symlink planted there (by a hand edit, say) and land
+    // the bytes wherever it points; rename() replaces the directory entry itself rather than
+    // the symlink's target, so the write can never escape screenshots/ that way. It also means
+    // nothing ever lists a half-written PNG. The temp name starts with "." and ends in ".tmp",
+    // which SCREENSHOT_PATH (the safe-name filter) already excludes from both /media and the
+    // Assets listing.
+    const tmp = join(store.root, "screenshots", `.${name}.${process.pid}.tmp`);
+    await writeFile(tmp, bytes);
+    await rename(tmp, fromManifestPath(store.root, grab));
     return c.json({ grab }, 201);
   });
 
