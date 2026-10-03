@@ -906,3 +906,13 @@ describe("cueRoom", () => {
     expect(cueRoom([{ t: 3 }], 0)).toEqual([0.4]);
   });
 });
+
+describe("onOptionGroups keeps same-named rounds apart", () => {
+  it("splits on the group id, not the label", () => {
+    const groups = onOptionGroups([
+      { value: "a", label: "A", on: "x/a", group: "Voiceover", groupId: "round-x" },
+      { value: "b", label: "B", on: "y/b", group: "Voiceover", groupId: "round-y" },
+    ]);
+    expect(groups.map((g) => g.options.length)).toEqual([1, 1]);
+  });
+});

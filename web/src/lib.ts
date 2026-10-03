@@ -426,6 +426,8 @@ export interface OnOption {
   full?: string;
   /** The menu group this option sits in: its round, on Voiceover. Other tabs leave it out. */
   group?: string;
+  /** What keeps two groups apart when their labels match (a round's lane id). Defaults to `group`. */
+  groupId?: string;
 }
 
 /** The On menu's options as runs of consecutive options sharing a group; ungrouped runs render as plain options. */
@@ -433,7 +435,7 @@ export function onOptionGroups(options: OnOption[]): { group: string | undefined
   const out: { group: string | undefined; options: OnOption[] }[] = [];
   for (const o of options) {
     const last = out[out.length - 1];
-    if (last && last.group === o.group) last.options.push(o);
+    if (last && (last.options[0].groupId ?? last.group) === (o.groupId ?? o.group)) last.options.push(o);
     else out.push({ group: o.group, options: [o] });
   }
   return out;
@@ -697,7 +699,7 @@ export function voiceNoteRows(m: VoiceNotes, note: Pick<Note, "on">): string | n
 export function voiceOnOptions(rounds: VoiceRound[], nameOf: (r: VariantRow) => string = (r) => r.name): OnOption[] {
   const out: OnOption[] = [];
   for (const round of [...rounds].reverse()) {
-    for (const r of round.reads) out.push({ value: `v:${r.key}`, label: nameOf(r), full: `${round.name} · ${nameOf(r)}`, group: round.name, on: variantOn(r), row: r.key });
+    for (const r of round.reads) out.push({ value: `v:${r.key}`, label: nameOf(r), full: `${round.name} · ${nameOf(r)}`, group: round.name, groupId: round.id, on: variantOn(r), row: r.key });
   }
   return out;
 }

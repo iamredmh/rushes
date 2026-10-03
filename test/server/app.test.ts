@@ -302,6 +302,13 @@ describe("API", () => {
     const long = await call("POST", "/api/variants", { stage: "voice", name: "Jane", file: "audio/j.wav", round: "R".repeat(65) });
     expect(long.status).toBe(400);
     expect(JSON.stringify(long.json)).toContain("round");
+    // A name that grows when slugged (ligatures) still gets a lane id that fits.
+    const lig = await call("POST", "/api/variants", { stage: "voice", name: "Louise", file: "audio/l.wav", round: "\uFB03".repeat(64) });
+    expect(lig.status).toBe(201);
+    expect(lig.json.lane.id.length).toBeLessThanOrEqual(64);
+    const lane = await call("POST", "/api/variants", { stage: "music", name: "Bed", file: "audio/b.wav", lane: "m".repeat(90) });
+    expect(lane.status).toBe(201);
+    expect(lane.json.lane.id.length).toBeLessThanOrEqual(64);
   });
 
   it("picks: null clears a lane or section pick, and leaves the rest", async () => {

@@ -106,7 +106,8 @@ export interface AddVariantInput {
 const LANE_NAMES: Record<LaneStage, string> = { voice: "Voiceover", music: "Music", sfx: "Sound effects" };
 
 export function addVariant(p: Project, input: AddVariantInput): { lane: Lane; variant: Variant } {
-  const laneId = slugify(input.lane ?? input.round ?? input.stage);
+  // Lane ids are capped at 64 by the schema; a slug can outgrow its source (NFKD splits ligatures).
+  const laneId = slugify(input.lane ?? input.round ?? input.stage).slice(0, 64).replace(/-+$/, "");
   let lane = p.lanes.find((l) => l.id === laneId);
   if (lane && lane.stage !== input.stage) throw new InvalidError(`Lane "${laneId}" belongs to ${lane.stage}, not ${input.stage}`);
   if (!lane) {
