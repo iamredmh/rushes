@@ -143,25 +143,117 @@ export function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
-export interface AssetSection {
+/**
+ * §16.3: the only extensions Open will act on, lower-case and without the dot. A web-side copy of
+ * src/server/reveal.ts's OPEN_SAFE_EXT (deliberately duplicated rather than imported, since the
+ * web bundle never pulls in server code) -- a unit test asserts the two stay equal. svg is
+ * deliberately excluded: on macOS an SVG often opens in a browser and can carry script.
+ */
+export const OPEN_SAFE_EXT: ReadonlySet<string> = new Set([
+  "md", "txt", "pdf", "srt", "vtt",
+  "png", "jpg", "jpeg", "gif", "webp",
+  "mp4", "mov", "m4v", "webm", "mkv",
+  "wav", "mp3", "m4a", "aac", "flac", "ogg",
+  "prproj", "drp",
+]);
+
+/** The lower-case extension of a file name, without the dot ("a.MP4" -> "mp4"; "noext" -> ""). */
+export function extOf(name: string): string {
+  const i = name.lastIndexOf(".");
+  return i === -1 ? "" : name.slice(i + 1).toLowerCase();
+}
+
+export type FolderId = "screenshot" | "cut" | "voiceover" | "music" | "sfx" | "doc" | "image" | "caption" | "export" | "delivery" | "edit";
+
+export interface FolderDef {
+  id: FolderId;
   title: string;
-  kind: "screenshot" | "cut" | "voiceover" | "music" | "sfx";
+  kinds: AssetKind[];
+  /** The view a folder opens in before anything's been remembered in localStorage for it. */
+  view: "grid" | "list";
+  /** Whether the "All films / one film" filter applies to this folder (§16.1). */
+  filmFilter: boolean;
+}
+
+/** §16.1's folders, in their fixed sidebar order. */
+export const FOLDERS: FolderDef[] = [
+  { id: "screenshot", title: "Screenshots", kinds: ["screenshot"], view: "grid", filmFilter: true },
+  { id: "cut", title: "Cuts", kinds: ["cut"], view: "grid", filmFilter: true },
+  { id: "voiceover", title: "Voiceover", kinds: ["take", "voice"], view: "list", filmFilter: false },
+  { id: "music", title: "Music", kinds: ["music"], view: "list", filmFilter: false },
+  { id: "sfx", title: "Sound effects", kinds: ["sfx"], view: "list", filmFilter: false },
+  { id: "doc", title: "Scripts & docs", kinds: ["doc"], view: "list", filmFilter: false },
+  { id: "image", title: "Images", kinds: ["image"], view: "grid", filmFilter: false },
+  { id: "caption", title: "Captions", kinds: ["caption"], view: "list", filmFilter: false },
+  { id: "export", title: "Exports", kinds: ["export"], view: "list", filmFilter: false },
+  { id: "delivery", title: "Delivery", kinds: ["delivery"], view: "grid", filmFilter: true },
+  { id: "edit", title: "Edit files", kinds: ["edit"], view: "list", filmFilter: false },
+];
+
+/** Folders whose list view offers a read-only preview on the right (§16.1). */
+export const PREVIEW_FOLDER_IDS: ReadonlySet<FolderId> = new Set(["doc", "caption", "export", "edit"]);
+/** Extensions the preview panel knows how to show (§16.1 / the brief). */
+export const PREVIEWABLE_EXT: ReadonlySet<string> = new Set(["md", "txt", "srt", "vtt"]);
+
+export function isPreviewable(asset: Pick<Asset, "name">): boolean {
+  return PREVIEWABLE_EXT.has(extOf(asset.name));
+}
+
+export interface FolderItemsOptions {
+  /** Matched, case-insensitively, against the name, the path, the file's own note, the film's
+   *  name and (for a cut) its version note. */
+  query?: string;
+  sort?: "newest" | "oldest" | "name";
+  /** A video id to narrow to, or null/undefined for every film. Only meaningful on a folder
+   *  with filmFilter set, but harmless to pass anywhere. */
+  film?: string | null;
+  /** Needed to resolve a film's name and a cut's version note for both search and sorting. */
+  videos?: Video[];
+}
+
+/** `assets` narrowed to one folder's kinds, then filtered by film and search, then sorted. */
+export function folderItems(assets: Asset[], folder: Pick<FolderDef, "kinds">, opts: FolderItemsOptions = {}): Asset[] {
+  const { query = "", sort = "newest", film, videos = [] } = opts;
+  let items = assets.filter((a) => folder.kinds.includes(a.kind));
+  if (film) items = items.filter((a) => a.video === film);
+  const q = query.trim().toLowerCase();
+  if (q) {
+    items = items.filter((a) => {
+      const video = videos.find((v) => v.id === a.video);
+      const version = video?.versions.find((v) => v.id === a.version);
+      const haystack = [a.name, a.path, a.note, version?.note, video?.name].filter((s): s is string => !!s);
+      return haystack.some((s) => s.toLowerCase().includes(q));
+    });
+  }
+  const modifiedMs = (a: Asset) => (a.modified ? new Date(a.modified).getTime() : 0);
+  const sorted = [...items];
+  if (sort === "name") sorted.sort((a, b) => a.name.localeCompare(b.name));
+  else if (sort === "oldest") sorted.sort((a, b) => modifiedMs(a) - modifiedMs(b));
+  else sorted.sort((a, b) => modifiedMs(b) - modifiedMs(a)); // "newest", the default
+  return sorted;
+}
+
+export interface FilmGroup {
+  /** "Film · vN", or null for items with no film/version (e.g. an un-parsed screenshot name). */
+  heading: string | null;
   items: Asset[];
 }
 
-const ASSET_SECTIONS: { title: AssetSection["title"]; kind: AssetSection["kind"]; match: (k: AssetKind) => boolean }[] = [
-  { title: "Screenshots", kind: "screenshot", match: (k) => k === "screenshot" },
-  { title: "Cuts", kind: "cut", match: (k) => k === "cut" },
-  { title: "Voiceover", kind: "voiceover", match: (k) => k === "take" || k === "voice" },
-  { title: "Music", kind: "music", match: (k) => k === "music" },
-  { title: "Sound effects", kind: "sfx", match: (k) => k === "sfx" },
-];
-
-/** Assets grouped into the Assets tab's sections, in spec order, dropping any section with nothing in it. */
-export function assetSections(assets: Asset[]): AssetSection[] {
-  return ASSET_SECTIONS.map(({ title, kind, match }) => ({ title, kind, items: assets.filter((a) => match(a.kind)) })).filter(
-    (s) => s.items.length > 0,
-  );
+/**
+ * Groups already-ordered items under "Film · vN" headings (§16.1), without reordering them --
+ * a run of consecutive items sharing the same film and version becomes one group, so calling
+ * this on output already sorted Newest/Oldest keeps that order intact.
+ */
+export function groupByFilm(items: Asset[], videos: Video[] = []): FilmGroup[] {
+  const groups: FilmGroup[] = [];
+  for (const a of items) {
+    const video = videos.find((v) => v.id === a.video);
+    const heading = video && a.version ? `${video.name} · ${a.version}` : null;
+    const last = groups[groups.length - 1];
+    if (last && last.heading === heading) last.items.push(a);
+    else groups.push({ heading, items: [a] });
+  }
+  return groups;
 }
 
 /** Normalised box from two pointer positions inside an element of size w × h. */

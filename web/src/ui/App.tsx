@@ -357,7 +357,7 @@ export function App() {
       <main class="body">
         {stage === "assets" ? (
           unlocked ? (
-            <Assets assets={assets} videos={state.project.videos} toast={toast} />
+            <Assets assets={assets} videos={state.project.videos} toast={toast} onChanged={() => void refresh()} />
           ) : (
             <div class="empty">
               <Icon name="lock" />

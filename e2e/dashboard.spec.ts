@@ -1,6 +1,15 @@
-import { access, rm, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { expect, test, videoReady } from "./fixture.js";
+
+const CLIP = fileURLToPath(new URL("./fixtures/clip.mp4", import.meta.url));
+// A 1x1 transparent PNG, reused for every screenshot the library tests need on disk: its
+// content never matters to these tests, only its name and that it's a valid PNG.
+const TINY_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+  "base64",
+);
 
 test("tabs stay locked until the project has something, then unlock live", async ({ page, rushes }) => {
   await page.goto(rushes.url);
@@ -565,6 +574,9 @@ test("a deleted file is marked missing in Assets", async ({ page, rushes }) => {
   await page.reload();
   await expect(page.getByRole("tab", { name: /Assets/ })).toHaveAttribute("aria-disabled", "false");
   await page.getByRole("tab", { name: /Assets/ }).click();
+  // The library's Cuts folder defaults to a poster-frame grid (§16.1); switch to the list view
+  // to get back the plain row this test is about.
+  await page.getByRole("button", { name: "List view" }).click();
   // The row itself isn't interactive, so it carries no aria-disabled -- just the "missing"
   // class for its own styling. The controls inside it are what AT and :hover see as disabled.
   const row = page.locator(".arow", { hasText: "hero_v1.mp4" });
@@ -731,4 +743,173 @@ test("the note box's send button stays inside the box, empty and grown with text
   await expectSendInsideInput();
   await input.fill("Line one\nLine two\nLine three\nLine four\nLine five");
   await expectSendInsideInput();
+});
+
+// ---- Plan 2d, Task 2: the Assets library (§16) ----
+
+test("the library has a folder sidebar with counts, and ↑/↓ moves between folders", async ({ page, rushes }) => {
+  await mkdir(join(rushes.root, "screenshots"), { recursive: true });
+  await writeFile(join(rushes.root, "screenshots", "hero_v1_00m00.00s_f1.png"), TINY_PNG);
+  await writeFile(join(rushes.root, "screenshots", "hero_v1_00m01.00s_f30.png"), TINY_PNG);
+  await rushes.addCut();
+  await writeFile(join(rushes.root, "script.md"), "# Title\n");
+  await writeFile(join(rushes.root, "image.png"), TINY_PNG);
+  await rushes.api("POST", "/api/files", { file: "image.png", kind: "image" });
+
+  await page.goto(rushes.url);
+  await expect(page.getByRole("tab", { name: /Assets/ })).toHaveAttribute("aria-disabled", "false");
+  await page.keyboard.press("7");
+
+  const sidebar = page.getByRole("navigation", { name: "Folders" });
+  const screenshots = sidebar.getByRole("button", { name: /Screenshots/ });
+  const cuts = sidebar.getByRole("button", { name: /Cuts/ });
+  const docs = sidebar.getByRole("button", { name: /Scripts & docs/ });
+  const images = sidebar.getByRole("button", { name: /Images/ });
+  const exports_ = sidebar.getByRole("button", { name: /Exports/ });
+
+  await expect(screenshots).toBeVisible();
+  await expect(screenshots.locator(".count")).toHaveText("2");
+  await expect(cuts).toBeVisible();
+  await expect(cuts.locator(".count")).toHaveText("1");
+  await expect(docs).toBeVisible();
+  await expect(docs.locator(".count")).toHaveText("1");
+  await expect(images).toBeVisible();
+  await expect(images.locator(".count")).toHaveText("1");
+  // Exports always shows, even with nothing in it yet.
+  await expect(exports_).toBeVisible();
+  await expect(exports_.locator(".count")).toHaveText("0");
+  // Empty folders (no voiceover, music, sfx, captions, delivery or edit files registered) never show.
+  await expect(sidebar.getByRole("button", { name: /Voiceover/ })).toHaveCount(0);
+  await expect(sidebar.getByRole("button", { name: /^Music/ })).toHaveCount(0);
+  await expect(sidebar.getByRole("button", { name: /Sound effects/ })).toHaveCount(0);
+  await expect(sidebar.getByRole("button", { name: /Captions/ })).toHaveCount(0);
+  await expect(sidebar.getByRole("button", { name: /Delivery/ })).toHaveCount(0);
+  await expect(sidebar.getByRole("button", { name: /Edit files/ })).toHaveCount(0);
+
+  // Screenshots sorts first, and is already selected.
+  await expect(screenshots).toHaveAttribute("aria-current", "true");
+  await screenshots.focus();
+  await page.keyboard.press("ArrowDown");
+  await expect(cuts).toHaveAttribute("aria-current", "true");
+  await expect(screenshots).not.toHaveAttribute("aria-current", "true");
+  await expect(page.locator(".aheader h2")).toContainText("Cuts");
+  await page.keyboard.press("ArrowUp");
+  await expect(screenshots).toHaveAttribute("aria-current", "true");
+  await expect(page.locator(".aheader h2")).toContainText("Screenshots");
+});
+
+test("search and the film filter narrow the screenshots", async ({ page, rushes }) => {
+  await rushes.addCut("", "Hero");
+  await rushes.addCut("", "Cutdown");
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await page.keyboard.press("g");
+  await expect(page.getByRole("status")).toContainText("Saved to screenshots/");
+  await page.keyboard.press("]");
+  await videoReady(page);
+  await page.keyboard.press("g");
+  await expect(page.getByRole("status")).toContainText("Saved to screenshots/");
+
+  await page.keyboard.press("7");
+  await expect(page.locator(".shot-tile")).toHaveCount(2);
+
+  const search = page.getByRole("searchbox", { name: "Search" });
+  await search.fill("hero");
+  await expect(page.locator(".shot-tile")).toHaveCount(1);
+  await search.fill("");
+  await expect(page.locator(".shot-tile")).toHaveCount(2);
+
+  const film = page.getByRole("combobox", { name: "Film" });
+  await film.selectOption({ label: "Cutdown" });
+  await expect(page.locator(".shot-tile")).toHaveCount(1);
+  await film.selectOption({ label: "All films" });
+  await expect(page.locator(".shot-tile")).toHaveCount(2);
+});
+
+test("a script previews as Markdown, safely", async ({ page, rushes }) => {
+  await writeFile(join(rushes.root, "script.md"), "# Title\n\nSome text with <script>alert(1)</script> in it.\n");
+  await page.goto(rushes.url);
+  await expect(page.getByRole("tab", { name: /Assets/ })).toHaveAttribute("aria-disabled", "false");
+  await page.keyboard.press("7");
+
+  await page.locator(".arow.previewable", { hasText: "script.md" }).click();
+  const preview = page.locator(".apreview");
+  await expect(preview.locator("h1")).toHaveText("Title");
+  await expect(preview).toContainText("<script>alert(1)</script>");
+  // The literal text renders -- never a real <script> element inside the preview.
+  await expect(preview.locator("script")).toHaveCount(0);
+});
+
+test("audio plays inline, one at a time, and stops when you leave the folder", async ({ page, rushes }) => {
+  await copyFile(CLIP, join(rushes.root, "bed-a.mp4"));
+  await copyFile(CLIP, join(rushes.root, "bed-b.mp4"));
+  await rushes.api("POST", "/api/variants", { stage: "music", name: "Bed A", file: "bed-a.mp4" });
+  await rushes.api("POST", "/api/variants", { stage: "music", name: "Bed B", file: "bed-b.mp4" });
+
+  await page.goto(rushes.url);
+  await expect(page.getByRole("tab", { name: /Assets/ })).toHaveAttribute("aria-disabled", "false");
+  await page.keyboard.press("7");
+  await expect(page.locator(".aheader h2")).toContainText("Music");
+
+  const rows = page.locator(".arow");
+  await expect(rows).toHaveCount(2);
+  const audio = page.locator("audio");
+
+  await rows.nth(0).getByRole("button", { name: "Play" }).click();
+  await expect.poll(() => audio.evaluate((el) => (el as HTMLAudioElement).paused)).toBe(false);
+  await expect(rows.nth(0).getByRole("button", { name: "Pause" })).toBeVisible();
+
+  // Only one plays at a time: starting the second row's playback takes over the one shared player.
+  await rows.nth(1).getByRole("button", { name: "Play" }).click();
+  await expect(rows.nth(0).getByRole("button", { name: "Play" })).toBeVisible();
+  await expect(rows.nth(1).getByRole("button", { name: "Pause" })).toBeVisible();
+  await expect.poll(() => audio.evaluate((el) => (el as HTMLAudioElement).paused)).toBe(false);
+
+  // Leaving the folder stops it.
+  await page.getByRole("navigation", { name: "Folders" }).getByRole("button", { name: /Exports/ }).click();
+  await expect.poll(() => audio.evaluate((el) => (el as HTMLAudioElement).paused)).toBe(true);
+});
+
+test("Open is offered for a doc and not for an unsafe file, and Export notes adds a file to Exports", async ({ page, rushes }) => {
+  await writeFile(join(rushes.root, "brief.md"), "# Brief\n");
+  await writeFile(join(rushes.root, "x.command"), "#!/bin/sh\necho hi\n");
+  await rushes.api("POST", "/api/files", { file: "x.command", kind: "edit" });
+
+  await page.goto(rushes.url);
+  await expect(page.getByRole("tab", { name: /Assets/ })).toHaveAttribute("aria-disabled", "false");
+  await page.keyboard.press("7");
+
+  // Scripts & docs sorts before Edit files, so it's already selected.
+  await expect(page.locator(".aheader h2")).toContainText("Scripts & docs");
+  const docRow = page.locator(".arow", { hasText: "brief.md" });
+  await expect(docRow.getByRole("button", { name: "Open" })).toBeVisible();
+
+  const sidebar = page.getByRole("navigation", { name: "Folders" });
+  await sidebar.getByRole("button", { name: /Edit files/ }).click();
+  const editRow = page.locator(".arow", { hasText: "x.command" });
+  await expect(editRow).toBeVisible();
+  await expect(editRow.getByRole("button", { name: "Open" })).toHaveCount(0);
+
+  await sidebar.getByRole("button", { name: /Exports/ }).click();
+  await expect(page.locator(".aheader h2")).toContainText("Exports");
+  await expect(page.locator(".arow")).toHaveCount(0);
+  await page.getByRole("button", { name: "Export notes" }).click();
+  await expect(page.getByRole("status")).toContainText("Saved to exports/");
+  await expect(page.locator(".arow")).toHaveCount(1);
+  await expect(page.locator(".arow")).toContainText("-notes-");
+});
+
+test("200 screenshots stay usable", async ({ page, rushes }) => {
+  await mkdir(join(rushes.root, "screenshots"), { recursive: true });
+  await Promise.all(
+    Array.from({ length: 200 }, (_, i) => writeFile(join(rushes.root, "screenshots", `hero_v1_00m00.00s_f${i}.png`), TINY_PNG)),
+  );
+  await page.goto(rushes.url);
+  await expect(page.getByRole("tab", { name: /Assets/ })).toHaveAttribute("aria-disabled", "false");
+  await page.keyboard.press("7");
+  await expect(page.locator(".shot-tile")).toHaveCount(200);
+
+  const search = page.getByRole("searchbox", { name: "Search" });
+  await search.fill("f199");
+  await expect(page.locator(".shot-tile")).toHaveCount(1);
 });

@@ -15,7 +15,7 @@ import { lstat, mkdir, readFile, rename, stat, writeFile } from "node:fs/promise
 import { existsSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { GRAB_PATH, SCREENSHOT_PATH, contentDisposition, contentType, inside, registeredMedia, sendFile } from "./files.js";
+import { contentDisposition, contentType, inside, sendFile } from "./files.js";
 import { candidatePaths, listAssets, fpsFor, screenshotName } from "./assets.js";
 import { osRevealer, osOpener, OPEN_SAFE_EXT, type Revealer, type Opener } from "./reveal.js";
 import type { CorruptEvent } from "./watch.js";
@@ -285,9 +285,13 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   app.get("/media", async (c) => {
     const path = c.req.query("path") ?? "";
     const [project, script] = await Promise.all([store.read("project"), store.read("script")]);
-    if (!registeredMedia(project, script).has(path) && !GRAB_PATH.test(path) && !SCREENSHOT_PATH.test(path)) {
-      throw new NotFoundError("media", path);
-    }
+    // candidatePaths (§16's own allow-list, shared with /api/reveal and /api/open) is a superset
+    // of registeredMedia/GRAB_PATH/SCREENSHOT_PATH: it adds every auto-discovered doc, caption
+    // and export (§16.2) -- a project's own *.md at the root, say, was never registered through
+    // rushes_add_file, so it would otherwise 404 here even though the library lists it and Open
+    // and Reveal already treat it as a valid asset.
+    const candidates = await candidatePaths(store, project, script);
+    if (!candidates.has(path)) throw new NotFoundError("media", path);
     const res = await sendFile(fromManifestPath(store.root, path), c.req.header("range"));
     res.headers.set("cross-origin-resource-policy", "same-origin");
     if (res.status !== 404 && c.req.query("download") === "1") {

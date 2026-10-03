@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { assetSections, boxFrom, defaultVersion, firstTab, fit, fmt, formatBytes, frameAt, isChanged, latest, neighbourVideo, noteTime, placeNote, shotAt, shotLabel, shotSeek, snap, stepFrame } from "../../web/src/lib.js";
+import {
+  boxFrom, defaultVersion, extOf, firstTab, fit, FOLDERS, fmt, folderItems, formatBytes, frameAt, groupByFilm,
+  isChanged, isPreviewable, latest, neighbourVideo, noteTime, OPEN_SAFE_EXT, placeNote, shotAt, shotLabel, shotSeek, snap, stepFrame,
+} from "../../web/src/lib.js";
 import type { Asset, Note, Section, Shot, TabState, Video } from "../../web/src/types.js";
+// Only this test imports the server's own list, so the web copy (ruling 1) is never pulled
+// into the web bundle -- this is purely to assert the two stay equal.
+import { OPEN_SAFE_EXT as SERVER_OPEN_SAFE_EXT } from "../../src/server/reveal.js";
 
 const note = (over: Partial<Note>): Note => ({
   id: "n_1", stage: "picture", video: "hero", version: "v3", on: null, scope: "point", t: 12.4, tOut: null, frame: null,
@@ -180,7 +186,44 @@ describe("formatBytes", () => {
   });
 });
 
-describe("assetSections", () => {
+describe("extOf / isPreviewable", () => {
+  it("lower-cases an extension and drops the dot", () => {
+    expect(extOf("a.MP4")).toBe("mp4");
+    expect(extOf("brief.md")).toBe("md");
+  });
+  it("is empty for a name with no extension", () => {
+    expect(extOf("noext")).toBe("");
+  });
+  it("is previewable only for md, txt, srt and vtt", () => {
+    expect(isPreviewable({ name: "script.md" })).toBe(true);
+    expect(isPreviewable({ name: "notes.txt" })).toBe(true);
+    expect(isPreviewable({ name: "en.srt" })).toBe(true);
+    expect(isPreviewable({ name: "en.vtt" })).toBe(true);
+    expect(isPreviewable({ name: "brief.pdf" })).toBe(false);
+    expect(isPreviewable({ name: "x.command" })).toBe(false);
+  });
+});
+
+describe("OPEN_SAFE_EXT (web copy)", () => {
+  it("matches the server's OPEN_SAFE_EXT (src/server/reveal.ts) exactly, with no svg", () => {
+    expect([...OPEN_SAFE_EXT].sort()).toEqual([...SERVER_OPEN_SAFE_EXT].sort());
+    expect(OPEN_SAFE_EXT.has("svg")).toBe(false);
+  });
+});
+
+describe("FOLDERS", () => {
+  it("lists the §16.1 folders in order, with Exports film-filter-free and Cuts/Delivery/Screenshots film-filtered", () => {
+    expect(FOLDERS.map((f) => f.title)).toEqual([
+      "Screenshots", "Cuts", "Voiceover", "Music", "Sound effects",
+      "Scripts & docs", "Images", "Captions", "Exports", "Delivery", "Edit files",
+    ]);
+    expect(FOLDERS.find((f) => f.id === "export")?.filmFilter).toBe(false);
+    expect(FOLDERS.find((f) => f.id === "cut")?.filmFilter).toBe(true);
+    expect(FOLDERS.find((f) => f.id === "delivery")?.filmFilter).toBe(true);
+  });
+});
+
+describe("folderItems", () => {
   const asset = (over: Partial<Asset>): Asset => ({
     kind: "screenshot",
     path: "screenshots/a.png",
@@ -191,25 +234,89 @@ describe("assetSections", () => {
     missing: false,
     ...over,
   });
+  const videos: Video[] = [
+    { id: "hero", name: "Hero", versions: [{ id: "v1", file: "renders/hero_v1.mp4", duration: null, fps: null, addedAt: "2026-10-01T00:00:00Z", note: "First pass", shots: [] }], lockedVersion: null },
+    { id: "cutdown", name: "Cutdown", versions: [], lockedVersion: null },
+  ];
 
-  it("groups assets into sections in spec order, with Voiceover holding takes and voice variants", () => {
-    const assets: Asset[] = [
-      asset({ kind: "screenshot", name: "s1.png" }),
-      asset({ kind: "cut", name: "c1.mp4" }),
-      asset({ kind: "take", name: "t1.wav" }),
-      asset({ kind: "voice", name: "v1.wav" }),
-      asset({ kind: "music", name: "m1.wav" }),
-      asset({ kind: "sfx", name: "f1.wav" }),
-    ];
-    const sections = assetSections(assets);
-    expect(sections.map((s) => s.title)).toEqual(["Screenshots", "Cuts", "Voiceover", "Music", "Sound effects"]);
-    expect(sections.find((s) => s.title === "Voiceover")?.items.map((a) => a.name)).toEqual(["t1.wav", "v1.wav"]);
+  it("narrows to one folder's kinds", () => {
+    const assets = [asset({ kind: "screenshot" }), asset({ kind: "cut", name: "c.mp4" })];
+    const folder = FOLDERS.find((f) => f.id === "screenshot")!;
+    expect(folderItems(assets, folder).map((a) => a.kind)).toEqual(["screenshot"]);
   });
 
-  it("leaves out sections with nothing in them", () => {
-    const assets: Asset[] = [asset({ kind: "music", name: "m1.wav" })];
-    expect(assetSections(assets).map((s) => s.title)).toEqual(["Music"]);
-    expect(assetSections([])).toEqual([]);
+  it("filters by film (video id)", () => {
+    const assets = [
+      asset({ kind: "screenshot", name: "h.png", video: "hero" }),
+      asset({ kind: "screenshot", name: "c.png", video: "cutdown" }),
+    ];
+    const folder = FOLDERS.find((f) => f.id === "screenshot")!;
+    expect(folderItems(assets, folder, { film: "hero" }).map((a) => a.name)).toEqual(["h.png"]);
+    expect(folderItems(assets, folder, { film: null }).map((a) => a.name)).toEqual(["h.png", "c.png"]);
+  });
+
+  it("searches by name, path, the file's own note, the version note and the film name", () => {
+    const folder = FOLDERS.find((f) => f.id === "cut")!;
+    const assets = [
+      asset({ kind: "cut", name: "hero_v1.mp4", path: "renders/hero_v1.mp4", video: "hero", version: "v1" }),
+      asset({ kind: "cut", name: "cutdown_v1.mp4", path: "renders/cutdown_v1.mp4", video: "cutdown", version: "v9" }),
+    ];
+    expect(folderItems(assets, folder, { query: "hero_v1", videos }).map((a) => a.name)).toEqual(["hero_v1.mp4"]);
+    expect(folderItems(assets, folder, { query: "renders/cutdown", videos }).map((a) => a.name)).toEqual(["cutdown_v1.mp4"]);
+    expect(folderItems(assets, folder, { query: "first pass", videos }).map((a) => a.name)).toEqual(["hero_v1.mp4"]);
+    expect(folderItems(assets, folder, { query: "Hero", videos }).map((a) => a.name)).toEqual(["hero_v1.mp4"]);
+  });
+
+  it("searches a registered file's own note", () => {
+    const folder = FOLDERS.find((f) => f.id === "doc")!;
+    const assets = [asset({ kind: "doc", name: "brief.md", note: "Client-facing brief" })];
+    expect(folderItems(assets, folder, { query: "client-facing" }).map((a) => a.name)).toEqual(["brief.md"]);
+    expect(folderItems(assets, folder, { query: "nope" })).toEqual([]);
+  });
+
+  it("sorts newest first by default, oldest first, or by name", () => {
+    const folder = FOLDERS.find((f) => f.id === "doc")!;
+    const assets = [
+      asset({ kind: "doc", name: "b.md", modified: "2026-10-02T00:00:00Z" }),
+      asset({ kind: "doc", name: "a.md", modified: "2026-10-03T00:00:00Z" }),
+    ];
+    expect(folderItems(assets, folder).map((a) => a.name)).toEqual(["a.md", "b.md"]);
+    expect(folderItems(assets, folder, { sort: "oldest" }).map((a) => a.name)).toEqual(["b.md", "a.md"]);
+    expect(folderItems(assets, folder, { sort: "name" }).map((a) => a.name)).toEqual(["a.md", "b.md"]);
+  });
+});
+
+describe("groupByFilm", () => {
+  const asset = (over: Partial<Asset>): Asset => ({
+    kind: "screenshot",
+    path: "screenshots/a.png",
+    abs: "/tmp/a.png",
+    name: "a.png",
+    size: 100,
+    modified: "2026-10-02T00:00:00Z",
+    missing: false,
+    ...over,
+  });
+  const videos: Video[] = [
+    { id: "hero", name: "Hero", versions: [], lockedVersion: null },
+    { id: "cutdown", name: "Cutdown", versions: [], lockedVersion: null },
+  ];
+
+  it("builds 'Film · vN' headings, keeping consecutive same-film-and-version items together", () => {
+    const items = [
+      asset({ name: "h1.png", video: "hero", version: "v1" }),
+      asset({ name: "h2.png", video: "hero", version: "v1" }),
+      asset({ name: "c1.png", video: "cutdown", version: "v2" }),
+    ];
+    const groups = groupByFilm(items, videos);
+    expect(groups.map((g) => g.heading)).toEqual(["Hero · v1", "Cutdown · v2"]);
+    expect(groups[0].items.map((a) => a.name)).toEqual(["h1.png", "h2.png"]);
+    expect(groups[1].items.map((a) => a.name)).toEqual(["c1.png"]);
+  });
+
+  it("gives an item with no film/version a null heading", () => {
+    const groups = groupByFilm([asset({ name: "x.png" })], videos);
+    expect(groups).toEqual([{ heading: null, items: [expect.objectContaining({ name: "x.png" })] }]);
   });
 });
 

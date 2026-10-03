@@ -116,12 +116,22 @@ describe("media", () => {
     expect(bad.status).toBe(416);
   });
 
-  it("refuses any path the project didn't register", async () => {
+  it("refuses any path the project didn't register or auto-discover", async () => {
     const { call, root } = await withClip();
-    await writeFile(join(root, "secret.txt"), "no");
-    expect((await call("/media?path=secret.txt")).status).toBe(404);
+    // Not .md/.txt/.pdf (§16.2's auto-discovered doc extensions), so this one is still refused
+    // on its own: it was never registered and nothing automatic picks it up either.
+    await writeFile(join(root, "secret.bin"), "no");
+    expect((await call("/media?path=secret.bin")).status).toBe(404);
     expect((await call("/media?path=..%2F..%2Fetc%2Fpasswd")).status).toBe(404);
     expect((await call("/media?path=.rushes%2Fnotes.json")).status).toBe(404);
+  });
+
+  it("serves an auto-discovered doc at the project root, even though nothing registered it (§16.2)", async () => {
+    const { call, root } = await withClip();
+    await writeFile(join(root, "brief.md"), "# Brief\n");
+    const res = await call("/media?path=brief.md");
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("# Brief\n");
   });
 
   it("says when a registered file has gone missing", async () => {

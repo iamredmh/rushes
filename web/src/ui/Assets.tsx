@@ -1,7 +1,13 @@
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { api, mediaUrl } from "../api.js";
-import { assetSections, formatBytes, fmt } from "../lib.js";
+import {
+  FOLDERS, type FolderDef, type FolderId, folderItems, groupByFilm, isPreviewable, PREVIEW_FOLDER_IDS,
+} from "../lib.js";
+import { safeMarkdownHtml } from "../markdown.js";
 import type { Asset, Video } from "../types.js";
+import {
+  AssetRow, AudioRow, Lightbox, PosterTile, PreviewRow, ShotTile,
+} from "./AssetViews.js";
 import { Icon } from "./Icon.js";
 
 export interface AssetsProps {
@@ -9,274 +15,370 @@ export interface AssetsProps {
   /** To resolve a cut's film name and version note. */
   videos: Video[];
   toast(message: string): void;
+  /** Called after an action (Export notes) writes a file the server's own change events won't
+   *  otherwise announce quickly -- the same pattern Picture.tsx uses after a grab. */
+  onChanged(): void;
 }
 
-const canSaveAs = typeof window !== "undefined" && "showSaveFilePicker" in window;
+type Sort = "newest" | "oldest" | "name";
+type View = "grid" | "list";
 
-/** "Show in Finder" on a Mac, "Show in Explorer" on Windows, "Open folder" everywhere else. */
-function revealLabel(): string {
-  const ua = navigator.userAgent;
-  if (/Mac/.test(ua)) return "Show in Finder";
-  if (/Windows/.test(ua)) return "Show in Explorer";
-  return "Open folder";
+const AUDIO_FOLDERS = new Set<FolderId>(["voiceover", "music", "sfx"]);
+const GRID_POSTER_FOLDERS = new Set<FolderId>(["cut", "delivery"]);
+const MAX_PREVIEW_BYTES = 1024 * 1024;
+
+function viewKey(id: FolderId): string {
+  return `rushes.assets.view.${id}`;
 }
 
-function shortDate(iso: string | null): string {
-  if (!iso) return "";
-  return new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+/** The remembered grid/list choice for a folder (§16.1), wrapped in try/catch: a browser with
+ *  localStorage disabled, or a private window that throws on read, must never break the tab. */
+function loadView(id: FolderId): View | null {
+  try {
+    const v = localStorage.getItem(viewKey(id));
+    return v === "grid" || v === "list" ? v : null;
+  } catch {
+    return null;
+  }
 }
 
-/** Download, Save as…, Show in Finder/Explorer/Open folder and Copy path, shared by every row and tile. */
-function Actions({ asset, toast }: { asset: Asset; toast(message: string): void }) {
-  const [saving, setSaving] = useState(false);
+function saveView(id: FolderId, view: View): void {
+  try {
+    localStorage.setItem(viewKey(id), view);
+  } catch {
+    // Ignored: the choice just won't be remembered this session.
+  }
+}
 
-  const saveAs = async () => {
-    if (saving) return;
-    setSaving(true);
-    // Set once the writable's open, so a failure after that point can abort it rather than
-    // leaving a half-written file with its handle never released.
-    let writable: FileSystemWritableFileStream | undefined;
-    try {
-      // showSaveFilePicker() throws AbortError on a user cancel; that's silent, not a toast.
-      const handle = await (window as unknown as { showSaveFilePicker(opts: { suggestedName: string }): Promise<FileSystemFileHandle> }).showSaveFilePicker({
-        suggestedName: asset.name,
-      });
-      const res = await fetch(mediaUrl(asset.path));
-      if (!res.ok || !res.body) throw new Error(`Couldn't read ${asset.name}`);
-      // Streamed straight from the response into the file, rather than buffered whole into
-      // memory first: a multi-gigabyte render would otherwise hold its entire contents as a
-      // blob before a single byte reaches disk.
-      writable = await handle.createWritable();
-      await res.body.pipeTo(writable);
-    } catch (e) {
-      if (writable) await writable.abort().catch(() => undefined);
-      if ((e as Error).name !== "AbortError") toast((e as Error).message || `Couldn't save ${asset.name}`);
-    } finally {
-      setSaving(false);
+/** Fetches a previewable file's text via mediaUrl(), capped at 1 MB: reads the response stream
+ *  and stops (cancelling it) once the cap is reached, rather than buffering the whole file only
+ *  to throw most of it away. */
+async function fetchPreview(path: string): Promise<{ text: string; truncated: boolean }> {
+  const res = await fetch(mediaUrl(path));
+  if (!res.ok) throw new Error(`Couldn't load ${path}`);
+  if (!res.body) return { text: await res.text(), truncated: false };
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  let bytes = 0;
+  let truncated = false;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    bytes += value.byteLength;
+    if (bytes > MAX_PREVIEW_BYTES) {
+      const allowed = value.byteLength - (bytes - MAX_PREVIEW_BYTES);
+      if (allowed > 0) text += decoder.decode(value.subarray(0, allowed), { stream: true });
+      truncated = true;
+      await reader.cancel().catch(() => undefined);
+      break;
     }
+    text += decoder.decode(value, { stream: true });
+  }
+  return { text, truncated };
+}
+
+/** The Assets library (§16): a folder sidebar, search/sort/film/grid-list controls, and a
+ *  folder-specific view -- thumbnail grids, poster-frame grids, inline-audio lists or
+ *  list+preview splits -- over every registered or auto-discovered project file. */
+export function Assets({ assets, videos, toast, onChanged }: AssetsProps) {
+  const visibleFolders = useMemo(
+    () => FOLDERS.filter((f) => f.id === "export" || assets.some((a) => f.kinds.includes(a.kind))),
+    [assets],
+  );
+  // Lazily seeded from the very first render's folders, so the first paint already shows the
+  // right folder instead of a one-frame flash of "nothing selected" while an effect catches up.
+  const [selectedId, setSelectedId] = useState<FolderId | null>(() => visibleFolders[0]?.id ?? null);
+  useEffect(() => {
+    if (selectedId && visibleFolders.some((f) => f.id === selectedId)) return;
+    setSelectedId(visibleFolders[0]?.id ?? null);
+  }, [visibleFolders, selectedId]);
+  const folder: FolderDef | null = visibleFolders.find((f) => f.id === selectedId) ?? null;
+
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<Sort>("newest");
+  const [film, setFilm] = useState<string | null>(null);
+  const [view, setView] = useState<View>("grid");
+
+  // A new folder gets a clean search/film/sort and its own remembered (or default) view --
+  // a search typed into Scripts & docs must never silently narrow Music too.
+  useEffect(() => {
+    if (!folder) return;
+    setQuery("");
+    setFilm(null);
+    setSort("newest");
+    setView(loadView(folder.id) ?? folder.view);
+  }, [folder?.id]);
+
+  const items = useMemo(
+    () => (folder ? folderItems(assets, folder, { query, sort, film, videos }) : []),
+    [assets, folder, query, sort, film, videos],
+  );
+
+  const changeView = (v: View) => {
+    if (!folder) return;
+    setView(v);
+    saveView(folder.id, v);
   };
 
-  const reveal = async () => {
+  // ---- the lightbox, for Screenshots/Images tiles ----
+  const [lightbox, setLightbox] = useState<Asset | null>(null);
+  const opener = useRef<HTMLElement | null>(null);
+  const openLightbox = (a: Asset) => {
+    opener.current = document.activeElement as HTMLElement | null;
+    setLightbox(a);
+  };
+  const closeLightbox = () => {
+    setLightbox(null);
+    opener.current?.focus();
+  };
+
+  // ---- inline audio: one shared <audio>, owned here (§16.1) ----
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [audioState, setAudioState] = useState<{ path: string | null; paused: boolean }>({ path: null, paused: true });
+  const stopAudio = () => {
+    audioRef.current?.pause();
+    setAudioState({ path: null, paused: true });
+  };
+  const toggleAudio = (asset: Asset) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (audioState.path === asset.path && !audioState.paused) {
+      audio.pause();
+      setAudioState({ path: asset.path, paused: true });
+      return;
+    }
+    if (audioState.path !== asset.path) audio.src = mediaUrl(asset.path);
+    void audio.play().catch(() => undefined);
+    setAudioState({ path: asset.path, paused: false });
+  };
+  // Stops on folder change and film-filter change; unmounting (a tab switch, since Assets is
+  // only ever rendered while stage === "assets") drops the <audio> element itself, which stops
+  // playback the same way.
+  useEffect(() => stopAudio, [selectedId, film]);
+  useEffect(() => stopAudio, []);
+
+  // ---- the Markdown/plain-text preview, for Scripts & docs, Captions, Exports and Edit files ----
+  const [previewPath, setPreviewPath] = useState<string | null>(null);
+  const [preview, setPreview] = useState<{ loading: boolean; text: string; truncated: boolean; error?: string } | null>(null);
+  const isPreviewFolder = !!folder && PREVIEW_FOLDER_IDS.has(folder.id);
+  useEffect(() => {
+    if (!isPreviewFolder) {
+      setPreviewPath(null);
+      return;
+    }
+    if (previewPath && items.some((a) => a.path === previewPath && isPreviewable(a))) return;
+    setPreviewPath(items.find(isPreviewable)?.path ?? null);
+    // previewPath is read, not written, as a dependency here on purpose: this only needs to
+    // re-run when the folder or its items change, not every time the selection itself changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPreviewFolder, items]);
+  useEffect(() => {
+    if (!previewPath) {
+      setPreview(null);
+      return;
+    }
+    let cancelled = false;
+    setPreview({ loading: true, text: "", truncated: false });
+    fetchPreview(previewPath)
+      .then((r) => { if (!cancelled) setPreview({ loading: false, text: r.text, truncated: r.truncated }); })
+      .catch((e) => { if (!cancelled) setPreview({ loading: false, text: "", truncated: false, error: (e as Error).message }); });
+    return () => { cancelled = true; };
+  }, [previewPath]);
+
+  // ---- sidebar keyboard: ↑/↓ move between folders (both focus and selection) ----
+  const onSidebarKeyDown = (e: KeyboardEvent) => {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    const nav = e.currentTarget as HTMLElement;
+    const buttons = Array.from(nav.querySelectorAll<HTMLButtonElement>(".afolder-btn"));
+    const i = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    if (i === -1) return;
+    e.preventDefault();
+    const next = buttons[i + (e.key === "ArrowDown" ? 1 : -1)];
+    if (!next) return;
+    next.focus();
+    next.click();
+  };
+
+  const revealProject = async () => {
     try {
-      await api.post("/api/reveal", { path: asset.path });
+      await api.post("/api/reveal", { project: true });
     } catch (e) {
       toast((e as Error).message);
     }
   };
 
-  const copyPath = async () => {
+  const exportNotes = async () => {
     try {
-      await navigator.clipboard.writeText(asset.abs);
-      toast("Path copied");
-    } catch {
-      toast("Couldn't reach the clipboard");
+      const { path } = await api.post<{ path: string }>("/api/exports/notes");
+      toast(`Saved to ${path}`);
+      onChanged();
+    } catch (e) {
+      toast((e as Error).message);
     }
   };
 
-  return (
-    <div class="aact">
-      {/* href always present, even when missing, so the element keeps the "link" role an <a>
-          without one loses; aria-disabled plus the click guard make it inert instead. */}
-      <a
-        class="btn ghost ib"
-        data-tip="Download"
-        aria-label="Download"
-        aria-disabled={asset.missing}
-        tabIndex={asset.missing ? -1 : undefined}
-        href={`${mediaUrl(asset.path)}&download=1`}
-        download={asset.name}
-        onClick={(e) => { if (asset.missing) e.preventDefault(); }}
-      >
-        <Icon name="download" />
-      </a>
-      {/* aria-disabled, not the native attribute, on all three: a native `disabled` button
-          never matches :hover in any browser, so it could never show a tooltip either way
-          -- the click guard below does the blocking instead. */}
-      {canSaveAs && (
-        <button
-          class="btn ghost ib"
-          data-tip="Save as…"
-          aria-label="Save as…"
-          aria-disabled={asset.missing || saving}
-          tabIndex={asset.missing ? -1 : undefined}
-          onClick={() => { if (!asset.missing) void saveAs(); }}
-        >
-          <Icon name="save" />
-        </button>
-      )}
-      <button
-        class="btn ghost ib"
-        data-tip={revealLabel()}
-        aria-label={revealLabel()}
-        aria-disabled={asset.missing}
-        tabIndex={asset.missing ? -1 : undefined}
-        onClick={() => { if (!asset.missing) void reveal(); }}
-      >
-        <Icon name="folder" />
-      </button>
-      <button
-        class="btn ghost ib"
-        data-tip="Copy path"
-        aria-label="Copy path"
-        aria-disabled={asset.missing}
-        tabIndex={asset.missing ? -1 : undefined}
-        onClick={() => { if (!asset.missing) void copyPath(); }}
-      >
-        <Icon name="copy" />
-      </button>
-    </div>
-  );
-}
+  const countFor = (f: FolderDef) => assets.filter((a) => f.kinds.includes(a.kind)).length;
 
-function Missing() {
-  return <span class="amiss" data-tip="Missing" aria-label="Missing">●</span>;
-}
-
-/** A cut's title and subtitle: "Film · vN" plus its version note, when it has one. */
-function cutLabel(asset: Asset, videos: Video[]): { title: string; subtitle: string | null } {
-  const video = videos.find((v) => v.id === asset.video);
-  const version = video?.versions.find((v) => v.id === asset.version);
-  const title = video && asset.version ? `${video.name} · ${asset.version}` : asset.name;
-  return { title, subtitle: version?.note || null };
-}
-
-function AssetRow({ asset, videos, toast }: { asset: Asset; videos: Video[]; toast(message: string): void }) {
-  const cut = asset.kind === "cut" ? cutLabel(asset, videos) : null;
-  // aria-disabled belongs on the controls inside (Actions), not here: a <div> isn't
-  // interactive, so AT has nothing to disable at this level.
-  return (
-    <div class={`arow${asset.missing ? " missing" : ""}`}>
-      <div class="ainfo">
-        <div class="atitle">
-          {cut ? cut.title : asset.name}
-          {asset.missing && <Missing />}
-        </div>
-        {cut?.subtitle && <div class="asub">{cut.subtitle}</div>}
-        <div class="afolder mono">{asset.path}</div>
-        {/* A missing file has no size or date to show -- just the mark above, no dangling "0 B · ". */}
-        {!asset.missing && <div class="ameta">{formatBytes(asset.size ?? 0)} · {shortDate(asset.modified)}</div>}
-      </div>
-      <Actions asset={asset} toast={toast} />
-    </div>
-  );
-}
-
-function ShotTile({ asset, videos, toast, onOpen }: { asset: Asset; videos: Video[]; toast(message: string): void; onOpen(): void }) {
-  const video = videos.find((v) => v.id === asset.video);
-  const when = asset.t !== undefined && asset.frame !== undefined ? `${fmt(asset.t)} · f${asset.frame}` : asset.name;
-  const film = video && asset.version ? `${video.name} · ${asset.version}` : null;
-  // Same as AssetRow: the controls carry aria-disabled, not this wrapper.
-  return (
-    <div class={`shot-tile${asset.missing ? " missing" : ""}`}>
-      <button type="button" class="shot-thumb" aria-label={`Open ${asset.name} full size`} onClick={onOpen}>
-        <img src={mediaUrl(asset.path)} alt={asset.name} loading="lazy" />
-      </button>
-      <div class="shot-meta">
-        <div class="mono">{when}{asset.missing && <Missing />}</div>
-        {film && <div class="asub">{film}</div>}
-      </div>
-      <Actions asset={asset} toast={toast} />
-    </div>
-  );
-}
-
-/** Every element inside `container` that's actually in the Tab order right now -- links and
- *  buttons, minus anything disabled or pulled out of the order with `tabIndex={-1}` (a missing
- *  asset's actions, say). */
-function tabbable(container: HTMLElement): HTMLElement[] {
-  return Array.from(container.querySelectorAll<HTMLElement>("a[href], button, [tabindex]")).filter((el) => {
-    if ((el as HTMLButtonElement).disabled) return false;
-    const ti = el.getAttribute("tabindex");
-    return ti === null || Number(ti) >= 0;
-  });
-}
-
-/** A simple modal dialog over the full-size image. Esc and a click on the backdrop both close
- *  it; both handlers live on this dialog (not on `window`), so Esc never also reaches the
- *  header's own Escape handling (closing the shortcuts popup, say). Opening moves focus to the
- *  close button and traps Tab inside; closing is the caller's job to send it back to whatever
- *  opened this. */
-function Lightbox({ asset, onClose, toast }: { asset: Asset; onClose(): void; toast(message: string): void }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const closeRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => { closeRef.current?.focus(); }, []);
-  return (
-    <div
-      class="lightbox"
-      role="dialog"
-      aria-modal="true"
-      aria-label={asset.name}
-      ref={ref}
-      onKeyDown={(e) => {
-        if (e.key === "Escape") {
-          e.stopPropagation();
-          onClose();
-          return;
-        }
-        if (e.key !== "Tab" || !ref.current) return;
-        const chain = tabbable(ref.current);
-        if (chain.length === 0) return;
-        const first = chain[0];
-        const last = chain[chain.length - 1];
-        // Only the two ends need handling: Tab and Shift+Tab between everything in the middle
-        // already behaves the way the browser's own order would, untouched.
-        if (e.shiftKey && document.activeElement === first) {
-          e.preventDefault();
-          last.focus();
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault();
-          first.focus();
-        }
-      }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
-    >
-      <div class="lbinner">
-        <img src={mediaUrl(asset.path)} alt={asset.name} />
-        <div class="lbactions">
-          <Actions asset={asset} toast={toast} />
-          <button ref={closeRef} class="btn ghost ib" aria-label="Close" onClick={onClose}><Icon name="x" /></button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/** The Assets tab (§15.3): every registered file in one place, grouped by section. */
-export function Assets({ assets, videos, toast }: AssetsProps) {
-  const [lightbox, setLightbox] = useState<Asset | null>(null);
-  // The element that had focus just before a tile opened the lightbox, so closing it (Esc,
-  // the backdrop, or the close button) can give focus back rather than dropping it to <body>.
-  const opener = useRef<HTMLElement | null>(null);
-  const sections = assetSections(assets);
-
-  const open = (a: Asset) => {
-    opener.current = document.activeElement as HTMLElement | null;
-    setLightbox(a);
-  };
-  const close = () => {
-    setLightbox(null);
-    opener.current?.focus();
-  };
-
-  return (
-    <div class="col assets">
-      {sections.map((section) => (
-        <section class="asec" key={section.kind}>
-          <h3>{section.title}</h3>
-          {section.kind === "screenshot" ? (
-            <div class="shots-grid">
-              {section.items.map((a) => (
-                <ShotTile asset={a} videos={videos} toast={toast} onOpen={() => open(a)} />
-              ))}
-            </div>
-          ) : (
-            <div class="arows">
-              {section.items.map((a) => <AssetRow asset={a} videos={videos} toast={toast} />)}
-            </div>
-          )}
+  const renderGrid = () => {
+    if (!folder) return null;
+    if (folder.id === "screenshot" && sort !== "name") {
+      return groupByFilm(items, videos).map((g, gi) => (
+        <section class="afilm-group" key={g.heading ?? `_${gi}`}>
+          {g.heading && <h3 class="afilm-heading">{g.heading}</h3>}
+          <div class="shots-grid">
+            {g.items.map((a) => <ShotTile key={a.path} asset={a} videos={videos} toast={toast} onOpen={() => openLightbox(a)} />)}
+          </div>
         </section>
-      ))}
-      {lightbox && <Lightbox asset={lightbox} toast={toast} onClose={close} />}
+      ));
+    }
+    if (GRID_POSTER_FOLDERS.has(folder.id)) {
+      return (
+        <div class="shots-grid">
+          {items.map((a) => <PosterTile key={a.path} asset={a} videos={videos} toast={toast} />)}
+        </div>
+      );
+    }
+    return (
+      <div class="shots-grid">
+        {items.map((a) => <ShotTile key={a.path} asset={a} videos={videos} toast={toast} onOpen={() => openLightbox(a)} />)}
+      </div>
+    );
+  };
+
+  const renderList = () => {
+    if (!folder) return null;
+    if (AUDIO_FOLDERS.has(folder.id)) {
+      return (
+        <div class="arows">
+          {items.map((a) => (
+            <AudioRow
+              key={a.path}
+              asset={a}
+              playing={audioState.path === a.path}
+              paused={audioState.paused}
+              onToggle={toggleAudio}
+              videos={videos}
+              toast={toast}
+            />
+          ))}
+        </div>
+      );
+    }
+    if (isPreviewFolder) {
+      return (
+        <div class="arows">
+          {items.map((a) => (
+            <PreviewRow key={a.path} asset={a} selected={previewPath === a.path} onSelect={() => setPreviewPath(a.path)} videos={videos} toast={toast} />
+          ))}
+        </div>
+      );
+    }
+    return (
+      <div class="arows">
+        {items.map((a) => <AssetRow key={a.path} asset={a} videos={videos} toast={toast} />)}
+      </div>
+    );
+  };
+
+  const previewExt = previewPath ? (previewPath.split(".").pop() ?? "").toLowerCase() : "";
+  const renderPreview = () => {
+    if (!previewPath || !preview) return <p class="aempty">Select a file to preview it here.</p>;
+    if (preview.loading) return <p class="aempty">Loading…</p>;
+    if (preview.error) return <p class="aempty">{preview.error}</p>;
+    return (
+      <>
+        {previewExt === "md" ? (
+          <div class="markdown" dangerouslySetInnerHTML={{ __html: safeMarkdownHtml(preview.text) }} />
+        ) : (
+          <pre class="plain">{preview.text}</pre>
+        )}
+        {preview.truncated && <p class="atrunc">Showing the first 1 MB</p>}
+      </>
+    );
+  };
+
+  return (
+    <div class="assets-lib">
+      <nav class="asidebar" aria-label="Folders" onKeyDown={onSidebarKeyDown}>
+        {visibleFolders.map((f) => (
+          <button
+            type="button"
+            class="afolder-btn"
+            key={f.id}
+            aria-current={f.id === selectedId ? "true" : undefined}
+            onClick={() => setSelectedId(f.id)}
+          >
+            <span>{f.title}</span>
+            <span class="count">{countFor(f)}</span>
+          </button>
+        ))}
+        <button type="button" class="afolder-root" onClick={() => void revealProject()}>
+          <Icon name="folder" />
+          Project folder
+        </button>
+      </nav>
+
+      {folder ? (
+        <div class="amain">
+          <header class="aheader">
+            <h2>{folder.title} <span class="count">{items.length}</span></h2>
+            <div class="acontrols">
+              <label class="search-wrap">
+                <Icon name="search" />
+                <input
+                  class="search"
+                  type="search"
+                  aria-label="Search"
+                  placeholder="Search"
+                  value={query}
+                  onInput={(e) => setQuery((e.target as HTMLInputElement).value)}
+                />
+              </label>
+              {folder.filmFilter && (
+                <select class="sel" aria-label="Film" value={film ?? ""} onChange={(e) => setFilm((e.target as HTMLSelectElement).value || null)}>
+                  <option value="">All films</option>
+                  {videos.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+                </select>
+              )}
+              <select class="sel" aria-label="Sort" value={sort} onChange={(e) => setSort((e.target as HTMLSelectElement).value as Sort)}>
+                <option value="newest">Newest</option>
+                <option value="oldest">Oldest</option>
+                <option value="name">Name</option>
+              </select>
+              <div class="seg" role="group" aria-label="View">
+                <button type="button" aria-pressed={view === "grid"} aria-label="Grid view" data-tip="Grid" onClick={() => changeView("grid")}>
+                  <Icon name="grid" />
+                </button>
+                <button type="button" aria-pressed={view === "list"} aria-label="List view" data-tip="List" onClick={() => changeView("list")}>
+                  <Icon name="list" />
+                </button>
+              </div>
+              {folder.id === "export" && (
+                <button type="button" class="btn" onClick={() => void exportNotes()}>
+                  <Icon name="script" />
+                  Export notes
+                </button>
+              )}
+            </div>
+          </header>
+          <div class={`abody${isPreviewFolder ? " split" : ""}`}>
+            <div class="alist">
+              {items.length === 0 ? <p class="aempty">Nothing here yet.</p> : view === "grid" ? renderGrid() : renderList()}
+            </div>
+            {isPreviewFolder && <aside class="apreview">{renderPreview()}</aside>}
+          </div>
+        </div>
+      ) : (
+        <div class="empty">
+          <Icon name="grid" />
+          <h2>Nothing to review in Assets yet</h2>
+        </div>
+      )}
+
+      {/* The one shared player every Play/Pause button in Voiceover/Music/Sound effects drives. */}
+      <audio ref={audioRef} onEnded={() => setAudioState((s) => ({ ...s, paused: true }))} />
+      {lightbox && <Lightbox asset={lightbox} toast={toast} onClose={closeLightbox} />}
     </div>
   );
 }
