@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { readFile, writeFile } from "node:fs/promises";
 import { tmpProject } from "../helpers/tmp.js";
 import { sse } from "../helpers/sse.js";
 import { startServer } from "../../src/server/start.js";
+import { ensureProjectId } from "../../src/core/project.js";
 
 describe("watching .rushes for hand edits", () => {
   it("announces a valid hand edit once, with its rev", async () => {
@@ -68,4 +69,46 @@ describe("watching .rushes for hand edits", () => {
     events.stop();
     await s.close();
   });
+
+  it("reports a corrupt file once, not again on every poll while it stays broken", async () => {
+    const { root } = await tmpProject();
+    const s = await startServer(root, { port: 0 });
+    const events = await sse(s.url);
+    await events.until("event: hello");
+    await writeFile(s.store.path("picks"), "{ broken");
+    await events.until("event: corrupt");
+    // Three or more poll periods (the poll runs every 500ms) with the file left broken.
+    await new Promise((r) => setTimeout(r, 1500));
+    expect(events.text().match(/event: corrupt/g)).toHaveLength(1);
+    events.stop();
+    await s.close();
+  });
+
+  it("the safety poll reads nothing while the project is idle", async () => {
+    const { root, store } = await tmpProject();
+    // Assign the project id up front, so the server's own startup doesn't write
+    // to project.json (ensureProjectIdOnce is a no-op once an id exists) — a
+    // write there would otherwise cost one legitimate, pre-existing fs.watch
+    // read of its own, unrelated to what this test is about.
+    await store.update("project", ensureProjectId);
+    const s = await startServer(root, { port: 0 });
+    // Attached after startServer() resolves, so it only sees reads from here on —
+    // the watcher's own startup seed (one read per file) has already happened.
+    const spy = vi.spyOn(s.store, "read");
+    const events = await sse(s.url);
+    await events.until("event: hello");
+    // Three or more poll periods with no edits at all.
+    await new Promise((r) => setTimeout(r, 1500));
+    expect(spy).not.toHaveBeenCalled();
+    events.stop();
+    await s.close();
+  });
+
+  // A dropped fs.watch notification (the OS failing to deliver one at all, as
+  // opposed to a corrupt or duplicate one) isn't something this suite can force
+  // deterministically — there's no seam to simulate it without faking fs.watch
+  // itself. It's covered instead by stress evidence from building this fix: the
+  // same stress recipe that reproduced the loss 5 times in 150 runs (see
+  // .superpowers/sdd/2026-10-03-rushes-plan-2c-assets/task-3-report.md) passed
+  // 150/150 once the poll safety net was added.
 });
