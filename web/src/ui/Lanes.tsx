@@ -184,7 +184,7 @@ export function Lanes({ rows, length, media, selected, marks, range, onSelect, o
                 ) : streamed ? (
                   <span class="smk" data-tip="Long file: switching isn't sample-exact"><Icon name="stream" /></span>
                 ) : null}
-                {row.meta ?? ""}
+                <span data-meta-text>{row.meta ?? ""}</span>
               </small>
             </button>
             <div

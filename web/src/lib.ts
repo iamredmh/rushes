@@ -626,8 +626,9 @@ export function voiceNoteTarget(sections: VoiceModel["sections"], variants: Vari
 }
 
 /**
- * The rows a Voiceover note is drawn on: the read, for a note on the read, or on a section or take
- * whose time falls in that section; and a take note's own sub-lane while its section is shown.
+ * The rows a Voiceover note is drawn on: the read, for a note on the read, on a section or a take
+ * (at its own time, even outside that section's span — a stray note, from an agent say, must never
+ * appear only in the list); and a take note's own sub-lane while its section is shown.
  */
 export function voiceNoteRows(m: Pick<VoiceModel, "sections" | "variants">, note: Pick<Note, "on" | "t">, shown: string | null): string[] {
   const target = voiceNoteTarget(m.sections, m.variants, note.on);
@@ -635,10 +636,7 @@ export function voiceNoteRows(m: Pick<VoiceModel, "sections" | "variants">, note
   if (target.kind === "read") return [READ_ROW];
   if (target.kind === "variant") return [target.row];
   const s = m.sections.find((x) => x.id === target.section)!;
-  const take = target.kind === "take" ? s.takes.find((t) => t.id === target.take) : undefined;
-  // A take can run past its section's end; a note on that overrun is still on the take.
-  const end = Math.max(s.end, s.start + (take?.duration ?? 0));
-  const rows = note.t >= s.start && note.t <= end ? [READ_ROW] : [];
+  const rows = [READ_ROW];
   if (target.kind === "take" && shown === s.id) rows.push(takeRowKey(s.id, target.take));
   return rows;
 }

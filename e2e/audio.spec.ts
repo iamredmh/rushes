@@ -51,6 +51,24 @@ async function loaded(page: Page, n: number) {
   await expect.poll(async () => (await inspect(page))?.media.length ?? 0, { timeout: 10_000 }).toBe(n);
 }
 
+/**
+ * The computed `overflow` of an element and every ancestor up to (and including) its `.lane`: a
+ * `[data-tip]` mark's tooltip (an `::after`) is clipped if any box between it and the lane hides
+ * overflow, so every link in the chain must stay `visible`.
+ */
+function overflowChain(mark: ReturnType<Page["locator"]>) {
+  return mark.evaluate((el) => {
+    const chain: string[] = [];
+    let node: HTMLElement | null = el as HTMLElement;
+    while (node) {
+      chain.push(getComputedStyle(node).overflow);
+      if (node.classList.contains("lane")) break;
+      node = node.parentElement;
+    }
+    return chain;
+  });
+}
+
 /** Open an audio tab once it has unlocked. */
 async function openTab(page: Page, name: RegExp, key: string) {
   const tab = page.getByRole("tab", { name });
@@ -287,7 +305,13 @@ test("a file over the stream threshold plays through the streamed fallback", asy
   await openTab(page, /Music/, "4");
   await loaded(page, 2);
   expect((await inspect(page)).streamed.length).toBe(2);
-  await expect(page.locator(".lane .smk").first()).toHaveAttribute("data-tip", /switching isn't sample-exact/);
+  const streamedMark = page.locator(".lane .smk").first();
+  await expect(streamedMark).toHaveAttribute("data-tip", /switching isn't sample-exact/);
+  // The Task 3 lane-mark tooltip sits in the meta line, which used to clip it with overflow:
+  // hidden (fixed by the same route as the Voiceover stale/missing marks below).
+  const streamedChain = await overflowChain(streamedMark);
+  expect(streamedChain.length).toBeGreaterThan(1);
+  expect(streamedChain.every((o) => o === "visible")).toBe(true);
   await page.keyboard.press(" ");
   await expect.poll(async () => (await inspect(page)).time, { timeout: 5000 }).toBeGreaterThan(0.6);
   await page.getByRole("button", { name: "B · Long", exact: true }).click();
@@ -567,6 +591,28 @@ test("a take shows the stale mark once the agent changes its line", async ({ pag
   await expect(page.locator(".lane.sub [data-stale]")).toHaveCount(3);
 });
 
+test("the stale mark's tooltip isn't clipped by the name column's ellipsis", async ({ page, rushes }) => {
+  await voScript(rushes);
+  await openVoice(page, rushes);
+  await section(page, "S2").click();
+  await rushes.api("PUT", "/api/script", { sections: [{ id: "s2", start: 3, end: 6, current: "A new line two." }] });
+  const mark = page.locator(".lane.sub [data-stale]").first();
+  await expect(mark).toHaveCSS("overflow", "visible");
+  // Every box between the mark and its lane must stay unclipped too, or the tooltip is cut off
+  // even though the mark itself is fine.
+  const chain = await overflowChain(mark);
+  expect(chain.length).toBeGreaterThan(1);
+  expect(chain.every((o) => o === "visible")).toBe(true);
+  // Hovering actually shows the tooltip (opacity: 1 once the 0.12s transition settles), and its
+  // content isn't suppressed.
+  await mark.hover();
+  await expect
+    .poll(() => mark.evaluate((el) => Number(getComputedStyle(el, "::after").opacity)))
+    .toBe(1);
+  const content = await mark.evaluate((el) => getComputedStyle(el, "::after").content);
+  expect(content).not.toBe("none");
+});
+
 test("New take starts a whole note on the section asking for another take", async ({ page, rushes }) => {
   await voScript(rushes);
   await openVoice(page, rushes);
@@ -585,6 +631,23 @@ test("New take starts a whole note on the section asking for another take", asyn
   expect(notes[0]).toMatchObject({ stage: "voice", on: "s2", scope: "whole", t: null, tOut: null, text: "Another take of S2: slower, and warmer on the last word." });
   await expect(page.locator(".note .on")).toHaveText("S2");
   await expect(page.locator(".note .t")).toHaveText("Whole");
+});
+
+test("New take refuses to drop a pending note, and shows a toast instead", async ({ page, rushes }) => {
+  await voScript(rushes);
+  await openVoice(page, rushes);
+  await section(page, "S2").click();
+  await page.keyboard.press("n");
+  await page.keyboard.type("Half a thought");
+  const scopePoint = page.getByRole("group", { name: "Scope" }).getByRole("button", { name: "Point" });
+  await expect(scopePoint).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "New take" }).click();
+  await expect(page.getByRole("status")).toHaveText("Finish or clear the note you're writing first.");
+  // Nothing about the pending note moved: the text, and the scope, are exactly as they were.
+  await expect(page.getByRole("textbox", { name: "New note" })).toHaveValue("Half a thought");
+  await expect(scopePoint).toHaveAttribute("aria-pressed", "true");
+  const { notes } = await rushes.api("GET", "/api/notes?stage=voice");
+  expect(notes).toHaveLength(0);
 });
 
 test("a range note on a section with Louder 2 dB saves and draws on the read", async ({ page, rushes }) => {

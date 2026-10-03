@@ -306,9 +306,14 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .lane .nm { display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; min-width: 0; text-align: left; border: 0; background: transparent; color: var(--text); padding: 6px 8px; margin: -6px -8px; border-radius: var(--r); cursor: pointer; }
 .lane .nm:hover { background: var(--raised); }
 .lane .nm b { display: flex; gap: 8px; align-items: center; min-width: 0; font-weight: 600; font-size: 15px; }
-.lane .nm b span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Only the name itself ellipsises: a mark beside it (stale, missing) is a sibling span and must
+   stay unclipped, or its [data-tip]::after tooltip gets clipped along with it. */
+.lane .nm b span[data-name] { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lane .nm b i { width: 9px; height: 9px; border-radius: 3px; flex: none; }
-.lane .nm small { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 15px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The meta line itself stays unclipped (its marks need room for their tooltips); only the text
+   span inside it ellipsises. */
+.lane .nm small { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 15px; color: var(--text-3); white-space: nowrap; }
+.lane .nm small span[data-meta-text] { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lane .track { height: 80px; }
 .lane.sub .track { height: 52px; }
 .lane.sub .nm { padding-left: 25px; }

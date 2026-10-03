@@ -268,6 +268,12 @@ export function AudioStage(props: AudioStageProps) {
       engine,
       setOn: setOnValue,
       startNote(text, opts = {}) {
+        // Nothing pending is ever dropped: a half-typed note, a range or quick marks hold the
+        // note box, so New take refuses rather than overwriting them.
+        if (range.in !== null || marks.length > 0 || noteHasText) {
+          toast("Finish or clear the note you're writing first.");
+          return;
+        }
         if (opts.on !== undefined) setOnValue(opts.on);
         if (opts.scope !== undefined) changeScope(opts.scope);
         starter.current?.(text);

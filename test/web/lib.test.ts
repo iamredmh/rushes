@@ -614,12 +614,18 @@ describe("Voiceover", () => {
       expect(voiceNoteTarget(sections, variants, "dry")).toEqual({ kind: "variant", row: "alt/dry" });
       expect(voiceNoteTarget(sections, variants, "s2:t9")).toBeNull();
     });
-    it("draws read and section notes on the read, inside the section's span", () => {
+    it("draws read and section notes on the read", () => {
       const m = model();
       expect(voiceNoteRows(m, n("vo", 10), "s1")).toEqual(["vo"]);
       expect(voiceNoteRows(m, n("s2", 5), "s1")).toEqual(["vo"]);
-      expect(voiceNoteRows(m, n("s2", 9), "s2")).toEqual([]);
       expect(voiceNoteRows(m, n("s2", null), "s2")).toEqual([]);
+    });
+    it("draws a section note on the read at its own time, even outside that section's span", () => {
+      const m = model();
+      // s2 spans [4, 8): t=9 is outside it, but the note must still draw on the read, not vanish
+      // into the list only.
+      expect(voiceNoteRows(m, n("s2", 9), "s2")).toEqual(["vo"]);
+      expect(voiceNoteRows(m, n("s2", 100), "s1")).toEqual(["vo"]);
     });
     it("draws a take note on the read, and on its sub-lane while its section is shown", () => {
       const m = model();
