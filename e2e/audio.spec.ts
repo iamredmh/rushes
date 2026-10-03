@@ -776,6 +776,51 @@ test("marks ticked without a range hold the film, as text and a range do", async
   await expect(films.getByRole("button", { name: /Cutdown/ })).toHaveAttribute("aria-pressed", "true");
 });
 
+test("switching tab, by 1–7 or by a click, refuses to drop a pending audio note", async ({ page, rushes }) => {
+  await rushes.addCut();
+  await rushes.addVariant("music", "Bed", { seconds: 2, freq: 220 });
+  await page.goto(rushes.testUrl());
+  await openTab(page, /Music/, "4");
+  await loaded(page, 1);
+  const tab = (name: RegExp) => page.getByRole("tab", { name });
+  // Nothing pending: the tabs switch freely.
+  await openTab(page, /Picture/, "2");
+  await openTab(page, /Music/, "4");
+  await loaded(page, 1);
+
+  // An In point is pending: the key is refused, and so is a click on a tab, Assets included.
+  await page.keyboard.press("i");
+  await expect(page.locator(".bar .chipx")).toHaveCount(1);
+  await page.keyboard.press("2");
+  await expect(page.getByRole("status")).toHaveText("Add or clear your note first");
+  await expect(tab(/Music/)).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("7");
+  await expect(tab(/Music/)).toHaveAttribute("aria-selected", "true");
+  await tab(/Mix/).click();
+  await expect(tab(/Music/)).toHaveAttribute("aria-selected", "true");
+  await tab(/Assets/).click();
+  await expect(tab(/Music/)).toHaveAttribute("aria-selected", "true");
+
+  // Marks and half-typed text survive the refused switch, exactly as they were.
+  await page.getByRole("group", { name: "Scope" }).getByRole("button", { name: "Range" }).click();
+  await page.getByRole("group", { name: "Marks" }).getByRole("button", { name: "Fall" }).click();
+  await page.keyboard.press("n");
+  await page.keyboard.type("Half a thought");
+  await tab(/Picture/).click();
+  await expect(page.getByRole("status")).toHaveText("Add or clear your note first");
+  await expect(tab(/Music/)).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("textbox", { name: "New note" })).toHaveValue("Half a thought");
+  await expect(page.locator(".bar .chipx")).toHaveCount(1);
+  await expect(page.getByRole("group", { name: "Marks" }).getByRole("button", { name: "Fall" })).toHaveAttribute("aria-pressed", "true");
+
+  // Clear the note (text, mark and range), and the tab can go.
+  await page.getByRole("textbox", { name: "New note" }).fill("");
+  await page.getByRole("group", { name: "Marks" }).getByRole("button", { name: "Fall" }).click();
+  await page.getByRole("button", { name: "Clear range" }).click();
+  await tab(/Picture/).click();
+  await expect(tab(/Picture/)).toHaveAttribute("aria-selected", "true");
+});
+
 // ---- Mix (Task 5) ----
 
 /**
@@ -894,6 +939,79 @@ test("the loudness readout shows the three values (or — without ffmpeg), and a
   await expect(values).toHaveText(["—", "—", "—"]);
   for (let i = 0; i < 3; i++) await expect(values.nth(i)).toHaveAttribute("data-tip", "Nothing to measure");
   await expect(page.locator("[data-measuring]")).toHaveCount(0);
+});
+
+/** Answers every loudness request from the page with `reply()`, counting them. Never reaches ffmpeg. */
+async function fakeLoudness(page: Page, reply: () => { status: number; body: unknown } | Promise<{ status: number; body: unknown }>) {
+  const seen = { count: 0 };
+  await page.route("**/api/mix/loudness", async (route) => {
+    seen.count++;
+    const r = await reply();
+    await route.fulfill({ status: r.status, contentType: "application/json", body: JSON.stringify(r.body) });
+  });
+  return seen;
+}
+const READING = { available: true, integrated: -16.2, truePeak: -1.5, musicUnderVo: -18, silent: false };
+
+test("a timed-out reading says so, and a click on the readout measures again", async ({ page, rushes }) => {
+  await mixProject(page, rushes);
+  let status = 504;
+  const seen = await fakeLoudness(page, () =>
+    status === 504 ? { status, body: { error: "loudness_timeout", message: "ffmpeg didn't finish" } } : { status, body: READING },
+  );
+  await openMix(page, rushes, 4);
+  const meter = page.getByRole("group", { name: "Loudness" });
+  const values = meter.locator("[data-value]");
+  await expect(values.first()).toHaveAttribute("data-tip", "Measuring took too long · click to retry");
+  await expect(values).toHaveText(["—", "—", "—"]);
+  const before = seen.count;
+  // Nothing changed, but the server never caches a timeout: a click asks again.
+  status = 200;
+  await meter.getByRole("button", { name: "Measure again" }).click();
+  await expect(values).toHaveText(["−16.2", "−1.5", "−18 dB"]);
+  expect(seen.count).toBe(before + 1);
+  await expect(meter.getByRole("button", { name: "Measure again" })).toHaveCount(0);
+});
+
+test("a burst of mute and solo inside the debounce makes exactly one loudness request", async ({ page, rushes }) => {
+  await mixProject(page, rushes);
+  const seen = await fakeLoudness(page, () => ({ status: 200, body: READING }));
+  await openMix(page, rushes, 4);
+  await expect(page.getByRole("group", { name: "Loudness" }).locator("[data-value]").first()).toHaveText("−16.2");
+  const start = seen.count;
+  const button = (name: string) => page.getByRole("button", { name, exact: true });
+  // Four changes, well inside the 500 ms window.
+  await page.evaluate(() => {
+    for (const name of ["Mute Music", "Solo Sound effects", "Mute Music", "Solo Sound effects", "Mute Voiceover"]) {
+      document.querySelector<HTMLButtonElement>(`button[aria-label="${name}"]`)!.click();
+    }
+  });
+  await expect(button("Mute Voiceover")).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("[data-measuring]")).toHaveCount(0, { timeout: 5_000 });
+  await page.waitForTimeout(800);
+  expect(seen.count - start).toBe(1);
+});
+
+test("unmuting after 'Nothing to measure' drops that reason while the new reading is on its way", async ({ page, rushes }) => {
+  await mixProject(page, rushes);
+  let release!: () => void;
+  let held: Promise<void> = Promise.resolve();
+  await fakeLoudness(page, async () => {
+    await held;
+    return { status: 200, body: READING };
+  });
+  await openMix(page, rushes, 4);
+  const values = page.getByRole("group", { name: "Loudness" }).locator("[data-value]");
+  await expect(values.first()).toHaveText("−16.2");
+  for (const lane of ["Voiceover", "Music", "Sound effects"]) await page.getByRole("button", { name: `Mute ${lane}`, exact: true }).click();
+  await expect(values.first()).toHaveAttribute("data-tip", "Nothing to measure");
+  // Hold the next reading back: until it lands, the readout must not still claim there's nothing to measure.
+  held = new Promise((ok) => (release = ok));
+  await page.getByRole("button", { name: "Mute Music", exact: true }).click();
+  await expect(values.first()).not.toHaveAttribute("data-tip", "Nothing to measure");
+  await expect(page.locator("[data-measuring]")).toBeVisible();
+  release();
+  await expect(values.first()).toHaveText("−16.2");
 });
 
 test("a lane with nothing picked, or a missing file, is empty and left out of the loudness request", async ({ page, rushes }) => {

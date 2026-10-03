@@ -142,13 +142,17 @@ export function App() {
   const tabs = state?.tabs ?? [];
   const tab = (s: Stage) => tabs.find((t) => t.stage === s);
   const assetsUnlocked = assets.length > 0;
+  // Leaving a tab unmounts it, so a note in the making there (the same `pending` that holds the
+  // film and New take) would be lost: refuse the switch instead, by click or by 1–7.
   const show = (s: Stage) => {
     if (!tab(s)?.unlocked) return toast(`Nothing to review in ${STAGE_NAMES[s]} yet`);
+    if (pending && s !== stage) return toast("Add or clear your note first");
     setStage(s);
     setSent(null);
   };
   const showAssets = () => {
     if (!assetsUnlocked) return toast("Nothing to review in Assets yet");
+    if (pending && stage !== "assets") return toast("Add or clear your note first");
     setStage("assets");
     setSent(null);
   };
