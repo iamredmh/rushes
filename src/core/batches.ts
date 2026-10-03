@@ -38,6 +38,11 @@ export function createBatch(
   return batch;
 }
 
+// §17.7: the audio tabs (Voiceover, Music, Sound effects, Mix) point the agent at the picks as
+// well as the notes, since fixing a note there usually means registering a new take or variant
+// and re-picking it, not just posting a new cut.
+const AUDIO_STAGES: readonly Stage[] = ["voice", "music", "sfx", "mix"];
+
 export function buildPrompt(project: string, stage: Stage, batchId: string, notes: number, sections: number): string {
   const parts: string[] = [];
   if (notes) parts.push(`${notes} note${notes === 1 ? "" : "s"}`);
@@ -45,7 +50,9 @@ export function buildPrompt(project: string, stage: Stage, batchId: string, note
   const steps =
     stage === "script"
       ? "Use rushes_get_batch, take each section's proposed line, then rushes_set_script with just those sections (it merges by id)."
-      : "Use rushes_get_batch, fix each note, then rushes_reply with a fixT for each and rushes_add_version for the new cut.";
+      : AUDIO_STAGES.includes(stage)
+        ? 'Use rushes_get_batch and rushes_get_picks, fix each note (marks such as "Fall" or "Quieter 3 dB" are part of the note), register the new variant or take, then rushes_reply.'
+        : "Use rushes_get_batch, fix each note, then rushes_reply with a fixT for each and rushes_add_version for the new cut.";
   return `Work through ${STAGE_NAMES[stage]} batch ${batchId} on ${project}: ${parts.join(" and ")}.\n${steps}`;
 }
 

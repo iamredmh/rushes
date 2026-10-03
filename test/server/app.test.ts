@@ -4,6 +4,7 @@ import { basename, join } from "node:path";
 import { Store } from "../../src/core/store.js";
 import { tmpProject } from "../helpers/tmp.js";
 import { createApp, type AppOptions } from "../../src/server/app.js";
+import type { LoudnessRunner } from "../../src/server/loudness.js";
 import { ProjectIdSchema } from "../../src/core/schema.js";
 
 // The smallest valid PNG (1×1, transparent).
@@ -722,5 +723,55 @@ describe("POST /api/exports/notes", () => {
     expect(b.status).toBe(201);
     const written = await readFile(join(root, a.json.path), "utf8");
     expect(written).toContain("notes");
+  });
+});
+
+describe("POST /api/mix/loudness (§17.6)", () => {
+  const EBUR128 = "  Integrated loudness:\n    I:         -20.0 LUFS\n\n  True peak:\n    Peak:      -6.0 dBFS\n";
+
+  async function withVariant(run: LoudnessRunner, opts: Partial<AppOptions> = {}) {
+    const { call, root } = await setup({ loudnessRunner: run, ...opts });
+    await mkdir(join(root, "audio"), { recursive: true });
+    await writeFile(join(root, "audio", "a.wav"), "not real audio");
+    await call("POST", "/api/variants", { stage: "music", name: "Deep house", file: "audio/a.wav" });
+    return { call };
+  }
+
+  it("returns the measured loudness, available: true", async () => {
+    const run: LoudnessRunner = async (args) => (args[0] === "-version" ? { code: 0, stderr: "" } : { code: 0, stderr: EBUR128 });
+    const { call } = await withVariant(run);
+    const r = await call("POST", "/api/mix/loudness", { lanes: ["music"] });
+    expect(r.status).toBe(200);
+    expect(r.json).toEqual({ available: true, integrated: -20, truePeak: -6, musicUnderVo: null });
+  });
+
+  it("caches: the runner isn't called again for a second, identical request", async () => {
+    let calls = 0;
+    const run: LoudnessRunner = async (args) => {
+      calls++;
+      return args[0] === "-version" ? { code: 0, stderr: "" } : { code: 0, stderr: EBUR128 };
+    };
+    const { call } = await withVariant(run);
+    await call("POST", "/api/mix/loudness", { lanes: ["music"] });
+    const callsAfterFirst = calls;
+    const second = await call("POST", "/api/mix/loudness", { lanes: ["music"] });
+    expect(second.json).toEqual({ available: true, integrated: -20, truePeak: -6, musicUnderVo: null });
+    expect(calls).toBe(callsAfterFirst);
+  });
+
+  it("returns { available: false } when ffmpeg is missing", async () => {
+    const run: LoudnessRunner = async () => ({ code: 1, stderr: "ffmpeg: command not found" });
+    const { call } = await withVariant(run);
+    const r = await call("POST", "/api/mix/loudness", { lanes: ["music"] });
+    expect(r.status).toBe(200);
+    expect(r.json).toMatchObject({ available: false });
+  });
+
+  it("returns 504 when a run hangs past the timeout", async () => {
+    const run: LoudnessRunner = (args) => (args[0] === "-version" ? Promise.resolve({ code: 0, stderr: "" }) : new Promise(() => {}));
+    const { call } = await withVariant(run, { loudnessTimeoutMs: 50 });
+    const r = await call("POST", "/api/mix/loudness", { lanes: ["music"] });
+    expect(r.status).toBe(504);
+    expect(r.json).toMatchObject({ error: "loudness_timeout" });
   });
 });

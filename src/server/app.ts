@@ -20,7 +20,8 @@ import { GRAB_PATH, SCREENSHOT_PATH, contentDisposition, contentType, inside, is
 import { candidatePaths, listAssets, fpsFor, screenshotName } from "./assets.js";
 import { osRevealer, osOpener, OPEN_SAFE_EXT, type Revealer, type Opener } from "./reveal.js";
 import type { CorruptEvent } from "./watch.js";
-import { LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, FileKindSchema, ProjectIdSchema, ShotSchema, type Batch, type Note } from "../core/schema.js";
+import { LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, FileKindSchema, MarkSchema, ProjectIdSchema, ShotSchema, type Batch, type Note } from "../core/schema.js";
+import { defaultRunner, measureMix, type LoudnessRunner } from "./loudness.js";
 
 export const VERSION = "0.1.0";
 
@@ -50,6 +51,7 @@ const NewNoteBody = z.object({
   text: z.string(),
   box: BoxSchema.nullish(),
   grab: z.string().nullish(),
+  marks: z.array(MarkSchema).max(4).optional(),
 });
 
 const UserEditBody = z.object({
@@ -59,6 +61,7 @@ const UserEditBody = z.object({
   scope: z.enum(["point", "range", "whole"]).optional(),
   t: t.nullable().optional(),
   tOut: t.nullable().optional(),
+  marks: z.array(MarkSchema).max(4).optional(),
   status: z.enum(["todo", "done"]).optional(),
 });
 
@@ -114,6 +117,8 @@ const ShotsBody = z.object({
 
 const LockBody = z.object({ version: z.string().nullable() });
 
+const MixLoudnessBody = z.object({ lanes: z.array(LaneStageSchema).min(1) });
+
 const GrabBody = z.object({
   video: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
   version: z.string().regex(/^v\d+$/),
@@ -158,6 +163,10 @@ export interface AppOptions {
   reveal?: Revealer;
   /** Opens a file in its default application for POST /api/open. Defaults to osOpener. */
   open?: Opener;
+  /** Runs ffmpeg for POST /api/mix/loudness. Defaults to a real ffmpeg spawn. Tests inject a fake. */
+  loudnessRunner?: LoudnessRunner;
+  /** Kills a loudness ffmpeg run after this many ms, returning 504. Defaults to 60s; tests set it low. */
+  loudnessTimeoutMs?: number;
 }
 
 const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost"]);
@@ -552,6 +561,15 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
       Object.assign(p.sections, b.sections ?? {});
     });
     return c.json(data);
+  });
+
+  // ---- mix loudness (§17.6) ----
+  app.post("/api/mix/loudness", async (c) => {
+    const b = await body(c, MixLoudnessBody);
+    const [project, script, picks] = await Promise.all([store.read("project"), store.read("script"), store.read("picks")]);
+    const run = opts.loudnessRunner ?? defaultRunner;
+    const result = await measureMix(project, script, picks, b.lanes, store.root, run, opts.loudnessTimeoutMs);
+    return c.json(result);
   });
 
   // ---- batches ----

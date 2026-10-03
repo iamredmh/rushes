@@ -16,6 +16,8 @@ export interface NewNote {
   grab?: string | null;
   /** Stamped by the server (Task 2) from the version's shots; passed through here. */
   shot?: Note["shot"];
+  /** User-owned, like text (§14.5): the quick marks on a range note on an audio tab. */
+  marks?: Note["marks"];
   by?: Note["by"];
 }
 
@@ -65,13 +67,15 @@ export interface UserEdit {
   scope?: Note["scope"];
   t?: number | null;
   tOut?: number | null;
+  /** User-owned, like text (§14.5): applyReply never touches this. */
+  marks?: Note["marks"];
   status?: Note["status"];
 }
 
 export function applyUserEdit(file: NotesFile, e: UserEdit): Note {
   const n = find(file, e.id);
   const next = { ...n };
-  for (const k of ["text", "box", "grab", "scope", "t", "tOut", "status"] as const) {
+  for (const k of ["text", "box", "grab", "scope", "t", "tOut", "marks", "status"] as const) {
     if (e[k] !== undefined) (next as Record<string, unknown>)[k] = e[k];
   }
   const parsed = NoteSchema.safeParse(next);

@@ -8,6 +8,7 @@ import { AlreadyRunningError, canonicalRoot } from "../server/lock.js";
 import { ApiError, RushesClient, dashboardUrlFor } from "../mcp/client.js";
 import { openBrowser, runStdio } from "../mcp/stdio.js";
 import { VERSION } from "../server/app.js";
+import { markLabel, type Mark } from "../core/schema.js";
 import { setup, type SetupEnv } from "../setup/setup.js";
 import { realSetupEnv } from "../setup/env.js";
 import type { HarnessId } from "../setup/harnesses.js";
@@ -322,7 +323,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
         if (o.json) return io.out(JSON.stringify(notes, null, 2)), 0;
         for (const n of notes) {
           const shot = n.shot ? `shot ${String(n.shot.n).padStart(2, "0")} ` : "";
-          io.out(`${n.id}  ${n.status === "done" ? "done" : "todo"}  ${n.stage.padEnd(7)} ${when(n).padEnd(17)} ${shot}${n.text}`);
+          const marks = (n.marks as Mark[] | undefined)?.length ? `${(n.marks as Mark[]).map(markLabel).join(" · ")}  ` : "";
+          io.out(`${n.id}  ${n.status === "done" ? "done" : "todo"}  ${n.stage.padEnd(7)} ${when(n).padEnd(17)} ${marks}${shot}${n.text}`);
         }
         if (!notes.length) io.out("No notes");
         return 0;

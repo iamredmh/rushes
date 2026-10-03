@@ -88,4 +88,23 @@ describe("createBatch", () => {
     expect(b.prompt).toContain("2 script sections");
     expect(b.prompt).toContain("rushes_set_script");
   });
+
+  it("points an audio-stage batch (voice, music, sfx, mix) at the picks and the notes' marks (§17.7)", () => {
+    const c = ctx();
+    for (const stage of ["voice", "music", "sfx", "mix"] as const) {
+      addNote(c.notes, { stage, scope: "whole", text: "Fix it" });
+      const b = createBatch(c, stage);
+      expect(b.prompt).toContain(
+        'Use rushes_get_batch and rushes_get_picks, fix each note (marks such as "Fall" or "Quieter 3 dB" are part of the note), register the new variant or take, then rushes_reply.',
+      );
+    }
+  });
+
+  it("keeps picture's own prompt wording (it doesn't go through picks)", () => {
+    const c = ctx();
+    addNote(c.notes, { stage: "picture", scope: "point", t: 1, text: "x" });
+    const b = createBatch(c, "picture");
+    expect(b.prompt).toContain("Use rushes_get_batch, fix each note, then rushes_reply with a fixT for each and rushes_add_version for the new cut.");
+    expect(b.prompt).not.toContain("rushes_get_picks");
+  });
 });

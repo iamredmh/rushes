@@ -123,6 +123,24 @@ export const BoxSchema = z.object({
   h: z.number().min(0).max(1),
 });
 
+// §14.5/§17.1: a range note on an audio tab can carry up to four quick marks. Louder/quieter
+// need a dB amount (chosen from 1, 2, 3, 6 or 9 in the UI, 3 the default); rise/fall never carry
+// one. Both rules, plus "no duplicate kinds" and "only on audio-ish stages", are enforced on the
+// note as a whole below, since they depend on more than one mark (or on the note's stage).
+export const MarkSchema = z.object({
+  kind: z.enum(["rise", "fall", "louder", "quieter"]),
+  db: z.number().min(0.5).max(24).optional(),
+});
+export type Mark = z.infer<typeof MarkSchema>;
+
+const MARK_STAGES: readonly Stage[] = ["voice", "music", "sfx", "mix"];
+
+/** "Rise" | "Fall" | "Louder 3 dB" | "Quieter 3 dB". */
+export function markLabel(m: Mark): string {
+  const label = m.kind === "rise" ? "Rise" : m.kind === "fall" ? "Fall" : m.kind === "louder" ? "Louder" : "Quieter";
+  return m.db === undefined ? label : `${label} ${m.db} dB`;
+}
+
 export const NoteSchema = z
   .object({
     id,
@@ -138,6 +156,7 @@ export const NoteSchema = z
     box: BoxSchema.nullable().default(null),
     grab: z.string().nullable().default(null),
     shot: z.object({ n: z.number().int().positive(), name: z.string() }).nullable().default(null),
+    marks: z.array(MarkSchema).max(4).default([]),
     status: z.enum(["todo", "done"]).default("todo"),
     reply: z.string().default(""),
     fixT: seconds.nullable().default(null),
@@ -154,6 +173,24 @@ export const NoteSchema = z
     }
     if (n.scope === "whole" && (n.t !== null || n.tOut !== null))
       ctx.addIssue({ code: "custom", path: ["scope"], message: "a whole-track note has no t or tOut" });
+
+    if (n.marks.length > 0 && !MARK_STAGES.includes(n.stage)) {
+      ctx.addIssue({ code: "custom", path: ["marks"], message: `marks don't apply to the ${n.stage} stage` });
+    }
+    const seenKinds = new Set<string>();
+    for (let i = 0; i < n.marks.length; i++) {
+      const m = n.marks[i];
+      if ((m.kind === "louder" || m.kind === "quieter") && m.db === undefined) {
+        ctx.addIssue({ code: "custom", path: ["marks", i, "db"], message: `${m.kind} needs a db amount` });
+      }
+      if ((m.kind === "rise" || m.kind === "fall") && m.db !== undefined) {
+        ctx.addIssue({ code: "custom", path: ["marks", i, "db"], message: `${m.kind} doesn't take a db amount` });
+      }
+      if (seenKinds.has(m.kind)) {
+        ctx.addIssue({ code: "custom", path: ["marks", i, "kind"], message: `duplicate mark "${m.kind}"` });
+      }
+      seenKinds.add(m.kind);
+    }
   });
 export type Note = z.infer<typeof NoteSchema>;
 

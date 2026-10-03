@@ -295,6 +295,28 @@ describe("cli", () => {
     await s.close();
   });
 
+  it("shows a note's marks (§17.7)", async () => {
+    const { root } = await tmpProject();
+    const s = await startServer(root, { port: 0 });
+    await fetch(`${s.url}/api/notes`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        stage: "music",
+        scope: "range",
+        t: 12,
+        tOut: 15,
+        text: "Bring it down",
+        marks: [{ kind: "fall" }, { kind: "quieter", db: 3 }],
+      }),
+    });
+    const a = io(root);
+    expect(await main(["notes", "--stage", "music"], a.x)).toBe(0);
+    expect(a.out[0]).toContain("Fall · Quieter 3 dB");
+    expect(a.out[0]).toContain("Bring it down");
+    await s.close();
+  });
+
   it("carries 59.999 s into the next minute instead of printing 0:60.00", async () => {
     const { root } = await tmpProject();
     const s = await startServer(root, { port: 0 });

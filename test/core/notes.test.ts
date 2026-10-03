@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { addNote, applyReply, applyUserEdit, filterNotes } from "../../src/core/notes.js";
-import { NoteSchema, type NotesFile } from "../../src/core/schema.js";
+import { markLabel, NoteSchema, type NotesFile } from "../../src/core/schema.js";
 
 const empty = (): NotesFile => ({ schema: 1, rev: 0, notes: [] });
 
@@ -79,6 +79,81 @@ describe("NoteSchema", () => {
     };
     const parsed = NoteSchema.parse(plan2Fixture);
     expect(parsed.shot).toBeNull();
+  });
+
+  it("a note with no marks (Plan 1-2) still loads, with marks: []", () => {
+    const oldFixture = {
+      id: "n_abc123",
+      stage: "music",
+      scope: "whole",
+      text: "Tempo feels slow",
+      createdAt: "2026-10-02T12:00:00.000Z",
+    };
+    expect(NoteSchema.parse(oldFixture).marks).toEqual([]);
+  });
+});
+
+describe("marks (§14.5)", () => {
+  const base = { stage: "music" as const, scope: "whole" as const, text: "x" };
+
+  it("accepts rise and fall with no db, and louder/quieter with one", () => {
+    const f = empty();
+    expect(addNote(f, { ...base, marks: [{ kind: "rise" }] }).marks).toEqual([{ kind: "rise" }]);
+    expect(addNote(f, { ...base, marks: [{ kind: "fall" }] }).marks).toEqual([{ kind: "fall" }]);
+    expect(addNote(f, { ...base, marks: [{ kind: "louder", db: 3 }] }).marks).toEqual([{ kind: "louder", db: 3 }]);
+    expect(addNote(f, { ...base, marks: [{ kind: "quieter", db: 6 }] }).marks).toEqual([{ kind: "quieter", db: 6 }]);
+  });
+
+  it("rejects louder/quieter with no db", () => {
+    const f = empty();
+    expect(() => addNote(f, { ...base, marks: [{ kind: "louder" }] })).toThrow(/invalid/i);
+    expect(() => addNote(f, { ...base, marks: [{ kind: "quieter" }] })).toThrow(/invalid/i);
+  });
+
+  it("rejects rise/fall with a db amount", () => {
+    const f = empty();
+    expect(() => addNote(f, { ...base, marks: [{ kind: "rise", db: 3 }] })).toThrow(/invalid/i);
+    expect(() => addNote(f, { ...base, marks: [{ kind: "fall", db: 3 }] })).toThrow(/invalid/i);
+  });
+
+  it("rejects duplicate kinds", () => {
+    const f = empty();
+    expect(() => addNote(f, { ...base, marks: [{ kind: "rise" }, { kind: "rise" }] })).toThrow(/invalid/i);
+    expect(() => addNote(f, { ...base, marks: [{ kind: "louder", db: 3 }, { kind: "louder", db: 6 }] })).toThrow(/invalid/i);
+  });
+
+  it("allows up to four distinct marks", () => {
+    const f = empty();
+    const n = addNote(f, { ...base, marks: [{ kind: "rise" }, { kind: "fall" }, { kind: "louder", db: 3 }, { kind: "quieter", db: 3 }] });
+    expect(n.marks).toHaveLength(4);
+  });
+
+  it("marks only apply on voice, music, sfx and mix", () => {
+    const f = empty();
+    for (const stage of ["voice", "music", "sfx", "mix"] as const) {
+      expect(addNote(f, { stage, scope: "whole", text: "x", marks: [{ kind: "rise" }] }).marks).toEqual([{ kind: "rise" }]);
+    }
+    expect(() => addNote(f, { stage: "picture", scope: "point", t: 1, text: "x", marks: [{ kind: "rise" }] })).toThrow(/invalid/i);
+    expect(() => addNote(f, { stage: "script", scope: "whole", text: "x", marks: [{ kind: "rise" }] })).toThrow(/invalid/i);
+  });
+
+  it("marks are user-owned: applyUserEdit can set them, applyReply can't touch them", () => {
+    const f = empty();
+    const n = addNote(f, { stage: "music", scope: "whole", text: "Tempo" });
+    applyUserEdit(f, { id: n.id, marks: [{ kind: "fall" }] });
+    expect(f.notes[0].marks).toEqual([{ kind: "fall" }]);
+    applyReply(f, { id: n.id, reply: "Done", status: "done" });
+    expect(f.notes[0].marks).toEqual([{ kind: "fall" }]);
+  });
+});
+
+describe("markLabel", () => {
+  it("labels rise and fall with no amount, louder/quieter with their dB", () => {
+    expect(markLabel({ kind: "rise" })).toBe("Rise");
+    expect(markLabel({ kind: "fall" })).toBe("Fall");
+    expect(markLabel({ kind: "louder", db: 3 })).toBe("Louder 3 dB");
+    expect(markLabel({ kind: "quieter", db: 3 })).toBe("Quieter 3 dB");
+    expect(markLabel({ kind: "quieter", db: 9 })).toBe("Quieter 9 dB");
   });
 });
 

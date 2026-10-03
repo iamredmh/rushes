@@ -1,5 +1,5 @@
 import { slugify } from "./ids.js";
-import type { Note, Project, Stage } from "./schema.js";
+import { markLabel, type Note, type Project, type Stage } from "./schema.js";
 
 // Picture notes are grouped by film and version; the other stages list straight through.
 // Script isn't included here -- script edits live in script.json, not notes.json.
@@ -49,9 +49,10 @@ function continued(text: string, indent: string): string {
 }
 
 function noteLines(n: Note): string[] {
+  const marks = n.marks.length ? ` · ${n.marks.map(markLabel).join(" · ")}` : "";
   const shot = n.shot ? ` · shot ${pad(n.shot.n)}` : "";
   const status = n.status === "done" ? "done" : "to do";
-  const lines = [`- **${noteTime(n.t, n.tOut)}**${shot} · ${status} — ${continued(n.text, "  ")}`];
+  const lines = [`- **${noteTime(n.t, n.tOut)}**${marks}${shot} · ${status} — ${continued(n.text, "  ")}`];
   if (n.reply) lines.push(`  - Reply: ${continued(n.reply, "    ")}`);
   if (n.grab) lines.push(`  - Screenshot: ${n.grab}`);
   return lines;

@@ -96,6 +96,20 @@ describe("notesMarkdown", () => {
     expect(md).toContain("  - Screenshot: screenshots/hero_v1_00m12.40s_f372.png");
   });
 
+  it("shows marks after the timecode (§17.7)", () => {
+    const notes: NotesFile = { schema: 1, rev: 0, notes: [] };
+    addNote(notes, {
+      stage: "music",
+      scope: "range",
+      t: 12,
+      tOut: 15,
+      text: "Bring the bed down here",
+      marks: [{ kind: "fall" }, { kind: "quieter", db: 3 }],
+    });
+    const md = notesMarkdown(project(), notes.notes, new Date(2026, 9, 3, 9, 0));
+    expect(md).toContain("- **0:12.00–0:15.00** · Fall · Quieter 3 dB · to do — Bring the bed down here");
+  });
+
   it("escapes nothing -- HTML, ampersands, Markdown emphasis and backticks all appear verbatim", () => {
     const notes: NotesFile = { schema: 1, rev: 0, notes: [] };
     const text = "Logo has <b>bold</b> & *stars* and a `code` span";
