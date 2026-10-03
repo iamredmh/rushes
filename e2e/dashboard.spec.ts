@@ -1007,6 +1007,33 @@ test("a file dropped into the project root appears once something refreshes Asse
   await expect(page.locator(".arow", { hasText: "notes2.md" })).toHaveCount(1);
 });
 
+test("a screenshot card holds its thumbnail and its actions, at any window width", async ({ page, rushes }) => {
+  // Real grabs, at the clip's full size: a large image is what pushed the card wider than its column.
+  await rushes.addCut();
+  await page.goto(rushes.url);
+  await videoReady(page);
+  for (let i = 0; i < 3; i++) {
+    await page.keyboard.press("g");
+    await expect(page.getByRole("status")).toContainText("Saved to screenshots/");
+    for (let k = 0; k < 10; k++) await page.keyboard.press("ArrowRight");
+  }
+  await page.keyboard.press("7");
+  await expect(page.locator(".shot-tile")).toHaveCount(3);
+  for (const width of [1440, 1180, 1000, 760]) {
+    await page.setViewportSize({ width, height: 900 });
+    const spills = await page.locator(".shot-tile").evaluateAll((tiles) =>
+      tiles.flatMap((tile) => {
+        const box = tile.getBoundingClientRect();
+        return [...tile.querySelectorAll(".shot-thumb, .aact, .aact > *")]
+          .map((el) => el.getBoundingClientRect())
+          .filter((r) => r.left < box.left - 0.5 || r.right > box.right + 0.5)
+          .map((r) => `${Math.round(r.right - box.right)}px past the edge`);
+      }),
+    );
+    expect(spills, `at ${width}px wide`).toEqual([]);
+  }
+});
+
 test("200 screenshots stay usable", async ({ page, rushes }) => {
   await mkdir(join(rushes.root, "screenshots"), { recursive: true });
   await Promise.all(

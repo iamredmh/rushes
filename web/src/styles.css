@@ -255,11 +255,13 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 
 .afilm-group + .afilm-group { margin-top: 20px; }
 .afilm-heading { margin: 0 0 12px; font-size: 15px; font-weight: 600; color: var(--text-2); }
-.shots-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; }
-.shot-tile { background: var(--raised); border-radius: var(--r-lg); padding: 10px; display: grid; gap: 10px; }
+.shots-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: 14px; }
+/* One column that can shrink to the card, so the thumbnail and the five actions never spill past its edge. */
+.shot-tile { background: var(--raised); border-radius: var(--r-lg); padding: 10px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; min-width: 0; }
+.shot-tile .aact { justify-content: space-between; flex-wrap: wrap; }
 .shot-tile.missing { opacity: 0.55; }
-.shot-thumb { border: 0; padding: 0; background: #000; border-radius: var(--r); aspect-ratio: 4 / 3; overflow: hidden; cursor: pointer; display: block; width: 100%; }
-.shot-thumb img, .shot-thumb video { width: 100%; height: 100%; object-fit: contain; background: var(--bg); display: block; }
+.shot-thumb { border: 0; padding: 0; background: #000; border-radius: var(--r); aspect-ratio: 4 / 3; overflow: hidden; cursor: pointer; display: block; width: 100%; min-width: 0; }
+.shot-thumb img, .shot-thumb video { width: 100%; height: 100%; max-width: 100%; min-width: 0; object-fit: contain; background: var(--bg); display: block; }
 .shot-thumb.poster { cursor: default; }
 /* A non-video Delivery file's grid tile (I5): its extension, not a black poster box. */
 .file-tile { width: 100%; height: 100%; display: grid; place-items: center; background: var(--app); }
