@@ -20,4 +20,6 @@ Rushes shows your work to the user stage by stage (script, picture, voiceover, m
 6. For script batches: when a section's `proposed` differs from `current`, adopt it with `rushes_set_script`, sending just that section with its `id`. Then make new takes for it.
 7. Lock picture with `rushes_lock_picture` only when the user says picture is locked; `version: null` unlocks it.
 
-Rushes has thirteen tools: `rushes_open`, `rushes_status`, `rushes_add_version`, `rushes_add_variant`, `rushes_set_script`, `rushes_get_script`, `rushes_add_take`, `rushes_list_notes`, `rushes_get_batch`, `rushes_reply`, `rushes_get_picks`, `rushes_set_shots` and `rushes_lock_picture`. The full contract is in `AGENTS.md` at the package root.
+Save renders, takes, beds and passes under the project's `renders/`, `audio/voiceover/`, `audio/music/` and `audio/sfx/` folders. Screenshots the user grabs with G or the camera button land in `screenshots/`. Use `rushes_list_assets` (optional `kind`) to find a file the user refers to but hasn't given you a path for, such as "use the screenshot I just took".
+
+Rushes has fourteen tools: `rushes_open`, `rushes_status`, `rushes_add_version`, `rushes_add_variant`, `rushes_set_script`, `rushes_get_script`, `rushes_add_take`, `rushes_list_notes`, `rushes_list_assets`, `rushes_get_batch`, `rushes_reply`, `rushes_get_picks`, `rushes_set_shots` and `rushes_lock_picture`. The full contract is in `AGENTS.md` at the package root.

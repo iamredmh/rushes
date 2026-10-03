@@ -10,6 +10,24 @@ npx -y github:iamredmh/rushes setup
 
 This registers the Rushes MCP server with every supported harness it finds (Claude Code, Codex, Cursor, Claude Desktop, Gemini CLI), and installs the skill where the harness supports skills. If it added anything, ask the user to restart the app. Use `--dry-run` to preview, and `--only claude-code,codex` to limit it.
 
+## Project folders
+
+Rushes recommends this layout; save your output there rather than wherever's convenient:
+
+```
+my-film/
+  renders/              cuts               hero-60s_v3.mp4
+  audio/
+    voiceover/          VO takes           s02_take3.wav
+    music/              music beds         deep-house.wav
+    sfx/                SFX passes         sfx_pass-a.wav
+  screenshots/          frame grabs        hero-60s_v3_00m12.05s_f726.png
+  exports/              (later) notes and markers for Premiere and Resolve
+  .rushes/              Rushes' own records (hidden; not for editing by hand)
+```
+
+Save renders to `renders/`, VO takes to `audio/voiceover/`, music beds to `audio/music/` and SFX passes to `audio/sfx/`. Screenshots live in `screenshots/` — the user's G key and camera button grab there; Rushes creates the folder itself on the first grab. `rushes_list_assets` (optional `kind`) returns every registered asset plus every screenshot. Call it when the user refers to something they haven't given you a path for — "use the screenshot I just took" — instead of guessing the file name.
+
 ## The loop
 
 1. **Register what you made.**
@@ -27,7 +45,7 @@ This registers the Rushes MCP server with every supported harness it finds (Clau
 
 ## Tools
 
-The MCP server has thirteen tools: `rushes_open`, `rushes_status`, `rushes_add_version`, `rushes_add_variant`, `rushes_set_script`, `rushes_get_script`, `rushes_add_take`, `rushes_list_notes`, `rushes_get_batch`, `rushes_reply`, `rushes_get_picks`, `rushes_set_shots` and `rushes_lock_picture`. Each takes an optional `project` folder, which defaults to the folder the harness started in.
+The MCP server has fourteen tools: `rushes_open`, `rushes_status`, `rushes_add_version`, `rushes_add_variant`, `rushes_set_script`, `rushes_get_script`, `rushes_add_take`, `rushes_list_notes`, `rushes_list_assets`, `rushes_get_batch`, `rushes_reply`, `rushes_get_picks`, `rushes_set_shots` and `rushes_lock_picture`. Each takes an optional `project` folder, which defaults to the folder the harness started in.
 
 ## Rules
 
