@@ -1,9 +1,10 @@
 import { test as base, expect, type Page } from "@playwright/test";
 import { spawn, type ChildProcess } from "node:child_process";
-import { copyFile, mkdir, mkdtemp, rm } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { makeWav } from "./fixtures/wav.js";
 
 const CLI = fileURLToPath(new URL("../dist/cli/index.js", import.meta.url));
 const CLIP = fileURLToPath(new URL("./fixtures/clip.mp4", import.meta.url));
@@ -11,9 +12,21 @@ const VERTICAL = fileURLToPath(new URL("./fixtures/vertical.mp4", import.meta.ur
 
 const DASHBOARD_URL = /http:\/\/127\.0\.0\.1:\d+\/p\/[a-z2-9]{8}\//;
 
+export interface VariantOptions {
+  seconds: number;
+  /** Tone frequency in Hz. */
+  freq: number;
+  meta?: Record<string, string | number>;
+  cues?: { name: string; t: number }[];
+  /** Lane name; defaults to the stage's own lane. */
+  lane?: string;
+}
+
 export interface Rushes {
   /** The dashboard URL this tab should be on: `http://127.0.0.1:PORT/p/<id>/`. */
   url: string;
+  /** The same URL with the test-only switches (`?test=1`, plus any extra query) that expose the audio engine. */
+  testUrl(extra?: string): string;
   /** Origin only (no `/p/<id>/`), for calling the API the way an agent would. */
   base: string;
   root: string;
@@ -23,6 +36,8 @@ export interface Rushes {
   addCut(note?: string, video?: string): Promise<{ version: { id: string } }>;
   /** Register the 9:16 test clip (360x640, 2 s) as a new cut of "Hero". */
   addVerticalCut(note?: string): Promise<{ version: { id: string } }>;
+  /** Write a generated sine WAV into the project and register it as a variant on `stage`. */
+  addVariant(stage: "voice" | "music" | "sfx", name: string, opts: VariantOptions): Promise<{ lane: { id: string }; variant: { id: string; cues: { id: string; name: string; t: number }[] } }>;
   /**
    * Stop this project's server and start a different, fresh project on exactly the
    * same port, simulating port reuse after `rushes stop`. Updates `url`, `base` and
@@ -131,6 +146,14 @@ export const test = base.extend<{ rushes: Rushes }>({
       await copyFile(VERTICAL, join(root, file));
       return api("POST", "/api/versions", { video: "Hero", file, note });
     };
+    let wavs = 0;
+    const addVariant = async (stage: "voice" | "music" | "sfx", name: string, opts: VariantOptions) => {
+      const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+      const file = `audio/${stage}-${++wavs}-${slug}.wav`;
+      await mkdir(join(root, "audio"), { recursive: true });
+      await writeFile(join(root, file), makeWav({ seconds: opts.seconds, freq: opts.freq }));
+      return api("POST", "/api/variants", { stage, name, file, lane: opts.lane, meta: opts.meta, cues: opts.cues });
+    };
     const swapProject = async () => {
       const port = Number(new URL(url).port);
       await stop(child);
@@ -145,11 +168,13 @@ export const test = base.extend<{ rushes: Rushes }>({
 
     await use({
       get url() { return url; },
+      testUrl: (extra = "") => `${url}?test=1${extra ? `&${extra}` : ""}`,
       get base() { return origin; },
       get root() { return root; },
       api,
       addCut,
       addVerticalCut,
+      addVariant,
       swapProject,
     });
 

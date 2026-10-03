@@ -1,5 +1,5 @@
 // Pure helpers for the dashboard. No DOM, so they're unit-tested in Node.
-import type { Asset, AssetKind, Note, Section, Shot, Stage, TabState, Video, Version } from "./types.js";
+import type { Asset, AssetKind, Cue, Lane, Mark, Note, Section, Shot, Stage, TabState, Video, Version } from "./types.js";
 
 /** 72.4 -> "1:12.40" (minutes, seconds, hundredths). */
 export function fmt(t: number): string {
@@ -80,7 +80,7 @@ export function neighbourVideo(videos: Video[], currentId: string | null, dir: -
 }
 
 /** Is this stage built in this release of the dashboard? Later releases add the audio tabs. */
-export const BUILT: Record<Stage, boolean> = { script: true, picture: true, voice: false, music: false, sfx: false, mix: false };
+export const BUILT: Record<Stage, boolean> = { script: true, picture: true, voice: false, music: true, sfx: true, mix: false };
 
 export const STAGE_NAMES: Record<Stage, string> = {
   script: "Script",
@@ -302,4 +302,168 @@ export function boxFrom(x0: number, y0: number, x1: number, y1: number, w: numbe
   const bx = clamp(Math.max(x0, x1) / w);
   const by = clamp(Math.max(y0, y1) / h);
   return { x: ax, y: ay, w: Math.round((bx - ax) * 10000) / 10000, h: Math.round((by - ay) * 10000) / 10000 };
+}
+
+// ---- audio tabs (§17) ----
+
+export type AudioStageId = "voice" | "music" | "sfx" | "mix";
+export type Scope = "point" | "range" | "whole";
+export type MarkKind = Mark["kind"];
+
+/** Quick-start chips per audio tab (§17.1). They only put a prefix in the note box. */
+export const AUDIO_CHIPS: Record<AudioStageId, string[]> = {
+  voice: ["Level", "Pace", "Pronunciation", "Breath"],
+  music: ["Tempo", "Key", "Energy", "Ending"],
+  sfx: ["Timing", "Level", "Swap sound", "Remove"],
+  mix: ["Level", "Balance", "Loudness"],
+};
+
+/** Louder/Quieter amounts on offer, and the default (§17.1). */
+export const MARK_DB: readonly number[] = [1, 2, 3, 6, 9];
+export const DEFAULT_MARK_DB = 3;
+const MARK_ORDER: MarkKind[] = ["rise", "fall", "louder", "quieter"];
+const OPPOSITE: Record<MarkKind, MarkKind> = { rise: "fall", fall: "rise", louder: "quieter", quieter: "louder" };
+const takesDb = (k: MarkKind) => k === "louder" || k === "quieter";
+
+/**
+ * A web copy of src/core/schema.ts's markLabel (the web bundle imports types only from src/; a
+ * unit test asserts the two agree): "Rise" | "Fall" | "Louder 3 dB" | "Quieter 3 dB".
+ */
+export function markLabel(m: Mark): string {
+  const label = m.kind === "rise" ? "Rise" : m.kind === "fall" ? "Fall" : m.kind === "louder" ? "Louder" : "Quieter";
+  return m.db === undefined ? label : `${label} ${m.db} dB`;
+}
+
+/** A note's marks as one line, "Fall · Quieter 3 dB", or null when it has none. */
+export function marksLabel(marks: Mark[] | undefined): string | null {
+  return marks && marks.length > 0 ? marks.map(markLabel).join(" · ") : null;
+}
+
+/**
+ * Turn a mark on or off. Rise and Fall exclude each other, and so do Louder and Quieter; one of
+ * each pair can be combined (Fall + Quieter 3 dB). Louder/Quieter carry `db`. Kept in a fixed order.
+ */
+export function toggleMark(marks: Mark[], kind: MarkKind, db = DEFAULT_MARK_DB): Mark[] {
+  const on = marks.some((m) => m.kind === kind);
+  const out = marks.filter((m) => m.kind !== kind && m.kind !== OPPOSITE[kind]);
+  if (!on) out.push(takesDb(kind) ? { kind, db } : { kind });
+  return out.sort((a, b) => MARK_ORDER.indexOf(a.kind) - MARK_ORDER.indexOf(b.kind));
+}
+
+/** Change the dB amount on an active Louder/Quieter mark. */
+export function setMarkDb(marks: Mark[], kind: MarkKind, db: number): Mark[] {
+  return marks.map((m) => (m.kind === kind && takesDb(kind) ? { kind, db } : m));
+}
+
+/** A variant card's second line: its description, else BPM · key; on SFX, the cue count too. */
+export function variantMeta(meta: Record<string, string | number> | undefined, cues = 0): string | null {
+  const parts: string[] = [];
+  const description = meta?.description;
+  if (description !== undefined && String(description).trim()) parts.push(String(description));
+  else {
+    if (meta?.bpm !== undefined) parts.push(`${meta.bpm} BPM`);
+    if (meta?.key !== undefined) parts.push(String(meta.key));
+  }
+  if (cues > 0) parts.push(`${cues} cue${cues === 1 ? "" : "s"}`);
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+/** One lane on Music or Sound effects: a variant of one of the stage's lanes (§17.3, §17.4). */
+export interface VariantRow {
+  /** `<lane id>/<variant id>`: unique, and the engine clip id. */
+  key: string;
+  lane: string;
+  laneName: string;
+  variant: string;
+  name: string;
+  meta: string | null;
+  file: string;
+  cues: Cue[];
+}
+
+/** Every variant of every lane on `stage`, in manifest order. */
+export function variantRows(lanes: Lane[], stage: "voice" | "music" | "sfx"): VariantRow[] {
+  const rows: VariantRow[] = [];
+  for (const l of lanes) {
+    if (l.stage !== stage) continue;
+    for (const v of l.variants) {
+      rows.push({
+        key: `${l.id}/${v.id}`, lane: l.id, laneName: l.name, variant: v.id, name: v.name,
+        meta: variantMeta(v.meta, stage === "sfx" ? v.cues.length : 0), file: v.file, cues: v.cues,
+      });
+    }
+  }
+  return rows;
+}
+
+/** One entry in a note's On menu: `on` is what's saved, `t` a cue's own time. */
+export interface OnOption {
+  value: string;
+  label: string;
+  on: string | null;
+  /** A cue's time: a point note on a cue is saved at it (§17.4). */
+  t?: number;
+  /** The lane row this option belongs to, if any. */
+  row?: string;
+}
+
+/** The On menu for variant rows: each variant, then (with `cues`) each cue as `Cue · Swipe`. */
+export function variantOnOptions(rows: VariantRow[], nameOf: (r: VariantRow) => string, cues = false): OnOption[] {
+  const out: OnOption[] = rows.map((r) => ({ value: `v:${r.key}`, label: nameOf(r), on: r.variant, row: r.key }));
+  if (!cues) return out;
+  const seen = new Set(out.map((o) => o.label));
+  for (const r of rows) {
+    for (const c of r.cues) {
+      let label = `Cue · ${c.name}`;
+      if (seen.has(label)) label = `${label} · ${nameOf(r)}`;
+      seen.add(label);
+      out.push({ value: `c:${r.key}:${c.id}`, label, on: c.id, t: c.t, row: r.key });
+    }
+  }
+  return out;
+}
+
+/** The row a note is drawn on: the variant it's `on`, else the pass holding the cue it's `on`. */
+export function variantNoteRow(rows: VariantRow[], on: string | null): string | null {
+  if (on === null) return null;
+  return rows.find((r) => r.variant === on)?.key ?? rows.find((r) => r.cues.some((c) => c.id === on))?.key ?? null;
+}
+
+/**
+ * Which clip each engine lane plays: the selected row's clip in its lane, else the picked one,
+ * else the lane's first. Audition and Use can differ (§17.3).
+ */
+export function laneSelection(
+  rows: { key: string; audition?: { lane: string; clip: string }; picked?: boolean }[],
+  selected: string | null,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  const sel = rows.find((r) => r.key === selected)?.audition;
+  for (const r of rows) {
+    const a = r.audition;
+    if (!a || out[a.lane] !== undefined) continue;
+    if (sel && sel.lane === a.lane) out[a.lane] = sel.clip;
+    else out[a.lane] = (rows.find((x) => x.picked && x.audition?.lane === a.lane) ?? r).audition!.clip;
+  }
+  return out;
+}
+
+/** A stable shuffle of `keys` for Blind: the same seed always gives the same order. */
+export function blindOrder(keys: string[], seed: number): string[] {
+  const hash = (k: string) => {
+    let h = (2166136261 ^ seed) >>> 0;
+    for (let i = 0; i < k.length; i++) h = Math.imul(h ^ k.charCodeAt(i), 16777619) >>> 0;
+    // One more avalanche round so keys differing only at the end still spread out.
+    h ^= h >>> 15;
+    h = Math.imul(h, 2246822507) >>> 0;
+    return (h ^ (h >>> 13)) >>> 0;
+  };
+  return [...keys].sort((a, b) => hash(a) - hash(b) || (a < b ? -1 : a > b ? 1 : 0));
+}
+
+/** Test-only switches read from the page URL. `streamOver` only counts alongside `test`. */
+export function testFlags(search: string): { test: boolean; streamOver: boolean } {
+  const q = new URLSearchParams(search);
+  const test = q.get("test") === "1";
+  return { test, streamOver: test && q.get("streamOver") === "1" };
 }

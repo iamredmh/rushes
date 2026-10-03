@@ -139,7 +139,15 @@ export function peakBuckets(duration: number): number {
 
 /** Stream (rather than decode) a file that wouldn't decode, or runs over 15 minutes. */
 export function shouldStream(duration: number | null, decoded: boolean): boolean {
-  return !decoded || (duration !== null && duration > MAX_DECODED_SECONDS);
+  return !decoded || (duration !== null && duration > streamThreshold);
+}
+
+// The length past which a file streams. Only a test build moves it (`?test=1&streamOver=1`), so the
+// streamed path can be exercised in a real browser without a 15-minute fixture.
+let streamThreshold = MAX_DECODED_SECONDS;
+/** Test-only: stream files longer than `seconds` (null restores the 15-minute default). */
+export function setStreamThreshold(seconds: number | null): void {
+  streamThreshold = seconds ?? MAX_DECODED_SECONDS;
 }
 
 /** Skip downloading a file whose size (from `content-length`) rules out 15 minutes. */

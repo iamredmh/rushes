@@ -199,7 +199,8 @@ test("a tab that isn't built yet says so instead of showing an empty page", asyn
   await rushes.addCut();
   await rushes.api("POST", "/api/variants", { stage: "music", name: "Deep house", file: "renders/hero_v1.mp4" });
   await page.goto(rushes.url);
-  await page.getByRole("tab", { name: /Music/ }).click();
+  // Music is built now (Plan 3); Mix, unlocked by the cut plus a music bed, isn't yet.
+  await page.getByRole("tab", { name: /Mix/ }).click();
   await expect(page.getByText("This tab arrives in the next release", { exact: false })).toBeVisible();
 });
 

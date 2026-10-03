@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   activeVariantGain, assembleRead, assetRev, type Clip, computePeaks, HAVE_FUTURE_DATA, laneGains, MAX_DECODE_BYTES,
   MAX_DECODED_SECONDS, mediaKey, mixPeaks, needsVideoSync, peakBuckets, resolveDurations, SEEK_COOLDOWN_SECONDS,
-  shouldStream, startPlan, streamStep, timelineLength, tooLargeToDecode, variantGains,
+  setStreamThreshold, shouldStream, startPlan, streamStep, timelineLength, tooLargeToDecode, variantGains,
 } from "../../web/src/audio/timeline.js";
 import type { Section, Take } from "../../web/src/types.js";
 
@@ -123,6 +123,16 @@ describe("streaming fallback", () => {
     expect(shouldStream(null, false)).toBe(true);
     expect(shouldStream(10, false)).toBe(true);
     expect(shouldStream(null, true)).toBe(false);
+  });
+  it("lets a test build lower the threshold, and restores it", () => {
+    setStreamThreshold(1);
+    try {
+      expect(shouldStream(3, true)).toBe(true);
+      expect(shouldStream(0.5, true)).toBe(false);
+    } finally {
+      setStreamThreshold(null);
+    }
+    expect(shouldStream(3, true)).toBe(false);
   });
   it("starts, corrects drift past 50 ms, and stops a streamed element", () => {
     // In range and paused: start it.

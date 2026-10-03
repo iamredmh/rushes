@@ -7,6 +7,12 @@ import type { Asset, Note, Section, Shot, TabState, Video } from "../../web/src/
 // Only this test imports the server's own list, so the web copy (ruling 1) is never pulled
 // into the web bundle -- this is purely to assert the two stay equal.
 import { OPEN_SAFE_EXT as SERVER_OPEN_SAFE_EXT } from "../../src/server/reveal.js";
+import { markLabel as serverMarkLabel, type Mark } from "../../src/core/schema.js";
+import {
+  AUDIO_CHIPS, BUILT, blindOrder, laneSelection, markLabel, marksLabel, setMarkDb, testFlags, toggleMark, variantMeta,
+  variantNoteRow, variantOnOptions, variantRows,
+} from "../../web/src/lib.js";
+import type { Lane } from "../../web/src/types.js";
 
 const note = (over: Partial<Note>): Note => ({
   id: "n_1", stage: "picture", video: "hero", version: "v3", on: null, scope: "point", t: 12.4, tOut: null, frame: null,
@@ -383,5 +389,98 @@ describe("neighbourVideo", () => {
   it("is null when the current id isn't found", () => {
     expect(neighbourVideo(videos, "nope", 1)).toBeNull();
     expect(neighbourVideo(videos, null, 1)).toBeNull();
+  });
+});
+
+describe("audio tabs: marks", () => {
+  it("labels marks exactly as the server does", () => {
+    const all: Mark[] = [{ kind: "rise" }, { kind: "fall" }, { kind: "louder", db: 3 }, { kind: "quieter", db: 6 }, { kind: "quieter", db: 1.5 }];
+    for (const m of all) expect(markLabel(m)).toBe(serverMarkLabel(m));
+    expect(marksLabel([{ kind: "fall" }, { kind: "quieter", db: 3 }])).toBe("Fall · Quieter 3 dB");
+    expect(marksLabel([])).toBeNull();
+    expect(marksLabel(undefined)).toBeNull();
+  });
+  it("toggles marks, keeping Rise/Fall and Louder/Quieter exclusive but combinable", () => {
+    let m = toggleMark([], "fall");
+    expect(m).toEqual([{ kind: "fall" }]);
+    m = toggleMark(m, "quieter");
+    expect(m).toEqual([{ kind: "fall" }, { kind: "quieter", db: 3 }]);
+    m = toggleMark(m, "rise");
+    expect(m).toEqual([{ kind: "rise" }, { kind: "quieter", db: 3 }]);
+    m = toggleMark(m, "louder", 6);
+    expect(m).toEqual([{ kind: "rise" }, { kind: "louder", db: 6 }]);
+    m = toggleMark(m, "louder");
+    expect(m).toEqual([{ kind: "rise" }]);
+    expect(toggleMark(m, "rise")).toEqual([]);
+  });
+  it("changes the dB on an active Louder or Quieter only", () => {
+    const m: Mark[] = [{ kind: "fall" }, { kind: "quieter", db: 3 }];
+    expect(setMarkDb(m, "quieter", 9)).toEqual([{ kind: "fall" }, { kind: "quieter", db: 9 }]);
+    expect(setMarkDb(m, "fall", 9)).toEqual(m);
+  });
+});
+
+describe("audio tabs: lanes", () => {
+  const lanes: Lane[] = [
+    { id: "music", stage: "music", name: "Music", variants: [
+      { id: "a", name: "A · Deep house", file: "a.wav", meta: { bpm: 120, key: "A minor" }, cues: [] },
+      { id: "b", name: "B · Warm keys", file: "b.wav", meta: { description: "Soft and warm", bpm: 104 }, cues: [] },
+    ] },
+    { id: "sfx", stage: "sfx", name: "Sound effects", variants: [
+      { id: "pass-a", name: "Pass A", file: "pa.wav", meta: { description: "Subtle" }, cues: [{ id: "swipe", name: "Swipe", t: 1.5 }, { id: "tap", name: "Tap", t: 0.5 }] },
+      { id: "pass-b", name: "Pass B", file: "pb.wav", meta: {}, cues: [{ id: "swipe", name: "Swipe", t: 1.6 }] },
+    ] },
+  ];
+  it("turns on Music and Sound effects", () => {
+    expect(BUILT.music).toBe(true);
+    expect(BUILT.sfx).toBe(true);
+    expect(AUDIO_CHIPS.music).toEqual(["Tempo", "Key", "Energy", "Ending"]);
+    expect(AUDIO_CHIPS.sfx).toEqual(["Timing", "Level", "Swap sound", "Remove"]);
+  });
+  it("makes one row per variant in manifest order, with description or BPM · key", () => {
+    const rows = variantRows(lanes, "music");
+    expect(rows.map((r) => r.key)).toEqual(["music/a", "music/b"]);
+    expect(rows.map((r) => r.meta)).toEqual(["120 BPM · A minor", "Soft and warm"]);
+    expect(variantRows(lanes, "sfx").map((r) => r.meta)).toEqual(["Subtle · 2 cues", "1 cue"]);
+    expect(variantMeta(undefined)).toBeNull();
+  });
+  it("lists passes then cues in the On menu, telling same-named cues apart", () => {
+    const rows = variantRows(lanes, "sfx");
+    const opts = variantOnOptions(rows, (r) => r.name, true);
+    expect(opts.map((o) => o.label)).toEqual(["Pass A", "Pass B", "Cue · Swipe", "Cue · Tap", "Cue · Swipe · Pass B"]);
+    expect(opts[2]).toMatchObject({ on: "swipe", t: 1.5, row: "sfx/pass-a" });
+    expect(variantOnOptions(rows, (r) => r.name).length).toBe(2);
+  });
+  it("draws a note on its variant, or on the pass holding its cue", () => {
+    const sfx = variantRows(lanes, "sfx");
+    expect(variantNoteRow(sfx, "pass-b")).toBe("sfx/pass-b");
+    expect(variantNoteRow(sfx, "tap")).toBe("sfx/pass-a");
+    expect(variantNoteRow(sfx, null)).toBeNull();
+    expect(variantNoteRow(sfx, "nope")).toBeNull();
+  });
+  it("hears the selected row, else the pick, else the first, per engine lane", () => {
+    const rows = [
+      { key: "a", audition: { lane: "m", clip: "a" } },
+      { key: "b", audition: { lane: "m", clip: "b" }, picked: true },
+      { key: "x", audition: { lane: "s", clip: "x" } },
+      { key: "read" },
+    ];
+    expect(laneSelection(rows, null)).toEqual({ m: "b", s: "x" });
+    expect(laneSelection(rows, "a")).toEqual({ m: "a", s: "x" });
+    expect(laneSelection(rows, "read")).toEqual({ m: "b", s: "x" });
+  });
+  it("shuffles for Blind stably, as a permutation", () => {
+    const keys = ["a", "b", "c", "d", "e", "f"];
+    const one = blindOrder(keys, 7);
+    expect([...one].sort()).toEqual(keys);
+    expect(blindOrder(keys, 7)).toEqual(one);
+    const seeds = [1, 2, 3, 4, 5].map((s) => blindOrder(keys, s).join(""));
+    expect(new Set(seeds).size).toBeGreaterThan(1);
+  });
+  it("reads the test switches only with test=1", () => {
+    expect(testFlags("")).toEqual({ test: false, streamOver: false });
+    expect(testFlags("?test=1")).toEqual({ test: true, streamOver: false });
+    expect(testFlags("?test=1&streamOver=1")).toEqual({ test: true, streamOver: true });
+    expect(testFlags("?streamOver=1")).toEqual({ test: false, streamOver: false });
   });
 });
