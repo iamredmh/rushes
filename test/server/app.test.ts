@@ -295,6 +295,15 @@ describe("API", () => {
     expect(picks.json.lanes).toEqual({ music: "deep-house" });
   });
 
+  it("a round name is capped at 64 characters, so its lane id always fits", async () => {
+    const { call } = await setup();
+    const ok = await call("POST", "/api/variants", { stage: "voice", name: "Gerald", file: "audio/g.wav", round: "R".repeat(64) });
+    expect(ok.status).toBe(201);
+    const long = await call("POST", "/api/variants", { stage: "voice", name: "Jane", file: "audio/j.wav", round: "R".repeat(65) });
+    expect(long.status).toBe(400);
+    expect(JSON.stringify(long.json)).toContain("round");
+  });
+
   it("picks: null clears a lane or section pick, and leaves the rest", async () => {
     const { call, store } = await setup();
     await call("PUT", "/api/picks", { lanes: { music: "deep-house", sfx: "pass-a", voice: "warm" }, sections: { s1: "t1", s2: "t3" } });

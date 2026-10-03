@@ -129,9 +129,11 @@ export function createMcpServer(ctx: ToolContext): McpServer {
         lane: z.string().optional().describe("Lane id. Defaults to `round` slugged, else the stage. Wins over `round`: give a lane only to add to an existing lane by its id."),
         round: z
           .string()
+          .min(1)
+          .max(64)
           .optional()
           .describe(
-            'Round name for voice reads, e.g. "Round 2 · Gerald, tone". Reads in one round are compared side by side; a new direction gets a new round.',
+            'Round name for voice reads (up to 64 characters), e.g. "Round 2 · Gerald, tone". Reads in one round are compared side by side; a new direction gets a new round.',
           ),
         meta: z.record(z.string(), z.union([z.string(), z.number()])).optional().describe("e.g. {\"bpm\": 120, \"key\": \"A minor\"}"),
         cues: z.array(z.object({ name: z.string(), t: z.number().nonnegative() })).optional().describe("SFX cues with times in seconds."),

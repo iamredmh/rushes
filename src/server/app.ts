@@ -83,7 +83,7 @@ const VersionBody = z.object({ video: z.string().min(1), file: z.string().min(1)
 const VariantBody = z.object({
   stage: LaneStageSchema,
   lane: z.string().optional(),
-  round: z.string().min(1).max(80).optional(),
+  round: z.string().min(1).max(64).optional(),
   name: z.string().min(1),
   file: z.string().min(1),
   meta: z.record(z.string(), z.union([z.string(), z.number()])).optional(),
