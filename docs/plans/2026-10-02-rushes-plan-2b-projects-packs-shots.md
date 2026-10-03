@@ -41,7 +41,7 @@
 - **Old data loads.** A `project.json` or `notes.json` written by Plan 1 or 2 (no `id`, no `shots`, no `lockedVersion`, no note `shot`) must still validate, through schema defaults or optionals.
 - **Git:** commits use this repo's local identity (`iamredmh <17407420+iamredmh@users.noreply.github.com>`). Never change git config. Every commit message ends with a blank line and then `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`. Never push.
 - **Prose** in docs and UI is UK English.
-- **No client names** (Caffeine, OISY, DFINITY) and no private paths in anything committed.
+- **No client or brand names** and no private paths in anything committed.
 
 ## Review Focus
 

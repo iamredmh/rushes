@@ -46,7 +46,7 @@
   - Commits use the repo's local identity, `iamredmh <17407420+iamredmh@users.noreply.github.com>`. Never change git config.
   - Each message ends with a blank line and then `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
   - Never push.
-- **Prose:** UK English. No client names (Caffeine, OISY, DFINITY) and no private or local paths in anything committed, including plan docs.
+- **Prose:** UK English. No client or brand names and no private or local paths in anything committed, including plan docs.
 
 ## Review Focus
 
