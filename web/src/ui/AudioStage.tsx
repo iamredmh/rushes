@@ -349,13 +349,14 @@ export function AudioStage(props: AudioStageProps) {
   };
 
   const version = preview?.version ?? null;
-  // Audio times are the audio's own: they don't move with the cut, so they're drawn as saved.
+  // Audio times are the audio's own: they don't move with the cut, so they're drawn as saved. A tab
+  // without Range (Voiceover, §18.3) draws an older range note as a point at its In, never a span.
   const drawn: Record<string, LaneMark[]> = {};
   for (const n of notes) {
     if (n.scope === "whole" || n.t === null) continue;
     const at = noteRow(n);
     for (const row of at === null ? [] : typeof at === "string" ? [at] : at) {
-      (drawn[row] ??= []).push({ id: n.id, t: n.t, tOut: n.tOut, status: n.status, text: n.text });
+      (drawn[row] ??= []).push({ id: n.id, t: n.t, tOut: hasRange ? n.tOut : null, status: n.status, text: n.text });
     }
   }
 

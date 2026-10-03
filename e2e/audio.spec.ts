@@ -780,6 +780,15 @@ test("a cut-off description's tooltip isn't clipped by the name column's ellipsi
   expect(await meta.evaluate((el) => getComputedStyle(el, "::after").content)).toBe(JSON.stringify(LONG));
 });
 
+test("an older Range note on a read draws on Voiceover as a point at its In, never a span (§18.3)", async ({ page, rushes }) => {
+  await twoRounds(rushes);
+  const { note } = await rushes.api("POST", "/api/notes", { stage: "voice", on: `${R2_ID}/more-sombre`, scope: "range", t: 1, tOut: 3, text: "From before rounds." });
+  await openVoice(page, rushes, 5);
+  const row = page.locator(`.lane[data-row="${R2_ID}/more-sombre"]`);
+  await expect(row.locator(`.mk[data-note="${note.id}"]`)).toHaveCount(1);
+  await expect(row.locator(`.span[data-note="${note.id}"]`)).toHaveCount(0);
+});
+
 test("a read added with no round shows under a Voiceover heading, and older notes are listed, not drawn", async ({ page, rushes }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
