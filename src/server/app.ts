@@ -24,7 +24,7 @@ import type { CorruptEvent } from "./watch.js";
 import { LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, FileKindSchema, MarkSchema, ProjectIdSchema, ShotSchema, LEVEL_MIN, LEVEL_MAX, LEVEL_STEP, type Batch, type Note } from "../core/schema.js";
 import { defaultRunner, measureMix, type LoudnessRunner } from "./loudness.js";
 
-export const VERSION = "0.1.0";
+export const VERSION = "0.2.0";
 
 async function body<T>(c: Context, schema: z.ZodType<T>): Promise<T> {
   let json: unknown;

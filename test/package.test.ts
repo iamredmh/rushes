@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { VERSION } from "../src/server/app.js";
 
 // §19.7: what ships to npm. Keeping this list in a test, rather than just in package.json,
 // means a future change to "files" has to pass a reader who can say why each entry is there.
@@ -22,5 +23,9 @@ describe("package.json, §19.7", () => {
 
   it("is at 0.2.0", () => {
     expect(pkg.version).toBe("0.2.0");
+  });
+
+  it("the runtime VERSION constant (the CLI's --version and help banner) matches package.json, so they can't drift apart", () => {
+    expect(VERSION).toBe(pkg.version);
   });
 });
