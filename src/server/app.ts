@@ -3,7 +3,7 @@ import { streamSSE } from "hono/streaming";
 import { z } from "zod";
 import type { Store, ChangeEvent } from "../core/store.js";
 import { RushesError, InvalidError, NotFoundError } from "../core/errors.js";
-import { addFile, addVariant, addVersion, ensureProjectIdOnce, lockPicture, setShots, shotAt } from "../core/project.js";
+import { addFile, addVariant, addVersion, ensureProjectIdOnce, lockPicture, resolveVideo, setShots, shotAt } from "../core/project.js";
 import { addTake, editSection, setSections } from "../core/script.js";
 import { addNote, applyReply, applyUserEdit, filterNotes } from "../core/notes.js";
 import { createBatch, latestBatch } from "../core/batches.js";
@@ -11,7 +11,8 @@ import { exportFileName, notesMarkdown } from "../core/exportNotes.js";
 import { tabStates } from "../core/tabs.js";
 import { fromManifestPath, toManifestPath } from "../core/paths.js";
 import { probe } from "../core/media.js";
-import { lstat, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { PROXY_PATH, ProxyJobs, extractFrame, type ProxyEvent } from "./proxy.js";
+import { lstat, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { basename, extname, join } from "node:path";
@@ -125,6 +126,9 @@ const LockBody = z.object({ version: z.string().nullable() });
 
 const MixLoudnessBody = z.object({ lanes: z.array(LaneStageSchema).min(1) });
 
+const SettingsBody = z.object({ autoProxy: z.boolean() }).strict();
+const FrameQuery = z.object({ t: z.coerce.number().finite().nonnegative() });
+
 const GrabBody = z.object({
   video: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
   version: z.string().regex(/^v\d+$/),
@@ -144,7 +148,9 @@ const AddFileBody = z.object({
   video: z.string().optional(),
 });
 
-const MAX_GRAB_BYTES = 25 * 1024 * 1024;
+// Big enough for a full-quality frame of a 4K original from the frame endpoint (§19.5), which
+// Picture posts here as the grab: 3840×2160 RGB is 24.9 MB before PNG compression.
+const MAX_GRAB_BYTES = 64 * 1024 * 1024;
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 /** Where the built dashboard lives: <package>/web-dist, next to dist/ and src/. */
@@ -173,6 +179,8 @@ export interface AppOptions {
   loudnessRunner?: LoudnessRunner;
   /** Kills a loudness ffmpeg run after this many ms, returning 504. Defaults to 60s; tests set it low. */
   loudnessTimeoutMs?: number;
+  /** §19.5's proxy jobs (and the ffmpeg/ffprobe they use). startServer passes its own so it can cancel them on close; tests inject fakes. */
+  proxyJobs?: ProxyJobs;
 }
 
 const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost"]);
@@ -193,6 +201,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   const webDir = opts.webDir ?? DEFAULT_WEB_DIR;
   const reveal = opts.reveal ?? osRevealer;
   const open = opts.open ?? osOpener;
+  const jobs = opts.proxyJobs ?? new ProxyJobs(store);
   const app = new Hono();
   // Every SSE client adds a change listener, so lift Node's default limit of ten.
   store.setMaxListeners(0);
@@ -455,10 +464,18 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   });
 
   app.get("/api/state", async (c) => {
-    const [project, script, notes, picks, batches] = await Promise.all([
-      store.read("project"), store.read("script"), store.read("notes"), store.read("picks"), store.read("batches"),
+    const [project, script, notes, picks, batches, ffmpeg] = await Promise.all([
+      store.read("project"), store.read("script"), store.read("notes"), store.read("picks"), store.read("batches"), jobs.available(),
     ]);
-    return c.json({ project, script, notes, picks, batches, tabs: tabStates(project, script, notes) });
+    const tabs = tabStates(project, script, notes);
+    // §19.5: why each cut may play badly (or null), probed once per file revision, never per request.
+    const videos = await Promise.all(
+      project.videos.map(async (v) => ({
+        ...v,
+        versions: await Promise.all(v.versions.map(async (ver) => ({ ...ver, proxyNeed: await jobs.needFor(fromManifestPath(store.root, ver.file)) }))),
+      })),
+    );
+    return c.json({ project: { ...project, videos }, script, notes, picks, batches, tabs, proxies: { ffmpeg, jobs: jobs.list() } });
   });
 
   app.get("/api/tabs", async (c) => {
@@ -503,16 +520,109 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   app.post("/api/versions", async (c) => {
     const b = await body(c, VersionBody);
     const file = toManifestPath(store.root, b.file);
-    const info = await probe(fromManifestPath(store.root, file));
+    const abs = fromManifestPath(store.root, file);
+    // The proxy jobs' probe is ffprobe (tests inject a fake), so the cut's need is read from the same answer.
+    const info = await jobs.probe(abs);
     let lockedVersion: string | null = null;
+    let autoProxy = false;
     const { result } = await store.update("project", (p) => {
       const out = addVersion(p, { video: b.video, file, note: b.note, duration: info.duration, fps: info.fps });
       lockedVersion = out.video.lockedVersion;
+      autoProxy = p.autoProxy;
       if (info.fps && p.videos.length === 1 && p.videos[0].versions.length === 1) p.fps = info.fps;
       return out;
     });
-    if (lockedVersion) return c.json({ ...result, warning: `Picture is locked at ${lockedVersion}` }, 201);
-    return c.json(result, 201);
+    // §19.5: say when the cut is likely to play badly, and start its proxy straight away when the
+    // project asks for that. Without ffmpeg, nothing is offered (needFor is null).
+    const reason = await jobs.needFor(abs, info);
+    const proxy: { proxySuggested?: true; proxyReason?: string; proxyJob?: ReturnType<ProxyJobs["start"]> } = {};
+    if (reason) {
+      proxy.proxySuggested = true;
+      proxy.proxyReason = reason;
+      if (autoProxy) proxy.proxyJob = jobs.start(result.video.id, result.version.id);
+    }
+    if (lockedVersion) return c.json({ ...result, ...proxy, warning: `Picture is locked at ${lockedVersion}` }, 201);
+    return c.json({ ...result, ...proxy }, 201);
+  });
+
+  // ---- proxies (§19.5) ----
+  /** The cut a proxy or frame route names, or a 404. The video may be given by id, slug or name. */
+  async function cutOf(videoRef: string, versionId: string) {
+    const project = await store.read("project");
+    const video = resolveVideo(project, videoRef);
+    const version = video.versions.find((v) => v.id === versionId);
+    if (!version) throw new NotFoundError("version", versionId);
+    return { project, video, version };
+  }
+
+  app.post("/api/videos/:video/versions/:version/proxy", async (c) => {
+    await jobs.requireFfmpeg();
+    const { video, version } = await cutOf(c.req.param("video"), c.req.param("version"));
+    // One job per cut (Review Focus 2): a second press, from this tab or another, joins the first.
+    const joined = jobs.find(video.id, version.id) !== undefined;
+    const job = jobs.start(video.id, version.id);
+    return c.json({ job }, joined ? 200 : 202);
+  });
+
+  app.delete("/api/proxy-jobs/:job", async (c) => {
+    const job = await jobs.cancel(c.req.param("job"));
+    return c.json({ job });
+  });
+
+  app.delete("/api/videos/:video/versions/:version/proxy", async (c) => {
+    const { video, version } = await cutOf(c.req.param("video"), c.req.param("version"));
+    const running = jobs.find(video.id, version.id);
+    if (running) await jobs.cancel(running.id);
+    // Checked before writing, so a delete of nothing never bumps project.json's rev. (A job that
+    // finished just as it was cancelled has recorded its proxy by now, and is deleted below.)
+    const fresh = await cutOf(video.id, version.id);
+    if (!fresh.version.proxy) {
+      if (running) return c.json({ version: fresh.version });
+      throw new NotFoundError("proxy", `${video.id} ${version.id}`);
+    }
+    let removed: string | null = null;
+    const { result } = await store.update("project", (p) => {
+      const v = p.videos.find((x) => x.id === video.id)?.versions.find((x) => x.id === version.id);
+      if (!v?.proxy) return undefined;
+      removed = v.proxy.file;
+      v.proxy = null;
+      return v;
+    });
+    if (!result) throw new NotFoundError("proxy", `${video.id} ${version.id}`);
+    // Only ever a file this server wrote into proxies/: the original is never touched, even if
+    // project.json was hand-edited to point the record somewhere else.
+    if (removed && PROXY_PATH.test(removed)) await rm(fromManifestPath(store.root, removed), { force: true });
+    return c.json({ version: result });
+  });
+
+  app.put("/api/project/settings", async (c) => {
+    const b = await body(c, SettingsBody);
+    const { data } = await store.update("project", (p) => {
+      p.autoProxy = b.autoProxy;
+    });
+    return c.json({ autoProxy: data.autoProxy });
+  });
+
+  // Grab Frame's still, always from the original at full quality: the exact frame round(t*fps),
+  // whichever file is playing. Returns the PNG only; Picture posts it to /api/grabs to save it.
+  app.get("/api/videos/:video/versions/:version/frame", async (c) => {
+    const q = FrameQuery.safeParse(c.req.query());
+    if (!q.success) throw new InvalidError("Query is invalid: t must be a time in seconds", q.error.issues);
+    await jobs.requireFfmpeg();
+    const { project, version } = await cutOf(c.req.param("video"), c.req.param("version"));
+    const orig = fromManifestPath(store.root, version.file);
+    const exists = await stat(orig).then((s) => s.isFile(), () => false);
+    if (!exists) throw new RushesError("The original file is missing", 404, "missing_file", { path: version.file });
+    const fps = version.fps ?? project.fps;
+    let frame = Math.round(q.data.t * fps);
+    // A time at or past the end lands on the last frame rather than on nothing.
+    if (version.duration !== null) frame = Math.min(frame, Math.max(0, Math.ceil(version.duration * fps - 1e-6) - 1));
+    const png = await extractFrame(jobs.run, orig, frame / fps);
+    if (!png) throw new RushesError(`ffmpeg couldn't read frame ${frame}`, 422, "no_frame", { frame });
+    return new Response(new Uint8Array(png), {
+      status: 200,
+      headers: { "content-type": "image/png", "cache-control": "no-store", "x-rushes-frame": String(frame), "content-length": String(png.length) },
+    });
   });
 
   app.put("/api/videos/:video/shots", async (c) => {
@@ -627,11 +737,14 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     streamSSE(c, async (stream) => {
       const send = (e: ChangeEvent) => void stream.writeSSE({ event: "change", data: JSON.stringify(e) });
       const corrupt = (e: CorruptEvent) => void stream.writeSSE({ event: "corrupt", data: JSON.stringify(e) });
+      const proxy = (e: ProxyEvent) => void stream.writeSSE({ event: "proxy", data: JSON.stringify(e) });
       store.on("change", send);
       store.on("corrupt", corrupt);
+      store.on("proxy", proxy);
       stream.onAbort(() => {
         store.off("change", send);
         store.off("corrupt", corrupt);
+        store.off("proxy", proxy);
       });
       await stream.writeSSE({ event: "hello", data: JSON.stringify({ root: store.root }) });
       while (!stream.aborted) await stream.sleep(15000).then(() => stream.writeSSE({ event: "ping", data: "" }));

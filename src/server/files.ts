@@ -73,7 +73,13 @@ export const SCREENSHOT_PATH = /^screenshots\/[a-z0-9][a-z0-9._-]*\.png$/;
 /** Every media path the project has registered. Only these (and grabs) may be served. */
 export function registeredMedia(project: Project, script: Script): Set<string> {
   const files = new Set<string>();
-  for (const v of project.videos) for (const ver of v.versions) files.add(ver.file);
+  for (const v of project.videos) {
+    for (const ver of v.versions) {
+      files.add(ver.file);
+      // §19.5: a cut's proxy plays in Picture just like the cut itself.
+      if (ver.proxy) files.add(ver.proxy.file);
+    }
+  }
   for (const l of project.lanes) for (const variant of l.variants) files.add(variant.file);
   for (const s of script.sections) for (const t of s.takes) files.add(t.file);
   for (const f of project.files) files.add(f.file);

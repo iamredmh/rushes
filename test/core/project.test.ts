@@ -8,7 +8,7 @@ import { ProjectSchema, type Project, type Shot } from "../../src/core/schema.js
 import { InvalidError, NotFoundError } from "../../src/core/errors.js";
 import { tmpProject } from "../helpers/tmp.js";
 
-const empty = (): Project => ({ schema: 1, rev: 0, name: "demo", fps: 30, videos: [], lanes: [], files: [] });
+const empty = (): Project => ({ schema: 1, rev: 0, name: "demo", fps: 30, videos: [], lanes: [], files: [], autoProxy: false });
 
 describe("ids", () => {
   it("slugifies names, keeping digits and dropping accents", () => {

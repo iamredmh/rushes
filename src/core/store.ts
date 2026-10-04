@@ -11,7 +11,7 @@ const GITIGNORE = "proxies/\npeaks/\nserver.json\nserver.log\n*.tmp\n*.bak\n";
 function defaults(key: FileKey, name: string): FileData[FileKey] {
   switch (key) {
     case "project":
-      return { schema: 1, rev: 0, name, fps: 30, videos: [], lanes: [], files: [] };
+      return { schema: 1, rev: 0, name, fps: 30, videos: [], lanes: [], files: [], autoProxy: false };
     case "script":
       return { schema: 1, rev: 0, wordsPerSecond: 2.6, sections: [] };
     case "notes":

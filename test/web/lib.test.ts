@@ -136,7 +136,7 @@ describe("isChanged and latest", () => {
     expect(isChanged(sec("Line.", "New line."))).toBe(true);
   });
   it("picks a video's newest version", () => {
-    const v = (id: string) => ({ id, file: `${id}.mp4`, duration: null, fps: null, addedAt: "", note: "", shots: [] });
+    const v = (id: string) => ({ id, file: `${id}.mp4`, duration: null, fps: null, addedAt: "", note: "", shots: [], proxy: null });
     expect(latest({ id: "hero", name: "Hero", versions: [v("v1"), v("v2")], lockedVersion: null })?.id).toBe("v2");
     expect(latest({ id: "hero", name: "Hero", versions: [], lockedVersion: null })).toBeUndefined();
     expect(latest(undefined)).toBeUndefined();
@@ -144,7 +144,7 @@ describe("isChanged and latest", () => {
 });
 
 describe("defaultVersion", () => {
-  const v = (id: string) => ({ id, file: `${id}.mp4`, duration: null, fps: null, addedAt: "", note: "", shots: [] });
+  const v = (id: string) => ({ id, file: `${id}.mp4`, duration: null, fps: null, addedAt: "", note: "", shots: [], proxy: null });
   it("follows the newest version when nothing is locked", () => {
     const video: Video = { id: "hero", name: "Hero", versions: [v("v1"), v("v2")], lockedVersion: null };
     expect(defaultVersion(video)?.id).toBe("v2");
@@ -299,7 +299,7 @@ describe("folderItems", () => {
     ...over,
   });
   const videos: Video[] = [
-    { id: "hero", name: "Hero", versions: [{ id: "v1", file: "renders/hero_v1.mp4", duration: null, fps: null, addedAt: "2026-10-01T00:00:00Z", note: "First pass", shots: [] }], lockedVersion: null },
+    { id: "hero", name: "Hero", versions: [{ id: "v1", file: "renders/hero_v1.mp4", duration: null, fps: null, addedAt: "2026-10-01T00:00:00Z", note: "First pass", shots: [], proxy: null }], lockedVersion: null },
     { id: "cutdown", name: "Cutdown", versions: [], lockedVersion: null },
   ];
 
@@ -914,7 +914,7 @@ describe("the VO pick rule: server mix and dashboard agree (parity)", () => {
     const { root } = await tmpProject("parity");
     await mkdir(join(root, "audio"), { recursive: true });
     await Promise.all(files.map((f) => writeFile(join(root, "audio", f), "x")));
-    const project: Project = { schema: 1, rev: 0, name: "p", fps: 30, videos: [], files: [], lanes };
+    const project: Project = { schema: 1, rev: 0, name: "p", fps: 30, videos: [], files: [], lanes, autoProxy: false };
     for (const c of cases) {
       const picks: Picks = { schema: 1, rev: 0, sections: c.sections, lanes: c.lanes, levels: {} };
       const server = mixInputs(project, picks, ["voice"], root).map((i) => [relative(root, i.file), i.offset]);

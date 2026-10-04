@@ -172,6 +172,7 @@ async function fixture() {
     fps: 30,
     videos: [],
     files: [],
+    autoProxy: false,
     lanes: [
       {
         id: "music",
@@ -348,7 +349,7 @@ describe("measureMix", () => {
   it("returns available: false, touching nothing else, when ffmpeg is missing", async () => {
     const run: LoudnessRunner = async () => ({ code: 1, stderr: "" });
     const result = await measureMix(
-      { schema: 1, rev: 0, name: "demo", fps: 30, videos: [], lanes: [], files: [] },
+      { schema: 1, rev: 0, name: "demo", fps: 30, videos: [], lanes: [], files: [], autoProxy: false },
       { schema: 1, rev: 0, lanes: {}, sections: {}, levels: {} },
       ["voice", "music", "sfx"],
       "/nonexistent",

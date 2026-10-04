@@ -6,6 +6,12 @@ import { tmpProject } from "../helpers/tmp.js";
 import { createApp, type AppOptions } from "../../src/server/app.js";
 import type { LoudnessRunner } from "../../src/server/loudness.js";
 import { ProjectIdSchema } from "../../src/core/schema.js";
+import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import type { Probe } from "../../src/core/media.js";
+import { ProxyJobs, type FfmpegRunner } from "../../src/server/proxy.js";
+import { startServer } from "../../src/server/start.js";
+import { sse } from "../helpers/sse.js";
 
 // The smallest valid PNG (1×1, transparent).
 const PNG_1PX = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
@@ -879,3 +885,294 @@ describe("POST /api/mix/loudness (§17.6)", () => {
     expect(aborted).toBe(true);
   });
 });
+
+// ---- §19.5 proxies: routes, state, settings and the frame endpoint ----
+
+const hasBin = (bin: string) => {
+  try {
+    execFileSync(bin, ["-version"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+};
+const HAS_FFMPEG = hasBin("ffmpeg") && hasBin("ffprobe");
+
+const PRORES_4K: Probe = { duration: 2, fps: 25, codec: "prores", width: 3840, height: 2160, pixFmt: "yuv422p10le" };
+const H264_1080: Probe = { duration: 2, fps: 25, codec: "h264", width: 1920, height: 1080, pixFmt: "yuv420p" };
+
+/** A stand-in ffmpeg that writes its output and then waits for `hold` (or a kill). */
+function holdingRunner(hold: Promise<void> = Promise.resolve()): FfmpegRunner {
+  return async (args, o = {}) => {
+    if (args[0] === "-version") return { code: 0, stderr: "" };
+    await writeFile(args[args.length - 1], "proxy bytes");
+    o.onStdout?.(Buffer.from("out_time_us=1000000\n"));
+    const killed = await Promise.race([
+      hold.then(() => false),
+      new Promise<boolean>((res) => o.signal?.addEventListener("abort", () => res(true))),
+    ]);
+    return { code: killed ? 255 : 0, stderr: "" };
+  };
+}
+
+async function proxySetup(opts: { hold?: Promise<void>; available?: boolean; probe?: (abs: string) => Promise<Probe> } = {}) {
+  const { root, store } = await tmpProject("spring-launch");
+  const jobs = new ProxyJobs(store, {
+    run: holdingRunner(opts.hold),
+    probe: opts.probe ?? (async (abs) => (abs.endsWith("_proxy.mp4") ? H264_1080 : PRORES_4K)),
+    available: async () => opts.available ?? true,
+  });
+  const ctx = await setupWith(store, { proxyJobs: jobs });
+  await mkdir(join(root, "renders"), { recursive: true });
+  await writeFile(join(root, "renders", "hero.mov"), "original");
+  return { ...ctx, root, store, jobs };
+}
+
+async function setupWith(store: Store, opts: AppOptions) {
+  const app = createApp(store, opts);
+  const call = async (method: string, path: string, json?: unknown) => {
+    const res = await app.request(path, {
+      method,
+      headers: json === undefined ? undefined : { "content-type": "application/json" },
+      body: json === undefined ? undefined : JSON.stringify(json),
+    });
+    const text = await res.text();
+    let parsed: any = text;
+    try {
+      parsed = text ? JSON.parse(text) : null;
+    } catch {
+      /* not JSON */
+    }
+    return { status: res.status, json: parsed, headers: res.headers };
+  };
+  return { app, call };
+}
+
+describe("proxies (§19.5)", () => {
+  it("POST …/proxy starts one job per cut: 202, then 200 joining it (Review Focus 2)", async () => {
+    const hold = gateOpen();
+    const { call, jobs } = await proxySetup({ hold: hold.promise });
+    await call("POST", "/api/versions", { video: "Hero", file: "renders/hero.mov" });
+    const first = await call("POST", "/api/videos/hero/versions/v1/proxy", {});
+    expect(first.status).toBe(202);
+    expect(first.json.job).toMatchObject({ video: "hero", version: "v1", state: "running", pct: 0, id: expect.any(String) });
+    const second = await call("POST", "/api/videos/hero/versions/v1/proxy", {});
+    expect(second.status).toBe(200);
+    expect(second.json.job.id).toBe(first.json.job.id);
+    hold.open();
+    expect((await jobs.wait(first.json.job.id)).state).toBe("done");
+  });
+
+  it("the finished proxy is recorded on the version and served by /media", async () => {
+    const { call, jobs, store } = await proxySetup();
+    await call("POST", "/api/versions", { video: "Hero", file: "renders/hero.mov" });
+    const { json } = await call("POST", "/api/videos/hero/versions/v1/proxy", {});
+    await jobs.wait(json.job.id);
+    const v = (await store.read("project")).videos[0].versions[0];
+    expect(v.proxy).toMatchObject({ file: "proxies/hero_v1_proxy.mp4", width: 1920, height: 1080, bytes: "proxy bytes".length, createdAt: expect.any(String) });
+    const media = await call("GET", "/media?path=proxies%2Fhero_v1_proxy.mp4");
+    expect(media.status).toBe(200);
+    expect(media.headers.get("content-type")).toBe("video/mp4");
+  });
+
+  it("404s for an unknown film or cut", async () => {
+    const { call } = await proxySetup();
+    await call("POST", "/api/versions", { video: "Hero", file: "renders/hero.mov" });
+    expect((await call("POST", "/api/videos/nope/versions/v1/proxy", {})).status).toBe(404);
+    expect((await call("POST", "/api/videos/hero/versions/v9/proxy", {})).status).toBe(404);
+    expect((await call("GET", "/api/videos/hero/versions/v9/frame?t=0")).status).toBe(404);
+  });
+
+  it("DELETE /api/proxy-jobs/:job cancels it; an unknown job is 404", async () => {
+    const { call, root } = await proxySetup({ hold: new Promise(() => undefined) });
+    await call("POST", "/api/versions", { video: "Hero", file: "renders/hero.mov" });
+    const { json } = await call("POST", "/api/videos/hero/versions/v1/proxy", {});
+    while (!existsSync(join(root, "proxies", "hero_v1_proxy.partial.mp4"))) await new Promise((r) => setTimeout(r, 5));
+    const r = await call("DELETE", `/api/proxy-jobs/${json.job.id}`, {});
+    expect(r.status).toBe(200);
+    expect(r.json.job).toMatchObject({ id: json.job.id, state: "cancelled" });
+    expect(existsSync(join(root, "proxies", "hero_v1_proxy.partial.mp4"))).toBe(false);
+    expect((await call("DELETE", `/api/proxy-jobs/${json.job.id}`, {})).status).toBe(404);
+  });
+
+  it("DELETE …/proxy removes the file and the record, never the original", async () => {
+    const { call, jobs, store, root } = await proxySetup();
+    await call("POST", "/api/versions", { video: "Hero", file: "renders/hero.mov" });
+    const { json } = await call("POST", "/api/videos/hero/versions/v1/proxy", {});
+    await jobs.wait(json.job.id);
+    const r = await call("DELETE", "/api/videos/hero/versions/v1/proxy", {});
+    expect(r.status).toBe(200);
+    expect(r.json.version).toMatchObject({ id: "v1", proxy: null });
+    expect((await store.read("project")).videos[0].versions[0].proxy).toBeNull();
+    expect(existsSync(join(root, "proxies", "hero_v1_proxy.mp4"))).toBe(false);
+    expect(existsSync(join(root, "renders", "hero.mov"))).toBe(true);
+    expect((await call("DELETE", "/api/videos/hero/versions/v1/proxy", {})).status).toBe(404);
+  });
+
+  it("PUT /api/project/settings saves autoProxy; anything else is 400", async () => {
+    const { call, store } = await proxySetup();
+    expect((await store.read("project")).autoProxy).toBe(false);
+    const r = await call("PUT", "/api/project/settings", { autoProxy: true });
+    expect(r).toMatchObject({ status: 200, json: { autoProxy: true } });
+    expect((await store.read("project")).autoProxy).toBe(true);
+    expect((await call("PUT", "/api/project/settings", { autoProxy: "yes" })).status).toBe(400);
+    expect((await call("PUT", "/api/project/settings", { autoProxy: true, fps: 12 })).status).toBe(400);
+  });
+
+  it("adding a cut that needs one says so; with autoProxy on, its job starts at once", async () => {
+    const hold = gateOpen();
+    const { call, jobs } = await proxySetup({ hold: hold.promise });
+    const off = await call("POST", "/api/versions", { video: "Hero", file: "renders/hero.mov" });
+    expect(off.status).toBe(201);
+    expect(off.json).toMatchObject({ proxySuggested: true, proxyReason: "It's a 4K ProRes file, which browsers struggle with" });
+    expect(off.json.proxyJob).toBeUndefined();
+    expect(jobs.list()).toEqual([]);
+
+    await call("PUT", "/api/project/settings", { autoProxy: true });
+    const on = await call("POST", "/api/versions", { video: "Hero", file: "renders/hero.mov" });
+    expect(on.json).toMatchObject({ proxySuggested: true, proxyJob: { video: "hero", version: "v2", state: "running" } });
+    expect(jobs.list()).toEqual([expect.objectContaining({ video: "hero", version: "v2" })]);
+    hold.open();
+    await jobs.wait(on.json.proxyJob.id);
+  });
+
+  it("a cut that plays fine gets no suggestion, and autoProxy leaves it alone", async () => {
+    const { call, jobs } = await proxySetup({ probe: async () => H264_1080 });
+    await call("PUT", "/api/project/settings", { autoProxy: true });
+    const r = await call("POST", "/api/versions", { video: "Hero", file: "renders/hero.mov" });
+    expect(r.json.proxySuggested).toBeUndefined();
+    expect(r.json.proxyReason).toBeUndefined();
+    expect(jobs.list()).toEqual([]);
+  });
+
+  it("GET /api/state carries proxyNeed per version, probed once per file revision", async () => {
+    let probes = 0;
+    const { call, root } = await proxySetup({
+      probe: async (abs) => {
+        probes++;
+        return abs.endsWith("hero.mov") ? PRORES_4K : H264_1080;
+      },
+    });
+    await writeFile(join(root, "renders", "small.mp4"), "small");
+    await call("POST", "/api/versions", { video: "Hero", file: "renders/hero.mov" });
+    await call("POST", "/api/versions", { video: "Hero", file: "renders/small.mp4" });
+    await call("POST", "/api/versions", { video: "Hero", file: "renders/gone.mp4" });
+    const before = probes;
+    const s1 = await call("GET", "/api/state");
+    const s2 = await call("GET", "/api/state");
+    expect(probes).toBe(before);
+    for (const s of [s1, s2]) {
+      expect(s.json.project.videos[0].versions.map((v: any) => v.proxyNeed)).toEqual(["It's a 4K ProRes file, which browsers struggle with", null, null]);
+      expect(s.json.proxies).toEqual({ ffmpeg: true, jobs: [] });
+    }
+    // A new render at the same path is a new revision: probed again, once.
+    await writeFile(join(root, "renders", "small.mp4"), "a bigger re-render of the small cut");
+    await call("GET", "/api/state");
+    await call("GET", "/api/state");
+    expect(probes).toBe(before + 1);
+  });
+
+  it("without ffmpeg: proxyNeed is null, nothing is suggested, and the routes say no_ffmpeg (501)", async () => {
+    const { call } = await proxySetup({ available: false });
+    const add = await call("POST", "/api/versions", { video: "Hero", file: "renders/hero.mov" });
+    expect(add.status).toBe(201);
+    expect(add.json.proxySuggested).toBeUndefined();
+    const state = await call("GET", "/api/state");
+    expect(state.json.project.videos[0].versions[0].proxyNeed).toBeNull();
+    expect(state.json.proxies).toEqual({ ffmpeg: false, jobs: [] });
+    const post = await call("POST", "/api/videos/hero/versions/v1/proxy", {});
+    expect(post.status).toBe(501);
+    expect(post.json).toMatchObject({ error: "no_ffmpeg", message: expect.stringContaining("ffmpeg") });
+    const frame = await call("GET", "/api/videos/hero/versions/v1/frame?t=0");
+    expect(frame.status).toBe(501);
+    expect(frame.json.error).toBe("no_ffmpeg");
+  });
+
+  it("the frame endpoint rejects a bad t", async () => {
+    const { call } = await proxySetup();
+    await call("POST", "/api/versions", { video: "Hero", file: "renders/hero.mov" });
+    expect((await call("GET", "/api/videos/hero/versions/v1/frame")).status).toBe(400);
+    expect((await call("GET", "/api/videos/hero/versions/v1/frame?t=-1")).status).toBe(400);
+    expect((await call("GET", "/api/videos/hero/versions/v1/frame?t=abc")).status).toBe(400);
+  });
+
+  it("the frame endpoint says when the original is missing", async () => {
+    const { call } = await proxySetup();
+    await call("POST", "/api/versions", { video: "Hero", file: "renders/gone.mov" });
+    const r = await call("GET", "/api/videos/hero/versions/v1/frame?t=0");
+    expect(r.status).toBe(404);
+    expect(r.json).toMatchObject({ error: "missing_file", message: "The original file is missing" });
+  });
+
+  it("broadcasts progress to every tab as an SSE proxy event", async () => {
+    const { root } = await tmpProject();
+    await mkdir(join(root, "renders"), { recursive: true });
+    await writeFile(join(root, "renders", "hero.mov"), "original");
+    const proxy = { run: holdingRunner(), probe: async (abs: string) => (abs.endsWith("_proxy.mp4") ? H264_1080 : PRORES_4K), available: async () => true };
+    const s = await startServer(root, { port: 0, proxy });
+    try {
+      const a = await sse(s.url);
+      const b = await sse(s.url);
+      await a.until("hello");
+      await b.until("hello");
+      await fetch(`${s.url}/api/versions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ video: "Hero", file: "renders/hero.mov" }) });
+      const r = await (await fetch(`${s.url}/api/videos/hero/versions/v1/proxy`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).json();
+      for (const tab of [a, b]) {
+        const text = await tab.until('"state":"done"');
+        expect(text).toContain("event: proxy");
+        expect(text).toContain(JSON.stringify({ job: r.job.id, video: "hero", version: "v1", pct: 50, state: "running" }));
+        expect(text).toContain(JSON.stringify({ job: r.job.id, video: "hero", version: "v1", pct: 100, state: "done" }));
+        tab.stop();
+      }
+    } finally {
+      await s.close();
+    }
+  });
+});
+
+describe.skipIf(!HAS_FFMPEG)("the frame endpoint, with real ffmpeg", () => {
+  /** Width and height from a PNG's IHDR chunk. */
+  const pngSize = (png: Buffer) => ({ width: png.readUInt32BE(16), height: png.readUInt32BE(20) });
+  /** Frame `n` of `file`, decoded to raw RGB by a select filter: the reference the endpoint must match. */
+  const rgbOfFrame = (file: string, n: number) =>
+    execFileSync("ffmpeg", ["-v", "error", "-i", file, "-vf", `select=eq(n\\,${n})`, "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], { maxBuffer: 64 << 20 });
+  const rgbOfPng = (png: Buffer) => execFileSync("ffmpeg", ["-v", "error", "-f", "png_pipe", "-i", "-", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], { input: png, maxBuffer: 64 << 20 });
+
+  it("returns the original's exact frame as a PNG at the original's size, which saves as a grab", async () => {
+    const { root, store } = await tmpProject();
+    await mkdir(join(root, "renders"));
+    const orig = join(root, "renders", "hero.mov");
+    execFileSync("ffmpeg", ["-hide_banner", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=1280x720:rate=30000/1001:duration=2", "-c:v", "prores_ks", "-profile:v", "1", orig]);
+    const { call, app } = await setupWith(store, {});
+    const add = await call("POST", "/api/versions", { video: "Hero", file: "renders/hero.mov" });
+    expect(add.json.version.fps).toBeCloseTo(29.97, 2);
+
+    // t = 0.45 s at 29.97 fps is frame round(13.49) = 13.
+    const res = await app.request("/api/videos/hero/versions/v1/frame?t=0.45");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/png");
+    expect(res.headers.get("x-rushes-frame")).toBe("13");
+    const png = Buffer.from(await res.arrayBuffer());
+    expect(pngSize(png)).toEqual({ width: 1280, height: 720 });
+    expect(rgbOfPng(png).equals(rgbOfFrame(orig, 13))).toBe(true);
+
+    // Past the end lands on the last frame.
+    const last = await app.request("/api/videos/hero/versions/v1/frame?t=99");
+    expect(last.status).toBe(200);
+    const lastFrame = Number(last.headers.get("x-rushes-frame"));
+    expect(lastFrame).toBe(59);
+    expect(rgbOfPng(Buffer.from(await last.arrayBuffer())).equals(rgbOfFrame(orig, 59))).toBe(true);
+
+    // Picture posts it as the grab.
+    const grab = await call("POST", "/api/grabs", { video: "hero", version: "v1", frame: 13, png: png.toString("base64") });
+    expect(grab.status).toBe(201);
+    expect(grab.json.grab).toMatch(/^screenshots\/hero_v1_00m00\.43s_f13\.png$/);
+    expect(pngSize(await readFile(join(root, grab.json.grab)))).toEqual({ width: 1280, height: 720 });
+  });
+});
+
+function gateOpen() {
+  let open!: () => void;
+  const promise = new Promise<void>((res) => (open = res));
+  return { promise, open };
+}

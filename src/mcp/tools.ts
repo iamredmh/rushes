@@ -104,7 +104,8 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     "rushes_add_version",
     {
       title: "Add a cut",
-      description: "Register a new cut of a video. The first cut creates the video. Returns the new version id (v1, v2 ...).",
+      description:
+        "Register a new cut of a video. The first cut creates the video. Returns the new version id (v1, v2 ...). When the cut is likely to play badly in a browser (4K, over 1.5 GB, or a codec such as ProRes), it also returns proxySuggested: true and proxyReason; Picture offers the user a proxy. If the project has autoProxy on, proxyJob is the proxy already being made.",
       inputSchema: {
         project,
         video: z.string().describe("Video id or name, e.g. \"Hero 60s\"."),

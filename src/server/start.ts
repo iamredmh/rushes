@@ -8,6 +8,7 @@ import { createApp, type AppOptions } from "./app.js";
 import { removeLock, writeLock } from "./lock.js";
 import { watchStore } from "./watch.js";
 import type { Revealer } from "./reveal.js";
+import { ProxyJobs, removePartials, type ProxyJobsOptions } from "./proxy.js";
 
 export const DEFAULT_PORT = 4580;
 
@@ -34,6 +35,8 @@ export interface StartOptions {
   idleMs?: number;
   /** Reveals a file in the system file manager for POST /api/reveal. Defaults to osRevealer. */
   reveal?: Revealer;
+  /** How §19.5's proxy jobs run ffmpeg and ffprobe. Defaults to the real ones; tests inject fakes. */
+  proxy?: ProxyJobsOptions;
 }
 
 function listen(server: Server, port: number, host: string): Promise<number> {
@@ -67,7 +70,10 @@ export async function startServer(rootDir: string, opts: StartOptions = {}): Pro
   // `appOpts` is the exact object the app's closure reads `projectId` from on every request, so
   // setting it below (once this server has won the project's lock and ensured the id) reaches
   // the already-constructed app without recreating it.
-  const appOpts: AppOptions = { webDir: opts.webDir, onShutdown: () => void close(), reveal: opts.reveal };
+  // Built on this server's own store, so its progress events reach this server's SSE clients.
+  // Every running job is cancelled when the server closes.
+  const proxyJobs = new ProxyJobs(store, opts.proxy);
+  const appOpts: AppOptions = { webDir: opts.webDir, onShutdown: () => void close(), reveal: opts.reveal, proxyJobs };
   const app = createApp(store, appOpts);
   const listener = getRequestListener(app.fetch);
   let lastRequest = Date.now();
@@ -106,6 +112,10 @@ export async function startServer(rootDir: string, opts: StartOptions = {}): Pro
   // landing before this line — however briefly a request could reach a freshly-listening
   // socket — can never cause a second write: restarts never bump the rev either way.
   const id = await ensureProjectIdOnce(store);
+  // Review Focus 1: a server that stopped mid-proxy left a half-written file. Nothing recorded it
+  // (a version's proxy is set only after a completed render), so it goes. Only the lock winner
+  // does this, so it can never delete a file another live server is still writing.
+  await removePartials(root);
   appOpts.projectId = id;
   const url = `http://${host}:${port}`;
   const stopWatching = await watchStore(store);
@@ -117,6 +127,8 @@ export async function startServer(rootDir: string, opts: StartOptions = {}): Pro
     closing ??= (async () => {
       clearTimeout(idleTimer);
       stopWatching();
+      // A running proxy's ffmpeg must not outlive the server; its partial file is deleted too.
+      await proxyJobs.cancelAll();
       server.closeAllConnections?.();
       await new Promise<void>((ok) => server.close(() => ok()));
       await removeLock(root, token);

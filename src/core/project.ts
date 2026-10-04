@@ -66,6 +66,7 @@ export function addVersion(p: Project, input: AddVersionInput, now = new Date())
     addedAt: now.toISOString(),
     note: input.note ?? "",
     shots: shots.map((s) => ({ ...s })),
+    proxy: null,
   };
   video.versions.push(version);
   return { video, version };

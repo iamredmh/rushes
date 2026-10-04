@@ -6,7 +6,7 @@ import type { Lane } from "../../web/src/types.js";
 import { addVersion } from "../../src/core/project.js";
 import type { NotesFile, Project } from "../../src/core/schema.js";
 
-const project = (): Project => ({ schema: 1, rev: 0, name: "Spring Launch", fps: 30, videos: [], lanes: [], files: [] });
+const project = (): Project => ({ schema: 1, rev: 0, name: "Spring Launch", fps: 30, videos: [], lanes: [], files: [], autoProxy: false });
 
 describe("exportFileName", () => {
   it("slugs the project name and dates it YYYY-MM-DD", () => {

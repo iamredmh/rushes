@@ -20,6 +20,16 @@ export const ShotSchema = z.object({
 });
 export type Shot = z.infer<typeof ShotSchema>;
 
+export const ProxySchema = z.object({
+  /** Manifest path, always "proxies/<film-slug>_<version>_proxy.mp4". */
+  file: z.string().min(1),
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+  bytes: z.number().int().nonnegative(),
+  createdAt: z.string(),
+});
+export type Proxy = z.infer<typeof ProxySchema>;
+
 export const VersionSchema = z.object({
   id,
   file: z.string().min(1),
@@ -28,6 +38,8 @@ export const VersionSchema = z.object({
   addedAt: z.string(),
   note: z.string().default(""),
   shots: z.array(ShotSchema).max(200).default([]),
+  // §19.5: a lightweight H.264 copy for smooth preview. Set only once a render has completed.
+  proxy: ProxySchema.nullable().default(null),
 });
 export type Version = z.infer<typeof VersionSchema>;
 
@@ -82,6 +94,8 @@ export const ProjectSchema = z.object({
   videos: z.array(VideoSchema).default([]),
   lanes: z.array(LaneSchema).default([]),
   files: z.array(FileEntrySchema).default([]),
+  // §19.5: start a proxy straight away for a new cut that meets the criteria. Off by default.
+  autoProxy: z.boolean().default(false),
 });
 export type Project = z.infer<typeof ProjectSchema>;
 

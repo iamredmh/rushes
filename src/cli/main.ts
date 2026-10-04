@@ -262,6 +262,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
           if (!a || !o.video) return usage(io, "rushes add version <file> --video NAME");
           const r = await (await client()).post("/api/versions", { video: o.video, file: resolve(io.cwd, a), note: o.note });
           io.out(`Added ${r.video.name} ${r.version.id}`);
+          // §19.5: the server says when this cut is likely to play badly in a browser.
+          if (r.proxySuggested) io.out(`Proxy suggested: ${r.proxyReason}.${r.proxyJob ? " Making one now (autoProxy is on)." : " Create one from Picture."}`);
           return 0;
         }
         if (what === "variant") {
