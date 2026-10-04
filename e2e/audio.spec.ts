@@ -1355,6 +1355,48 @@ test("a Mix level: drags live, saves on reload, resets on double-click, and re-m
   await expect.poll(async () => (await rushes.api("GET", "/api/picks")).levels).toEqual({});
 });
 
+test("a refresh from elsewhere never snaps a slider you're mid-drag on (regression)", async ({ page, rushes }) => {
+  await mixProject(page, rushes);
+  await openMix(page, rushes, 3);
+  const musicDb = page.locator('.lane[data-row="music"] .level .db');
+  const sfxDb = page.locator('.lane[data-row="sfx"] .level .db');
+  await expect(musicDb).toHaveText("0.0 dB");
+  await expect(sfxDb).toHaveText("0.0 dB");
+
+  // Hold music's own debounced save back (it would otherwise land and self-correct any wrong
+  // resync within the same 300 ms window this test needs to inspect), so the race is deterministic.
+  let releaseMusicSave!: () => void;
+  const held = new Promise<void>((ok) => (releaseMusicSave = ok));
+  await page.route("**/api/picks", async (route) => {
+    const req = route.request();
+    let body: { levels?: { music?: unknown } } | null = null;
+    try {
+      body = req.method() === "PUT" ? req.postDataJSON() : null;
+    } catch {
+      body = null;
+    }
+    if (body?.levels?.music !== undefined) await held;
+    await route.continue();
+  });
+
+  // Start dragging music -- its save is debounced 300 ms, and now held back besides.
+  await dragLevel(page, "Music level", -14);
+  await expect(musicDb).toHaveText("−14.0 dB");
+
+  // Meanwhile, sfx's level changes from elsewhere (another tab, or the agent) -- a direct server
+  // call, bypassing the held route above. The server emits a change event, and this tab's own SSE
+  // listener refreshes state while music's save is still held pending.
+  await rushes.api("PUT", "/api/picks", { levels: { sfx: -6 } });
+  await expect(sfxDb).toHaveText("−6.0 dB");
+
+  // Music's own in-progress drag must survive that refresh, not snap back to the stale server value.
+  await expect(musicDb).toHaveText("−14.0 dB");
+
+  // Release the held save: it lands with the dragged value, alongside sfx's.
+  releaseMusicSave();
+  await expect.poll(async () => (await rushes.api("GET", "/api/picks")).levels).toEqual({ sfx: -6, music: -14 });
+});
+
 test("a burst of dragging inside the debounce window saves once, at the last value", async ({ page, rushes }) => {
   await mixProject(page, rushes);
   await openMix(page, rushes, 3);

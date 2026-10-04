@@ -79,12 +79,27 @@ export function Mix({ state, assets, video, toast, onChanged, onPendingChange }:
   const pickLevels = state.picks.levels;
   const savedLevel = (lane: MixLane): number => pickLevels[MIX_STAGE[lane]] ?? 0;
   const [levels, setLevels] = useState<Record<MixLane, number>>(() => ({ vo: savedLevel("vo"), music: savedLevel("music"), sfx: savedLevel("sfx") }));
-  // Picked up elsewhere (another tab, the agent, or your own save landing): resynced by value, not identity.
+  const saveTimers = useRef<Partial<Record<MixLane, number>>>({});
+  // Picked up elsewhere (another tab, the agent, or your own save landing) -- but never for a lane
+  // with a save still pending: a refresh racing your own debounce must not snap the slider you're
+  // dragging back to the stale server value underneath your hand.
   const savedKey = JSON.stringify(pickLevels);
   useEffect(() => {
-    setLevels({ vo: savedLevel("vo"), music: savedLevel("music"), sfx: savedLevel("sfx") });
+    setLevels((v) => {
+      let changed = false;
+      const next = { ...v };
+      for (const lane of MIX_LANES) {
+        if (saveTimers.current[lane] !== undefined) continue;
+        const saved = savedLevel(lane);
+        if (next[lane] !== saved) {
+          next[lane] = saved;
+          changed = true;
+        }
+      }
+      return changed ? next : v;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [savedKey]);
-  const saveTimers = useRef<Partial<Record<MixLane, number>>>({});
   useEffect(
     () => () => {
       for (const id of Object.values(saveTimers.current)) window.clearTimeout(id);

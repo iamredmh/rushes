@@ -832,6 +832,14 @@ describe("Mix", () => {
       expect(levelText(0)).toBe("0.0");
       expect(levelText(-17.6, 0)).toBe("−18");
     });
+    it("the Mix slider's exact readout (§19.6): a real U+2212 minus, never an ASCII hyphen", () => {
+      // A Mix level is always a whole 0.5 dB step, so this is the literal string the slider shows.
+      expect(levelText(-14)).toBe("−14.0");
+      expect(`${levelText(-14)} dB`).toBe("−14.0 dB");
+      expect(levelText(-14)).not.toContain("-"); // U+002D, the ASCII hyphen-minus
+      expect(levelText(6)).toBe("+6.0");
+      expect(levelText(0)).toBe("0.0");
+    });
     it("clamps a level to the slider's range and snaps it to the 0.5 dB step (§19.6)", () => {
       expect(clampLevel(-14)).toBe(-14);
       expect(clampLevel(-14.2)).toBe(-14);
