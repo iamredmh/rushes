@@ -488,18 +488,24 @@ test("a version pin left over from peeking at a cut doesn't block the next one f
   await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v3");
 });
 
-test("Space on a focused button presses it instead of playing; from the page it still plays (§19.8)", async ({ page, rushes }) => {
+test("Space on a button reached by keyboard presses it; after a mouse click it still plays (§19.8)", async ({ page, rushes }) => {
   await rushes.addCut();
   await page.goto(rushes.url);
   await videoReady(page);
   const video = page.locator("video");
   const box = page.getByRole("button", { name: "Draw a box" });
-  await box.focus();
+  // Reached by keyboard, the button owns Space.
+  // (WebKit, like Safari, skips buttons on Tab unless Option is held.)
+  const tab = test.info().project.name === "webkit" ? "Alt+Tab" : "Tab";
+  for (let i = 0; i < 80 && !(await box.evaluate((el) => el === document.activeElement)); i++) await page.keyboard.press(tab);
+  await expect(box).toBeFocused();
   await page.keyboard.press(" ");
   await expect(box).toHaveAttribute("aria-pressed", "true");
   await page.waitForTimeout(300);
   expect(await video.evaluate((v: HTMLVideoElement) => v.paused)).toBe(true);
-  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  // Clicked with the mouse instead, it doesn't: Space plays.
+  await box.click();
+  await expect(box).toHaveAttribute("aria-pressed", "false");
   await page.keyboard.press(" ");
   await expect.poll(() => video.evaluate((v: HTMLVideoElement) => !v.paused)).toBe(true);
 });

@@ -130,6 +130,10 @@ export function useRushes(): Live {
         refreshingFromError.current = false;
         void refresh();
       },
+      // The leader went quiet (a frozen tab) and this one took over, or this page was frozen.
+      resync() {
+        void refresh();
+      },
     });
     if (testFlags(location.search).test) window.__rushesLive = { role: () => live.role() };
     return () => {

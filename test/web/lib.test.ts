@@ -13,7 +13,7 @@ import {
 import { OPEN_SAFE_EXT as SERVER_OPEN_SAFE_EXT } from "../../src/server/reveal.js";
 import { markLabel as serverMarkLabel, type Mark } from "../../src/core/schema.js";
 import {
-  AUDIO_CHIPS, BUILT, blindOrder, laneSelection, markLabel, marksLabel, scopeOptions, setMarkDb, spacePressesButton, testFlags, toggleMark, variantMeta,
+  AUDIO_CHIPS, BUILT, blindOrder, laneSelection, markLabel, marksLabel, scopeOptions, noteFocus, setMarkDb, spacePressesButton, testFlags, toggleMark, watchFocusOrigin, variantMeta,
   variantNoteRow, variantNoteTarget, variantOnLabel, variantOnOptions, variantRows,
 } from "../../web/src/lib.js";
 import type { Lane } from "../../web/src/types.js";
@@ -612,16 +612,41 @@ describe("audio tabs: lanes", () => {
 });
 
 describe("Space on a focused button (§19.8)", () => {
-  /** A stand-in element: `closest` matches the selectors it's inside. */
-  const inside = (...matches: string[]) => ({ closest: (sel: string) => (matches.includes(sel) ? {} : null) });
-  it("is the button's when a button has focus", () => {
-    expect(spacePressesButton(inside("button") as unknown as EventTarget)).toBe(true);
+  /** A stand-in button: it matches `:focus-visible` when `keyboard`, and is its own `closest("button")`. */
+  const button = (keyboard: boolean, player = false) => {
+    const el = {
+      matches: (sel: string) => sel === ":focus-visible" && keyboard,
+      closest: (sel: string) => (sel === "button" ? el : sel === "[data-player]" && player ? {} : null),
+    };
+    return el as unknown as EventTarget;
+  };
+  it("is the button's when it was reached by keyboard", () => {
+    const b = button(true);
+    noteFocus(b);
+    expect(spacePressesButton(b)).toBe(true);
+  });
+  it("plays when the button only has focus from a mouse click", () => {
+    const b = button(false);
+    noteFocus(b);
+    expect(spacePressesButton(b)).toBe(false);
+    // A key press later makes it match :focus-visible, but how it got focus is what counts.
+    expect(spacePressesButton(b)).toBe(false);
   });
   it("still plays from the page, the player, or a button inside the player", () => {
     expect(spacePressesButton(null)).toBe(false);
     expect(spacePressesButton({} as EventTarget)).toBe(false);
-    expect(spacePressesButton(inside() as unknown as EventTarget)).toBe(false);
-    expect(spacePressesButton(inside("button", "[data-player]") as unknown as EventTarget)).toBe(false);
+    const lane = button(true, true);
+    noteFocus(lane);
+    expect(spacePressesButton(lane)).toBe(false);
+  });
+  it("forgets a keyboard focus once the button is pressed with the pointer", () => {
+    const listeners: Record<string, (e: Event) => void> = {};
+    watchFocusOrigin({ addEventListener: (type: string, cb: (e: Event) => void) => { listeners[type] = cb; } } as unknown as Document);
+    const b = button(true);
+    listeners.focusin({ target: b } as unknown as Event);
+    expect(spacePressesButton(b)).toBe(true);
+    listeners.pointerdown({ target: b } as unknown as Event);
+    expect(spacePressesButton(b)).toBe(false);
   });
 });
 

@@ -4,7 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { claim, owner, release } from "../../web/src/audio/bus.js";
 import {
-  AudioEngine, clearPeaksCache, IDLE_FILES_LIMIT, liveContexts, PEAKS_CACHE_LIMIT, peaksCacheSize, RAMP_SECONDS, START_LEAD, type EngineOptions,
+  AudioEngine, clearPeaksCache, IDLE_BYTES_LIMIT, IDLE_FILES_LIMIT, liveContexts, PEAKS_CACHE_LIMIT, peaksCacheSize, RAMP_SECONDS, START_LEAD, type EngineOptions,
 } from "../../web/src/audio/engine.js";
 import type { Clip } from "../../web/src/audio/timeline.js";
 
@@ -39,7 +39,7 @@ class FakeSource extends FakeNode {
   start(when: number, offset: number, duration: number) { this.started = [when, offset, duration]; }
   stop() { this.stopped = true; }
 }
-interface FakeBuffer { duration: number; numberOfChannels: number; getChannelData(i: number): Float32Array; tag: string }
+interface FakeBuffer { duration: number; length: number; numberOfChannels: number; getChannelData(i: number): Float32Array; tag: string }
 class FakeMedia {
   currentTime = 0;
   paused = true;
@@ -74,7 +74,8 @@ class FakeCtx {
     if (tag.startsWith("bad")) return Promise.reject(new Error("EncodingError"));
     const duration = Number(tag);
     const data = new Float32Array(Math.max(1, Math.round(duration * 100))).fill(0.25);
-    return Promise.resolve({ duration, numberOfChannels: 1, getChannelData: () => data, tag });
+    // `length` as at 48 kHz, so a buffer's size in memory is real; the samples behind it are few.
+    return Promise.resolve({ duration, length: Math.round(duration * 48_000), numberOfChannels: 1, getChannelData: () => data, tag });
   }
   resume() { this.state = "running"; return Promise.resolve(); }
   close() { this.state = "closed"; return Promise.resolve(); }
@@ -706,6 +707,41 @@ describe("AudioEngine: follow-ups (§19.8)", () => {
     for (let i = 0; i < n; i++) delete files[`/m/f${i}.wav`];
   });
 
+  it("brings a file back from idle before applying the limit, so it's never the one released", async () => {
+    const n = IDLE_FILES_LIMIT + 1;
+    for (let i = 0; i < n; i++) files[`/m/f${i}.wav`] = "1";
+    const clips = Array.from({ length: n }, (_, i) => clip(`f${i}`, 0, 1));
+    const engine = new AudioEngine(undefined, options());
+    for (let i = 0; i < n; i++) {
+      engine.setClips([clips[i]]);
+      await engine.load(clips[i].path);
+    }
+    // Idle is full (f0…f11). Dropping f12 while bringing back f0, the oldest, keeps f0.
+    expect(engine.inspect().idle).toHaveLength(IDLE_FILES_LIMIT);
+    engine.setClips([clips[0]]);
+    expect(engine.inspect().media).toEqual(["f0.wav"]);
+    await engine.load("f0.wav");
+    expect(fetches.filter((f) => f.url === "/m/f0.wav")).toHaveLength(1);
+    expect(engine.inspect().idle).toHaveLength(IDLE_FILES_LIMIT);
+    expect(engine.inspect().idle).toContain(`f${n - 1}.wav`);
+    engine.dispose();
+    for (let i = 0; i < n; i++) delete files[`/m/f${i}.wav`];
+  });
+
+  it(`caps idle decoded audio at ${IDLE_BYTES_LIMIT / 1024 / 1024} MB, releasing the least recently dropped first`, async () => {
+    // Ten minutes of mono at 48 kHz: 115.2 MB decoded, so three don't fit idle together.
+    for (let i = 0; i < 3; i++) files[`/m/big${i}.wav`] = "600";
+    const engine = new AudioEngine(undefined, options());
+    for (let i = 0; i < 3; i++) {
+      engine.setClips([clip(`big${i}`, 0, 0)]);
+      await engine.load(`big${i}.wav`);
+    }
+    engine.setClips([]);
+    expect(engine.inspect().idle).toEqual(["big1.wav", "big2.wav"]);
+    engine.dispose();
+    for (let i = 0; i < 3; i++) delete files[`/m/big${i}.wav`];
+  });
+
   it("never keeps a superseded revision idle", async () => {
     const { engine } = await ready([{ ...clip("a", 0, 4), rev: "r1" }]);
     engine.setClips([{ ...clip("a", 0, 4), rev: "r2" }]);
@@ -787,6 +823,51 @@ describe("AudioEngine: follow-ups (§19.8)", () => {
     gates["/m/b.wav"].open();
     await loading;
     expect(ctx.sources.at(-1)!.started![1]).toBeCloseTo(1, 9);
+    engine.dispose();
+  });
+
+  it("re-rendered twice before the first decodes: the first load is aborted, one source joins", async () => {
+    const { engine, ctx } = await ready([{ ...clip("a", 0, 0), rev: "r1" }]);
+    ctx.currentTime = 10;
+    engine.play(0);
+    ctx.currentTime = 11;
+    gate("/m/a.wav");
+    engine.setClips([{ ...clip("a", 0, 0), rev: "r2" }]);
+    const second = engine.load("a.wav", "r2");
+    await Promise.resolve();
+    engine.setClips([{ ...clip("a", 0, 0), rev: "r3" }]);
+    const third = engine.load("a.wav", "r3");
+    expect(fetches[1].signal?.aborted).toBe(true);
+    frame();
+    expect(engine.playing).toBe(true);
+    expect(engine.length).toBe(4);
+    gates["/m/a.wav"].open();
+    await expect(second).rejects.toThrow();
+    await third;
+    expect(engine.inspect().sources).toBe(1);
+    expect(engine.inspect().media).toEqual(["a.wav#r3"]);
+    expect(ctx.sources.filter((s) => s.started && !s.stopped)).toHaveLength(1);
+    engine.dispose();
+  });
+
+  it("a re-render shorter than the playhead ends playback cleanly once it decodes", async () => {
+    const { engine, ctx } = await ready([{ ...clip("a", 0, 0), rev: "r1" }]);
+    const ended = vi.fn();
+    engine.onEnded(ended);
+    ctx.currentTime = 10;
+    engine.play(0);
+    ctx.currentTime = 13;
+    files["/m/a.wav"] = "1";
+    engine.setClips([{ ...clip("a", 0, 0), rev: "r2" }]);
+    await engine.load("a.wav", "r2");
+    // The new file ends before the playhead: nothing starts, and the next frame ends the run.
+    expect(engine.inspect().sources).toBe(0);
+    expect(engine.length).toBe(1);
+    frame();
+    expect(engine.playing).toBe(false);
+    expect(ended).toHaveBeenCalledTimes(1);
+    expect(frames.size).toBe(0);
+    files["/m/a.wav"] = "4";
     engine.dispose();
   });
 

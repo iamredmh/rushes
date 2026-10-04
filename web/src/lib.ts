@@ -639,15 +639,48 @@ export function blindOrder(keys: string[], seed: number): string[] {
   return [...keys].sort((a, b) => hash(a) - hash(b) || (a < b ? -1 : a > b ? 1 : 0));
 }
 
+type FocusTarget = { matches?(selector: string): boolean; closest?(selector: string): FocusTarget | null };
+
+// Buttons that got focus from the keyboard (Tab), as opposed to a click.
+const keyboardFocused = new WeakSet<object>();
+let watching = false;
+
 /**
- * Whether Space belongs to the focused element rather than the transport (§19.8): a focused button
- * (Measure again, say) is pressed by Space, not played over. A button inside the player itself, a
- * lane's name or a shot (marked `data-player`), only selects or seeks, so Space still plays there.
+ * Remember, as focus lands, whether a button was reached by keyboard: `:focus-visible` read then.
+ * It can't be read when Space is pressed, since any key press makes the focused element match it.
+ * A pointer press on a button forgets it, so a click on a button Tab had reached plays again too.
+ * Installed once, by the page's entry point.
+ */
+export function watchFocusOrigin(doc: Pick<Document, "addEventListener">): void {
+  if (watching) return;
+  watching = true;
+  doc.addEventListener("focusin", (e) => noteFocus(e.target), true);
+  doc.addEventListener("pointerdown", (e) => {
+    const button = (e.target as FocusTarget | null)?.closest?.("button");
+    if (button) keyboardFocused.delete(button);
+  }, true);
+}
+
+/** Record whether `target` matches `:focus-visible` as it takes focus. Exported for tests. */
+export function noteFocus(target: EventTarget | null): void {
+  const el = target as FocusTarget | null;
+  if (!el || typeof el.matches !== "function") return;
+  if (el.matches(":focus-visible")) keyboardFocused.add(el);
+  else keyboardFocused.delete(el);
+}
+
+/**
+ * Whether Space belongs to the focused element rather than the transport (§19.8): a button reached
+ * by keyboard (Tab to Measure again, say) is pressed by Space, not played over. A button that only
+ * has focus because it was clicked (a tab, M, S, Blind, a scope chip) doesn't keep Space: it plays,
+ * as before. A button inside the player itself, a lane's name or a shot (marked `data-player`),
+ * only selects or seeks, so Space plays there either way.
  */
 export function spacePressesButton(target: EventTarget | null): boolean {
-  const el = target as { closest?: (selector: string) => unknown } | null;
+  const el = target as FocusTarget | null;
   if (!el || typeof el.closest !== "function") return false;
-  return !!el.closest("button") && !el.closest("[data-player]");
+  const button = el.closest("button");
+  return !!button && keyboardFocused.has(button) && !el.closest("[data-player]");
 }
 
 /** Test-only switches read from the page URL. `streamOver` only counts alongside `test`. */

@@ -1498,6 +1498,24 @@ test("leaving Mix stops playback and releases its engine", async ({ page, rushes
 
 // ---- Follow-ups (§19.8) ----
 
+/** Move focus by keyboard, Tab by Tab, until `target` has it. WebKit, like Safari, skips buttons
+ *  on Tab unless Option is held. */
+async function tabTo(page: Page, target: ReturnType<Page["locator"]>) {
+  const key = test.info().project.name === "webkit" ? "Alt+Tab" : "Tab";
+  for (let i = 0; i < 80; i++) {
+    await page.keyboard.press(key);
+    if (await target.evaluate((el) => el === document.activeElement)) return;
+  }
+  throw new Error("Tab never reached the button");
+}
+
+/** Space toggles playback: it plays when paused and pauses when playing. */
+async function spaceToggles(page: Page) {
+  const was = (await inspect(page)).playing;
+  await page.keyboard.press(" ");
+  await expect.poll(async () => (await inspect(page)).playing).toBe(!was);
+}
+
 test("re-rendering the only clip mid-play keeps playing: its lane rejoins on the clock once decoded (§19.8)", async ({ page, rushes }) => {
   const bed = await rushes.addVariant("music", "A · Deep house", { seconds: 30, freq: 220 });
   await page.goto(rushes.testUrl());
@@ -1551,7 +1569,8 @@ test("Space on a focused button presses it instead of playing: Measure again on 
   await expect(again).toBeVisible();
   const before = seen.count;
   status = 200;
-  await again.focus();
+  // Reached by keyboard, the button owns Space.
+  await tabTo(page, again);
   await page.keyboard.press(" ");
   await expect(values).toHaveText(["−16.2", "−1.5", "−18 dB"]);
   expect(seen.count).toBe(before + 1);
@@ -1570,8 +1589,31 @@ test("Space on a focused button presses it on Voiceover too: Blind, not Play (§
   await twoRounds(rushes);
   await openVoice(page, rushes, 2);
   const blind = page.getByRole("button", { name: "Blind" });
-  await blind.focus();
+  await tabTo(page, blind);
   await page.keyboard.press(" ");
   await expect(blind).toHaveAttribute("aria-pressed", "true");
   expect((await inspect(page)).playing).toBe(false);
+});
+
+test("Space plays after a mouse click on a tab, M, S, Blind or a scope chip (§19.8)", async ({ page, rushes }) => {
+  await mixProject(page, rushes);
+  await page.goto(rushes.testUrl());
+  const button = (name: string) => page.getByRole("button", { name, exact: true });
+  await page.getByRole("tab", { name: /Mix/ }).click();
+  await loaded(page, 3);
+  await spaceToggles(page);
+  await spaceToggles(page);
+  await button("Mute Music").click();
+  await spaceToggles(page);
+  await button("Solo Voiceover").click();
+  await spaceToggles(page);
+
+  await page.getByRole("tab", { name: /Music/ }).click();
+  await loaded(page, 1);
+  await spaceToggles(page);
+  await button("Blind").click();
+  await expect(button("Blind")).toHaveAttribute("aria-pressed", "true");
+  await spaceToggles(page);
+  await page.getByRole("group", { name: "Scope" }).getByRole("button", { name: "Whole" }).click();
+  await spaceToggles(page);
 });

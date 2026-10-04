@@ -20,9 +20,17 @@ export const RAMP_SECONDS = 0.004;
 const PROBE_TIMEOUT_MS = 15_000;
 /**
  * Files no clip uses any more (a folded Voiceover round, say) wait idle, newest last, so bringing
- * them back is instant. Past this many the least recently dropped is released (§19.8).
+ * them back is instant. Past this many, or past IDLE_BYTES_LIMIT of decoded audio between them, the
+ * least recently dropped is released (§19.8).
  */
 export const IDLE_FILES_LIMIT = 12;
+/** Decoded audio held idle, at most: 32-bit samples, so `length × channels × 4` bytes a buffer. */
+export const IDLE_BYTES_LIMIT = 256 * 1024 * 1024;
+
+/** What a decoded buffer holds in memory; a streamed file holds none. */
+function bufferBytes(m: Media): number {
+  return m.buffer ? m.buffer.length * m.buffer.numberOfChannels * 4 : 0;
+}
 
 export interface LoadResult {
   duration: number;
@@ -357,7 +365,8 @@ export class AudioEngine {
 
   /**
    * Replace the clips. Unchanged clips keep playing; new ones join on the clock. Files no clip uses
-   * any more wait idle (up to IDLE_FILES_LIMIT, then the least recently dropped is freed), and loads
+   * any more wait idle (up to IDLE_FILES_LIMIT and IDLE_BYTES_LIMIT, then the least recently dropped
+   * is freed), and loads
    * still in flight for them are aborted. A file re-rendered in place (same path, new revision) is
    * freed at once: its old revision is never asked for again.
    */
@@ -392,14 +401,21 @@ export class AudioEngine {
     }
     for (const key of [...this.media.keys()]) if (!used.has(key)) this.media.delete(key);
     for (const [key, kept] of this.idle) if (!used.has(key) && paths.has(kept.load.path)) this.idle.delete(key);
-    while (this.idle.size > IDLE_FILES_LIMIT) this.idle.delete(this.idle.keys().next().value!);
-    // Back from idle: in play at once, no fetch or decode.
+    // Back from idle: in play at once, no fetch or decode. Before the limits are applied, so a file
+    // coming back is never the one released.
     for (const key of used) {
       const kept = this.idle.get(key);
       if (!kept) continue;
       this.idle.delete(key);
       this.media.set(key, kept.media);
       this.loads.set(key, kept.load);
+    }
+    let bytes = 0;
+    for (const kept of this.idle.values()) bytes += bufferBytes(kept.media);
+    while (this.idle.size > IDLE_FILES_LIMIT || bytes > IDLE_BYTES_LIMIT) {
+      const [key, kept] = this.idle.entries().next().value!;
+      bytes -= bufferBytes(kept.media);
+      this.idle.delete(key);
     }
     this.clips = clips.slice();
     if (this._playing) {
