@@ -5,7 +5,10 @@
   "type": "module",
   "license": "MIT",
   "author": "Red Morley Hewitt",
-  "repository": "github:iamredmh/rushes",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/iamredmh/rushes.git"
+  },
   "bin": {
     "rushes": "dist/cli/index.js"
   },
