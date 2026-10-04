@@ -20,7 +20,7 @@ import { GRAB_PATH, SCREENSHOT_PATH, contentDisposition, contentType, inside, is
 import { candidatePaths, listAssets, fpsFor, screenshotName } from "./assets.js";
 import { osRevealer, osOpener, OPEN_SAFE_EXT, type Revealer, type Opener } from "./reveal.js";
 import type { CorruptEvent } from "./watch.js";
-import { LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, FileKindSchema, MarkSchema, ProjectIdSchema, ShotSchema, type Batch, type Note } from "../core/schema.js";
+import { LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, FileKindSchema, MarkSchema, ProjectIdSchema, ShotSchema, LEVEL_MIN, LEVEL_MAX, LEVEL_STEP, type Batch, type Note } from "../core/schema.js";
 import { defaultRunner, measureMix, type LoudnessRunner } from "./loudness.js";
 
 export const VERSION = "0.1.0";
@@ -102,7 +102,10 @@ const SectionEditBody = z.object({
 const TakeBody = z.object({ file: z.string().min(1) });
 // A pick is a variant or take id; null clears it. picks.json itself only ever holds strings.
 const PickMap = z.record(z.string(), z.string().nullable());
-const PicksBody = z.object({ lanes: PickMap.optional(), sections: PickMap.optional() });
+// §19.6: a level is −24..6 dB in 0.5 dB steps; null resets it to 0 (removes the key).
+const LevelValue = z.number().min(LEVEL_MIN).max(LEVEL_MAX).multipleOf(LEVEL_STEP);
+const LevelsBody = z.object({ voice: LevelValue.nullable(), music: LevelValue.nullable(), sfx: LevelValue.nullable() }).partial();
+const PicksBody = z.object({ lanes: PickMap.optional(), sections: PickMap.optional(), levels: LevelsBody.optional() });
 const BatchBody = z.object({ stage: StageSchema });
 
 const NoteQuery = z.object({
@@ -571,6 +574,14 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     const { data } = await store.update("picks", (p) => {
       merge(p.lanes, b.lanes);
       merge(p.sections, b.sections);
+      // §19.6: same merge rule as lanes/sections -- a number sets the level, null resets it to 0
+      // (deletes the key), anything not named is kept.
+      for (const stage of ["voice", "music", "sfx"] as const) {
+        const v = b.levels?.[stage];
+        if (v === undefined) continue;
+        if (v === null) delete p.levels[stage];
+        else p.levels[stage] = v;
+      }
     });
     return c.json(data);
   });

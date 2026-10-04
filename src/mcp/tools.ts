@@ -247,7 +247,8 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     "rushes_get_picks",
     {
       title: "Get picks",
-      description: "Which variant is in use per audio lane (per round on Voiceover). Section take picks are kept for older projects but not used.",
+      description:
+        "Which variant is in use per audio lane (per round on Voiceover), and each Mix lane's level in dB (where the user wants voice, music and sfx to sit). Section take picks are kept for older projects but not used.",
       inputSchema: { project },
     },
     safe(async ({ project }) => (await ctx.client(project)).get("/api/picks")),

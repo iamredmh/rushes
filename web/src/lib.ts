@@ -859,6 +859,19 @@ export function mixOnOptions(m: MixModel): OnOption[] {
   return out;
 }
 
+// §19.6: a Mix lane's level slider, mirroring src/core/schema.ts's LEVEL_MIN/MAX/STEP exactly (not
+// imported -- the web bundle imports types only from src/).
+export const LEVEL_MIN = -24;
+export const LEVEL_MAX = 6;
+export const LEVEL_STEP = 0.5;
+
+/** A level, clamped to the slider's range and snapped to its 0.5 dB step (§19.6) -- a guard before a
+ *  value reaches the server, never a substitute for the server's own check. */
+export function clampLevel(db: number): number {
+  const stepped = Math.round(db / LEVEL_STEP) * LEVEL_STEP;
+  return Math.min(LEVEL_MAX, Math.max(LEVEL_MIN, stepped));
+}
+
 /** A level for the loudness readout: one decimal by default, a real minus sign, "+" above zero, never "−0.0". */
 export function levelText(n: number, digits = 1): string {
   const fixed = Math.abs(n).toFixed(digits);

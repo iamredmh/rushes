@@ -99,11 +99,11 @@ describe("parseEbur128", () => {
 });
 
 describe("loudnessArgs", () => {
-  it("builds the exact ffmpeg argument array for 3 inputs", () => {
+  it("builds the exact ffmpeg argument array for 3 inputs, each at 0 dB with no level set", () => {
     const inputs: MixInput[] = [
-      { file: "/abs/vo.wav", offset: 0, stage: "voice" },
-      { file: "/abs/music.wav", offset: 0, stage: "music" },
-      { file: "/abs/sfx.wav", offset: 2.5, stage: "sfx" },
+      { file: "/abs/vo.wav", offset: 0, stage: "voice", gainDb: 0 },
+      { file: "/abs/music.wav", offset: 0, stage: "music", gainDb: 0 },
+      { file: "/abs/sfx.wav", offset: 2.5, stage: "sfx", gainDb: 0 },
     ];
     expect(loudnessArgs(inputs)).toEqual([
       "-nostats",
@@ -114,11 +114,23 @@ describe("loudnessArgs", () => {
       "-i",
       "/abs/sfx.wav",
       "-filter_complex",
-      "[0]adelay=0:all=1[a0];[1]adelay=0:all=1[a1];[2]adelay=2500:all=1[a2];[a0][a1][a2]amix=inputs=3:normalize=0,ebur128=peak=true",
+      "[0]adelay=0:all=1,volume=0dB[a0];[1]adelay=0:all=1,volume=0dB[a1];[2]adelay=2500:all=1,volume=0dB[a2];[a0][a1][a2]amix=inputs=3:normalize=0,ebur128=peak=true",
       "-f",
       "null",
       "-",
     ]);
+  });
+
+  it("puts each input's level (§19.6) in its own volume filter", () => {
+    const inputs: MixInput[] = [
+      { file: "/abs/vo.wav", offset: 0, stage: "voice", gainDb: 0 },
+      { file: "/abs/music.wav", offset: 0, stage: "music", gainDb: -14 },
+      { file: "/abs/sfx.wav", offset: 0, stage: "sfx", gainDb: -6.5 },
+    ];
+    const filter = loudnessArgs(inputs)[loudnessArgs(inputs).indexOf("-filter_complex") + 1];
+    expect(filter).toContain("volume=0dB[a0]");
+    expect(filter).toContain("volume=-14dB[a1]");
+    expect(filter).toContain("volume=-6.5dB[a2]");
   });
 });
 
@@ -191,6 +203,7 @@ async function fixture() {
     rev: 0,
     lanes: { music: "b" }, // sfx has no pick -> falls back to its first variant
     sections: { s2: "u1" }, // an older take pick, which the mix never uses (§18.4)
+    levels: {},
   };
 
   return { root, project, picks };
@@ -201,7 +214,7 @@ describe("mixInputs", () => {
     const { root, project, picks } = await fixture();
     const inputs = mixInputs(project, picks, ["voice", "music", "sfx"], root);
     expect(inputs).toEqual([
-      { file: join(root, "audio", "music-b.wav"), offset: 0, stage: "music" }, // picked music variant
+      { file: join(root, "audio", "music-b.wav"), offset: 0, stage: "music", gainDb: 0 }, // picked music variant
       // voice: no round has a pick, so nothing plays even though the sections have takes.
       // sfx has no pick: Mix plays nothing on it, so it's never stood in for by its first pass.
     ]);
@@ -217,7 +230,7 @@ describe("mixInputs", () => {
     });
     // "music" (the bed) is picked; "sting" isn't.
     expect(mixInputs(project, picks, ["music"], root)).toEqual([
-      { file: join(root, "audio", "music-b.wav"), offset: 0, stage: "music" },
+      { file: join(root, "audio", "music-b.wav"), offset: 0, stage: "music", gainDb: 0 },
     ]);
     // Picking the sting too adds it.
     const both: Picks = { ...picks, lanes: { ...picks.lanes, sting: "a" } };
@@ -225,6 +238,17 @@ describe("mixInputs", () => {
       join(root, "audio", "music-b.wav"),
       join(root, "audio", "music-a.wav"),
     ]);
+  });
+
+  it("sets each input's gainDb from picks.levels, 0 when a lane has none (§19.6)", async () => {
+    const { root, project, picks } = await fixture();
+    const withLevels: Picks = { ...picks, lanes: { ...picks.lanes, sfx: "pass1" }, levels: { music: -14, sfx: -6 } };
+    const inputs = mixInputs(project, withLevels, ["music", "sfx"], root);
+    expect(inputs.find((i) => i.stage === "music")?.gainDb).toBe(-14);
+    expect(inputs.find((i) => i.stage === "sfx")?.gainDb).toBe(-6);
+    // voice has no level set: defaults to 0.
+    const withPick: Picks = { ...withLevels, lanes: { ...withLevels.lanes, voice: "alt" } };
+    expect(mixInputs(project, withPick, ["voice"], root)[0].gainDb).toBe(0);
   });
 
   it("never falls back to the first voice variant when none is picked, and never to takes either (§18.4)", async () => {
@@ -238,13 +262,13 @@ describe("mixInputs", () => {
     const { root, project, picks } = await fixture();
     const withPick: Picks = { ...picks, lanes: { ...picks.lanes, voice: "alt" } };
     const inputs = mixInputs(project, withPick, ["voice"], root);
-    expect(inputs).toEqual([{ file: join(root, "audio", "voice-alt.wav"), offset: 0, stage: "voice" }]);
+    expect(inputs).toEqual([{ file: join(root, "audio", "voice-alt.wav"), offset: 0, stage: "voice", gainDb: 0 }]);
   });
 
   it("includes only the lanes asked for", async () => {
     const { root, project, picks } = await fixture();
     expect(mixInputs(project, picks, ["music"], root)).toEqual([
-      { file: join(root, "audio", "music-b.wav"), offset: 0, stage: "music" },
+      { file: join(root, "audio", "music-b.wav"), offset: 0, stage: "music", gainDb: 0 },
     ]);
     expect(mixInputs(project, picks, [], root)).toEqual([]);
   });
@@ -267,13 +291,13 @@ describe("mixInputs", () => {
       { id: "round-1", stage: "voice", name: "Round 1", variants: [{ id: "gerald", name: "Gerald", file: "audio/gerald.wav", meta: {}, cues: [] }] },
       { id: "round-2", stage: "voice", name: "Round 2", variants: [{ id: "sombre", name: "More sombre", file: "audio/sombre.wav", meta: {}, cues: [] }] },
     );
-    const inputs = mixInputs(project, { schema: 1, rev: 0, lanes: { "round-1": "gerald" }, sections: {} }, ["voice"], root);
+    const inputs = mixInputs(project, { schema: 1, rev: 0, lanes: { "round-1": "gerald" }, sections: {}, levels: {} }, ["voice"], root);
     expect(inputs.map((i) => i.file)).toEqual([join(root, "audio", "gerald.wav")]);
   });
 
   it("with no round picked there is no VO input, even when takes exist", async () => {
     const { root, project } = await fixture();
-    const inputs = mixInputs(project, { schema: 1, rev: 0, lanes: {}, sections: {} }, ["voice"], root);
+    const inputs = mixInputs(project, { schema: 1, rev: 0, lanes: {}, sections: {}, levels: {} }, ["voice"], root);
     expect(inputs).toEqual([]);
   });
 
@@ -289,7 +313,7 @@ describe("mixInputs", () => {
       { id: "round-1", stage: "voice", name: "Round 1", variants: [{ id: "gerald", name: "Gerald", file: "audio/gerald.wav", meta: {}, cues: [] }] },
       { id: "round-2", stage: "voice", name: "Round 2", variants: [{ id: "sombre", name: "More sombre", file: "audio/sombre.wav", meta: {}, cues: [] }] },
     );
-    const inputs = mixInputs(project, { schema: 1, rev: 0, lanes: { "round-1": "gerald", "round-2": "sombre" }, sections: {} }, ["voice"], root);
+    const inputs = mixInputs(project, { schema: 1, rev: 0, lanes: { "round-1": "gerald", "round-2": "sombre" }, sections: {}, levels: {} }, ["voice"], root);
     expect(inputs.map((i) => i.file)).toEqual([join(root, "audio", "sombre.wav")]);
   });
 
@@ -325,7 +349,7 @@ describe("measureMix", () => {
     const run: LoudnessRunner = async () => ({ code: 1, stderr: "" });
     const result = await measureMix(
       { schema: 1, rev: 0, name: "demo", fps: 30, videos: [], lanes: [], files: [] },
-      { schema: 1, rev: 0, lanes: {}, sections: {} },
+      { schema: 1, rev: 0, lanes: {}, sections: {}, levels: {} },
       ["voice", "music", "sfx"],
       "/nonexistent",
       run,
@@ -360,6 +384,25 @@ describe("measureMix", () => {
     const again = await measureMix(project, picks, ["voice", "music"], root, run, 60_000, async () => 2);
     expect(again).toEqual(result);
     expect(calls).toHaveLength(callsSoFar); // cache hit: the runner isn't called again at all
+  });
+
+  it("a level change changes the cache key, so it's measured again rather than served stale (§19.6)", async () => {
+    const { root, project, picks } = await fixture();
+    let calls = 0;
+    const run: LoudnessRunner = async (args) => {
+      if (args[0] !== "-version") calls++;
+      return args[0] === "-version" ? { code: 0, stderr: "" } : { code: 0, stderr: ebur(-16) };
+    };
+    await measureMix(project, picks, ["music"], root, run);
+    expect(calls).toBe(1);
+    // A second, identical request is a cache hit.
+    await measureMix(project, picks, ["music"], root, run);
+    expect(calls).toBe(1);
+    // Same files, same offsets, same runner -- only the level differs: not served from cache.
+    const leveled: Picks = { ...picks, levels: { music: -14 } };
+    const result = await measureMix(project, leveled, ["music"], root, run);
+    expect(calls).toBe(2);
+    expect(result.integrated).not.toBeNull();
   });
 
   it("leaves musicUnderVo null when only one of voice/music is present", async () => {

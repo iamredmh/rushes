@@ -110,6 +110,18 @@ describe("createBatch", () => {
     }
   });
 
+  it("also points the Mix batch at the levels: where the user wants each lane to sit (§19.6)", () => {
+    const c = ctx();
+    addNote(c.notes, { stage: "mix", scope: "whole", text: "Bring the music up" });
+    const b = createBatch(c, "mix");
+    expect(b.prompt).toContain("levels");
+    // Music and sfx get the shared audio-stage wording and nothing about levels.
+    for (const stage of ["music", "sfx"] as const) {
+      addNote(c.notes, { stage, scope: "whole", text: "Fix it" });
+      expect(createBatch(c, stage).prompt).not.toContain("levels");
+    }
+  });
+
   it("points a voice batch at new whole reads by round, not at old marks-based fixes (§18.5)", () => {
     const c = ctx();
     addNote(c.notes, { stage: "voice", scope: "whole", text: "More sombre" });

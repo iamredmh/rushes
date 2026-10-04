@@ -331,6 +331,27 @@ describe("API", () => {
     expect((await call("PUT", "/api/picks", { sections: { s1: false } })).status).toBe(400);
   });
 
+  it("picks: levels (§19.6) are set, range/step-checked, and null resets to 0", async () => {
+    const { call, store } = await setup();
+    const set = await call("PUT", "/api/picks", { levels: { music: -14 } });
+    expect(set.status).toBe(200);
+    expect(set.json.levels).toEqual({ music: -14 });
+    // Out of range, and off the 0.5 dB step, are both refused -- nothing is saved either time.
+    expect((await call("PUT", "/api/picks", { levels: { music: -30 } })).status).toBe(400);
+    expect((await call("PUT", "/api/picks", { levels: { music: -13.3 } })).status).toBe(400);
+    expect((await call("PUT", "/api/picks", { levels: { voice: 6.5 } })).status).toBe(400);
+    const unchanged = await store.read("picks");
+    expect(unchanged.levels).toEqual({ music: -14 });
+    // Other lanes, and a set and a clear sharing one request.
+    const more = await call("PUT", "/api/picks", { levels: { voice: 6, sfx: null, music: -24 } });
+    expect(more.json.levels).toEqual({ voice: 6, music: -24 });
+    // null resets to 0, which means the key is gone from disk -- same rule as lanes/sections.
+    const cleared = await call("PUT", "/api/picks", { levels: { music: null } });
+    expect(cleared.json.levels).toEqual({ voice: 6 });
+    const saved = await store.read("picks");
+    expect(Object.keys(saved.levels)).toEqual(["voice"]);
+  });
+
   it("batches: send the tab's open notes once, then 409 when nothing is left", async () => {
     const { call } = await setup();
     const n = (await call("POST", "/api/notes", { stage: "picture", scope: "point", t: 1, text: "x" })).json.note;
@@ -794,6 +815,19 @@ describe("POST /api/mix/loudness (§17.6)", () => {
     const r = await call("POST", "/api/mix/loudness", { lanes: ["music"] });
     expect(r.status).toBe(200);
     expect(r.json).toEqual({ available: true, integrated: -20, truePeak: -6, musicUnderVo: null, silent: false });
+  });
+
+  it("applies the lane's saved level before measuring (§19.6)", async () => {
+    const calls: string[][] = [];
+    const run: LoudnessRunner = async (args) => {
+      calls.push(args);
+      return args[0] === "-version" ? { code: 0, stderr: "" } : { code: 0, stderr: EBUR128 };
+    };
+    const { call } = await withVariant(run);
+    await call("PUT", "/api/picks", { levels: { music: -14 } });
+    await call("POST", "/api/mix/loudness", { lanes: ["music"] });
+    const filter = calls.find((a) => a[0] !== "-version")!;
+    expect(filter.join(" ")).toContain("volume=-14dB");
   });
 
   it("caches: the runner isn't called again for a second, identical request", async () => {

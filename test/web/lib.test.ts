@@ -698,7 +698,7 @@ describe("voiceRounds (§18.2)", () => {
 });
 
 import {
-  levelText, loudnessLanes, loudnessReadout, MIX_LANES, type MixModel, mixNoteRows, mixNoteTarget, mixOnLabel, mixOnOptions, notePending,
+  clampLevel, levelText, loudnessLanes, loudnessReadout, MIX_LANES, type MixModel, mixNoteRows, mixNoteTarget, mixOnLabel, mixOnOptions, notePending,
 } from "../../web/src/lib.js";
 import type { LoudnessResult } from "../../web/src/types.js";
 
@@ -832,6 +832,13 @@ describe("Mix", () => {
       expect(levelText(0)).toBe("0.0");
       expect(levelText(-17.6, 0)).toBe("−18");
     });
+    it("clamps a level to the slider's range and snaps it to the 0.5 dB step (§19.6)", () => {
+      expect(clampLevel(-14)).toBe(-14);
+      expect(clampLevel(-14.2)).toBe(-14);
+      expect(clampLevel(-14.3)).toBe(-14.5);
+      expect(clampLevel(-30)).toBe(-24);
+      expect(clampLevel(20)).toBe(6);
+    });
     it("shows LUFS integrated, dBTP true peak and music under VO", () => {
       const cells = loudnessReadout(result());
       expect(cells.map((c) => [c.id, c.label])).toEqual([
@@ -901,7 +908,7 @@ describe("the VO pick rule: server mix and dashboard agree (parity)", () => {
     await Promise.all(files.map((f) => writeFile(join(root, "audio", f), "x")));
     const project: Project = { schema: 1, rev: 0, name: "p", fps: 30, videos: [], files: [], lanes };
     for (const c of cases) {
-      const picks: Picks = { schema: 1, rev: 0, sections: c.sections, lanes: c.lanes };
+      const picks: Picks = { schema: 1, rev: 0, sections: c.sections, lanes: c.lanes, levels: {} };
       const server = mixInputs(project, picks, ["voice"], root).map((i) => [relative(root, i.file), i.offset]);
       // The dashboard's VO, as Mix plays it: the newest round's pick, walking back past rounds with
       // none -- never the assembled read from takes, which Rushes no longer mixes.

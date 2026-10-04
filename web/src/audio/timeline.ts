@@ -53,11 +53,21 @@ export const MAX_DECODE_BYTES = MAX_DECODED_SECONDS * 48_000 * 2 * 4;
 export const PEAKS_PER_SECOND = 50;
 export const MAX_PEAK_BUCKETS = 60_000;
 
-/** Lane gains from mute and solo. Solo wins: with any lane soloed, only soloed lanes play, muted or not. */
-export function laneGains(lanes: { id: string; muted?: boolean; solo?: boolean }[]): Record<string, number> {
+/** A dB value as a linear gain (§19.6): 0 dB is unity, −6 dB is about half, and so on. */
+export function dbToGain(db: number): number {
+  return 10 ** (db / 20);
+}
+
+/** Lane gains from mute, solo and each lane's level (§19.6). Solo wins: with any lane soloed, only
+ *  soloed lanes play, muted or not; a muted or non-soloed-while-soloing lane is silent regardless
+ *  of its level. `level` defaults to 0 dB (unity), so callers with no levels at all are unaffected. */
+export function laneGains(lanes: { id: string; muted?: boolean; solo?: boolean; level?: number }[]): Record<string, number> {
   const anySolo = lanes.some((l) => l.solo);
   const out: Record<string, number> = {};
-  for (const l of lanes) out[l.id] = anySolo ? (l.solo ? 1 : 0) : l.muted ? 0 : 1;
+  for (const l of lanes) {
+    const muteSolo = anySolo ? (l.solo ? 1 : 0) : l.muted ? 0 : 1;
+    out[l.id] = dbToGain(l.level ?? 0) * muteSolo;
+  }
   return out;
 }
 

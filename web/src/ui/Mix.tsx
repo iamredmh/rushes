@@ -11,8 +11,9 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { api, ApiError } from "../api.js";
 import { assetRev, type Clip, laneGains } from "../audio/timeline.js";
 import {
-  defaultVersion, heardVoice, loudnessLanes, type LoudnessState, loudnessReadout, MIX_LANES, type MixLane, type MixModel, mixNoteRows,
-  mixOnLabel, mixOnOptions, STAGE_NAMES, type VariantRow, variantRows, voiceRounds, WHOLE_MIX,
+  clampLevel, defaultVersion, heardVoice, LEVEL_MAX, LEVEL_MIN, LEVEL_STEP, levelText, loudnessLanes, type LoudnessState, loudnessReadout,
+  MIX_LANES, type MixLane, type MixModel, mixNoteRows, MIX_STAGE, mixOnLabel, mixOnOptions, STAGE_NAMES, type VariantRow, variantRows,
+  voiceRounds, WHOLE_MIX,
 } from "../lib.js";
 import type { Asset, LoudnessResult, State, Video } from "../types.js";
 import { AudioStage, type Preview } from "./AudioStage.js";
@@ -23,6 +24,8 @@ const COLOR: Record<MixLane, string> = { vo: "#4FD1C5", music: "#A78BFA", sfx: "
 const NAME: Record<MixLane, string> = { vo: "Voiceover", music: "Music", sfx: "Sound effects" };
 /** The readout waits this long after the last change before measuring (§17.6). */
 export const LOUDNESS_DEBOUNCE_MS = 500;
+/** A level is saved this long after the last drag (§19.6): the slider itself stays live the whole time. */
+export const LEVEL_SAVE_DEBOUNCE_MS = 300;
 
 type LaneView = { muted: boolean; solo: boolean };
 const UNTOUCHED: Record<MixLane, LaneView> = { vo: { muted: false, solo: false }, music: { muted: false, solo: false }, sfx: { muted: false, solo: false } };
@@ -69,8 +72,40 @@ export function Mix({ state, assets, video, toast, onChanged, onPendingChange }:
 
   // ---- mute and solo: view state only ----
   const [view, setView] = useState(UNTOUCHED);
-  const gains = laneGains(MIX_LANES.map((id) => ({ id, ...view[id] })));
   const toggle = (lane: MixLane, key: keyof LaneView) => setView((v) => ({ ...v, [lane]: { ...v[lane], [key]: !v[lane][key] } }));
+
+  // ---- levels (§19.6): saved with the picks, in dB. The slider stays live (and the engine hears
+  // every tick) while the save to /api/picks is debounced, so dragging never spams the server. ----
+  const pickLevels = state.picks.levels;
+  const savedLevel = (lane: MixLane): number => pickLevels[MIX_STAGE[lane]] ?? 0;
+  const [levels, setLevels] = useState<Record<MixLane, number>>(() => ({ vo: savedLevel("vo"), music: savedLevel("music"), sfx: savedLevel("sfx") }));
+  // Picked up elsewhere (another tab, the agent, or your own save landing): resynced by value, not identity.
+  const savedKey = JSON.stringify(pickLevels);
+  useEffect(() => {
+    setLevels({ vo: savedLevel("vo"), music: savedLevel("music"), sfx: savedLevel("sfx") });
+  }, [savedKey]);
+  const saveTimers = useRef<Partial<Record<MixLane, number>>>({});
+  useEffect(
+    () => () => {
+      for (const id of Object.values(saveTimers.current)) window.clearTimeout(id);
+    },
+    [],
+  );
+  const setLevel = (lane: MixLane, db: number) => {
+    const clamped = clampLevel(db);
+    setLevels((v) => (v[lane] === clamped ? v : { ...v, [lane]: clamped }));
+    const timers = saveTimers.current;
+    if (timers[lane] !== undefined) window.clearTimeout(timers[lane]);
+    timers[lane] = window.setTimeout(() => {
+      delete timers[lane];
+      // 0 dB is the default: saved as a clear (null), same as the key never having been set.
+      api.put("/api/picks", { levels: { [MIX_STAGE[lane]]: clamped === 0 ? null : clamped } }).then(onChanged, (e) => {
+        toast(e instanceof ApiError ? e.message : "Couldn't save the level");
+      });
+    }, LEVEL_SAVE_DEBOUNCE_MS);
+  };
+
+  const gains = laneGains(MIX_LANES.map((id) => ({ id, ...view[id], level: levels[id] })));
 
   // ---- the lanes ----
   const metaOf = (lane: MixLane): string | null => {
@@ -95,14 +130,29 @@ export function Mix({ state, assets, video, toast, onChanged, onPendingChange }:
       <>
         <button type="button" class="ms" aria-pressed={view[lane].muted} aria-label={`Mute ${NAME[lane]}`} data-tip="Mute" onClick={() => toggle(lane, "muted")}>M</button>
         <button type="button" class="ms" aria-pressed={view[lane].solo} aria-label={`Solo ${NAME[lane]}`} data-tip="Solo" onClick={() => toggle(lane, "solo")}>S</button>
+        <label class="level" data-tip={`Level for ${NAME[lane]}. Double-click to reset.`}>
+          <input
+            type="range"
+            min={LEVEL_MIN}
+            max={LEVEL_MAX}
+            step={LEVEL_STEP}
+            value={levels[lane]}
+            aria-label={`${NAME[lane]} level`}
+            onInput={(e) => setLevel(lane, Number((e.target as HTMLInputElement).value))}
+            onDblClick={() => setLevel(lane, 0)}
+          />
+          <span class="db mono">{levelText(levels[lane])} dB</span>
+        </label>
       </>
     ),
   }));
 
   // ---- loudness (§17.6): the lanes you hear, debounced, never blocking ----
   const want = loudnessLanes(heard, gains);
-  // Anything that changes the mix re-measures: the lanes, and what each plays (picks, takes, re-renders).
-  const signature = JSON.stringify({ want, clips: MIX_LANES.map((l) => clipsOf[l].map((c) => [c.path, c.rev ?? "", c.offset])) });
+  // Anything that changes the mix re-measures: the lanes, what each plays (picks, takes, re-renders),
+  // and the levels -- the server applies them before measuring, so this follows the saved value
+  // (`pickLevels`), not the slider mid-drag, which it can't see yet anyway.
+  const signature = JSON.stringify({ want, levels: pickLevels, clips: MIX_LANES.map((l) => clipsOf[l].map((c) => [c.path, c.rev ?? "", c.offset])) });
   const [loudness, setLoudness] = useState<LoudnessState>({ kind: "waiting" });
   const [measuring, setMeasuring] = useState(false);
   // Bumped by clicking the readout after a timeout or an error: the server never caches either, so

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  activeVariantGain, assetRev, type Clip, computePeaks, HAVE_FUTURE_DATA, laneGains, MAX_DECODE_BYTES,
+  activeVariantGain, assetRev, type Clip, computePeaks, dbToGain, HAVE_FUTURE_DATA, laneGains, MAX_DECODE_BYTES,
   MAX_DECODED_SECONDS, mediaKey, mixPeaks, needsVideoSync, peakBuckets, resolveDurations, SEEK_COOLDOWN_SECONDS,
   setStreamThreshold, shouldStream, startPlan, streamStep, timelineLength, tooLargeToDecode, variantGains,
 } from "../../web/src/audio/timeline.js";
@@ -23,6 +23,23 @@ describe("laneGains", () => {
   });
   it("handles no lanes", () => {
     expect(laneGains([])).toEqual({});
+  });
+  it("applies each lane's level as a dB gain (§19.6), unity when none is given", () => {
+    expect(laneGains([{ id: "music", level: -6 }])["music"]).toBeCloseTo(0.501, 3);
+    expect(laneGains([{ id: "vo" }])["vo"]).toBe(1);
+    expect(laneGains([{ id: "vo", level: 0 }])["vo"]).toBe(1);
+  });
+  it("mute still wins over a level (§19.6)", () => {
+    expect(laneGains([{ id: "music", level: -6, muted: true }])).toEqual({ music: 0 });
+    expect(laneGains([{ id: "vo", level: 6, solo: false }, { id: "music", level: -6, solo: true }])).toEqual({ vo: 0, music: dbToGain(-6) });
+  });
+});
+
+describe("dbToGain", () => {
+  it("is unity at 0 dB and halves roughly every 6 dB", () => {
+    expect(dbToGain(0)).toBe(1);
+    expect(dbToGain(-6)).toBeCloseTo(0.501, 3);
+    expect(dbToGain(6)).toBeCloseTo(1.995, 3);
   });
 });
 

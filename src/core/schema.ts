@@ -210,11 +210,22 @@ export const NotesFileSchema = z.object({
 });
 export type NotesFile = z.infer<typeof NotesFileSchema>;
 
+// §19.6: a Mix lane's level, in dB. −24..6 in 0.5 dB steps; PUT /api/picks enforces the range and
+// step (a value outside it, or off the step, is a 400), so the stored file is never checked again here.
+export const LEVEL_MIN = -24;
+export const LEVEL_MAX = 6;
+export const LEVEL_STEP = 0.5;
+
+export const LevelsSchema = z.object({ voice: z.number(), music: z.number(), sfx: z.number() }).partial().default({});
+export type Levels = z.infer<typeof LevelsSchema>;
+
 export const PicksSchema = z.object({
   schema: z.literal(1),
   rev: z.number().int().nonnegative(),
   lanes: z.record(z.string(), z.string()).default({}),
   sections: z.record(z.string(), z.string()).default({}),
+  // §19.6: each Mix lane's level in dB, defaulting to 0 (absent). Keyed the same as LaneStage.
+  levels: LevelsSchema,
 });
 export type Picks = z.infer<typeof PicksSchema>;
 

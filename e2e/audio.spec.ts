@@ -1100,7 +1100,7 @@ test("Mix shows three lanes; mute and solo change the lane gains, and solo wins"
 
   // View state only: nothing is saved, and leaving the tab resets it.
   const picks = await rushes.api("GET", "/api/picks");
-  expect(Object.keys(picks).sort()).toEqual(["lanes", "rev", "schema", "sections"]);
+  expect(Object.keys(picks).sort()).toEqual(["lanes", "levels", "rev", "schema", "sections"]);
   await page.keyboard.press("4");
   await openTab(page, /Mix/, "6");
   await loaded(page, 3);
@@ -1313,6 +1313,67 @@ test("a Mix note on an SFX pass named like the music bed lands on Sound effects,
   await expect(page.locator(`.lane[data-row="sfx"] .mk[data-note="${added.id}"]`)).toHaveCount(1);
   await expect(page.locator(`.lane[data-row="music"] .mk[data-note="${added.id}"]`)).toHaveCount(0);
   await expect(page.locator(`.note[data-note="${added.id}"] .on`)).toHaveText("Sound effects · Option A");
+});
+
+// ---- Levels (§19.6, Plan 4 Task 2) ----
+
+/** Drags a Mix level slider to `db` by setting its value and firing the same `input` event a real drag fires. */
+async function dragLevel(page: Page, label: string, db: number) {
+  await page.locator(`input[aria-label="${label}"]`).evaluate((el: HTMLInputElement, v: number) => {
+    el.value = String(v);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  }, db);
+}
+
+test("a Mix level: drags live, saves on reload, resets on double-click, and re-measures loudness", async ({ page, rushes }) => {
+  await mixProject(page, rushes);
+  const asked = await openMix(page, rushes, 3);
+  const musicDb = page.locator('.lane[data-row="music"] .level .db');
+  await expect(musicDb).toHaveText("0.0 dB");
+
+  // Dragging to −14 is heard immediately through the engine, at roughly 10^(-14/20).
+  await dragLevel(page, "Music level", -14);
+  await expect(musicDb).toHaveText("−14.0 dB");
+  await expect.poll(async () => (await inspect(page)).lanes.music).toBeCloseTo(0.1995, 3);
+
+  // The loudness readout re-measures once the level is saved (debounced), not on every tick.
+  const before = asked.length;
+  await expect.poll(() => asked.length, { timeout: 10_000 }).toBeGreaterThan(before);
+
+  // It survives a reload: saved with the picks.
+  await page.reload();
+  await openTab(page, /Mix/, "6");
+  await loaded(page, 3);
+  await expect(page.locator('.lane[data-row="music"] .level .db')).toHaveText("−14.0 dB");
+  const picks = await rushes.api("GET", "/api/picks");
+  expect(picks.levels).toEqual({ music: -14 });
+
+  // Double-click resets it to 0, live and saved.
+  await page.locator('input[aria-label="Music level"]').dblclick();
+  await expect(page.locator('.lane[data-row="music"] .level .db')).toHaveText("0.0 dB");
+  await expect.poll(async () => (await inspect(page)).lanes.music).toBeCloseTo(1, 3);
+  await expect.poll(async () => (await rushes.api("GET", "/api/picks")).levels).toEqual({});
+});
+
+test("a burst of dragging inside the debounce window saves once, at the last value", async ({ page, rushes }) => {
+  await mixProject(page, rushes);
+  await openMix(page, rushes, 3);
+  const calls: unknown[] = [];
+  page.on("request", (r) => {
+    if (r.url().endsWith("/api/picks") && r.method() === "PUT") calls.push(r.postDataJSON());
+  });
+  // Four changes, well inside the 300 ms debounce window (one evaluate, so nothing can land between them).
+  await page.evaluate(() => {
+    const el = document.querySelector<HTMLInputElement>('input[aria-label="Music level"]')!;
+    for (const v of [-2, -6, -10, -14]) {
+      el.value = String(v);
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+  });
+  await expect(page.locator('.lane[data-row="music"] .level .db')).toHaveText("−14.0 dB");
+  await page.waitForTimeout(600);
+  const levelCalls = calls.filter((c): c is { levels?: { music?: number } } => !!(c as { levels?: unknown }).levels);
+  expect(levelCalls).toEqual([{ levels: { music: -14 } }]);
 });
 
 test("leaving Mix stops playback and releases its engine", async ({ page, rushes }) => {

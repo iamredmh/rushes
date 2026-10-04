@@ -82,6 +82,9 @@ export interface MixInput {
   /** Seconds from the start of the mix. */
   offset: number;
   stage: LaneStage;
+  /** §19.6: the lane's level in dB, from `picks.levels[stage]` (0 when unset). Applied as a `volume`
+   *  filter before the mix is measured, so the readout matches what Mix plays. */
+  gainDb: number;
 }
 
 /**
@@ -119,7 +122,7 @@ export function mixInputs(project: Project, picks: Picks, lanes: LaneStage[], ro
   const out: MixInput[] = [];
   const add = (file: string, offset: number, stage: LaneStage) => {
     const abs = fromManifestPath(root, file);
-    if (existsSync(abs)) out.push({ file: abs, offset, stage });
+    if (existsSync(abs)) out.push({ file: abs, offset, stage, gainDb: picks.levels[stage] ?? 0 });
   };
 
   if (want.has("voice")) {
@@ -145,7 +148,9 @@ function inputArgs(inputs: MixInput[]): string[] {
 }
 
 function filterComplex(inputs: MixInput[]): string {
-  const delays = inputs.map((inp, i) => `[${i}]adelay=${Math.round(inp.offset * 1000)}:all=1[a${i}]`);
+  // §19.6: each input's level is applied (volume=<db>dB) before the mix, right after its delay, so
+  // the readout measures the mix exactly as Mix plays it.
+  const delays = inputs.map((inp, i) => `[${i}]adelay=${Math.round(inp.offset * 1000)}:all=1,volume=${inp.gainDb}dB[a${i}]`);
   const labels = inputs.map((_, i) => `[a${i}]`).join("");
   return `${delays.join(";")};${labels}amix=inputs=${inputs.length}:normalize=0,ebur128=peak=true`;
 }
@@ -286,10 +291,10 @@ function cacheSet(run: LoudnessRunner, key: string, value: LoudnessResult): void
  * same files otherwise) still gets its own cache entry.
  */
 async function cacheKey(inputs: MixInput[], lanes: LaneStage[], span: VoSpan): Promise<string | null> {
-  const stats: { file: string; offset: number; mtimeMs: number }[] = [];
+  const stats: { file: string; offset: number; gainDb: number; mtimeMs: number }[] = [];
   for (const i of inputs) {
     try {
-      stats.push({ file: i.file, offset: i.offset, mtimeMs: (await stat(i.file)).mtimeMs });
+      stats.push({ file: i.file, offset: i.offset, gainDb: i.gainDb, mtimeMs: (await stat(i.file)).mtimeMs });
     } catch {
       return null;
     }
