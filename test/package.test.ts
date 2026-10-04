@@ -28,4 +28,15 @@ describe("package.json, §19.7", () => {
   it("the runtime VERSION constant (the CLI's --version and help banner) matches package.json, so they can't drift apart", () => {
     expect(VERSION).toBe(pkg.version);
   });
+
+  it("the Claude Code plugin's version matches package.json, so plugin users get the new skill (the plugin cache is keyed on it)", () => {
+    const plugin = JSON.parse(readFileSync(new URL("../.claude-plugin/plugin.json", import.meta.url), "utf8")) as { version: string };
+    expect(plugin.version).toBe(pkg.version);
+  });
+
+  it("package-lock.json is at the same version, so the next npm install doesn't rewrite it in an unrelated change", () => {
+    const lock = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8")) as { version: string; packages: Record<string, { version?: string }> };
+    expect(lock.version).toBe(pkg.version);
+    expect(lock.packages[""].version).toBe(pkg.version);
+  });
 });
