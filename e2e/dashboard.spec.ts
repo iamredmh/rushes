@@ -139,6 +139,51 @@ test("a box on a vertical cut is measured against the picture, not the 16:9 fram
   close(notes[0].box.h, 0.5);
 });
 
+test("a box on a vertical cut in a frame that doesn't fit it is still measured against the picture", async ({ page, rushes }) => {
+  await rushes.addVerticalCut();
+  await page.goto(rushes.url);
+  await videoReady(page);
+  // Force the frame back to 16:9, as Safari used to leave it: the 9:16 picture is pillarboxed
+  // inside a wider overlay, so the overlay and the picture are no longer the same rect.
+  await page.addStyleTag({ content: ".framebox .frame{width:100%!important;aspect-ratio:16/9!important}" });
+  const overlay = (await page.locator(".overlay").boundingBox())!;
+  expect(overlay.width / overlay.height).toBeCloseTo(16 / 9, 1);
+  // The picture's rect follows the overlay's new size a frame later (ResizeObserver): wait until
+  // it's centred in the wider overlay, not still where the fitted frame had it.
+  await expect.poll(async () => {
+    const p = (await page.locator(".pic").boundingBox())!;
+    return Math.abs(p.x + p.width / 2 - (overlay.x + overlay.width / 2)) < 1 && Math.abs(p.height - overlay.height) < 1;
+  }).toBe(true);
+  const pic = (await page.locator(".pic").boundingBox())!;
+  expect(pic.width / pic.height).toBeCloseTo(360 / 640, 1);
+  expect(pic.x).toBeGreaterThan(overlay.x + 100);
+
+  // The same drag as above, on the picture: from just inside its top-left corner to its centre.
+  await page.keyboard.press("b");
+  await page.mouse.move(pic.x + 1, pic.y + 1);
+  await page.mouse.down();
+  await page.mouse.move(pic.x + pic.width * 0.5, pic.y + pic.height * 0.5, { steps: 4 });
+  await page.mouse.up();
+  // The pending box is drawn inside the picture's rect.
+  const bx = (await page.locator(".pic .bx").boundingBox())!;
+  expect(bx.x).toBeGreaterThanOrEqual(pic.x - 1);
+  expect(bx.y).toBeGreaterThanOrEqual(pic.y - 1);
+  expect(bx.x + bx.width).toBeLessThanOrEqual(pic.x + pic.width + 1);
+  expect(bx.y + bx.height).toBeLessThanOrEqual(pic.y + pic.height + 1);
+  expect(bx.width).toBeCloseTo(pic.width * 0.5, -1);
+
+  await page.keyboard.press("n");
+  await page.keyboard.type("Box on a pillarboxed vertical cut.");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".note")).toHaveCount(1);
+  const { notes } = await rushes.api("GET", "/api/notes?stage=picture");
+  const close = (v: number, exp: number) => expect(Math.abs(v - exp)).toBeLessThanOrEqual(0.02);
+  close(notes[0].box.x, 0);
+  close(notes[0].box.y, 0);
+  close(notes[0].box.w, 0.5);
+  close(notes[0].box.h, 0.5);
+});
+
 test("a new cut mid-review waits for a click instead of dropping pending marks", async ({ page, rushes }) => {
   await rushes.addCut();
   await page.goto(rushes.url);
@@ -1259,9 +1304,15 @@ test.describe("proxies (§19.5)", () => {
     const late = await context.newPage();
     await late.goto(rushes.url);
     await expect(late.locator(".proxybar")).toContainText("Creating proxy");
-    await other.locator(".proxybar").getByRole("button", { name: "Cancel" }).click();
-    await expect(page.locator(".proxybar").getByRole("button", { name: "Create proxy" })).toBeVisible();
-    await expect(late.locator(".proxybar").getByRole("button", { name: "Create proxy" })).toBeVisible();
+    // Cancelled from outside the browser, the way an agent would: three tabs, each with its event
+    // stream and a long file loading, can fill Chromium's six connections to one host, and a
+    // Cancel clicked in one of them then waits for a free socket. (The button itself is covered by
+    // "Cancel stops a proxy part-way".) What this test is for is that the end reaches every tab.
+    const { proxies } = await rushes.api("GET", "/api/state");
+    await rushes.api("DELETE", `/api/proxy-jobs/${proxies.jobs[0].id}`, {});
+    for (const tab of [page, other, late]) {
+      await expect(tab.locator(".proxybar").getByRole("button", { name: "Create proxy" })).toBeVisible();
+    }
   });
 
   test("ticking the checkbox saves autoProxy, and a new qualifying cut starts its proxy by itself", async ({ page, rushes }) => {

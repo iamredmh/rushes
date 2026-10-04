@@ -154,14 +154,15 @@ async function startOnPort(port: number, noFfmpeg = false): Promise<Started> {
 /**
  * Playwright's WebKit on Linux decodes video through the system's GStreamer, and H.264/AAC
  * playback there isn't something CI can count on (Playwright marks its own video tests fixme on
- * Linux WebKit). So on Linux WebKit only, a test that puts an H.264 cut or an H.264 proxy in the
- * player is skipped, with this reason in the report. Everywhere else (Chromium on every OS, and
- * WebKit on macOS, which plays through AVFoundation) every test runs. Set
+ * Linux WebKit). CI runs WebKit on macOS for that reason; this is the safety net for anyone
+ * running WebKit locally on Linux. There only, a test that puts an H.264 cut or an H.264 proxy in
+ * the player is skipped, with this reason in the report. Everywhere else (Chromium on every OS,
+ * and WebKit on macOS, which plays through AVFoundation) every test runs. Set
  * `RUSHES_E2E_WEBKIT_H264=1` to run them on Linux WebKit anyway.
  */
 const H264_SKIP_REASON = "needs H.264 playback, which Playwright's WebKit on Linux can't be relied on for";
 export function needsH264(browserName: string): void {
-  base.info().skip(browserName === "webkit" && process.platform === "linux" && !process.env.RUSHES_E2E_WEBKIT_H264, H264_SKIP_REASON);
+  base.info().skip(browserName === "webkit" && process.platform === "linux" && process.env.RUSHES_E2E_WEBKIT_H264 !== "1", H264_SKIP_REASON);
 }
 
 export const test = base.extend<{ rushes: Rushes; noFfmpeg: boolean }>({

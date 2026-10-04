@@ -1,7 +1,8 @@
 name: CI
 
 # §19.4: every push and pull request is built, typechecked, unit tested, run through the
-# browser suite in Chromium and WebKit with ffmpeg installed, and checked for what would ship.
+# browser suite with ffmpeg installed, and checked for what would ship. Chromium runs on Linux;
+# WebKit runs on macOS, where it plays H.264 the way Safari does, so its whole suite runs.
 on:
   push:
   pull_request:
@@ -11,12 +12,18 @@ permissions:
 
 jobs:
   test:
-    name: Node ${{ matrix.node }}
-    runs-on: ubuntu-latest
+    name: ${{ matrix.browser }} · Node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         node: ["20.19.x", "22.x"]
+        browser: [chromium, webkit]
+        include:
+          - browser: chromium
+            os: ubuntu-latest
+          - browser: webkit
+            os: macos-latest
     steps:
       - uses: actions/checkout@v5
 
@@ -25,8 +32,16 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
 
-      - name: Install ffmpeg
+      - name: Install ffmpeg (Linux)
+        if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install ffmpeg (macOS)
+        if: runner.os == 'macOS'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+        run: brew install ffmpeg
 
       - name: Install dependencies
         run: npm ci
@@ -40,36 +55,27 @@ jobs:
       - name: Unit tests
         run: npx vitest run
 
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium webkit
+      - name: Install Playwright's ${{ matrix.browser }}
+        run: npx playwright install --with-deps ${{ matrix.browser }}
 
-      # Both projects, Chromium and WebKit. On Linux WebKit, tests that need H.264 playback are
-      # skipped with a reason (see needsH264 in e2e/fixture.ts); every other test runs there.
-      - name: Browser tests
-        run: npx playwright test --retries=0
-
-      # Evidence, not a gate: the H.264 tests in Linux WebKit as well, to find out whether
-      # GStreamer here plays them. If this goes green run after run, the skip can go.
-      - name: Browser tests needing H.264, in Linux WebKit (informational)
-        if: matrix.node == '22.x'
-        continue-on-error: true
-        env:
-          RUSHES_E2E_WEBKIT_H264: "1"
-          PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report-webkit-h264
-        run: npx playwright test --project=webkit --retries=0 --output=test-results-webkit-h264
+      - name: Browser tests in ${{ matrix.browser }}
+        run: npx playwright test --project=${{ matrix.browser }} --retries=0
 
       # npm pack runs the prepare script (the build) first, and its output lands in pack.json
       # ahead of npm's own JSON, so the check reads from the line that opens the JSON array.
+      # It fails on anything outside the allowed files, on an empty list, and without
+      # package.json or the built dist/.
       - name: Check what would ship
+        if: matrix.browser == 'chromium'
         run: |
           npm pack --dry-run --json > pack.json
-          node -e 'const t=require("fs").readFileSync("pack.json","utf8");const ok=["dist/","web-dist/","skills/",".claude-plugin/",".mcp.json","README.md","AGENTS.md","LICENSE","package.json"];const files=JSON.parse(t.slice(t.search(/^\[$/m)))[0].files.map(f=>f.path);const bad=files.filter(p=>!ok.some(a=>a.endsWith("/")?p.startsWith(a):p===a));if(bad.length){console.error("Not allowed in the package:\n"+bad.join("\n"));process.exit(1)}console.log(files.length+" files, all allowed")'
+          node -e 'const t=require("fs").readFileSync("pack.json","utf8");const ok=["dist/","web-dist/","skills/",".claude-plugin/",".mcp.json","README.md","AGENTS.md","LICENSE","package.json"];const i=t.search(/^\[$/m);if(i<0){console.error("No JSON from npm pack");process.exit(1)}const files=JSON.parse(t.slice(i))[0].files.map(f=>f.path);if(!files.length){console.error("npm pack lists no files");process.exit(1)}const bad=files.filter(p=>!ok.some(a=>a.endsWith("/")?p.startsWith(a):p===a));if(bad.length){console.error("Not allowed in the package:\n"+bad.join("\n"));process.exit(1)}if(!files.includes("package.json")||!files.some(p=>p.startsWith("dist/"))){console.error("The package is missing package.json or dist/");process.exit(1)}console.log(files.length+" files, all allowed")'
 
       - name: Upload the Playwright report
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report-node-${{ matrix.node }}
+          name: playwright-report-${{ matrix.browser }}-node-${{ matrix.node }}
           path: |
             playwright-report/
             test-results/
