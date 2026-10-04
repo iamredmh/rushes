@@ -14,13 +14,51 @@ const TINY_PNG = Buffer.from(
 test("tabs stay locked until the project has something, then unlock live", async ({ page, rushes }) => {
   await page.goto(rushes.url);
   await expect(page.getByRole("tab", { name: /Picture/ })).toHaveAttribute("aria-disabled", "true");
-  await expect(page.getByText("Nothing to review in Picture yet")).toBeVisible();
+  await expect(page.getByText("Watch each cut, leave timecoded notes and lock the picture.")).toBeVisible();
   await rushes.addCut("first cut");
   // No reload: the server's change event unlocks the tab.
   await expect(page.getByRole("tab", { name: /Picture/ })).toHaveAttribute("aria-disabled", "false");
   await page.getByRole("tab", { name: /Picture/ }).click();
   await videoReady(page);
   await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v1");
+});
+
+test("a locked tab opens, explains itself and offers a prompt for your agent (locked, §19.1)", async ({ page, rushes, context, browserName }) => {
+  if (browserName === "chromium") await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await rushes.addCut();
+  await page.goto(rushes.url);
+  await videoReady(page);
+
+  // 1. Click Music: it opens (never a toast), shows what it's for, and there's no notes column.
+  // A locked tab stays marked aria-disabled for CSS (styles.css: never the disabled attribute,
+  // so the click handler still runs) -- force the click past Playwright's own actionability
+  // check, the same way a real pointer click isn't blocked by aria-disabled.
+  const musicTab = page.getByRole("tab", { name: /Music/ });
+  await musicTab.click({ force: true });
+  await expect(page).toHaveURL(rushes.url);
+  await expect(musicTab).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByText("Compare music beds against the picture and pick one.")).toBeVisible();
+  await expect(page.getByRole("complementary", { name: "Notes" })).toHaveCount(0);
+
+  // 2. Click Copy prompt: it copies the ready-to-paste request to the clipboard (Chromium), or
+  // at least confirms with a toast (every browser, since WebKit grants no clipboard read here).
+  await page.getByRole("button", { name: "Copy prompt for your agent" }).click();
+  if (browserName === "chromium") {
+    const clipboard = await page.evaluate(() => navigator.clipboard.readText());
+    expect(clipboard).toContain('rushes_add_variant (stage "music")');
+  } else {
+    await expect(page.getByRole("status")).toHaveText("Prompt copied");
+  }
+
+  // 3. Hover (checked via the attribute that drives the tooltip) the locked Music tab.
+  await expect(musicTab).toHaveAttribute("data-tip", "Locked: ask your agent for music beds");
+
+  // 4. Press 4, the Music key, from elsewhere: the Music locked page opens.
+  await page.getByRole("tab", { name: /Picture/ }).click();
+  await videoReady(page);
+  await page.keyboard.press("4");
+  await expect(musicTab).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByText("Compare music beds against the picture and pick one.")).toBeVisible();
 });
 
 test("a note at the playhead is saved and survives a reload", async ({ page, rushes }) => {

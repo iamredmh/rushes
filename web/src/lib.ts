@@ -91,15 +91,68 @@ export const STAGE_NAMES: Record<Stage, string> = {
   mix: "Mix",
 };
 
-/** One line saying what unlocks a tab. */
-export const UNLOCK_HINT: Record<Stage, string> = {
-  script: "It unlocks when your agent adds a script with rushes_set_script.",
-  picture: "It unlocks when your agent adds a cut with rushes_add_version.",
-  voice: "It unlocks when your agent adds a voice read with rushes_add_variant.",
-  music: "It unlocks when your agent adds a music bed with rushes_add_variant.",
-  sfx: "It unlocks when your agent adds an SFX pass with rushes_add_variant.",
-  mix: "It unlocks once there's a cut and at least one audio stage.",
+/** §19.1: a locked tab's copy -- what it's for, what unlocks it, and the noun its tooltip asks for. */
+export const LOCKED_TAB: Record<Stage | "assets", { what: string; unlocks: string; ask: string }> = {
+  script: {
+    what: "Read the VO line by line and suggest your own wording.",
+    unlocks: "Your agent adds the script.",
+    ask: "the script",
+  },
+  picture: {
+    what: "Watch each cut, leave timecoded notes and lock the picture.",
+    unlocks: "Your agent adds a cut.",
+    ask: "a cut",
+  },
+  voice: {
+    what: "Compare whole reads in rounds and pick one.",
+    unlocks: "Your agent adds voice reads.",
+    ask: "voice reads",
+  },
+  music: {
+    what: "Compare music beds against the picture and pick one.",
+    unlocks: "Your agent adds music beds.",
+    ask: "music beds",
+  },
+  sfx: {
+    what: "Compare SFX passes, cue by cue.",
+    unlocks: "Your agent adds an SFX pass.",
+    ask: "an SFX pass",
+  },
+  mix: {
+    what: "Balance voice, music and effects and check loudness.",
+    unlocks: "Unlocks with a cut and any audio.",
+    ask: "a cut and some audio",
+  },
+  assets: {
+    what: "Every file in the project in one place.",
+    unlocks: "Unlocks with the first cut, take, track or screenshot.",
+    ask: "files",
+  },
 };
+
+/** `{for "{f}"}`/`{of "{f}"}`: ` <word> "<film>"` once a film is known, else nothing. */
+const filmClause = (word: string, filmName: string | null): string => (filmName ? ` ${word} "${filmName}"` : "");
+
+/** §19.1's "Copy prompt for your agent" templates, one per locked tab, verbatim. */
+const PROMPT_TEMPLATE: Record<Stage | "assets", (p: string, f: string | null) => string> = {
+  script: (p, f) =>
+    `In Rushes project "${p}", add the voiceover script${filmClause("for", f)} with rushes_set_script, one section per line with start and end times.`,
+  picture: (p, f) => `In Rushes project "${p}", add the latest cut${filmClause("of", f)} with rushes_add_version.`,
+  voice: (p, f) =>
+    `In Rushes project "${p}", record two or three voice reads${filmClause("for", f)} and add each with rushes_add_variant (stage "voice", round "Round 1 · Voices") with a one-line description.`,
+  music: (p, f) =>
+    `In Rushes project "${p}", make two or three music beds${filmClause("for", f)} and add each with rushes_add_variant (stage "music") with a one-line description.`,
+  sfx: (p, f) =>
+    `In Rushes project "${p}", make a sound-effects pass${filmClause("for", f)} and add it with rushes_add_variant (stage "sfx") with its cues.`,
+  mix: (p, f) =>
+    `In Rushes project "${p}", add a cut and at least one voice read, music bed or SFX pass${filmClause("for", f)}.`,
+  assets: (p, f) => `In Rushes project "${p}", add the first cut${filmClause("of", f)} with rushes_add_version.`,
+};
+
+/** The ready-to-paste request a locked tab's "Copy prompt for your agent" button copies (§19.1). */
+export function agentPrompt(stage: Stage | "assets", projectName: string, filmName: string | null): string {
+  return PROMPT_TEMPLATE[stage](projectName, filmName);
+}
 
 /** Which tab to show first: the first unlocked one in workflow order, preferring Picture when it's there. */
 export function firstTab(tabs: TabState[]): Stage {

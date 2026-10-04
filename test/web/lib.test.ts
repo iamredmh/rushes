@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  boxFrom, cueRoom, defaultVersion, extOf, firstTab, fit, FOLDERS, fmt, folderItems, formatBytes, frameAt, groupByFilm,
-  isChanged, isPreviewable, latest, metaLine, neighbourVideo, noteTime, OPEN_SAFE_EXT, placeNote, shotAt, shotLabel, shotSeek, snap, stepFrame,
+  agentPrompt, boxFrom, cueRoom, defaultVersion, extOf, firstTab, fit, FOLDERS, fmt, folderItems, formatBytes, frameAt, groupByFilm,
+  isChanged, isPreviewable, latest, LOCKED_TAB, metaLine, neighbourVideo, noteTime, OPEN_SAFE_EXT, placeNote, shotAt, shotLabel, shotSeek, snap, stepFrame,
 } from "../../web/src/lib.js";
 import type { Asset, Note, Section, Shot, TabState, Video } from "../../web/src/types.js";
 // Only this test imports the server's own list, so the web copy (ruling 1) is never pulled
@@ -96,6 +96,26 @@ describe("firstTab", () => {
     expect(firstTab(tabs(["script", "picture"]))).toBe("picture");
     expect(firstTab(tabs(["script"]))).toBe("script");
     expect(firstTab(tabs([]))).toBe("picture");
+  });
+});
+
+describe("LOCKED_TAB / agentPrompt (§19.1)", () => {
+  it("gives every locked tab non-empty what, unlocks and ask", () => {
+    for (const copy of Object.values(LOCKED_TAB)) {
+      expect(copy.what.trim()).not.toBe("");
+      expect(copy.unlocks.trim()).not.toBe("");
+      expect(copy.ask.trim()).not.toBe("");
+    }
+  });
+  it("builds the Music prompt with a film clause when the film is known", () => {
+    expect(agentPrompt("music", "Launch", "Hero")).toBe(
+      'In Rushes project "Launch", make two or three music beds for "Hero" and add each with rushes_add_variant (stage "music") with a one-line description.',
+    );
+  });
+  it("drops the film clause when there's no film", () => {
+    expect(agentPrompt("music", "Launch", null)).toBe(
+      'In Rushes project "Launch", make two or three music beds and add each with rushes_add_variant (stage "music") with a one-line description.',
+    );
   });
 });
 

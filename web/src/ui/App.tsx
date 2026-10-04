@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, ApiError } from "../api.js";
-import { BUILT, STAGE_NAMES, UNLOCK_HINT, defaultVersion, firstTab, latest, neighbourVideo, snap } from "../lib.js";
+import { LOCKED_TAB, STAGE_NAMES, agentPrompt, defaultVersion, firstTab, latest, neighbourVideo, snap } from "../lib.js";
 import type { Batch, Stage, Video } from "../types.js";
 import { useRushes } from "../useRushes.js";
 import { Assets } from "./Assets.js";
@@ -15,15 +15,34 @@ const ORDER: Stage[] = ["script", "picture", "voice", "music", "sfx", "mix"];
 // Assets isn't a review stage (§15.3): it's a dashboard-only tab after the six stages, so it's
 // kept out of Stage and ORDER entirely and handled as its own case throughout this file.
 type View = Stage | "assets";
-const ASSETS_HINT = "It unlocks once the project has a cut, a take, a track or a screenshot.";
 const typing = (el: EventTarget | null) => el instanceof HTMLElement && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
 
-function Empty({ stage, unlocked }: { stage: Stage; unlocked: boolean }) {
+/** §19.1: a locked tab's own page -- what it's for, what unlocks it, and a prompt to copy for your agent. */
+function Locked({ tab, projectName, filmName, toast }: { tab: Stage | "assets"; projectName: string; filmName: string | null; toast: (m: string) => void }) {
+  const { what, unlocks } = LOCKED_TAB[tab];
+  const name = tab === "assets" ? "Assets" : STAGE_NAMES[tab];
+  const icon = tab === "assets" ? "grid" : STAGE_ICONS[tab];
+  const prompt = agentPrompt(tab, projectName, filmName);
+  const boxRef = useRef<HTMLTextAreaElement>(null);
+  const copyPrompt = async () => {
+    try {
+      await navigator.clipboard.writeText(prompt);
+    } catch {
+      boxRef.current?.select();
+    }
+    toast("Prompt copied");
+  };
   return (
-    <div class="empty">
-      <Icon name={unlocked ? STAGE_ICONS[stage] : "lock"} />
-      <h2>{unlocked ? `${STAGE_NAMES[stage]} is coming` : `Nothing to review in ${STAGE_NAMES[stage]} yet`}</h2>
-      <p>{unlocked ? "This tab arrives in the next release of Rushes. Your agent can already read and reply to notes for it." : UNLOCK_HINT[stage]}</p>
+    <div class="empty locked">
+      <Icon name={icon} />
+      <h2>{name}</h2>
+      <p>{what}</p>
+      <p>{unlocks}</p>
+      <textarea class="promptbox mono" readOnly rows={3} ref={boxRef} value={prompt} aria-label="Prompt for your agent" />
+      <button class="btn primary" onClick={() => void copyPrompt()}>
+        <Icon name="copy" />
+        Copy prompt for your agent
+      </button>
     </div>
   );
 }
@@ -143,15 +162,14 @@ export function App() {
   const tab = (s: Stage) => tabs.find((t) => t.stage === s);
   const assetsUnlocked = assets.length > 0;
   // Leaving a tab unmounts it, so a note in the making there (the same `pending` that holds the
-  // film and New take) would be lost: refuse the switch instead, by click or by 1–7.
+  // film and New take) would be lost: refuse the switch instead, by click or by 1–7. A locked
+  // tab always opens (§19.1): it shows its own page rather than a toast.
   const show = (s: Stage) => {
-    if (!tab(s)?.unlocked) return toast(`Nothing to review in ${STAGE_NAMES[s]} yet`);
     if (pending && s !== stage) return toast("Add or clear your note first");
     setStage(s);
     setSent(null);
   };
   const showAssets = () => {
-    if (!assetsUnlocked) return toast("Nothing to review in Assets yet");
     if (pending && stage !== "assets") return toast("Add or clear your note first");
     setStage("assets");
     setSent(null);
@@ -344,7 +362,14 @@ export function App() {
         {ORDER.map((s) => {
           const t = tab(s);
           return (
-            <button class="tab" role="tab" aria-selected={stage === s} aria-disabled={!t?.unlocked} onClick={() => show(s)}>
+            <button
+              class="tab"
+              role="tab"
+              aria-selected={stage === s}
+              aria-disabled={!t?.unlocked}
+              data-tip={t?.unlocked ? undefined : `Locked: ask your agent for ${LOCKED_TAB[s].ask}`}
+              onClick={() => show(s)}
+            >
               <Icon name={STAGE_ICONS[s]} />
               {STAGE_NAMES[s]}
               {t?.unlocked ? (t.todo > 0 && <span class="dot" title={`${t.todo} open`} />) : <Icon name="lock" class="lk" />}
@@ -353,7 +378,14 @@ export function App() {
         })}
         {/* Assets: the last tab, after Mix. Not a review stage, so it's never counted in ORDER
             and never shows a to-do dot — just locked, or not. */}
-        <button class="tab" role="tab" aria-selected={stage === "assets"} aria-disabled={!assetsUnlocked} onClick={() => showAssets()}>
+        <button
+          class="tab"
+          role="tab"
+          aria-selected={stage === "assets"}
+          aria-disabled={!assetsUnlocked}
+          data-tip={assetsUnlocked ? undefined : `Locked: ask your agent for ${LOCKED_TAB.assets.ask}`}
+          onClick={() => showAssets()}
+        >
           <Icon name="grid" />
           Assets
           {!assetsUnlocked && <Icon name="lock" class="lk" />}
@@ -366,14 +398,10 @@ export function App() {
           unlocked ? (
             <Assets assets={assets} videos={state.project.videos} toast={toast} onChanged={() => void refresh()} />
           ) : (
-            <div class="empty">
-              <Icon name="lock" />
-              <h2>Nothing to review in Assets yet</h2>
-              <p>{ASSETS_HINT}</p>
-            </div>
+            <Locked tab="assets" projectName={state.project.name} filmName={video?.name ?? null} toast={toast} />
           )
-        ) : !unlocked || !BUILT[stage] ? (
-          <Empty stage={stage} unlocked={unlocked} />
+        ) : !unlocked ? (
+          <Locked tab={stage} projectName={state.project.name} filmName={video?.name ?? null} toast={toast} />
         ) : stage === "picture" && video && version ? (
           <Picture
             key={video.id}
@@ -425,9 +453,7 @@ export function App() {
             onChanged={() => void refresh()}
             onPendingChange={setPending}
           />
-        ) : (
-          <Empty stage={stage} unlocked={unlocked} />
-        )}
+        ) : null}
       </main>
     </div>
   );
