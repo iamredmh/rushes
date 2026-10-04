@@ -38,7 +38,7 @@ function Locked({ tab, projectName, filmName, toast }: { tab: Stage | "assets"; 
       <h2>{name}</h2>
       <p>{what}</p>
       <p>{unlocks}</p>
-      <textarea class="promptbox mono" readOnly rows={3} ref={boxRef} value={prompt} aria-label="Prompt for your agent" />
+      <textarea class="promptbox mono" readOnly rows={4} ref={boxRef} value={prompt} aria-label="Prompt for your agent" />
       <button class="btn primary" onClick={() => void copyPrompt()}>
         <Icon name="copy" />
         Copy prompt for your agent
@@ -366,13 +366,22 @@ export function App() {
               class="tab"
               role="tab"
               aria-selected={stage === s}
-              aria-disabled={!t?.unlocked}
+              data-locked={t?.unlocked ? undefined : "true"}
               data-tip={t?.unlocked ? undefined : `Locked: ask your agent for ${LOCKED_TAB[s].ask}`}
               onClick={() => show(s)}
             >
               <Icon name={STAGE_ICONS[s]} />
               {STAGE_NAMES[s]}
-              {t?.unlocked ? (t.todo > 0 && <span class="dot" title={`${t.todo} open`} />) : <Icon name="lock" class="lk" />}
+              {t?.unlocked ? (
+                t.todo > 0 && <span class="dot" title={`${t.todo} open`} />
+              ) : (
+                <>
+                  <Icon name="lock" class="lk" />
+                  {/* Visually hidden, not aria-hidden: an enabled, clickable tab is announced as
+                      locked (Safari's aria-description support is patchy, so a hidden span instead). */}
+                  <span class="vh"> Locked</span>
+                </>
+              )}
             </button>
           );
         })}
@@ -382,13 +391,18 @@ export function App() {
           class="tab"
           role="tab"
           aria-selected={stage === "assets"}
-          aria-disabled={!assetsUnlocked}
+          data-locked={assetsUnlocked ? undefined : "true"}
           data-tip={assetsUnlocked ? undefined : `Locked: ask your agent for ${LOCKED_TAB.assets.ask}`}
           onClick={() => showAssets()}
         >
           <Icon name="grid" />
           Assets
-          {!assetsUnlocked && <Icon name="lock" class="lk" />}
+          {!assetsUnlocked && (
+            <>
+              <Icon name="lock" class="lk" />
+              <span class="vh"> Locked</span>
+            </>
+          )}
         </button>
       </nav>
       {problem && !wrongProject && <div class="banner"><Icon name="alert" />{problem}</div>}

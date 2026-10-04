@@ -72,7 +72,7 @@ function overflowChain(mark: ReturnType<Page["locator"]>) {
 /** Open an audio tab once it has unlocked. */
 async function openTab(page: Page, name: RegExp, key: string) {
   const tab = page.getByRole("tab", { name });
-  await expect(tab).toHaveAttribute("aria-disabled", "false");
+  await expect(tab).not.toHaveAttribute("data-locked");
   await page.keyboard.press(key);
   await expect(tab).toHaveAttribute("aria-selected", "true");
 }

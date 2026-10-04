@@ -13,11 +13,11 @@ const TINY_PNG = Buffer.from(
 
 test("tabs stay locked until the project has something, then unlock live", async ({ page, rushes }) => {
   await page.goto(rushes.url);
-  await expect(page.getByRole("tab", { name: /Picture/ })).toHaveAttribute("aria-disabled", "true");
+  await expect(page.getByRole("tab", { name: /Picture/ })).toHaveAttribute("data-locked", "true");
   await expect(page.getByText("Watch each cut, leave timecoded notes and lock the picture.")).toBeVisible();
   await rushes.addCut("first cut");
   // No reload: the server's change event unlocks the tab.
-  await expect(page.getByRole("tab", { name: /Picture/ })).toHaveAttribute("aria-disabled", "false");
+  await expect(page.getByRole("tab", { name: /Picture/ })).not.toHaveAttribute("data-locked");
   await page.getByRole("tab", { name: /Picture/ }).click();
   await videoReady(page);
   await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v1");
@@ -30,15 +30,16 @@ test("a locked tab opens, explains itself and offers a prompt for your agent (lo
   await videoReady(page);
 
   // 1. Click Music: it opens (never a toast), shows what it's for, and there's no notes column.
-  // A locked tab stays marked aria-disabled for CSS (styles.css: never the disabled attribute,
-  // so the click handler still runs) -- force the click past Playwright's own actionability
-  // check, the same way a real pointer click isn't blocked by aria-disabled.
+  // A locked tab is an ordinary enabled button -- never aria-disabled -- so an unmodified click
+  // works exactly like it would on any other tab.
   const musicTab = page.getByRole("tab", { name: /Music/ });
-  await musicTab.click({ force: true });
+  await musicTab.click();
   await expect(page).toHaveURL(rushes.url);
   await expect(musicTab).toHaveAttribute("aria-selected", "true");
   await expect(page.getByText("Compare music beds against the picture and pick one.")).toBeVisible();
   await expect(page.getByRole("complementary", { name: "Notes" })).toHaveCount(0);
+  // Locked, but still announced as such: a visually hidden "Locked" word in the accessible name.
+  await expect(musicTab).toHaveAccessibleName(/Locked/);
 
   // 2. Click Copy prompt: it copies the ready-to-paste request to the clipboard (Chromium), or
   // at least confirms with a toast (every browser, since WebKit grants no clipboard read here).
@@ -526,7 +527,7 @@ test("a grabbed frame is saved as a screenshot and shows up in Assets with its a
   await page.keyboard.press("g");
   await expect(page.getByRole("status")).toHaveText("Saved to screenshots/hero_v1_00m01.00s_f30.png");
 
-  await expect(page.getByRole("tab", { name: /Assets/ })).toHaveAttribute("aria-disabled", "false");
+  await expect(page.getByRole("tab", { name: /Assets/ })).not.toHaveAttribute("data-locked");
   await page.keyboard.press("7");
   const tile = page.locator(".shot-tile");
   await expect(tile).toHaveCount(1);
@@ -602,7 +603,7 @@ test("a deleted file is marked missing in Assets", async ({ page, rushes }) => {
   await videoReady(page);
   await rm(join(rushes.root, "renders", "hero_v1.mp4"));
   await page.reload();
-  await expect(page.getByRole("tab", { name: /Assets/ })).toHaveAttribute("aria-disabled", "false");
+  await expect(page.getByRole("tab", { name: /Assets/ })).not.toHaveAttribute("data-locked");
   await page.getByRole("tab", { name: /Assets/ }).click();
   // The library's Cuts folder defaults to a poster-frame grid (§16.1); switch to the list view
   // to get back the plain row this test is about.
@@ -787,7 +788,7 @@ test("the library has a folder sidebar with counts, and ↑/↓ moves between fo
   await rushes.api("POST", "/api/files", { file: "image.png", kind: "image" });
 
   await page.goto(rushes.url);
-  await expect(page.getByRole("tab", { name: /Assets/ })).toHaveAttribute("aria-disabled", "false");
+  await expect(page.getByRole("tab", { name: /Assets/ })).not.toHaveAttribute("data-locked");
   await page.keyboard.press("7");
 
   const sidebar = page.getByRole("navigation", { name: "Folders" });
@@ -859,7 +860,7 @@ test("search and the film filter narrow the screenshots", async ({ page, rushes 
 test("a script previews as Markdown, safely", async ({ page, rushes }) => {
   await writeFile(join(rushes.root, "script.md"), "# Title\n\nSome text with <script>alert(1)</script> in it.\n");
   await page.goto(rushes.url);
-  await expect(page.getByRole("tab", { name: /Assets/ })).toHaveAttribute("aria-disabled", "false");
+  await expect(page.getByRole("tab", { name: /Assets/ })).not.toHaveAttribute("data-locked");
   await page.keyboard.press("7");
 
   // The title itself is the select control (I3), not the whole row.
@@ -877,7 +878,7 @@ test("keyboard users can trigger a preview row's actions and select it (I3)", as
   await writeFile(join(rushes.root, "notes.md"), "# Notes\n");
 
   await page.goto(rushes.url);
-  await expect(page.getByRole("tab", { name: /Assets/ })).toHaveAttribute("aria-disabled", "false");
+  await expect(page.getByRole("tab", { name: /Assets/ })).not.toHaveAttribute("data-locked");
   await page.keyboard.press("7");
   await expect(page.locator(".aheader h2")).toContainText("Scripts & docs");
 
@@ -903,7 +904,7 @@ test("audio plays inline, one at a time, and stops when you leave the folder", a
   await rushes.api("POST", "/api/variants", { stage: "music", name: "Bed B", file: "bed-b.mp4" });
 
   await page.goto(rushes.url);
-  await expect(page.getByRole("tab", { name: /Assets/ })).toHaveAttribute("aria-disabled", "false");
+  await expect(page.getByRole("tab", { name: /Assets/ })).not.toHaveAttribute("data-locked");
   await page.keyboard.press("7");
   await expect(page.locator(".aheader h2")).toContainText("Music");
   // A list-only folder never offers the grid/list toggle (I5) -- Music's tiles would be
@@ -975,7 +976,7 @@ test("a rejected play() resets the row and shows a toast, instead of claiming to
   });
 
   await page.goto(rushes.url);
-  await expect(page.getByRole("tab", { name: /Assets/ })).toHaveAttribute("aria-disabled", "false");
+  await expect(page.getByRole("tab", { name: /Assets/ })).not.toHaveAttribute("data-locked");
   await page.keyboard.press("7");
   await expect(page.locator(".aheader h2")).toContainText("Music");
 
@@ -991,7 +992,7 @@ test("Open is offered for a doc and not for an unsafe file, and Export notes add
   await rushes.api("POST", "/api/files", { file: "x.command", kind: "edit" });
 
   await page.goto(rushes.url);
-  await expect(page.getByRole("tab", { name: /Assets/ })).toHaveAttribute("aria-disabled", "false");
+  await expect(page.getByRole("tab", { name: /Assets/ })).not.toHaveAttribute("data-locked");
   await page.keyboard.press("7");
 
   // Scripts & docs sorts before Edit files, so it's already selected.
@@ -1017,7 +1018,7 @@ test("Open is offered for a doc and not for an unsafe file, and Export notes add
 test("a file dropped into the project root appears once something refreshes Assets (I7)", async ({ page, rushes }) => {
   await writeFile(join(rushes.root, "existing.md"), "# Existing\n");
   await page.goto(rushes.url);
-  await expect(page.getByRole("tab", { name: /Assets/ })).toHaveAttribute("aria-disabled", "false");
+  await expect(page.getByRole("tab", { name: /Assets/ })).not.toHaveAttribute("data-locked");
   await page.keyboard.press("7");
   await expect(page.locator(".aheader h2")).toContainText("Scripts & docs");
   await expect(page.locator(".arow")).toHaveCount(1);
@@ -1070,7 +1071,7 @@ test("200 screenshots stay usable", async ({ page, rushes }) => {
     Array.from({ length: 200 }, (_, i) => writeFile(join(rushes.root, "screenshots", `hero_v1_00m00.00s_f${i}.png`), TINY_PNG)),
   );
   await page.goto(rushes.url);
-  await expect(page.getByRole("tab", { name: /Assets/ })).toHaveAttribute("aria-disabled", "false");
+  await expect(page.getByRole("tab", { name: /Assets/ })).not.toHaveAttribute("data-locked");
   await page.keyboard.press("7");
   await expect(page.locator(".shot-tile")).toHaveCount(200);
 
@@ -1086,7 +1087,7 @@ test("Cuts posters are lazy: not every tile loads a video before you scroll (I6)
     await rushes.api("POST", "/api/versions", { video: "Hero", file: "renders/hero.mp4" });
   }
   await page.goto(rushes.url);
-  await expect(page.getByRole("tab", { name: /Assets/ })).toHaveAttribute("aria-disabled", "false");
+  await expect(page.getByRole("tab", { name: /Assets/ })).not.toHaveAttribute("data-locked");
   await page.keyboard.press("7");
   await expect(page.locator(".aheader h2")).toContainText("Cuts");
 
