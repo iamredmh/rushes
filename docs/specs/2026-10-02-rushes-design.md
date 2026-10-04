@@ -613,3 +613,105 @@ This section is binding and replaces §17.5.
   3. Reply.
 - **The Script batch prompt** is unchanged, apart from this: when VO already exists, the agent re-records the picked voice with the corrected script and registers it as a new read in a new round.
 - **Export and the CLI** name a voice note's read by its round and name, e.g. `Round 2 · Gerald · more sombre`.
+
+## 19. Plan 4: ready for other people (agreed 4 October 2026)
+
+**Why.** Rushes does the job. Plan 4 makes it easy for someone else to pick up, try and trust. Red agreed the order, the proxy behaviour, the levels and the locked-tab behaviour on 4 October 2026, and reviewed the mockup. This section is binding.
+
+### 19.1 Locked tabs explain themselves
+- **Every tab is always visible**, from the very start of a project, in workflow order.
+- **A locked tab can be opened.** It never just shows a toast. Its page shows:
+  - the tab's icon and name;
+  - one sentence on what the tab is for, e.g. "Compare music beds against the picture and pick one";
+  - what unlocks it, in plain words, e.g. "Your agent adds music beds to this project";
+  - **Copy prompt for your agent**, which copies a ready-to-paste request naming the project and film, and the tool the agent should use, e.g. `In Rushes project "Launch", make two or three music beds for "Hero" and add each with rushes_add_variant (stage "music") with a one-line description.`
+- **No notes column on a locked tab.** There's nothing to note yet.
+- **Hovering a locked tab** shows a tooltip, e.g. "Locked: ask your agent for music beds".
+- **Assets follows the same rules.**
+
+### 19.2 Example project: `rushes demo [dir]`
+- **What it makes.** It creates a ready-to-explore project in `dir` (default `./rushes-demo`), then opens it.
+- **All media is generated on the user's machine.** Nothing is downloaded and nothing ships in the package. It contains:
+  - a 30 s test-pattern film with burnt-in timecode, in two cuts (v1 and v2), with shots;
+  - a short script in four sections;
+  - **voice reads in two rounds.** These use the system's text-to-speech where there is one (macOS `say`). Otherwise they are clearly labelled placeholder tones;
+  - two music beds (synthesised chords at two tempos);
+  - one SFX pass with cues;
+  - example notes on Picture, Voiceover, Music and Mix.
+- **Requirements.** It needs ffmpeg. Without it, `demo` says so in one line, points to `rushes doctor`, and exits without creating anything.
+- **Never overwrites.** It refuses to write into a non-empty folder.
+
+### 19.3 Health check: `rushes doctor`
+- **What it checks**, one line each with ✓ or ✗ and a plain fix:
+  - the Node version (≥ 20.19, or ≥ 22.12 on the 22 line);
+  - ffmpeg and ffprobe on the PATH, with their version;
+  - which agent harnesses have the Rushes MCP registered (reusing `setup`'s detection);
+  - whether a Rushes server is running for this folder (port, project id);
+  - whether the project files are valid;
+  - free disk space when there are proxies.
+- **Output.** `--json` gives the same checks as data.
+- **Exit code.** It exits non-zero if a required check fails. ffmpeg is recommended, not required.
+- **For agents.** The MCP tool `rushes_doctor` returns the JSON.
+
+### 19.4 Tested on every change
+- **What CI runs.** A GitHub Actions workflow runs on each push and pull request:
+  - Node 20.19 and 22.x;
+  - `npm ci`, build, typecheck and vitest;
+  - Playwright in **Chromium and WebKit**, with ffmpeg installed so the probe and loudness paths are exercised;
+  - `npm pack --dry-run`, failing if anything outside the allowed files would ship.
+- **WebKit fixes** that must land with it:
+  - the test setup only grants clipboard permissions where the browser supports them;
+  - **a box drawn on a vertical cut is measured against the picture in Safari**. Today it is measured against the 16:9 frame, which is a real bug.
+
+### 19.5 Proxies: the user's choice, never silent
+- **When Rushes offers one.** For a cut that's likely to play badly:
+  - 4K or larger on either edge;
+  - over 1.5 GB;
+  - a codec browsers can't play reliably (ProRes, DNx, HEVC 10-bit, anything that isn't H.264, VP9 or AV1);
+  - or the browser reports a playback error.
+
+  The server works this out with ffprobe when the cut is added. Without ffmpeg, nothing is offered.
+- **The offer** is a bar under the player. It says why in a few words (e.g. "It's a 4K ProRes file (2.3 GB), which browsers struggle with"), then has a **Create proxy** button. The button's tooltip reads: "Makes a lightweight 1080p copy on your drive so this cut previews smoothly. About N MB. Your original isn't changed."
+- **While it's made.**
+  - The bar reads "Creating proxy", with progress in % and **Cancel**.
+  - Cancel stops ffmpeg and deletes the partial file.
+  - Progress reaches every open tab over SSE.
+- **When it's done.**
+  - "✓ Proxy ready", with its path and size.
+  - A **Proxy / Original** switch appears on the player, with tooltips. It defaults to Proxy, and the choice is remembered per film.
+  - Notes, timecodes and frame numbers are identical on both.
+- **The checkbox.** "Create proxies for new cuts like this automatically" is saved per project (`project.json`, `autoProxy`) and off by default. When it's on, a new cut that meets the criteria starts a proxy straight away, with the same visible progress and Cancel.
+- **The file.**
+  - It goes in a visible `proxies/` folder, named `<film-slug>_<version>_proxy.mp4`.
+  - It is H.264, at most 1920 px on the long edge, same frame rate and duration, yuv420p, AAC audio, with faststart.
+  - Its record (`file`, `width`, `height`, `bytes`, `createdAt`) is stored on the version as `proxy`.
+- **Assets** gets a **Proxies** folder listing each proxy with its size, and a **Delete proxy** button. Deleting removes the file and the record. The original is never touched.
+- **Grab Frame** always takes the still from the **original**, at full quality. The server extracts the exact frame with ffmpeg, so the still is the same whichever file is playing.
+- **Agents.** `rushes_add_version` returns `proxySuggested: true` and a reason when a cut meets the criteria.
+
+### 19.6 Levels on Mix
+- **The slider.** Each Mix lane (Voiceover, Music, Sound effects) has a level slider:
+  - −24 dB to +6 dB in 0.5 dB steps;
+  - the value shown as e.g. `−14.0 dB`;
+  - double-click resets it to 0;
+  - arrow keys move it 0.5 dB at a time;
+  - it is labelled for screen readers.
+- **Stored in `picks.json`** as `levels: { voice?, music?, sfx? }` in dB, defaulting to 0. `PUT /api/picks` accepts them, and `null` resets one to 0. `rushes_get_picks` returns them.
+- **Playback.**
+  - Each lane's gain is the level combined with mute and solo, ramped like any other gain change.
+  - Levels never change files.
+- **Loudness** (§17.6) applies the levels before measuring, and the cache key includes them.
+- **The Mix batch prompt** tells the agent that levels are where the user wants each lane to sit.
+
+### 19.7 Publishing to npm
+- **What ships.** The package publishes as `rushes`. `files` lists only `dist`, `web-dist`, `skills`, `.claude-plugin`, `.mcp.json`, `README.md`, `AGENTS.md` and `LICENSE`, so no tests, fixtures, docs or plans ship.
+- **The build.** `prepublishOnly` runs the build and the tests.
+- **The source switch.** The `SOURCE` constant and the docs switch from `github:iamredmh/rushes` to `rushes` in the same release.
+- **Publishing is done with Red, not by an agent alone.** Red runs `npm login` once in Terminal, which confirms in the browser. Then, with Red's OK at the time, `npm publish`. If npm asks for a one-time code, Red enters it.
+
+### 19.8 Follow-ups folded in
+- **Voiceover memory.**
+  - Only decode the current round, opened folds and the selected read.
+  - A folded round's buffers are released, under a small LRU cap.
+- **Re-rendering a file mid-play** no longer stops playback. That lane rejoins once it decodes.
+- **Space on a focused button** activates the button, e.g. "Measure again", instead of playing.
