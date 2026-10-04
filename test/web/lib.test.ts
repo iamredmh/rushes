@@ -13,7 +13,7 @@ import {
 import { OPEN_SAFE_EXT as SERVER_OPEN_SAFE_EXT } from "../../src/server/reveal.js";
 import { markLabel as serverMarkLabel, type Mark } from "../../src/core/schema.js";
 import {
-  AUDIO_CHIPS, BUILT, blindOrder, laneSelection, markLabel, marksLabel, scopeOptions, setMarkDb, testFlags, toggleMark, variantMeta,
+  AUDIO_CHIPS, BUILT, blindOrder, laneSelection, markLabel, marksLabel, scopeOptions, setMarkDb, spacePressesButton, testFlags, toggleMark, variantMeta,
   variantNoteRow, variantNoteTarget, variantOnLabel, variantOnOptions, variantRows,
 } from "../../web/src/lib.js";
 import type { Lane } from "../../web/src/types.js";
@@ -608,6 +608,20 @@ describe("audio tabs: lanes", () => {
     expect(testFlags("?test=1")).toEqual({ test: true, streamOver: false });
     expect(testFlags("?test=1&streamOver=1")).toEqual({ test: true, streamOver: true });
     expect(testFlags("?streamOver=1")).toEqual({ test: false, streamOver: false });
+  });
+});
+
+describe("Space on a focused button (§19.8)", () => {
+  /** A stand-in element: `closest` matches the selectors it's inside. */
+  const inside = (...matches: string[]) => ({ closest: (sel: string) => (matches.includes(sel) ? {} : null) });
+  it("is the button's when a button has focus", () => {
+    expect(spacePressesButton(inside("button") as unknown as EventTarget)).toBe(true);
+  });
+  it("still plays from the page, the player, or a button inside the player", () => {
+    expect(spacePressesButton(null)).toBe(false);
+    expect(spacePressesButton({} as EventTarget)).toBe(false);
+    expect(spacePressesButton(inside() as unknown as EventTarget)).toBe(false);
+    expect(spacePressesButton(inside("button", "[data-player]") as unknown as EventTarget)).toBe(false);
   });
 });
 

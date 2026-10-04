@@ -255,6 +255,8 @@ export function Lanes({ rows, length, media, selected, marks, range, onSelect, o
             <button
               type="button"
               class="nm"
+              // Part of the player: Space still plays with a lane focused (§19.8).
+              data-player
               aria-current={current ? "true" : "false"}
               aria-label={row.name}
               aria-description={row.missing ? (typeof row.missing === "string" ? row.missing : "Missing") : undefined}

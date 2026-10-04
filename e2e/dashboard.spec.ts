@@ -487,6 +487,22 @@ test("a version pin left over from peeking at a cut doesn't block the next one f
   await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v3");
 });
 
+test("Space on a focused button presses it instead of playing; from the page it still plays (§19.8)", async ({ page, rushes }) => {
+  await rushes.addCut();
+  await page.goto(rushes.url);
+  await videoReady(page);
+  const video = page.locator("video");
+  const box = page.getByRole("button", { name: "Draw a box" });
+  await box.focus();
+  await page.keyboard.press(" ");
+  await expect(box).toHaveAttribute("aria-pressed", "true");
+  await page.waitForTimeout(300);
+  expect(await video.evaluate((v: HTMLVideoElement) => v.paused)).toBe(true);
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press(" ");
+  await expect.poll(() => video.evaluate((v: HTMLVideoElement) => !v.paused)).toBe(true);
+});
+
 test("switching films pauses the one playing, and its playhead is remembered even mid-play", async ({ page, rushes }) => {
   await rushes.addCut("hero cut");
   await rushes.addCut("cutdown cut", "Cutdown");

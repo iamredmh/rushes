@@ -18,6 +18,11 @@ export const START_LEAD = 0.03;
 export const RAMP_SECONDS = 0.004;
 /** Give up waiting on a file's metadata after this long. */
 const PROBE_TIMEOUT_MS = 15_000;
+/**
+ * Files no clip uses any more (a folded Voiceover round, say) wait idle, newest last, so bringing
+ * them back is instant. Past this many the least recently dropped is released (§19.8).
+ */
+export const IDLE_FILES_LIMIT = 12;
 
 export interface LoadResult {
   duration: number;
@@ -42,6 +47,10 @@ export interface EngineSnapshot {
   media: string[];
   /** Of those, the ones playing through `<audio>`. */
   streamed: string[];
+  /** Files no clip uses, held for a quick return, least recently dropped first. */
+  idle: string[];
+  /** Each live buffer source by clip id, as a serial number: a clip whose number changes was restarted. */
+  voices: Record<string, number>;
 }
 
 /** Everything the engine reaches outside itself, injectable for tests. Defaults are the browser's. */
@@ -96,6 +105,7 @@ interface Media {
   streamed: boolean;
 }
 interface Load {
+  path: string;
   promise: Promise<LoadResult>;
   /** Cancels the fetch, the probe and the decode's result (eviction, dispose). */
   abort: AbortController;
@@ -150,12 +160,19 @@ export class AudioEngine {
   /** Decoded or streamed files, by mediaKey. */
   private readonly media = new Map<string, Media>();
   private readonly loads = new Map<string, Load>();
+  /** Files no clip uses, with their finished loads, least recently dropped first. */
+  private readonly idle = new Map<string, { media: Media; load: Load }>();
+  /** A re-rendered clip's last known length, by clip id, held until its new file decodes, so the
+   *  timeline's length doesn't drop (and playback stop) meanwhile. */
+  private readonly holding = new Map<string, number>();
   private selection: Record<string, string> = {};
   private readonly laneTargets: Record<string, number> = {};
   private readonly laneNodes = new Map<string, GainNode>();
   private readonly clipNodes = new Map<string, ClipNodes>();
   /** Live buffer sources for the current run, by clip id. */
   private readonly voices = new Map<string, AudioBufferSourceNode>();
+  private readonly serials = new WeakMap<AudioBufferSourceNode, number>();
+  private serial = 0;
 
   private _playing = false;
   /** Timeline time at `startedAt`. */
@@ -215,6 +232,8 @@ export class AudioEngine {
       lanes: { ...this.laneTargets },
       media: [...this.media.keys()],
       streamed: [...this.media].filter(([, m]) => m.streamed).map(([k]) => k),
+      idle: [...this.idle.keys()],
+      voices: Object.fromEntries([...this.voices].map(([id, src]) => [id, this.serials.get(src) ?? 0])),
     };
   }
 
@@ -250,14 +269,16 @@ export class AudioEngine {
   load(path: string, rev?: string): Promise<LoadResult> {
     if (this.disposed) return Promise.reject(new Error("The audio engine was disposed"));
     const key = mediaKey({ path, rev });
-    const existing = this.loads.get(key);
+    const existing = this.loads.get(key) ?? this.idle.get(key)?.load;
     if (existing) return existing.promise;
     const abort = new AbortController();
     const promise = this.loadOnce(path, key, abort.signal);
-    const entry: Load = { promise, abort };
+    const entry: Load = { path, promise, abort };
     this.loads.set(key, entry);
     promise.catch(() => {
       if (this.loads.get(key) === entry) this.loads.delete(key);
+      // A re-render that won't load holds the timeline's length no longer.
+      for (const c of this.clips) if (mediaKey(c) === key) this.holding.delete(c.id);
     });
     return promise;
   }
@@ -324,6 +345,7 @@ export class AudioEngine {
 
   /** A file arriving mid-play joins in, locked to the clock. */
   private afterLoad(key: string): void {
+    for (const c of this.clips) if (mediaKey(c) === key) this.holding.delete(c.id);
     if (this._playing) {
       for (const c of this.resolved()) if (mediaKey(c) === key && !this.voices.has(c.id)) this.startLate(c);
       this.syncStreams(this.rawClock());
@@ -333,23 +355,52 @@ export class AudioEngine {
 
   // ---- the clip list and gains ----
 
-  /** Replace the clips. Unchanged clips keep playing; new ones join on the clock. Files no clip
-   *  uses any more are freed, and their loads in flight aborted. */
+  /**
+   * Replace the clips. Unchanged clips keep playing; new ones join on the clock. Files no clip uses
+   * any more wait idle (up to IDLE_FILES_LIMIT, then the least recently dropped is freed), and loads
+   * still in flight for them are aborted. A file re-rendered in place (same path, new revision) is
+   * freed at once: its old revision is never asked for again.
+   */
   setClips(clips: Clip[]): void {
     const next = new Map(clips.map((c) => [c.id, c]));
+    const lengths = this.resolved();
+    const was = new Map(this.clips.map((c) => [c.id, c]));
     for (const old of this.clips) {
       const now = next.get(old.id);
       const same = now && now.lane === old.lane && now.path === old.path && now.rev === old.rev
         && now.offset === old.offset && now.duration === old.duration;
       if (!same) this.dropClip(old.id);
     }
+    // A clip re-rendered in place keeps its length until the new file is in.
+    for (const c of lengths) {
+      const now = next.get(c.id);
+      const old = was.get(c.id)!;
+      if (now && now.path === old.path && now.rev !== old.rev && c.duration > 0) this.holding.set(c.id, c.duration);
+    }
+    for (const id of [...this.holding.keys()]) if (!next.has(id)) this.holding.delete(id);
     const used = new Set(clips.map(mediaKey));
+    const paths = new Set(clips.map((c) => c.path));
     for (const [key, load] of this.loads) {
       if (used.has(key)) continue;
-      load.abort.abort();
+      const m = this.media.get(key);
+      // Superseded by a newer revision of the same file: never coming back.
+      const superseded = !m || paths.has(load.path);
+      if (superseded) load.abort.abort();
+      else this.idle.set(key, { media: m, load });
       this.loads.delete(key);
+      this.media.delete(key);
     }
     for (const key of [...this.media.keys()]) if (!used.has(key)) this.media.delete(key);
+    for (const [key, kept] of this.idle) if (!used.has(key) && paths.has(kept.load.path)) this.idle.delete(key);
+    while (this.idle.size > IDLE_FILES_LIMIT) this.idle.delete(this.idle.keys().next().value!);
+    // Back from idle: in play at once, no fetch or decode.
+    for (const key of used) {
+      const kept = this.idle.get(key);
+      if (!kept) continue;
+      this.idle.delete(key);
+      this.media.set(key, kept.media);
+      this.loads.set(key, kept.load);
+    }
     this.clips = clips.slice();
     if (this._playing) {
       for (const c of this.resolved()) if (!this.voices.has(c.id)) this.startLate(c);
@@ -428,6 +479,8 @@ export class AudioEngine {
     this.stopVoices();
     for (const load of this.loads.values()) load.abort.abort();
     this.loads.clear();
+    this.idle.clear();
+    this.holding.clear();
     for (const id of [...this.clipNodes.keys()]) this.dropClip(id);
     for (const node of this.laneNodes.values()) node.disconnect();
     this.laneNodes.clear();
@@ -455,10 +508,13 @@ export class AudioEngine {
     return this.ctx;
   }
 
+  /** The clips with every unknown length filled: from its file, else (mid re-render) the length it had. */
   private resolved(): Clip[] {
     const durations: Record<string, number> = {};
     for (const [key, m] of this.media) durations[key] = m.duration;
-    return resolveDurations(this.clips, durations);
+    const clips = resolveDurations(this.clips, durations);
+    if (this.holding.size === 0) return clips;
+    return clips.map((c) => (c.duration > 0 ? c : { ...c, duration: this.holding.get(c.id) ?? 0 }));
   }
 
   private clampTime(t: number): number {
@@ -510,6 +566,7 @@ export class AudioEngine {
     };
     src.start(when, offset, c.duration - offset);
     this.voices.set(c.id, src);
+    this.serials.set(src, ++this.serial);
   }
 
   private stopSource(src: AudioBufferSourceNode): void {
@@ -635,6 +692,11 @@ export class AudioEngine {
     if (!this._playing) return;
     const len = this.length;
     if (len <= 0) {
+      // A file still loading will join on the clock (§19.8): keep time running until it does.
+      if (this.clips.some((c) => this.loads.has(mediaKey(c)) && !this.media.has(mediaKey(c)))) {
+        this.frame = this.opts.raf(this.tick);
+        return;
+      }
       // Every clip went away mid-play: nothing left to play.
       this.pause();
       return;

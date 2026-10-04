@@ -639,6 +639,17 @@ export function blindOrder(keys: string[], seed: number): string[] {
   return [...keys].sort((a, b) => hash(a) - hash(b) || (a < b ? -1 : a > b ? 1 : 0));
 }
 
+/**
+ * Whether Space belongs to the focused element rather than the transport (§19.8): a focused button
+ * (Measure again, say) is pressed by Space, not played over. A button inside the player itself, a
+ * lane's name or a shot (marked `data-player`), only selects or seeks, so Space still plays there.
+ */
+export function spacePressesButton(target: EventTarget | null): boolean {
+  const el = target as { closest?: (selector: string) => unknown } | null;
+  if (!el || typeof el.closest !== "function") return false;
+  return !!el.closest("button") && !el.closest("[data-player]");
+}
+
 /** Test-only switches read from the page URL. `streamOver` only counts alongside `test`. */
 export function testFlags(search: string): { test: boolean; streamOver: boolean } {
   const q = new URLSearchParams(search);

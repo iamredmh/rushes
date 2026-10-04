@@ -11,7 +11,7 @@ import { type AudioEngine, type EngineSnapshot, liveContexts } from "../audio/en
 import { type Clip, needsVideoSync, setStreamThreshold } from "../audio/timeline.js";
 import { useAudioStage } from "../audio/useAudioStage.js";
 import {
-  AUDIO_CHIPS, type AudioStageId, fmt, laneSelection, type Listening, notePending, noteTime, type OnOption, type Scope, snap, stepFrame, testFlags,
+  AUDIO_CHIPS, type AudioStageId, fmt, laneSelection, type Listening, notePending, noteTime, type OnOption, type Scope, snap, spacePressesButton, stepFrame, testFlags,
 } from "../lib.js";
 import type { Mark, Note } from "../types.js";
 import { Icon } from "./Icon.js";
@@ -305,7 +305,12 @@ export function AudioStage(props: AudioStageProps) {
   onKeyRef.current = (e: KeyboardEvent) => {
     if (typing(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
     const k = e.key.toLowerCase();
-    if (e.key === " ") { e.preventDefault(); toggle(); }
+    if (e.key === " ") {
+      // A focused button (Measure again, say) is pressed by Space, not played over (§19.8).
+      if (spacePressesButton(e.target)) return;
+      e.preventDefault();
+      toggle();
+    }
     else if (e.key === "ArrowLeft") { e.preventDefault(); step(e.shiftKey ? -10 : -1); }
     else if (e.key === "ArrowRight") { e.preventDefault(); step(e.shiftKey ? 10 : 1); }
     else if (k === "i") setIn();

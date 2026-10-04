@@ -89,9 +89,15 @@ export function Voice({ state, assets, video, toast, onChanged, onPendingChange 
     onChanged();
   };
 
-  // ---- what the engine plays: every read of every round, each in a lane of its own ----
+  // ---- what the engine plays (§19.8): each read in a lane of its own, but only the reads you can
+  // reach: the current round's and those of the rounds you've opened. The selected read is always
+  // one of them, since a read is selected by clicking its lane, and folding a round drops a selection
+  // on it (AudioStage). A folded round's files leave the engine, which keeps them idle for a quick
+  // return; opening it again decodes whatever has been released.
   const clipOf = (r: VariantRow): Clip => ({ id: r.key, lane: readLane(r), path: r.file, offset: 0, duration: 0, rev: rev(r.file) });
-  const clips: Clip[] = rounds.flatMap((round) => round.reads.filter((r) => !missing(r.file)).map(clipOf));
+  const clips: Clip[] = rounds
+    .filter((round) => round.current || opened.has(round.id))
+    .flatMap((round) => round.reads.filter((r) => !missing(r.file)).map(clipOf));
 
   // ---- the lanes: the current round open, then older rounds newest first, each folded ----
   const notes = state.notes.notes.filter((n) => n.stage === "voice");

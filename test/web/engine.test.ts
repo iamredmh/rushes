@@ -4,7 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { claim, owner, release } from "../../web/src/audio/bus.js";
 import {
-  AudioEngine, clearPeaksCache, liveContexts, PEAKS_CACHE_LIMIT, peaksCacheSize, RAMP_SECONDS, START_LEAD, type EngineOptions,
+  AudioEngine, clearPeaksCache, IDLE_FILES_LIMIT, liveContexts, PEAKS_CACHE_LIMIT, peaksCacheSize, RAMP_SECONDS, START_LEAD, type EngineOptions,
 } from "../../web/src/audio/engine.js";
 import type { Clip } from "../../web/src/audio/timeline.js";
 
@@ -511,10 +511,10 @@ describe("AudioEngine: fix round 1", () => {
     expect(engine.inspect().media).toEqual([]);
     await engine.load("c.wav");
     expect(engine.inspect().media).toEqual(["c.wav"]);
-    // Reloading a freed path fetches it again.
+    // A freed path waits idle (§19.8), so bringing it back fetches nothing.
     engine.setClips([clip("a", 0, 4)]);
     await engine.load("a.wav");
-    expect(fetches.filter((f) => f.url === "/m/a.wav")).toHaveLength(2);
+    expect(fetches.filter((f) => f.url === "/m/a.wav")).toHaveLength(1);
   });
 
   it("aborts a load in flight when its path is dropped", async () => {
@@ -660,5 +660,148 @@ describe("AudioEngine: fix round 1", () => {
     const n = seen.length;
     frame();
     expect(seen).toHaveLength(n);
+  });
+});
+
+describe("AudioEngine: follow-ups (§19.8)", () => {
+  it("keeps a dropped file idle, so bringing it back needs no fetch or decode", async () => {
+    const { engine, ctx } = await ready([clip("a", 0, 4), clip("b", 0, 4)]);
+    const first = await engine.load("a.wav");
+    engine.setClips([clip("b", 0, 4)]);
+    expect(engine.inspect().media).toEqual(["b.wav"]);
+    expect(engine.inspect().idle).toEqual(["a.wav"]);
+    engine.setClips([clip("a", 0, 4), clip("b", 0, 4)]);
+    // Back at once: no load to wait on, the same result and no second fetch or decode.
+    expect(engine.inspect().media.sort()).toEqual(["a.wav", "b.wav"]);
+    expect(engine.inspect().idle).toEqual([]);
+    expect(await engine.load("a.wav")).toBe(first);
+    expect(fetches.filter((f) => f.url === "/m/a.wav")).toHaveLength(1);
+    expect(ctx.decodes).toBe(2);
+    engine.dispose();
+  });
+
+  it(`releases idle files beyond ${IDLE_FILES_LIMIT}, the least recently dropped first`, async () => {
+    const n = IDLE_FILES_LIMIT + 2;
+    for (let i = 0; i < n; i++) files[`/m/f${i}.wav`] = "1";
+    const clips = Array.from({ length: n }, (_, i) => clip(`f${i}`, 0, 1));
+    const engine = new AudioEngine(undefined, options());
+    // Dropped one at a time, oldest first.
+    for (let i = 0; i < n; i++) {
+      engine.setClips([clips[i]]);
+      await engine.load(clips[i].path);
+    }
+    engine.setClips([]);
+    const idle = engine.inspect().idle;
+    expect(idle).toHaveLength(IDLE_FILES_LIMIT);
+    expect(idle).not.toContain("f0.wav");
+    expect(idle).not.toContain("f1.wav");
+    expect(idle).toContain(`f${n - 1}.wav`);
+    // A released file is fetched again; an idle one isn't.
+    engine.setClips([clips[0], clips[n - 1]]);
+    await engine.load("f0.wav");
+    await engine.load(`f${n - 1}.wav`);
+    expect(fetches.filter((f) => f.url === "/m/f0.wav")).toHaveLength(2);
+    expect(fetches.filter((f) => f.url === `/m/f${n - 1}.wav`)).toHaveLength(1);
+    engine.dispose();
+    for (let i = 0; i < n; i++) delete files[`/m/f${i}.wav`];
+  });
+
+  it("never keeps a superseded revision idle", async () => {
+    const { engine } = await ready([{ ...clip("a", 0, 4), rev: "r1" }]);
+    engine.setClips([{ ...clip("a", 0, 4), rev: "r2" }]);
+    expect(engine.inspect().idle).toEqual([]);
+    engine.dispose();
+  });
+
+  it("keeps the heard clip's source when other clips leave", async () => {
+    const { engine, ctx } = await ready([clip("a", 0, 4, "x"), clip("b", 0, 4, "y")]);
+    ctx.currentTime = 10;
+    engine.play(0);
+    const voice = engine.inspect().voices.a;
+    ctx.currentTime = 10.5;
+    engine.setClips([clip("a", 0, 4, "x")]);
+    expect(engine.inspect().voices).toEqual({ a: voice });
+    engine.setClips([clip("a", 0, 4, "x"), clip("b", 0, 4, "y")]);
+    // b comes back from idle and joins on the clock; a is untouched.
+    expect(engine.inspect().voices.a).toBe(voice);
+    expect(engine.inspect().voices.b).toBeGreaterThan(voice);
+    expect(ctx.sources.at(-1)!.started![1]).toBeCloseTo(0.5, 9);
+    engine.dispose();
+  });
+
+  it("keeps playing through a re-render of the only clip: silent until it decodes, then back at the right place", async () => {
+    const { engine, ctx } = await ready([{ ...clip("a", 0, 4), rev: "r1" }]);
+    ctx.currentTime = 10;
+    engine.play(0);
+    ctx.currentTime = 11;
+    gate("/m/a.wav");
+    engine.setClips([{ ...clip("a", 0, 4), rev: "r2" }]);
+    const loading = engine.load("a.wav", "r2");
+    frame();
+    expect(engine.playing).toBe(true);
+    expect(engine.inspect().sources).toBe(0);
+    // The length holds while the new file decodes, so the clock runs on.
+    expect(engine.length).toBe(4);
+    ctx.currentTime = 11.5;
+    frame();
+    expect(engine.playing).toBe(true);
+    expect(engine.time).toBeCloseTo(1.5 - START_LEAD, 9);
+    gates["/m/a.wav"].open();
+    await loading;
+    expect(engine.inspect().sources).toBe(1);
+    const fresh = ctx.sources.at(-1)!;
+    expect(fresh.started![0]).toBeCloseTo(11.5 + START_LEAD, 9);
+    expect(fresh.started![1]).toBeCloseTo(1.5, 9);
+    expect(engine.playing).toBe(true);
+    engine.dispose();
+  });
+
+  it("keeps playing through a re-render of a clip whose length was never given", async () => {
+    const { engine, ctx } = await ready([{ ...clip("a", 0, 0), rev: "r1" }]);
+    ctx.currentTime = 10;
+    engine.play(0);
+    ctx.currentTime = 11;
+    gate("/m/a.wav");
+    engine.setClips([{ ...clip("a", 0, 0), rev: "r2" }]);
+    const loading = engine.load("a.wav", "r2");
+    frame();
+    expect(engine.playing).toBe(true);
+    expect(engine.length).toBe(4);
+    gates["/m/a.wav"].open();
+    await loading;
+    expect(engine.inspect().sources).toBe(1);
+    engine.dispose();
+  });
+
+  it("keeps the clock running while the only clip's new file loads, then starts it in place", async () => {
+    const { engine, ctx } = await ready([clip("a", 0, 0)]);
+    ctx.currentTime = 10;
+    engine.play(0);
+    ctx.currentTime = 11;
+    gate("/m/b.wav");
+    engine.setClips([clip("b", 0, 0)]);
+    const loading = engine.load("b.wav");
+    expect(engine.length).toBe(0);
+    frame();
+    expect(engine.playing).toBe(true);
+    gates["/m/b.wav"].open();
+    await loading;
+    expect(ctx.sources.at(-1)!.started![1]).toBeCloseTo(1, 9);
+    engine.dispose();
+  });
+
+  it("stops when a re-rendered only clip fails to load", async () => {
+    const { engine, ctx } = await ready([{ ...clip("a", 0, 0), rev: "r1" }]);
+    ctx.currentTime = 10;
+    engine.play(0);
+    files["/m/a.wav"] = "bad";
+    probed["/m/a.wav"] = 0;
+    engine.setClips([{ ...clip("a", 0, 0), rev: "r2" }]);
+    await expect(engine.load("a.wav", "r2")).rejects.toThrow();
+    frame();
+    expect(engine.playing).toBe(false);
+    files["/m/a.wav"] = "4";
+    delete probed["/m/a.wav"];
+    engine.dispose();
   });
 });

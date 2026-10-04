@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { api, mediaUrl, originalFrame } from "../api.js";
-import { boxFrom, contentRect, fmt, frameAt, noteTime, placeNote, shotAt, shotLabel, shotSeek, snap, stepFrame, type ProxyProgress } from "../lib.js";
+import { boxFrom, contentRect, fmt, frameAt, noteTime, placeNote, shotAt, shotLabel, shotSeek, snap, spacePressesButton, stepFrame, type ProxyProgress } from "../lib.js";
 import type { Note, ProxyJob, Video, Version } from "../types.js";
 import { Icon } from "./Icon.js";
 import { Notes } from "./Notes.js";
@@ -282,7 +282,12 @@ export function Picture({
   onKeyRef.current = (e: KeyboardEvent) => {
     if (typing(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
     const k = e.key.toLowerCase();
-    if (e.key === " ") { e.preventDefault(); toggle(); }
+    if (e.key === " ") {
+      // A focused button (Create proxy, say) is pressed by Space, not played over (§19.8).
+      if (spacePressesButton(e.target)) return;
+      e.preventDefault();
+      toggle();
+    }
     else if (e.key === "ArrowLeft") { e.preventDefault(); step(e.shiftKey ? -10 : -1); }
     else if (e.key === "ArrowRight") { e.preventDefault(); step(e.shiftKey ? 10 : 1); }
     else if (k === "i") setIn();
@@ -525,7 +530,7 @@ export function Picture({
         <div class="ends"><span>0:00</span><span>{fmt(duration)}</span></div>
 
         {shots.length > 0 && (
-          <div class="shots">
+          <div class="shots" data-player>
             {shots.map((s) => (
               <button
                 type="button"
