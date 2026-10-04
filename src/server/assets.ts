@@ -4,6 +4,7 @@ import type { FileEntry, FileKind, LaneStage, Project, Script } from "../core/sc
 import type { Store } from "../core/store.js";
 import { fromManifestPath } from "../core/paths.js";
 import { GRAB_PATH, SCREENSHOT_PATH, registeredMedia } from "./files.js";
+import { PROXY_PATH } from "./proxy.js";
 
 export type AssetKind = "screenshot" | "cut" | "proxy" | "take" | "music" | "sfx" | "voice" | FileKind;
 
@@ -246,7 +247,11 @@ export async function listAssets(store: Store, project: Project, script: Script)
     [...video.versions].reverse().map((version) => ({ video: video.id, version: version.id, file: version.file })),
   );
   const proxyEntries = project.videos.flatMap((video) =>
-    [...video.versions].reverse().flatMap((version) => (version.proxy ? [{ video: video.id, version: version.id, proxy: version.proxy }] : [])),
+    // Only a file this server would have written into proxies/: a hand-edited record pointing
+    // anywhere else (the original, say) is never offered for deletion as a proxy.
+    [...video.versions].reverse().flatMap((version) =>
+      version.proxy && PROXY_PATH.test(version.proxy.file) ? [{ video: video.id, version: version.id, proxy: version.proxy }] : [],
+    ),
   );
   // A take has no name of its own in script.json (just an id and the text it was read against),
   // so its label is its ordinal within the section -- "Take 1", "Take 2" -- rather than the file

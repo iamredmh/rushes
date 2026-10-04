@@ -2,7 +2,8 @@ import { test as base, expect, type Page } from "@playwright/test";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { makeWav } from "./fixtures/wav.js";
 
@@ -26,9 +27,19 @@ function ffmpeg(args: string[]): Promise<void> {
   });
 }
 
+/** PATH with every directory that holds ffmpeg or ffprobe left out: a server started on it has neither. */
+function pathWithoutFfmpeg(): string {
+  return (process.env.PATH ?? "")
+    .split(delimiter)
+    .filter((dir) => dir && !["ffmpeg", "ffprobe"].some((bin) => existsSync(join(dir, bin))))
+    .join(delimiter);
+}
+
 export interface ProResOptions {
   width?: number;
   height?: number;
+  /** "h264" makes a browser-playable MP4 instead (a 4K one still earns a proxy offer). */
+  codec?: "prores" | "h264";
   /** Length in seconds. Defaults to 6. */
   seconds?: number;
   /**
@@ -87,7 +98,7 @@ interface Started {
 }
 
 /** Start `rushes serve` on a fresh project folder (with a space in its path) and wait for its dashboard URL. */
-async function start(port = 0): Promise<Started> {
+async function start(port = 0, noFfmpeg = false): Promise<Started> {
   const tmpDir = await mkdtemp(join(tmpdir(), "rushes e2e "));
   const root = join(tmpDir, "My Film");
   await mkdir(join(root, "renders"), { recursive: true });
@@ -95,7 +106,7 @@ async function start(port = 0): Promise<Started> {
   // actually opening Finder/Explorer during a test run.
   const child = spawn(process.execPath, [CLI, "serve", root, "--port", String(port)], {
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, RUSHES_NO_REVEAL: "1" },
+    env: { ...process.env, RUSHES_NO_REVEAL: "1", ...(noFfmpeg ? { PATH: pathWithoutFfmpeg() } : {}) },
   });
   const url = await new Promise<string>((ok, fail) => {
     let out = "";
@@ -127,10 +138,10 @@ async function stop(child: ChildProcess): Promise<void> {
  * N+1), kill that child and try again, up to ~5 s. Node sets SO_REUSEADDR by
  * default, so this is usually a no-op after the first attempt.
  */
-async function startOnPort(port: number): Promise<Started> {
+async function startOnPort(port: number, noFfmpeg = false): Promise<Started> {
   const deadline = Date.now() + 5000;
   for (;;) {
-    const attempt = await start(port);
+    const attempt = await start(port, noFfmpeg);
     if (attempt.port === port) return attempt;
     await stop(attempt.child);
     await rm(attempt.tmpDir, { recursive: true, force: true });
@@ -140,10 +151,12 @@ async function startOnPort(port: number): Promise<Started> {
   }
 }
 
-export const test = base.extend<{ rushes: Rushes }>({
-  rushes: async ({}, use) => {
+export const test = base.extend<{ rushes: Rushes; noFfmpeg: boolean }>({
+  /** Start the server without ffmpeg or ffprobe on its PATH (`test.use({ noFfmpeg: true })`). */
+  noFfmpeg: [false, { option: true }],
+  rushes: async ({ noFfmpeg }, use) => {
     const tmpDirs: string[] = [];
-    let started = await start();
+    let started = await start(0, noFfmpeg);
     tmpDirs.push(started.tmpDir);
     let child = started.child;
     let url = started.url;
@@ -180,9 +193,14 @@ export const test = base.extend<{ rushes: Rushes }>({
     const addProResCut = async (opts: ProResOptions = {}, note?: string) => {
       const n = (cutsByVideo.get("hero") ?? 0) + 1;
       cutsByVideo.set("hero", n);
-      const file = `renders/hero_v${n}.mov`;
+      const file = `renders/hero_v${n}.${opts.codec === "h264" ? "mp4" : "mov"}`;
       const out = join(root, file);
-      if (opts.long) {
+      if (opts.codec === "h264") {
+        await ffmpeg([
+          "-f", "lavfi", "-i", `testsrc=size=${opts.width ?? 640}x${opts.height ?? 360}:rate=30:duration=${opts.seconds ?? 6}`,
+          "-c:v", "libx264", "-preset", "ultrafast", "-g", "30", "-pix_fmt", "yuv420p", out,
+        ]);
+      } else if (opts.long) {
         const one = join(root, "renders", `.hero_v${n}_one.mov`);
         await ffmpeg([
           "-f", "lavfi", "-i", `testsrc=size=${opts.width ?? 160}x${opts.height ?? 90}:rate=30:duration=1`,
@@ -210,7 +228,7 @@ export const test = base.extend<{ rushes: Rushes }>({
     const swapProject = async () => {
       const port = Number(new URL(url).port);
       await stop(child);
-      const next = await startOnPort(port);
+      const next = await startOnPort(port, noFfmpeg);
       tmpDirs.push(next.tmpDir);
       child = next.child;
       url = next.url;

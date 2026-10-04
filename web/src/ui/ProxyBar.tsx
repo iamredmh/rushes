@@ -2,6 +2,10 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { api, ApiError } from "../api.js";
 import { formatBytes, proxyPhase, proxyReason, proxyTip, type ProxyProgress } from "../lib.js";
 import type { ProxyJob, Version, Video } from "../types.js";
+import { Icon } from "./Icon.js";
+
+/** How long "✓ Proxy ready" stays before the bar folds back to the checkbox alone. */
+export const DONE_SHOWN_MS = 6000;
 
 export interface ProxyBarProps {
   video: Video;
@@ -24,9 +28,11 @@ export interface ProxyBarProps {
 const ensureStop = (s: string) => (/[.!?]$/.test(s) ? s : `${s}.`);
 
 /**
- * §19.5's bar under the player: the offer and its reason, "Creating proxy" with progress and
- * Cancel, then "✓ Proxy ready", and the checkbox that makes proxies for new cuts automatically.
- * Rendered inside Picture, which is keyed by film, so "✓ Proxy ready" lasts until the film changes.
+ * §19.5's bar under the player, one row so the timeline and the note box stay on screen: the offer
+ * and its reason, "Creating proxy" with progress and Cancel, or "✓ Proxy ready", each followed by
+ * the checkbox that makes proxies for new cuts automatically (which wraps after the button, never
+ * before it, when there's no room). "✓ Proxy ready" folds away after DONE_SHOWN_MS or on its ×,
+ * leaving the checkbox alone. Picture keys this by version, so nothing carries across cuts.
  */
 export function ProxyBar({ video, version, ffmpeg, autoProxy, job, broken, duration, toast, onChanged, noteProxyJob }: ProxyBarProps) {
   const [starting, setStarting] = useState(false);
@@ -37,8 +43,8 @@ export function ProxyBar({ video, version, ffmpeg, autoProxy, job, broken, durat
   // An existing proxy, met on opening the film, just brings the Proxy/Original switch.
   const watched = useRef(new Set<string>());
   if (job?.state === "running") watched.current.add(job.job);
-
-  if (!ffmpeg) return null;
+  // The finished job whose "✓ Proxy ready" has been folded away, by time or by its ×.
+  const [dismissed, setDismissed] = useState<string | null>(null);
 
   const phase = proxyPhase({
     ffmpeg,
@@ -49,6 +55,16 @@ export function ProxyBar({ video, version, ffmpeg, autoProxy, job, broken, durat
     starting,
     watched: !!job && watched.current.has(job.job),
   });
+  const doneJob = phase === "done" && job ? job.job : null;
+  useEffect(() => {
+    if (!doneJob) return;
+    const timer = window.setTimeout(() => setDismissed(doneJob), DONE_SHOWN_MS);
+    return () => clearTimeout(timer);
+  }, [doneJob]);
+
+  if (!ffmpeg) return null;
+
+  const shown = doneJob && dismissed === doneJob ? "none" : phase;
   const reason = proxyReason(version.proxyNeed, broken);
   const pct = job?.state === "running" ? job.pct : job?.state === "done" ? 100 : 0;
   const running = job?.state === "running" ? job : null;
@@ -93,45 +109,50 @@ export function ProxyBar({ video, version, ffmpeg, autoProxy, job, broken, durat
     }
   };
 
+  const check = (
+    <label class="check">
+      <input
+        type="checkbox"
+        checked={auto}
+        onChange={(e) => {
+          const el = e.currentTarget as HTMLInputElement;
+          // So Space, ←/→ and the other keys go back to the player, as after picking a version.
+          el.blur();
+          void toggleAuto(el.checked);
+        }}
+      />
+      Create proxies for new cuts like this automatically
+    </label>
+  );
+
   return (
-    <div class={`proxybar${phase === "none" ? " quiet" : ""}`}>
-      {phase === "offer" && reason && (
-        <div class="proxyrow offer">
-          <span class="why"><b>This cut may play slowly.</b> {ensureStop(reason)}</span>
-          <button class="btn primary tip-wrap tip-end" aria-label="Create proxy" data-tip={proxyTip(version.duration ?? duration)} onClick={() => void create()}>Create proxy</button>
-        </div>
-      )}
-      {phase === "working" && (
-        <div class="proxyrow working">
-          <span>Creating proxy</span>
-          <div class="pbar" role="progressbar" aria-label="Proxy progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
-            <i style={{ width: `${pct}%` }} />
-          </div>
-          <span class="mono">{pct}%</span>
-          <button class="btn" aria-disabled={!running || cancelling} onClick={() => void cancel()}>Cancel</button>
-        </div>
-      )}
-      {phase === "done" && version.proxy && (
-        <div class="proxyrow done">
-          <span class="ok">✓ Proxy ready</span>
-          <span class="why">
-            Saved to <span class="mono">{version.proxy.file}</span> ({formatBytes(version.proxy.bytes)}). Grab Frame still uses the original, at full quality.
-          </span>
-        </div>
-      )}
-      <label class="check">
-        <input
-          type="checkbox"
-          checked={auto}
-          onChange={(e) => {
-            const el = e.currentTarget as HTMLInputElement;
-            // So Space, ←/→ and the other keys go back to the player, as after picking a version.
-            el.blur();
-            void toggleAuto(el.checked);
-          }}
-        />
-        Create proxies for new cuts like this automatically
-      </label>
+    <div class={`proxybar${shown === "none" ? " quiet" : ""}`}>
+      <div class={`proxyrow${shown === "none" ? "" : ` ${shown}`}`}>
+        {shown === "offer" && reason && (
+          <>
+            <span class="why"><b>This cut may play slowly.</b> {ensureStop(reason)}</span>
+            <button class="btn primary tip-wrap tip-end" aria-label="Create proxy" data-tip={proxyTip(version.duration ?? duration)} onClick={() => void create()}>Create proxy</button>
+          </>
+        )}
+        {shown === "working" && (
+          <>
+            <span>Creating proxy</span>
+            <div class="pbar" role="progressbar" aria-label="Proxy progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
+              <i style={{ width: `${pct}%` }} />
+            </div>
+            <span class="mono">{pct}%</span>
+            <button class="btn" aria-disabled={!running || cancelling} onClick={() => void cancel()}>Cancel</button>
+          </>
+        )}
+        {shown === "done" && version.proxy && (
+          <>
+            <span class="ok">✓ Proxy ready</span>
+            <span class="why">Saved to <span class="mono">{version.proxy.file}</span> ({formatBytes(version.proxy.bytes)}).</span>
+            <button class="btn ghost ib" aria-label="Dismiss" data-tip="Dismiss" onClick={() => setDismissed(doneJob)}><Icon name="x" /></button>
+          </>
+        )}
+        {check}
+      </div>
     </div>
   );
 }

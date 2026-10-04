@@ -197,17 +197,27 @@ export function Picture({
   };
   const clearRange = () => setRange({ in: null, out: null });
 
+  // Every grab is numbered, and only the latest one's result is shown and attached: an ffmpeg
+  // grab can take a moment, so an earlier one finishing late must never replace a later one.
+  const grabSeq = useRef(0);
+  // How many ffmpeg grabs are still being made: the camera button shows it's busy meanwhile.
+  const [grabbing, setGrabbing] = useState(0);
+
   const grabFrame = async () => {
     const v = ref.current;
     const at = now();
     const forVideo = video.id;
     const forVersion = version.id;
+    const n = ++grabSeq.current;
+    let extracting = false;
     try {
       let frame = frameAt(at, fps);
       let png: string;
       if (ffmpeg) {
         // §19.5: the still always comes from the original, at full quality, whichever file is
         // playing: the server extracts that exact frame with ffmpeg.
+        extracting = true;
+        setGrabbing((g) => g + 1);
         const still = await originalFrame(forVideo, forVersion, at);
         frame = still.frame ?? frame;
         png = still.png;
@@ -220,6 +230,11 @@ export function Picture({
         png = canvas.toDataURL("image/png");
       }
       const r = await api.post<{ grab: string }>("/api/grabs", { video: forVideo, version: forVersion, frame, png });
+      if (n !== grabSeq.current) {
+        // Superseded by a later grab: its file is saved all the same, so Assets still hears of it.
+        onChanged();
+        return;
+      }
       toast(`Saved to ${r.grab}`);
       // The screenshot is a new asset on disk: refresh so the Assets tab unlocks and shows
       // it right away, without waiting for a server change event (grabs don't send one).
@@ -231,7 +246,9 @@ export function Picture({
       // must it attach to a different cut of the same film that's since come on screen.
       if (mountedRef.current && forVersion === versionRef.current) onGrabChange(forVideo, r.grab);
     } catch (e) {
-      toast((e as Error).message);
+      if (n === grabSeq.current) toast((e as Error).message);
+    } finally {
+      if (extracting && mountedRef.current) setGrabbing((g) => g - 1);
     }
   };
 
@@ -361,7 +378,10 @@ export function Picture({
       <div class="stack">
         <div class="framebox">
           <div class="frame" style={{ aspectRatio: String(aspect) }}>
-            {broken && <div class="msg">This file won't play in a browser. Ask your agent for an H.264 MP4 of this cut.</div>}
+            {/* One message, never two: with ffmpeg, the proxy offer under the player speaks for a
+                file that won't play. Only the original, with a proxy to switch back to, says so here. */}
+            {broken && !ffmpeg && <div class="msg">This file won't play in a browser. Ask your agent for an H.264 MP4 of this cut.</div>}
+            {broken && ffmpeg && version.proxy && !playsProxy && <div class="msg">This file won't play in a browser.</div>}
             <video
               hidden={broken}
               ref={(el) => {
@@ -428,6 +448,7 @@ export function Picture({
 
         {noteProxyJob && (
           <ProxyBar
+            key={version.id}
             video={video}
             version={version}
             ffmpeg={ffmpeg}
@@ -457,7 +478,7 @@ export function Picture({
           <button class="btn ghost ib" data-tip="Set out  O" aria-label="Set out point" onClick={setOut}><Icon name="out" /></button>
           <span class="vsep" />
           <button class="btn ghost ib" data-tip="Draw a box  B" aria-label="Draw a box" aria-pressed={boxMode} onClick={() => setBoxMode(!boxMode)}><Icon name="box" /></button>
-          <button class="btn ghost ib" data-tip="Grab frame  G" aria-label="Grab frame" onClick={() => void grabFrame()}><Icon name="camera" /></button>
+          <button class="btn ghost ib" data-tip="Grab frame  G" aria-label="Grab frame" aria-busy={grabbing > 0} onClick={() => void grabFrame()}><Icon name="camera" /></button>
         </div>
 
         <div

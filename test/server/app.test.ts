@@ -902,11 +902,20 @@ const HAS_FFMPEG = hasBin("ffmpeg") && hasBin("ffprobe");
 const PRORES_4K: Probe = { duration: 2, fps: 25, codec: "prores", width: 3840, height: 2160, pixFmt: "yuv422p10le" };
 const H264_1080: Probe = { duration: 2, fps: 25, codec: "h264", width: 1920, height: 1080, pixFmt: "yuv420p" };
 
-/** A stand-in ffmpeg that writes its output and then waits for `hold` (or a kill). */
+/**
+ * A stand-in ffmpeg that writes its output and then waits for `hold` (or a kill). An encode's last
+ * argument is the .mp4 it writes; a frame extraction's is `pipe:1`, so it answers with a PNG on
+ * stdout instead, and never writes a file of that name into the working directory.
+ */
 function holdingRunner(hold: Promise<void> = Promise.resolve()): FfmpegRunner {
   return async (args, o = {}) => {
     if (args[0] === "-version") return { code: 0, stderr: "" };
-    await writeFile(args[args.length - 1], "proxy bytes");
+    const out = args[args.length - 1];
+    if (!out.endsWith(".mp4")) {
+      o.onStdout?.(Buffer.from(PNG_1PX, "base64"));
+      return { code: 0, stderr: "" };
+    }
+    await writeFile(out, "proxy bytes");
     o.onStdout?.(Buffer.from("out_time_us=1000000\n"));
     const killed = await Promise.race([
       hold.then(() => false),
@@ -1254,6 +1263,16 @@ describe("proxies, fix round 1", () => {
     expect(existsSync(join(root, "renders", "hero.mov"))).toBe(true);
   });
 
+  it("the stand-in ffmpeg answers a frame extraction on stdout and writes no pipe:1 file", async () => {
+    const { call, app } = await proxySetup();
+    await call("POST", "/api/versions", { video: "Hero", file: "renders/hero.mov" });
+    const res = await app.request("/api/videos/hero/versions/v1/frame?t=0");
+    expect(res.status).toBe(200);
+    const png = Buffer.from(await res.arrayBuffer());
+    expect(png.equals(Buffer.from(PNG_1PX, "base64"))).toBe(true);
+    expect(existsSync(join(process.cwd(), "pipe:1"))).toBe(false);
+  });
+
   it("the frame endpoint's t must be a time from 0 to 24 h", async () => {
     const { call } = await proxySetup();
     await call("POST", "/api/versions", { video: "Hero", file: "renders/hero.mov" });
@@ -1269,3 +1288,11 @@ function gateOpen() {
   const promise = new Promise<void>((res) => (open = res));
   return { promise, open };
 }
+
+// Last in the file: nothing above may leave a stray `pipe:1` (a frame extraction's stdout target)
+// in the working directory.
+describe("after the server tests", () => {
+  it("there's no pipe:1 file in the working directory", () => {
+    expect(existsSync(join(process.cwd(), "pipe:1"))).toBe(false);
+  });
+});

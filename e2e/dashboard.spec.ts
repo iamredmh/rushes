@@ -234,11 +234,35 @@ test("Send to agent batches this tab's open notes and shows the prompt to paste"
   await expect(page.getByRole("status")).toHaveText("Nothing open on Picture to send");
 });
 
-test("a cut the browser can't play says so instead of showing a black frame", async ({ page, rushes }) => {
+test.describe("without ffmpeg", () => {
+  test.use({ noFfmpeg: true });
+
+  test("a cut the browser can't play says so instead of showing a black frame", async ({ page, rushes }) => {
+    await writeFile(join(rushes.root, "renders", "prores.mov"), Buffer.alloc(4096, 1));
+    await rushes.api("POST", "/api/versions", { video: "Hero", file: "renders/prores.mov" });
+    await page.goto(rushes.url);
+    await expect(page.getByText("This file won't play in a browser. Ask your agent for an H.264 MP4 of this cut.")).toBeVisible();
+    // Nothing is offered without ffmpeg (§19.5).
+    await expect(page.locator(".proxybar")).toHaveCount(0);
+  });
+
+  test("Grab Frame still saves a still, from the player itself", async ({ page, rushes }) => {
+    await rushes.addCut();
+    await page.goto(rushes.url);
+    await videoReady(page);
+    for (let i = 0; i < 30; i++) await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("g");
+    await expect(page.getByRole("status")).toHaveText("Saved to screenshots/hero_v1_00m01.00s_f30.png");
+  });
+});
+
+test("with ffmpeg, a cut the browser can't play gets the proxy offer instead: one message, not two", async ({ page, rushes }) => {
+  test.skip(!hasFfmpeg, "needs ffmpeg and ffprobe");
   await writeFile(join(rushes.root, "renders", "prores.mov"), Buffer.alloc(4096, 1));
   await rushes.api("POST", "/api/versions", { video: "Hero", file: "renders/prores.mov" });
   await page.goto(rushes.url);
-  await expect(page.getByText("This file won't play in a browser", { exact: false })).toBeVisible();
+  await expect(page.locator(".proxybar")).toContainText("This cut may play slowly. The browser couldn't play this file.");
+  await expect(page.getByText("This file won't play in a browser", { exact: false })).toHaveCount(0);
 });
 
 test("an agent's change doesn't overwrite a line you're still typing", async ({ page, rushes }) => {
@@ -1116,6 +1140,18 @@ async function watchForProgress(page: import("@playwright/test").Page): Promise<
   });
 }
 
+/** The timeline track and the note box sit wholly inside the 1440×900 window. */
+async function expectPlayerOnScreen(page: import("@playwright/test").Page): Promise<void> {
+  const b = await page.evaluate(() => ({
+    height: innerHeight,
+    track: document.querySelector(".track")!.getBoundingClientRect().bottom,
+    note: document.querySelector(".comp textarea")!.getBoundingClientRect().bottom,
+  }));
+  expect(b.height).toBe(900);
+  expect(b.track).toBeLessThanOrEqual(900);
+  expect(b.note).toBeLessThanOrEqual(900);
+}
+
 /** The width in a PNG's IHDR chunk. */
 function pngWidth(png: Buffer): number {
   return png.readUInt32BE(16);
@@ -1176,6 +1212,11 @@ test.describe("proxies (§19.5)", () => {
     await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.readyState >= 1 && Math.abs(v.currentTime - 2) < 0.02)).toBe(true);
     expect(await video.evaluate((v: HTMLVideoElement) => v.paused)).toBe(true);
     await expect(page.getByLabel("Timecode")).toContainText("0:02.00");
+
+    // Its × folds "✓ Proxy ready" away, leaving the checkbox alone.
+    await offer.getByRole("button", { name: "Dismiss" }).click();
+    await expect(offer).not.toContainText("Proxy ready");
+    await expect(offer.getByRole("checkbox")).toBeVisible();
   });
 
   test("Cancel stops a proxy part-way, returns to the offer and leaves nothing in proxies/", async ({ page, rushes }) => {
@@ -1266,6 +1307,120 @@ test.describe("proxies (§19.5)", () => {
     await expect(offer.getByRole("button", { name: "Create proxy" })).toBeVisible();
     await expect(offer).not.toContainText("Creating proxy");
     expect(await readdir(join(rushes.root, "proxies")).catch(() => [])).toEqual([]);
+  });
+
+  test("at 1440×900 the bar keeps the timeline and the note box on screen: offer and progress", async ({ page, rushes }) => {
+    await rushes.addProResCut({ long: true });
+    await page.goto(rushes.url);
+    const offer = page.locator(".proxybar");
+    await expect(offer.getByRole("button", { name: "Create proxy" })).toBeVisible();
+    await expectPlayerOnScreen(page);
+    await offer.getByRole("button", { name: "Create proxy" }).click();
+    await expect(offer.locator(".proxyrow.working .mono")).toHaveText(/^\d+%$/);
+    await expectPlayerOnScreen(page);
+    await offer.getByRole("button", { name: "Cancel" }).click();
+    await expect(offer.getByRole("button", { name: "Create proxy" })).toBeVisible();
+  });
+
+  test("at 1440×900 \"✓ Proxy ready\" keeps everything on screen, then folds away by itself", async ({ page, rushes }) => {
+    await rushes.addProResCut();
+    await page.goto(rushes.url);
+    const bar = page.locator(".proxybar");
+    await bar.getByRole("button", { name: "Create proxy" }).click();
+    await expect(bar).toContainText("✓ Proxy ready");
+    await expectPlayerOnScreen(page);
+    await expect(bar).not.toContainText("Proxy ready", { timeout: 10_000 });
+    await expect(bar.getByRole("checkbox", { name: "Create proxies for new cuts like this automatically" })).toBeVisible();
+    await expectPlayerOnScreen(page);
+  });
+
+  test("changing version while Create proxy is on its way never shows \"Creating proxy\" on the other cut", async ({ page, rushes }) => {
+    await rushes.addProResCut({}, "first");
+    await rushes.addProResCut({ long: true }, "second");
+    let release!: () => void;
+    const held = new Promise<void>((ok) => (release = ok));
+    await page.route(/\/api\/videos\/hero\/versions\/v2\/proxy$/, async (route) => {
+      await held;
+      await route.continue();
+    });
+    await page.goto(rushes.url);
+    const bar = page.locator(".proxybar");
+    await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v2");
+    await bar.getByRole("button", { name: "Create proxy" }).click();
+    await expect(bar).toContainText("Creating proxy");
+    await page.getByRole("combobox", { name: "Version" }).selectOption("v1");
+    await expect(bar.getByRole("button", { name: "Create proxy" })).toBeVisible();
+    await expect(bar).not.toContainText("Creating proxy");
+    release();
+    await expect.poll(async () => (await rushes.api("GET", "/api/state")).proxies.jobs.length).toBe(1);
+    await expect(bar).not.toContainText("Creating proxy");
+    const { proxies } = await rushes.api("GET", "/api/state");
+    await rushes.api("DELETE", `/api/proxy-jobs/${proxies.jobs[0].id}`, {});
+  });
+
+  test("only the latest grab is kept, however the ffmpeg stills finish, and the camera shows it's busy", async ({ page, rushes }) => {
+    await rushes.addCut();
+    let release!: () => void;
+    const held = new Promise<void>((ok) => (release = ok));
+    let first = true;
+    await page.route(/\/frame\?t=/, async (route) => {
+      if (first) {
+        first = false;
+        await held;
+      }
+      await route.continue();
+    });
+    await page.goto(rushes.url);
+    await videoReady(page);
+    for (let i = 0; i < 10; i++) await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("g");
+    const camera = page.getByRole("button", { name: "Grab frame" });
+    await expect(camera).toHaveAttribute("aria-busy", "true");
+    for (let i = 0; i < 10; i++) await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("g");
+    await expect(page.getByRole("status")).toHaveText("Saved to screenshots/hero_v1_00m00.67s_f20.png");
+    release();
+    await expect(camera).toHaveAttribute("aria-busy", "false");
+    await access(join(rushes.root, "screenshots", "hero_v1_00m00.33s_f10.png"));
+    await expect(page.locator(".comp .chipx", { hasText: "Frame 20" })).toBeVisible();
+    await expect(page.locator(".comp .chipx", { hasText: "Frame 10" })).toHaveCount(0);
+    await expect(page.getByRole("status")).toHaveText("Saved to screenshots/hero_v1_00m00.67s_f20.png");
+  });
+
+  test("switching file while playing keeps it playing, from the same place", async ({ page, rushes }) => {
+    await rushes.addProResCut({ codec: "h264", width: 3840, height: 2160, seconds: 10 });
+    await rushes.api("POST", "/api/videos/hero/versions/v1/proxy", {});
+    await proxyRecorded(rushes, "v1");
+    await page.goto(rushes.url);
+    const video = page.locator("video");
+    await expect(video).toHaveAttribute("src", /proxies%2F/);
+    await videoReady(page);
+    await page.keyboard.press(" ");
+    await expect.poll(() => video.evaluate((v: HTMLVideoElement) => !v.paused && v.currentTime > 0.3)).toBe(true);
+    const before = await video.evaluate((v: HTMLVideoElement) => v.currentTime);
+    await page.getByRole("button", { name: "Original", exact: true }).click();
+    await expect(video).toHaveAttribute("src", /renders%2Fhero_v1\.mp4/);
+    await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.readyState >= 2 && !v.paused && v.currentTime >= 0.3)).toBe(true);
+    expect(await video.evaluate((v: HTMLVideoElement) => v.currentTime)).toBeGreaterThanOrEqual(before - 0.05);
+    await page.getByRole("button", { name: "Proxy", exact: true }).click();
+    await expect(video).toHaveAttribute("src", /proxies%2F/);
+    await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.readyState >= 2 && !v.paused && v.currentTime >= 0.3)).toBe(true);
+    await page.keyboard.press(" ");
+  });
+
+  test("a proxy deleted while you watch takes the switch with it, back to the original", async ({ page, rushes }) => {
+    await rushes.addProResCut();
+    await rushes.api("POST", "/api/videos/hero/versions/v1/proxy", {});
+    await proxyRecorded(rushes, "v1");
+    await page.goto(rushes.url);
+    const video = page.locator("video");
+    await expect(page.getByRole("button", { name: "Proxy", exact: true })).toBeVisible();
+    await expect(video).toHaveAttribute("src", /proxies%2F/);
+    await rushes.api("DELETE", "/api/videos/hero/versions/v1/proxy", {});
+    await expect(page.getByRole("button", { name: "Proxy", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Original", exact: true })).toHaveCount(0);
+    await expect(video).toHaveAttribute("src", /renders%2Fhero_v1\.mov/);
+    await expect(page.locator(".proxybar").getByRole("button", { name: "Create proxy" })).toBeVisible();
   });
 
   test("Grab Frame on the proxy saves the original's full-size frame", async ({ page, rushes }) => {
