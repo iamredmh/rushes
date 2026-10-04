@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { VERSION } from "../src/server/app.js";
+import { SOURCE } from "../src/setup/harnesses.js";
 
 // §19.7: what ships to npm. Keeping this list in a test, rather than just in package.json,
 // means a future change to "files" has to pass a reader who can say why each entry is there.
@@ -47,8 +48,32 @@ describe("shipped agent docs (final review I3)", () => {
   it.each(["skills/rushes/SKILL.md", "AGENTS.md"])("%s runs the demo through npx with --no-browser, then rushes_open, never a bare `rushes demo`", (file) => {
     const text = read(file);
     // A bare `rushes demo` assumes a global binary and, without --no-browser, never returns.
-    expect(text).toContain("npx -y github:iamredmh/rushes demo <folder> --no-browser");
+    expect(text).toContain("npx -y rushes demo <folder> --no-browser");
     expect(text).toMatch(/--no-browser`?,? then `rushes_open`/);
     expect(text).not.toMatch(/`rushes demo`/);
+  });
+});
+
+describe("install source, §19.7: SOURCE is rushes", () => {
+  const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), "utf8");
+
+  it.each(["README.md", "AGENTS.md", "skills/rushes/SKILL.md"])("%s has no `npx -y github:iamredmh/rushes` install command, apart from README's one before-publishing note", (file) => {
+    const text = read(file);
+    const matches = text.match(/npx -y github:iamredmh\/rushes/g) ?? [];
+    if (file === "README.md") {
+      expect(matches).toHaveLength(1);
+      expect(text).toContain("Before publishing to npm, the GitHub form also works: `npx -y github:iamredmh/rushes setup`.");
+    } else {
+      expect(matches).toHaveLength(0);
+    }
+  });
+
+  it("SOURCE is the npm package name", () => {
+    expect(SOURCE).toBe("rushes");
+  });
+
+  it("the shipped .mcp.json (the Claude Code plugin) launches rushes from npm, not GitHub", () => {
+    const mcp = JSON.parse(read(".mcp.json")) as { mcpServers: { rushes: { command: string; args: string[] } } };
+    expect(mcp.mcpServers.rushes).toEqual({ command: "npx", args: ["-y", SOURCE, "mcp"] });
   });
 });

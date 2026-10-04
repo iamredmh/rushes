@@ -11,7 +11,7 @@ Your agent renders a cut, writes a voiceover script or generates music beds. Rus
 
 Your notes are saved as plain files in your project. The agent reads them, fixes things and replies on each one, and you see each reply arrive.
 
-It runs on your machine. There's no account, no API key and no server to sign up for. You need [Node.js](https://nodejs.org) 20.19 or newer (or 22.12+ on the 22 line), and git (needed to install straight from GitHub until Rushes is on npm).
+It runs on your machine. There's no account, no API key and no server to sign up for. You need [Node.js](https://nodejs.org) 20.19 or newer (or 22.12+ on the 22 line).
 
 > Status: early. The Script, Picture, Voiceover, Music, Sound effects and Mix tabs, the MCP tools and the CLI all work today.
 
@@ -30,10 +30,12 @@ If your user asked you to use Rushes, do this:
 1. Run this once. It finds every supported harness on the machine and registers the Rushes MCP server, plus the Rushes skill where the harness supports skills:
 
    ```bash
-   npx -y github:iamredmh/rushes setup
+   npx -y rushes setup
    ```
 
-   It prints one line per harness. Existing config is kept and a `.rushes.bak` backup is written first. Run it with `--dry-run` first if you want to show the user the changes before making them.
+   (Before publishing to npm, the GitHub form also works: `npx -y github:iamredmh/rushes setup`.)
+
+   It prints one line per harness. Existing config is kept and a `.rushes.bak` backup is written first. Run it with `--dry-run` first if you want to show the user the changes before making them. A machine already set up through the GitHub form is recognised as Rushes too — setup switches it to the npm launch instead of adding a second registration.
 2. If it added anything, tell the user to restart the app (or start a new session) so the `rushes_*` tools load.
 3. From then on, follow [AGENTS.md](AGENTS.md). In short: register what you made, call `rushes_open`, wait for the user to press **Send to agent**, then `rushes_get_batch`, fix the notes, and `rushes_reply`.
 
@@ -46,15 +48,15 @@ If you can't run commands, give the user the matching line from **Manual setup**
 | Harness | How |
 |---|---|
 | **Claude Code**: plugin, which includes the skill | `/plugin marketplace add iamredmh/rushes` then `/plugin install rushes@iamredmh` |
-| **Claude Code**: MCP only | `claude mcp add --scope user rushes -- npx -y github:iamredmh/rushes mcp` |
-| **Codex** | add to `~/.codex/config.toml`:<br>`[mcp_servers.rushes]`<br>`command = "npx"`<br>`args = ["-y", "github:iamredmh/rushes", "mcp"]` |
-| **Cursor** (`~/.cursor/mcp.json`), **Claude Desktop** (`claude_desktop_config.json`), **Gemini CLI** (`~/.gemini/settings.json`) | `{ "mcpServers": { "rushes": { "command": "npx", "args": ["-y", "github:iamredmh/rushes", "mcp"] } } }` |
+| **Claude Code**: MCP only | `claude mcp add --scope user rushes -- npx -y rushes mcp` |
+| **Codex** | add to `~/.codex/config.toml`:<br>`[mcp_servers.rushes]`<br>`command = "npx"`<br>`args = ["-y", "rushes", "mcp"]` |
+| **Cursor** (`~/.cursor/mcp.json`), **Claude Desktop** (`claude_desktop_config.json`), **Gemini CLI** (`~/.gemini/settings.json`) | `{ "mcpServers": { "rushes": { "command": "npx", "args": ["-y", "rushes", "mcp"] } } }` |
 
-On Windows, `rushes setup` writes the launch as `cmd /c npx -y github:iamredmh/rushes mcp` (in JSON: `"command": "cmd", "args": ["/c", "npx", "-y", "github:iamredmh/rushes", "mcp"]`), because harnesses can't start `npx` directly there. Do the same if you set it up by hand.
+On Windows, `rushes setup` writes the launch as `cmd /c npx -y rushes mcp` (in JSON: `"command": "cmd", "args": ["/c", "npx", "-y", "rushes", "mcp"]`), because harnesses can't start `npx` directly there. Do the same if you set it up by hand.
 
 ### Other harnesses
 
-Any MCP client that can launch a local stdio server works. Point it at `npx -y github:iamredmh/rushes mcp`. Agents with no MCP support can use the CLI instead (`rushes add`, `rushes notes`, `rushes reply`): see [AGENTS.md](AGENTS.md).
+Any MCP client that can launch a local stdio server works. Point it at `npx -y rushes mcp`. Agents with no MCP support can use the CLI instead (`rushes add`, `rushes notes`, `rushes reply`): see [AGENTS.md](AGENTS.md).
 
 ChatGPT's apps can't run local MCP servers yet. Use Codex, OpenAI's agent, instead.
 
@@ -62,8 +64,8 @@ ChatGPT's apps can't run local MCP servers yet. Use Codex, OpenAI's agent, inste
 
 ```bash
 cd your-project
-npx -y github:iamredmh/rushes open    # opens the review desk in your browser
-npx -y github:iamredmh/rushes stop    # stops it
+npx -y rushes open    # opens the review desk in your browser
+npx -y rushes stop    # stops it
 ```
 
 Each project opens at its own address, `http://127.0.0.1:4580/p/<id>/` — safe to run several projects at once.
@@ -75,7 +77,7 @@ A server your agent starts in the background stops by itself after two hours wit
 No project to hand? Build one:
 
 ```bash
-npx -y github:iamredmh/rushes demo    # creates ./rushes-demo and opens it
+npx -y rushes demo    # creates ./rushes-demo and opens it
 ```
 
 It generates a complete example on your machine — a 30 s test film in two cuts, a short script, voice reads in two rounds, two music beds, an SFX pass, and example notes on Picture, Voiceover, Music and Mix — so every tab has something in it from the start. Nothing is downloaded and nothing ships with Rushes; it's all made locally with ffmpeg and, where available, your system's text-to-speech. It needs ffmpeg — without it, `demo` says so and points you at `rushes doctor`. It refuses to write into a folder that isn't empty. Pass a folder name to put it somewhere else, and `--no-browser` to skip opening it.
@@ -83,8 +85,8 @@ It generates a complete example on your machine — a 30 s test film in two cuts
 ### Health check: `rushes doctor`
 
 ```bash
-npx -y github:iamredmh/rushes doctor          # Node, ffmpeg, which agents have Rushes, this project, free disk space
-npx -y github:iamredmh/rushes doctor --json   # the same checks as data
+npx -y rushes doctor          # Node, ffmpeg, which agents have Rushes, this project, free disk space
+npx -y rushes doctor --json   # the same checks as data
 ```
 
 Each check prints ✓ or ✗ with a plain fix, e.g. `✗ Claude Code — the Rushes MCP server isn't registered. Fix: rushes setup --only claude-code`. Only the Node version (and, inside a project, its files) has to pass; ffmpeg is recommended (proxies and loudness need it) but not required, and doctor warns when your ffmpeg was built without libx264, which proxies and the demo encode with. Run it from inside a project folder to add file, server and disk checks. Agents get the same checks from the `rushes_doctor` tool.

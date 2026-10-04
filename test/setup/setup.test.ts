@@ -3,11 +3,18 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach } from "vitest";
-import { harnesses, mcpLaunch, mergeJson, mergeToml, MCP_ARGS, SOURCE } from "../../src/setup/harnesses.js";
+import { harnesses, mcpLaunch, mergeJson, mergeToml, LEGACY_SOURCES, MCP_ARGS, SOURCE } from "../../src/setup/harnesses.js";
 import { setup, type SetupEnv } from "../../src/setup/setup.js";
 
 const homes: string[] = [];
 afterEach(async () => { while (homes.length) await rm(homes.pop()!, { recursive: true, force: true }); });
+
+/** A bare temp home, for tests that supply their own `exec`/`which` rather than fakeHome's. */
+async function freshHome(): Promise<string> {
+  const home = await mkdtemp(join(tmpdir(), "rushes home "));
+  homes.push(home);
+  return home;
+}
 
 async function fakeHome() {
   const home = await mkdtemp(join(tmpdir(), "rushes home "));
@@ -184,5 +191,90 @@ describe("setup", () => {
     const r = (await setup(env, { only: ["claude-desktop"] }))[0];
     expect(r.status).toBe("added");
     expect(JSON.parse(await readFile(join(mac, "claude_desktop_config.json"), "utf8")).mcpServers.rushes.command).toBe("npx");
+  });
+});
+
+describe("migrating a legacy (pre-npm) registration, §19.7", () => {
+  it("switches a legacy JSON registration (Cursor) to the npm source, keeping a single rushes key", async () => {
+    const { env, home } = await fakeHome();
+    const configPath = join(home, ".cursor", "mcp.json");
+    await mkdir(join(home, ".cursor"));
+    await writeFile(configPath, JSON.stringify({ theme: "dark", mcpServers: { rushes: { command: "npx", args: ["-y", LEGACY_SOURCES[0], "mcp"] } } }));
+    const r = (await setup(env, { only: ["cursor"] }))[0];
+    expect(r.status).toBe("added");
+    const doc = JSON.parse(await readFile(configPath, "utf8"));
+    expect(doc.theme).toBe("dark");
+    expect(Object.keys(doc.mcpServers)).toEqual(["rushes"]);
+    expect(doc.mcpServers.rushes).toEqual({ command: "npx", args: ["-y", SOURCE, "mcp"] });
+    // Running it again is a no-op: the migration doesn't flap.
+    expect((await setup(env, { only: ["cursor"] }))[0].status).toBe("already");
+  });
+
+  it("switches a legacy TOML registration (Codex) to the npm source, keeping a single table", async () => {
+    const { env, home } = await fakeHome();
+    const configPath = join(home, ".codex", "config.toml");
+    await mkdir(join(home, ".codex"));
+    await writeFile(configPath, `model = "o4"\n\n[mcp_servers.rushes]\ncommand = "npx"\nargs = ["-y", "${LEGACY_SOURCES[0]}", "mcp"]\n`);
+    const r = (await setup(env, { only: ["codex"] }))[0];
+    expect(r.status).toBe("added");
+    const text = await readFile(configPath, "utf8");
+    expect(text.match(/\[mcp_servers\.rushes\]/g)).toHaveLength(1);
+    expect(text).toContain(`args = ["-y", "${SOURCE}", "mcp"]`);
+    expect(text).not.toContain(LEGACY_SOURCES[0]);
+    expect((await setup(env, { only: ["codex"] }))[0].status).toBe("already");
+  });
+
+  it("switches a legacy Claude Code registration to the npm source instead of leaving it, and doesn't add a duplicate", async () => {
+    const home = await freshHome();
+    const calls: string[][] = [];
+    let out = `rushes: npx -y ${LEGACY_SOURCES[0]} mcp  (stdio)\n`;
+    const env: SetupEnv = {
+      home,
+      platform: "darwin",
+      which: async (cmd) => cmd === "claude",
+      exec: async (cmd, args) => {
+        calls.push([cmd, ...args]);
+        if (args[0] === "mcp" && args[1] === "get") return { code: 0, out };
+        if (args[0] === "mcp" && args[1] === "remove") {
+          out = ""; // the name is gone until the next `add`
+          return { code: 0, out: "Removed" };
+        }
+        if (args[0] === "mcp" && args[1] === "add") {
+          out = `rushes: npx -y ${SOURCE} mcp  (stdio)\n`;
+          return { code: 0, out: "Added" };
+        }
+        return { code: 1, out: "" };
+      },
+    };
+    const r = (await setup(env, { only: ["claude-code"] }))[0];
+    expect(r.status).toBe("added");
+    expect(r.detail).toContain("npm");
+    // Exactly one remove and one add -- never two adds, which would risk a duplicate.
+    expect(calls.filter((c) => c[2] === "remove")).toHaveLength(1);
+    expect(calls.filter((c) => c[2] === "add")).toHaveLength(1);
+    expect(calls).toContainEqual(["claude", "mcp", "remove", "--scope", "user", "rushes"]);
+    expect(calls).toContainEqual(["claude", "mcp", "add", "--scope", "user", "rushes", "--", "npx", ...MCP_ARGS]);
+    // Running it again now reports already registered, on the npm source -- no further remove/add.
+    const second = (await setup(env, { only: ["claude-code"] }))[0];
+    expect(second.status).toBe("already");
+    expect(calls.filter((c) => c[2] === "remove")).toHaveLength(1);
+  });
+
+  it("a dry run on a legacy Claude Code registration reports what it would do, without calling remove or add", async () => {
+    const home = await freshHome();
+    const calls: string[][] = [];
+    const env: SetupEnv = {
+      home,
+      platform: "darwin",
+      which: async (cmd) => cmd === "claude",
+      exec: async (cmd, args) => {
+        calls.push([cmd, ...args]);
+        if (args[0] === "mcp" && args[1] === "get") return { code: 0, out: `rushes: npx -y ${LEGACY_SOURCES[0]} mcp  (stdio)\n` };
+        return { code: 1, out: "" };
+      },
+    };
+    const r = (await setup(env, { only: ["claude-code"], dryRun: true }))[0];
+    expect(r.status).toBe("would-add");
+    expect(calls.some((c) => c[2] === "remove" || c[2] === "add")).toBe(false);
   });
 });

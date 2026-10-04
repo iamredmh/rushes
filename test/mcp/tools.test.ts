@@ -274,7 +274,7 @@ describe("ensureServer", () => {
     const { root } = await tmpProject();
     const err = ensureServer(root, { spawnServer: () => undefined, timeoutMs: 400 });
     await expect(err).rejects.toThrow(/did not start/);
-    // The hint names the install source that works today, not an npm package that isn't published.
+    // The hint names the current install source (the npm package, §19.7), not the old GitHub form.
     await expect(err).rejects.toThrow(`npx -y ${SOURCE} open`);
   });
 

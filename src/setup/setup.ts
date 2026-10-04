@@ -1,7 +1,7 @@
 import { access, copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { harnesses, mcpLaunch, mergeJson, mergeToml, type Harness, type HarnessId } from "./harnesses.js";
+import { harnesses, mcpLaunch, mentionsLegacySource, mergeJson, mergeToml, type Harness, type HarnessId } from "./harnesses.js";
 
 export interface SetupEnv {
   home: string;
@@ -71,7 +71,18 @@ async function one(h: Harness, env: SetupEnv, dryRun: boolean): Promise<SetupRes
       // Run from home so a project's own .mcp.json can't make it look registered.
       const got = await env.exec("claude", ["mcp", "get", "rushes"], env.home);
       const skill = await installSkill(h, env, dryRun);
-      if (got.code === 0) return { ...base, status: "already", detail: "rushes MCP server already registered", skill };
+      if (got.code === 0) {
+        // A server named "rushes" already exists. If it's still pointed at a legacy source
+        // (registered before the npm publish), switch it over in place rather than leaving it,
+        // since `claude mcp add` won't overwrite an existing name.
+        if (!mentionsLegacySource(got.out)) return { ...base, status: "already", detail: "rushes MCP server already registered", skill };
+        if (dryRun) return { ...base, status: "would-add", detail: "claude mcp remove --scope user rushes && claude mcp add --scope user rushes -- " + command.join(" "), skill };
+        const removed = await env.exec("claude", ["mcp", "remove", "--scope", "user", "rushes"], env.home);
+        if (removed.code !== 0) return { ...base, status: "failed", detail: removed.out.trim() || "claude mcp remove failed", skill };
+        const added = await env.exec("claude", ["mcp", "add", "--scope", "user", "rushes", "--", ...command], env.home);
+        if (added.code !== 0) return { ...base, status: "failed", detail: added.out.trim() || "claude mcp add failed", skill };
+        return { ...base, status: "added", detail: "switched from the older GitHub launch to npm", skill };
+      }
       if (dryRun) return { ...base, status: "would-add", detail: "claude mcp add --scope user rushes", skill };
       const add = await env.exec("claude", ["mcp", "add", "--scope", "user", "rushes", "--", ...command], env.home);
       if (add.code !== 0) return { ...base, status: "failed", detail: add.out.trim() || "claude mcp add failed", skill };

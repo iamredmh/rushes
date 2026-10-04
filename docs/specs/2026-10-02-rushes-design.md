@@ -706,7 +706,7 @@ This section is binding and replaces §17.5.
 ### 19.7 Publishing to npm
 - **What ships.** The package publishes as `rushes`. `files` lists only `dist`, `web-dist`, `skills`, `.claude-plugin`, `.mcp.json`, `README.md`, `AGENTS.md` and `LICENSE`, so no tests, fixtures, docs or plans ship.
 - **The build.** `prepublishOnly` runs the build and the tests.
-- **The source switch.** The `SOURCE` constant and the docs switch from `github:iamredmh/rushes` to `rushes` in the same release.
+- **The source switch.** The `SOURCE` constant is now `rushes`, and the docs switch from `github:iamredmh/rushes` to it in the same release (README keeps one line noting the GitHub form still works before the npm publish lands). `LEGACY_SOURCES` keeps the old `github:iamredmh/rushes` launch recognised: `rushes setup` finds a harness already registered that way and switches its registration to the npm launch in place, rather than adding a duplicate, and `rushes doctor` still reports it as registered (with a detail saying it's on the older GitHub launch) rather than missing.
 - **Publishing is done with Red, not by an agent alone.** Red runs `npm login` once in Terminal, which confirms in the browser. Then, with Red's OK at the time, `npm publish`. If npm asks for a one-time code, Red enters it.
 
 ### 19.8 Follow-ups folded in

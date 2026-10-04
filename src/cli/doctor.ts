@@ -2,7 +2,7 @@ import { access, readFile, statfs as nodeStatfs } from "node:fs/promises";
 import { join } from "node:path";
 import { RUSHES_DIR, Store } from "../core/store.js";
 import { FILES, type FileKey } from "../core/schema.js";
-import { harnesses, mcpLaunch, mergeJson, mergeToml, type Harness } from "../setup/harnesses.js";
+import { harnesses, LEGACY_DETAIL, legacyMcpLaunches, mcpLaunch, mentionsLegacySource, mergeJson, mergeToml, type Harness } from "../setup/harnesses.js";
 import { realSetupEnv } from "../setup/env.js";
 import type { SetupEnv } from "../setup/setup.js";
 import { canonicalRoot } from "../server/lock.js";
@@ -202,16 +202,21 @@ async function harnessCheck(h: Harness, env: DoctorEnv): Promise<Check & { unkno
     if (got.timedOut) {
       return { ...base, ok: false, unknown: true, detail: `couldn't check: claude mcp get rushes didn't answer within ${DOCTOR_EXEC_TIMEOUT_MS / 1000} s.`, fix: "Run claude mcp get rushes yourself to check" };
     }
-    const ok = got.code === 0;
-    return { ...base, ok, detail: ok ? "the Rushes MCP server is registered." : "the Rushes MCP server isn't registered.", fix: ok ? undefined : `rushes setup --only ${h.id}` };
+    if (got.code !== 0) return { ...base, ok: false, detail: "the Rushes MCP server isn't registered.", fix: `rushes setup --only ${h.id}` };
+    const legacy = mentionsLegacySource(got.out);
+    return { ...base, ok: true, detail: legacy ? LEGACY_DETAIL : "the Rushes MCP server is registered." };
   }
   const path = h.config!;
   const text = await readFile(path, "utf8").catch(() => null);
   try {
     const launch = mcpLaunch(env.platform);
     const { changed } = h.kind === "toml" ? mergeToml(text, launch) : mergeJson(text, launch);
-    const ok = !changed;
-    return { ...base, ok, detail: ok ? "the Rushes MCP server is registered." : "the Rushes MCP server isn't registered.", fix: ok ? undefined : `rushes setup --only ${h.id}` };
+    if (!changed) return { ...base, ok: true, detail: "the Rushes MCP server is registered." };
+    // Not a match for the current (npm) launch -- but a registration written before the publish,
+    // still pointed at the GitHub source, counts as Rushes too.
+    const legacy = legacyMcpLaunches(env.platform).some((l) => !(h.kind === "toml" ? mergeToml(text, l) : mergeJson(text, l)).changed);
+    if (legacy) return { ...base, ok: true, detail: LEGACY_DETAIL };
+    return { ...base, ok: false, detail: "the Rushes MCP server isn't registered.", fix: `rushes setup --only ${h.id}` };
   } catch {
     return { ...base, ok: false, detail: `${path} exists but isn't valid, so registration can't be checked.`, fix: `Fix ${path}, then run: rushes setup --only ${h.id}` };
   }

@@ -188,12 +188,42 @@ describe("runDoctor", () => {
     expect(before.fix).toContain("rushes setup");
     await expect(rm(configPath)).rejects.toThrow(); // doctor never created it
 
-    await writeFile(configPath, JSON.stringify({ mcpServers: { rushes: { command: "npx", args: ["-y", "github:iamredmh/rushes", "mcp"] } } }), "utf8");
+    await writeFile(configPath, JSON.stringify({ mcpServers: { rushes: { command: "npx", args: ["-y", "rushes", "mcp"] } } }), "utf8");
     const beforeText = await readFile(configPath, "utf8");
     const registered = await runDoctor(fakeEnv(home, home));
-    expect(find(registered, "agent:cursor")).toMatchObject({ ok: true, required: false });
+    expect(find(registered, "agent:cursor")).toMatchObject({ ok: true, required: false, detail: "the Rushes MCP server is registered." });
     // doctor is read-only: the config is untouched.
     expect(await readFile(configPath, "utf8")).toBe(beforeText);
+  });
+
+  it("reports a legacy GitHub-source registration as registered too, with a detail pointing at setup (§19.7)", async () => {
+    const home = await tmpHome();
+    await mkdir(join(home, ".cursor"), { recursive: true });
+    await writeFile(join(home, ".cursor", "mcp.json"), JSON.stringify({ mcpServers: { rushes: { command: "npx", args: ["-y", "github:iamredmh/rushes", "mcp"] } } }), "utf8");
+    const checks = await runDoctor(fakeEnv(home, home));
+    expect(find(checks, "agent:cursor")).toMatchObject({ ok: true, required: false, detail: "registered with the older GitHub launch. Run rushes setup to switch to npm." });
+  });
+
+  it("reports a legacy Claude Code registration (via `claude mcp get`'s own output) as registered too", async () => {
+    const home = await tmpHome();
+    await mkdir(join(home, ".claude"), { recursive: true });
+    const env = fakeEnv(home, home, {
+      which: async (cmd) => cmd === "claude",
+      exec: async () => ({ code: 0, out: 'rushes: npx -y github:iamredmh/rushes mcp  (stdio)\n' }),
+    });
+    const checks = await runDoctor(env);
+    expect(find(checks, "agent:claude-code")).toMatchObject({ ok: true, required: false, detail: "registered with the older GitHub launch. Run rushes setup to switch to npm." });
+  });
+
+  it("reports a Claude Code registration already on the npm source as plainly registered", async () => {
+    const home = await tmpHome();
+    await mkdir(join(home, ".claude"), { recursive: true });
+    const env = fakeEnv(home, home, {
+      which: async (cmd) => cmd === "claude",
+      exec: async () => ({ code: 0, out: "rushes: npx -y rushes mcp  (stdio)\n" }),
+    });
+    const checks = await runDoctor(env);
+    expect(find(checks, "agent:claude-code")).toMatchObject({ ok: true, required: false, detail: "the Rushes MCP server is registered." });
   });
 
   it("controller ruling: adds 'No agent has Rushes yet' when harnesses are installed but none is registered", async () => {

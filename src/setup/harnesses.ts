@@ -1,12 +1,15 @@
 import { join } from "node:path";
 
-/** What every harness runs to start the Rushes MCP server. Switches to "rushes" once it's on npm. */
-export const SOURCE = "github:iamredmh/rushes";
+/** What every harness runs to start the Rushes MCP server, now that Rushes is on npm (§19.7). */
+export const SOURCE = "rushes";
 /**
- * The package name once Rushes is on npm (§19.7). Not wired in yet: `SOURCE` keeps pointing at
- * GitHub until the publish commit switches it over, alongside the docs, in the same release.
+ * Older `npx` sources that already-registered harnesses may still be using, from before the
+ * npm publish. `setup` and `doctor` recognise these as Rushes too, and `setup` migrates a
+ * registration that uses one of them to `SOURCE` in place, rather than adding a duplicate.
  */
-export const NPM_SOURCE = "rushes";
+export const LEGACY_SOURCES = ["github:iamredmh/rushes"];
+/** The detail `doctor` reports for a harness still registered through a legacy source. */
+export const LEGACY_DETAIL = "registered with the older GitHub launch. Run rushes setup to switch to npm.";
 /** The launch everywhere except Windows. */
 export const MCP_COMMAND = "npx";
 export const MCP_ARGS = ["-y", SOURCE, "mcp"];
@@ -17,12 +20,27 @@ export interface McpLaunch {
 }
 
 /**
- * How a harness should start the Rushes MCP server on this platform. On
- * Windows npx is a .cmd script, which harnesses can't spawn directly, so it
- * goes through cmd /c.
+ * How a harness should start the Rushes MCP server on this platform, from a given `npx` source.
+ * On Windows npx is a .cmd script, which harnesses can't spawn directly, so it goes through cmd /c.
  */
+function launchFor(platform: NodeJS.Platform, source: string): McpLaunch {
+  const args = ["-y", source, "mcp"];
+  return platform === "win32" ? { command: "cmd", args: ["/c", MCP_COMMAND, ...args] } : { command: MCP_COMMAND, args };
+}
+
+/** How a harness should start the Rushes MCP server on this platform, from the current `SOURCE`. */
 export function mcpLaunch(platform: NodeJS.Platform): McpLaunch {
-  return platform === "win32" ? { command: "cmd", args: ["/c", MCP_COMMAND, ...MCP_ARGS] } : { command: MCP_COMMAND, args: [...MCP_ARGS] };
+  return launchFor(platform, SOURCE);
+}
+
+/** The same launch shapes, one per `LEGACY_SOURCES` entry, for recognising an existing registration. */
+export function legacyMcpLaunches(platform: NodeJS.Platform): McpLaunch[] {
+  return LEGACY_SOURCES.map((source) => launchFor(platform, source));
+}
+
+/** Does this text (e.g. `claude mcp get rushes` output) name a legacy `npx` source? */
+export function mentionsLegacySource(text: string): boolean {
+  return LEGACY_SOURCES.some((source) => text.includes(source));
 }
 
 const DEFAULT_LAUNCH: McpLaunch = { command: MCP_COMMAND, args: MCP_ARGS };

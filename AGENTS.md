@@ -5,10 +5,10 @@ Rushes is a local review desk. Your user watches the work in a browser, leaves t
 ## Setup (once per machine)
 
 ```bash
-npx -y github:iamredmh/rushes setup
+npx -y rushes setup
 ```
 
-This registers the Rushes MCP server with every supported harness it finds (Claude Code, Codex, Cursor, Claude Desktop, Gemini CLI), and installs the skill where the harness supports skills. If it added anything, ask the user to restart the app. Use `--dry-run` to preview, and `--only claude-code,codex` to limit it.
+This registers the Rushes MCP server with every supported harness it finds (Claude Code, Codex, Cursor, Claude Desktop, Gemini CLI), and installs the skill where the harness supports skills. If it added anything, ask the user to restart the app. Use `--dry-run` to preview, and `--only claude-code,codex` to limit it. A harness already registered through the older `github:iamredmh/rushes` launch is recognised as Rushes too; setup switches it to the npm launch in place, never adding a duplicate.
 
 If setup doesn't seem to have worked, or the user asks you to check your own environment, call `rushes_doctor` (or `rushes doctor [--json]` from the CLI). It reports the Node version, whether ffmpeg/ffprobe are on PATH, which agent harnesses have Rushes registered, and — run from inside a project — whether its files are valid, whether a server is already running for it, and free disk space. Read-only: it never starts a server or changes anything.
 
@@ -49,7 +49,7 @@ When the user wants to share notes with someone else, call `rushes_export_notes`
 
 ## A demo project
 
-No project to show yet? Run `npx -y github:iamredmh/rushes demo <folder> --no-browser`, then `rushes_open` with `project: "<folder>"`. The demo makes a complete example on the user's machine — a cut in two versions, a script, voice reads in two rounds, two music beds, an SFX pass and example notes — all generated locally with ffmpeg. Always pass `--no-browser`: without it the command stays running as the server and never returns. It refuses a folder that isn't empty.
+No project to show yet? Run `npx -y rushes demo <folder> --no-browser`, then `rushes_open` with `project: "<folder>"`. The demo makes a complete example on the user's machine — a cut in two versions, a script, voice reads in two rounds, two music beds, an SFX pass and example notes — all generated locally with ffmpeg. Always pass `--no-browser`: without it the command stays running as the server and never returns. It refuses a folder that isn't empty.
 
 ## Locked tabs and the prompts they copy
 
@@ -96,15 +96,15 @@ The MCP server has seventeen tools: `rushes_open`, `rushes_status`, `rushes_add_
 ## Without MCP
 
 ```bash
-npx -y github:iamredmh/rushes open
-npx -y github:iamredmh/rushes add version renders/hero_v2.mp4 --video "Hero 60s" --note "logo hold"
-npx -y github:iamredmh/rushes notes --stage picture --status todo --json
-npx -y github:iamredmh/rushes reply n_8f2k3a "Held the phone 0.5 s longer" --done --fix-t 12.9 --fix-version v2
-npx -y github:iamredmh/rushes add variant voice gerald.wav --name Gerald --round "Round 1 · Voices"
-npx -y github:iamredmh/rushes add shots shots.json --video "Hero 60s" --version v2
-npx -y github:iamredmh/rushes add file brief.pdf --kind doc
-npx -y github:iamredmh/rushes export notes
-npx -y github:iamredmh/rushes doctor --json
+npx -y rushes open
+npx -y rushes add version renders/hero_v2.mp4 --video "Hero 60s" --note "logo hold"
+npx -y rushes notes --stage picture --status todo --json
+npx -y rushes reply n_8f2k3a "Held the phone 0.5 s longer" --done --fix-t 12.9 --fix-version v2
+npx -y rushes add variant voice gerald.wav --name Gerald --round "Round 1 · Voices"
+npx -y rushes add shots shots.json --video "Hero 60s" --version v2
+npx -y rushes add file brief.pdf --kind doc
+npx -y rushes export notes
+npx -y rushes doctor --json
 ```
 
 `shots.json` is a JSON array of `{name, start, tag?}`, or that array wrapped as `{"shots": [...]}`.

@@ -2,7 +2,7 @@
   "mcpServers": {
     "rushes": {
       "command": "npx",
-      "args": ["-y", "github:iamredmh/rushes", "mcp"]
+      "args": ["-y", "rushes", "mcp"]
     }
   }
 }
