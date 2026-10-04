@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, readdir, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { addVariant, addVersion, setShots } from "../core/project.js";
+import { addVariant, addVersion, setShots, shotAt } from "../core/project.js";
 import { addNote } from "../core/notes.js";
 import { setSections } from "../core/script.js";
 import { toManifestPath } from "../core/paths.js";
@@ -62,6 +62,8 @@ export interface DemoDeps {
   /** Spawns macOS `say`, or `null` on a machine without it (or where it didn't answer `-v ?`). */
   say: Runner | null;
   now: Date;
+  /** The font file to burn the timecode in with, when it exists. Defaults to macOS's Arial; tests point it elsewhere. */
+  font?: string;
 }
 
 const PRODUCT = "Lumen";
@@ -92,10 +94,10 @@ async function checkFolder(dir: string): Promise<boolean> {
 
 /**
  * Everything `makeDemo` can leave behind under `root`: the `.rushes` project folder and the
- * generated `media` folder. Nothing else is ever created there.
+ * generated `renders` and `audio` folders. Nothing else is ever created there.
  */
 async function removeDemoContents(root: string): Promise<void> {
-  await Promise.all([rm(join(root, ".rushes"), { recursive: true, force: true }), rm(join(root, "media"), { recursive: true, force: true })]);
+  await Promise.all([".rushes", "renders", "audio"].map((name) => rm(join(root, name), { recursive: true, force: true })));
 }
 
 async function requireFfmpeg(ffmpeg: Runner): Promise<void> {
@@ -109,25 +111,29 @@ async function requireFfmpeg(ffmpeg: Runner): Promise<void> {
 }
 
 /**
- * The font `drawtext` burns the timecode in with, or `null` to skip the overlay entirely: either
- * the font file isn't on this machine, or this ffmpeg build wasn't compiled with `drawtext` (both
- * common on a minimal install) -- never a reason to fail the demo.
+ * How `drawtext` burns the timecode in: with `font` (a file) when it's on this machine, else with
+ * fontconfig's default font (`""`, no `fontfile`) when a one-frame probe shows that works, as it
+ * does on most Linux builds -- or `null` to skip the overlay entirely: this ffmpeg wasn't compiled
+ * with `drawtext`, or it can't find any font (both common on a minimal install). Never a reason to
+ * fail the demo.
  */
-async function drawtextFont(ffmpeg: Runner): Promise<string | null> {
-  if (!existsSync(FONT)) return null;
+async function drawtextFont(ffmpeg: Runner, font: string): Promise<string | null> {
   try {
     const r = await ffmpeg(["-hide_banner", "-filters"]);
     if (r.code !== 0 || !/\bdrawtext\b/.test(`${r.stdout}\n${r.stderr}`)) return null;
-    return FONT;
+    if (existsSync(font)) return font;
+    const probe = await ffmpeg(["-hide_banner", "-f", "lavfi", "-i", "color=size=64x64:duration=0.04", "-vf", "drawtext=text=0", "-frames:v", "1", "-f", "null", "-"]);
+    return probe.code === 0 ? "" : null;
   } catch {
     return null;
   }
 }
 
+/** `font` is a file path, `""` for fontconfig's default, or `null` for no timecode. */
 function videoFilter(font: string | null, hue: number | null): string[] {
   const parts: string[] = [];
   if (hue !== null) parts.push(`hue=h=${hue}`);
-  if (font) parts.push(`drawtext=fontfile=${font}:text='%{pts\\:hms}':fontcolor=white:fontsize=36:x=24:y=24:box=1:boxcolor=black@0.5:boxborderw=10`);
+  if (font !== null) parts.push(`drawtext=${font ? `fontfile=${font}:` : ""}text='%{pts\\:hms}':fontcolor=white:fontsize=36:x=24:y=24:box=1:boxcolor=black@0.5:boxborderw=10`);
   return parts.length ? ["-vf", parts.join(",")] : [];
 }
 
@@ -236,22 +242,30 @@ export async function makeDemo(dir: string, deps: DemoDeps): Promise<{ dir: stri
     const store = new Store(root);
     await store.init(`${PRODUCT} launch demo`);
 
-    const mediaDir = join(root, "media");
-    await Promise.all(["picture", "voice", "music", "sfx"].map((sub) => mkdir(join(mediaDir, sub), { recursive: true })));
+    // The layout README and AGENTS recommend: renders/ for cuts, audio/<voiceover|music|sfx>/ for the rest.
+    const rendersDir = join(root, "renders");
+    const voiceDir = join(root, "audio", "voiceover");
+    const musicDir = join(root, "audio", "music");
+    const sfxDir = join(root, "audio", "sfx");
+    await Promise.all([rendersDir, voiceDir, musicDir, sfxDir].map((d) => mkdir(d, { recursive: true })));
 
-    const font = await drawtextFont(deps.ffmpeg);
+    const font = await drawtextFont(deps.ffmpeg, deps.font ?? FONT);
 
     // 1. The picture: a 30 s test-pattern film in two cuts, v2 hue-shifted, with shots every 6 s.
-    const v1Abs = join(mediaDir, "picture", "lumen-launch_v1.mp4");
-    const v2Abs = join(mediaDir, "picture", "lumen-launch_v2.mp4");
+    const v1Abs = join(rendersDir, "lumen-launch_v1.mp4");
+    const v2Abs = join(rendersDir, "lumen-launch_v2.mp4");
     await renderCut(deps.ffmpeg, v1Abs, { hue: null, font });
     await renderCut(deps.ffmpeg, v2Abs, { hue: 100, font });
 
     let videoId = "";
+    let pictureNoteShot: ReturnType<typeof shotAt> = null;
+    const pictureNoteT = 10;
     await store.update("project", (p) => {
       const { video, version: v1 } = addVersion(p, { video: `${PRODUCT} launch`, file: toManifestPath(root, v1Abs), duration: DURATION, fps: 25, note: "First cut of the test pattern" }, deps.now);
       videoId = video.id;
-      setShots(p, video.id, v1.id, [0, 6, 12, 18, 24].map((start, i) => ({ name: `Shot ${i + 1}`, start })));
+      const cut = setShots(p, video.id, v1.id, [0, 6, 12, 18, 24].map((start, i) => ({ name: `Shot ${i + 1}`, start })));
+      // Stamped as the server stamps a note made in the dashboard (app.ts, POST /api/notes).
+      pictureNoteShot = shotAt(cut.shots, pictureNoteT);
       addVersion(p, { video: videoId, file: toManifestPath(root, v2Abs), duration: DURATION, fps: 25, note: "Hue pass, for comparison" }, deps.now);
     });
 
@@ -271,9 +285,9 @@ export async function makeDemo(dir: string, deps: DemoDeps): Promise<{ dir: stri
     const hasSay = deps.say !== null;
     const [voiceA, voiceB] = hasSay ? await pickSystemVoices(deps.say!) : [null, null];
 
-    const round1AWav = join(mediaDir, "voice", "round-1-voice-a.wav");
-    const round1BWav = join(mediaDir, "voice", "round-1-voice-b.wav");
-    const round2Wav = join(mediaDir, "voice", "round-2-voice-a-slower.wav");
+    const round1AWav = join(voiceDir, "round-1-voice-a.wav");
+    const round1BWav = join(voiceDir, "round-1-voice-b.wav");
+    const round2Wav = join(voiceDir, "round-2-voice-a-slower.wav");
     if (hasSay) {
       await renderSayVoice(deps.say!, deps.ffmpeg, round1AWav, { voice: voiceA, text: scriptText });
       await renderSayVoice(deps.say!, deps.ffmpeg, round1BWav, { voice: voiceB, text: scriptText });
@@ -283,22 +297,26 @@ export async function makeDemo(dir: string, deps: DemoDeps): Promise<{ dir: stri
       await renderSineTone(deps.ffmpeg, round1BWav, 554, 10);
       await renderSineTone(deps.ffmpeg, round2Wav, 440, 12);
     }
-    const voiceAName = hasSay ? "Voice A" : "Placeholder A (no text-to-speech on this machine)";
-    const voiceBName = hasSay ? "Voice B" : "Placeholder B (no text-to-speech on this machine)";
+    // Short names for the note text; the read names spell out why there's no voice.
+    const shortA = hasSay ? "Voice A" : "Placeholder A";
+    const shortB = hasSay ? "Voice B" : "Placeholder B";
+    const voiceAName = hasSay ? shortA : `${shortA} (no text-to-speech on this machine)`;
+    const voiceBName = hasSay ? shortB : `${shortB} (no text-to-speech on this machine)`;
+    const placeholder = "A placeholder tone, not a read";
 
     let round1LaneId = "";
     let voiceAId = "";
     await store.update("project", (p) => {
-      const { lane, variant } = addVariant(p, { stage: "voice", round: "Round 1 · Voices", name: voiceAName, file: toManifestPath(root, round1AWav) });
+      const { lane, variant } = addVariant(p, { stage: "voice", round: "Round 1 · Voices", name: voiceAName, file: toManifestPath(root, round1AWav), description: hasSay ? "The script at a natural pace" : placeholder });
       round1LaneId = lane.id;
       voiceAId = variant.id;
-      addVariant(p, { stage: "voice", round: "Round 1 · Voices", name: voiceBName, file: toManifestPath(root, round1BWav) });
-      addVariant(p, { stage: "voice", round: "Round 2 · Voice A, pace", name: "Voice A · slower", file: toManifestPath(root, round2Wav) });
+      addVariant(p, { stage: "voice", round: "Round 1 · Voices", name: voiceBName, file: toManifestPath(root, round1BWav), description: hasSay ? "A second voice, same script and pace" : placeholder });
+      addVariant(p, { stage: "voice", round: "Round 2 · Voice A, pace", name: "Voice A · slower", file: toManifestPath(root, round2Wav), description: "Based on Voice A, slower" });
     });
 
     // 4. Music beds: two synthesised chords at different tempos.
-    const warmPadWav = join(mediaDir, "music", "warm-pad.wav");
-    const pulseWav = join(mediaDir, "music", "pulse.wav");
+    const warmPadWav = join(musicDir, "warm-pad.wav");
+    const pulseWav = join(musicDir, "pulse.wav");
     await renderChord(deps.ffmpeg, warmPadWav, { freqs: [196, 246.94, 293.66], seconds: 12 });
     await renderChord(deps.ffmpeg, pulseWav, { freqs: [220, 277.18, 329.63], seconds: 12, pulseHz: 2.5 });
 
@@ -310,7 +328,7 @@ export async function makeDemo(dir: string, deps: DemoDeps): Promise<{ dir: stri
     });
 
     // 5. One SFX pass, three whooshes with cues.
-    const sfxWav = join(mediaDir, "sfx", "pass-a.wav");
+    const sfxWav = join(sfxDir, "pass-a.wav");
     const cueTimes = [1.5, 4.5, 7.5];
     await renderWhooshes(deps.ffmpeg, sfxWav, cueTimes, 9);
     await store.update("project", (p) => {
@@ -333,11 +351,12 @@ export async function makeDemo(dir: string, deps: DemoDeps): Promise<{ dir: stri
       picks.levels.music = -12;
     });
 
-    // 7. Example notes: a point on Picture, a whole note on Voiceover, a range note with "Fall" on
-    // Music, and a whole note on Mix.
+    // 7. Example notes: a point on Picture, a whole note on a Round 1 read, a range note with "Fall"
+    // on Music, and a whole note on Mix.
+    const voiceNote = hasSay ? `${shortA} reads warmer than ${shortB}. Lean that way for launch.` : `${shortA} over ${shortB} for now. Swap in real reads before launch.`;
     await store.update("notes", (notes) => {
-      addNote(notes, { stage: "picture", video: videoId, version: "v1", scope: "point", t: 10, text: "Hold the opening frame a beat longer before the cut." }, deps.now);
-      addNote(notes, { stage: "voice", on: null, scope: "whole", text: "Voice A reads warmer than Voice B. Lean that way for launch." }, deps.now);
+      addNote(notes, { stage: "picture", video: videoId, version: "v1", scope: "point", t: pictureNoteT, shot: pictureNoteShot, text: "Hold the opening frame a beat longer before the cut." }, deps.now);
+      addNote(notes, { stage: "voice", on: `${round1LaneId}/${voiceAId}`, scope: "whole", text: voiceNote }, deps.now);
       addNote(notes, { stage: "music", on: `music/${musicVariantId}`, scope: "range", t: 6, tOut: 9, marks: [{ kind: "fall" }], text: "Let the pad fall away under the last line." }, deps.now);
       addNote(notes, { stage: "mix", on: null, scope: "whole", text: "Check the whole mix against a phone speaker before sign-off." }, deps.now);
     });

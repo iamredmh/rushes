@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { makeDemo, makeRunner, pickVoices, type DemoDeps, type Runner } from "../../src/cli/demo.js";
 import { fromManifestPath } from "../../src/core/paths.js";
 import { Store } from "../../src/core/store.js";
+import { onLabel } from "../../src/core/notes.js";
 
 const made: string[] = [];
 afterEach(async () => {
@@ -30,12 +31,10 @@ function fakeFfmpegMissing(): Runner {
   return async () => ({ code: 1, stdout: "", stderr: "" });
 }
 
-/** Succeeds like `fakeFfmpeg`, except its `n`th call fails -- for exercising cleanup on a failure part-way through a run. */
-function fakeFfmpegFailsOnCall(n: number): Runner {
-  let count = 0;
+/** Succeeds like `fakeFfmpeg`, except the first cut render fails -- for exercising cleanup on a failure part-way through a run. */
+function fakeFfmpegFailsOnFirstRender(): Runner {
   return async (args) => {
-    count++;
-    if (count === n) return { code: 1, stdout: "", stderr: "synthetic failure for the regression test" };
+    if (args.some((a) => a.includes("testsrc2"))) return { code: 1, stdout: "", stderr: "synthetic failure for the regression test" };
     if (args[0] === "-hide_banner" && args.includes("-filters")) return { code: 0, stdout: "... drawtext ...\n", stderr: "" };
     return { code: 0, stdout: "ffmpeg version 8.1 Copyright (c) 2000-2026 the FFmpeg developers\n", stderr: "" };
   };
@@ -130,6 +129,93 @@ describe("makeDemo", () => {
     expect(script.sections.filter((s) => s.current.includes("Lumen")).length).toBeGreaterThan(0);
   });
 
+  it("puts the Voiceover note on a real Round 1 read, named in its text (§18.3: no 'Assembled read')", async () => {
+    const dir = await emptyDir();
+    await makeDemo(dir, deps());
+    const store = new Store(dir);
+    const project = await store.read("project");
+    const notes = await store.read("notes");
+    const voiceNote = notes.notes.find((n) => n.stage === "voice")!;
+    expect(voiceNote.on).toBe("round-1-voices/voice-a");
+    const [laneId, variantId] = voiceNote.on!.split("/");
+    expect(project.lanes.find((l) => l.id === laneId)?.variants.some((v) => v.id === variantId)).toBe(true);
+    expect(voiceNote.text).toContain("Voice A");
+    expect(onLabel(voiceNote, { project, script: await store.read("script") })).toBe("Round 1 · Voices · Voice A");
+  });
+
+  it("names the placeholders, not voices, in the Voiceover note when there's no text-to-speech", async () => {
+    const dir = await emptyDir();
+    await makeDemo(dir, deps({ say: null }));
+    const notes = await new Store(dir).read("notes");
+    const voiceNote = notes.notes.find((n) => n.stage === "voice")!;
+    expect(voiceNote.on).toMatch(/^round-1-voices\/placeholder-a/);
+    expect(voiceNote.text).toContain("Placeholder A");
+    expect(voiceNote.text).not.toContain("Voice A");
+  });
+
+  it("gives every read a one-line description, and Round 2's says what it's based on", async () => {
+    const dir = await emptyDir();
+    await makeDemo(dir, deps());
+    const project = await new Store(dir).read("project");
+    const reads = project.lanes.filter((l) => l.stage === "voice").flatMap((l) => l.variants);
+    for (const r of reads) expect(String(r.meta.description ?? "").trim()).not.toBe("");
+    const round2 = project.lanes.find((l) => l.id === "round-2-voice-a-pace")!;
+    expect(round2.variants[0].meta.description).toBe("Based on Voice A, slower");
+  });
+
+  it("stamps the Picture note with its shot, as a note made in the dashboard would be", async () => {
+    const dir = await emptyDir();
+    await makeDemo(dir, deps());
+    const notes = await new Store(dir).read("notes");
+    expect(notes.notes.find((n) => n.stage === "picture")!.shot).toEqual({ n: 2, name: "Shot 2" });
+  });
+
+  it("lays the media out as README and AGENTS recommend: renders/ and audio/<voiceover|music|sfx>/", async () => {
+    const dir = await emptyDir();
+    await makeDemo(dir, deps());
+    const project = await new Store(dir).read("project");
+    for (const v of project.videos[0].versions) expect(v.file).toMatch(/^renders\//);
+    const byStage = (stage: string) => project.lanes.filter((l) => l.stage === stage).flatMap((l) => l.variants.map((v) => v.file));
+    for (const f of byStage("voice")) expect(f).toMatch(/^audio\/voiceover\//);
+    for (const f of byStage("music")) expect(f).toMatch(/^audio\/music\//);
+    for (const f of byStage("sfx")) expect(f).toMatch(/^audio\/sfx\//);
+    expect((await readdir(dir)).sort()).toEqual([".rushes", "audio", "renders"]);
+  });
+
+  it("burns the timecode in through fontconfig when the macOS font isn't there but drawtext works without one", async () => {
+    const dir = await emptyDir();
+    const calls: string[][] = [];
+    const ffmpeg: Runner = async (args) => {
+      calls.push(args);
+      if (args.includes("-filters")) return { code: 0, stdout: "... drawtext ...\n", stderr: "" };
+      return { code: 0, stdout: "ffmpeg version 8.1\n", stderr: "" };
+    };
+    await makeDemo(dir, deps({ ffmpeg, font: join(dir, "no-such-font.ttf") }));
+    const cuts = calls.filter((a) => a.some((x) => x.includes("testsrc2")));
+    expect(cuts).toHaveLength(2);
+    for (const c of cuts) {
+      const vf = c[c.indexOf("-vf") + 1] ?? "";
+      expect(vf).toContain("drawtext=text=");
+      expect(vf).not.toContain("fontfile");
+    }
+  });
+
+  it("skips the timecode, and still finishes, when drawtext can't find a font at all", async () => {
+    const dir = await emptyDir();
+    const calls: string[][] = [];
+    const ffmpeg: Runner = async (args) => {
+      calls.push(args);
+      if (args.includes("-filters")) return { code: 0, stdout: "... drawtext ...\n", stderr: "" };
+      // The fontconfig probe: drawtext with no fontfile fails on a build without fontconfig.
+      if (args.some((x) => x.startsWith("drawtext"))) return { code: 1, stdout: "", stderr: "Cannot find a valid font" };
+      return { code: 0, stdout: "ffmpeg version 8.1\n", stderr: "" };
+    };
+    await makeDemo(dir, deps({ ffmpeg, font: join(dir, "no-such-font.ttf") }));
+    const cuts = calls.filter((a) => a.some((x) => x.includes("testsrc2")));
+    expect(cuts).toHaveLength(2);
+    for (const c of cuts) expect(c.join(" ")).not.toContain("drawtext");
+  });
+
   it("falls back to sine-tone placeholders when `say` isn't available", async () => {
     const dir = await emptyDir();
     await makeDemo(dir, deps({ say: null }));
@@ -154,33 +240,32 @@ describe("makeDemo", () => {
 });
 
 describe("makeDemo, cleanup on a failure part-way through", () => {
-  const FAILS_ON_RENDER = 3; // call 1 is requireFfmpeg's -version check, 2 is drawtextFont's -filters check, 3 is the first renderCut.
 
   it("removes the folder entirely when it didn't exist before the run, and a retry into the same path then works", async () => {
     const base = await emptyDir();
     const dir = join(base, "fresh-demo"); // doesn't exist yet -- makeDemo must create (and, on failure, remove) it.
 
-    await expect(makeDemo(dir, deps({ ffmpeg: fakeFfmpegFailsOnCall(FAILS_ON_RENDER) }))).rejects.toThrow(
+    await expect(makeDemo(dir, deps({ ffmpeg: fakeFfmpegFailsOnFirstRender() }))).rejects.toThrow(
       /^The demo couldn't finish \(.*\)\. Nothing was left behind\.$/,
     );
     await expect(readdir(dir)).rejects.toThrow(/ENOENT/);
 
     const { dir: made_ } = await makeDemo(dir, deps());
     expect(made_).toBe(dir);
-    expect((await readdir(dir)).sort()).toEqual([".rushes", "media"]);
+    expect((await readdir(dir)).sort()).toEqual([".rushes", "audio", "renders"]);
   });
 
   it("leaves a pre-existing empty folder in place, untouched, and a retry into the same path then works", async () => {
     const dir = await emptyDir(); // pre-existing and empty, per the first refusal check.
 
-    await expect(makeDemo(dir, deps({ ffmpeg: fakeFfmpegFailsOnCall(FAILS_ON_RENDER) }))).rejects.toThrow(
+    await expect(makeDemo(dir, deps({ ffmpeg: fakeFfmpegFailsOnFirstRender() }))).rejects.toThrow(
       /^The demo couldn't finish \(.*\)\. Nothing was left behind\.$/,
     );
     expect(await readdir(dir)).toEqual([]); // the folder itself survives, still empty.
 
     const { dir: made_ } = await makeDemo(dir, deps());
     expect(made_).toBe(dir);
-    expect((await readdir(dir)).sort()).toEqual([".rushes", "media"]);
+    expect((await readdir(dir)).sort()).toEqual([".rushes", "audio", "renders"]);
   });
 });
 
