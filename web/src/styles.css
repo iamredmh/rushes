@@ -129,8 +129,14 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 /* .frame sizes itself to the cut (aspect-ratio set from the video, 16:9 before metadata
    loads), not a fixed 16:9 box: a vertical cut shrinks its width to fit max-height, centred. */
 .frame { position: relative; aspect-ratio: 16 / 9; max-width: 100%; max-height: min(70vh, 640px); margin: 0 auto; border-radius: var(--r-lg); overflow: hidden; background: #000; }
+/* The player's width is worked out, not left to aspect-ratio + max-height: Safari doesn't carry
+   max-height across the ratio to shrink the width, so a vertical cut stayed 16:9 wide (§19.4).
+   --ar is the cut's own ratio, set alongside aspect-ratio. */
+.framebox .frame { width: min(100%, calc(min(70vh, 640px) * var(--ar, 16 / 9))); }
 .frame video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
 .frame .overlay { position: absolute; inset: 0; }
+/* The picture's own rect inside the overlay (contentRect): saved and drawn boxes sit in it. */
+.frame .pic { position: absolute; pointer-events: none; }
 .frame .overlay.drawing { cursor: crosshair; }
 .frame .bx { position: absolute; border: 2px solid var(--todo); border-radius: 6px; pointer-events: none; }
 .frame .bx.saved { border-color: var(--accent); border-style: dashed; }

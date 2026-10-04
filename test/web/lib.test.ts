@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  agentPrompt, boxFrom, cueRoom, defaultVersion, extOf, firstTab, fit, FOLDERS, fmt, folderItems, formatBytes, frameAt, groupByFilm,
+  agentPrompt, boxFrom, contentRect, cueRoom, defaultVersion, extOf, firstTab, fit, FOLDERS, fmt, folderItems, formatBytes, frameAt, groupByFilm,
   isChanged, isPreviewable, latest, LOCKED_TAB, metaLine, neighbourVideo, noteTime, OPEN_SAFE_EXT, placeNote, shotAt, shotLabel, shotSeek, snap, stepFrame,
 } from "../../web/src/lib.js";
 import type { Asset, Note, Section, Shot, TabState, Video } from "../../web/src/types.js";
@@ -128,6 +128,37 @@ describe("boxFrom", () => {
     expect(boxFrom(100, 50, 300, 150, 400, 200)).toEqual({ x: 0.25, y: 0.25, w: 0.5, h: 0.5 });
     expect(boxFrom(300, 150, 100, 50, 400, 200)).toEqual({ x: 0.25, y: 0.25, w: 0.5, h: 0.5 });
     expect(boxFrom(-50, -50, 500, 300, 400, 200)).toEqual({ x: 0, y: 0, w: 1, h: 1 });
+  });
+});
+
+describe("contentRect", () => {
+  it("is the whole box when the picture's shape matches it", () => {
+    expect(contentRect(1920, 1080, 960, 540)).toEqual({ x: 0, y: 0, w: 960, h: 540 });
+  });
+  it("pillarboxes a vertical cut in a 16:9 box: full height, centred", () => {
+    // 360x640 in 992x630: scale 630/640, so 354.375 wide, (992 - 354.375) / 2 in from the left.
+    expect(contentRect(360, 640, 992, 630)).toEqual({ x: 318.8125, y: 0, w: 354.375, h: 630 });
+  });
+  it("letterboxes a wide cut in a taller box: full width, centred", () => {
+    expect(contentRect(2400, 1000, 1200, 900)).toEqual({ x: 0, y: 200, w: 1200, h: 500 });
+  });
+  it("scales up as well as down", () => {
+    expect(contentRect(16, 9, 1600, 1000)).toEqual({ x: 0, y: 50, w: 1600, h: 900 });
+  });
+  it("falls back to the whole box before the picture's size is known", () => {
+    expect(contentRect(0, 0, 640, 360)).toEqual({ x: 0, y: 0, w: 640, h: 360 });
+    expect(contentRect(360, 640, 0, 0)).toEqual({ x: 0, y: 0, w: 0, h: 0 });
+  });
+  it("with boxFrom, measures a drag on a pillarboxed picture against the picture", () => {
+    const r = contentRect(360, 640, 992, 630);
+    // Pointer positions in the element's own coordinates, moved into the picture's.
+    const drag = (x0: number, y0: number, x1: number, y1: number) => boxFrom(x0 - r.x, y0 - r.y, x1 - r.x, y1 - r.y, r.w, r.h);
+    // From the picture's top-left corner to its centre.
+    expect(drag(r.x, 0, r.x + r.w / 2, r.h / 2)).toEqual({ x: 0, y: 0, w: 0.5, h: 0.5 });
+    // A drag that starts out in the pillarbox is clamped to the picture's edge.
+    expect(drag(10, 0, r.x + r.w / 2, r.h / 2)).toEqual({ x: 0, y: 0, w: 0.5, h: 0.5 });
+    // Measured against the element instead, the same drag is the bug: a box well under half as wide.
+    expect(boxFrom(r.x, 0, r.x + r.w / 2, r.h / 2, 992, 630).w).toBeLessThan(0.2);
   });
 });
 

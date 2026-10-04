@@ -162,8 +162,10 @@ export function Assets({ assets, videos, toast, onChanged }: AssetsProps) {
   // ---- the lightbox, for Screenshots/Images tiles ----
   const [lightbox, setLightbox] = useState<Asset | null>(null);
   const opener = useRef<HTMLElement | null>(null);
-  const openLightbox = (a: Asset) => {
-    opener.current = document.activeElement as HTMLElement | null;
+  // Focus returns to the thumbnail that opened it. That's the clicked button itself, not
+  // document.activeElement: Safari never focuses a button on click, so activeElement is <body>.
+  const openLightbox = (a: Asset, from: HTMLElement) => {
+    opener.current = from;
     setLightbox(a);
   };
   const closeLightbox = () => {
@@ -303,7 +305,7 @@ export function Assets({ assets, videos, toast, onChanged }: AssetsProps) {
         <section class="afilm-group" key={g.heading ?? `_${gi}`}>
           {g.heading && <h3 class="afilm-heading">{g.heading}</h3>}
           <div class="shots-grid">
-            {g.items.map((a) => <ShotTile key={a.path} asset={a} videos={videos} toast={toast} onOpen={() => openLightbox(a)} />)}
+            {g.items.map((a) => <ShotTile key={a.path} asset={a} videos={videos} toast={toast} onOpen={(from) => openLightbox(a, from)} />)}
           </div>
         </section>
       ));
@@ -317,7 +319,7 @@ export function Assets({ assets, videos, toast, onChanged }: AssetsProps) {
     }
     return (
       <div class="shots-grid">
-        {items.map((a) => <ShotTile key={a.path} asset={a} videos={videos} toast={toast} onOpen={() => openLightbox(a)} />)}
+        {items.map((a) => <ShotTile key={a.path} asset={a} videos={videos} toast={toast} onOpen={(from) => openLightbox(a, from)} />)}
       </div>
     );
   };

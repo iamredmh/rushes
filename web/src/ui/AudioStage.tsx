@@ -201,6 +201,9 @@ export function AudioStage(props: AudioStageProps) {
   const tc = useRef<HTMLSpanElement>(null);
   const pvTc = useRef<HTMLDivElement>(null);
   const video = useRef<HTMLVideoElement>(null);
+  // The preview starts when the audio clock does, not when Play is pressed (see paint).
+  const pvStarted = useRef(false);
+  const lastPaintT = useRef(0);
   const input = useRef<HTMLTextAreaElement>(null);
   const placeholderFor = (t: number) => {
     if (scope === "whole") return stage === "voice" ? "Note on the whole read" : "Note on the whole track";
@@ -224,6 +227,14 @@ export function AudioStage(props: AudioStageProps) {
     if (v && v.readyState >= 1 && !v.seeking && needsVideoSync(v.currentTime, t, fps)) {
       v.currentTime = Math.min(t, Number.isFinite(v.duration) ? v.duration : t);
     }
+    // Audio can take a moment to start after Play (WebKit's especially, under load). A preview
+    // already running would get ahead of a clock still at the start and be pulled back, again and
+    // again; so it's started on the first frame the clock has actually moved.
+    if (v && engine.playing && !pvStarted.current && t > lastPaintT.current) {
+      pvStarted.current = true;
+      void v.play().catch(() => undefined);
+    }
+    lastPaintT.current = t;
   };
   const paintRef = useRef(paint);
   paintRef.current = paint;
@@ -236,8 +247,9 @@ export function AudioStage(props: AudioStageProps) {
   useEffect(() => {
     const v = video.current;
     if (!v) return;
-    if (playing) void v.play().catch(() => undefined);
-    else {
+    // Playing, paint() starts the preview (or a newly chosen one) once the audio clock moves.
+    pvStarted.current = false;
+    if (!playing) {
       v.pause();
       paintRef.current(engine.time);
     }

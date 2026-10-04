@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { api, mediaUrl, originalFrame } from "../api.js";
-import { boxFrom, fmt, frameAt, noteTime, placeNote, shotAt, shotLabel, shotSeek, snap, stepFrame, type ProxyProgress } from "../lib.js";
+import { boxFrom, contentRect, fmt, frameAt, noteTime, placeNote, shotAt, shotLabel, shotSeek, snap, stepFrame, type ProxyProgress } from "../lib.js";
 import type { Note, ProxyJob, Video, Version } from "../types.js";
 import { Icon } from "./Icon.js";
 import { Notes } from "./Notes.js";
@@ -61,7 +61,9 @@ export function Picture({
   const [broken, setBroken] = useState(false);
   const [range, setRange] = useState<{ in: number | null; out: number | null }>({ in: null, out: null });
   const [boxMode, setBoxMode] = useState(false);
-  const [drag, setDrag] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  const [drag, setDrag] = useState<{ x0: number; y0: number; x1: number; y1: number; w: number; h: number } | null>(null);
+  // The overlay's size, kept only so the picture's rect (below) follows a resized window.
+  const [overlaySize, setOverlaySize] = useState({ w: 0, h: 0 });
   const [box, setBox] = useState<Box | null>(null);
   const [shown, setShown] = useState<Box | null>(null);
   const [noteHasText, setNoteHasText] = useState(false);
@@ -295,16 +297,34 @@ export function Picture({
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // Drawing a box on the frame.
+  // Drawing a box on the frame. Boxes are measured against the picture itself -- where the
+  // video's pixels actually are inside the element under object-fit: contain -- never the
+  // element's own box, which is wider than a vertical cut whenever the frame hasn't shrunk to
+  // fit it (§19.4: Safari kept it 16:9). The maths is ours (contentRect), so no browser's
+  // layout of the frame can change what a box means.
+  const picture = (w: number, h: number) => {
+    const v = ref.current;
+    return contentRect(v?.videoWidth ?? 0, v?.videoHeight ?? 0, w, h);
+  };
   const point = (e: PointerEvent) => {
     const r = overlay.current!.getBoundingClientRect();
-    return { x: e.clientX - r.left, y: e.clientY - r.top, w: r.width, h: r.height };
+    const c = picture(r.width, r.height);
+    return { x: e.clientX - r.left - c.x, y: e.clientY - r.top - c.y, w: c.w, h: c.h };
   };
+  useEffect(() => {
+    const el = overlay.current;
+    if (!el) return;
+    const measure = () => setOverlaySize((s) => (s.w === el.clientWidth && s.h === el.clientHeight ? s : { w: el.clientWidth, h: el.clientHeight }));
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   const down = (e: PointerEvent) => {
     if (!boxMode) return;
     const p = point(e);
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
-    setDrag({ x0: p.x, y0: p.y, x1: p.x, y1: p.y });
+    setDrag({ x0: p.x, y0: p.y, x1: p.x, y1: p.y, w: p.w, h: p.h });
   };
   const move = (e: PointerEvent) => {
     if (!drag) return;
@@ -314,15 +334,16 @@ export function Picture({
   const up = (e: PointerEvent) => {
     if (!drag) return;
     const p = point(e);
-    const b = boxFrom(drag.x0, drag.y0, p.x, p.y, p.w, p.h);
+    const b = boxFrom(drag.x0, drag.y0, p.x, p.y, drag.w, drag.h);
     setDrag(null);
     setBoxMode(false);
     justDrew.current = true;
     if (b.w > 0.01 && b.h > 0.01) setBox(b);
   };
-  const live: Box | null = drag && overlay.current
-    ? boxFrom(drag.x0, drag.y0, drag.x1, drag.y1, overlay.current.clientWidth, overlay.current.clientHeight)
-    : null;
+  const live: Box | null = drag ? boxFrom(drag.x0, drag.y0, drag.x1, drag.y1, drag.w, drag.h) : null;
+  // Read at render: `aspect` and `overlaySize` change whenever the picture's size or the
+  // overlay's does, so this is never stale for long.
+  const pic = picture(overlaySize.w, overlaySize.h);
   const style = (b: Box) => ({ left: `${b.x * 100}%`, top: `${b.y * 100}%`, width: `${b.w * 100}%`, height: `${b.h * 100}%` });
 
   const pct = (s: number) => `${duration ? (s / duration) * 100 : 0}%`;
@@ -377,7 +398,7 @@ export function Picture({
     <div class="split">
       <div class="stack">
         <div class="framebox">
-          <div class="frame" style={{ aspectRatio: String(aspect) }}>
+          <div class="frame" style={{ aspectRatio: String(aspect), "--ar": String(aspect) }}>
             {/* One message, never two: with ffmpeg, the proxy offer under the player speaks for a
                 file that won't play. Only the original, with a proxy to switch back to, says so here. */}
             {broken && !ffmpeg && <div class="msg">This file won't play in a browser. Ask your agent for an H.264 MP4 of this cut.</div>}
@@ -414,9 +435,11 @@ export function Picture({
                 else if (!boxMode) toggle();
               }}
             >
-              {shown && <div class="bx saved" style={style(shown)} />}
-              {box && <div class="bx" style={style(box)} />}
-              {live && <div class="bx" style={style(live)} />}
+              <div class="pic" style={{ left: `${pic.x}px`, top: `${pic.y}px`, width: `${pic.w}px`, height: `${pic.h}px` }}>
+                {shown && <div class="bx saved" style={style(shown)} />}
+                {box && <div class="bx" style={style(box)} />}
+                {live && <div class="bx" style={style(live)} />}
+              </div>
             </div>
             <div class="tcover">f{frameAt(t, fps)}{current && ` · shot ${shotLabel(current.n)}`}</div>
             {version.proxy && (

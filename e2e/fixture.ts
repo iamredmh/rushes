@@ -151,10 +151,23 @@ async function startOnPort(port: number, noFfmpeg = false): Promise<Started> {
   }
 }
 
+/**
+ * Playwright's WebKit on Linux decodes video through the system's GStreamer, and H.264/AAC
+ * playback there isn't something CI can count on (Playwright marks its own video tests fixme on
+ * Linux WebKit). So on Linux WebKit only, a test that puts an H.264 cut or an H.264 proxy in the
+ * player is skipped, with this reason in the report. Everywhere else (Chromium on every OS, and
+ * WebKit on macOS, which plays through AVFoundation) every test runs. Set
+ * `RUSHES_E2E_WEBKIT_H264=1` to run them on Linux WebKit anyway.
+ */
+const H264_SKIP_REASON = "needs H.264 playback, which Playwright's WebKit on Linux can't be relied on for";
+export function needsH264(browserName: string): void {
+  base.info().skip(browserName === "webkit" && process.platform === "linux" && !process.env.RUSHES_E2E_WEBKIT_H264, H264_SKIP_REASON);
+}
+
 export const test = base.extend<{ rushes: Rushes; noFfmpeg: boolean }>({
   /** Start the server without ffmpeg or ffprobe on its PATH (`test.use({ noFfmpeg: true })`). */
   noFfmpeg: [false, { option: true }],
-  rushes: async ({ noFfmpeg }, use) => {
+  rushes: async ({ noFfmpeg, browserName }, use) => {
     const tmpDirs: string[] = [];
     let started = await start(0, noFfmpeg);
     tmpDirs.push(started.tmpDir);
@@ -176,6 +189,7 @@ export const test = base.extend<{ rushes: Rushes; noFfmpeg: boolean }>({
       return json;
     };
     const addCut = async (note?: string, video = "Hero") => {
+      needsH264(browserName);
       const slug = video.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
       const n = (cutsByVideo.get(slug) ?? 0) + 1;
       cutsByVideo.set(slug, n);
@@ -184,6 +198,7 @@ export const test = base.extend<{ rushes: Rushes; noFfmpeg: boolean }>({
       return api("POST", "/api/versions", { video, file, note });
     };
     const addVerticalCut = async (note?: string) => {
+      needsH264(browserName);
       const n = (cutsByVideo.get("hero") ?? 0) + 1;
       cutsByVideo.set("hero", n);
       const file = `renders/hero_v${n}.mp4`;
@@ -191,6 +206,8 @@ export const test = base.extend<{ rushes: Rushes; noFfmpeg: boolean }>({
       return api("POST", "/api/versions", { video: "Hero", file, note });
     };
     const addProResCut = async (opts: ProResOptions = {}, note?: string) => {
+      // Its proxy is H.264, and every proxy test plays or offers to play one.
+      needsH264(browserName);
       const n = (cutsByVideo.get("hero") ?? 0) + 1;
       cutsByVideo.set("hero", n);
       const file = `renders/hero_v${n}.${opts.codec === "h264" ? "mp4" : "mov"}`;

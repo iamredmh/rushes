@@ -348,6 +348,20 @@ export function groupByFilm(items: Asset[], videos: Video[] = []): FilmGroup[] {
   return [...byHeading.values()];
 }
 
+/**
+ * Where a videoW × videoH picture actually sits inside a boxW × boxH element under
+ * `object-fit: contain`: scaled to fit whole, centred, letterboxed or pillarboxed on the spare
+ * axis. Notes' boxes are measured against this, never the element itself, which is only the
+ * picture when the two shapes happen to match. Without a picture size yet, it's the whole box.
+ */
+export function contentRect(videoW: number, videoH: number, boxW: number, boxH: number) {
+  if (!(videoW > 0 && videoH > 0 && boxW > 0 && boxH > 0)) return { x: 0, y: 0, w: Math.max(0, boxW), h: Math.max(0, boxH) };
+  const scale = Math.min(boxW / videoW, boxH / videoH);
+  const w = videoW * scale;
+  const h = videoH * scale;
+  return { x: (boxW - w) / 2, y: (boxH - h) / 2, w, h };
+}
+
 /** Normalised box from two pointer positions inside an element of size w × h. */
 export function boxFrom(x0: number, y0: number, x1: number, y1: number, w: number, h: number) {
   // Four decimals is finer than a pixel on any screen, and keeps notes.json readable.

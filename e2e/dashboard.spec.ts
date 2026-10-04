@@ -1,7 +1,7 @@
 import { access, copyFile, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { expect, hasFfmpeg, test, videoReady } from "./fixture.js";
+import { expect, hasFfmpeg, needsH264, test, videoReady } from "./fixture.js";
 
 const CLIP = fileURLToPath(new URL("./fixtures/clip.mp4", import.meta.url));
 // A 1x1 transparent PNG, reused for every screenshot the library tests need on disk: its
@@ -449,7 +449,8 @@ test("switching films pauses the one playing, and its playhead is remembered eve
   await videoReady(page);
   const pack = page.getByRole("navigation", { name: "Films" });
   await page.keyboard.press(" ");
-  await page.waitForTimeout(600);
+  // Played for a while, however long a loaded machine takes to start: not a fixed wait.
+  await expect.poll(() => page.locator("video").evaluate((v: HTMLVideoElement) => v.currentTime)).toBeGreaterThan(0.5);
   await page.keyboard.press("]");
   await expect(pack.getByRole("button", { name: /Cutdown/ })).toHaveAttribute("aria-pressed", "true");
   await page.keyboard.press("[");
@@ -542,8 +543,9 @@ test("a tab left open after its project stops never writes into the project that
   expect(notes).toEqual([]);
 });
 
-test("a grabbed frame is saved as a screenshot and shows up in Assets with its actions", async ({ page, rushes, context }) => {
-  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+test("a grabbed frame is saved as a screenshot and shows up in Assets with its actions", async ({ page, rushes, context, browserName }) => {
+  // WebKit has no clipboard permissions to grant; there the toast is what the test can see.
+  if (browserName === "chromium") await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await rushes.addCut();
   await page.goto(rushes.url);
   await videoReady(page);
@@ -558,20 +560,26 @@ test("a grabbed frame is saved as a screenshot and shows up in Assets with its a
   await expect(tile.locator("img")).toBeVisible();
   const dl = tile.getByRole("link", { name: "Download" });
   await expect(dl).toHaveAttribute("href", /download=1/);
-  await expect(tile.getByRole("button", { name: "Save as…" })).toBeVisible();
+  // Save as… needs the File System Access API, which Safari doesn't have: there it's left out.
+  const canSaveAs = await page.evaluate(() => "showSaveFilePicker" in window);
+  const saveAs = tile.getByRole("button", { name: "Save as…" });
+  if (canSaveAs) await expect(saveAs).toBeVisible();
+  else await expect(saveAs).toHaveCount(0);
+  expect(canSaveAs).toBe(browserName === "chromium");
 
   await tile.getByRole("button", { name: /Show in Finder|Show in Explorer|Open folder/ }).click();
   await expect(page.getByRole("status")).toBeHidden();
 
   await tile.getByRole("button", { name: "Copy path" }).click();
   await expect(page.getByRole("status")).toHaveText("Path copied");
-  const clipboard = await page.evaluate(() => navigator.clipboard.readText());
-  const { assets } = await rushes.api("GET", "/api/assets");
-  expect(clipboard).toBe(assets[0].abs);
+  if (browserName === "chromium") {
+    const clipboard = await page.evaluate(() => navigator.clipboard.readText());
+    const { assets } = await rushes.api("GET", "/api/assets");
+    expect(clipboard).toBe(assets[0].abs);
+  }
 });
 
-test("the lightbox moves focus to Close, traps Tab inside itself, and returns focus on close", async ({ page, rushes, context }) => {
-  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+test("the lightbox moves focus to Close, traps Tab inside itself, and returns focus on close", async ({ page, rushes }) => {
   await rushes.addCut();
   await page.goto(rushes.url);
   await videoReady(page);
@@ -896,8 +904,9 @@ test("a script previews as Markdown, safely", async ({ page, rushes }) => {
   await expect(preview.locator("script")).toHaveCount(0);
 });
 
-test("keyboard users can trigger a preview row's actions and select it (I3)", async ({ page, rushes, context }) => {
-  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+test("keyboard users can trigger a preview row's actions and select it (I3)", async ({ page, rushes, context, browserName }) => {
+  // WebKit has no clipboard permissions to grant; there the toast is what the test can see.
+  if (browserName === "chromium") await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await writeFile(join(rushes.root, "brief.md"), "# Brief\n");
   await writeFile(join(rushes.root, "notes.md"), "# Notes\n");
 
@@ -921,7 +930,8 @@ test("keyboard users can trigger a preview row's actions and select it (I3)", as
   await expect(page.locator(".apreview h1")).toHaveText("Notes");
 });
 
-test("audio plays inline, one at a time, and stops when you leave the folder", async ({ page, rushes }) => {
+test("audio plays inline, one at a time, and stops when you leave the folder", async ({ page, rushes, browserName }) => {
+  needsH264(browserName);
   await copyFile(CLIP, join(rushes.root, "bed-a.mp4"));
   await copyFile(CLIP, join(rushes.root, "bed-b.mp4"));
   await rushes.api("POST", "/api/variants", { stage: "music", name: "Bed A", file: "bed-a.mp4" });
@@ -989,7 +999,8 @@ test("audio stops when you switch tabs (Assets → Picture and back)", async ({ 
   await expect.poll(() => page.locator("audio").evaluate((el) => (el as HTMLAudioElement).paused)).toBe(true);
 });
 
-test("a rejected play() resets the row and shows a toast, instead of claiming to be playing (M4)", async ({ page, rushes }) => {
+test("a rejected play() resets the row and shows a toast, instead of claiming to be playing (M4)", async ({ page, rushes, browserName }) => {
+  needsH264(browserName);
   await copyFile(CLIP, join(rushes.root, "bed.mp4"));
   await rushes.api("POST", "/api/variants", { stage: "music", name: "Bed", file: "bed.mp4" });
 
@@ -1104,7 +1115,8 @@ test("200 screenshots stay usable", async ({ page, rushes }) => {
   await expect(page.locator(".shot-tile")).toHaveCount(1);
 });
 
-test("Cuts posters are lazy: not every tile loads a video before you scroll (I6)", async ({ page, rushes }) => {
+test("Cuts posters are lazy: not every tile loads a video before you scroll (I6)", async ({ page, rushes, browserName }) => {
+  needsH264(browserName);
   // 40 versions of the same film, all pointing at one reused clip file.
   await copyFile(CLIP, join(rushes.root, "renders", "hero.mp4"));
   for (let i = 0; i < 40; i++) {
@@ -1274,6 +1286,8 @@ test.describe("proxies (§19.5)", () => {
   test("Assets › Proxies lists each proxy with its size, and Delete removes it", async ({ page, rushes }) => {
     await rushes.addProResCut();
     await page.goto(rushes.url);
+    // Wait for the dashboard to be up before its key: a 7 pressed before then is lost.
+    await expect(page.getByRole("tab", { name: /Assets/ })).not.toHaveAttribute("data-locked");
     await page.keyboard.press("7");
     const sidebar = page.getByRole("navigation", { name: "Folders" });
     await expect(sidebar.getByRole("button", { name: /Cuts/ })).toBeVisible();

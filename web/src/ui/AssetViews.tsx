@@ -293,14 +293,14 @@ export function PreviewRow({
 }
 
 /** A Screenshots/Images grid tile. */
-export function ShotTile({ asset, videos, toast, onOpen }: { asset: Asset; videos: Video[]; toast(message: string): void; onOpen(): void }) {
+export function ShotTile({ asset, videos, toast, onOpen }: { asset: Asset; videos: Video[]; toast(message: string): void; onOpen(from: HTMLElement): void }) {
   const video = videos.find((v) => v.id === asset.video);
   const when = asset.t !== undefined && asset.frame !== undefined ? `${fmt(asset.t)} · f${asset.frame}` : asset.label ?? asset.name;
   const film = video && asset.version ? `${video.name} · ${asset.version}` : null;
   // Same as AssetRow: the controls carry aria-disabled, not this wrapper.
   return (
     <div class={`shot-tile${asset.missing ? " missing" : ""}`}>
-      <button type="button" class="shot-thumb" aria-label={`Open ${asset.name} full size`} onClick={onOpen}>
+      <button type="button" class="shot-thumb" aria-label={`Open ${asset.name} full size`} onClick={(e) => onOpen(e.currentTarget as HTMLElement)}>
         <img src={mediaUrl(asset.path)} alt={asset.name} loading="lazy" />
       </button>
       <div class="shot-meta">
