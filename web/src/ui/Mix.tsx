@@ -79,7 +79,9 @@ export function Mix({ state, assets, video, toast, onChanged, onPendingChange }:
   const pickLevels = state.picks.levels;
   const savedLevel = (lane: MixLane): number => pickLevels[MIX_STAGE[lane]] ?? 0;
   const [levels, setLevels] = useState<Record<MixLane, number>>(() => ({ vo: savedLevel("vo"), music: savedLevel("music"), sfx: savedLevel("sfx") }));
-  const saveTimers = useRef<Partial<Record<MixLane, number>>>({});
+  // Each lane's debounced save still to go: its timer, and the save itself, so leaving Mix can
+  // send it straight away rather than lose it.
+  const saveTimers = useRef<Partial<Record<MixLane, { id: number; send: () => void }>>>({});
   // Picked up elsewhere (another tab, the agent, or your own save landing) -- but never for a lane
   // with a save still pending: a refresh racing your own debounce must not snap the slider you're
   // dragging back to the stale server value underneath your hand.
@@ -100,9 +102,17 @@ export function Mix({ state, assets, video, toast, onChanged, onPendingChange }:
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [savedKey]);
+  // Leaving Mix (a tab key pressed mid-drag, say) flushes every pending save instead of dropping it.
   useEffect(
     () => () => {
-      for (const id of Object.values(saveTimers.current)) window.clearTimeout(id);
+      const timers = saveTimers.current;
+      for (const lane of MIX_LANES) {
+        const pending = timers[lane];
+        if (!pending) continue;
+        window.clearTimeout(pending.id);
+        delete timers[lane];
+        pending.send();
+      }
     },
     [],
   );
@@ -110,14 +120,17 @@ export function Mix({ state, assets, video, toast, onChanged, onPendingChange }:
     const clamped = clampLevel(db);
     setLevels((v) => (v[lane] === clamped ? v : { ...v, [lane]: clamped }));
     const timers = saveTimers.current;
-    if (timers[lane] !== undefined) window.clearTimeout(timers[lane]);
-    timers[lane] = window.setTimeout(() => {
-      delete timers[lane];
-      // 0 dB is the default: saved as a clear (null), same as the key never having been set.
-      api.put("/api/picks", { levels: { [MIX_STAGE[lane]]: clamped === 0 ? null : clamped } }).then(onChanged, (e) => {
+    if (timers[lane] !== undefined) window.clearTimeout(timers[lane].id);
+    // 0 dB is the default: saved as a clear (null), same as the key never having been set.
+    const send = () =>
+      void api.put("/api/picks", { levels: { [MIX_STAGE[lane]]: clamped === 0 ? null : clamped } }).then(onChanged, (e) => {
         toast(e instanceof ApiError ? e.message : "Couldn't save the level");
       });
+    const id = window.setTimeout(() => {
+      delete timers[lane];
+      send();
     }, LEVEL_SAVE_DEBOUNCE_MS);
+    timers[lane] = { id, send };
   };
 
   const gains = laneGains(MIX_LANES.map((id) => ({ id, ...view[id], level: levels[id] })));
@@ -153,6 +166,7 @@ export function Mix({ state, assets, video, toast, onChanged, onPendingChange }:
             step={LEVEL_STEP}
             value={levels[lane]}
             aria-label={`${NAME[lane]} level`}
+            aria-valuetext={`${levelText(levels[lane])} dB`}
             onInput={(e) => setLevel(lane, Number((e.target as HTMLInputElement).value))}
             onDblClick={() => setLevel(lane, 0)}
           />

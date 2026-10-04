@@ -1095,3 +1095,8 @@ export function proxyMeta(asset: Pick<Asset, "size" | "width" | "height" | "vers
   if (asset.version) parts.push(`from ${asset.version}`);
   return parts.join(" · ");
 }
+
+/** The copy keys to name in a hint: ⌘C on Apple platforms, Ctrl+C everywhere else. `platform` is `navigator.platform`. */
+export function copyShortcut(platform: string): string {
+  return /Mac|iPhone|iPad|iPod/.test(platform) ? "⌘C" : "Ctrl+C";
+}

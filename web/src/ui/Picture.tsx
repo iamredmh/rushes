@@ -292,7 +292,8 @@ export function Picture({
     else if (e.key === "ArrowRight") { e.preventDefault(); step(e.shiftKey ? 10 : 1); }
     else if (k === "i") setIn();
     else if (k === "o") setOut();
-    else if (k === "g") void grabFrame();
+    // Holding G repeats the key: each repeat would be another full decode and PNG round-trip.
+    else if (k === "g" && !e.repeat) void grabFrame();
     else if (k === "b") setBoxMode((m) => !m);
     else if (k === "n") { e.preventDefault(); input.current?.focus(); }
   };

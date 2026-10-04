@@ -1479,6 +1479,27 @@ test("a burst of dragging inside the debounce window saves once, at the last val
   expect(levelCalls).toEqual([{ levels: { music: -14 } }]);
 });
 
+test("a level dragged just before leaving Mix is still saved (Minor 6)", async ({ page, rushes }) => {
+  await mixProject(page, rushes);
+  await openMix(page, rushes, 3);
+  // Drag, then press 1 (Script) straight away, inside the 300 ms debounce: leaving Mix unmounts it.
+  await dragLevel(page, "Music level", -14);
+  await page.keyboard.press("1");
+  await expect(page.getByRole("tab", { name: /Script/ })).toHaveAttribute("aria-selected", "true");
+  await expect.poll(async () => (await rushes.api("GET", "/api/picks")).levels).toEqual({ music: -14 });
+  await openTab(page, /Mix/, "6");
+  await expect(page.locator('.lane[data-row="music"] .level .db')).toHaveText("−14.0 dB");
+});
+
+test("a level slider tells a screen reader its value in dB (Minor 7)", async ({ page, rushes }) => {
+  await mixProject(page, rushes);
+  await openMix(page, rushes, 3);
+  const slider = page.locator('input[aria-label="Music level"]');
+  await expect(slider).toHaveAttribute("aria-valuetext", "0.0 dB");
+  await dragLevel(page, "Music level", -14);
+  await expect(slider).toHaveAttribute("aria-valuetext", "−14.0 dB");
+});
+
 test("leaving Mix stops playback and releases its engine", async ({ page, rushes }) => {
   await mixProject(page, rushes);
   await openMix(page, rushes, 3);

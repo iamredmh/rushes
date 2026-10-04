@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  agentPrompt, boxFrom, contentRect, cueRoom, defaultVersion, extOf, firstTab, fit, FOLDERS, fmt, folderItems, formatBytes, frameAt, groupByFilm,
+  agentPrompt, boxFrom, contentRect, copyShortcut, cueRoom, defaultVersion, extOf, firstTab, fit, FOLDERS, fmt, folderItems, formatBytes, frameAt, groupByFilm,
   isChanged, isPreviewable, latest, LOCKED_TAB, metaLine, neighbourVideo, noteTime, OPEN_SAFE_EXT, placeNote, shotAt, shotLabel, shotSeek, snap, stepFrame,
 } from "../../web/src/lib.js";
 import type { Asset, Note, Section, Shot, TabState, Video } from "../../web/src/types.js";
@@ -1107,5 +1107,15 @@ describe("proxies (§19.5)", () => {
   it("describes a proxy as size · W×H · from vN, reusing formatBytes", () => {
     expect(proxyMeta({ size: 148_897_792, width: 1920, height: 1080, version: "v3" })).toBe("142.0 MB · 1920×1080 · from v3");
     expect(proxyMeta({ size: 1536, width: undefined, height: undefined, version: undefined })).toBe("2 KB");
+  });
+});
+
+describe("copyShortcut (Minor 11)", () => {
+  it("is ⌘C on Apple platforms and Ctrl+C elsewhere", () => {
+    expect(copyShortcut("MacIntel")).toBe("⌘C");
+    expect(copyShortcut("iPad")).toBe("⌘C");
+    expect(copyShortcut("Linux x86_64")).toBe("Ctrl+C");
+    expect(copyShortcut("Win32")).toBe("Ctrl+C");
+    expect(copyShortcut("")).toBe("Ctrl+C");
   });
 });

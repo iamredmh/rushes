@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, ApiError } from "../api.js";
-import { LOCKED_TAB, STAGE_NAMES, agentPrompt, defaultVersion, firstTab, latest, neighbourVideo, proxyKey, snap } from "../lib.js";
+import { LOCKED_TAB, STAGE_NAMES, agentPrompt, copyShortcut, defaultVersion, firstTab, latest, neighbourVideo, proxyKey, snap } from "../lib.js";
 import type { Batch, Stage, Video } from "../types.js";
 import { useRushes } from "../useRushes.js";
 import { Assets } from "./Assets.js";
@@ -27,10 +27,12 @@ function Locked({ tab, projectName, filmName, toast }: { tab: Stage | "assets"; 
   const copyPrompt = async () => {
     try {
       await navigator.clipboard.writeText(prompt);
+      toast("Prompt copied");
     } catch {
+      // The clipboard was refused: the prompt is selected instead, so say what to press.
       boxRef.current?.select();
+      toast(`Prompt selected: press ${copyShortcut(navigator.platform)}`);
     }
-    toast("Prompt copied");
   };
   return (
     <div class="empty locked">

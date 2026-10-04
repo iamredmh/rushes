@@ -929,6 +929,38 @@ test("the library has a folder sidebar with counts, and ↑/↓ moves between fo
   await expect(page.locator(".aheader h2")).toContainText("Screenshots");
 });
 
+test("holding G grabs once: key repeats are ignored (Minor 10)", async ({ page, rushes }) => {
+  await rushes.addCut();
+  await page.goto(rushes.url);
+  await videoReady(page);
+  const grabs: string[] = [];
+  page.on("request", (r) => {
+    if (r.method() === "POST" && /\/api\/grabs$/.test(r.url())) grabs.push(r.url());
+  });
+  await page.evaluate(() => {
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "g", bubbles: true }));
+    for (let i = 0; i < 5; i++) window.dispatchEvent(new KeyboardEvent("keydown", { key: "g", repeat: true, bubbles: true }));
+  });
+  await expect(page.getByRole("status")).toContainText("Saved to screenshots/");
+  await page.waitForTimeout(500);
+  expect(grabs).toHaveLength(1);
+});
+
+test("Copy prompt says what happened when the clipboard is refused: the prompt is selected (Minor 11)", async ({ page, rushes }) => {
+  await rushes.addCut();
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: () => Promise.reject(new Error("denied")) } });
+  });
+  await page.getByRole("tab", { name: /Music/ }).click();
+  await page.getByRole("button", { name: "Copy prompt for your agent" }).click();
+  const mac = await page.evaluate(() => /Mac|iPhone|iPad|iPod/.test(navigator.platform));
+  await expect(page.getByRole("status")).toHaveText(`Prompt selected: press ${mac ? "⌘C" : "Ctrl+C"}`);
+  const selected = await page.locator("textarea.promptbox").evaluate((el: HTMLTextAreaElement) => el.selectionEnd - el.selectionStart === el.value.length);
+  expect(selected).toBe(true);
+});
+
 test("search and the film filter narrow the screenshots", async ({ page, rushes }) => {
   await rushes.addCut("", "Hero");
   await rushes.addCut("", "Cutdown");
