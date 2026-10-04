@@ -2,6 +2,7 @@ import { parseArgs } from "node:util";
 import { readFile } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import { Store } from "../core/store.js";
+import { ffmpegRunner, makeDemo, sayAvailable, sayRunner } from "./demo.js";
 import { startServer, DEFAULT_PORT, type Running } from "../server/start.js";
 import { ensureServer, findServer, type EnsureOptions } from "../mcp/ensure.js";
 import { AlreadyRunningError, canonicalRoot } from "../server/lock.js";
@@ -34,6 +35,7 @@ Usage
                                                     start the server without a browser (stops after N idle minutes)
   rushes stop [dir]                                 stop the project's running server
   rushes init [dir] [--name NAME]                  create the .rushes folder
+  rushes demo [dir] [--no-browser]                  create an example project with generated media (default ./rushes-demo), then open it
   rushes setup [--only claude-code,codex,...] [--dry-run]
                                                     add Rushes to every agent harness on this machine
   rushes mcp                                        run the MCP server over stdio
@@ -78,9 +80,12 @@ const OPTIONS = {
   version: { type: "boolean", short: "v" },
 } as const;
 
-const LONG_RUNNING = ["open", "serve", "mcp"];
+// "demo" is here too: without --no-browser it ends by running "open" (a server that keeps
+// running), so index.ts must not process.exit() the moment main() first resolves. With
+// --no-browser nothing is left open, so the process still exits on its own once main() resolves.
+const LONG_RUNNING = ["open", "serve", "mcp", "demo"];
 
-/** Does this command line start something that keeps running (open, serve, mcp)? Flags before the command are skipped. */
+/** Does this command line start something that keeps running (open, serve, mcp, demo)? Flags before the command are skipped. */
 export function longRunningCommand(argv: string[]): boolean {
   try {
     const [cmd] = parseArgs({ args: argv, options: OPTIONS, allowPositionals: true }).positionals;
@@ -231,6 +236,16 @@ export async function main(argv: string[], io: Io): Promise<number> {
         await new Store(root).init(o.name ?? basename(root));
         io.out(`Created ${root}/.rushes`);
         return 0;
+      }
+      case "demo": {
+        const target = resolve(io.cwd, rest[0] ?? "rushes-demo");
+        const say = (await sayAvailable(sayRunner)) ? sayRunner : null;
+        const { dir } = await makeDemo(target, { ffmpeg: ffmpegRunner, say, now: new Date() });
+        io.out(`Created ${dir}`);
+        // §19.2: opens it, same as `rushes open`, unless told not to -- "demo" is in LONG_RUNNING
+        // precisely so this nested server (when it starts) keeps the process alive.
+        if (o["no-browser"]) return 0;
+        return main(["open", dir], io);
       }
       case "setup": {
         const only = o.only ? (o.only.split(",").map((x) => x.trim()) as HarnessId[]) : undefined;
