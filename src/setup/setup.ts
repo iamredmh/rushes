@@ -9,8 +9,11 @@ export interface SetupEnv {
   appData?: string;
   /** Is this command on PATH? */
   which(cmd: string): Promise<boolean>;
-  /** Run a command in `cwd`; resolve with exit code and output. */
-  exec(cmd: string, args: string[], cwd: string): Promise<{ code: number; out: string }>;
+  /**
+   * Run a command in `cwd`; resolve with exit code and output. With `timeout` (ms), the command
+   * gets no stdin and is killed once the time is up, resolving with `timedOut: true`.
+   */
+  exec(cmd: string, args: string[], cwd: string, opts?: { timeout?: number }): Promise<{ code: number; out: string; timedOut?: boolean }>;
   /** Path of the SKILL.md to install. Defaults to the one shipped in this package. */
   skillFile?: string;
 }

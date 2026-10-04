@@ -55,6 +55,9 @@ export function realDoctorEnv(cwd: string): DoctorEnv {
 
 const exists = (p: string) => access(p).then(() => true, () => false);
 
+/** How long doctor waits on any one command (ffmpeg, ffprobe, `claude mcp get`) before saying it couldn't check. */
+export const DOCTOR_EXEC_TIMEOUT_MS = 10_000;
+
 /** "v22.12.0" -> {major: 22, minor: 12}. Null for anything that doesn't start with a version. */
 function parseNodeVersion(v: string): { major: number; minor: number } | null {
   const m = /^v?(\d+)\.(\d+)/.exec(v);
@@ -103,11 +106,21 @@ async function ffmpegCheck(env: DoctorEnv): Promise<Check> {
   }
   let out = "";
   try {
-    out = (await env.exec("ffmpeg", ["-version"], env.cwd)).out;
+    out = (await env.exec("ffmpeg", ["-version"], env.cwd, { timeout: DOCTOR_EXEC_TIMEOUT_MS })).out;
   } catch {
     out = "";
   }
   const version = parseFfmpegVersion(out);
+  if ((await hasLibx264(env)) === false) {
+    return {
+      id: "ffmpeg",
+      label: "ffmpeg",
+      ok: false,
+      required: false,
+      detail: `${version ? `ffmpeg ${version.major}.${version.minor}` : "ffmpeg"} is on PATH, but it was built without libx264, which proxies and the demo encode with.`,
+      fix: "Install an ffmpeg build that includes libx264 (on Fedora, RPM Fusion's ffmpeg rather than ffmpeg-free).",
+    };
+  }
   // Controller ruling: ffmpeg below 5.1 still works (-vsync stands in for -fps_mode), so this is
   // a warning, not a failure.
   if (version && !hasFpsMode(version)) {
@@ -126,6 +139,21 @@ async function ffmpegCheck(env: DoctorEnv): Promise<Check> {
     required: false,
     detail: version ? `ffmpeg ${version.major}.${version.minor} is on PATH.` : "ffmpeg is on PATH.",
   };
+}
+
+/**
+ * Whether this ffmpeg can encode with libx264, which proxies and the demo use: some distribution
+ * builds (Fedora's ffmpeg-free, say) leave it out. Null when the encoder list couldn't be read --
+ * never reported as missing on a guess.
+ */
+async function hasLibx264(env: DoctorEnv): Promise<boolean | null> {
+  try {
+    const r = await env.exec("ffmpeg", ["-hide_banner", "-encoders"], env.cwd, { timeout: DOCTOR_EXEC_TIMEOUT_MS });
+    if (r.code !== 0 || !/Encoders:/.test(r.out)) return null;
+    return /\blibx264\b/.test(r.out);
+  } catch {
+    return null;
+  }
 }
 
 /** "ffprobe version 6.1.1 Copyright ..." -> {major: 6, minor: 1}. Generic over the tool name, unlike parseFfmpegVersion. */
@@ -147,7 +175,7 @@ async function ffprobeCheck(env: DoctorEnv): Promise<Check> {
   }
   let out = "";
   try {
-    out = (await env.exec("ffprobe", ["-version"], env.cwd)).out;
+    out = (await env.exec("ffprobe", ["-version"], env.cwd, { timeout: DOCTOR_EXEC_TIMEOUT_MS })).out;
   } catch {
     out = "";
   }
@@ -161,14 +189,19 @@ async function installed(h: Harness, env: DoctorEnv): Promise<boolean> {
 }
 
 /** Whether `h` has the Rushes MCP server registered, without changing anything -- reuses setup's own mergers as a dry-run diff. */
-async function harnessCheck(h: Harness, env: DoctorEnv): Promise<Check> {
+async function harnessCheck(h: Harness, env: DoctorEnv): Promise<Check & { unknown?: true }> {
   const base = { id: `agent:${h.id}`, label: h.name, required: false };
   if (h.kind === "claude-cli") {
     if (!(await env.which("claude"))) {
       return { ...base, ok: false, detail: "the claude command isn't on PATH, so registration can't be checked.", fix: `Install Claude Code, then run: rushes setup --only ${h.id}` };
     }
     // Run from home, like setup does, so a project's own .mcp.json can't make it look registered.
-    const got = await env.exec("claude", ["mcp", "get", "rushes"], env.home);
+    // With a time limit and no stdin: a slow claude (it may start the MCP server to check it) or
+    // one waiting on input must never stall doctor.
+    const got = await env.exec("claude", ["mcp", "get", "rushes"], env.home, { timeout: DOCTOR_EXEC_TIMEOUT_MS });
+    if (got.timedOut) {
+      return { ...base, ok: false, unknown: true, detail: `couldn't check: claude mcp get rushes didn't answer within ${DOCTOR_EXEC_TIMEOUT_MS / 1000} s.`, fix: "Run claude mcp get rushes yourself to check" };
+    }
     const ok = got.code === 0;
     return { ...base, ok, detail: ok ? "the Rushes MCP server is registered." : "the Rushes MCP server isn't registered.", fix: ok ? undefined : `rushes setup --only ${h.id}` };
   }
@@ -266,12 +299,13 @@ export async function runDoctor(env: DoctorEnv): Promise<Check[]> {
   if (!present.length) {
     checks.push({ id: "agents", label: "Agent harnesses", ok: true, required: false, detail: "No supported agent harness found on this machine." });
   } else {
-    const harnessChecks: Check[] = [];
+    const harnessChecks: (Check & { unknown?: true })[] = [];
     for (const h of present) harnessChecks.push(await harnessCheck(h, env));
-    checks.push(...harnessChecks);
+    checks.push(...harnessChecks.map(({ unknown: _unknown, ...c }) => c));
     // Controller ruling: when every installed harness is unregistered, say so once in plain words
-    // rather than making the reader infer it from a run of individual crosses.
-    if (harnessChecks.every((c) => !c.ok)) {
+    // rather than making the reader infer it from a run of individual crosses. A harness that
+    // couldn't be checked isn't known to be unregistered, so it doesn't count.
+    if (harnessChecks.every((c) => !c.ok && !c.unknown)) {
       checks.push({ id: "agents", label: "Agent harnesses", ok: false, required: false, detail: "No agent has Rushes yet.", fix: "Run rushes setup" });
     }
   }

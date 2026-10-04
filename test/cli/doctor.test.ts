@@ -133,6 +133,43 @@ describe("runDoctor", () => {
     expect(find(await runDoctor(env), "ffprobe")).toMatchObject({ ok: true, detail: "ffprobe is on PATH." });
   });
 
+  it("warns, without requiring it, when ffmpeg was built without libx264 (Minor 14)", async () => {
+    const home = await tmpHome();
+    const encoders = (withX264: boolean) =>
+      `Encoders:\n V..... = Video\n ------\n${withX264 ? " V....D libx264              libx264 H.264 / AVC\n" : ""} V....D libopenh264          OpenH264 H.264\n`;
+    const env = (withX264: boolean) =>
+      fakeEnv(home, home, {
+        which: async (cmd) => cmd === "ffmpeg",
+        exec: async (_cmd, args) => (args.includes("-encoders") ? { code: 0, out: encoders(withX264) } : { code: 0, out: "ffmpeg version 6.1.1 Copyright (c) 2000-2023\n" }),
+      });
+    const missing = find(await runDoctor(env(false)), "ffmpeg")!;
+    expect(missing).toMatchObject({ ok: false, required: false });
+    expect(missing.detail).toBe("ffmpeg 6.1 is on PATH, but it was built without libx264, which proxies and the demo encode with.");
+    expect(missing.fix).toContain("libx264");
+    expect(find(await runDoctor(env(true)), "ffmpeg")).toMatchObject({ ok: true, detail: "ffmpeg 6.1 is on PATH." });
+  });
+
+  it("asks claude with a time limit, and says it couldn't check when claude doesn't answer (Minor 9)", async () => {
+    const home = await tmpHome();
+    await mkdir(join(home, ".claude"), { recursive: true });
+    const seen: { cmd: string; timeout?: number }[] = [];
+    const checks = await runDoctor(
+      fakeEnv(home, home, {
+        which: async (cmd) => cmd === "claude",
+        exec: async (cmd, _args, _cwd, opts) => {
+          seen.push({ cmd, timeout: opts?.timeout });
+          return cmd === "claude" ? { code: 124, out: "", timedOut: true } : { code: 1, out: "" };
+        },
+      }),
+    );
+    expect(seen.find((c) => c.cmd === "claude")?.timeout).toBe(10_000);
+    const claude = find(checks, "agent:claude-code")!;
+    expect(claude).toMatchObject({ ok: false, required: false });
+    expect(claude.detail).toBe("couldn't check: claude mcp get rushes didn't answer within 10 s.");
+    // Not knowing isn't the same as "nobody has Rushes".
+    expect(find(checks, "agents")).toBeUndefined();
+  });
+
   it("reports no agent harness found when nothing is installed", async () => {
     const home = await tmpHome();
     const checks = await runDoctor(fakeEnv(home, home));
