@@ -12,12 +12,17 @@ import { ensureServer, findServer } from "../../src/mcp/ensure.js";
 import { resolveProjectRoot, stdioContext } from "../../src/mcp/stdio.js";
 import { lockPath } from "../../src/server/lock.js";
 import { SOURCE } from "../../src/setup/harnesses.js";
+import { runDoctor, realDoctorEnv } from "../../src/cli/doctor.js";
 
 async function connect() {
   const { root } = await tmpProject("spring-launch");
   const running = await startServer(root, { port: 0 });
   const opened: string[] = [];
-  const server = createMcpServer({ client: async () => new RushesClient(running.url), openBrowser: (u) => opened.push(u) });
+  const server = createMcpServer({
+    client: async () => new RushesClient(running.url),
+    openBrowser: (u) => opened.push(u),
+    doctor: async () => runDoctor(realDoctorEnv(root)),
+  });
   const [a, b] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "test", version: "0" });
   await Promise.all([server.connect(a), client.connect(b)]);
@@ -30,11 +35,11 @@ async function connect() {
 }
 
 describe("MCP tools", () => {
-  it("lists the sixteen tools", async () => {
+  it("lists the seventeen tools", async () => {
     const t = await connect();
     const { tools } = await t.client.listTools();
     expect(tools.map((x) => x.name).sort()).toEqual([
-      "rushes_add_file", "rushes_add_take", "rushes_add_variant", "rushes_add_version", "rushes_export_notes",
+      "rushes_add_file", "rushes_add_take", "rushes_add_variant", "rushes_add_version", "rushes_doctor", "rushes_export_notes",
       "rushes_get_batch", "rushes_get_picks", "rushes_get_script", "rushes_list_assets", "rushes_list_notes",
       "rushes_lock_picture", "rushes_open", "rushes_reply", "rushes_set_script", "rushes_set_shots", "rushes_status",
     ]);
@@ -186,6 +191,17 @@ describe("MCP tools", () => {
     expect(r.json.path).toMatch(/^exports\/spring-launch-notes-\d{4}-\d{2}-\d{2}\.md$/);
     const exported = await readFile(join(t.root, r.json.path), "utf8");
     expect(exported).toContain("spring-launch — notes");
+    await t.close();
+  });
+
+  it("rushes_doctor returns the checks array for the connected project", async () => {
+    const t = await connect();
+    const r = await t.call("rushes_doctor");
+    expect(Array.isArray(r.json)).toBe(true);
+    const project = r.json.find((c: any) => c.id === "project");
+    // tmpProject() already ran store.init(), so the project files all parse.
+    expect(project).toBeUndefined();
+    expect(r.json.find((c: any) => c.id === "file:project")).toMatchObject({ ok: true, required: true });
     await t.close();
   });
 

@@ -14,6 +14,7 @@ import { onLabel, type OnContext } from "../core/notes.js";
 import { setup, type SetupEnv } from "../setup/setup.js";
 import { realSetupEnv } from "../setup/env.js";
 import type { HarnessId } from "../setup/harnesses.js";
+import { runDoctor, realDoctorEnv, type DoctorEnv } from "./doctor.js";
 
 export interface Io {
   out(line: string): void;
@@ -25,6 +26,8 @@ export interface Io {
   onServer?: (s: Running) => void;
   /** Environment for `rushes setup`. Tests pass a fake home. */
   setupEnv?: SetupEnv;
+  /** Environment for `rushes doctor`. Tests pass a fake Node version, PATH and home. */
+  doctorEnv?: DoctorEnv;
 }
 
 export const HELP = `rushes ${VERSION}: a local review desk for video made with AI agents
@@ -40,6 +43,7 @@ Usage
                                                     add Rushes to every agent harness on this machine
   rushes mcp                                        run the MCP server over stdio
   rushes status [dir]                               tabs and open items
+  rushes doctor [dir] [--json]                      check Node, ffmpeg, agent harnesses and this project
   rushes add version <file> --video NAME [--note TEXT]
   rushes add variant <music|sfx|voice> <file> --name NAME [--lane ID] [--round NAME]
   rushes add shots <file.json> --video NAME [--version V]
@@ -270,6 +274,19 @@ export async function main(argv: string[], io: Io): Promise<number> {
           io.out(`${t.stage.padEnd(8)} ${t.unlocked ? "open  " : "locked"} ${t.todo ? `${t.todo} to do` : ""}`.trimEnd());
         }
         return 0;
+      }
+      case "doctor": {
+        const root = rest[0] ? resolve(io.cwd, rest[0]) : dir;
+        const checks = await runDoctor(io.doctorEnv ?? realDoctorEnv(root));
+        if (o.json) {
+          io.out(JSON.stringify(checks, null, 2));
+        } else {
+          for (const c of checks) {
+            const fix = !c.ok && c.fix ? ` Fix: ${c.fix}` : "";
+            io.out(`${c.ok ? "✓" : "✗"} ${c.label} — ${c.detail}${fix}`);
+          }
+        }
+        return checks.some((c) => c.required && !c.ok) ? 1 : 0;
       }
       case "add": {
         const [what, a, b] = rest;

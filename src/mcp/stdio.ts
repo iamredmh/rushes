@@ -4,6 +4,7 @@ import { dirname, resolve } from "node:path";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createMcpServer, type ToolContext } from "./tools.js";
 import { ensureServer, type EnsureOptions } from "./ensure.js";
+import { runDoctor, realDoctorEnv } from "../cli/doctor.js";
 
 export function openBrowser(url: string): void {
   const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open";
@@ -30,6 +31,7 @@ export function stdioContext(defaultRoot: string, ensure?: EnsureOptions): ToolC
   return {
     client: async (project) => ensureServer(resolveProjectRoot(defaultRoot, project), ensure),
     openBrowser,
+    doctor: async (project) => runDoctor(realDoctorEnv(resolveProjectRoot(defaultRoot, project))),
   };
 }
 

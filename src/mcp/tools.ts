@@ -2,12 +2,15 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ApiError, dashboardUrlFor, type RushesClient } from "./client.js";
 import { VERSION } from "../server/app.js";
+import type { Check } from "../cli/doctor.js";
 
 export interface ToolContext {
   /** Resolve a client for a project folder (defaults to the working directory). */
   client(project?: string): Promise<RushesClient>;
   /** Open a URL in the user's browser. */
   openBrowser(url: string): void;
+  /** §19.3: the doctor checks for a project folder (defaults to the working directory). Read-only, no server required. */
+  doctor(project?: string): Promise<Check[]>;
 }
 
 const project = z.string().optional().describe("Project folder. Defaults to the current working directory.");
@@ -282,6 +285,17 @@ export function createMcpServer(ctx: ToolContext): McpServer {
       inputSchema: { project },
     },
     safe(async ({ project }) => (await ctx.client(project)).post("/api/exports/notes", {})),
+  );
+
+  server.registerTool(
+    "rushes_doctor",
+    {
+      title: "Rushes doctor",
+      description:
+        "Health check (§19.3): Node version, ffmpeg/ffprobe on PATH, which agent harnesses have the Rushes MCP server registered, and this project's files, server and disk space. Read-only -- doesn't start a server or change anything.",
+      inputSchema: { project },
+    },
+    safe(async ({ project }) => ctx.doctor(project)),
   );
 
   return server;
