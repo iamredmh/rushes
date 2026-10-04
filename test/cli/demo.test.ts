@@ -30,6 +30,17 @@ function fakeFfmpegMissing(): Runner {
   return async () => ({ code: 1, stdout: "", stderr: "" });
 }
 
+/** Succeeds like `fakeFfmpeg`, except its `n`th call fails -- for exercising cleanup on a failure part-way through a run. */
+function fakeFfmpegFailsOnCall(n: number): Runner {
+  let count = 0;
+  return async (args) => {
+    count++;
+    if (count === n) return { code: 1, stdout: "", stderr: "synthetic failure for the regression test" };
+    if (args[0] === "-hide_banner" && args.includes("-filters")) return { code: 0, stdout: "... drawtext ...\n", stderr: "" };
+    return { code: 0, stdout: "ffmpeg version 8.1 Copyright (c) 2000-2026 the FFmpeg developers\n", stderr: "" };
+  };
+}
+
 function fakeSay(): Runner {
   return async (args) => {
     if (args[0] === "-v" && args[1] === "?") return { code: 0, stdout: "Daniel              en_GB    # Hello!\nSamantha            en_US    # Hello!\n", stderr: "" };
@@ -139,6 +150,37 @@ describe("makeDemo", () => {
     expect(pickVoices(listing)).toEqual(["Daniel", "Samantha"]);
     expect(pickVoices("Alex                en_US    # Hello!\n")).toEqual([null, null]);
     expect(pickVoices("Daniel              en_GB    # Hello!\n")).toEqual(["Daniel", "Daniel"]);
+  });
+});
+
+describe("makeDemo, cleanup on a failure part-way through", () => {
+  const FAILS_ON_RENDER = 3; // call 1 is requireFfmpeg's -version check, 2 is drawtextFont's -filters check, 3 is the first renderCut.
+
+  it("removes the folder entirely when it didn't exist before the run, and a retry into the same path then works", async () => {
+    const base = await emptyDir();
+    const dir = join(base, "fresh-demo"); // doesn't exist yet -- makeDemo must create (and, on failure, remove) it.
+
+    await expect(makeDemo(dir, deps({ ffmpeg: fakeFfmpegFailsOnCall(FAILS_ON_RENDER) }))).rejects.toThrow(
+      /^The demo couldn't finish \(.*\)\. Nothing was left behind\.$/,
+    );
+    await expect(readdir(dir)).rejects.toThrow(/ENOENT/);
+
+    const { dir: made_ } = await makeDemo(dir, deps());
+    expect(made_).toBe(dir);
+    expect((await readdir(dir)).sort()).toEqual([".rushes", "media"]);
+  });
+
+  it("leaves a pre-existing empty folder in place, untouched, and a retry into the same path then works", async () => {
+    const dir = await emptyDir(); // pre-existing and empty, per the first refusal check.
+
+    await expect(makeDemo(dir, deps({ ffmpeg: fakeFfmpegFailsOnCall(FAILS_ON_RENDER) }))).rejects.toThrow(
+      /^The demo couldn't finish \(.*\)\. Nothing was left behind\.$/,
+    );
+    expect(await readdir(dir)).toEqual([]); // the folder itself survives, still empty.
+
+    const { dir: made_ } = await makeDemo(dir, deps());
+    expect(made_).toBe(dir);
+    expect((await readdir(dir)).sort()).toEqual([".rushes", "media"]);
   });
 });
 

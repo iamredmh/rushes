@@ -77,15 +77,25 @@ function tail(s: string): string {
   return lines[lines.length - 1] ?? "ffmpeg gave no reason";
 }
 
-async function refuseIfNotEmpty(dir: string): Promise<void> {
+/** Refuses a non-empty folder. Otherwise returns whether `dir` already existed (empty) before this run, so a failure part-way through knows how much of it is safe to remove. */
+async function checkFolder(dir: string): Promise<boolean> {
   let names: string[];
   try {
     names = await readdir(dir);
   } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === "ENOENT") return;
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return false;
     throw e;
   }
   if (names.length > 0) throw new Error("That folder isn't empty. Choose a new one: rushes demo <folder>");
+  return true;
+}
+
+/**
+ * Everything `makeDemo` can leave behind under `root`: the `.rushes` project folder and the
+ * generated `media` folder. Nothing else is ever created there.
+ */
+async function removeDemoContents(root: string): Promise<void> {
+  await Promise.all([rm(join(root, ".rushes"), { recursive: true, force: true }), rm(join(root, "media"), { recursive: true, force: true })]);
 }
 
 async function requireFfmpeg(ffmpeg: Runner): Promise<void> {
@@ -210,121 +220,136 @@ async function renderWhooshes(ffmpeg: Runner, out: string, times: number[], tota
  * with ffmpeg (and macOS `say`, when it's there) -- nothing is downloaded or shipped.
  *
  * Refuses, without writing anything, when `dir` exists and isn't empty, or when ffmpeg isn't
- * available through `deps.ffmpeg`.
+ * available through `deps.ffmpeg`. A failure after that point -- say isn't playing along, or
+ * ffmpeg chokes on one of the renders -- undoes everything this run created (the whole folder,
+ * if it didn't exist before; just what's inside it, if it did) and rethrows with a one-line
+ * reason, so nothing a user runs twice ever looks like a half-built project.
  */
 export async function makeDemo(dir: string, deps: DemoDeps): Promise<{ dir: string }> {
   const root = resolve(dir);
-  await refuseIfNotEmpty(root);
+  // Decided before anything is written: whether a failure part-way through should remove `root`
+  // itself (we created it) or only what we put inside it (it was already there, empty).
+  const existedBefore = await checkFolder(root);
   await requireFfmpeg(deps.ffmpeg);
 
-  const store = new Store(root);
-  await store.init(`${PRODUCT} launch demo`);
+  try {
+    const store = new Store(root);
+    await store.init(`${PRODUCT} launch demo`);
 
-  const mediaDir = join(root, "media");
-  await Promise.all(["picture", "voice", "music", "sfx"].map((sub) => mkdir(join(mediaDir, sub), { recursive: true })));
+    const mediaDir = join(root, "media");
+    await Promise.all(["picture", "voice", "music", "sfx"].map((sub) => mkdir(join(mediaDir, sub), { recursive: true })));
 
-  const font = await drawtextFont(deps.ffmpeg);
+    const font = await drawtextFont(deps.ffmpeg);
 
-  // 1. The picture: a 30 s test-pattern film in two cuts, v2 hue-shifted, with shots every 6 s.
-  const v1Abs = join(mediaDir, "picture", "lumen-launch_v1.mp4");
-  const v2Abs = join(mediaDir, "picture", "lumen-launch_v2.mp4");
-  await renderCut(deps.ffmpeg, v1Abs, { hue: null, font });
-  await renderCut(deps.ffmpeg, v2Abs, { hue: 100, font });
+    // 1. The picture: a 30 s test-pattern film in two cuts, v2 hue-shifted, with shots every 6 s.
+    const v1Abs = join(mediaDir, "picture", "lumen-launch_v1.mp4");
+    const v2Abs = join(mediaDir, "picture", "lumen-launch_v2.mp4");
+    await renderCut(deps.ffmpeg, v1Abs, { hue: null, font });
+    await renderCut(deps.ffmpeg, v2Abs, { hue: 100, font });
 
-  let videoId = "";
-  await store.update("project", (p) => {
-    const { video, version: v1 } = addVersion(p, { video: `${PRODUCT} launch`, file: toManifestPath(root, v1Abs), duration: DURATION, fps: 25, note: "First cut of the test pattern" }, deps.now);
-    videoId = video.id;
-    setShots(p, video.id, v1.id, [0, 6, 12, 18, 24].map((start, i) => ({ name: `Shot ${i + 1}`, start })));
-    addVersion(p, { video: videoId, file: toManifestPath(root, v2Abs), duration: DURATION, fps: 25, note: "Hue pass, for comparison" }, deps.now);
-  });
-
-  // 2. The script: four plain sections about the fictional product.
-  const sections = [
-    { id: "s1", start: 0, end: 7.5, current: `${PRODUCT} opens on a blank timeline and a flashing cursor.` },
-    { id: "s2", start: 7.5, end: 15, current: `Drop in a folder of clips, and ${PRODUCT} finds the best takes on its own.` },
-    { id: "s3", start: 15, end: 22.5, current: "Notes, picks and a locked cut travel with the project, not a chat log." },
-    { id: "s4", start: 22.5, end: 30, current: `${PRODUCT}: fewer rounds, and a cut everyone signed off on.` },
-  ];
-  await store.update("script", (s) => {
-    setSections(s, sections, { replace: true });
-  });
-
-  // 3. Voice reads, two rounds: Round 1 compares two voices; Round 2 is one voice at a slower pace.
-  const scriptText = sections.map((s) => s.current).join(" ");
-  const hasSay = deps.say !== null;
-  const [voiceA, voiceB] = hasSay ? await pickSystemVoices(deps.say!) : [null, null];
-
-  const round1AWav = join(mediaDir, "voice", "round-1-voice-a.wav");
-  const round1BWav = join(mediaDir, "voice", "round-1-voice-b.wav");
-  const round2Wav = join(mediaDir, "voice", "round-2-voice-a-slower.wav");
-  if (hasSay) {
-    await renderSayVoice(deps.say!, deps.ffmpeg, round1AWav, { voice: voiceA, text: scriptText });
-    await renderSayVoice(deps.say!, deps.ffmpeg, round1BWav, { voice: voiceB, text: scriptText });
-    await renderSayVoice(deps.say!, deps.ffmpeg, round2Wav, { voice: voiceA, rate: 140, text: scriptText });
-  } else {
-    await renderSineTone(deps.ffmpeg, round1AWav, 440, 10);
-    await renderSineTone(deps.ffmpeg, round1BWav, 554, 10);
-    await renderSineTone(deps.ffmpeg, round2Wav, 440, 12);
-  }
-  const voiceAName = hasSay ? "Voice A" : "Placeholder A (no text-to-speech on this machine)";
-  const voiceBName = hasSay ? "Voice B" : "Placeholder B (no text-to-speech on this machine)";
-
-  let round1LaneId = "";
-  let voiceAId = "";
-  await store.update("project", (p) => {
-    const { lane, variant } = addVariant(p, { stage: "voice", round: "Round 1 · Voices", name: voiceAName, file: toManifestPath(root, round1AWav) });
-    round1LaneId = lane.id;
-    voiceAId = variant.id;
-    addVariant(p, { stage: "voice", round: "Round 1 · Voices", name: voiceBName, file: toManifestPath(root, round1BWav) });
-    addVariant(p, { stage: "voice", round: "Round 2 · Voice A, pace", name: "Voice A · slower", file: toManifestPath(root, round2Wav) });
-  });
-
-  // 4. Music beds: two synthesised chords at different tempos.
-  const warmPadWav = join(mediaDir, "music", "warm-pad.wav");
-  const pulseWav = join(mediaDir, "music", "pulse.wav");
-  await renderChord(deps.ffmpeg, warmPadWav, { freqs: [196, 246.94, 293.66], seconds: 12 });
-  await renderChord(deps.ffmpeg, pulseWav, { freqs: [220, 277.18, 329.63], seconds: 12, pulseHz: 2.5 });
-
-  let musicVariantId = "";
-  await store.update("project", (p) => {
-    const { variant } = addVariant(p, { stage: "music", name: "Warm pad", file: toManifestPath(root, warmPadWav) });
-    musicVariantId = variant.id;
-    addVariant(p, { stage: "music", name: "Pulse", file: toManifestPath(root, pulseWav) });
-  });
-
-  // 5. One SFX pass, three whooshes with cues.
-  const sfxWav = join(mediaDir, "sfx", "pass-a.wav");
-  const cueTimes = [1.5, 4.5, 7.5];
-  await renderWhooshes(deps.ffmpeg, sfxWav, cueTimes, 9);
-  await store.update("project", (p) => {
-    addVariant(p, {
-      stage: "sfx",
-      name: "Pass A",
-      file: toManifestPath(root, sfxWav),
-      cues: [
-        { name: "Whoosh 1", t: cueTimes[0] },
-        { name: "Whoosh 2", t: cueTimes[1] },
-        { name: "Whoosh 3", t: cueTimes[2] },
-      ],
+    let videoId = "";
+    await store.update("project", (p) => {
+      const { video, version: v1 } = addVersion(p, { video: `${PRODUCT} launch`, file: toManifestPath(root, v1Abs), duration: DURATION, fps: 25, note: "First cut of the test pattern" }, deps.now);
+      videoId = video.id;
+      setShots(p, video.id, v1.id, [0, 6, 12, 18, 24].map((start, i) => ({ name: `Shot ${i + 1}`, start })));
+      addVersion(p, { video: videoId, file: toManifestPath(root, v2Abs), duration: DURATION, fps: 25, note: "Hue pass, for comparison" }, deps.now);
     });
-  });
 
-  // 6. Picks: music and round 1, with music's level set to -12 dB so Mix shows a level.
-  await store.update("picks", (picks) => {
-    picks.lanes.music = musicVariantId;
-    picks.lanes[round1LaneId] = voiceAId;
-    picks.levels.music = -12;
-  });
+    // 2. The script: four plain sections about the fictional product.
+    const sections = [
+      { id: "s1", start: 0, end: 7.5, current: `${PRODUCT} opens on a blank timeline and a flashing cursor.` },
+      { id: "s2", start: 7.5, end: 15, current: `Drop in a folder of clips, and ${PRODUCT} finds the best takes on its own.` },
+      { id: "s3", start: 15, end: 22.5, current: "Notes, picks and a locked cut travel with the project, not a chat log." },
+      { id: "s4", start: 22.5, end: 30, current: `${PRODUCT}: fewer rounds, and a cut everyone signed off on.` },
+    ];
+    await store.update("script", (s) => {
+      setSections(s, sections, { replace: true });
+    });
 
-  // 7. Example notes: a point on Picture, a whole note on Voiceover, a range note with "Fall" on
-  // Music, and a whole note on Mix.
-  await store.update("notes", (notes) => {
-    addNote(notes, { stage: "picture", video: videoId, version: "v1", scope: "point", t: 10, text: "Hold the opening frame a beat longer before the cut." }, deps.now);
-    addNote(notes, { stage: "voice", on: null, scope: "whole", text: "Voice A reads warmer than Voice B -- lean that way for launch." }, deps.now);
-    addNote(notes, { stage: "music", on: `music/${musicVariantId}`, scope: "range", t: 6, tOut: 9, marks: [{ kind: "fall" }], text: "Let the pad fall away under the last line." }, deps.now);
-    addNote(notes, { stage: "mix", on: null, scope: "whole", text: "Check the whole mix against a phone speaker before sign-off." }, deps.now);
-  });
+    // 3. Voice reads, two rounds: Round 1 compares two voices; Round 2 is one voice at a slower pace.
+    const scriptText = sections.map((s) => s.current).join(" ");
+    const hasSay = deps.say !== null;
+    const [voiceA, voiceB] = hasSay ? await pickSystemVoices(deps.say!) : [null, null];
 
-  return { dir: root };
+    const round1AWav = join(mediaDir, "voice", "round-1-voice-a.wav");
+    const round1BWav = join(mediaDir, "voice", "round-1-voice-b.wav");
+    const round2Wav = join(mediaDir, "voice", "round-2-voice-a-slower.wav");
+    if (hasSay) {
+      await renderSayVoice(deps.say!, deps.ffmpeg, round1AWav, { voice: voiceA, text: scriptText });
+      await renderSayVoice(deps.say!, deps.ffmpeg, round1BWav, { voice: voiceB, text: scriptText });
+      await renderSayVoice(deps.say!, deps.ffmpeg, round2Wav, { voice: voiceA, rate: 140, text: scriptText });
+    } else {
+      await renderSineTone(deps.ffmpeg, round1AWav, 440, 10);
+      await renderSineTone(deps.ffmpeg, round1BWav, 554, 10);
+      await renderSineTone(deps.ffmpeg, round2Wav, 440, 12);
+    }
+    const voiceAName = hasSay ? "Voice A" : "Placeholder A (no text-to-speech on this machine)";
+    const voiceBName = hasSay ? "Voice B" : "Placeholder B (no text-to-speech on this machine)";
+
+    let round1LaneId = "";
+    let voiceAId = "";
+    await store.update("project", (p) => {
+      const { lane, variant } = addVariant(p, { stage: "voice", round: "Round 1 · Voices", name: voiceAName, file: toManifestPath(root, round1AWav) });
+      round1LaneId = lane.id;
+      voiceAId = variant.id;
+      addVariant(p, { stage: "voice", round: "Round 1 · Voices", name: voiceBName, file: toManifestPath(root, round1BWav) });
+      addVariant(p, { stage: "voice", round: "Round 2 · Voice A, pace", name: "Voice A · slower", file: toManifestPath(root, round2Wav) });
+    });
+
+    // 4. Music beds: two synthesised chords at different tempos.
+    const warmPadWav = join(mediaDir, "music", "warm-pad.wav");
+    const pulseWav = join(mediaDir, "music", "pulse.wav");
+    await renderChord(deps.ffmpeg, warmPadWav, { freqs: [196, 246.94, 293.66], seconds: 12 });
+    await renderChord(deps.ffmpeg, pulseWav, { freqs: [220, 277.18, 329.63], seconds: 12, pulseHz: 2.5 });
+
+    let musicVariantId = "";
+    await store.update("project", (p) => {
+      const { variant } = addVariant(p, { stage: "music", name: "Warm pad", file: toManifestPath(root, warmPadWav) });
+      musicVariantId = variant.id;
+      addVariant(p, { stage: "music", name: "Pulse", file: toManifestPath(root, pulseWav) });
+    });
+
+    // 5. One SFX pass, three whooshes with cues.
+    const sfxWav = join(mediaDir, "sfx", "pass-a.wav");
+    const cueTimes = [1.5, 4.5, 7.5];
+    await renderWhooshes(deps.ffmpeg, sfxWav, cueTimes, 9);
+    await store.update("project", (p) => {
+      addVariant(p, {
+        stage: "sfx",
+        name: "Pass A",
+        file: toManifestPath(root, sfxWav),
+        cues: [
+          { name: "Whoosh 1", t: cueTimes[0] },
+          { name: "Whoosh 2", t: cueTimes[1] },
+          { name: "Whoosh 3", t: cueTimes[2] },
+        ],
+      });
+    });
+
+    // 6. Picks: music and round 1, with music's level set to -12 dB so Mix shows a level.
+    await store.update("picks", (picks) => {
+      picks.lanes.music = musicVariantId;
+      picks.lanes[round1LaneId] = voiceAId;
+      picks.levels.music = -12;
+    });
+
+    // 7. Example notes: a point on Picture, a whole note on Voiceover, a range note with "Fall" on
+    // Music, and a whole note on Mix.
+    await store.update("notes", (notes) => {
+      addNote(notes, { stage: "picture", video: videoId, version: "v1", scope: "point", t: 10, text: "Hold the opening frame a beat longer before the cut." }, deps.now);
+      addNote(notes, { stage: "voice", on: null, scope: "whole", text: "Voice A reads warmer than Voice B. Lean that way for launch." }, deps.now);
+      addNote(notes, { stage: "music", on: `music/${musicVariantId}`, scope: "range", t: 6, tOut: 9, marks: [{ kind: "fall" }], text: "Let the pad fall away under the last line." }, deps.now);
+      addNote(notes, { stage: "mix", on: null, scope: "whole", text: "Check the whole mix against a phone speaker before sign-off." }, deps.now);
+    });
+
+    return { dir: root };
+  } catch (e) {
+    // A failure here must never leave a half-built project looking like a real one. Only `root`
+    // itself is treated carefully: remove it whole when we created it, or just what we put inside
+    // it when it was already there (and, by `checkFolder` above, already empty) -- never anything
+    // we didn't create.
+    await (existedBefore ? removeDemoContents(root) : rm(root, { recursive: true, force: true }));
+    const reason = e instanceof Error ? e.message : String(e);
+    throw new Error(`The demo couldn't finish (${reason}). Nothing was left behind.`);
+  }
 }
