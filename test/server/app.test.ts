@@ -6,6 +6,7 @@ import { tmpProject } from "../helpers/tmp.js";
 import { createApp, type AppOptions } from "../../src/server/app.js";
 import type { LoudnessRunner } from "../../src/server/loudness.js";
 import { ProjectIdSchema } from "../../src/core/schema.js";
+import { addVersion } from "../../src/core/project.js";
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import type { Probe } from "../../src/core/media.js";
@@ -1168,6 +1169,98 @@ describe.skipIf(!HAS_FFMPEG)("the frame endpoint, with real ffmpeg", () => {
     expect(grab.status).toBe(201);
     expect(grab.json.grab).toMatch(/^screenshots\/hero_v1_00m00\.43s_f13\.png$/);
     expect(pngSize(await readFile(join(root, grab.json.grab)))).toEqual({ width: 1280, height: 720 });
+  });
+});
+
+describe("proxies, fix round 1", () => {
+  it("GET /api/state never waits on a probe: null at once, then a change when the probe finds a need (ruling B)", async () => {
+    let land!: (p: Probe) => void;
+    const pending = new Promise<Probe>((r) => (land = r));
+    let probes = 0;
+    const { call, store, jobs } = await proxySetup({
+      probe: (abs) => {
+        probes++;
+        return abs.endsWith("hero.mov") ? pending : Promise.resolve(H264_1080);
+      },
+    });
+    // Registered by hand, so nothing has probed it yet.
+    await store.update("project", (p) => {
+      addVersion(p, { video: "Hero", file: "renders/hero.mov", duration: 2, fps: 25 });
+    });
+    const changes: unknown[] = [];
+    store.on("change", (e) => changes.push(e));
+    const timeout = new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 1000));
+    const state = await Promise.race([call("GET", "/api/state"), timeout]);
+    expect(state).not.toBe("timeout");
+    expect((state as any).json.project.videos[0].versions[0].proxyNeed).toBeNull();
+    expect(probes).toBe(1);
+    // A second read while it's still probing doesn't start another probe.
+    await call("GET", "/api/state");
+    expect(probes).toBe(1);
+    expect(changes).toEqual([]);
+
+    land(PRORES_4K);
+    await jobs.probesIdle();
+    expect(changes).toEqual([{ file: "project", rev: (await store.read("project")).rev }]);
+    const after = await call("GET", "/api/state");
+    expect(after.json.project.videos[0].versions[0].proxyNeed).toBe("It's a 4K ProRes file, which browsers struggle with");
+    expect(probes).toBe(1);
+  });
+
+  it("a cut whose job failed can be tried again: 202 with a new job id", async () => {
+    const { call, jobs } = await proxySetup();
+    await call("POST", "/api/versions", { video: "Hero", file: "renders/gone.mov" });
+    const first = await call("POST", "/api/videos/hero/versions/v1/proxy", {});
+    expect(first.status).toBe(202);
+    expect(await jobs.wait(first.json.job.id)).toMatchObject({ state: "failed", reason: "The original file is missing" });
+    const again = await call("POST", "/api/videos/hero/versions/v1/proxy", {});
+    expect(again.status).toBe(202);
+    expect(again.json.job.id).not.toBe(first.json.job.id);
+    await jobs.wait(again.json.job.id);
+  });
+
+  it("/media serves a proxy record only at a proxies/…_proxy.mp4 name", async () => {
+    const { call, store, root } = await proxySetup();
+    await call("POST", "/api/versions", { video: "Hero", file: "renders/hero.mov" });
+    await mkdir(join(root, "notes"), { recursive: true });
+    await writeFile(join(root, "notes", "private.txt"), "not for the browser");
+    await store.update("project", (p) => {
+      p.videos[0].versions[0].proxy = { file: "notes/private.txt", width: 2, height: 2, bytes: 1, createdAt: "2026-10-04T00:00:00Z" };
+    });
+    expect((await call("GET", "/media?path=notes%2Fprivate.txt")).status).toBe(404);
+  });
+
+  it("/media never follows a symlink planted at a proxy's name", async () => {
+    const { call, store, root } = await proxySetup();
+    await call("POST", "/api/versions", { video: "Hero", file: "renders/hero.mov" });
+    await mkdir(join(root, "proxies"), { recursive: true });
+    await writeFile(join(root, "elsewhere.mp4"), "someone else's file");
+    await symlink(join(root, "elsewhere.mp4"), join(root, "proxies", "hero_v1_proxy.mp4"));
+    await store.update("project", (p) => {
+      p.videos[0].versions[0].proxy = { file: "proxies/hero_v1_proxy.mp4", width: 2, height: 2, bytes: 1, createdAt: "2026-10-04T00:00:00Z" };
+    });
+    expect((await call("GET", "/media?path=proxies%2Fhero_v1_proxy.mp4")).status).toBe(404);
+  });
+
+  it("DELETE …/proxy never deletes a file outside proxies/, even when the record was hand-edited to point there", async () => {
+    const { call, store, root } = await proxySetup();
+    await call("POST", "/api/versions", { video: "Hero", file: "renders/hero.mov" });
+    await store.update("project", (p) => {
+      p.videos[0].versions[0].proxy = { file: "renders/hero.mov", width: 2, height: 2, bytes: 1, createdAt: "2026-10-04T00:00:00Z" };
+    });
+    const r = await call("DELETE", "/api/videos/hero/versions/v1/proxy", {});
+    expect(r.status).toBe(200);
+    expect(r.json.version.proxy).toBeNull();
+    expect(existsSync(join(root, "renders", "hero.mov"))).toBe(true);
+  });
+
+  it("the frame endpoint's t must be a time from 0 to 24 h", async () => {
+    const { call } = await proxySetup();
+    await call("POST", "/api/versions", { video: "Hero", file: "renders/hero.mov" });
+    for (const t of ["", "NaN", "Infinity", "1e9", "86400.5", "-0.1", "abc"]) {
+      const r = await call("GET", `/api/videos/hero/versions/v1/frame?t=${encodeURIComponent(t)}`);
+      expect([t, r.status]).toEqual([t, 400]);
+    }
   });
 });
 

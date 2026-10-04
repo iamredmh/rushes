@@ -128,7 +128,8 @@ export async function startServer(rootDir: string, opts: StartOptions = {}): Pro
       clearTimeout(idleTimer);
       stopWatching();
       // A running proxy's ffmpeg must not outlive the server; its partial file is deleted too.
-      await proxyJobs.cancelAll();
+      // From here no new job starts either (a POST or an autoProxy cut racing the close).
+      await proxyJobs.close();
       server.closeAllConnections?.();
       await new Promise<void>((ok) => server.close(() => ok()));
       await removeLock(root, token);

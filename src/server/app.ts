@@ -11,7 +11,7 @@ import { exportFileName, notesMarkdown } from "../core/exportNotes.js";
 import { tabStates } from "../core/tabs.js";
 import { fromManifestPath, toManifestPath } from "../core/paths.js";
 import { probe } from "../core/media.js";
-import { PROXY_PATH, ProxyJobs, extractFrame, type ProxyEvent } from "./proxy.js";
+import { PROXY_PATH, ProxyJobs, type ProxyEvent } from "./proxy.js";
 import { lstat, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -127,7 +127,8 @@ const LockBody = z.object({ version: z.string().nullable() });
 const MixLoudnessBody = z.object({ lanes: z.array(LaneStageSchema).min(1) });
 
 const SettingsBody = z.object({ autoProxy: z.boolean() }).strict();
-const FrameQuery = z.object({ t: z.coerce.number().finite().nonnegative() });
+// A time in seconds, 0 to 24 h: an empty value, NaN, Infinity or anything huge is a 400.
+const FrameQuery = z.object({ t: z.string().min(1).pipe(z.coerce.number<string>().finite().min(0).max(86400)) });
 
 const GrabBody = z.object({
   video: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
@@ -326,6 +327,12 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     // whatever asked for it: exports/ in particular takes any file with no extension filter, so
     // without this an exports/x.html would be served as text/html on the dashboard's own origin,
     // free to call its API. Forced to a generic download instead, regardless of ?download=1.
+    // §19.5: a proxy is a file this server wrote into proxies/. A symlink planted at that name
+    // (or anything that isn't a plain file) is never followed.
+    if (PROXY_PATH.test(path)) {
+      const info = await lstat(fromManifestPath(store.root, path)).catch(() => null);
+      if (!info || !info.isFile() || info.isSymbolicLink()) throw new NotFoundError("media", path);
+    }
     const type = contentType(path);
     const inlineSafe = isInlineSafeType(type);
     const res = await sendFile(fromManifestPath(store.root, path), c.req.header("range"), inlineSafe ? type : "application/octet-stream");
@@ -468,11 +475,12 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
       store.read("project"), store.read("script"), store.read("notes"), store.read("picks"), store.read("batches"), jobs.available(),
     ]);
     const tabs = tabStates(project, script, notes);
-    // §19.5: why each cut may play badly (or null), probed once per file revision, never per request.
+    // §19.5: why each cut may play badly (or null). Never waits on a probe: an unprobed cut is
+    // null until its background probe lands, which then announces a change (ruling B).
     const videos = await Promise.all(
       project.videos.map(async (v) => ({
         ...v,
-        versions: await Promise.all(v.versions.map(async (ver) => ({ ...ver, proxyNeed: await jobs.needFor(fromManifestPath(store.root, ver.file)) }))),
+        versions: await Promise.all(v.versions.map(async (ver) => ({ ...ver, proxyNeed: await jobs.needNow(fromManifestPath(store.root, ver.file)) }))),
       })),
     );
     return c.json({ project: { ...project, videos }, script, notes, picks, batches, tabs, proxies: { ffmpeg, jobs: jobs.list() } });
@@ -534,12 +542,12 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     });
     // §19.5: say when the cut is likely to play badly, and start its proxy straight away when the
     // project asks for that. Without ffmpeg, nothing is offered (needFor is null).
-    const reason = await jobs.needFor(abs, info);
+    const reason = await jobs.needFrom(abs, info);
     const proxy: { proxySuggested?: true; proxyReason?: string; proxyJob?: ReturnType<ProxyJobs["start"]> } = {};
     if (reason) {
       proxy.proxySuggested = true;
       proxy.proxyReason = reason;
-      if (autoProxy) proxy.proxyJob = jobs.start(result.video.id, result.version.id);
+      if (autoProxy && !jobs.isClosing) proxy.proxyJob = jobs.start(result.video.id, result.version.id);
     }
     if (lockedVersion) return c.json({ ...result, ...proxy, warning: `Picture is locked at ${lockedVersion}` }, 201);
     return c.json({ ...result, ...proxy }, 201);
@@ -617,7 +625,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     let frame = Math.round(q.data.t * fps);
     // A time at or past the end lands on the last frame rather than on nothing.
     if (version.duration !== null) frame = Math.min(frame, Math.max(0, Math.ceil(version.duration * fps - 1e-6) - 1));
-    const png = await extractFrame(jobs.run, orig, frame / fps);
+    const png = await jobs.frame(orig, frame / fps);
     if (!png) throw new RushesError(`ffmpeg couldn't read frame ${frame}`, 422, "no_frame", { frame });
     return new Response(new Uint8Array(png), {
       status: 200,

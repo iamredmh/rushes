@@ -3,6 +3,7 @@ import { stat } from "node:fs/promises";
 import { extname, join, normalize, sep } from "node:path";
 import { Readable } from "node:stream";
 import type { Project, Script } from "../core/schema.js";
+import { PROXY_PATH } from "./proxy.js";
 
 export const CONTENT_TYPES: Record<string, string> = {
   ".mp4": "video/mp4",
@@ -76,8 +77,9 @@ export function registeredMedia(project: Project, script: Script): Set<string> {
   for (const v of project.videos) {
     for (const ver of v.versions) {
       files.add(ver.file);
-      // §19.5: a cut's proxy plays in Picture just like the cut itself.
-      if (ver.proxy) files.add(ver.proxy.file);
+      // §19.5: a cut's proxy plays in Picture just like the cut itself -- but only a name this
+      // server would write, so a hand-edited record can't open up any other file.
+      if (ver.proxy && PROXY_PATH.test(ver.proxy.file)) files.add(ver.proxy.file);
     }
   }
   for (const l of project.lanes) for (const variant of l.variants) files.add(variant.file);

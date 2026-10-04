@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { access, writeFile } from "node:fs/promises";
+import { access, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
 import { main, longRunningCommand, type Io } from "../../src/cli/main.js";
@@ -565,5 +565,41 @@ describe("cli stop and idle", () => {
     const a = io(root);
     expect(await main(["serve", ".", "--idle-minutes", "soon"], a.x)).toBe(2);
     expect(a.err[0]).toContain("--idle-minutes");
+  });
+});
+
+describe("cli: rushes add version and proxies (§19.5)", () => {
+  const prores4k = { duration: 2, fps: 25, codec: "prores", width: 3840, height: 2160, pixFmt: "yuv422p10le" };
+  const h264 = { duration: 2, fps: 25, codec: "h264", width: 1920, height: 1080, pixFmt: "yuv420p" };
+  const fakeFfmpeg = async (args: string[]) => {
+    if (args[0] !== "-version") await writeFile(args[args.length - 1], "proxy");
+    return { code: 0, stderr: "" };
+  };
+
+  it("prints the suggestion for a cut that may play badly, and says when autoProxy is making one", async () => {
+    const { root } = await tmpProject();
+    await mkdir(join(root, "renders"), { recursive: true });
+    await writeFile(join(root, "renders", "hero.mov"), "original");
+    await writeFile(join(root, "renders", "small.mp4"), "small");
+    const s = await startServer(root, {
+      port: 0,
+      proxy: { run: fakeFfmpeg, probe: async (abs) => (abs.endsWith(".mov") ? prores4k : h264), available: async () => true },
+    });
+    try {
+      const a = io(root);
+      expect(await main(["add", "version", "renders/hero.mov", "--video", "Hero"], a.x)).toBe(0);
+      expect(a.out).toEqual(["Added Hero v1", "Proxy suggested: It's a 4K ProRes file, which browsers struggle with. Create one from Picture."]);
+
+      const b = io(root);
+      expect(await main(["add", "version", "renders/small.mp4", "--video", "Hero"], b.x)).toBe(0);
+      expect(b.out).toEqual(["Added Hero v2"]);
+
+      await fetch(`${s.url}/api/project/settings`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ autoProxy: true }) });
+      const c = io(root);
+      expect(await main(["add", "version", "renders/hero.mov", "--video", "Hero"], c.x)).toBe(0);
+      expect(c.out).toEqual(["Added Hero v3", "Proxy suggested: It's a 4K ProRes file, which browsers struggle with. Making one now (autoProxy is on)."]);
+    } finally {
+      await s.close();
+    }
   });
 });
