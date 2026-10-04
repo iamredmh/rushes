@@ -5,6 +5,7 @@ import { FILES, type FileKey } from "../core/schema.js";
 import { harnesses, mcpLaunch, mergeJson, mergeToml, type Harness } from "../setup/harnesses.js";
 import { realSetupEnv } from "../setup/env.js";
 import type { SetupEnv } from "../setup/setup.js";
+import { canonicalRoot } from "../server/lock.js";
 import { hasFpsMode, parseFfmpegVersion } from "../server/proxy.js";
 
 // §19.3: `rushes doctor` and the `rushes_doctor` MCP tool. Read-only: every check only looks,
@@ -127,18 +128,31 @@ async function ffmpegCheck(env: DoctorEnv): Promise<Check> {
   };
 }
 
+/** "ffprobe version 6.1.1 Copyright ..." -> {major: 6, minor: 1}. Generic over the tool name, unlike parseFfmpegVersion. */
+function parseToolVersion(text: string): { major: number; minor: number } | null {
+  const m = /version n?(\d+)\.(\d+)/.exec(text);
+  return m ? { major: Number(m[1]), minor: Number(m[2]) } : null;
+}
+
 async function ffprobeCheck(env: DoctorEnv): Promise<Check> {
-  const present = await env.which("ffprobe");
-  return present
-    ? { id: "ffprobe", label: "ffprobe", ok: true, required: false, detail: "ffprobe is on PATH." }
-    : {
-        id: "ffprobe",
-        label: "ffprobe",
-        ok: false,
-        required: false,
-        detail: "ffprobe isn't on PATH. It ships with ffmpeg.",
-        fix: installFix(env.platform),
-      };
+  if (!(await env.which("ffprobe"))) {
+    return {
+      id: "ffprobe",
+      label: "ffprobe",
+      ok: false,
+      required: false,
+      detail: "ffprobe isn't on PATH. It ships with ffmpeg.",
+      fix: installFix(env.platform),
+    };
+  }
+  let out = "";
+  try {
+    out = (await env.exec("ffprobe", ["-version"], env.cwd)).out;
+  } catch {
+    out = "";
+  }
+  const version = parseToolVersion(out);
+  return { id: "ffprobe", label: "ffprobe", ok: true, required: false, detail: version ? `ffprobe ${version.major}.${version.minor} is on PATH.` : "ffprobe is on PATH." };
 }
 
 /** Is this harness installed at all (its marker folder exists, or its CLI is on PATH)? Mirrors setup.ts's own check, read-only. */
@@ -170,9 +184,15 @@ async function harnessCheck(h: Harness, env: DoctorEnv): Promise<Check> {
   }
 }
 
-/** Whether a Rushes server is running for this folder: a health request to its port, falling back to a pid check. Never a failure either way -- it's informational. */
+/**
+ * Whether a Rushes server is running for this folder: a health request to its port, checked
+ * against this project's own canonical root (the same check `isRushesFor` in server/lock.ts
+ * makes), falling back to a pid check when nothing answers. A server answering for a *different*
+ * project is reported as a failure -- a stale server.json left behind when the project moved or
+ * its folder was reused -- everything else here is informational.
+ */
 async function serverCheck(cwd: string): Promise<Check> {
-  const base = { id: "server", label: "Rushes server", required: false, ok: true as const };
+  const base = { id: "server", label: "Rushes server", required: false };
   let lock: { port?: unknown; pid?: unknown } | null = null;
   try {
     lock = JSON.parse(await readFile(join(cwd, RUSHES_DIR, "server.json"), "utf8"));
@@ -180,35 +200,37 @@ async function serverCheck(cwd: string): Promise<Check> {
     lock = null;
   }
   if (!lock || typeof lock.port !== "number" || typeof lock.pid !== "number") {
-    return { ...base, detail: "No server is running for this folder." };
+    return { ...base, ok: true, detail: "No server is running for this folder." };
   }
   const { port, pid } = lock as { port: number; pid: number };
-  let alive = false;
-  let id: string | undefined;
+  const root = await canonicalRoot(cwd);
+  type Health = { app?: string; id?: string; root?: string };
+  let health: Health | null = null;
   try {
     const res = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(800) });
-    if (res.ok) {
-      const health = (await res.json()) as { app?: string; id?: string };
-      if (health.app === "rushes") {
-        alive = true;
-        id = health.id;
-      }
-    }
+    if (res.ok) health = (await res.json()) as Health;
   } catch {
-    // The port didn't answer in time; fall back to a pid check below.
+    health = null; // The port didn't answer in time; fall back to a pid check below.
   }
-  if (!alive) {
-    try {
-      process.kill(pid, 0);
-      alive = true;
-    } catch {
-      alive = false;
+  if (health?.app === "rushes") {
+    if (health.root !== root) {
+      return {
+        ...base,
+        ok: false,
+        detail: `server.json points at another project's server (port ${port}).`,
+        fix: "Run rushes stop here, then rushes open",
+      };
     }
+    return { ...base, ok: true, detail: `running on port ${port}${health.id ? `, project ${health.id}` : ""}.` };
   }
-  return {
-    ...base,
-    detail: alive ? `running on port ${port}${id ? `, project ${id}` : ""}.` : `not running (a stale lock names pid ${pid}; it clears on the next start).`,
-  };
+  let alive = false;
+  try {
+    process.kill(pid, 0);
+    alive = true;
+  } catch {
+    alive = false;
+  }
+  return { ...base, ok: true, detail: alive ? `running on port ${port}.` : `not running (a stale lock names pid ${pid}; it clears on the next start).` };
 }
 
 /** Free space where proxies live, only reported when a proxies/ folder exists. */
@@ -244,7 +266,14 @@ export async function runDoctor(env: DoctorEnv): Promise<Check[]> {
   if (!present.length) {
     checks.push({ id: "agents", label: "Agent harnesses", ok: true, required: false, detail: "No supported agent harness found on this machine." });
   } else {
-    for (const h of present) checks.push(await harnessCheck(h, env));
+    const harnessChecks: Check[] = [];
+    for (const h of present) harnessChecks.push(await harnessCheck(h, env));
+    checks.push(...harnessChecks);
+    // Controller ruling: when every installed harness is unregistered, say so once in plain words
+    // rather than making the reader infer it from a run of individual crosses.
+    if (harnessChecks.every((c) => !c.ok)) {
+      checks.push({ id: "agents", label: "Agent harnesses", ok: false, required: false, detail: "No agent has Rushes yet.", fix: "Run rushes setup" });
+    }
   }
 
   if (!(await exists(join(env.cwd, RUSHES_DIR)))) {

@@ -1,13 +1,18 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
+import { createServer, type Server } from "node:http";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { tmpProject } from "../helpers/tmp.js";
 import { runDoctor, realDoctorEnv, type DoctorEnv } from "../../src/cli/doctor.js";
 import { main, type Io } from "../../src/cli/main.js";
 import { startServer } from "../../src/server/start.js";
 import { lockPath } from "../../src/server/lock.js";
 import { RUSHES_DIR } from "../../src/core/store.js";
+import { createMcpServer } from "../../src/mcp/tools.js";
+import { stdioContext } from "../../src/mcp/stdio.js";
 
 const dirs: string[] = [];
 afterEach(async () => { while (dirs.length) await rm(dirs.pop()!, { recursive: true, force: true }); });
@@ -16,6 +21,21 @@ async function tmpHome() {
   const home = await mkdtemp(join(tmpdir(), "rushes doctor home "));
   dirs.push(home);
   return home;
+}
+
+/** A bare HTTP server that answers /api/health with `body`, for serverCheck's fetch to talk to. */
+async function fakeHealthServer(body: Record<string, unknown>): Promise<{ port: number; close: () => Promise<void> }> {
+  const server: Server = createServer((req, res) => {
+    if (req.url === "/api/health") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(body));
+    } else {
+      res.writeHead(404).end();
+    }
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = (server.address() as { port: number }).port;
+  return { port, close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
 }
 
 /** A DoctorEnv with nothing installed: no agent harnesses, no ffmpeg, a fresh home, in `cwd`. Overridden per test. */
@@ -97,6 +117,22 @@ describe("runDoctor", () => {
     expect(ffmpeg).toMatchObject({ ok: true, detail: "ffmpeg 6.1 is on PATH." });
   });
 
+  it("ffprobe reports its own version (§19.3), not just that it's on PATH", async () => {
+    const home = await tmpHome();
+    const env = fakeEnv(home, home, {
+      which: async (cmd) => cmd === "ffprobe",
+      exec: async () => ({ code: 0, out: "ffprobe version 6.1.1 Copyright (c) 2000-2023 the FFmpeg developers\n" }),
+    });
+    const ffprobe = find(await runDoctor(env), "ffprobe")!;
+    expect(ffprobe).toMatchObject({ ok: true, detail: "ffprobe 6.1 is on PATH." });
+  });
+
+  it("ffprobe with an unparseable version string still passes, just without a version", async () => {
+    const home = await tmpHome();
+    const env = fakeEnv(home, home, { which: async (cmd) => cmd === "ffprobe", exec: async () => ({ code: 0, out: "garbage\n" }) });
+    expect(find(await runDoctor(env), "ffprobe")).toMatchObject({ ok: true, detail: "ffprobe is on PATH." });
+  });
+
   it("reports no agent harness found when nothing is installed", async () => {
     const home = await tmpHome();
     const checks = await runDoctor(fakeEnv(home, home));
@@ -121,6 +157,25 @@ describe("runDoctor", () => {
     expect(find(registered, "agent:cursor")).toMatchObject({ ok: true, required: false });
     // doctor is read-only: the config is untouched.
     expect(await readFile(configPath, "utf8")).toBe(beforeText);
+  });
+
+  it("controller ruling: adds 'No agent has Rushes yet' when harnesses are installed but none is registered", async () => {
+    const home = await tmpHome();
+    await mkdir(join(home, ".cursor"), { recursive: true });
+    await mkdir(join(home, ".gemini"), { recursive: true });
+    const checks = await runDoctor(fakeEnv(home, home));
+    expect(checks.filter((c) => c.id.startsWith("agent:")).every((c) => !c.ok)).toBe(true);
+    expect(find(checks, "agents")).toMatchObject({ ok: false, required: false, detail: "No agent has Rushes yet.", fix: "Run rushes setup" });
+  });
+
+  it("doesn't add 'No agent has Rushes yet' once at least one harness is registered", async () => {
+    const home = await tmpHome();
+    await mkdir(join(home, ".cursor"), { recursive: true });
+    await writeFile(join(home, ".cursor", "mcp.json"), JSON.stringify({ mcpServers: { rushes: { command: "npx", args: ["-y", "github:iamredmh/rushes", "mcp"] } } }), "utf8");
+    await mkdir(join(home, ".gemini"), { recursive: true });
+    const checks = await runDoctor(fakeEnv(home, home));
+    expect(find(checks, "agent:cursor")).toMatchObject({ ok: true });
+    expect(find(checks, "agents")).toBeUndefined();
   });
 
   it("a corrupt notes.json fails that file check by name, other files still pass", async () => {
@@ -170,6 +225,23 @@ describe("runDoctor", () => {
     const checks = await runDoctor(fakeEnv(root, home));
     expect(find(checks, "server")).toMatchObject({ ok: true });
     expect(find(checks, "server")!.detail).toContain("not running");
+  });
+
+  it("fails the server check when server.json points at another project's live server, without trusting it", async () => {
+    const { root } = await tmpProject();
+    const home = await tmpHome();
+    // A real Rushes server, but answering for a different project's root entirely -- the kind of
+    // stale server.json a moved or reused project folder can leave behind.
+    const fake = await fakeHealthServer({ ok: true, app: "rushes", root: "/somewhere/else/entirely", id: "zzzzzzzz" });
+    await writeFile(lockPath(root), JSON.stringify({ port: fake.port, pid: process.pid }), "utf8");
+    const checks = await runDoctor(fakeEnv(root, home));
+    expect(find(checks, "server")).toMatchObject({
+      ok: false,
+      required: false,
+      detail: `server.json points at another project's server (port ${fake.port}).`,
+      fix: "Run rushes stop here, then rushes open",
+    });
+    await fake.close();
   });
 
   it("reports disk space only when proxies/ exists, using the injected statfs", async () => {
@@ -247,5 +319,37 @@ describe("rushes doctor (CLI)", () => {
     const parsed = JSON.parse(a.out[0]);
     expect(parsed.find((c: any) => c.id === "project").detail).toBe("No Rushes project in this folder.");
     expect(code === 0 || code === 1).toBe(true);
+  });
+});
+
+describe("rushes_doctor (MCP) launched at / or the home folder", () => {
+  async function callDoctor(defaultRoot: string) {
+    const server = createMcpServer(stdioContext(defaultRoot, { spawnServer: () => { throw new Error("doctor must never spawn a server"); }, timeoutMs: 300 }));
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "test", version: "0" });
+    await Promise.all([server.connect(a), client.connect(b)]);
+    const r = (await client.callTool({ name: "rushes_doctor", arguments: {} })) as { content: { text: string }[]; isError?: boolean };
+    await client.close();
+    return r;
+  }
+
+  // Controller ruling: unlike every other tool (see "project root for stdio" in test/mcp/tools.test.ts,
+  // which asserts "/" and the home folder are refused there), rushes_doctor must not error out just
+  // because the harness launched it somewhere that isn't a project -- it still runs the environment
+  // checks, and its own project checks read "No Rushes project in this folder" there.
+  it("doesn't refuse '/', and reports the environment checks plus 'no project here'", async () => {
+    const r = await callDoctor("/");
+    expect(r.isError).toBeFalsy();
+    const checks = JSON.parse(r.content[0].text);
+    expect(checks.find((c: any) => c.id === "node")).toBeTruthy();
+    expect(checks.find((c: any) => c.id === "project")).toMatchObject({ ok: true, required: false, detail: "No Rushes project in this folder." });
+  });
+
+  it("doesn't refuse the home folder either", async () => {
+    const r = await callDoctor(homedir());
+    expect(r.isError).toBeFalsy();
+    const checks = JSON.parse(r.content[0].text);
+    expect(checks.find((c: any) => c.id === "node")).toBeTruthy();
+    expect(checks.find((c: any) => c.id === "project")).toMatchObject({ ok: true, required: false, detail: "No Rushes project in this folder." });
   });
 });
