@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState } from "preact/hooks";
-import { api, mediaUrl } from "../api.js";
-import { boxFrom, fmt, frameAt, noteTime, placeNote, shotAt, shotLabel, shotSeek, snap, stepFrame } from "../lib.js";
-import type { Note, Video, Version } from "../types.js";
+import { api, mediaUrl, originalFrame } from "../api.js";
+import { boxFrom, fmt, frameAt, noteTime, placeNote, shotAt, shotLabel, shotSeek, snap, stepFrame, type ProxyProgress } from "../lib.js";
+import type { Note, ProxyJob, Video, Version } from "../types.js";
 import { Icon } from "./Icon.js";
 import { Notes } from "./Notes.js";
+import { ProxyBar } from "./ProxyBar.js";
+
+/** Which file the player shows when the cut has a proxy (§19.5). */
+export type Source = "proxy" | "original";
 
 type Box = { x: number; y: number; w: number; h: number };
 
@@ -27,12 +31,25 @@ export interface PictureProps {
   onGrabChange(video: string, grab: string | null): void;
   /** Forwards the underlying <video> element up, so a caller can read its live time or pause it directly. */
   playerRef?: { current: HTMLVideoElement | null };
+  /** §19.5: the server has ffmpeg (proxies are offered, and Grab Frame takes stills from the original). */
+  ffmpeg?: boolean;
+  /** project.autoProxy, for the proxy bar's checkbox. */
+  autoProxy?: boolean;
+  /** This cut's proxy job, as this tab last heard of it. */
+  proxyJob?: ProxyProgress;
+  noteProxyJob?(job: ProxyJob): void;
+  /** This film's Proxy/Original choice, remembered by the caller. Proxy unless you've picked Original. */
+  source?: Source;
+  onSourceChange?(video: string, source: Source): void;
 }
 
 const typing = (el: EventTarget | null) => el instanceof HTMLElement && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
 
 /** The cut, with notes down the right: frame stepping, In/Out ranges, a box on the frame and frame grabs. */
-export function Picture({ video, version, fps, notes, toast, onChanged, onPendingChange, startAt, grab, onGrabChange, playerRef }: PictureProps) {
+export function Picture({
+  video, version, fps, notes, toast, onChanged, onPendingChange, startAt, grab, onGrabChange, playerRef,
+  ffmpeg = false, autoProxy = false, proxyJob, noteProxyJob, source = "proxy", onSourceChange,
+}: PictureProps) {
   const ref = useRef<HTMLVideoElement>(null);
   const overlay = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
@@ -98,13 +115,37 @@ export function Picture({ video, version, fps, notes, toast, onChanged, onPendin
     if (mountedFile.current !== undefined) onGrabChange(video.id, null);
     mountedFile.current = version.file;
     setShown(null);
+  }, [version.file]);
+
+  // §19.5: the proxy plays unless you've picked Original. The switch never changes the cut, so
+  // notes, timecodes and frame numbers are the same on both.
+  const playsProxy = !!version.proxy && source !== "original";
+  const src = mediaUrl(playsProxy ? version.proxy!.file : version.file);
+
+  // When the file changes under the same cut (the switch, or a proxy arriving), the new one picks
+  // up where the old one was: its time, and whether it was playing. That's read off the element
+  // here, during render, before the new src resets it, and applied once the new file's metadata
+  // loads. A file the browser can't play never loads, so the restore point waits, and switching
+  // back still lands in the same place. A new cut starts from the top instead.
+  const resume = useRef<{ t: number; play: boolean } | null>(null);
+  const shownSrc = useRef<{ cut: string; src: string } | null>(null);
+  if (shownSrc.current && shownSrc.current.src !== src) {
+    const v = ref.current;
+    if (shownSrc.current.cut !== version.file) resume.current = null;
+    else if (!resume.current && v) resume.current = { t: v.error ? t : v.currentTime, play: !v.paused && !v.error };
+  }
+  shownSrc.current = { cut: version.file, src };
+
+  // A file the browser can't decode can fail before any handler is attached, so check the element too.
+  useEffect(() => {
+    setBroken(false);
     const v = ref.current;
     if (!v) return;
     const fail = () => setBroken(true);
     if (v.error) fail();
     v.addEventListener("error", fail);
     return () => v.removeEventListener("error", fail);
-  }, [version.file]);
+  }, [src]);
 
   // Smooth playhead while playing.
   useEffect(() => {
@@ -118,13 +159,23 @@ export function Picture({ video, version, fps, notes, toast, onChanged, onPendin
     return () => cancelAnimationFrame(id);
   }, [playing]);
 
-  // The element's time, snapped to its frame. Key handlers can run before a re-render, so never trust `t` for this.
-  const now = () => snap(ref.current?.currentTime ?? t, fps);
+  // The element's time (or, while a switched file is still loading, the time it will resume at).
+  // Key handlers can run before a re-render, so never trust `t` for this.
+  const liveTime = () => resume.current?.t ?? ref.current?.currentTime ?? t;
+  // The same, snapped to its frame.
+  const now = () => snap(liveTime(), fps);
 
   const seek = (to: number) => {
     const v = ref.current;
     if (!v) return;
-    v.currentTime = Math.min(Math.max(0, to), duration || v.duration || to);
+    const at = Math.min(Math.max(0, to), duration || v.duration || to);
+    if (resume.current) {
+      // The file isn't playable yet: move where it will resume instead.
+      resume.current.t = at;
+      setT(at);
+      return;
+    }
+    v.currentTime = at;
     setT(v.currentTime);
   };
   const toggle = () => {
@@ -135,7 +186,7 @@ export function Picture({ video, version, fps, notes, toast, onChanged, onPendin
   };
   const step = (n: number) => {
     ref.current?.pause();
-    seek(stepFrame(ref.current?.currentTime ?? t, fps, n, duration));
+    seek(stepFrame(liveTime(), fps, n, duration));
   };
   const setIn = () => setRange({ in: now(), out: null });
   const setOut = () => {
@@ -148,16 +199,27 @@ export function Picture({ video, version, fps, notes, toast, onChanged, onPendin
 
   const grabFrame = async () => {
     const v = ref.current;
-    if (!v || !v.videoWidth) return toast("Nothing to grab yet");
-    const canvas = document.createElement("canvas");
-    canvas.width = v.videoWidth;
-    canvas.height = v.videoHeight;
-    canvas.getContext("2d")!.drawImage(v, 0, 0);
-    const frame = frameAt(now(), fps);
+    const at = now();
     const forVideo = video.id;
     const forVersion = version.id;
     try {
-      const r = await api.post<{ grab: string }>("/api/grabs", { video: video.id, version: version.id, frame, png: canvas.toDataURL("image/png") });
+      let frame = frameAt(at, fps);
+      let png: string;
+      if (ffmpeg) {
+        // §19.5: the still always comes from the original, at full quality, whichever file is
+        // playing: the server extracts that exact frame with ffmpeg.
+        const still = await originalFrame(forVideo, forVersion, at);
+        frame = still.frame ?? frame;
+        png = still.png;
+      } else {
+        if (!v || !v.videoWidth) return toast("Nothing to grab yet");
+        const canvas = document.createElement("canvas");
+        canvas.width = v.videoWidth;
+        canvas.height = v.videoHeight;
+        canvas.getContext("2d")!.drawImage(v, 0, 0);
+        png = canvas.toDataURL("image/png");
+      }
+      const r = await api.post<{ grab: string }>("/api/grabs", { video: forVideo, version: forVersion, frame, png });
       toast(`Saved to ${r.grab}`);
       // The screenshot is a new asset on disk: refresh so the Assets tab unlocks and shows
       // it right away, without waiting for a server change event (grabs don't send one).
@@ -280,6 +342,18 @@ export function Picture({ video, version, fps, notes, toast, onChanged, onPendin
         setT(v.currentTime);
       }
     }
+    // A switched file picks up where the last one was (see `resume`).
+    const r = resume.current;
+    if (r) {
+      resume.current = null;
+      v.currentTime = Math.min(r.t, v.duration || r.t);
+      setT(r.t);
+      if (r.play) void v.play().catch(() => undefined);
+    }
+  };
+
+  const choose = (to: Source) => {
+    if (to !== source) onSourceChange?.(video.id, to);
   };
 
   return (
@@ -299,12 +373,12 @@ export function Picture({ video, version, fps, notes, toast, onChanged, onPendin
                 // startApplied guards the once-only seek.
                 if (el && el.readyState >= 1) applyMetadata(el);
               }}
-              src={mediaUrl(version.file)}
+              src={src}
               preload="auto"
               playsInline
               onLoadedMetadata={(e) => applyMetadata(e.target as HTMLVideoElement)}
-              onTimeUpdate={(e) => !playing && setT((e.target as HTMLVideoElement).currentTime)}
-              onSeeked={(e) => setT((e.target as HTMLVideoElement).currentTime)}
+              onTimeUpdate={(e) => !playing && !resume.current && setT((e.target as HTMLVideoElement).currentTime)}
+              onSeeked={(e) => !resume.current && setT((e.target as HTMLVideoElement).currentTime)}
               onPlay={() => setPlaying(true)}
               onPause={() => setPlaying(false)}
               onEnded={() => setPlaying(false)}
@@ -325,8 +399,47 @@ export function Picture({ video, version, fps, notes, toast, onChanged, onPendin
               {live && <div class="bx" style={style(live)} />}
             </div>
             <div class="tcover">f{frameAt(t, fps)}{current && ` · shot ${shotLabel(current.n)}`}</div>
+            {version.proxy && (
+              <div class="srcswitch" role="group" aria-label="Which file plays">
+                <button
+                  type="button"
+                  class="tip-below tip-start tip-wrap"
+                  aria-pressed={playsProxy}
+                  aria-label="Proxy"
+                  data-tip="Playing the lightweight copy. Notes and timings are the same."
+                  onClick={(e) => { (e.currentTarget as HTMLElement).blur(); choose("proxy"); }}
+                >
+                  Proxy
+                </button>
+                <button
+                  type="button"
+                  class="tip-below tip-start tip-wrap"
+                  aria-pressed={!playsProxy}
+                  aria-label="Original"
+                  data-tip="Play the full-quality file. It may stutter."
+                  onClick={(e) => { (e.currentTarget as HTMLElement).blur(); choose("original"); }}
+                >
+                  Original
+                </button>
+              </div>
+            )}
           </div>
         </div>
+
+        {noteProxyJob && (
+          <ProxyBar
+            video={video}
+            version={version}
+            ffmpeg={ffmpeg}
+            autoProxy={autoProxy}
+            job={proxyJob}
+            broken={broken && !playsProxy}
+            duration={duration}
+            toast={toast}
+            onChanged={onChanged}
+            noteProxyJob={noteProxyJob}
+          />
+        )}
 
         <div class="bar">
           <button class="btn ghost ib" data-tip="Back one frame  ←" aria-label="Back one frame" onClick={() => step(-1)}><Icon name="prev" /></button>

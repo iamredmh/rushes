@@ -1,5 +1,5 @@
 import { test as base, expect, type Page } from "@playwright/test";
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,6 +11,33 @@ const CLIP = fileURLToPath(new URL("./fixtures/clip.mp4", import.meta.url));
 const VERTICAL = fileURLToPath(new URL("./fixtures/vertical.mp4", import.meta.url));
 
 const DASHBOARD_URL = /http:\/\/127\.0\.0\.1:\d+\/p\/[a-z2-9]{8}\//;
+
+/** Whether ffmpeg and ffprobe are both on PATH: the proxy tests (§19.5) skip without them. */
+export const hasFfmpeg = ["ffmpeg", "ffprobe"].every((bin) => spawnSync(bin, ["-version"], { stdio: "ignore" }).status === 0);
+
+/** Run ffmpeg with an args array (never a shell), rejecting with its stderr on failure. */
+function ffmpeg(args: string[]): Promise<void> {
+  return new Promise((ok, fail) => {
+    const child = spawn("ffmpeg", ["-v", "error", "-y", ...args], { stdio: ["ignore", "ignore", "pipe"] });
+    let err = "";
+    child.stderr!.on("data", (d) => (err += d));
+    child.on("error", fail);
+    child.on("exit", (code) => (code === 0 ? ok() : fail(new Error(`ffmpeg failed (${code}): ${err}`))));
+  });
+}
+
+export interface ProResOptions {
+  width?: number;
+  height?: number;
+  /** Length in seconds. Defaults to 6. */
+  seconds?: number;
+  /**
+   * A cut whose proxy takes several seconds to make, so Cancel is reachable: one second of a
+   * small ProRes picture with AAC audio, stream-copied end to end `seconds` times. Copying is
+   * near instant and keeps the file small; encoding its audio back to AAC is what takes the time.
+   */
+  long?: boolean;
+}
 
 export interface VariantOptions {
   seconds: number;
@@ -38,6 +65,8 @@ export interface Rushes {
   addCut(note?: string, video?: string): Promise<{ version: { id: string } }>;
   /** Register the 9:16 test clip (360x640, 2 s) as a new cut of "Hero". */
   addVerticalCut(note?: string): Promise<{ version: { id: string } }>;
+  /** Generate a ProRes test pattern (640x360, 6 s by default) into the project and register it as a new cut of "Hero". Needs ffmpeg. */
+  addProResCut(opts?: ProResOptions, note?: string): Promise<{ version: { id: string }; proxySuggested?: true; proxyReason?: string; proxyJob?: { id: string; state: string } }>;
   /** Write a generated sine WAV into the project and register it as a variant on `stage`. */
   addVariant(stage: "voice" | "music" | "sfx", name: string, opts: VariantOptions): Promise<{ lane: { id: string }; variant: { id: string; cues: { id: string; name: string; t: number }[] } }>;
   /**
@@ -148,6 +177,28 @@ export const test = base.extend<{ rushes: Rushes }>({
       await copyFile(VERTICAL, join(root, file));
       return api("POST", "/api/versions", { video: "Hero", file, note });
     };
+    const addProResCut = async (opts: ProResOptions = {}, note?: string) => {
+      const n = (cutsByVideo.get("hero") ?? 0) + 1;
+      cutsByVideo.set("hero", n);
+      const file = `renders/hero_v${n}.mov`;
+      const out = join(root, file);
+      if (opts.long) {
+        const one = join(root, "renders", `.hero_v${n}_one.mov`);
+        await ffmpeg([
+          "-f", "lavfi", "-i", `testsrc=size=${opts.width ?? 160}x${opts.height ?? 90}:rate=30:duration=1`,
+          "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=1",
+          "-ac", "2", "-c:v", "prores_ks", "-profile:v", "0", "-c:a", "aac", "-b:a", "32k", "-shortest", one,
+        ]);
+        await ffmpeg(["-stream_loop", String((opts.seconds ?? 300) - 1), "-i", one, "-c", "copy", out]);
+        await rm(one, { force: true });
+      } else {
+        await ffmpeg([
+          "-f", "lavfi", "-i", `testsrc=size=${opts.width ?? 640}x${opts.height ?? 360}:rate=30:duration=${opts.seconds ?? 6}`,
+          "-c:v", "prores_ks", "-profile:v", "0", out,
+        ]);
+      }
+      return api("POST", "/api/versions", { video: "Hero", file, note });
+    };
     let wavs = 0;
     const addVariant = async (stage: "voice" | "music" | "sfx", name: string, opts: VariantOptions) => {
       const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
@@ -176,6 +227,7 @@ export const test = base.extend<{ rushes: Rushes }>({
       api,
       addCut,
       addVerticalCut,
+      addProResCut,
       addVariant,
       swapProject,
     });

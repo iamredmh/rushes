@@ -13,7 +13,7 @@ export interface ToolContext {
 const project = z.string().optional().describe("Project folder. Defaults to the current working directory.");
 const stage = z.enum(["script", "picture", "voice", "music", "sfx", "mix"]);
 const fileKind = z.enum(["doc", "image", "caption", "export", "delivery", "edit"]);
-const assetKind = z.enum(["screenshot", "cut", "take", "music", "sfx", "voice", "doc", "image", "caption", "export", "delivery", "edit"]);
+const assetKind = z.enum(["screenshot", "cut", "proxy", "take", "music", "sfx", "voice", "doc", "image", "caption", "export", "delivery", "edit"]);
 
 function ok(data: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };

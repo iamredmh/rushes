@@ -32,7 +32,32 @@ export const api = {
   post: <T>(path: string, body: unknown = {}) => call<T>("POST", path, body),
   patch: <T>(path: string, body: unknown) => call<T>("PATCH", path, body),
   put: <T>(path: string, body: unknown) => call<T>("PUT", path, body),
+  del: <T>(path: string, body: unknown = {}) => call<T>("DELETE", path, body),
 };
+
+/**
+ * §19.5: the exact frame at `t` from a cut's original file, extracted by ffmpeg on the server, as a
+ * PNG data URL ready for POST /api/grabs, with the frame number the server actually took.
+ */
+export async function originalFrame(video: string, version: string, t: number): Promise<{ frame: number | null; png: string }> {
+  const id = projectId();
+  const res = await fetch(`/api/videos/${encodeURIComponent(video)}/versions/${encodeURIComponent(version)}/frame?t=${t}`, {
+    headers: id ? { "x-rushes-project": id } : {},
+  });
+  if (!res.ok) {
+    const json = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, json.error ?? "error", json.message ?? `Request failed (${res.status})`);
+  }
+  const header = Number(res.headers.get("x-rushes-frame"));
+  const blob = await res.blob();
+  const png = await new Promise<string>((ok, fail) => {
+    const reader = new FileReader();
+    reader.onload = () => ok(reader.result as string);
+    reader.onerror = () => fail(reader.error ?? new Error("Couldn't read the frame"));
+    reader.readAsDataURL(blob);
+  });
+  return { frame: Number.isInteger(header) && header >= 0 ? header : null, png };
+}
 
 /** URL the browser can load a registered media file (or grab) from. */
 export function mediaUrl(path: string): string {

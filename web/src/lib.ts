@@ -1,5 +1,5 @@
 // Pure helpers for the dashboard. No DOM, so they're unit-tested in Node.
-import type { Asset, AssetKind, Cue, Lane, LaneStage, LoudnessResult, Mark, Note, Section, Shot, Stage, TabState, Video, Version } from "./types.js";
+import type { Asset, AssetKind, Cue, Lane, LaneStage, LoudnessResult, Mark, Note, ProxyEvent, ProxyJob, Section, Shot, Stage, TabState, Video, Version } from "./types.js";
 
 /** 72.4 -> "1:12.40" (minutes, seconds, hundredths). */
 export function fmt(t: number): string {
@@ -237,7 +237,7 @@ export function extOf(name: string): string {
   return i === -1 ? "" : name.slice(i + 1).toLowerCase();
 }
 
-export type FolderId = "screenshot" | "cut" | "voiceover" | "music" | "sfx" | "doc" | "image" | "caption" | "export" | "delivery" | "edit";
+export type FolderId = "screenshot" | "cut" | "proxy" | "voiceover" | "music" | "sfx" | "doc" | "image" | "caption" | "export" | "delivery" | "edit";
 
 export interface FolderDef {
   id: FolderId;
@@ -258,6 +258,8 @@ export interface FolderDef {
 export const FOLDERS: FolderDef[] = [
   { id: "screenshot", title: "Screenshots", kinds: ["screenshot"], view: "grid", filmFilter: true, gridToggle: true },
   { id: "cut", title: "Cuts", kinds: ["cut"], view: "grid", filmFilter: true, gridToggle: true },
+  // §19.5: listed only once a proxy exists, like every folder but Exports.
+  { id: "proxy", title: "Proxies", kinds: ["proxy"], view: "list", filmFilter: true, gridToggle: false },
   { id: "voiceover", title: "Voiceover", kinds: ["take", "voice"], view: "list", filmFilter: false, gridToggle: false },
   { id: "music", title: "Music", kinds: ["music"], view: "list", filmFilter: false, gridToggle: false },
   { id: "sfx", title: "Sound effects", kinds: ["sfx"], view: "list", filmFilter: false, gridToggle: false },
@@ -922,4 +924,116 @@ export function loudnessReadout(s: LoudnessState): ReadoutCell[] {
     ? ["−∞", "The mix is silent"]
     : r.musicUnderVo === null ? [DASH, "Needs Voiceover and Music both playing"] : [`${levelText(r.musicUnderVo, 0)} dB`, null];
   return cells(level(r.integrated), level(r.truePeak), under);
+}
+
+// ---- Proxies (§19.5) ----
+
+/** The Create proxy tooltip's size: duration × 8 Mbit/s (about 1 MB a second), rounded to 10 MB, and never under 10. */
+export function proxyEstimateMb(seconds: number): number {
+  return Math.max(10, Math.round((Number.isFinite(seconds) ? seconds : 0) / 10) * 10);
+}
+
+/** The Create proxy button's tooltip (§19.5). */
+export function proxyTip(seconds: number): string {
+  return `Makes a lightweight 1080p copy on your drive so this cut previews smoothly. About ${proxyEstimateMb(seconds)} MB. Your original isn't changed.`;
+}
+
+/** The offer's reason when the browser itself refused the file, whatever the server thought of it. */
+export const PLAYBACK_ERROR_REASON = "The browser couldn't play this file";
+
+/** One proxy job as this tab last heard of it, and when (`performance.now()`), so older news never overwrites newer. */
+export interface ProxyProgress extends ProxyEvent {
+  at: number;
+}
+/** What this tab knows of every proxy job, one per cut, keyed by proxyKey(). */
+export type ProxyJobs = Readonly<Record<string, ProxyProgress>>;
+
+export const proxyKey = (video: string, version: string): string => `${video}/${version}`;
+
+/** A route's ProxyJob in the SSE event's shape. */
+export function proxyProgress(job: ProxyJob, at: number): ProxyProgress {
+  const p: ProxyProgress = { job: job.id, video: job.video, version: job.version, pct: job.pct, state: job.state, at };
+  if (job.reason !== undefined) p.reason = job.reason;
+  return p;
+}
+
+/**
+ * Folds one report of a job (an SSE event, a route's reply, or a job the state lists) into what
+ * this tab knows. A job never moves backwards: once it's finished it stays finished, and its % never
+ * drops. A different job for the same cut replaces the old one unless it's older news. Returns the
+ * same object when nothing changes, so a state update can bail out.
+ */
+export function mergeProxyJob(jobs: ProxyJobs, e: ProxyProgress): ProxyJobs {
+  const key = proxyKey(e.video, e.version);
+  const old = jobs[key];
+  if (old && old.job === e.job) {
+    if (old.state !== "running") return jobs;
+    if (e.state === "running" && e.pct <= old.pct) return jobs;
+  } else if (old && old.at > e.at) {
+    return jobs;
+  }
+  return { ...jobs, [key]: e };
+}
+
+/**
+ * After a state fetch that started at `since`: drops what that state shows is over, then seeds the
+ * jobs it lists as running (a tab opened mid-job shows progress before the next tick). Dropped are a
+ * running job the state no longer lists (its end was missed, e.g. while the event stream
+ * reconnected) and a finished job whose proxy has since gone (deleted). Only news older than the
+ * fetch is ever dropped.
+ */
+export function settleProxyJobs(
+  jobs: ProxyJobs,
+  running: readonly ProxyJob[],
+  since: number,
+  hasProxy: (video: string, version: string) => boolean,
+): ProxyJobs {
+  const listed = new Set(running.map((j) => j.id));
+  let next: Record<string, ProxyProgress> | null = null;
+  for (const [key, p] of Object.entries(jobs)) {
+    if (p.at >= since) continue;
+    const over = (p.state === "running" && !listed.has(p.job)) || (p.state === "done" && !hasProxy(p.video, p.version));
+    if (!over) continue;
+    next ??= { ...jobs };
+    delete next[key];
+  }
+  let out: ProxyJobs = next ?? jobs;
+  for (const j of running) out = mergeProxyJob(out, proxyProgress(j, since));
+  return out;
+}
+
+export type ProxyPhase = "none" | "offer" | "working" | "done";
+
+/**
+ * Which row the bar under the player shows (§19.5). Nothing without ffmpeg. "working" while a job
+ * runs (or is being started, or has finished but its record hasn't arrived yet). "done" only for
+ * a proxy this view watched being made; an existing proxy otherwise just brings the switch. The
+ * offer needs a reason: the server's, or a playback error, and no proxy yet.
+ */
+export function proxyPhase(p: {
+  ffmpeg: boolean;
+  need: string | null | undefined;
+  broken: boolean;
+  hasProxy: boolean;
+  job: ProxyProgress | undefined;
+  starting: boolean;
+  watched: boolean;
+}): ProxyPhase {
+  if (!p.ffmpeg) return "none";
+  if (p.starting || p.job?.state === "running" || (p.job?.state === "done" && !p.hasProxy)) return "working";
+  if (p.hasProxy) return p.watched && p.job?.state === "done" ? "done" : "none";
+  return p.need || p.broken ? "offer" : "none";
+}
+
+/** The offer's reason: the server's when it has one, else the browser's own refusal. Null when there's no reason to offer. */
+export function proxyReason(need: string | null | undefined, broken: boolean): string | null {
+  return need || (broken ? PLAYBACK_ERROR_REASON : null);
+}
+
+/** "1.2 MB · 1920×1080 · from v3": a Proxies row's second line. */
+export function proxyMeta(asset: Pick<Asset, "size" | "width" | "height" | "version">): string {
+  const parts = [formatBytes(asset.size ?? 0)];
+  if (asset.width && asset.height) parts.push(`${asset.width}×${asset.height}`);
+  if (asset.version) parts.push(`from ${asset.version}`);
+  return parts.join(" · ");
 }

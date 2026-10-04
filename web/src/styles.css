@@ -46,6 +46,8 @@ svg.ic { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-wid
 .btn:active { background: var(--press); }
 .btn.primary { background: var(--accent); color: var(--on-accent); font-weight: 600; }
 .btn.primary:hover { background: var(--accent-2); }
+.btn.danger { background: var(--over); color: #fff; font-weight: 600; }
+.btn.danger:hover { background: var(--over); filter: brightness(1.1); }
 .btn.ghost { background: transparent; color: var(--text-2); }
 .btn.ghost:hover { background: var(--raised); color: var(--text); }
 .ib { width: 36px; padding: 0; }
@@ -156,6 +158,30 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .shot .mono { font: 500 13px var(--mono); color: var(--text-2); }
 .shot .name { font-size: 15px; color: var(--text); }
 .shot .tag { font: 13px var(--mono); text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-3); }
+
+/* proxies (§19.5): the bar under the player, and the Proxy/Original switch on it */
+.proxybar { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; background: var(--raised); border-radius: var(--r-lg); padding: 14px 16px; font-size: 15px; }
+.proxybar.quiet { background: transparent; padding: 0 2px; }
+.proxyrow { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-width: 0; min-height: 36px; }
+.proxyrow .why { flex: 1; min-width: 240px; color: var(--text-2); }
+.proxyrow .why b { color: var(--text); font-weight: 600; }
+.proxyrow .why .mono { color: var(--text); overflow-wrap: anywhere; }
+.proxyrow .ok { color: var(--done); font-weight: 600; }
+.proxyrow.working > .mono { min-width: 4.5ch; text-align: right; color: var(--text-2); }
+.pbar { position: relative; flex: 1; min-width: 200px; height: 8px; border-radius: 999px; background: var(--bg); overflow: hidden; }
+.pbar i { position: absolute; inset: 0 auto 0 0; background: var(--accent); border-radius: 999px; transition: width 0.2s; }
+.check { display: flex; align-items: center; gap: 8px; width: fit-content; color: var(--text-2); cursor: pointer; font-size: 15px; }
+.check input { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.srcswitch { position: absolute; left: 12px; top: 12px; z-index: 4; display: flex; gap: 2px; padding: 3px; border-radius: 999px; background: rgba(0, 0, 0, 0.6); }
+.srcswitch button { padding: 2px 10px; border: 0; border-radius: 999px; background: transparent; color: var(--text-2); font: 500 15px/1.5 var(--sans); cursor: pointer; }
+.srcswitch button:hover { color: var(--text); }
+.srcswitch button[aria-pressed="true"] { background: var(--press); color: var(--text); }
+/* Long tooltips wrap; one by the left or right edge of its box lines up with that edge instead of centring. */
+.tip-wrap[data-tip]::after { white-space: normal; width: max-content; max-width: 300px; line-height: 1.35; text-align: left; }
+.tip-start[data-tip]::after { left: 0; transform: translateY(2px); }
+.tip-end[data-tip]::after { left: auto; right: 0; transform: translateY(2px); }
+.tip-start[data-tip]:hover::after, .tip-start[data-tip]:focus-visible::after,
+.tip-end[data-tip]:hover::after, .tip-end[data-tip]:focus-visible::after { transform: none; }
 
 /* notes */
 .panel { background: var(--raised); border-radius: var(--r-lg); display: flex; flex-direction: column; min-height: 0; }
@@ -297,6 +323,7 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .ameta { font-size: 15px; color: var(--text-3); }
 .amiss { color: var(--over); font-size: 10px; line-height: 1; }
 .aact { display: flex; gap: 4px; flex: none; }
+.aconfirm { display: flex; gap: 4px; flex: none; }
 
 @media (max-width: 860px) {
   .assets-lib { grid-template-columns: minmax(0, 1fr); }

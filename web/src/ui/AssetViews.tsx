@@ -4,7 +4,7 @@
 // layout, state and keyboard handling.
 import { useEffect, useRef, useState } from "preact/hooks";
 import { api, mediaUrl } from "../api.js";
-import { extOf, formatBytes, fmt, metaLine, OPEN_SAFE_EXT, VIDEO_EXT } from "../lib.js";
+import { extOf, formatBytes, fmt, metaLine, OPEN_SAFE_EXT, proxyMeta, VIDEO_EXT } from "../lib.js";
 import type { Asset, Video } from "../types.js";
 import { Icon } from "./Icon.js";
 
@@ -181,6 +181,48 @@ export function AssetRow({ asset, videos, toast }: { asset: Asset; videos: Video
         {!asset.missing && <div class="ameta">{formatBytes(asset.size ?? 0)} · {shortDate(asset.modified)}</div>}
       </div>
       <Actions asset={asset} toast={toast} />
+    </div>
+  );
+}
+
+/** A Proxies row (§19.5): the file's name, "size · W×H · from vN", the usual actions, and Delete
+ *  proxy, which asks once more before removing the file and its record. The original is never touched. */
+export function ProxyRow({ asset, toast, onChanged }: { asset: Asset; toast(message: string): void; onChanged(): void }) {
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const confirmRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => { if (confirming) confirmRef.current?.focus(); }, [confirming]);
+  const remove = async () => {
+    if (busy || !asset.video || !asset.version) return;
+    setBusy(true);
+    try {
+      await api.del(`/api/videos/${encodeURIComponent(asset.video)}/versions/${encodeURIComponent(asset.version)}/proxy`);
+      onChanged();
+    } catch (e) {
+      toast((e as Error).message);
+      setConfirming(false);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div class={`arow${asset.missing ? " missing" : ""}`}>
+      <div class="ainfo">
+        <div class="atitle">{asset.name}{asset.missing && <Missing />}</div>
+        <div class="afolder mono">{asset.path}</div>
+        {!asset.missing && <div class="ameta">{proxyMeta(asset)}</div>}
+      </div>
+      <Actions asset={asset} toast={toast} />
+      {confirming ? (
+        <div class="aconfirm" role="group" aria-label="Delete this proxy?" onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setConfirming(false); } }}>
+          <button ref={confirmRef} type="button" class="btn danger" aria-disabled={busy} onClick={() => void remove()}>Delete</button>
+          <button type="button" class="btn ghost" onClick={() => setConfirming(false)}>Keep</button>
+        </div>
+      ) : (
+        <button type="button" class="btn ghost ib" data-tip="Delete proxy (the original is kept)" aria-label="Delete proxy" onClick={() => setConfirming(true)}>
+          <Icon name="trash" />
+        </button>
+      )}
     </div>
   );
 }

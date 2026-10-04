@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { api, ApiError, eventsUrl } from "./api.js";
-import type { Asset, State } from "./types.js";
+import { mergeProxyJob, proxyProgress, settleProxyJobs, type ProxyJobs } from "./lib.js";
+import type { Asset, ProxyEvent, ProxyJob, State } from "./types.js";
 
 export interface Live {
   state: State | null;
@@ -13,6 +14,11 @@ export interface Live {
   wrongProject: boolean;
   /** Fetch the latest state now (after a write the page made itself). */
   refresh(): Promise<void>;
+  /** §19.5: every proxy job this tab knows of, one per cut, from the SSE `proxy` events (so
+   *  every open tab shows the same progress), seeded from the state's running jobs. */
+  proxyJobs: ProxyJobs;
+  /** Folds a job a route just returned (Create proxy, Cancel) in, ahead of its SSE event. */
+  noteProxyJob(job: ProxyJob): void;
 }
 
 /** The project's state, kept current from the server's change events. */
@@ -21,6 +27,7 @@ export function useRushes(): Live {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [problem, setProblem] = useState<string | null>(null);
   const [wrongProject, setWrongProject] = useState(false);
+  const [proxyJobs, setProxyJobs] = useState<ProxyJobs>({});
   const timer = useRef<number | undefined>(undefined);
   // Number each request so a slow one that lands after a newer one can't overwrite it.
   const seq = useRef(0);
@@ -38,6 +45,8 @@ export function useRushes(): Live {
 
   const refresh = async () => {
     const id = ++seq.current;
+    // Proxy news that arrives while this fetch is out is newer than what it brings back.
+    const since = performance.now();
     // State and assets are fetched together but handled independently: a failed assets
     // fetch must never blank the state (or vice versa), so each settles on its own.
     const [stateResult, assetsResult] = await Promise.all([
@@ -54,7 +63,11 @@ export function useRushes(): Live {
     applied.current = id;
     let wrongProjectNow = false;
     if (stateResult.ok) {
-      setState(stateResult.data);
+      const data = stateResult.data;
+      setState(data);
+      const hasProxy = (video: string, version: string) =>
+        !!data.project.videos.find((v) => v.id === video)?.versions.find((v) => v.id === version)?.proxy;
+      setProxyJobs((jobs) => settleProxyJobs(jobs, data.proxies?.jobs ?? [], since, hasProxy));
       setProblem(null);
       setWrongProject(false);
     } else if (stateResult.error instanceof ApiError && stateResult.error.code === "wrong_project") {
@@ -88,6 +101,10 @@ export function useRushes(): Live {
       clearTimeout(timer.current);
       timer.current = window.setTimeout(() => void refresh(), 40);
     });
+    events.addEventListener("proxy", (e) => {
+      const event = JSON.parse((e as MessageEvent).data) as ProxyEvent;
+      setProxyJobs((jobs) => mergeProxyJob(jobs, { ...event, at: performance.now() }));
+    });
     events.addEventListener("corrupt", (e) => {
       const { file } = JSON.parse((e as MessageEvent).data) as { file: string };
       setProblem(`${file} has an error and wasn't loaded. Fix or restore it, and Rushes will pick it up.`);
@@ -109,5 +126,7 @@ export function useRushes(): Live {
     };
   }, []);
 
-  return { state, assets, problem, wrongProject, refresh };
+  const noteProxyJob = (job: ProxyJob) => setProxyJobs((jobs) => mergeProxyJob(jobs, proxyProgress(job, performance.now())));
+
+  return { state, assets, problem, wrongProject, refresh, proxyJobs, noteProxyJob };
 }

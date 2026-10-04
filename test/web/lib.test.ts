@@ -4,6 +4,10 @@ import {
   isChanged, isPreviewable, latest, LOCKED_TAB, metaLine, neighbourVideo, noteTime, OPEN_SAFE_EXT, placeNote, shotAt, shotLabel, shotSeek, snap, stepFrame,
 } from "../../web/src/lib.js";
 import type { Asset, Note, Section, Shot, TabState, Video } from "../../web/src/types.js";
+import {
+  mergeProxyJob, PLAYBACK_ERROR_REASON, proxyEstimateMb, proxyMeta, proxyPhase, proxyProgress, proxyReason, proxyTip, settleProxyJobs,
+  type ProxyJobs, type ProxyProgress,
+} from "../../web/src/lib.js";
 // Only this test imports the server's own list, so the web copy (ruling 1) is never pulled
 // into the web bundle -- this is purely to assert the two stay equal.
 import { OPEN_SAFE_EXT as SERVER_OPEN_SAFE_EXT } from "../../src/server/reveal.js";
@@ -273,12 +277,13 @@ describe("OPEN_SAFE_EXT (web copy)", () => {
 describe("FOLDERS", () => {
   it("lists the §16.1 folders in order, with Exports film-filter-free and Cuts/Delivery/Screenshots film-filtered", () => {
     expect(FOLDERS.map((f) => f.title)).toEqual([
-      "Screenshots", "Cuts", "Voiceover", "Music", "Sound effects",
+      "Screenshots", "Cuts", "Proxies", "Voiceover", "Music", "Sound effects",
       "Scripts & docs", "Images", "Captions", "Exports", "Delivery", "Edit files",
     ]);
     expect(FOLDERS.find((f) => f.id === "export")?.filmFilter).toBe(false);
     expect(FOLDERS.find((f) => f.id === "cut")?.filmFilter).toBe(true);
     expect(FOLDERS.find((f) => f.id === "delivery")?.filmFilter).toBe(true);
+    expect(FOLDERS.find((f) => f.id === "proxy")).toMatchObject({ kinds: ["proxy"], view: "list", filmFilter: true, gridToggle: false });
   });
   it("only offers the grid/list toggle for Screenshots, Images, Cuts and Delivery (I5)", () => {
     const withToggle = FOLDERS.filter((f) => f.gridToggle).map((f) => f.id).sort();
@@ -949,5 +954,88 @@ describe("onOptionGroups keeps same-named rounds apart", () => {
       { value: "b", label: "B", on: "y/b", group: "Voiceover", groupId: "round-y" },
     ]);
     expect(groups.map((g) => g.options.length)).toEqual([1, 1]);
+  });
+});
+
+describe("proxies (§19.5)", () => {
+  const job = (over: Partial<ProxyProgress> = {}): ProxyProgress => ({ job: "j1", video: "hero", version: "v1", pct: 0, state: "running", at: 1, ...over });
+
+  it("estimates the proxy at 1 MB a second (8 Mbit/s), rounded to 10 MB and never under 10", () => {
+    expect(proxyEstimateMb(6)).toBe(10);
+    expect(proxyEstimateMb(0)).toBe(10);
+    expect(proxyEstimateMb(NaN)).toBe(10);
+    expect(proxyEstimateMb(142)).toBe(140);
+    expect(proxyEstimateMb(145)).toBe(150);
+    expect(proxyTip(142)).toBe("Makes a lightweight 1080p copy on your drive so this cut previews smoothly. About 140 MB. Your original isn't changed.");
+  });
+
+  it("never moves a job backwards: a finished job stays finished, and its % never drops", () => {
+    let jobs: ProxyJobs = {};
+    jobs = mergeProxyJob(jobs, job({ pct: 40, at: 2 }));
+    expect(jobs["hero/v1"].pct).toBe(40);
+    expect(mergeProxyJob(jobs, job({ pct: 10, at: 3 }))).toBe(jobs);
+    jobs = mergeProxyJob(jobs, job({ pct: 100, state: "done", at: 4 }));
+    expect(mergeProxyJob(jobs, job({ pct: 99, at: 5 }))).toBe(jobs);
+    expect(jobs["hero/v1"].state).toBe("done");
+  });
+
+  it("a newer job for the same cut replaces the old one, older news never does", () => {
+    let jobs: ProxyJobs = mergeProxyJob({}, job({ state: "failed", reason: "x", at: 5 }));
+    expect(mergeProxyJob(jobs, job({ job: "j0", at: 3 }))).toBe(jobs);
+    jobs = mergeProxyJob(jobs, job({ job: "j2", at: 6 }));
+    expect(jobs["hero/v1"]).toMatchObject({ job: "j2", state: "running" });
+  });
+
+  it("turns a route's ProxyJob into the event's shape", () => {
+    expect(proxyProgress({ id: "j1", video: "hero", version: "v2", pct: 3, state: "failed", reason: "The original file is missing" }, 9)).toEqual({
+      job: "j1", video: "hero", version: "v2", pct: 3, state: "failed", reason: "The original file is missing", at: 9,
+    });
+  });
+
+  it("settling against a state seeds its running jobs and drops what it shows is over, but only older news", () => {
+    const noProxy = () => false;
+    // A tab opened mid-job: the state's running job is seeded.
+    const seeded = settleProxyJobs({}, [{ id: "j1", video: "hero", version: "v1", pct: 12, state: "running" }], 10, noProxy);
+    expect(seeded["hero/v1"]).toMatchObject({ job: "j1", pct: 12, state: "running", at: 10 });
+    // A running job the state no longer lists ended unseen: dropped.
+    expect(settleProxyJobs(seeded, [], 20, noProxy)).toEqual({});
+    // ...unless the news is newer than the fetch.
+    expect(settleProxyJobs(seeded, [], 5, noProxy)).toBe(seeded);
+    // A finished job whose proxy has gone (deleted) is dropped; one whose proxy is there stays.
+    const done = mergeProxyJob({}, job({ state: "done", pct: 100, at: 1 }));
+    expect(settleProxyJobs(done, [], 20, noProxy)).toEqual({});
+    expect(settleProxyJobs(done, [], 20, () => true)).toBe(done);
+    // Failed and cancelled jobs are kept: they're what the bar returns to the offer from.
+    const failed = mergeProxyJob({}, job({ state: "failed", at: 1 }));
+    expect(settleProxyJobs(failed, [], 20, noProxy)).toBe(failed);
+  });
+
+  it("picks the bar's row: nothing without ffmpeg, the offer needs a reason and no proxy, and ✓ only for a proxy watched being made", () => {
+    const base = { ffmpeg: true, need: null, broken: false, hasProxy: false, job: undefined, starting: false, watched: false };
+    expect(proxyPhase({ ...base, ffmpeg: false, need: "It's a ProRes file" })).toBe("none");
+    expect(proxyPhase(base)).toBe("none");
+    expect(proxyPhase({ ...base, need: "It's a ProRes file" })).toBe("offer");
+    expect(proxyPhase({ ...base, broken: true })).toBe("offer");
+    expect(proxyPhase({ ...base, need: "x", starting: true })).toBe("working");
+    expect(proxyPhase({ ...base, need: "x", job: job() })).toBe("working");
+    expect(proxyPhase({ ...base, need: "x", job: job({ state: "failed" }) })).toBe("offer");
+    expect(proxyPhase({ ...base, need: "x", job: job({ state: "cancelled" }) })).toBe("offer");
+    // Finished, but the record hasn't arrived yet: still working, at 100%.
+    expect(proxyPhase({ ...base, need: "x", job: job({ state: "done" }), watched: true })).toBe("working");
+    expect(proxyPhase({ ...base, need: "x", hasProxy: true, job: job({ state: "done" }), watched: true })).toBe("done");
+    expect(proxyPhase({ ...base, need: "x", hasProxy: true, job: job({ state: "done" }) })).toBe("none");
+    expect(proxyPhase({ ...base, need: "x", hasProxy: true })).toBe("none");
+  });
+
+  it("gives the server's reason, else the browser's refusal", () => {
+    expect(proxyReason("It's a ProRes file, which browsers struggle with", true)).toBe("It's a ProRes file, which browsers struggle with");
+    expect(proxyReason(null, true)).toBe(PLAYBACK_ERROR_REASON);
+    expect(PLAYBACK_ERROR_REASON).toBe("The browser couldn't play this file");
+    expect(proxyReason(undefined, false)).toBeNull();
+  });
+
+  it("describes a proxy as size · W×H · from vN, reusing formatBytes", () => {
+    expect(proxyMeta({ size: 148_897_792, width: 1920, height: 1080, version: "v3" })).toBe("142.0 MB · 1920×1080 · from v3");
+    expect(proxyMeta({ size: 1536, width: undefined, height: undefined, version: undefined })).toBe("2 KB");
   });
 });

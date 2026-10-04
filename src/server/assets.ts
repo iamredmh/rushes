@@ -5,7 +5,7 @@ import type { Store } from "../core/store.js";
 import { fromManifestPath } from "../core/paths.js";
 import { GRAB_PATH, SCREENSHOT_PATH, registeredMedia } from "./files.js";
 
-export type AssetKind = "screenshot" | "cut" | "take" | "music" | "sfx" | "voice" | FileKind;
+export type AssetKind = "screenshot" | "cut" | "proxy" | "take" | "music" | "sfx" | "voice" | FileKind;
 
 export interface Asset {
   kind: AssetKind;
@@ -33,6 +33,9 @@ export interface Asset {
   /** A voice/music/sfx variant's own meta (e.g. {bpm: 120, key: "A minor"}), for the same
    *  secondary text. Only present when the variant actually has any. */
   meta?: Record<string, string | number>;
+  /** A proxy's picture size (§19.5), from its record. */
+  width?: number;
+  height?: number;
 }
 
 /**
@@ -128,7 +131,7 @@ async function fileAsset(
   store: Store,
   kind: AssetKind,
   path: string,
-  extra: Partial<Pick<Asset, "video" | "version" | "section" | "lane" | "variant" | "note" | "label" | "laneName" | "meta">>,
+  extra: Partial<Pick<Asset, "video" | "version" | "section" | "lane" | "variant" | "note" | "label" | "laneName" | "meta" | "width" | "height">>,
 ): Promise<Asset> {
   const abs = fromManifestPath(store.root, path);
   const info = await statInfo(abs);
@@ -233,13 +236,17 @@ function variantEntries(
 
 /**
  * Every asset in the project: screenshots (newest modified first), then cuts (by video in
- * project order, newest version first), then takes, voice, music and sfx, each in manifest
+ * project order, newest version first), then proxies (§19.5, the same order, only for a cut that
+ * has one recorded), then takes, voice, music and sfx, each in manifest
  * order. Callers never need to sort this themselves. Every file this returns has been `stat`ed,
  * in parallel within each group, so a large project doesn't pay for it one file at a time.
  */
 export async function listAssets(store: Store, project: Project, script: Script): Promise<Asset[]> {
   const cutEntries = project.videos.flatMap((video) =>
     [...video.versions].reverse().map((version) => ({ video: video.id, version: version.id, file: version.file })),
+  );
+  const proxyEntries = project.videos.flatMap((video) =>
+    [...video.versions].reverse().flatMap((version) => (version.proxy ? [{ video: video.id, version: version.id, proxy: version.proxy }] : [])),
   );
   // A take has no name of its own in script.json (just an id and the text it was read against),
   // so its label is its ordinal within the section -- "Take 1", "Take 2" -- rather than the file
@@ -248,9 +255,10 @@ export async function listAssets(store: Store, project: Project, script: Script)
     section.takes.map((take, i) => ({ section: section.id, file: take.file, label: `Take ${i + 1}` })),
   );
 
-  const [[freshNames, oldNames], cuts, takes, voice, music, sfx] = await Promise.all([
+  const [[freshNames, oldNames], cuts, proxies, takes, voice, music, sfx] = await Promise.all([
     Promise.all([pngNames(store, SCREENSHOT_DIRS[0][0]), pngNames(store, SCREENSHOT_DIRS[1][0])]),
     Promise.all(cutEntries.map((e) => fileAsset(store, "cut", e.file, { video: e.video, version: e.version }))),
+    Promise.all(proxyEntries.map((e) => fileAsset(store, "proxy", e.proxy.file, { video: e.video, version: e.version, width: e.proxy.width, height: e.proxy.height }))),
     Promise.all(takeEntries.map((e) => fileAsset(store, "take", e.file, { section: e.section, label: e.label }))),
     Promise.all(variantEntries(project, "voice").map((e) => fileAsset(store, "voice", e.file, { lane: e.lane, laneName: e.laneName, variant: e.variant, label: e.label, meta: e.meta }))),
     Promise.all(variantEntries(project, "music").map((e) => fileAsset(store, "music", e.file, { lane: e.lane, laneName: e.laneName, variant: e.variant, label: e.label, meta: e.meta }))),
@@ -263,7 +271,7 @@ export async function listAssets(store: Store, project: Project, script: Script)
   const screenshots = [...fresh, ...old].sort((a, b) => b.mtimeMs - a.mtimeMs).map((x) => x.asset);
   const library = await libraryAssets(store, project);
 
-  return [...screenshots, ...cuts, ...takes, ...voice, ...music, ...sfx, ...library];
+  return [...screenshots, ...cuts, ...proxies, ...takes, ...voice, ...music, ...sfx, ...library];
 }
 
 /**

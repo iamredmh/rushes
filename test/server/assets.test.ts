@@ -97,6 +97,28 @@ describe("listAssets", () => {
     ]);
   });
 
+  it("lists a cut's proxy (§19.5) after the cuts, with its size, picture size and the cut it came from", async () => {
+    const { root, store } = await seeded();
+    await mkdir(join(root, "proxies"), { recursive: true });
+    await writeFile(join(root, "proxies", "hero_v1_proxy.mp4"), Buffer.alloc(1234));
+    await store.update("project", (p) => {
+      p.videos[0].versions[0].proxy = { file: "proxies/hero_v1_proxy.mp4", width: 1920, height: 1080, bytes: 1234, createdAt: new Date().toISOString() };
+    });
+    const [project, script] = await Promise.all([store.read("project"), store.read("script")]);
+    const assets = await listAssets(store, project, script);
+    expect(assets.map((a) => a.kind).slice(3, 6)).toEqual(["cut", "cut", "proxy"]);
+    const proxy = assets.find((a) => a.kind === "proxy")!;
+    expect(proxy).toMatchObject({
+      path: "proxies/hero_v1_proxy.mp4", name: "hero_v1_proxy.mp4", video: "hero", version: "v1", width: 1920, height: 1080, size: 1234, missing: false,
+    });
+  });
+
+  it("lists no proxy for a cut without one", async () => {
+    const { store, project, script } = await seeded();
+    const assets = await listAssets(store, project, script);
+    expect(assets.some((a) => a.kind === "proxy")).toBe(false);
+  });
+
   it("parses video/version/frame/t off a new-style screenshot name", async () => {
     const { store, root, project, script } = await seeded();
     const assets = await listAssets(store, project, script);

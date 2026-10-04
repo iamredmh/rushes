@@ -7,7 +7,7 @@ import {
 import { safeMarkdownHtml } from "../markdown.js";
 import type { Asset, Video } from "../types.js";
 import {
-  AssetRow, AudioRow, Lightbox, PosterTile, PreviewRow, ShotTile,
+  AssetRow, AudioRow, Lightbox, PosterTile, PreviewRow, ProxyRow, ShotTile,
 } from "./AssetViews.js";
 import { Icon } from "./Icon.js";
 
@@ -338,6 +338,13 @@ export function Assets({ assets, videos, toast, onChanged }: AssetsProps) {
               toast={toast}
             />
           ))}
+        </div>
+      );
+    }
+    if (folder.id === "proxy") {
+      return (
+        <div class="arows">
+          {items.map((a) => <ProxyRow key={a.path} asset={a} toast={toast} onChanged={onChanged} />)}
         </div>
       );
     }

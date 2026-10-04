@@ -1,12 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, ApiError } from "../api.js";
-import { LOCKED_TAB, STAGE_NAMES, agentPrompt, defaultVersion, firstTab, latest, neighbourVideo, snap } from "../lib.js";
+import { LOCKED_TAB, STAGE_NAMES, agentPrompt, defaultVersion, firstTab, latest, neighbourVideo, proxyKey, snap } from "../lib.js";
 import type { Batch, Stage, Video } from "../types.js";
 import { useRushes } from "../useRushes.js";
 import { Assets } from "./Assets.js";
 import { Icon, STAGE_ICONS } from "./Icon.js";
 import { Mix } from "./Mix.js";
-import { Picture } from "./Picture.js";
+import { Picture, type Source } from "./Picture.js";
 import { Script } from "./Script.js";
 import { VariantTab } from "./VariantTab.js";
 import { Voice } from "./Voice.js";
@@ -48,7 +48,7 @@ function Locked({ tab, projectName, filmName, toast }: { tab: Stage | "assets"; 
 }
 
 export function App() {
-  const { state, assets, problem, wrongProject, refresh } = useRushes();
+  const { state, assets, problem, wrongProject, refresh, proxyJobs, noteProxyJob } = useRushes();
   const [stage, setStage] = useState<View | null>(null);
   const [videoId, setVideoId] = useState<string | null>(null);
   const [versionId, setVersionId] = useState<string | null>(null);
@@ -75,12 +75,26 @@ export function App() {
   const playerRef = useRef<HTMLVideoElement | null>(null);
   // Tells Picture whenever its pending grab changes, so App can remember it per film.
   const setGrabFor = (forVideo: string, grab: string | null) => setGrabs((g) => ({ ...g, [forVideo]: grab }));
+  // §19.5: each film's Proxy/Original choice, in memory only. Proxy unless you've picked Original.
+  const [sources, setSources] = useState<Record<string, Source>>({});
+  const setSourceFor = (forVideo: string, source: Source) => setSources((s) => ({ ...s, [forVideo]: source }));
+  // Proxy jobs whose failure has already been toasted, so each is said once.
+  const toastedFailures = useRef(new Set<string>());
 
   const toast = (message: string) => {
     setToastText(message);
     clearTimeout(toastTimer.current);
     toastTimer.current = window.setTimeout(() => setToastText(null), 2400);
   };
+
+  // §19.5: a proxy that fails says why, in whichever tab is open; the bar returns to the offer.
+  useEffect(() => {
+    for (const p of Object.values(proxyJobs)) {
+      if (p.state !== "failed" || toastedFailures.current.has(p.job)) continue;
+      toastedFailures.current.add(p.job);
+      toast(p.reason ?? "Couldn't make the proxy");
+    }
+  }, [proxyJobs]);
 
   // First load: pick a tab and a video.
   useEffect(() => {
@@ -430,6 +444,12 @@ export function App() {
             grab={grabs[video.id] ?? null}
             onGrabChange={setGrabFor}
             playerRef={playerRef}
+            ffmpeg={state.proxies?.ffmpeg ?? false}
+            autoProxy={state.project.autoProxy}
+            proxyJob={proxyJobs[proxyKey(video.id, version.id)]}
+            noteProxyJob={noteProxyJob}
+            source={sources[video.id] ?? "proxy"}
+            onSourceChange={setSourceFor}
           />
         ) : stage === "script" ? (
           <Script script={state.script} toast={toast} onChanged={() => void refresh()} />
