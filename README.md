@@ -37,7 +37,7 @@ If your user asked you to use Rushes, do this:
 2. If it added anything, tell the user to restart the app (or start a new session) so the `rushes_*` tools load.
 3. From then on, follow [AGENTS.md](AGENTS.md). In short: register what you made, call `rushes_open`, wait for the user to press **Send to agent**, then `rushes_get_batch`, fix the notes, and `rushes_reply`.
 
-The MCP server has sixteen tools: `rushes_open`, `rushes_status`, `rushes_add_version`, `rushes_add_variant`, `rushes_set_script`, `rushes_get_script`, `rushes_add_take`, `rushes_list_notes`, `rushes_list_assets`, `rushes_get_batch`, `rushes_reply`, `rushes_get_picks`, `rushes_set_shots`, `rushes_lock_picture`, `rushes_add_file` and `rushes_export_notes`.
+The MCP server has seventeen tools: `rushes_open`, `rushes_status`, `rushes_add_version`, `rushes_add_variant`, `rushes_set_script`, `rushes_get_script`, `rushes_add_take`, `rushes_list_notes`, `rushes_list_assets`, `rushes_get_batch`, `rushes_reply`, `rushes_get_picks`, `rushes_set_shots`, `rushes_lock_picture`, `rushes_add_file`, `rushes_export_notes` and `rushes_doctor`.
 
 If you can't run commands, give the user the matching line from **Manual setup** below.
 
@@ -70,6 +70,25 @@ Each project opens at its own address, `http://127.0.0.1:4580/p/<id>/` — safe 
 
 A server your agent starts in the background stops by itself after two hours with nothing connected.
 
+### Try it first: `rushes demo`
+
+No project to hand? Build one:
+
+```bash
+npx -y github:iamredmh/rushes demo    # creates ./rushes-demo and opens it
+```
+
+It generates a complete example on your machine — a 30 s test film in two cuts, a short script, voice reads in two rounds, two music beds, an SFX pass, and example notes on Picture, Voiceover, Music and Mix — so every tab has something in it from the start. Nothing is downloaded and nothing ships with Rushes; it's all made locally with ffmpeg and, where available, your system's text-to-speech. It needs ffmpeg — without it, `demo` says so and points you at `rushes doctor`. It refuses to write into a folder that isn't empty. Pass a folder name to put it somewhere else, and `--no-browser` to skip opening it.
+
+### Health check: `rushes doctor`
+
+```bash
+npx -y github:iamredmh/rushes doctor          # Node, ffmpeg, which agents have Rushes, this project, free disk space
+npx -y github:iamredmh/rushes doctor --json   # the same checks as data
+```
+
+Each check prints ✓ or ✗ with a plain fix, e.g. `✗ Claude Code — the Rushes MCP server isn't registered. Fix: rushes setup --only claude-code`. Only the Node version has to pass; ffmpeg is recommended (proxies and loudness need it) but not required. Run it from inside a project folder to add file, server and disk checks. Agents get the same checks from the `rushes_doctor` tool.
+
 ## Shortcuts
 
 In the Picture tab:
@@ -94,6 +113,14 @@ Anywhere:
 - **[ / ]** previous/next film
 - **?** shortcuts
 - **Esc** close
+
+## Locked tabs
+
+Every tab is visible from the start, in workflow order, even before there's anything in it. A locked tab isn't a dead end: open it and it explains itself — what the tab is for, what unlocks it, and a **Copy prompt for your agent** button that copies a ready-to-paste request naming your project, the film, and the tool your agent should use, e.g.:
+
+> In Rushes project "Launch", make two or three music beds for "Hero" and add each with rushes_add_variant (stage "music") with a one-line description.
+
+Hovering a locked tab shows the same thing as a tooltip. The Assets tab follows the same rule.
 
 ## Screenshots and the Assets library
 
@@ -121,6 +148,14 @@ Rushes creates `screenshots/` itself on the first grab. It never creates the oth
 
 A project with more than one film gets numbered pills in the header — `[`/`]` switch between them, and each film remembers its own version and playhead. The header reads **Picture vN**, with a lock button beside it: lock a film at a cut and the dashboard opens on that cut until you unlock it. A version can carry a shot list from the storyboard, shown as a strip under the timeline, and every Picture note records the shot it falls in.
 
+## Proxies
+
+Some cuts play badly in a browser: 4K or larger, over 1.5 GB, a codec browsers can't play reliably (ProRes, DNx, HEVC 10-bit — anything that isn't H.264, VP9 or AV1), or one that threw a playback error. Rushes checks with ffprobe as the cut is added, and if it's likely to struggle, a bar appears under the player saying why in a few words, with a **Create proxy** button. It makes a lightweight 1080p H.264 copy on your drive — your original file is never changed — with visible progress and **Cancel**. Notes, timecodes and frame numbers are identical on the proxy and the original.
+
+Once it's ready, a **Proxy / Original** switch appears on the player (defaults to Proxy, remembered per film). **Grab Frame** always takes the still from the original at full quality, whichever one you're watching. Tick "Create proxies for new cuts like this automatically" (off by default, saved per project) to skip the offer next time. The **Assets** tab has a **Proxies** folder listing each one with its size and a **Delete proxy** button; deleting removes only the proxy file, never the original.
+
+Without ffmpeg, no proxy is ever offered.
+
 ## Audio review
 
 The Voiceover, Music, Sound effects and Mix tabs share one audio engine, so switching what you hear is instant and never restarts playback or knocks picture out of sync.
@@ -132,6 +167,7 @@ Voiceover works in rounds: the same script read by a few voices, then variations
 - On Voiceover, a note is **Whole** (`Speaker`, `Pacing`, `Tone` or `Overall` — the read as a whole) or **Point** (`Fix this` or `Keep this`, marked at the playhead). There's no Range scope and no Rise/Fall/Louder/Quieter marks there.
 - On Music, Sound effects and Mix, a note can carry marks: toggle **Rise**, **Fall**, **Louder** or **Quieter** (with a dB amount, 3 by default) to say how a range should change — "Fall" or "Quieter 3 dB".
 - **Mix** shows a loudness readout — integrated LUFS, true peak, and the music's level under the VO — measured over exactly what Mix plays, using the newest round's picked voice read. It needs **ffmpeg** on your PATH; without it, the readout shows "—". After a timeout or an error, click the readout to measure again.
+- Each **Mix** lane (Voiceover, Music, Sound effects) has a level slider, −24 dB to +6 dB in 0.5 dB steps, shown as e.g. `−14.0 dB`. Double-click resets it to 0; arrow keys move it 0.5 dB at a time. Levels are saved with your picks, never change a file, and the loudness readout is measured with them applied.
 
 ## What gets saved
 
@@ -156,6 +192,10 @@ npm run rushes -- open ../some-project
 ```
 
 ffmpeg and ffprobe are optional. With them installed, Rushes reads frame rates and durations and can make browser-playable copies.
+
+## Publishing (maintainers)
+
+Run `npm login` once in Terminal — it confirms in your browser. Then, with the maintainer's OK at the time, `npm publish`. npm may ask for a one-time code; enter it when it does.
 
 ## Licence
 

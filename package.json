@@ -1,6 +1,6 @@
 {
   "name": "rushes",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A local review desk for video made with AI agents: timecoded notes, script edits and audio picks your agent can read and act on.",
   "type": "module",
   "license": "MIT",
@@ -13,7 +13,11 @@
     "dist",
     "web-dist",
     "skills",
-    "AGENTS.md"
+    ".claude-plugin",
+    ".mcp.json",
+    "README.md",
+    "AGENTS.md",
+    "LICENSE"
   ],
   "engines": {
     "node": "^20.19.0 || >=22.12.0"
@@ -24,7 +28,8 @@
     "test": "vitest run",
     "rushes": "tsx src/cli/index.ts",
     "prepare": "npm run build",
-    "test:e2e": "npm run build && playwright test"
+    "test:e2e": "npm run build && playwright test",
+    "prepublishOnly": "npm run build && npm run typecheck && npx vitest run"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.3",

@@ -2,6 +2,11 @@ import { join } from "node:path";
 
 /** What every harness runs to start the Rushes MCP server. Switches to "rushes" once it's on npm. */
 export const SOURCE = "github:iamredmh/rushes";
+/**
+ * The package name once Rushes is on npm (§19.7). Not wired in yet: `SOURCE` keeps pointing at
+ * GitHub until the publish commit switches it over, alongside the docs, in the same release.
+ */
+export const NPM_SOURCE = "rushes";
 /** The launch everywhere except Windows. */
 export const MCP_COMMAND = "npx";
 export const MCP_ARGS = ["-y", SOURCE, "mcp"];
