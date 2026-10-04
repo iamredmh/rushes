@@ -1,7 +1,8 @@
 import { access, copyFile, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { expect, hasFfmpeg, needsH264, test, videoReady } from "./fixture.js";
+import type { BrowserContext, Page } from "@playwright/test";
+import { expect, hasFfmpeg, needsH264, type Rushes, test, videoReady } from "./fixture.js";
 
 const CLIP = fileURLToPath(new URL("./fixtures/clip.mp4", import.meta.url));
 // A 1x1 transparent PNG, reused for every screenshot the library tests need on disk: its
@@ -1320,12 +1321,9 @@ test.describe("proxies (§19.5)", () => {
     const late = await context.newPage();
     await late.goto(rushes.url);
     await expect(late.locator(".proxybar")).toContainText("Creating proxy");
-    // Cancelled from outside the browser, the way an agent would: three tabs, each with its event
-    // stream and a long file loading, can fill Chromium's six connections to one host, and a
-    // Cancel clicked in one of them then waits for a free socket. (The button itself is covered by
-    // "Cancel stops a proxy part-way".) What this test is for is that the end reaches every tab.
-    const { proxies } = await rushes.api("GET", "/api/state");
-    await rushes.api("DELETE", `/api/proxy-jobs/${proxies.jobs[0].id}`, {});
+    // Cancelled from the tab opened last. The tabs share one event stream (§19.8), so three of them
+    // and their long file loading no longer fill Chromium's six connections to one host.
+    await late.locator(".proxybar").getByRole("button", { name: "Cancel" }).click();
     for (const tab of [page, other, late]) {
       await expect(tab.locator(".proxybar").getByRole("button", { name: "Create proxy" })).toBeVisible();
     }
@@ -1518,5 +1516,64 @@ test.describe("proxies (§19.5)", () => {
     await expect(page.getByRole("status")).toHaveText("Saved to screenshots/hero_v1_00m00.33s_f10.png");
     const png = await readFile(join(rushes.root, "screenshots", "hero_v1_00m00.33s_f10.png"));
     expect(pngWidth(png)).toBe(2400);
+  });
+});
+
+// ---- One live connection for every open tab (§19.8) ----
+
+test.describe("tabs share one live connection (§19.8)", () => {
+  type Live = { __rushesLive?: { role(): string } };
+  /** Event streams the server has open now. */
+  const streams = async (rushes: Rushes) => (await rushes.api<{ sse: number }>("GET", "/api/health?test=1")).sse;
+  /** Four tabs on the project, each up and showing its cut. */
+  async function fourTabs(page: Page, context: BrowserContext, rushes: Rushes) {
+    const tabs = [page, ...(await Promise.all([1, 2, 3].map(() => context.newPage())))];
+    for (const tab of tabs) {
+      await tab.goto(rushes.testUrl());
+      await expect(tab.getByRole("combobox", { name: "Version" })).toHaveValue("v1");
+    }
+    await expect.poll(() => Promise.all(tabs.map((t) => t.evaluate(() => (window as Live).__rushesLive?.role() ?? null)))).toEqual(
+      ["leader", "follower", "follower", "follower"],
+    );
+    return tabs;
+  }
+  const note = (rushes: Rushes, text: string) =>
+    rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 1, text }).then((r) => r.note.id as string);
+
+  test("four tabs hold one event stream between them, and a change reaches all four", async ({ page, context, rushes }) => {
+    await rushes.addCut();
+    const tabs = await fourTabs(page, context, rushes);
+    await expect.poll(() => streams(rushes)).toBe(1);
+    const id = await note(rushes, "From the agent.");
+    for (const tab of tabs) await expect(tab.locator(`.note[data-note="${id}"]`)).toBeVisible();
+    expect(await streams(rushes)).toBe(1);
+  });
+
+  test("when the leader tab closes, another takes the stream and changes still reach the rest", async ({ page, context, rushes }) => {
+    await rushes.addCut();
+    const [leader, ...rest] = await fourTabs(page, context, rushes);
+    await leader.close();
+    await expect.poll(() => Promise.all(rest.map((t) => t.evaluate(() => (window as Live).__rushesLive!.role())))).toContain("leader");
+    await expect.poll(() => streams(rushes)).toBe(1);
+    const id = await note(rushes, "After the leader left.");
+    for (const tab of rest) await expect(tab.locator(`.note[data-note="${id}"]`)).toBeVisible();
+  });
+
+  test("with four tabs open, Cancel on a proxy from the fourth completes promptly", async ({ page, context, rushes }) => {
+    test.skip(!hasFfmpeg, "needs ffmpeg and ffprobe");
+    await rushes.addProResCut({ long: true });
+    const tabs = [page, ...(await Promise.all([1, 2, 3].map(() => context.newPage())))];
+    for (const tab of tabs) {
+      await tab.goto(rushes.testUrl());
+      await expect(tab.locator(".proxybar").getByRole("button", { name: "Create proxy" })).toBeVisible();
+    }
+    await expect.poll(() => streams(rushes)).toBe(1);
+    await tabs[0].locator(".proxybar").getByRole("button", { name: "Create proxy" }).click();
+    const fourth = tabs[3].locator(".proxybar");
+    await expect(fourth).toContainText("Creating proxy");
+    await fourth.getByRole("button", { name: "Cancel" }).click();
+    // Promptly: well inside the time a stalled request would wait for a free socket.
+    for (const tab of tabs) await expect(tab.locator(".proxybar").getByRole("button", { name: "Create proxy" })).toBeVisible({ timeout: 3000 });
+    expect((await rushes.api("GET", "/api/state")).proxies.jobs).toEqual([]);
   });
 });

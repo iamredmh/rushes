@@ -465,9 +465,13 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     return c.json({ ok: true, stopping: !!opts.onShutdown });
   });
 
+  // Event streams open now. Only `?test=1` shows it, so the e2e suite can check that a browser's
+  // tabs share one stream (§19.8).
+  let streams = 0;
   app.get("/api/health", async (c) => {
     const [project, id] = await Promise.all([store.read("project"), getProjectId()]);
-    return c.json({ ok: true, app: "rushes", version: VERSION, root: store.root, id, name: project.name });
+    const health = { ok: true, app: "rushes", version: VERSION, root: store.root, id, name: project.name };
+    return c.json(c.req.query("test") === "1" ? { ...health, sse: streams } : health);
   });
 
   app.get("/api/state", async (c) => {
@@ -749,7 +753,9 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
       store.on("change", send);
       store.on("corrupt", corrupt);
       store.on("proxy", proxy);
+      streams++;
       stream.onAbort(() => {
+        streams--;
         store.off("change", send);
         store.off("corrupt", corrupt);
         store.off("proxy", proxy);

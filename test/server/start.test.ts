@@ -69,6 +69,22 @@ describe("startServer", () => {
     await s.close();
   });
 
+  it("counts open event streams for tests, on /api/health?test=1 only", async () => {
+    const { root } = await tmpProject();
+    const s = await startServer(root, { port: 0 });
+    const health = async (q = "?test=1") => (await (await fetch(`${s.url}/api/health${q}`)).json()) as { sse?: number };
+    expect(await health()).toMatchObject({ sse: 0 });
+    expect(await health("")).not.toHaveProperty("sse");
+    const ctrl = new AbortController();
+    const res = await fetch(`${s.url}/api/events`, { signal: ctrl.signal });
+    const reader = res.body!.getReader();
+    await reader.read();
+    expect(await health()).toMatchObject({ sse: 1 });
+    ctrl.abort();
+    await expect.poll(async () => (await health()).sse).toBe(0);
+    await s.close();
+  });
+
   it("uses the real path as the root, so a symlinked path finds the same server", async () => {
     const { root } = await tmpProject();
     const link = join(dirname(root), "Linked Project");

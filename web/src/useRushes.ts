@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
-import { api, ApiError, eventsUrl } from "./api.js";
-import { mergeProxyJob, proxyProgress, settleProxyJobs, type ProxyJobs } from "./lib.js";
+import { api, ApiError, eventsUrl, projectId } from "./api.js";
+import { mergeProxyJob, proxyProgress, settleProxyJobs, testFlags, type ProxyJobs } from "./lib.js";
+import { connectLive, type LiveRole } from "./live.js";
 import type { Asset, ProxyEvent, ProxyJob, State } from "./types.js";
 
 export interface Live {
@@ -21,7 +22,15 @@ export interface Live {
   noteProxyJob(job: ProxyJob): void;
 }
 
-/** The project's state, kept current from the server's change events. */
+declare global {
+  interface Window {
+    /** Test-only (`?test=1`): which tab holds the shared event stream (§19.8). */
+    __rushesLive?: { role(): LiveRole };
+  }
+}
+
+/** The project's state, kept current from the server's change events, heard through one
+ *  connection that every open tab on the project shares (live.ts). */
 export function useRushes(): Live {
   const [state, setState] = useState<State | null>(null);
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -95,32 +104,36 @@ export function useRushes(): Live {
 
   useEffect(() => {
     void refresh();
-    const events = new EventSource(eventsUrl());
-    events.addEventListener("change", () => {
-      // Several files often change together; fetch once.
-      clearTimeout(timer.current);
-      timer.current = window.setTimeout(() => void refresh(), 40);
+    const live = connectLive(projectId() ?? "", eventsUrl(), {
+      change() {
+        // Several files often change together; fetch once.
+        clearTimeout(timer.current);
+        timer.current = window.setTimeout(() => void refresh(), 40);
+      },
+      proxy(data) {
+        const event = JSON.parse(data) as ProxyEvent;
+        setProxyJobs((jobs) => mergeProxyJob(jobs, { ...event, at: performance.now() }));
+      },
+      corrupt(data) {
+        const { file } = JSON.parse(data) as { file: string };
+        setProblem(`${file} has an error and wasn't loaded. Fix or restore it, and Rushes will pick it up.`);
+      },
+      // The stream's state, heard by every tab (relayed from the leader's): a follower notices a
+      // server that's gone the same way, and its refresh() failures drive the same backoff.
+      error() {
+        setProblem("Lost touch with the Rushes server. Retrying…");
+        if (refreshingFromError.current) return;
+        refreshingFromError.current = true;
+        void refresh().finally(() => { refreshingFromError.current = false; });
+      },
+      open() {
+        refreshingFromError.current = false;
+        void refresh();
+      },
     });
-    events.addEventListener("proxy", (e) => {
-      const event = JSON.parse((e as MessageEvent).data) as ProxyEvent;
-      setProxyJobs((jobs) => mergeProxyJob(jobs, { ...event, at: performance.now() }));
-    });
-    events.addEventListener("corrupt", (e) => {
-      const { file } = JSON.parse((e as MessageEvent).data) as { file: string };
-      setProblem(`${file} has an error and wasn't loaded. Fix or restore it, and Rushes will pick it up.`);
-    });
-    events.onerror = () => {
-      setProblem("Lost touch with the Rushes server. Retrying…");
-      if (refreshingFromError.current) return;
-      refreshingFromError.current = true;
-      void refresh().finally(() => { refreshingFromError.current = false; });
-    };
-    events.onopen = () => {
-      refreshingFromError.current = false;
-      void refresh();
-    };
+    if (testFlags(location.search).test) window.__rushesLive = { role: () => live.role() };
     return () => {
-      events.close();
+      live.close();
       clearTimeout(timer.current);
       clearTimeout(retryTimer.current);
     };
