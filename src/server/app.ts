@@ -88,6 +88,7 @@ const VariantBody = z.object({
   name: z.string().min(1),
   file: z.string().min(1),
   meta: z.record(z.string(), z.union([z.string(), z.number()])).optional(),
+  description: z.string().min(1).max(200).optional(),
   cues: z.array(z.object({ name: z.string().min(1), t })).optional(),
 });
 const ScriptBody = z.object({

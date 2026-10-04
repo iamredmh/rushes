@@ -121,6 +121,18 @@ describe("MCP tools", () => {
     await t.close();
   });
 
+  it("rushes_add_variant takes a description and stores it as meta.description, over any in meta", async () => {
+    const t = await connect();
+    const { tools } = await t.client.listTools();
+    const props = tools.find((x) => x.name === "rushes_add_variant")!.inputSchema.properties as Record<string, { description?: string }>;
+    expect(props.description?.description ?? "").toMatch(/meta\.description/);
+    const r = await t.call("rushes_add_variant", { stage: "voice", name: "Gerald", file: "g.wav", round: "Round 1", description: "Warmer, slower intro" });
+    expect(r.json.variant.meta).toEqual({ description: "Warmer, slower intro" });
+    const m = await t.call("rushes_add_variant", { stage: "music", name: "Bed", file: "b.wav", meta: { bpm: 120, description: "old" }, description: "New" });
+    expect(m.json.variant.meta).toEqual({ bpm: 120, description: "New" });
+    await t.close();
+  });
+
   it("rushes_open's url is the project's own dashboard address", async () => {
     const t = await connect();
     const r = await t.call("rushes_open", { browser: false });

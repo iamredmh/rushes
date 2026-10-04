@@ -302,6 +302,18 @@ describe("API", () => {
     expect(picks.json.lanes).toEqual({ music: "deep-house" });
   });
 
+  it("a variant's description is stored as meta.description, merged with meta, and wins over meta's own", async () => {
+    const { call } = await setup();
+    const a = await call("POST", "/api/variants", { stage: "voice", name: "Gerald", file: "audio/g.wav", round: "Round 1", description: "Warmer, slower intro" });
+    expect(a.status).toBe(201);
+    expect(a.json.variant.meta).toEqual({ description: "Warmer, slower intro" });
+    const b = await call("POST", "/api/variants", { stage: "music", name: "Bed", file: "audio/b.wav", meta: { bpm: 120, description: "old" }, description: "New" });
+    expect(b.json.variant.meta).toEqual({ bpm: 120, description: "New" });
+    const c = await call("POST", "/api/variants", { stage: "music", name: "Bed 2", file: "audio/b2.wav", meta: { description: "Kept" } });
+    expect(c.json.variant.meta).toEqual({ description: "Kept" });
+    expect((await call("POST", "/api/variants", { stage: "music", name: "Bed 3", file: "audio/b3.wav", description: "x".repeat(201) })).status).toBe(400);
+  });
+
   it("a round name is capped at 64 characters, so its lane id always fits", async () => {
     const { call } = await setup();
     const ok = await call("POST", "/api/variants", { stage: "voice", name: "Gerald", file: "audio/g.wav", round: "R".repeat(64) });

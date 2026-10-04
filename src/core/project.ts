@@ -101,6 +101,8 @@ export interface AddVariantInput {
   name: string;
   file: string;
   meta?: Record<string, string | number>;
+  /** The one-line description the lane card shows. Stored as `meta.description`; wins over a `description` inside `meta`. */
+  description?: string;
   cues?: { name: string; t: number }[];
 }
 
@@ -123,7 +125,7 @@ export function addVariant(p: Project, input: AddVariantInput): { lane: Lane; va
     id: uniqueId(slugify(input.name), lane.variants.map((v) => v.id)),
     name: input.name,
     file: input.file,
-    meta: input.meta ?? {},
+    meta: input.description === undefined ? { ...input.meta } : { ...input.meta, description: input.description },
     cues,
   };
   lane.variants.push(variant);

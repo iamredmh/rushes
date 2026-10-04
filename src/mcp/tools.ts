@@ -140,6 +140,12 @@ export function createMcpServer(ctx: ToolContext): McpServer {
             'Round name for voice reads (up to 64 characters), e.g. "Round 2 · Gerald, tone". Reads in one round are compared side by side; a new direction gets a new round.',
           ),
         meta: z.record(z.string(), z.union([z.string(), z.number()])).optional().describe("e.g. {\"bpm\": 120, \"key\": \"A minor\"}"),
+        description: z
+          .string()
+          .min(1)
+          .max(200)
+          .optional()
+          .describe("One line on what this read, bed or pass is, shown on its lane card. Stored as meta.description, and wins over one given in meta."),
         cues: z.array(z.object({ name: z.string(), t: z.number().nonnegative() })).optional().describe("SFX cues with times in seconds."),
       },
     },

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { access, mkdir, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
 import { main, longRunningCommand, type Io } from "../../src/cli/main.js";
@@ -133,6 +133,16 @@ describe("cli", () => {
     const a = io(root);
     expect(await main(["add", "variant", "voice", "audio/g.wav", "--name", "Gerald", "--round", "Round 1 · Voices"], a.x)).toBe(0);
     expect(a.out.pop()).toBe("Added Round 1 · Voices: Gerald");
+    await s.close();
+  });
+
+  it("add variant --description stores the one-line description as meta.description", async () => {
+    const { root } = await tmpProject("spring-launch");
+    const s = await startServer(root, { port: 0 });
+    const a = io(root);
+    expect(await main(["add", "variant", "voice", "audio/g.wav", "--name", "Gerald", "--round", "Round 1", "--description", "Warmer, slower intro"], a.x)).toBe(0);
+    const project = JSON.parse(await readFile(join(root, ".rushes", "project.json"), "utf8"));
+    expect(project.lanes[0].variants[0].meta).toEqual({ description: "Warmer, slower intro" });
     await s.close();
   });
 
