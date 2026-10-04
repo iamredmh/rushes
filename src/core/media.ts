@@ -35,16 +35,45 @@ export function parseRate(rate: string | undefined): number | null {
   return Number.isFinite(v) && v > 0 ? Math.round(v * 1000) / 1000 : null;
 }
 
-/** Read duration, frame rate, codec, size and pixel format with ffprobe. Returns nulls when ffprobe is missing or fails. */
-export async function probe(file: string): Promise<Probe> {
-  if (!(await hasFfprobe())) return { ...NO_PROBE };
+/** How long one ffprobe may run before it's killed and treated as no probe (a stalled network volume, say). */
+export const PROBE_TIMEOUT_MS = 20_000;
+
+/**
+ * Read duration, frame rate, codec, size and pixel format with ffprobe. Returns nulls when ffprobe
+ * is missing or fails, takes longer than `timeout` (default 20 s), or `signal` aborts.
+ */
+export async function probe(file: string, opts: { timeout?: number; signal?: AbortSignal } = {}): Promise<Probe> {
+  if (opts.signal?.aborted || !(await hasFfprobe())) return { ...NO_PROBE };
+  const timeout = opts.timeout ?? PROBE_TIMEOUT_MS;
+  // execFile kills ffprobe at `timeout` or on abort, but only answers once it has exited. A
+  // process stuck in an uninterruptible read can outlive SIGKILL, so give up on waiting too.
+  let timer: NodeJS.Timeout | undefined;
+  let onAbort: (() => void) | undefined;
+  const giveUp = new Promise<Probe>((res) => {
+    timer = setTimeout(() => res({ ...NO_PROBE }), timeout + 1_000);
+    onAbort = () => res({ ...NO_PROBE });
+    opts.signal?.addEventListener("abort", onAbort, { once: true });
+  });
   try {
-    const { stdout } = await run("ffprobe", [
-      "-v", "error",
-      "-show_entries", "format=duration:stream=codec_type,codec_name,width,height,pix_fmt,avg_frame_rate,r_frame_rate",
-      "-of", "json",
-      file,
-    ]);
+    return await Promise.race([readProbe(file, timeout, opts.signal), giveUp]);
+  } finally {
+    clearTimeout(timer);
+    if (onAbort) opts.signal?.removeEventListener("abort", onAbort);
+  }
+}
+
+async function readProbe(file: string, timeout: number, signal: AbortSignal | undefined): Promise<Probe> {
+  try {
+    const { stdout } = await run(
+      "ffprobe",
+      [
+        "-v", "error",
+        "-show_entries", "format=duration:stream=codec_type,codec_name,width,height,pix_fmt,avg_frame_rate,r_frame_rate",
+        "-of", "json",
+        file,
+      ],
+      { timeout, killSignal: "SIGKILL", signal },
+    );
     const j = JSON.parse(stdout) as {
       format?: { duration?: string };
       streams?: {

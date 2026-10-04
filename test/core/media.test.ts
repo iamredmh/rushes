@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { proxyNeed, type Probe } from "../../src/core/media.js";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { delimiter, join } from "node:path";
+import { PROBE_TIMEOUT_MS, probe as mediaProbe, proxyNeed, type Probe } from "../../src/core/media.js";
 
 const probe = (p: Partial<Probe>): Probe => ({ duration: 10, fps: 25, codec: "h264", width: 1920, height: 1080, pixFmt: "yuv420p", ...p });
 
@@ -45,5 +48,44 @@ describe("proxyNeed (§19.5)", () => {
 
   it("offers nothing when nothing is known (no ffprobe)", () => {
     expect(proxyNeed({ duration: null, fps: null, codec: null, width: null, height: null, pixFmt: null }, null)).toBeNull();
+  });
+});
+
+describe("probe: a hung ffprobe never holds a slot for good (Minor 8)", () => {
+  /** Puts a fake `ffprobe` first on PATH that answers -version, then hangs on any real probe. */
+  async function withHangingFfprobe(fn: () => Promise<void>): Promise<void> {
+    const dir = await mkdtemp(join(tmpdir(), "rushes-ffprobe-"));
+    const bin = join(dir, "ffprobe");
+    await writeFile(bin, '#!/bin/sh\nif [ "$1" = "-version" ]; then echo "ffprobe version 8.1"; exit 0; fi\nexec sleep 30\n', "utf8");
+    await chmod(bin, 0o755);
+    const path = process.env.PATH;
+    process.env.PATH = `${dir}${delimiter}${path ?? ""}`;
+    try {
+      await fn();
+    } finally {
+      process.env.PATH = path;
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+
+  it.runIf(process.platform !== "win32")("gives up after its timeout and reports nothing known", async () => {
+    await withHangingFfprobe(async () => {
+      const started = Date.now();
+      expect(await mediaProbe("/nowhere.mov", { timeout: 300 })).toEqual({ duration: null, fps: null, codec: null, width: null, height: null, pixFmt: null });
+      expect(Date.now() - started).toBeLessThan(5_000);
+    });
+  }, 10_000);
+
+  it.runIf(process.platform !== "win32")("stops when its signal aborts", async () => {
+    await withHangingFfprobe(async () => {
+      const controller = new AbortController();
+      const p = mediaProbe("/nowhere.mov", { signal: controller.signal });
+      setTimeout(() => controller.abort(), 100);
+      expect((await p).duration).toBeNull();
+    });
+  }, 10_000);
+
+  it("waits 20 s by default", () => {
+    expect(PROBE_TIMEOUT_MS).toBe(20_000);
   });
 });

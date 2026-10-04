@@ -166,8 +166,8 @@ export interface ProxyEvent {
 export interface ProxyJobsOptions {
   /** Runs ffmpeg. Defaults to a real spawn. */
   run?: FfmpegRunner;
-  /** Reads a file's duration, codec and size. Defaults to ffprobe. */
-  probe?: (abs: string) => Promise<Probe>;
+  /** Reads a file's duration, codec and size, stopping when `signal` aborts. Defaults to ffprobe. */
+  probe?: (abs: string, signal?: AbortSignal) => Promise<Probe>;
   /** Whether ffmpeg and ffprobe are both on PATH. Defaults to checking each once. */
   available?: () => Promise<boolean>;
   /** How many file revisions' needs are remembered. Defaults to 500. */
@@ -193,7 +193,7 @@ export const PROBE_CONCURRENCY = 2;
  */
 export class ProxyJobs {
   readonly run: FfmpegRunner;
-  readonly probe: (abs: string) => Promise<Probe>;
+  private readonly probeFile: (abs: string, signal?: AbortSignal) => Promise<Probe>;
   private readonly isAvailable: () => Promise<boolean>;
   private availableOnce: Promise<boolean> | null = null;
   private versionOnce: Promise<{ ok: boolean; version: FfmpegVersion | null }> | null = null;
@@ -209,13 +209,15 @@ export class ProxyJobs {
   private probeIdle: { promise: Promise<void>; resolve: () => void } | null = null;
   // Frame extractions in flight, by original and time: identical requests share one ffmpeg.
   private readonly frames = new Map<string, Promise<Buffer | null>>();
+  // Every frame extraction and probe in flight, so close() can stop them rather than leave orphans.
+  private readonly inflight = new Set<AbortController>();
 
   constructor(
     private readonly store: Store,
     opts: ProxyJobsOptions = {},
   ) {
     this.run = opts.run ?? defaultFfmpeg;
-    this.probe = opts.probe ?? ffprobe;
+    this.probeFile = opts.probe ?? ((abs, signal) => ffprobe(abs, { signal }));
     this.needCacheLimit = opts.needCacheLimit ?? NEED_CACHE_LIMIT;
     const injected = opts.available;
     this.isAvailable = () =>
@@ -315,10 +317,28 @@ export class ProxyJobs {
     return r.settled;
   }
 
-  /** Stops taking new jobs and cancels every running one. Used when the server closes. */
+  /** Stops taking new jobs, cancels every running one, and stops every frame extraction and probe in flight. Used when the server closes. */
   async close(): Promise<void> {
     this.closing = true;
+    for (const c of this.inflight) c.abort();
     await Promise.all([...this.byId.keys()].map((id) => this.cancel(id).catch(() => undefined)));
+  }
+
+  /** Runs `work` with a signal close() aborts. Once closing, the signal starts aborted. */
+  private async tracked<T>(work: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    const c = new AbortController();
+    if (this.closing) c.abort();
+    this.inflight.add(c);
+    try {
+      return await work(c.signal);
+    } finally {
+      this.inflight.delete(c);
+    }
+  }
+
+  /** A file's duration, codec and size (ffprobe, unless a test injects a fake). Stopped by close(): nothing known then. */
+  probe(abs: string): Promise<Probe> {
+    return this.tracked((signal) => this.probeFile(abs, signal));
   }
 
   /**
@@ -412,7 +432,8 @@ export class ProxyJobs {
     const k = `${orig}\0${seconds.toFixed(6)}`;
     const flying = this.frames.get(k);
     if (flying) return flying;
-    const flight = extractFrame(this.run, orig, seconds).finally(() => this.frames.delete(k));
+    if (this.closing) return Promise.resolve(null);
+    const flight = this.tracked((signal) => extractFrame(this.run, orig, seconds, FRAME_TIMEOUT_MS, signal)).finally(() => this.frames.delete(k));
     this.frames.set(k, flight);
     return flight;
   }
@@ -487,7 +508,8 @@ export class ProxyJobs {
       }
       // Rename first, record second: a record only ever points at a whole file.
       await rename(partial, final);
-      const out = await this.probe(final).catch(() => null);
+      // Not stopped by close(): a committing job runs to the end, and this probe is of a local file it just wrote.
+      const out = await this.probeFile(final).catch(() => null);
       const size =
         out?.width && out?.height
           ? { width: out.width, height: out.height }
@@ -608,10 +630,13 @@ export function frameArgs(orig: string, seconds: number): string[] {
 export const FRAME_TIMEOUT_MS = 30_000;
 
 /** Runs `frameArgs` and collects the PNG. Null when ffmpeg failed or wrote nothing (a time past the end). */
-export async function extractFrame(run: FfmpegRunner, orig: string, seconds: number, timeoutMs = FRAME_TIMEOUT_MS): Promise<Buffer | null> {
+export async function extractFrame(run: FfmpegRunner, orig: string, seconds: number, timeoutMs = FRAME_TIMEOUT_MS, signal?: AbortSignal): Promise<Buffer | null> {
   const chunks: Buffer[] = [];
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const stop = () => controller.abort();
+  if (signal?.aborted) controller.abort();
+  signal?.addEventListener("abort", stop, { once: true });
   try {
     const res = await run(frameArgs(orig, seconds), { signal: controller.signal, onStdout: (c) => chunks.push(c) });
     if (res.code !== 0 || controller.signal.aborted) return null;
@@ -619,5 +644,6 @@ export async function extractFrame(run: FfmpegRunner, orig: string, seconds: num
     return png.length > 0 ? png : null;
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener("abort", stop);
   }
 }

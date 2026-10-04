@@ -650,3 +650,50 @@ describe("makeFfmpegRunner: the kill", () => {
     expect(chunks).toEqual(["ffmpeg version 4.4"]);
   });
 });
+
+describe("ProxyJobs.close stops frame extractions and probes in flight (Minor 12)", () => {
+  it("aborts a frame extraction's ffmpeg and a background probe, so neither outlives the server", async () => {
+    const { root, store } = await project();
+    const signals: AbortSignal[] = [];
+    const waitForAbort = (signal: AbortSignal | undefined) =>
+      new Promise<void>((res) => {
+        if (!signal) return;
+        if (signal.aborted) res();
+        signal.addEventListener("abort", () => res());
+      });
+    const run: FfmpegRunner = async (args, o = {}) => {
+      if (args[0] === "-version") return { code: 0, stderr: "" };
+      if (o.signal) signals.push(o.signal);
+      await waitForAbort(o.signal);
+      return { code: 255, stderr: "Exiting normally, received signal 15." };
+    };
+    const probe = async (_abs: string, signal?: AbortSignal): Promise<Probe> => {
+      if (signal) signals.push(signal);
+      await waitForAbort(signal);
+      return { duration: null, fps: null, codec: null, width: null, height: null, pixFmt: null };
+    };
+    const jobs = new ProxyJobs(store, { run, probe, available: async () => true });
+    const frame = jobs.frame(join(root, "renders", "hero.mov"), 1);
+    const probed = jobs.probe(join(root, "renders", "hero.mov"));
+    await vi.waitFor(() => expect(signals).toHaveLength(2));
+    expect(signals.some((s) => s.aborted)).toBe(false);
+    await jobs.close();
+    expect(signals.every((s) => s.aborted)).toBe(true);
+    expect(await frame).toBeNull();
+    expect((await probed).duration).toBeNull();
+  });
+
+  it("a frame or probe asked for once the server is closing starts already stopped", async () => {
+    const { root, store } = await project();
+    let ran = 0;
+    const run: FfmpegRunner = async (args, o = {}) => {
+      if (args[0] === "-version") return { code: 0, stderr: "" };
+      ran++;
+      return o.signal?.aborted ? { code: 255, stderr: "" } : { code: 0, stderr: "" };
+    };
+    const jobs = new ProxyJobs(store, { run, probe: fakeProbe, available: async () => true });
+    await jobs.close();
+    expect(await jobs.frame(join(root, "renders", "hero.mov"), 1)).toBeNull();
+    expect(ran).toBe(0);
+  });
+});
