@@ -47,6 +47,10 @@ The CLI equivalent is `rushes add file <path> --kind K [--name N] [--note T] [--
 
 When the user wants to share notes with someone else, call `rushes_export_notes` (CLI: `rushes export notes`). It writes every note, grouped by stage and, for Picture, by film and version, to a dated Markdown file in `exports/`, and returns its path.
 
+## A demo project
+
+No project to show yet? Run `npx -y github:iamredmh/rushes demo <folder> --no-browser`, then `rushes_open` with `project: "<folder>"`. The demo makes a complete example on the user's machine — a cut in two versions, a script, voice reads in two rounds, two music beds, an SFX pass and example notes — all generated locally with ffmpeg. Always pass `--no-browser`: without it the command stays running as the server and never returns. It refuses a folder that isn't empty.
+
 ## Locked tabs and the prompts they copy
 
 Every tab is visible from the start, in workflow order, even before it has anything in it. Opening a locked tab explains what it's for and what unlocks it, and offers a **Copy prompt for your agent** button. If the user pastes you one of these, it's a direct, already-scoped request — act on it the same as any other instruction, e.g.:

@@ -40,3 +40,15 @@ describe("package.json, §19.7", () => {
     expect(lock.packages[""].version).toBe(pkg.version);
   });
 });
+
+describe("shipped agent docs (final review I3)", () => {
+  const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), "utf8");
+
+  it.each(["skills/rushes/SKILL.md", "AGENTS.md"])("%s runs the demo through npx with --no-browser, then rushes_open, never a bare `rushes demo`", (file) => {
+    const text = read(file);
+    // A bare `rushes demo` assumes a global binary and, without --no-browser, never returns.
+    expect(text).toContain("npx -y github:iamredmh/rushes demo <folder> --no-browser");
+    expect(text).toMatch(/--no-browser`?,? then `rushes_open`/);
+    expect(text).not.toMatch(/`rushes demo`/);
+  });
+});

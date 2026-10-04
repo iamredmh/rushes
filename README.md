@@ -87,7 +87,7 @@ npx -y github:iamredmh/rushes doctor          # Node, ffmpeg, which agents have 
 npx -y github:iamredmh/rushes doctor --json   # the same checks as data
 ```
 
-Each check prints ✓ or ✗ with a plain fix, e.g. `✗ Claude Code — the Rushes MCP server isn't registered. Fix: rushes setup --only claude-code`. Only the Node version has to pass; ffmpeg is recommended (proxies and loudness need it) but not required. Run it from inside a project folder to add file, server and disk checks. Agents get the same checks from the `rushes_doctor` tool.
+Each check prints ✓ or ✗ with a plain fix, e.g. `✗ Claude Code — the Rushes MCP server isn't registered. Fix: rushes setup --only claude-code`. Only the Node version (and, inside a project, its files) has to pass; ffmpeg is recommended (proxies and loudness need it) but not required, and doctor warns when your ffmpeg was built without libx264, which proxies and the demo encode with. Run it from inside a project folder to add file, server and disk checks. Agents get the same checks from the `rushes_doctor` tool.
 
 ## Shortcuts
 
@@ -120,13 +120,13 @@ Every tab is visible from the start, in workflow order, even before there's anyt
 
 > In Rushes project "Launch", make two or three music beds for "Hero" and add each with rushes_add_variant (stage "music") with a one-line description.
 
-Hovering a locked tab shows the same thing as a tooltip. The Assets tab follows the same rule.
+Hovering a locked tab shows a short tooltip, e.g. "Locked: ask your agent for music beds". The Assets tab follows the same rule.
 
 ## Screenshots and the Assets library
 
 Press **G**, or the camera button, to grab the current frame. It's saved as a PNG to `screenshots/`, named for the film, version and timecode — grabbing the same frame twice overwrites the same file.
 
-The **Assets** tab (key `7`) is a library with a folder sidebar: Screenshots, Cuts, Voiceover, Music, Sound effects, Scripts & docs, Images, Captions, Exports, Delivery and Edit files. Each folder has search and a sort order; Screenshots, Images, Cuts and Delivery also get a grid/list toggle, and Screenshots, Cuts and Delivery get a film filter — every other folder is list-only. Audio plays inline, one at a time, and Markdown or text files get a read-only preview. Every item has five actions: Download, Save as (Chrome and Edge only — other browsers just get Download), Open, Show in Finder and Copy path. **Open** appears, and is accepted, only for a fixed list of safe, non-executable types — never scripts, apps or archives. Top-level `.md`, `.txt`, `.pdf`, `.srt` and `.vtt` files, plus anything in `exports/`, are picked up automatically; everything else your agent registers with `rushes_add_file`. The Exports folder also has an **Export notes** button, which writes every note to a dated Markdown file there.
+The **Assets** tab (key `7`) is a library with a folder sidebar: Screenshots, Cuts, Voiceover, Music, Sound effects, Scripts & docs, Images, Captions, Exports, Delivery, Edit files and Proxies. Each folder has search and a sort order; Screenshots, Images, Cuts and Delivery also get a grid/list toggle, and Screenshots, Cuts and Delivery get a film filter — every other folder is list-only. Audio plays inline, one at a time, and Markdown or text files get a read-only preview. Every item has five actions: Download, Save as (Chrome and Edge only — other browsers just get Download), Open, Show in Finder and Copy path. **Open** appears, and is accepted, only for a fixed list of safe, non-executable types — never scripts, apps or archives. Top-level `.md`, `.txt`, `.pdf`, `.srt` and `.vtt` files, plus anything in `exports/`, are picked up automatically; everything else your agent registers with `rushes_add_file`. The Exports folder also has an **Export notes** button, which writes every note to a dated Markdown file there.
 
 Rushes recommends this layout for a project folder:
 
@@ -176,11 +176,11 @@ your-project/.rushes/
   project.json   videos, versions, audio lanes and variants
   script.json    VO sections: the agent's line, your version, direction, takes
   notes.json     every note, with the agent's replies
-  picks.json     which variant or take is in use
+  picks.json     which variant or take is in use, and each Mix lane's level
   batches.json   what you sent to the agent
 ```
 
-Add `.rushes/` to git if you want your review history kept with the project — and `screenshots/` alongside it, since notes point to the grabs there. Rushes ignores its own temporary files.
+Add `.rushes/` to git if you want your review history kept with the project — and `screenshots/` alongside it, since notes point to the grabs there. Keep `proxies/` out of git: proxies can run to gigabytes, and Rushes can always make them again. Rushes ignores its own temporary files.
 
 ## Develop
 
