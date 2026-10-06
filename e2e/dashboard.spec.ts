@@ -1630,6 +1630,16 @@ function wavePixels(page: Page): Promise<number> {
   });
 }
 
+/** Two animation frames, then a few checks over half a second: long enough for an answer the page
+ *  has just had to be rendered, if it was going to be. */
+async function settledNoWave(page: Page): Promise<void> {
+  await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
+  for (let i = 0; i < 5; i++) {
+    await expect(page.locator(".track canvas.pwave")).toHaveCount(0);
+    await page.waitForTimeout(100);
+  }
+}
+
 /** Wait until the server has answered a cut's peaks with something other than 202. */
 async function peaksSettled(rushes: Rushes, version: string): Promise<number> {
   let status = 0;
@@ -1714,9 +1724,11 @@ test.describe("the Picture waveform (§19.9)", () => {
   });
 
   test("while the next cut's waveform is still on its way, the last cut's is never shown (fix round 2)", async ({ page, rushes }) => {
+    // Both cuts have audio, so the last check can only pass if v2's own waveform is drawn.
     await rushes.addProResCut({ codec: "h264", seconds: 3, audio: true });
-    await rushes.addCut();
+    await rushes.addProResCut({ codec: "h264", seconds: 3, audio: true });
     expect(await peaksSettled(rushes, "v1")).toBe(200);
+    expect(await peaksSettled(rushes, "v2")).toBe(200);
     // v2's answer is held back until the test lets it go.
     let release!: () => void;
     const held = new Promise<void>((r) => (release = r));
@@ -1730,13 +1742,11 @@ test.describe("the Picture waveform (§19.9)", () => {
     await expect.poll(() => wavePixels(page)).toBeGreaterThan(50);
     await versions.selectOption("v2");
     await expect(versions).toHaveValue("v2");
-    for (let i = 0; i < 5; i++) {
-      await expect(page.locator(".track canvas.pwave")).toHaveCount(0);
-      await page.waitForTimeout(100);
-    }
+    await settledNoWave(page);
+    const answered = page.waitForResponse((r) => r.url().includes("/versions/v2/peaks") && r.status() === 200);
     release();
-    await page.waitForTimeout(300);
-    await expect(page.locator(".track canvas.pwave")).toHaveCount(0);
+    await answered;
+    await expect.poll(() => wavePixels(page)).toBeGreaterThan(50);
   });
 
   test("a slow answer for a cut you've already left is never drawn on the one you're on (fix round 2)", async ({ page, rushes }) => {
@@ -1755,11 +1765,12 @@ test.describe("the Picture waveform (§19.9)", () => {
     const versions = page.getByRole("combobox", { name: "Version" });
     await expect(versions).toHaveValue("v2");
     await expect.poll(() => asked).toBeGreaterThan(0);
+    const v1Answered = page.waitForResponse((r) => r.url().includes("/versions/v1/peaks") && r.status() === 204);
     await versions.selectOption("v1");
     await expect(versions).toHaveValue("v1");
+    await v1Answered;
     release();
-    await page.waitForTimeout(500);
-    await expect(page.locator(".track canvas.pwave")).toHaveCount(0);
+    await settledNoWave(page);
   });
 
   test("a cut with no audio shows no waveform", async ({ page, rushes }) => {
@@ -1771,7 +1782,8 @@ test.describe("the Picture waveform (§19.9)", () => {
     await answered;
     await videoReady(page);
     await expect(page.locator(".track")).toBeVisible();
-    await expect(page.locator(".track canvas.pwave")).toHaveCount(0);
+    // Checked once the answer has had time to be drawn, not straight after it arrives.
+    await settledNoWave(page);
   });
 
   test("with the proxy offer showing, the timeline and its waveform still sit inside a 1440×900 window", async ({ page, rushes }) => {
