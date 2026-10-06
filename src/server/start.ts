@@ -9,7 +9,7 @@ import { removeLock, writeLock } from "./lock.js";
 import { watchStore } from "./watch.js";
 import type { Revealer } from "./reveal.js";
 import { ProxyJobs, removePartials, type ProxyJobsOptions } from "./proxy.js";
-import { PeakJobs, removePeakTemps, type PeakJobsOptions } from "./peaks.js";
+import { PeakJobs, removeOrphanPeaks, removePeakTemps, type PeakJobsOptions } from "./peaks.js";
 
 export const DEFAULT_PORT = 4580;
 
@@ -124,6 +124,8 @@ export async function startServer(rootDir: string, opts: StartOptions = {}): Pro
   await removePartials(root);
   // Likewise a waveform that was being saved: its temp file is never read, and goes.
   await removePeakTemps(root);
+  // And a waveform whose cut is no longer in the project.
+  await removeOrphanPeaks(root, await store.read("project")).catch(() => undefined);
   appOpts.projectId = id;
   const url = `http://${host}:${port}`;
   const stopWatching = await watchStore(store);

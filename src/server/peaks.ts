@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fromManifestPath } from "../core/paths.js";
 import { RUSHES_DIR, type ChangeEvent, type Store } from "../core/store.js";
+import type { Project } from "../core/schema.js";
 import { defaultFfmpeg, type FfmpegRunner } from "./proxy.js";
 
 // §19.9: the Picture waveform. When a cut is added (or the dashboard asks for one that has none
@@ -426,4 +427,30 @@ export async function removePeakTemps(root: string): Promise<string[]> {
   const temps = names.filter((n) => n.endsWith(".tmp"));
   await Promise.all(temps.map((n) => rm(join(dir, n), { force: true }).catch(() => undefined)));
   return temps;
+}
+
+/**
+ * Start-up clean-up: a peaks file whose cut is no longer in the project (a film or version
+ * removed by hand) is deleted. A file belongs to a cut when it starts `<video>_<version>_`, the
+ * trailing underscore included, so v1 never claims v10's file. Only plain files directly inside
+ * .rushes/peaks/ are ever removed. Returns the names removed.
+ */
+export async function removeOrphanPeaks(root: string, project: Project): Promise<string[]> {
+  const dir = join(root, RUSHES_DIR, PEAKS_DIR);
+  let names: string[];
+  try {
+    names = await readdir(dir);
+  } catch {
+    return [];
+  }
+  const owners = project.videos.flatMap((v) => v.versions.map((ver) => `${v.id}_${ver.id}_`));
+  const orphans: string[] = [];
+  for (const n of names) {
+    if (owners.some((prefix) => n.startsWith(prefix))) continue;
+    const info = await lstat(join(dir, n)).catch(() => null);
+    if (!info || info.isDirectory()) continue;
+    orphans.push(n);
+  }
+  await Promise.all(orphans.map((n) => rm(join(dir, n), { force: true }).catch(() => undefined)));
+  return orphans;
 }

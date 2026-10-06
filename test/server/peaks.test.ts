@@ -515,7 +515,11 @@ describe("PeakJobs in the background (§19.9)", () => {
   });
 
   it("a stray temp file in .rushes/peaks/ is deleted when the server starts", async () => {
-    const { root } = await tmpProject();
+    const { root, store } = await tmpProject();
+    // The peaks file below belongs to a current cut, so only the temp files go.
+    await store.update("project", (p) => {
+      addVersion(p, { video: "hero", file: "renders/hero.mp4", duration: 2, fps: 25 });
+    });
     await mkdir(join(root, ".rushes", "peaks"), { recursive: true });
     await writeFile(join(root, ".rushes", "peaks", ".hero_v1_0123456789abcdef.json.x.tmp"), "half");
     await writeFile(join(root, ".rushes", "peaks", "hero_v1_0123456789abcdef.json"), '{"v":1,"audio":false}');
