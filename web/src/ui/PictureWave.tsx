@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { mediaUrl, projectId } from "../api.js";
 import { testFlags } from "../lib.js";
-import { cachedWave, FALLBACK_RATE, hasCachedWave, loadWave, rememberWave, waveKey, type Wave, type WaveDeps } from "../peaks.js";
+import { cachedWave, FALLBACK_RATE, hasCachedWave, loadWave, rememberWave, watchPixelRatio, waveKey, type Wave, type WaveDeps } from "../peaks.js";
 import type { Version } from "../types.js";
 
 /** The first retry while the server is still making the peaks; it doubles up to RETRY_MAX_MS. A `change` asks sooner. */
@@ -114,7 +114,12 @@ export function PictureWave({ wave, length }: { wave: Wave; length: number }) {
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(c);
-    return () => ro.disconnect();
+    // A move to a screen with another pixel ratio changes no CSS size, so ResizeObserver misses it.
+    const stopRatio = watchPixelRatio(window, measure);
+    return () => {
+      ro.disconnect();
+      stopRatio();
+    };
   }, []);
 
   useEffect(() => {

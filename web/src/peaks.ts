@@ -110,3 +110,32 @@ export function rememberWave(key: string, wave: Wave | null): void {
   cache.set(key, wave);
   while (cache.size > CACHE_LIMIT) cache.delete(cache.keys().next().value!);
 }
+
+// ---- the screen's pixel ratio ----
+
+/** The part of `window` that watchPixelRatio needs, so it can be tested without a browser. */
+export interface PixelRatioWindow {
+  devicePixelRatio: number;
+  matchMedia(query: string): { addEventListener(type: "change", fn: () => void): void; removeEventListener(type: "change", fn: () => void): void };
+}
+
+/**
+ * Calls `onChange` with the new device pixel ratio whenever it changes (the window moved to a
+ * screen with another density, or the page was zoomed), listening again at each new ratio, since a
+ * `(resolution: Xdppx)` query only ever reports leaving X. Returns a function that stops listening.
+ */
+export function watchPixelRatio(win: PixelRatioWindow, onChange: (dpr: number) => void): () => void {
+  let stop = () => undefined as void;
+  const listen = () => {
+    const list = win.matchMedia(`(resolution: ${win.devicePixelRatio}dppx)`);
+    const fire = () => {
+      stop();
+      onChange(win.devicePixelRatio);
+      listen();
+    };
+    list.addEventListener("change", fire);
+    stop = () => list.removeEventListener("change", fire);
+  };
+  listen();
+  return () => stop();
+}
