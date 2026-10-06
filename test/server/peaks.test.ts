@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, truncate, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
 import { createApp } from "../../src/server/app.js";
@@ -9,7 +9,7 @@ import { addVersion } from "../../src/core/project.js";
 import type { Probe } from "../../src/core/media.js";
 import type { ChangeEvent, Store } from "../../src/core/store.js";
 import { ProxyJobs, type FfmpegRunner } from "../../src/server/proxy.js";
-import { PEAK_BUCKETS, PEAKS_CONCURRENCY, PEAKS_FILE, PEAKS_MAX_BYTES, PeakJobs, removePeakTemps } from "../../src/server/peaks.js";
+import { PEAK_BUCKETS, PEAKS_CONCURRENCY, PEAKS_FILE, PEAKS_MAX_BYTES, PeakJobs, peaksTimeoutMs, removePeakTemps } from "../../src/server/peaks.js";
 import { startServer } from "../../src/server/start.js";
 
 const has = (bin: string) => {
@@ -294,6 +294,43 @@ describe("a peaks file is only believed when it's one this server could have wri
     await peaks.idle();
     await writeFile(join(root, ".rushes", "peaks", name), JSON.stringify(ok) + " ".repeat(1000));
     expect((await call("GET", URL1)).json).toEqual(ok);
+  });
+});
+
+describe("the decode's timeout scales with the file (fix round 2)", () => {
+  it("is 60 s plus the size at 5 MB/s, held between 5 and 60 minutes", () => {
+    const min = 60_000;
+    expect(peaksTimeoutMs(0)).toBe(5 * min);
+    expect(peaksTimeoutMs(1.2e9)).toBe(5 * min);
+    expect(peaksTimeoutMs(2e9)).toBe(60_000 + 400_000);
+    expect(peaksTimeoutMs(17.7e9)).toBe(60 * min);
+    expect(peaksTimeoutMs(100e9)).toBe(60 * min);
+  });
+
+  it("a 3 GB file isn't killed at 5 minutes, only past its own 11", async () => {
+    const { root, store } = await tmpProject();
+    await mkdir(join(root, "renders"), { recursive: true });
+    // Sparse: 3 GB by its size, nothing on disk.
+    await writeFile(join(root, "renders", "hero.mov"), "");
+    await truncate(join(root, "renders", "hero.mov"), 3e9);
+    await store.update("project", (p) => {
+      addVersion(p, { video: "hero", file: "renders/hero.mov", duration: 2, fps: 25 });
+    });
+    const run = fakeDecoder(() => ({ gate: new Promise(() => undefined) }));
+    const peaks = new PeakJobs(store, { run, available: async () => true });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      expect((await peaks.answer("hero", "v1", "renders/hero.mov")).state).toBe("computing");
+      await vi.waitFor(() => expect(run.calls).toHaveLength(1), { interval: 1 });
+      await vi.advanceTimersByTimeAsync(5 * 60_000 + 1_000);
+      expect(run.killed).toBe(0);
+      await vi.advanceTimersByTimeAsync(6 * 60_000);
+      expect(run.killed).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+    await peaks.idle();
+    expect((await peaks.answer("hero", "v1", "renders/hero.mov")).state).toBe("failed");
   });
 });
 
