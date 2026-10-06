@@ -1672,6 +1672,47 @@ test.describe("the Picture waveform (§19.9)", () => {
     expect(await draws()).toBe(before);
   });
 
+  test("moving to a screen with another pixel ratio redraws the waveform at that ratio (fix round 2)", async ({ page, rushes }) => {
+    // Neither browser can move a page to another screen, and Chromium's CDP override changes the
+    // ratio without firing the media query, so the window's ratio and its (resolution) queries are
+    // stood in for: `__moveToScreen(n)` sets devicePixelRatio and fires what a real move would.
+    await page.addInitScript(() => {
+      let dpr = 1;
+      Object.defineProperty(window, "devicePixelRatio", { get: () => dpr, configurable: true });
+      const lists: { query: string; fns: Set<EventListener> }[] = [];
+      const real = window.matchMedia.bind(window);
+      window.matchMedia = ((query: string) => {
+        if (!/resolution/.test(query)) return real(query);
+        const entry = { query, fns: new Set<EventListener>() };
+        lists.push(entry);
+        return {
+          media: query,
+          get matches() { return query === `(resolution: ${dpr}dppx)`; },
+          addEventListener: (_: string, fn: EventListener) => entry.fns.add(fn),
+          removeEventListener: (_: string, fn: EventListener) => entry.fns.delete(fn),
+        } as unknown as MediaQueryList;
+      }) as typeof window.matchMedia;
+      (window as unknown as { __moveToScreen(n: number): void }).__moveToScreen = (n: number) => {
+        const was = `(resolution: ${dpr}dppx)`;
+        dpr = n;
+        for (const l of lists.filter((x) => x.query === was)) for (const fn of [...l.fns]) fn(new Event("change"));
+      };
+    });
+    await rushes.addProResCut({ codec: "h264", seconds: 3, audio: true });
+    await page.goto(rushes.url);
+    await expect.poll(() => wavePixels(page)).toBeGreaterThan(50);
+    const backing = () => page.evaluate(() => { const c = document.querySelector<HTMLCanvasElement>(".track canvas.pwave")!; return { w: c.width, css: c.getBoundingClientRect().width }; });
+    const one = await backing();
+    expect(one.w).toBe(Math.round(one.css));
+    const move = (n: number) => page.evaluate((x) => (window as unknown as { __moveToScreen(n: number): void }).__moveToScreen(x), n);
+    await move(2);
+    await expect.poll(async () => (await backing()).w).toBe(Math.round(one.css * 2));
+    // Listening again at the new ratio: a second move is heard too.
+    await move(1);
+    await expect.poll(async () => (await backing()).w).toBe(Math.round(one.css));
+    expect(await wavePixels(page)).toBeGreaterThan(50);
+  });
+
   test("a cut with no audio shows no waveform", async ({ page, rushes }) => {
     await rushes.addCut();
     expect(await peaksSettled(rushes, "v1")).toBe(204);

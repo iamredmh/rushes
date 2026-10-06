@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FALLBACK_MAX_BYTES, cachedWave, hasCachedWave, loadWave, normalisePeaks, rememberWave, waveKey, type WaveDeps } from "../../web/src/peaks.js";
+import { FALLBACK_MAX_BYTES, cachedWave, hasCachedWave, loadWave, normalisePeaks, rememberWave, watchPixelRatio, waveKey, type WaveDeps } from "../../web/src/peaks.js";
 
 const CUT = { peaksUrl: "/api/videos/hero/versions/v1/peaks", mediaUrl: "/media?path=renders%2Fhero.mp4", size: 1_000_000 };
 
@@ -112,5 +112,42 @@ describe("the waveform cache", () => {
   it("normalisePeaks scales the loudest to 1, leaving silence at 0", () => {
     expect(Array.from(normalisePeaks(new Float32Array([0.2, 0.4])))).toEqual([0.5, 1]);
     expect(Array.from(normalisePeaks(new Float32Array([0, 0])))).toEqual([0, 0]);
+  });
+});
+
+describe("watchPixelRatio (fix round 2)", () => {
+  /** A window whose devicePixelRatio the test sets, with matchMedia lists it can fire. */
+  function fakeWindow(dpr: number) {
+    const lists: { query: string; listeners: Set<() => void> }[] = [];
+    const win = {
+      devicePixelRatio: dpr,
+      matchMedia(query: string) {
+        const entry = { query, listeners: new Set<() => void>() };
+        lists.push(entry);
+        return {
+          addEventListener: (_: "change", fn: () => void) => entry.listeners.add(fn),
+          removeEventListener: (_: "change", fn: () => void) => entry.listeners.delete(fn),
+        };
+      },
+    };
+    const live = () => lists.filter((l) => l.listeners.size > 0);
+    return { win, live, fire: () => [...live()].forEach((l) => [...l.listeners].forEach((fn) => fn())) };
+  }
+
+  it("calls back when the pixel ratio changes, and listens again at the new ratio", () => {
+    const { win, live, fire } = fakeWindow(1);
+    const seen: number[] = [];
+    const stop = watchPixelRatio(win, (dpr) => seen.push(dpr));
+    expect(live().map((l) => l.query)).toEqual(["(resolution: 1dppx)"]);
+    win.devicePixelRatio = 2;
+    fire();
+    expect(seen).toEqual([2]);
+    expect(live().map((l) => l.query)).toEqual(["(resolution: 2dppx)"]);
+    win.devicePixelRatio = 1.5;
+    fire();
+    expect(seen).toEqual([2, 1.5]);
+    expect(live().map((l) => l.query)).toEqual(["(resolution: 1.5dppx)"]);
+    stop();
+    expect(live()).toEqual([]);
   });
 });
