@@ -3,6 +3,7 @@ import { api, ApiError } from "../api.js";
 import { LOCKED_TAB, STAGE_NAMES, agentPrompt, copyShortcut, defaultVersion, firstTab, latest, neighbourVideo, proxyKey, snap } from "../lib.js";
 import type { Batch, Stage, Video } from "../types.js";
 import { useRushes } from "../useRushes.js";
+import { assetRev } from "../audio/timeline.js";
 import { Assets } from "./Assets.js";
 import { Icon, STAGE_ICONS } from "./Icon.js";
 import { Mix } from "./Mix.js";
@@ -117,6 +118,8 @@ export function App() {
   const version = video?.versions.find((v) => v.id === versionId) ?? target;
   const locked = !!video?.lockedVersion;
   const fps = version?.fps ?? state?.project.fps ?? 30;
+  // §19.9: the cut's file as Assets lists it: its size and revision, for the Picture waveform.
+  const cutAsset = version ? assets.find((a) => a.kind === "cut" && a.path === version.file) : undefined;
 
   // A new cut arriving mid-review mustn't rewind the player or drop pending marks. So the
   // moment something's pending, hold the cut on screen; a newer one then waits behind a chip.
@@ -452,6 +455,8 @@ export function App() {
             noteProxyJob={noteProxyJob}
             source={sources[video.id] ?? "proxy"}
             onSourceChange={setSourceFor}
+            fileSize={cutAsset?.size ?? null}
+            fileRev={cutAsset ? assetRev(cutAsset) : undefined}
           />
         ) : stage === "script" ? (
           <Script script={state.script} toast={toast} onChanged={() => void refresh()} />

@@ -1615,3 +1615,121 @@ test.describe("tabs share one live connection (§19.8)", () => {
     expect((await rushes.api("GET", "/api/state")).proxies.jobs).toEqual([]);
   });
 });
+
+// ---- §19.9 the Picture waveform ----
+
+/** How many of the waveform canvas's pixels are drawn on (alpha above 0); 0 when there's no canvas. */
+function wavePixels(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const c = document.querySelector<HTMLCanvasElement>(".track canvas.pwave");
+    if (!c || !c.width || !c.height) return 0;
+    const data = c.getContext("2d")!.getImageData(0, 0, c.width, c.height).data;
+    let n = 0;
+    for (let i = 3; i < data.length; i += 4) if (data[i] > 0) n++;
+    return n;
+  });
+}
+
+/** Wait until the server has answered a cut's peaks with something other than 202. */
+async function peaksSettled(rushes: Rushes, version: string): Promise<number> {
+  let status = 0;
+  await expect
+    .poll(async () => {
+      status = (await fetch(`${rushes.base}/api/videos/hero/versions/${version}/peaks`)).status;
+      return status;
+    }, { timeout: 15_000 })
+    .not.toBe(202);
+  return status;
+}
+
+test.describe("the Picture waveform (§19.9)", () => {
+  test.skip(!hasFfmpeg, "needs ffmpeg and ffprobe");
+
+  test("a vertical cut with audio draws its waveform in the timeline, hidden from screen readers, and playback never redraws it", async ({ page, rushes }) => {
+    await rushes.addProResCut({ codec: "h264", width: 360, height: 640, seconds: 3, audio: true });
+    await page.goto(rushes.testUrl());
+    const wave = page.locator(".track canvas.pwave");
+    await expect(wave).toBeVisible();
+    await expect(wave).toHaveAttribute("aria-hidden", "true");
+    await expect.poll(() => wavePixels(page)).toBeGreaterThan(50);
+    // It sits inside the bar, under the playhead.
+    const box = await page.evaluate(() => {
+      const t = document.querySelector(".track")!.getBoundingClientRect();
+      const c = document.querySelector(".track canvas.pwave")!.getBoundingClientRect();
+      const z = (sel: string) => Number(getComputedStyle(document.querySelector(sel)!).zIndex);
+      return { th: t.height, inside: c.top >= t.top && c.bottom <= t.bottom && c.left >= t.left && c.right <= t.right, wave: z(".track canvas.pwave"), head: z(".track .playhead") };
+    });
+    expect(box.th).toBe(40);
+    expect(box.inside).toBe(true);
+    expect(box.wave).toBeLessThan(box.head);
+
+    await videoReady(page);
+    const draws = () => page.evaluate(() => window.__rushesPicture!.waveDraws());
+    const before = await draws();
+    await page.getByRole("button", { name: "Play" }).click();
+    await expect.poll(() => page.locator("video").evaluate((v: HTMLVideoElement) => v.currentTime)).toBeGreaterThan(0.5);
+    await page.getByRole("button", { name: "Pause" }).click();
+    expect(await draws()).toBe(before);
+  });
+
+  test("a cut with no audio shows no waveform", async ({ page, rushes }) => {
+    await rushes.addCut();
+    expect(await peaksSettled(rushes, "v1")).toBe(204);
+    // The dashboard asks, hears "no audio", and draws nothing.
+    const answered = page.waitForResponse((r) => r.url().includes("/versions/v1/peaks") && r.status() === 204);
+    await page.goto(rushes.url);
+    await answered;
+    await videoReady(page);
+    await expect(page.locator(".track")).toBeVisible();
+    await expect(page.locator(".track canvas.pwave")).toHaveCount(0);
+  });
+
+  test("with the proxy offer showing, the timeline and its waveform still sit inside a 1440×900 window", async ({ page, rushes }) => {
+    await rushes.addProResCut({ audio: true });
+    await page.goto(rushes.url);
+    await expect(page.locator(".proxybar").getByRole("button", { name: "Create proxy" })).toBeVisible();
+    await expect.poll(() => wavePixels(page)).toBeGreaterThan(50);
+    await expectPlayerOnScreen(page);
+    expect(await page.evaluate(() => document.querySelector(".track")!.getBoundingClientRect().height)).toBe(40);
+  });
+
+  test("switching to another cut never shows the last one's waveform", async ({ page, rushes }) => {
+    await rushes.addProResCut({ codec: "h264", seconds: 3, audio: true });
+    await rushes.addCut();
+    expect(await peaksSettled(rushes, "v1")).toBe(200);
+    expect(await peaksSettled(rushes, "v2")).toBe(204);
+    await page.goto(rushes.url);
+    const versions = page.getByRole("combobox", { name: "Version" });
+    await expect(versions).toHaveValue("v2");
+    await expect(page.locator(".track canvas.pwave")).toHaveCount(0);
+    await versions.selectOption("v1");
+    await expect.poll(() => wavePixels(page)).toBeGreaterThan(50);
+    await versions.selectOption("v2");
+    await expect(page.locator(".track canvas.pwave")).toHaveCount(0);
+    await versions.selectOption("v1");
+    await expect(page.locator(".track canvas.pwave")).toHaveCount(1);
+  });
+
+  test("a cut added while you watch gets its waveform once the server has made it", async ({ page, rushes }) => {
+    await rushes.addCut();
+    await page.goto(rushes.url);
+    await videoReady(page);
+    await rushes.addProResCut({ codec: "h264", seconds: 3, audio: true });
+    await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v2");
+    await expect.poll(() => wavePixels(page)).toBeGreaterThan(50);
+  });
+
+  test("without ffmpeg on the server (501), the browser decodes a small cut itself", async ({ page, rushes }) => {
+    await rushes.addProResCut({ codec: "h264", seconds: 3, audio: true });
+    const peaksAsked: number[] = [];
+    await page.route("**/api/videos/*/versions/*/peaks", (route) => {
+      peaksAsked.push(Date.now());
+      return route.fulfill({ status: 501, contentType: "application/json", body: JSON.stringify({ error: "no_ffmpeg", message: "no ffmpeg" }) });
+    });
+    const media = page.waitForRequest((r) => r.url().includes("/media?path=renders%2Fhero_v1.mp4") && !r.headers()["range"]);
+    await page.goto(rushes.url);
+    await media;
+    await expect.poll(() => wavePixels(page)).toBeGreaterThan(50);
+    expect(peaksAsked.length).toBeGreaterThanOrEqual(1);
+  });
+});

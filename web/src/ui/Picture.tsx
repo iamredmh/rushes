@@ -5,6 +5,7 @@ import type { Note, ProxyJob, Video, Version } from "../types.js";
 import { Icon } from "./Icon.js";
 import { Notes } from "./Notes.js";
 import { ProxyBar } from "./ProxyBar.js";
+import { PictureWave, usePictureWave } from "./PictureWave.js";
 
 /** Which file the player shows when the cut has a proxy (§19.5). */
 export type Source = "proxy" | "original";
@@ -41,6 +42,10 @@ export interface PictureProps {
   /** This film's Proxy/Original choice, remembered by the caller. Proxy unless you've picked Original. */
   source?: Source;
   onSourceChange?(video: string, source: Source): void;
+  /** §19.9: the cut's file size (null when unknown), for the waveform's no-ffmpeg fallback. */
+  fileSize?: number | null;
+  /** The cut's file revision (its modified time), so a file re-rendered in place gets a fresh waveform. */
+  fileRev?: string;
 }
 
 const typing = (el: EventTarget | null) => el instanceof HTMLElement && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
@@ -48,7 +53,7 @@ const typing = (el: EventTarget | null) => el instanceof HTMLElement && (el.isCo
 /** The cut, with notes down the right: frame stepping, In/Out ranges, a box on the frame and frame grabs. */
 export function Picture({
   video, version, fps, notes, toast, onChanged, onPendingChange, startAt, grab, onGrabChange, playerRef,
-  ffmpeg = false, autoProxy = false, proxyJob, noteProxyJob, source = "proxy", onSourceChange,
+  ffmpeg = false, autoProxy = false, proxyJob, noteProxyJob, source = "proxy", onSourceChange, fileSize = null, fileRev,
 }: PictureProps) {
   const ref = useRef<HTMLVideoElement>(null);
   const overlay = useRef<HTMLDivElement>(null);
@@ -67,6 +72,8 @@ export function Picture({
   const [box, setBox] = useState<Box | null>(null);
   const [shown, setShown] = useState<Box | null>(null);
   const [noteHasText, setNoteHasText] = useState(false);
+  // §19.9: the cut's own audio, drawn quietly in the timeline. Always the original's, even with a proxy.
+  const wave = usePictureWave(video.id, version, fileSize, fileRev);
   // The click that ends a box drag shouldn't also start playback.
   const justDrew = useRef(false);
   // startAt restores a film's remembered playhead, but only once: the first metadata load
@@ -522,6 +529,7 @@ export function Picture({
             seek(((e.clientX - r.left) / r.width) * duration);
           }}
         >
+          {wave && <PictureWave wave={wave} length={duration} />}
           {placed.map(({ n, at }) => at.tOut !== null && <div class={`span ${n.status}`} style={{ left: pct(at.t!), width: pct(at.tOut - at.t!) }} />)}
           {range.in !== null && <div class="span live" style={{ left: pct(range.in), width: pct((range.out ?? range.in + 0.2) - range.in) }} />}
           {shots.filter((s) => s.start > 0).map((s) => <div class="tick" style={{ left: pct(s.start) }} />)}
