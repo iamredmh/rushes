@@ -220,9 +220,12 @@ export function App() {
 
   // Where the page body starts (below the header, tabs and any banner), as --body-top, so Picture
   // can cap its player at the window's height (fix round 1: a tall cut leaves room for the timeline
-  // and the note box). Read after every render, since a banner or a wrapped header moves it, and
-  // on resize; written only when it changes.
+  // and the note box). Read after every render (a banner moves it), on resize, whenever the header
+  // or the tabs change size without a render (a wrapped crumb, say), and once the web fonts have
+  // loaded; written only when it changes.
   const bodyRef = useRef<HTMLElement>(null);
+  const headRef = useRef<HTMLElement>(null);
+  const tabsRef = useRef<HTMLElement>(null);
   const placeBody = () => {
     const el = bodyRef.current;
     if (!el) return;
@@ -234,8 +237,21 @@ export function App() {
   useEffect(() => {
     const onResize = () => placeBody();
     window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
+    let live = true;
+    void document.fonts?.ready.then(() => { if (live) placeBody(); });
+    return () => {
+      live = false;
+      window.removeEventListener("resize", onResize);
+    };
   }, []);
+  // The header and tabs exist once the project has loaded, so they're observed from then on.
+  const shellUp = !!state && !!stage;
+  useEffect(() => {
+    if (!shellUp) return;
+    const ro = new ResizeObserver(() => placeBody());
+    for (const el of [headRef.current, tabsRef.current]) if (el) ro.observe(el, { box: "border-box" });
+    return () => ro.disconnect();
+  }, [shellUp]);
 
   const send = async () => {
     if (!stage || stage === "assets") return;
@@ -274,7 +290,7 @@ export function App() {
 
   return (
     <div class="shell">
-      <header class="head">
+      <header class="head" ref={headRef}>
         <span class="logo"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg></span>
         <nav class="crumb" aria-label="Project">
           <span>{state.project.name}</span>
@@ -396,7 +412,7 @@ export function App() {
         </div>
       )}
 
-      <nav class="tabs" role="tablist" aria-label="Stages">
+      <nav class="tabs" ref={tabsRef} role="tablist" aria-label="Stages">
         {ORDER.map((s) => {
           const t = tab(s);
           return (
