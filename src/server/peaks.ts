@@ -215,7 +215,8 @@ export class PeakJobs {
   ) {
     this.run = opts.run ?? defaultFfmpeg;
     this.timeoutMs = opts.timeoutMs;
-    this.buckets = opts.buckets ?? PEAK_BUCKETS;
+    // Never more than PEAK_BUCKETS: readSaved refuses anything longer, so a bigger file would be made forever.
+    this.buckets = Math.max(1, Math.min(PEAK_BUCKETS, Math.floor(opts.buckets ?? PEAK_BUCKETS)));
     const run = this.run;
     this.isAvailable = opts.available ?? (async () => (await run(["-version"])).code === 0);
   }
@@ -393,6 +394,7 @@ export class PeakJobs {
       await mkdir(this.dir).catch((e: NodeJS.ErrnoException) => {
         if (e.code !== "EEXIST") throw e;
       });
+      if (!(await realPeaksDir(this.dir))) throw new Error(".rushes/peaks isn't a folder Rushes can write to");
       await writeFile(tmp, JSON.stringify(record));
       await rename(tmp, join(this.dir, item.name));
     } catch (e) {
@@ -406,6 +408,7 @@ export class PeakJobs {
   /** Every other revision's peaks for the same cut. */
   private async removeStale(item: Item): Promise<void> {
     const prefix = `${item.video}_${item.version}_`;
+    if (!(await realPeaksDir(this.dir))) return;
     let names: string[];
     try {
       names = await readdir(this.dir);
@@ -427,6 +430,15 @@ export class PeakJobs {
   }
 }
 
+/**
+ * Whether .rushes/peaks is a real folder, not a link to one somewhere else (fix round 3, M3).
+ * Nothing is saved into, swept from or cleaned out of a peaks folder that isn't.
+ */
+async function realPeaksDir(dir: string): Promise<boolean> {
+  const info = await lstat(dir).catch(() => null);
+  return !!info && info.isDirectory() && !info.isSymbolicLink();
+}
+
 function lastLine(stderr: string): string {
   const lines = stderr.split(/[\r\n]+/).map((l) => l.trim()).filter(Boolean);
   const last = lines[lines.length - 1];
@@ -439,6 +451,7 @@ function lastLine(stderr: string): string {
  */
 export async function removePeakTemps(root: string): Promise<string[]> {
   const dir = join(root, RUSHES_DIR, PEAKS_DIR);
+  if (!(await realPeaksDir(dir))) return [];
   let names: string[];
   try {
     names = await readdir(dir);
@@ -453,11 +466,13 @@ export async function removePeakTemps(root: string): Promise<string[]> {
 /**
  * Start-up clean-up: a peaks file whose cut is no longer in the project (a film or version
  * removed by hand) is deleted. A file belongs to a cut when it starts `<video>_<version>_`, the
- * trailing underscore included, so v1 never claims v10's file. Only plain files directly inside
- * .rushes/peaks/ are ever removed. Returns the names removed.
+ * trailing underscore included, so v1 never claims v10's file. Only files with a name Rushes
+ * writes (PEAKS_FILE), directly inside a real .rushes/peaks/ folder, are ever removed. Returns
+ * the names removed.
  */
 export async function removeOrphanPeaks(root: string, project: Project): Promise<string[]> {
   const dir = join(root, RUSHES_DIR, PEAKS_DIR);
+  if (!(await realPeaksDir(dir))) return [];
   let names: string[];
   try {
     names = await readdir(dir);
@@ -467,7 +482,8 @@ export async function removeOrphanPeaks(root: string, project: Project): Promise
   const owners = project.videos.flatMap((v) => v.versions.map((ver) => `${v.id}_${ver.id}_`));
   const orphans: string[] = [];
   for (const n of names) {
-    if (owners.some((prefix) => n.startsWith(prefix))) continue;
+    // Only names Rushes writes; anything else in the folder is someone else's.
+    if (!PEAKS_FILE.test(n) || owners.some((prefix) => n.startsWith(prefix))) continue;
     const info = await lstat(join(dir, n)).catch(() => null);
     if (!info || info.isDirectory()) continue;
     orphans.push(n);
