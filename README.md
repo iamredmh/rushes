@@ -6,6 +6,7 @@ Your agent renders a cut, writes a voiceover script or generates music beds. Rus
 
 - **Script:** your edits sit beside the agent's lines.
 - **Picture:** timecoded notes, ranges, boxes on the frame and frame grabs.
+- **Picture waveform:** the cut's own audio, drawn quietly in the timeline, so you can see where the sound is.
 - **Voiceover, Music, Sound effects:** variants you can switch between with no gap.
 - **Mix:** everything playing together.
 

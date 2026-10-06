@@ -715,3 +715,26 @@ This section is binding and replaces §17.5.
   - A folded round's buffers are released, under a small LRU cap.
 - **Re-rendering a file mid-play** no longer stops playback. That lane rejoins once it decodes.
 - **Space on a focused button** activates the button, e.g. "Measure again", instead of playing.
+
+### 19.9 Picture waveform
+- **Where it shows.** A quiet waveform of the cut's own audio inside Picture's timeline bar.
+  - The bar keeps its height, so nothing in the layout moves.
+  - It's drawn in a muted grey-blue (`--text-3` at low opacity), under the ranges, shot ticks, note markers and playhead.
+  - It's a `<canvas>` scaled for the screen's pixel ratio and redrawn only when its peaks, its size or the timeline's length change, never per frame. It's `aria-hidden`, since the slider already has a label.
+- **How the server makes it.**
+  - When a cut is added, or the dashboard asks for one that has none, ffmpeg decodes the **original's** audio (never a proxy's), mono at 8 kHz as raw floats, and the server reduces it while it streams to about 2000 buckets, each the largest absolute amplitude, normalised to 0..1. A long film is never held in memory.
+  - Decodes run in the background, two at a time, with a timeout, and are killed when the server closes. `GET /api/state` never waits on one.
+  - The result is `.rushes/peaks/<video>_<version>_<hash>.json`, where the hash is of the file's path, size and mtime: `{ "v": 1, "buckets": 2000, "duration": 68.67, "peaks": [0..1, 3 decimals] }`. A cut with no audio stream is saved as `{ "v": 1, "audio": false }`, so it isn't decoded again on the next start.
+  - It's written to a temp name and renamed into place; a temp file left by a stopped server is deleted at start-up. A failed decode writes nothing (it's remembered until the server restarts). When the file is re-rendered, the old revision's peaks file for that cut is removed.
+  - A `change` event goes out when a peaks file lands, so open tabs ask again.
+- **The route.** `GET /api/videos/:video/versions/:version/peaks`, behind the same project guard as every other route:
+  - 200 with the JSON when it's ready;
+  - 202 while it's being made;
+  - 204 when the cut has no audio;
+  - 501 `{ "error": "no_ffmpeg" }` without ffmpeg;
+  - 404 `missing_file` when the original isn't there, and 422 `no_peaks` when the decode failed.
+- **The dashboard.**
+  - It asks for the shown cut's peaks. On 202 it asks again when the next `change` arrives, or after a gentle back-off.
+  - On 501, a cut under 100 MB is fetched through `/media` and decoded in the browser (`decodeAudioData`, then `computePeaks`); anything larger gets no waveform.
+  - On 204, or any other answer, nothing is drawn.
+  - Results are cached per version and file revision. Switching versions or films never shows the previous cut's waveform.
