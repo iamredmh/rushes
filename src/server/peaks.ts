@@ -289,7 +289,8 @@ export class PeakJobs {
   }
 
   private enqueue(item: Item): void {
-    if (this.closing) return;
+    // Two callers (an add and a tab, or two tabs) can both get here for the same cut: one decode.
+    if (this.closing || this.queue.has(item.name) || this.running.has(item.name)) return;
     this.queue.set(item.name, item);
     this.pump();
   }
@@ -301,7 +302,7 @@ export class PeakJobs {
       const controller = new AbortController();
       this.running.set(name, controller);
       void this.make(item, controller).finally(() => {
-        this.running.delete(name);
+        if (this.running.get(name) === controller) this.running.delete(name);
         this.pump();
         if (this.queue.size === 0 && this.running.size === 0 && this.idleWaiter) {
           this.idleWaiter.resolve();
