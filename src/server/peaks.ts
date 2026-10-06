@@ -21,6 +21,8 @@ export const PEAKS_DIR = "peaks";
 export const PEAKS_CONCURRENCY = 2;
 /** A decode that runs longer than this is killed and treated as failed. */
 export const PEAKS_TIMEOUT_MS = 5 * 60_000;
+/** A peaks file is at most this big (2000 peaks are about 12 KB); anything larger isn't read. */
+export const PEAKS_MAX_BYTES = 64 * 1024;
 /** How many failed revisions are remembered (so a broken file isn't decoded on every request). */
 const FAILED_LIMIT = 500;
 /** ffmpeg's words for a file with no audio stream to decode ("Output file #0 does not contain any stream" before 7.0). */
@@ -266,7 +268,10 @@ export class PeakJobs {
   private async readSaved(name: string): Promise<PeaksFile | null> {
     let text: string;
     try {
-      text = await readFile(join(this.dir, name), "utf8");
+      const path = join(this.dir, name);
+      const info = await stat(path);
+      if (!info.isFile() || info.size > PEAKS_MAX_BYTES) return null;
+      text = await readFile(path, "utf8");
     } catch {
       return null;
     }
@@ -277,7 +282,7 @@ export class PeakJobs {
       const peaks = j.peaks;
       if (
         typeof j.duration === "number" && Number.isFinite(j.duration) && j.duration >= 0 &&
-        Array.isArray(peaks) && peaks.length > 0 && peaks.length === j.buckets &&
+        Array.isArray(peaks) && peaks.length > 0 && peaks.length <= PEAK_BUCKETS && peaks.length === j.buckets &&
         peaks.every((p) => typeof p === "number" && p >= 0 && p <= 1)
       ) {
         return { v: 1, buckets: peaks.length, duration: j.duration, peaks: peaks as number[] };
