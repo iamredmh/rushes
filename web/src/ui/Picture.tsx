@@ -6,6 +6,7 @@ import { Icon } from "./Icon.js";
 import { Notes } from "./Notes.js";
 import { ProxyBar } from "./ProxyBar.js";
 import { PictureWave, usePictureWave } from "./PictureWave.js";
+import { usePlayerFloor } from "./playerFloor.js";
 
 /** Which file the player shows when the cut has a proxy (§19.5). */
 export type Source = "proxy" | "original";
@@ -74,6 +75,9 @@ export function Picture({
   const [box, setBox] = useState<Box | null>(null);
   const [shown, setShown] = useState<Box | null>(null);
   const [noteHasText, setNoteHasText] = useState(false);
+  // Fix round 3 (M2): in a very short window the player column holds what's in it.
+  const stackRef = useRef<HTMLDivElement>(null);
+  usePlayerFloor(stackRef);
   // §19.9: the cut's own audio, drawn quietly in the timeline. Always the original's, even with a proxy.
   const wave = usePictureWave(video.id, version, fileSize, fileRev, durationOf === version.file ? duration : (version.duration ?? 0));
   // The click that ends a box drag shouldn't also start playback.
@@ -412,7 +416,7 @@ export function Picture({
 
   return (
     <div class="split">
-      <div class="stack">
+      <div class="stack" ref={stackRef}>
         {/* The box's height is written out in full rather than through a custom property: Chromium
             doesn't always redo a container-unit height when only the variable inside it changes. */}
         <div class="framebox" style={{ height: `min(640px, 70vh, calc(100cqw / ${aspect}))` }}>
