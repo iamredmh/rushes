@@ -141,11 +141,14 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
    shape, fits inside it. Its width is worked out from the box's height (container units), since
    Safari doesn't narrow a width from max-height through aspect-ratio. A 16:9 cut, or a taller
    window, leaves the picture as it was. The frame box's height here is the 16:9 default; Picture
-   writes it inline with the cut's own ratio. */
-.split > .stack { display: flex; flex-direction: column; align-self: start; container-type: inline-size; max-height: calc(100vh - var(--body-top, 114px) - 2 * var(--body-pad)); }
-.split > .stack > * { flex: none; }
-.split > .stack > .framebox { flex: 0 1 auto; height: min(640px, 70vh, calc(100cqw * 9 / 16)); min-height: 200px; container-type: size; }
-.split > .stack > .framebox .frame { width: min(100cqw, calc(100cqh * var(--ar, 16 / 9))); }
+   writes it inline with the cut's own ratio. It's all behind @supports: a browser without
+   container units keeps the earlier layout, the min(70vh, 640px) cap above. */
+@supports (width: 1cqw) {
+  .split > .stack { display: flex; flex-direction: column; align-self: start; container-type: inline-size; max-height: calc(100vh - var(--body-top, 114px) - 2 * var(--body-pad)); }
+  .split > .stack > * { flex: none; }
+  .split > .stack > .framebox { flex: 0 1 auto; height: min(640px, 70vh, calc(100cqw * 9 / 16)); min-height: 200px; container-type: size; }
+  .split > .stack > .framebox .frame { width: min(100cqw, calc(100cqh * var(--ar, 16 / 9))); }
+}
 .split > .shots { grid-column: 1; grid-row: 2; margin-top: -6px; }
 .frame video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
 .frame .overlay { position: absolute; inset: 0; }
