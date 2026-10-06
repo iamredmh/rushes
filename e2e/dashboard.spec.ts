@@ -1733,3 +1733,105 @@ test.describe("the Picture waveform (§19.9)", () => {
     expect(peaksAsked.length).toBeGreaterThanOrEqual(1);
   });
 });
+
+// ---- a tall cut leaves room for the timeline and the note box (§19.9, fix round 1) ----
+
+/** The bottoms of everything that must stay on screen under the picture, and the window's height. */
+async function playerBottoms(page: Page) {
+  return page.evaluate(() => {
+    const bottom = (sel: string) => document.querySelector(sel)!.getBoundingClientRect().bottom;
+    return { height: innerHeight, bar: bottom(".bar"), track: bottom(".track"), ends: bottom(".ends"), composer: bottom(".comp") };
+  });
+}
+
+/** The column ends at the window's edge less the body's 24 px padding: the picture gave way only as much as it had to. */
+async function expectColumnFilled(page: Page): Promise<void> {
+  const b = await playerBottoms(page);
+  expect(b.ends).toBeGreaterThanOrEqual(b.height - 24 - 2);
+}
+
+async function expectAllOnScreen(page: Page): Promise<void> {
+  // The frame settles to the cut's shape once its metadata loads.
+  await expect.poll(async () => {
+    const b = await playerBottoms(page);
+    return Math.max(b.bar, b.track, b.ends, b.composer) <= b.height;
+  }, { timeout: 5000 }).toBe(true);
+  const b = await playerBottoms(page);
+  for (const k of ["bar", "track", "ends", "composer"] as const) expect(b[k], k).toBeLessThanOrEqual(b.height);
+}
+
+const frameBox = async (page: Page) => (await page.locator(".frame").boundingBox())!;
+
+test.describe("a tall cut (fix round 1)", () => {
+  test("a 9:16 cut at 1440×900 keeps the controls, the timeline, its labels and the note box on screen", async ({ page, rushes }) => {
+    await rushes.addVerticalCut();
+    await page.goto(rushes.url);
+    await videoReady(page);
+    await expectAllOnScreen(page);
+    await expectColumnFilled(page);
+    const f = await frameBox(page);
+    // Still the cut's own shape, just shorter.
+    expect(f.width / f.height).toBeCloseTo(360 / 640, 1);
+    expect(f.height).toBeGreaterThan(500);
+  });
+
+  test("a 9:16 4K cut with the proxy offer showing still fits", async ({ page, rushes }) => {
+    test.skip(!hasFfmpeg, "needs ffmpeg and ffprobe");
+    await rushes.addProResCut({ codec: "h264", width: 2160, height: 3840, seconds: 2 });
+    await page.goto(rushes.url);
+    await expect(page.locator(".proxybar").getByRole("button", { name: "Create proxy" })).toBeVisible();
+    // Measured once the frame has taken the cut's shape (16:9 until its metadata loads).
+    await expect.poll(async () => { const f = await frameBox(page); return Math.abs(f.width / f.height - 9 / 16) < 0.05; }, { timeout: 10_000 }).toBe(true);
+    await expectAllOnScreen(page);
+    await expectColumnFilled(page);
+  });
+
+  test("with a shot list, the note box still fits; the shot strip may run below", async ({ page, rushes }) => {
+    await rushes.addVerticalCut();
+    await rushes.api("PUT", "/api/videos/hero/shots", { shots: [{ name: "Open", start: 0 }, { name: "Turn", start: 1 }] });
+    await page.goto(rushes.url);
+    await videoReady(page);
+    await expect(page.locator(".shot")).toHaveCount(2);
+    await expectAllOnScreen(page);
+    // The strip, beside the note box rather than above it, doesn't shrink the picture either.
+    await expectColumnFilled(page);
+    // The strip comes straight after the timeline.
+    const shots = (await page.locator(".shots").boundingBox())!;
+    const ends = (await page.locator(".ends").boundingBox())!;
+    expect(shots.y).toBeGreaterThan(ends.y + ends.height);
+    expect(shots.y - (ends.y + ends.height)).toBeLessThan(30);
+  });
+
+  test("a 16:9 cut looks as it did: the picture is the column's full width at 1440×900", async ({ page, rushes }) => {
+    await rushes.addCut();
+    await page.goto(rushes.url);
+    await videoReady(page);
+    // 1440 less the body's padding (2 × 24), the notes column (380) and the gap (20).
+    await expect.poll(async () => Math.round((await frameBox(page)).width)).toBe(992);
+    const f = await frameBox(page);
+    expect(Math.abs(f.height - 992 * (9 / 16))).toBeLessThanOrEqual(2);
+    await expectAllOnScreen(page);
+  });
+
+  test("a taller window doesn't shrink a 9:16 cut: at 1440×1100 it keeps its full 640 px", async ({ page, rushes }) => {
+    await page.setViewportSize({ width: 1440, height: 1100 });
+    await rushes.addVerticalCut();
+    await page.goto(rushes.url);
+    await videoReady(page);
+    await expect.poll(async () => Math.round((await frameBox(page)).height)).toBe(640);
+    expect((await frameBox(page)).width).toBeCloseTo(360, 0);
+    await expectAllOnScreen(page);
+  });
+});
+
+test.describe("a tall cut without ffmpeg (fix round 1)", () => {
+  test.use({ noFfmpeg: true });
+
+  test("with no proxy row at all, a 9:16 cut still fits at 1440×900", async ({ page, rushes }) => {
+    await rushes.addVerticalCut();
+    await page.goto(rushes.url);
+    await videoReady(page);
+    await expect(page.locator(".proxybar")).toHaveCount(0);
+    await expectAllOnScreen(page);
+  });
+});

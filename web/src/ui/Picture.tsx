@@ -410,7 +410,9 @@ export function Picture({
   return (
     <div class="split">
       <div class="stack">
-        <div class="framebox">
+        {/* The box's height is written out in full rather than through a custom property: Chromium
+            doesn't always redo a container-unit height when only the variable inside it changes. */}
+        <div class="framebox" style={{ height: `min(640px, 70vh, calc(100cqw / ${aspect}))` }}>
           <div class="frame" style={{ aspectRatio: String(aspect), "--ar": String(aspect) }}>
             {/* One message, never two: with ffmpeg, the proxy offer under the player speaks for a
                 file that won't play. Only the original, with a proxy to switch back to, says so here. */}
@@ -537,25 +539,27 @@ export function Picture({
           <div class="playhead" style={{ left: pct(t) }} />
         </div>
         <div class="ends"><span>0:00</span><span>{fmt(duration)}</span></div>
-
-        {shots.length > 0 && (
-          <div class="shots" data-player>
-            {shots.map((s) => (
-              <button
-                type="button"
-                class="shot"
-                ref={(el) => { shotRefs.current[s.n] = el; }}
-                aria-current={current?.n === s.n ? "true" : undefined}
-                onClick={() => { ref.current?.pause(); seek(shotSeek(s.start, fps)); }}
-              >
-                <span class="mono">{shotLabel(s.n)} · {s.start.toFixed(2)}s</span>
-                <span class="name">{s.name}</span>
-                {s.tag && <span class="tag">{s.tag}</span>}
-              </button>
-            ))}
-          </div>
-        )}
       </div>
+
+      {/* Outside the player's column, so the note box stays level with the timeline: the strip
+          may run below the window on a tall cut (fix round 1). */}
+      {shots.length > 0 && (
+        <div class="shots" data-player>
+          {shots.map((s) => (
+            <button
+              type="button"
+              class="shot"
+              ref={(el) => { shotRefs.current[s.n] = el; }}
+              aria-current={current?.n === s.n ? "true" : undefined}
+              onClick={() => { ref.current?.pause(); seek(shotSeek(s.start, fps)); }}
+            >
+              <span class="mono">{shotLabel(s.n)} · {s.start.toFixed(2)}s</span>
+              <span class="name">{s.name}</span>
+              {s.tag && <span class="tag">{s.tag}</span>}
+            </button>
+          ))}
+        </div>
+      )}
 
       <Notes
         notes={notes}

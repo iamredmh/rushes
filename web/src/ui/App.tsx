@@ -218,6 +218,25 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   });
 
+  // Where the page body starts (below the header, tabs and any banner), as --body-top, so Picture
+  // can cap its player at the window's height (fix round 1: a tall cut leaves room for the timeline
+  // and the note box). Read after every render, since a banner or a wrapped header moves it, and
+  // on resize; written only when it changes.
+  const bodyRef = useRef<HTMLElement>(null);
+  const placeBody = () => {
+    const el = bodyRef.current;
+    if (!el) return;
+    const top = `${Math.round(el.getBoundingClientRect().top + window.scrollY)}px`;
+    const root = document.documentElement.style;
+    if (root.getPropertyValue("--body-top") !== top) root.setProperty("--body-top", top);
+  };
+  useLayoutEffect(placeBody);
+  useEffect(() => {
+    const onResize = () => placeBody();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
   const send = async () => {
     if (!stage || stage === "assets") return;
     setKeysOpen(false);
@@ -426,7 +445,7 @@ export function App() {
       </nav>
       {problem && !wrongProject && <div class="banner"><Icon name="alert" />{problem}</div>}
 
-      <main class="body">
+      <main class="body" ref={bodyRef}>
         {stage === "assets" ? (
           unlocked ? (
             <Assets assets={assets} videos={state.project.videos} toast={toast} onChanged={() => void refresh()} />
