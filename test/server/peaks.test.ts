@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, readdir, truncate, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, readdir, stat, symlink, truncate, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
 import { createApp } from "../../src/server/app.js";
@@ -9,7 +9,7 @@ import { addVersion } from "../../src/core/project.js";
 import type { Probe } from "../../src/core/media.js";
 import type { ChangeEvent, Store } from "../../src/core/store.js";
 import { ProxyJobs, type FfmpegRunner } from "../../src/server/proxy.js";
-import { PEAK_BUCKETS, PEAKS_CONCURRENCY, PEAKS_FILE, PEAKS_MAX_BYTES, PeakJobs, peaksTimeoutMs, removeOrphanPeaks, removePeakTemps } from "../../src/server/peaks.js";
+import { PEAK_BUCKETS, PEAKS_CONCURRENCY, PEAKS_FILE, PEAKS_MAX_BYTES, PeakJobs, peaksHash, peaksTimeoutMs, removeOrphanPeaks, removePeakTemps } from "../../src/server/peaks.js";
 import { startServer } from "../../src/server/start.js";
 
 const has = (bin: string) => {
@@ -389,6 +389,42 @@ describe("peaks files that no cut owns (fix round 2)", () => {
     const after = await files();
     expect(after).toHaveLength(2);
     expect(after).toContain(before.find((n) => n.startsWith("hero_v10_")));
+  });
+});
+
+describe("what a decode may save (fix round 2)", () => {
+  it("nothing, when the file changed while it was being read: that answer is for a revision that's gone", async () => {
+    const hold = gate();
+    const run = fakeDecoder(() => ({ gate: hold.promise }));
+    const { call, peaks, register, root, files } = await setup(run);
+    await register("renders/hero.mp4");
+    expect((await call("GET", URL1)).status).toBe(202);
+    await expect.poll(() => run.calls.length).toBe(1);
+    await writeFile(join(root, "renders", "hero.mp4"), "re-rendered mid-decode, longer");
+    hold.open();
+    await peaks.idle();
+    expect(await files()).toEqual([]);
+    // The new revision is made on the next ask.
+    expect((await call("GET", URL1)).status).toBe(202);
+    await peaks.idle();
+    expect(await files()).toHaveLength(1);
+  });
+
+  it("is written to a temp name and renamed: a link planted at the final name is replaced, never written through", async () => {
+    const run = fakeDecoder();
+    const { call, peaks, register, root } = await setup(run);
+    await register("renders/hero.mp4");
+    const info = await stat(join(root, "renders", "hero.mp4"));
+    const name = `hero_v1_${peaksHash("renders/hero.mp4", info.size, info.mtimeMs)}.json`;
+    const dir = join(root, ".rushes", "peaks");
+    await mkdir(dir, { recursive: true });
+    const outside = join(root, "outside.json");
+    await symlink(outside, join(dir, name));
+    expect((await call("GET", URL1)).status).toBe(202);
+    await peaks.idle();
+    expect(existsSync(outside)).toBe(false);
+    expect((await lstat(join(dir, name))).isFile()).toBe(true);
+    expect((await call("GET", URL1)).status).toBe(200);
   });
 });
 
