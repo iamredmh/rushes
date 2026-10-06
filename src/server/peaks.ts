@@ -46,9 +46,30 @@ export const PEAKS_FILE = /^[a-z0-9][a-z0-9-]*_v\d+_[0-9a-f]{16}\.json$/;
 /** The file format, version 1. A cut with no audio stream gets `{ v: 1, audio: false }`, so it isn't decoded again. */
 export type PeaksFile = { v: 1; buckets: number; duration: number; peaks: number[] } | { v: 1; audio: false };
 
-/** ffmpeg's arguments: the first audio stream only, mixed to mono at 8 kHz, as raw 32-bit floats on stdout. */
+/**
+ * The containers a cut may be read as: the ordinary video and audio ones. Playlist and list
+ * formats (HLS, concat, and the like) are left out, so a "cut" that is really a list can't make
+ * ffmpeg open other files (fix round 3, M8).
+ */
+export const PEAKS_FORMATS = "mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mxf,wav,w64,aiff,mp3,aac,flac,ogg,caf,asf,mpeg,flv,dv";
+
+/**
+ * ffmpeg's arguments. Only local files (`file`, and `pipe` for stdout) in ordinary containers are
+ * read. The first audio stream is decoded, if there is one (`-map 0:a:0?`; with none, ffmpeg says
+ * the output "does not contain any stream", which is recorded as no audio). `aresample` pads with
+ * silence from 0:00 when the audio starts late, so the peaks line up with the picture. Then it's
+ * mixed to mono at 8 kHz and written as raw 32-bit floats on stdout.
+ */
 export function peaksArgs(abs: string): string[] {
-  return ["-hide_banner", "-nostdin", "-v", "error", "-i", abs, "-vn", "-sn", "-dn", "-ac", "1", "-ar", String(PEAK_RATE), "-f", "f32le", "pipe:1"];
+  return [
+    "-hide_banner", "-nostdin", "-v", "error",
+    "-protocol_whitelist", "file,pipe",
+    "-format_whitelist", PEAKS_FORMATS,
+    "-i", abs,
+    "-map", "0:a:0?", "-vn", "-sn", "-dn",
+    "-af", "aresample=async=1:first_pts=0",
+    "-ac", "1", "-ar", String(PEAK_RATE), "-f", "f32le", "pipe:1",
+  ];
 }
 
 /**
