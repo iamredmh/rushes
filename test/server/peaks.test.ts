@@ -9,7 +9,7 @@ import { addVersion } from "../../src/core/project.js";
 import type { Probe } from "../../src/core/media.js";
 import type { ChangeEvent, Store } from "../../src/core/store.js";
 import { ProxyJobs, type FfmpegRunner } from "../../src/server/proxy.js";
-import { PEAK_BUCKETS, PEAKS_CONCURRENCY, PEAKS_FILE, PEAKS_MAX_BYTES, PeakJobs, peaksTimeoutMs, removePeakTemps } from "../../src/server/peaks.js";
+import { PEAK_BUCKETS, PEAKS_CONCURRENCY, PEAKS_FILE, PEAKS_MAX_BYTES, PeakJobs, peaksTimeoutMs, removeOrphanPeaks, removePeakTemps } from "../../src/server/peaks.js";
 import { startServer } from "../../src/server/start.js";
 
 const has = (bin: string) => {
@@ -331,6 +331,64 @@ describe("the decode's timeout scales with the file (fix round 2)", () => {
     }
     await peaks.idle();
     expect((await peaks.answer("hero", "v1", "renders/hero.mov")).state).toBe("failed");
+  });
+});
+
+describe("peaks files that no cut owns (fix round 2)", () => {
+  const HASH = "0123456789abcdef";
+  const peaksDir = (root: string) => join(root, ".rushes", "peaks");
+
+  it("are deleted at start-up; a current cut's file stays, and nothing outside .rushes/peaks/ is touched", async () => {
+    const { root, store } = await tmpProject();
+    await mkdir(join(root, "renders"), { recursive: true });
+    await writeFile(join(root, "renders", "hero.mp4"), "x");
+    await store.update("project", (p) => {
+      addVersion(p, { video: "hero", file: "renders/hero.mp4", duration: 2, fps: 25 });
+    });
+    await mkdir(peaksDir(root), { recursive: true });
+    const names = [
+      `hero_v1_${HASH}.json`, // the current cut: kept
+      `hero_v10_${HASH}.json`, // v10 isn't a cut, whatever v1's prefix looks like: gone
+      `hero_v2_${HASH}.json`, // a cut that's gone: gone
+      `trailer_v1_${HASH}.json`, // a film that's gone: gone
+      "notes.txt", // not a peaks file at all, but in peaks/: gone
+    ];
+    for (const n of names) await writeFile(join(peaksDir(root), n), '{"v":1,"audio":false}');
+    await writeFile(join(root, "renders", `hero_v2_${HASH}.json`), "not in peaks/");
+    await writeFile(join(root, ".rushes", `hero_v2_${HASH}.json`), "not in peaks/");
+
+    expect((await removeOrphanPeaks(root, await store.read("project"))).sort()).toEqual(names.slice(1).sort());
+    expect(await readdir(peaksDir(root))).toEqual([`hero_v1_${HASH}.json`]);
+    expect(existsSync(join(root, "renders", `hero_v2_${HASH}.json`))).toBe(true);
+    expect(existsSync(join(root, ".rushes", `hero_v2_${HASH}.json`))).toBe(true);
+
+    // And it's what a starting server does.
+    await writeFile(join(peaksDir(root), `hero_v3_${HASH}.json`), "{}");
+    const s = await startServer(root, { port: 0, peaks: { run: fakeDecoder(), available: async () => true } });
+    try {
+      expect(await readdir(peaksDir(root))).toEqual([`hero_v1_${HASH}.json`]);
+    } finally {
+      await s.close();
+    }
+  });
+
+  it("with v1 and v10 both current, both files stay at start-up, and v1's re-render leaves v10's alone", async () => {
+    const run = fakeDecoder();
+    const { call, peaks, register, root, store, files } = await setup(run);
+    for (let i = 1; i <= 10; i++) await register(`renders/c${i}.mp4`);
+    await call("GET", URL1);
+    await call("GET", "/api/videos/hero/versions/v10/peaks");
+    await peaks.idle();
+    const before = await files();
+    expect(before.map((n) => n.split("_")[1]).sort()).toEqual(["v1", "v10"]);
+    expect(await removeOrphanPeaks(root, await store.read("project"))).toEqual([]);
+
+    await writeFile(join(root, "renders", "c1.mp4"), "re-rendered, longer bytes");
+    expect((await call("GET", URL1)).status).toBe(202);
+    await peaks.idle();
+    const after = await files();
+    expect(after).toHaveLength(2);
+    expect(after).toContain(before.find((n) => n.startsWith("hero_v10_")));
   });
 });
 
