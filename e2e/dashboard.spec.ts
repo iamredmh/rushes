@@ -1713,6 +1713,55 @@ test.describe("the Picture waveform (§19.9)", () => {
     expect(await wavePixels(page)).toBeGreaterThan(50);
   });
 
+  test("while the next cut's waveform is still on its way, the last cut's is never shown (fix round 2)", async ({ page, rushes }) => {
+    await rushes.addProResCut({ codec: "h264", seconds: 3, audio: true });
+    await rushes.addCut();
+    expect(await peaksSettled(rushes, "v1")).toBe(200);
+    // v2's answer is held back until the test lets it go.
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    await page.route("**/api/videos/hero/versions/v2/peaks", async (route) => {
+      await held;
+      await route.continue().catch(() => undefined);
+    });
+    await page.goto(rushes.url);
+    const versions = page.getByRole("combobox", { name: "Version" });
+    await versions.selectOption("v1");
+    await expect.poll(() => wavePixels(page)).toBeGreaterThan(50);
+    await versions.selectOption("v2");
+    await expect(versions).toHaveValue("v2");
+    for (let i = 0; i < 5; i++) {
+      await expect(page.locator(".track canvas.pwave")).toHaveCount(0);
+      await page.waitForTimeout(100);
+    }
+    release();
+    await page.waitForTimeout(300);
+    await expect(page.locator(".track canvas.pwave")).toHaveCount(0);
+  });
+
+  test("a slow answer for a cut you've already left is never drawn on the one you're on (fix round 2)", async ({ page, rushes }) => {
+    await rushes.addCut();
+    await rushes.addProResCut({ codec: "h264", seconds: 3, audio: true });
+    expect(await peaksSettled(rushes, "v2")).toBe(200);
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let asked = 0;
+    await page.route("**/api/videos/hero/versions/v2/peaks", async (route) => {
+      asked++;
+      await held;
+      await route.continue().catch(() => undefined);
+    });
+    await page.goto(rushes.url);
+    const versions = page.getByRole("combobox", { name: "Version" });
+    await expect(versions).toHaveValue("v2");
+    await expect.poll(() => asked).toBeGreaterThan(0);
+    await versions.selectOption("v1");
+    await expect(versions).toHaveValue("v1");
+    release();
+    await page.waitForTimeout(500);
+    await expect(page.locator(".track canvas.pwave")).toHaveCount(0);
+  });
+
   test("a cut with no audio shows no waveform", async ({ page, rushes }) => {
     await rushes.addCut();
     expect(await peaksSettled(rushes, "v1")).toBe(204);
