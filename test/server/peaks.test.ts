@@ -351,14 +351,15 @@ describe("peaks files that no cut owns (fix round 2)", () => {
       `hero_v10_${HASH}.json`, // v10 isn't a cut, whatever v1's prefix looks like: gone
       `hero_v2_${HASH}.json`, // a cut that's gone: gone
       `trailer_v1_${HASH}.json`, // a film that's gone: gone
-      "notes.txt", // not a peaks file at all, but in peaks/: gone
     ];
     for (const n of names) await writeFile(join(peaksDir(root), n), '{"v":1,"audio":false}');
+    // Not a name Rushes writes: never touched, even in peaks/ (fix round 3, M3).
+    await writeFile(join(peaksDir(root), "notes.txt"), "someone's notes");
     await writeFile(join(root, "renders", `hero_v2_${HASH}.json`), "not in peaks/");
     await writeFile(join(root, ".rushes", `hero_v2_${HASH}.json`), "not in peaks/");
 
     expect((await removeOrphanPeaks(root, await store.read("project"))).sort()).toEqual(names.slice(1).sort());
-    expect(await readdir(peaksDir(root))).toEqual([`hero_v1_${HASH}.json`]);
+    expect((await readdir(peaksDir(root))).sort()).toEqual([`hero_v1_${HASH}.json`, "notes.txt"]);
     expect(existsSync(join(root, "renders", `hero_v2_${HASH}.json`))).toBe(true);
     expect(existsSync(join(root, ".rushes", `hero_v2_${HASH}.json`))).toBe(true);
 
@@ -366,10 +367,33 @@ describe("peaks files that no cut owns (fix round 2)", () => {
     await writeFile(join(peaksDir(root), `hero_v3_${HASH}.json`), "{}");
     const s = await startServer(root, { port: 0, peaks: { run: fakeDecoder(), available: async () => true } });
     try {
-      expect(await readdir(peaksDir(root))).toEqual([`hero_v1_${HASH}.json`]);
+      expect((await readdir(peaksDir(root))).sort()).toEqual([`hero_v1_${HASH}.json`, "notes.txt"]);
     } finally {
       await s.close();
     }
+  });
+
+  it("a .rushes/peaks that is a link to another folder is left alone: nothing in it is swept or saved (fix round 3, M3)", async () => {
+    const { root, store } = await tmpProject();
+    await mkdir(join(root, "renders"), { recursive: true });
+    await writeFile(join(root, "renders", "hero.mp4"), "x");
+    await store.update("project", (p) => {
+      addVersion(p, { video: "hero", file: "renders/hero.mp4", duration: 2, fps: 25 });
+    });
+    const elsewhere = join(root, "elsewhere");
+    await mkdir(elsewhere);
+    const foreign = [`hero_v2_${HASH}.json`, ".x.tmp", "photo.jpg"];
+    for (const n of foreign) await writeFile(join(elsewhere, n), "theirs");
+    await symlink(elsewhere, peaksDir(root));
+    expect(await removeOrphanPeaks(root, await store.read("project"))).toEqual([]);
+    expect(await removePeakTemps(root)).toEqual([]);
+    // A decode doesn't save through it either.
+    const run = fakeDecoder();
+    const peaks = new PeakJobs(store, { run, available: async () => true });
+    await peaks.answer("hero", "v1", "renders/hero.mp4");
+    await peaks.idle();
+    expect((await readdir(elsewhere)).sort()).toEqual([...foreign].sort());
+    expect((await peaks.answer("hero", "v1", "renders/hero.mp4")).state).toBe("failed");
   });
 
   it("with v1 and v10 both current, both files stay at start-up, and v1's re-render leaves v10's alone", async () => {
@@ -425,6 +449,25 @@ describe("what a decode may save (fix round 2)", () => {
     expect(existsSync(outside)).toBe(false);
     expect((await lstat(join(dir, name))).isFile()).toBe(true);
     expect((await call("GET", URL1)).status).toBe(200);
+  });
+});
+
+describe("the buckets option (fix round 3, M5)", () => {
+  it("is held to 2000, so a file it makes is one this server will read back", async () => {
+    const { root, store } = await tmpProject();
+    await mkdir(join(root, "renders"), { recursive: true });
+    await writeFile(join(root, "renders", "hero.mp4"), "x");
+    await store.update("project", (p) => {
+      addVersion(p, { video: "hero", file: "renders/hero.mp4", duration: 2, fps: 25 });
+    });
+    const run = fakeDecoder(() => ({ samples: Array.from({ length: 5000 }, (_, i) => (i % 7) / 7) }));
+    const peaks = new PeakJobs(store, { run, available: async () => true, buckets: 5000 });
+    expect((await peaks.answer("hero", "v1", "renders/hero.mp4")).state).toBe("computing");
+    await peaks.idle();
+    const a = await peaks.answer("hero", "v1", "renders/hero.mp4");
+    expect(a.state).toBe("ready");
+    if (a.state === "ready") expect(a.data.peaks).toHaveLength(PEAK_BUCKETS);
+    expect(run.calls).toHaveLength(1);
   });
 });
 
