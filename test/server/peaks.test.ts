@@ -257,6 +257,68 @@ describe("GET …/peaks (§19.9)", () => {
   });
 });
 
+describe("PeakJobs: one decode per cut (fix round 2)", () => {
+  /** A decoder that holds until aborted, counting how many run at once. */
+  function holding() {
+    let now = 0;
+    const seen = { max: 0 };
+    const run = fakeDecoder(() => {
+      now++;
+      seen.max = Math.max(seen.max, now);
+      return { gate: new Promise(() => undefined) };
+    });
+    const wrapped = (async (args, o) => {
+      try {
+        return await run(args, o);
+      } finally {
+        if (args[0] !== "-version") now--;
+      }
+    }) as Fake;
+    Object.defineProperty(wrapped, "calls", { get: () => run.calls });
+    Object.defineProperty(wrapped, "killed", { get: () => run.killed });
+    return { run: wrapped, seen };
+  }
+
+  it("a cut added while a tab asks for its waveform is decoded once, and close() kills that one decode", async () => {
+    const { run } = holding();
+    const { call, peaks, register } = await setup(run);
+    await register("renders/hero.mp4");
+    // All three pass their checks before any has queued: what the route does (answer) twice, as
+    // two tabs would, and the add's queueCut.
+    const [, a, b] = await Promise.all([
+      peaks.queueCut("hero", "v1", "renders/hero.mp4"),
+      peaks.answer("hero", "v1", "renders/hero.mp4"),
+      peaks.answer("hero", "v1", "renders/hero.mp4"),
+    ]);
+    expect([a.state, b.state]).toEqual(["computing", "computing"]);
+    expect((await call("GET", URL1)).status).toBe(202);
+    await expect.poll(() => run.calls.length).toBe(1);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(run.calls).toHaveLength(1);
+    await peaks.close();
+    expect(run.killed).toBe(1);
+  });
+
+  it("five cuts asked for at once never run more than two decodes", async () => {
+    const { run, seen } = holding();
+    const { call, peaks, register } = await setup(run);
+    for (let i = 1; i <= 5; i++) await register(`renders/c${i}.mp4`);
+    await Promise.all(
+      [1, 2, 3, 4, 5].flatMap((i) => [
+        peaks.queueCut("hero", `v${i}`, `renders/c${i}.mp4`),
+        peaks.answer("hero", `v${i}`, `renders/c${i}.mp4`),
+        call("GET", `/api/videos/hero/versions/v${i}/peaks`),
+      ]),
+    );
+    await expect.poll(() => run.calls.length).toBe(2);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(seen.max).toBe(2);
+    expect(run.calls).toHaveLength(2);
+    await peaks.close();
+    expect(run.killed).toBe(2);
+  });
+});
+
 describe("PeakJobs in the background (§19.9)", () => {
   it("adding a cut starts its waveform without waiting for it, and GET /api/state never waits either", async () => {
     const run = fakeDecoder(() => ({ gate: new Promise(() => undefined) }));
