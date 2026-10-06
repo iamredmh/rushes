@@ -9,6 +9,7 @@ import { removeLock, writeLock } from "./lock.js";
 import { watchStore } from "./watch.js";
 import type { Revealer } from "./reveal.js";
 import { ProxyJobs, removePartials, type ProxyJobsOptions } from "./proxy.js";
+import { PeakJobs, removePeakTemps, type PeakJobsOptions } from "./peaks.js";
 
 export const DEFAULT_PORT = 4580;
 
@@ -37,6 +38,8 @@ export interface StartOptions {
   reveal?: Revealer;
   /** How §19.5's proxy jobs run ffmpeg and ffprobe. Defaults to the real ones; tests inject fakes. */
   proxy?: ProxyJobsOptions;
+  /** How §19.9's waveforms run ffmpeg. Defaults to the real one; tests inject fakes. */
+  peaks?: PeakJobsOptions;
 }
 
 function listen(server: Server, port: number, host: string): Promise<number> {
@@ -73,7 +76,10 @@ export async function startServer(rootDir: string, opts: StartOptions = {}): Pro
   // Built on this server's own store, so its progress events reach this server's SSE clients.
   // Every running job is cancelled when the server closes.
   const proxyJobs = new ProxyJobs(store, opts.proxy);
-  const appOpts: AppOptions = { webDir: opts.webDir, onShutdown: () => void close(), reveal: opts.reveal, proxyJobs };
+  // §19.9: waveforms use their own runner (a test's fake proxy encoder is no audio decoder), and
+  // ffmpeg is there exactly when proxies say so.
+  const peakJobs = new PeakJobs(store, { available: () => proxyJobs.available(), ...opts.peaks });
+  const appOpts: AppOptions = { webDir: opts.webDir, onShutdown: () => void close(), reveal: opts.reveal, proxyJobs, peakJobs };
   const app = createApp(store, appOpts);
   const listener = getRequestListener(app.fetch);
   let lastRequest = Date.now();
@@ -116,6 +122,8 @@ export async function startServer(rootDir: string, opts: StartOptions = {}): Pro
   // (a version's proxy is set only after a completed render), so it goes. Only the lock winner
   // does this, so it can never delete a file another live server is still writing.
   await removePartials(root);
+  // Likewise a waveform that was being saved: its temp file is never read, and goes.
+  await removePeakTemps(root);
   appOpts.projectId = id;
   const url = `http://${host}:${port}`;
   const stopWatching = await watchStore(store);
@@ -129,7 +137,7 @@ export async function startServer(rootDir: string, opts: StartOptions = {}): Pro
       stopWatching();
       // A running proxy's ffmpeg must not outlive the server; its partial file is deleted too.
       // From here no new job starts either (a POST or an autoProxy cut racing the close).
-      await proxyJobs.close();
+      await Promise.all([proxyJobs.close(), peakJobs.close()]);
       server.closeAllConnections?.();
       await new Promise<void>((ok) => server.close(() => ok()));
       await removeLock(root, token);
