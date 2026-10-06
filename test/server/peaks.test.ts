@@ -9,7 +9,7 @@ import { addVersion } from "../../src/core/project.js";
 import type { Probe } from "../../src/core/media.js";
 import type { ChangeEvent, Store } from "../../src/core/store.js";
 import { ProxyJobs, type FfmpegRunner } from "../../src/server/proxy.js";
-import { PEAKS_CONCURRENCY, PEAKS_FILE, PeakJobs, removePeakTemps } from "../../src/server/peaks.js";
+import { PEAK_BUCKETS, PEAKS_CONCURRENCY, PEAKS_FILE, PEAKS_MAX_BYTES, PeakJobs, removePeakTemps } from "../../src/server/peaks.js";
 import { startServer } from "../../src/server/start.js";
 
 const has = (bin: string) => {
@@ -254,6 +254,46 @@ describe("GET …/peaks (§19.9)", () => {
     await peaks.idle();
     expect((await call("GET", URL1)).status).toBe(200);
     expect(run.calls).toHaveLength(2);
+  });
+});
+
+describe("a peaks file is only believed when it's one this server could have written (fix round 2)", () => {
+  const ok = { v: 1, buckets: 3, duration: 1, peaks: [0, 0.5, 1] };
+  const big = new Array(PEAK_BUCKETS + 1).fill(0.5);
+  it.each([
+    ["a peak above 1", { ...ok, peaks: [0, 0.5, 1.5] }],
+    ["a negative peak", { ...ok, peaks: [0, -0.5, 1] }],
+    ["a buckets count that doesn't match the peaks", { ...ok, buckets: 4 }],
+    [`more than ${PEAK_BUCKETS} peaks`, { v: 1, buckets: big.length, duration: 1, peaks: big }],
+    ["no duration", { v: 1, buckets: 3, peaks: [0, 0.5, 1] }],
+    ["another format version", { ...ok, v: 2 }],
+  ])("%s is made again", async (_what, body) => {
+    const run = fakeDecoder();
+    const { call, peaks, register, root, files } = await setup(run);
+    await register("renders/hero.mp4");
+    await call("GET", URL1);
+    await peaks.idle();
+    const [name] = await files();
+    await writeFile(join(root, ".rushes", "peaks", name), JSON.stringify(body));
+    expect((await call("GET", URL1)).status).toBe(202);
+    await peaks.idle();
+    expect((await call("GET", URL1)).json).toEqual({ v: 1, buckets: 4, duration: 0.001, peaks: [0.1, 0.5, 1, 0.25] });
+  });
+
+  it(`a file over ${PEAKS_MAX_BYTES / 1024} KB isn't read at all, even if it would parse`, async () => {
+    const run = fakeDecoder();
+    const { call, peaks, register, root, files } = await setup(run);
+    await register("renders/hero.mp4");
+    await call("GET", URL1);
+    await peaks.idle();
+    const [name] = await files();
+    const padded = JSON.stringify(ok) + " ".repeat(PEAKS_MAX_BYTES);
+    await writeFile(join(root, ".rushes", "peaks", name), padded);
+    expect((await call("GET", URL1)).status).toBe(202);
+    // Just under the limit, the same content is believed.
+    await peaks.idle();
+    await writeFile(join(root, ".rushes", "peaks", name), JSON.stringify(ok) + " ".repeat(1000));
+    expect((await call("GET", URL1)).json).toEqual(ok);
   });
 });
 
