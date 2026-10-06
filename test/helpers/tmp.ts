@@ -7,7 +7,9 @@ import { Store } from "../../src/core/store.js";
 const made: string[] = [];
 
 afterEach(async () => {
-  while (made.length) await rm(made.pop()!, { recursive: true, force: true });
+  // Retried: a background job a test started (a §19.9 waveform landing in .rushes/peaks/, say)
+  // can still be writing as the folder goes, which fails one pass with ENOTEMPTY.
+  while (made.length) await rm(made.pop()!, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
 });
 
 /**
