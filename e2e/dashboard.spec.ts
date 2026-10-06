@@ -1824,6 +1824,19 @@ test.describe("a tall cut (fix round 1)", () => {
   });
 });
 
+test.describe("the player follows the real header height (fix round 2)", () => {
+  test("a header that grows without the page re-rendering still leaves the timeline and note box on screen", async ({ page, rushes }) => {
+    await rushes.addVerticalCut();
+    await page.goto(rushes.url);
+    await videoReady(page);
+    await expectAllOnScreen(page);
+    // A taller header (a wrapped crumb, a late web font): no state changes, so the app doesn't render.
+    await page.addStyleTag({ content: ".head { padding-top: 70px; }" });
+    await expectAllOnScreen(page);
+    await expectColumnFilled(page);
+  });
+});
+
 test.describe("a tall cut without ffmpeg (fix round 1)", () => {
   test.use({ noFfmpeg: true });
 
