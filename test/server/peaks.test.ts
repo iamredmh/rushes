@@ -587,6 +587,63 @@ describe("PeakJobs in the background (§19.9)", () => {
 });
 
 describe.skipIf(!FFMPEG)("peaks with real ffmpeg", () => {
+  it("audio that starts a second in is drawn from 0:00: the first second is silence (fix round 3, I1)", async () => {
+    const { root, store } = await tmpProject();
+    await mkdir(join(root, "renders"), { recursive: true });
+    const ff = (args: string[]) => execFileSync("ffmpeg", ["-v", "error", "-y", ...args], { stdio: "ignore" });
+    // 3 s of picture; the 2 s of tone starts at 1 s.
+    ff([
+      "-f", "lavfi", "-i", "testsrc2=s=180x320:d=3",
+      "-itsoffset", "1", "-f", "lavfi", "-i", "sine=f=440:d=2",
+      "-map", "0:v", "-map", "1:a", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", join(root, "renders", "late.mp4"),
+    ]);
+    const peaks = new PeakJobs(store);
+    const app = createApp(store, { peakJobs: peaks });
+    const post = await app.request("/api/versions", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ video: "Hero", file: "renders/late.mp4" }) });
+    expect(post.status).toBe(201);
+    await expect.poll(async () => (await app.request(URL1)).status, { timeout: 10_000 }).toBe(200);
+    const data = (await (await app.request(URL1)).json()) as { duration: number; peaks: number[] };
+    expect(data.duration).toBeGreaterThan(2.9);
+    expect(data.duration).toBeLessThan(3.1);
+    const n = data.peaks.length;
+    // The first ~0.95 s (allowing for the encoder's priming) is silent; the rest is the tone.
+    expect(Math.max(...data.peaks.slice(0, Math.floor(n * 0.3)))).toBeLessThan(0.05);
+    expect(Math.min(...data.peaks.slice(Math.floor(n * 0.4), Math.floor(n * 0.95)))).toBeGreaterThan(0.5);
+    await peaks.close();
+  });
+
+  it("a .mov and a .wav decode; a playlist or concat list posing as a cut is refused (fix round 3, M8)", async () => {
+    const { root, store } = await tmpProject();
+    await mkdir(join(root, "renders"), { recursive: true });
+    const ff = (args: string[]) => execFileSync("ffmpeg", ["-v", "error", "-y", ...args], { stdio: "ignore" });
+    ff(["-f", "lavfi", "-i", "testsrc2=s=160x90:d=1", "-f", "lavfi", "-i", "sine=d=1", "-c:v", "prores_ks", "-c:a", "pcm_s16le", join(root, "renders", "a.mov")]);
+    ff(["-f", "lavfi", "-i", "sine=d=1", join(root, "renders", "b.wav")]);
+    // A segment that is a perfectly good file: only the playlist around it is refused.
+    ff(["-f", "lavfi", "-i", "sine=d=1", "-c:a", "aac", "-f", "mpegts", join(root, "renders", "seg.ts")]);
+    await writeFile(join(root, "renders", "c.m3u8"), "#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1,\nseg.ts\n#EXT-X-ENDLIST\n");
+    await writeFile(join(root, "renders", "d.ffconcat"), "ffconcat version 1.0\nfile seg.ts\n");
+    for (const f of ["a.mov", "b.wav", "c.m3u8", "d.ffconcat"]) {
+      await store.update("project", (p) => {
+        addVersion(p, { video: "hero", file: `renders/${f}`, duration: 1, fps: 25 });
+      });
+    }
+    const peaks = new PeakJobs(store);
+    const app = createApp(store, { peakJobs: peaks });
+    const settle = async (v: string) => {
+      await expect.poll(async () => (await app.request(`/api/videos/hero/versions/${v}/peaks`)).status, { timeout: 10_000 }).not.toBe(202);
+      return app.request(`/api/videos/hero/versions/${v}/peaks`);
+    };
+    expect((await settle("v1")).status).toBe(200);
+    expect((await settle("v2")).status).toBe(200);
+    for (const v of ["v3", "v4"]) {
+      const r = await settle(v);
+      expect(r.status).toBe(422);
+      expect(((await r.json()) as { error: string }).error).toBe("no_peaks");
+    }
+    expect((await readdir(join(root, ".rushes", "peaks"))).filter((n) => /_v[34]_/.test(n))).toEqual([]);
+    await peaks.close();
+  });
+
   it("a 2 s tone gives a waveform that isn't flat, and a clip with no audio gives 204", async () => {
     const { root, store } = await tmpProject();
     await mkdir(join(root, "renders"), { recursive: true });

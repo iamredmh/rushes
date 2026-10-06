@@ -79,10 +79,17 @@ describe("PeakReducer (§19.9): streaming f32le into peak buckets", () => {
 });
 
 describe("peaksArgs", () => {
-  it("decodes only the audio, mono at 8 kHz, as raw floats on stdout", () => {
+  it("reads only local files in ordinary containers, decodes the first audio stream from 0:00, mono at 8 kHz, as raw floats on stdout", () => {
     expect(peaksArgs("/films/a b.mov")).toEqual([
-      "-hide_banner", "-nostdin", "-v", "error", "-i", "/films/a b.mov",
-      "-vn", "-sn", "-dn", "-ac", "1", "-ar", "8000", "-f", "f32le", "pipe:1",
+      "-hide_banner", "-nostdin", "-v", "error",
+      // No network, and no playlists or concat lists that would open other files (fix round 3, M8).
+      "-protocol_whitelist", "file,pipe",
+      "-format_whitelist", "mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mxf,wav,w64,aiff,mp3,aac,flac,ogg,caf,asf,mpeg,flv,dv",
+      "-i", "/films/a b.mov",
+      // The first audio stream, if there is one (M7); padded with silence from 0:00 when it starts late (I1).
+      "-map", "0:a:0?", "-vn", "-sn", "-dn",
+      "-af", "aresample=async=1:first_pts=0",
+      "-ac", "1", "-ar", "8000", "-f", "f32le", "pipe:1",
     ]);
   });
 });
