@@ -167,7 +167,56 @@ export function needsH264(browserName: string): void {
   base.info().skip(browserName === "webkit" && process.platform === "linux" && process.env.RUSHES_E2E_WEBKIT_H264 !== "1", H264_SKIP_REASON);
 }
 
+/**
+ * Runs in every page before the dashboard does, so a test run makes no sound: Playwright's WebKit
+ * plays through the Mac's real speakers (it has no mute flag), and the fixtures are 440 Hz tones.
+ * Whatever connects to a context's destination goes through a zero gain instead, so nodes upstream
+ * still see the signal; a media element that plays on its own gets volume 0, which nothing in the
+ * app reads. Playback, timing and `muted` are left alone.
+ */
+function silenceAudio(): void {
+  const { connect, disconnect } = AudioNode.prototype;
+  const zeros = new WeakMap<AudioDestinationNode, GainNode>();
+  const zeroFor = (node: AudioNode, dest: AudioDestinationNode): GainNode => {
+    let gain = zeros.get(dest);
+    if (!gain) {
+      gain = node.context.createGain();
+      gain.gain.value = 0;
+      (connect as Function).call(gain, dest);
+      zeros.set(dest, gain);
+    }
+    return gain;
+  };
+  AudioNode.prototype.connect = function (this: AudioNode, dest: AudioNode | AudioParam, ...rest: number[]) {
+    if (!(dest instanceof AudioDestinationNode)) return (connect as Function).call(this, dest, ...rest);
+    (connect as Function).call(this, zeroFor(this, dest), ...rest);
+    return dest;
+  } as typeof connect;
+  AudioNode.prototype.disconnect = function (this: AudioNode, ...args: unknown[]) {
+    if (args[0] instanceof AudioDestinationNode) args[0] = zeroFor(this, args[0]);
+    return (disconnect as Function).apply(this, args);
+  } as typeof disconnect;
+
+  // An element routed into a graph is silenced at the destination, so it keeps its own volume.
+  const routed = new WeakSet<HTMLMediaElement>();
+  const createSource = AudioContext.prototype.createMediaElementSource;
+  AudioContext.prototype.createMediaElementSource = function (this: AudioContext, el: HTMLMediaElement) {
+    routed.add(el);
+    el.volume = 1;
+    return createSource.call(this, el);
+  };
+  const play = HTMLMediaElement.prototype.play;
+  HTMLMediaElement.prototype.play = function (this: HTMLMediaElement) {
+    if (!routed.has(this)) this.volume = 0;
+    return play.call(this);
+  };
+}
+
 export const test = base.extend<{ rushes: Rushes; noFfmpeg: boolean }>({
+  context: async ({ context }, use) => {
+    await context.addInitScript(silenceAudio);
+    await use(context);
+  },
   /** Start the server without ffmpeg or ffprobe on its PATH (`test.use({ noFfmpeg: true })`). */
   noFfmpeg: [false, { option: true }],
   rushes: async ({ noFfmpeg, browserName }, use) => {

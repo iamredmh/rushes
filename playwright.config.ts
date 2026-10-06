@@ -14,7 +14,8 @@ export default defineConfig({
   timeout: 30_000,
   use: { trace: "retain-on-failure" },
   projects: [
-    { name: "chromium", use: { ...devices["Desktop Chrome"], viewport } },
+    // Muted, as WebKit is in e2e/fixture.ts: the fixtures are 440 Hz tones and a run shouldn't beep.
+    { name: "chromium", use: { ...devices["Desktop Chrome"], viewport, launchOptions: { args: ["--mute-audio"] } } },
     { name: "webkit", use: { ...devices["Desktop Safari"], viewport } },
   ],
 });
