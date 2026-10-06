@@ -19,8 +19,17 @@ export const PEAK_RATE = 8000;
 export const PEAKS_DIR = "peaks";
 /** Waveforms are made this many at a time, like the proxy-need probes. */
 export const PEAKS_CONCURRENCY = 2;
-/** A decode that runs longer than this is killed and treated as failed. */
+/** A decode is given at least this long, and never more than PEAKS_TIMEOUT_MAX_MS. */
 export const PEAKS_TIMEOUT_MS = 5 * 60_000;
+export const PEAKS_TIMEOUT_MAX_MS = 60 * 60_000;
+/** The slowest a decode is expected to read the original: 5 MB a second, a slow network volume. */
+const PEAKS_READ_BYTES_PER_S = 5e6;
+
+/** How long a decode of a file this size may run before it's killed: 60 s plus the size read at 5 MB/s, held to 5–60 minutes. */
+export function peaksTimeoutMs(bytes: number): number {
+  const ms = 60_000 + (Math.max(0, bytes) / PEAKS_READ_BYTES_PER_S) * 1000;
+  return Math.round(Math.min(PEAKS_TIMEOUT_MAX_MS, Math.max(PEAKS_TIMEOUT_MS, ms)));
+}
 /** A peaks file is at most this big (2000 peaks are about 12 KB); anything larger isn't read. */
 export const PEAKS_MAX_BYTES = 64 * 1024;
 /** How many failed revisions are remembered (so a broken file isn't decoded on every request). */
@@ -145,13 +154,14 @@ export interface PeakJobsOptions {
   run?: FfmpegRunner;
   /** Whether ffmpeg is there. Defaults to running `ffmpeg -version` once. */
   available?: () => Promise<boolean>;
-  /** Kills a decode after this long. Defaults to 5 minutes. */
+  /** Kills a decode after this long. Defaults to `peaksTimeoutMs` of the original's size. */
   timeoutMs?: number;
   /** Peaks per cut. Defaults to 2000. */
   buckets?: number;
 }
 
 interface Item {
+  size: number;
   video: string;
   version: string;
   file: string;
@@ -169,7 +179,7 @@ export class PeakJobs {
   private readonly run: FfmpegRunner;
   private readonly isAvailable: () => Promise<boolean>;
   private availableOnce: Promise<boolean> | null = null;
-  private readonly timeoutMs: number;
+  private readonly timeoutMs: number | undefined;
   private readonly buckets: number;
   private readonly queue = new Map<string, Item>();
   private readonly running = new Map<string, AbortController>();
@@ -182,7 +192,7 @@ export class PeakJobs {
     opts: PeakJobsOptions = {},
   ) {
     this.run = opts.run ?? defaultFfmpeg;
-    this.timeoutMs = opts.timeoutMs ?? PEAKS_TIMEOUT_MS;
+    this.timeoutMs = opts.timeoutMs;
     this.buckets = opts.buckets ?? PEAK_BUCKETS;
     const run = this.run;
     this.isAvailable = opts.available ?? (async () => (await run(["-version"])).code === 0);
@@ -261,7 +271,7 @@ export class PeakJobs {
     }
     if (!info.isFile()) return null;
     const hash = peaksHash(file, info.size, info.mtimeMs);
-    return { video, version, file, abs, hash, name: `${video}_${version}_${hash}.json` };
+    return { video, version, file, abs, hash, size: info.size, name: `${video}_${version}_${hash}.json` };
   }
 
   /** A peaks file on disk, or null when there's none (or it doesn't read as one: it's made again). */
@@ -329,7 +339,7 @@ export class PeakJobs {
     const timer = setTimeout(() => {
       timedOut = true;
       controller.abort();
-    }, this.timeoutMs);
+    }, this.timeoutMs ?? peaksTimeoutMs(item.size));
     let res: { code: number; stderr: string };
     try {
       res = await this.run(peaksArgs(item.abs), { signal: controller.signal, onStdout: (c) => reducer.push(c) });
