@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { FALLBACK_MAX_BYTES, cachedWave, hasCachedWave, loadWave, normalisePeaks, rememberWave, watchPixelRatio, waveKey, type WaveDeps } from "../../web/src/peaks.js";
+import { FALLBACK_MAX_BYTES, FALLBACK_MAX_SECONDS, cachedWave, hasCachedWave, loadWave, normalisePeaks, rememberWave, watchPixelRatio, waveKey, type WaveDeps } from "../../web/src/peaks.js";
 
-const CUT = { peaksUrl: "/api/videos/hero/versions/v1/peaks", mediaUrl: "/media?path=renders%2Fhero.mp4", size: 1_000_000 };
+const CUT = { peaksUrl: "/api/videos/hero/versions/v1/peaks", mediaUrl: "/media?path=renders%2Fhero.mp4", size: 1_000_000, duration: async () => 2 };
 
 function json(status: number, body?: unknown): Response {
   return new Response(body === undefined ? null : JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -63,6 +63,18 @@ describe("loadWave (§19.9)", () => {
       expect((await loadWave({ ...CUT, size }, d, signal())).kind).toBe("none");
       expect(asked).toEqual([CUT.peaksUrl]);
     }
+  });
+
+  it("501 with a cut over 15 minutes, or of a length that never becomes known, draws nothing and never fetches it (fix round 3, M1)", async () => {
+    for (const duration of [FALLBACK_MAX_SECONDS + 1, 40 * 60, null]) {
+      const { d, asked } = deps(() => json(501, { error: "no_ffmpeg" }));
+      // A low-bitrate recording: small on disk, long in the tab once decoded.
+      expect((await loadWave({ ...CUT, size: 99_000_000, duration: async () => duration }, d, signal())).kind).toBe("none");
+      expect(asked).toEqual([CUT.peaksUrl]);
+    }
+    const { d, asked } = deps(() => json(501, { error: "no_ffmpeg" }));
+    expect((await loadWave({ ...CUT, duration: async () => FALLBACK_MAX_SECONDS }, d, signal())).kind).toBe("wave");
+    expect(asked).toEqual([CUT.peaksUrl, CUT.mediaUrl]);
   });
 
   it("501 with a file the browser can't decode (no audio track) draws nothing", async () => {
