@@ -10,6 +10,8 @@ import type { Version } from "../types.js";
 /** The first retry while the server is still making the peaks; it doubles up to RETRY_MAX_MS. A `change` asks sooner. */
 const RETRY_MS = 1500;
 const RETRY_MAX_MS = 15_000;
+/** How long a no-ffmpeg fallback waits for the player to learn the cut's length. */
+const LENGTH_WAIT_MS = 15_000;
 
 const browserDeps: WaveDeps = {
   fetch(url, init) {
@@ -32,8 +34,23 @@ const browserDeps: WaveDeps = {
  * is a new object on every state refresh, which is how a `change` (the server's peaks landing)
  * prompts an early retry.
  */
-export function usePictureWave(video: string, version: Version, size: number | null, rev: string | undefined): Wave | null {
+export function usePictureWave(video: string, version: Version, size: number | null, rev: string | undefined, length: number): Wave | null {
   const key = waveKey(video, version.id, version.file, rev);
+  // The player's length (0 until its metadata loads), for the no-ffmpeg fallback's 15-minute cap:
+  // a fallback waits for it, and gives up after LENGTH_WAIT_MS.
+  const lengthRef = useRef(length);
+  const lengthWaiters = useRef<((n: number) => void)[]>([]);
+  useEffect(() => {
+    lengthRef.current = length;
+    if (length > 0) for (const w of lengthWaiters.current.splice(0)) w(length);
+  }, [length]);
+  const knownLength = (): Promise<number | null> =>
+    lengthRef.current > 0
+      ? Promise.resolve(lengthRef.current)
+      : new Promise((res) => {
+          lengthWaiters.current.push(res);
+          window.setTimeout(() => res(null), LENGTH_WAIT_MS);
+        });
   const [shown, setShown] = useState<{ key: string; wave: Wave | null } | null>(() => (hasCachedWave(key) ? { key, wave: cachedWave(key) } : null));
   const retryNow = useRef<(() => void) | null>(null);
 
@@ -49,6 +66,7 @@ export function usePictureWave(video: string, version: Version, size: number | n
       peaksUrl: `/api/videos/${encodeURIComponent(video)}/versions/${encodeURIComponent(version.id)}/peaks`,
       mediaUrl: mediaUrl(version.file),
       size,
+      duration: knownLength,
     };
     const attempt = async () => {
       retryNow.current = null;

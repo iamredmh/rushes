@@ -7,6 +7,9 @@ import { mixPeaks } from "./audio/timeline.js";
 export const WAVE_BUCKETS = 2000;
 /** Without ffmpeg, a cut this size or larger gets no waveform: it would mean fetching and decoding all of it. */
 export const FALLBACK_MAX_BYTES = 100 * 1000 * 1000;
+/** Without ffmpeg, a cut longer than this gets no waveform either: a small, low-bitrate file can still run
+ *  for an hour, and decoding all of it would hold that much audio in the tab. */
+export const FALLBACK_MAX_SECONDS = 15 * 60;
 /** The browser decodes at this rate: plenty for the outline, and a fraction of the memory of 48 kHz. */
 export const FALLBACK_RATE = 8000;
 
@@ -25,11 +28,13 @@ export interface WaveDeps {
   decode(data: ArrayBuffer): Promise<{ channels: Float32Array[]; duration: number }>;
 }
 
-/** The cut to load: where its peaks and its file are, and the file's size (null when unknown). */
+/** The cut to load: where its peaks and its file are, the file's size (null when unknown), and its
+ *  length in seconds once the player knows it (null if it never does). */
 export interface WaveCut {
   peaksUrl: string;
   mediaUrl: string;
   size: number | null;
+  duration(): Promise<number | null>;
 }
 
 const NONE: WaveLoad = { kind: "none" };
@@ -66,13 +71,16 @@ export async function loadWave(cut: WaveCut, deps: WaveDeps, signal: AbortSignal
 async function fallback(cut: WaveCut, deps: WaveDeps, signal: AbortSignal): Promise<WaveLoad> {
   if (cut.size === null || !(cut.size < FALLBACK_MAX_BYTES)) return NONE;
   try {
+    const length = await cut.duration();
+    if (signal.aborted) throw new DOMException("aborted", "AbortError");
+    if (length === null || !(length > 0) || length > FALLBACK_MAX_SECONDS) return NONE;
     const res = await deps.fetch(cut.mediaUrl, { signal });
     if (!res.ok) return NONE;
     const { channels, duration } = await deps.decode(await res.arrayBuffer());
     if (signal.aborted) throw new DOMException("aborted", "AbortError");
-    const length = channels[0]?.length ?? 0;
-    if (length === 0 || !(duration > 0)) return NONE;
-    return { kind: "wave", wave: { peaks: normalisePeaks(mixPeaks(channels, Math.min(WAVE_BUCKETS, length))), duration } };
+    const samples = channels[0]?.length ?? 0;
+    if (samples === 0 || !(duration > 0)) return NONE;
+    return { kind: "wave", wave: { peaks: normalisePeaks(mixPeaks(channels, Math.min(WAVE_BUCKETS, samples))), duration } };
   } catch (e) {
     if (signal.aborted) throw e;
     return NONE;

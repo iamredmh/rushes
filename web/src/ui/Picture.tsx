@@ -60,6 +60,8 @@ export function Picture({
   const input = useRef<HTMLTextAreaElement>(null);
   const [t, setT] = useState(0);
   const [duration, setDuration] = useState(version.duration ?? 0);
+  // Which cut `duration` was read from: until a new cut's metadata loads, it's still the last one's.
+  const [durationOf, setDurationOf] = useState<string | null>(version.duration ? version.file : null);
   // The frame's shape: the video's own aspect ratio once metadata loads, 16:9 before then.
   const [aspect, setAspect] = useState(16 / 9);
   const [playing, setPlaying] = useState(false);
@@ -73,7 +75,7 @@ export function Picture({
   const [shown, setShown] = useState<Box | null>(null);
   const [noteHasText, setNoteHasText] = useState(false);
   // §19.9: the cut's own audio, drawn quietly in the timeline. Always the original's, even with a proxy.
-  const wave = usePictureWave(video.id, version, fileSize, fileRev);
+  const wave = usePictureWave(video.id, version, fileSize, fileRev, durationOf === version.file ? duration : (version.duration ?? 0));
   // The click that ends a box drag shouldn't also start playback.
   const justDrew = useRef(false);
   // startAt restores a film's remembered playhead, but only once: the first metadata load
@@ -385,6 +387,7 @@ export function Picture({
    *  frame letterboxed at the 16:9 default forever). */
   const applyMetadata = (v: HTMLVideoElement) => {
     setDuration(v.duration || version.duration || 0);
+    setDurationOf(version.file);
     if (v.videoWidth && v.videoHeight) setAspect(v.videoWidth / v.videoHeight);
     if (!startApplied.current) {
       startApplied.current = true;
