@@ -1927,6 +1927,26 @@ test.describe("the player follows the real header height (fix round 2)", () => {
   });
 });
 
+test.describe("a very short window (fix round 3, M2)", () => {
+  for (const height of [520, 440]) test(`at ${height} px high the player stops shrinking and the shot strip sits below the timeline, never over it`, async ({ page, rushes }) => {
+    await page.setViewportSize({ width: 1440, height });
+    await rushes.addVerticalCut();
+    await rushes.api("PUT", "/api/videos/hero/shots", { shots: [{ name: "Open", start: 0 }, { name: "Turn", start: 1 }] });
+    await page.goto(rushes.url);
+    await videoReady(page);
+    await expect(page.locator(".shot")).toHaveCount(2);
+    const r = await page.evaluate(() => {
+      const box = (sel: string) => document.querySelector(sel)!.getBoundingClientRect();
+      return { frame: box(".frame").height, track: box(".track").bottom, ends: box(".ends").bottom, shots: box(".shots").top, stack: box(".split > .stack").bottom };
+    });
+    // The frame keeps its 200 px floor, and the column grows to hold what's in it.
+    expect(r.frame).toBeGreaterThanOrEqual(199);
+    expect(r.stack).toBeGreaterThanOrEqual(r.ends - 1);
+    expect(r.shots).toBeGreaterThanOrEqual(r.ends);
+    expect(r.shots).toBeGreaterThanOrEqual(r.track);
+  });
+});
+
 test.describe("a tall cut without ffmpeg (fix round 1)", () => {
   test.use({ noFfmpeg: true });
 
