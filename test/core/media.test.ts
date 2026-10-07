@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { PROBE_TIMEOUT_MS, parseVideoProbe, probe as mediaProbe, probeVideo, proxyNeed, type Probe } from "../../src/core/media.js";
+import { GIVE_UP_GRACE_MS, PROBE_TIMEOUT_MS, giveUpAfter, parseVideoProbe, probe as mediaProbe, probeVideo, proxyNeed, type Probe } from "../../src/core/media.js";
 
 const probe = (p: Partial<Probe>): Probe => ({ duration: 10, fps: 25, codec: "h264", width: 1920, height: 1080, pixFmt: "yuv420p", ...p });
 
@@ -89,6 +89,49 @@ describe("probe: a hung ffprobe never holds a slot for good (Minor 8)", () => {
   it("waits 20 s by default", () => {
     expect(PROBE_TIMEOUT_MS).toBe(20_000);
   });
+
+  // Review I2: probeVideo gives up the same way, so a stalled drive never holds a request.
+  it.runIf(process.platform !== "win32")("probeVideo gives up after its timeout and says so", async () => {
+    await withHangingFfprobe(async () => {
+      const started = Date.now();
+      expect(await probeVideo("/nowhere.mp4", { timeout: 300 })).toEqual({ ok: false, code: "unreadable", reason: "ffprobe took too long" });
+      expect(Date.now() - started).toBeLessThan(5_000);
+    });
+  }, 10_000);
+
+  it.runIf(process.platform !== "win32")("probeVideo stops when its signal aborts", async () => {
+    await withHangingFfprobe(async () => {
+      const controller = new AbortController();
+      const p = probeVideo("/nowhere.mp4", { signal: controller.signal });
+      setTimeout(() => controller.abort(), 100);
+      expect(await p).toEqual({ ok: false, code: "unreadable", reason: "ffprobe was stopped" });
+      expect(await probeVideo("/nowhere.mp4", { signal: controller.signal })).toEqual({ ok: false, code: "unreadable", reason: "ffprobe was stopped" });
+    });
+  }, 10_000);
+});
+
+describe("giveUpAfter: one give-up rule for every ffprobe (review I2)", () => {
+  const never = new Promise<string>(() => undefined);
+
+  it("answers about a second after the timeout even when the work never settles (a child that outlives SIGKILL)", async () => {
+    const started = Date.now();
+    expect(await giveUpAfter(never, { timeout: 50, gaveUp: (why) => why })).toBe("timeout");
+    const took = Date.now() - started;
+    expect(took).toBeGreaterThanOrEqual(GIVE_UP_GRACE_MS + 40);
+    expect(took).toBeLessThan(GIVE_UP_GRACE_MS + 1_000);
+  });
+
+  it("answers at once when the signal aborts, or has already", async () => {
+    const c = new AbortController();
+    const p = giveUpAfter(never, { timeout: 60_000, signal: c.signal, gaveUp: (why) => why });
+    setTimeout(() => c.abort(), 20);
+    expect(await p).toBe("aborted");
+    expect(await giveUpAfter(never, { timeout: 60_000, signal: c.signal, gaveUp: (why) => why })).toBe("aborted");
+  });
+
+  it("passes the work's own answer straight through", async () => {
+    expect(await giveUpAfter(Promise.resolve("done"), { timeout: 50, gaveUp: (why) => why })).toBe("done");
+  });
 });
 
 describe("probe: only local files (the scan runs it on every media file it finds)", () => {
@@ -154,6 +197,11 @@ describe.skipIf(!hasFf)("probeVideo with the real ffprobe", () => {
       expect(await probeVideo(tall)).toMatchObject({ ok: true, width: 180, height: 320, fps: 30 });
       const ana = make(dir, "ana.mp4", ["-f", "lavfi", "-i", "testsrc=size=240x240:rate=30:duration=1", "-vf", "setsar=4/3", "-c:v", "libx264", "-pix_fmt", "yuv420p"]);
       expect(await probeVideo(ana)).toMatchObject({ ok: true, width: 320, height: 240 });
+      // Review M5: a phone held upright. The stored picture is 320×180; the rotation tag turns it.
+      const wide = make(dir, "wide.mp4", ["-f", "lavfi", "-i", "testsrc=size=320x180:rate=30:duration=1", "-c:v", "libx264", "-pix_fmt", "yuv420p"]);
+      expect(await probeVideo(wide)).toMatchObject({ ok: true, width: 320, height: 180 });
+      const turned = make(dir, "turned.mp4", ["-display_rotation", "90", "-i", wide, "-c", "copy"]);
+      expect(await probeVideo(turned)).toMatchObject({ ok: true, width: 180, height: 320 });
       const still = make(dir, "still.png", ["-f", "lavfi", "-i", "color=c=red:s=16x16", "-frames:v", "1"]);
       expect(await probeVideo(still)).toMatchObject({ ok: false, code: "not_video" });
       const junk = join(dir, "junk.mp4");
