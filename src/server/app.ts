@@ -24,7 +24,7 @@ import { candidatePaths, listAssets, fpsFor, screenshotName } from "./assets.js"
 import { osRevealer, osOpener, OPEN_SAFE_EXT, type Revealer, type Opener } from "./reveal.js";
 import type { CorruptEvent } from "./watch.js";
 import { LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, FileKindSchema, MarkSchema, ProjectIdSchema, ShotSchema, LEVEL_MIN, LEVEL_MAX, LEVEL_STEP, type Batch, type Note } from "../core/schema.js";
-import { LABEL_MAX } from "../core/labels.js";
+import { LABEL_MAX, oneLineOf } from "../core/labels.js";
 import { defaultRunner, measureMix, type LoudnessRunner } from "./loudness.js";
 
 export const VERSION = "0.2.2";
@@ -88,7 +88,12 @@ const VersionBody = z.object({
   video: z.string().min(1),
   file: z.string().min(1),
   note: z.string().optional(),
-  label: z.string().trim().max(LABEL_MAX, `label is ${LABEL_MAX} characters at most: put the detail in note`).optional(),
+  // Cleaned to one line first, so padding and invisible characters don't count, then counted in characters.
+  label: z
+    .string()
+    .transform(oneLineOf)
+    .refine((s) => Array.from(s).length <= LABEL_MAX, `label is ${LABEL_MAX} characters at most: put the detail in note`)
+    .optional(),
 });
 const VariantBody = z.object({
   stage: LaneStageSchema,
