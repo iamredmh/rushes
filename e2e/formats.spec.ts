@@ -320,3 +320,101 @@ test.describe("an older cut with no stored size (no ffprobe on the server)", () 
     expect(seen).toEqual([]);
   });
 });
+
+// ---- Task 4 review, fix round 1 ----
+
+/** Every chip's left edge and width, in chip order. */
+const chipBoxes = (page: Page) =>
+  page.getByRole("radiogroup", { name: "Format" }).getByRole("radio").evaluateAll((els) => els.map((el) => {
+    const r = el.getBoundingClientRect();
+    return { x: r.x, w: r.width };
+  }));
+
+// I1, §21.8 (3): a chip's position never changes.
+test("the chips never move: not when a count appears or reaches two digits, nor when the selection changes", async ({ page, rushes }) => {
+  await rushes.addFormatsCut(FOUR);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await page.mouse.move(1400, 880);
+  const start = await chipBoxes(page);
+  const note = (text: string) => rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 1, text });
+  await note("Drop this first sound.");
+  await expect(radio(page, "9:16")).toHaveAccessibleName("9:16, 1 open note");
+  expect(await chipBoxes(page)).toEqual(start);
+  for (let i = 2; i <= 10; i++) await note(`Note ${i}`);
+  await expect(radio(page, "9:16")).toHaveAccessibleName("9:16, 10 open notes");
+  expect(await chipBoxes(page)).toEqual(start);
+  for (const label of ["1:1", "9:16", "4:5"]) {
+    await radio(page, label).click();
+    await expect(radio(page, label)).toHaveAttribute("aria-checked", "true");
+    await page.mouse.move(1400, 880);
+    expect(await chipBoxes(page)).toEqual(start);
+  }
+});
+
+// M3.
+test("the one-format popover opens only for its own chip, never over a Not in v2 tooltip, and closes on Esc and after a click", async ({ page, rushes, context, browserName }) => {
+  if (browserName === "chromium") await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await rushes.addFormatsCut(FOUR);
+  await rushes.addCut();
+  await page.goto(rushes.url);
+  await videoReady(page);
+  const pop = page.locator(".fmtpop");
+  await radio(page, "9:16").hover();
+  await expect(radio(page, "9:16")).toHaveAttribute("data-tip", "Not in v2");
+  await page.waitForTimeout(200);
+  await expect(pop).toHaveCSS("opacity", "0");
+  await radio(page, "16:9").hover();
+  await expect(pop).toHaveCSS("opacity", "1");
+  // Into the popover and click Copy: it stays while the pointer is over it, and lets go after.
+  const copy = page.getByRole("button", { name: "Copy a prompt for your agent" });
+  await copy.hover();
+  await copy.click();
+  await expect(page.locator(".toast")).toHaveText(/Prompt copied|Couldn't reach the clipboard/);
+  await expect(copy).not.toBeFocused();
+  await expect(pop).toHaveCSS("opacity", "1");
+  await page.mouse.move(1400, 880);
+  await expect(pop).toHaveCSS("opacity", "0");
+  // From the keyboard: focus opens it, Esc closes it.
+  await copy.focus();
+  await expect(pop).toHaveCSS("opacity", "1");
+  await page.keyboard.press("Escape");
+  await expect(pop).toHaveCSS("opacity", "0");
+  // Hovering the chip again after Esc opens it again.
+  await radio(page, "16:9").hover();
+  await expect(pop).toHaveCSS("opacity", "1");
+  // With the popover open from the keyboard, a Not in v2 chip's tooltip still shows uncovered.
+  await page.mouse.move(1400, 880);
+  await copy.focus();
+  await expect(pop).toHaveCSS("opacity", "1");
+  await radio(page, "4:5").hover();
+  await expect(pop).toHaveCSS("opacity", "0");
+});
+
+// M7.
+test("focus follows the selection under Alt+arrows, and the warning mark on a selected chip reads at 4.5:1 or more", async ({ page, rushes }) => {
+  await rushes.addFormatsCut([WIDE, TALL, { ...SQUARE, seconds: 4.5 }]);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await radio(page, "16:9").focus();
+  await page.keyboard.press("Home");
+  await expect(radio(page, "9:16")).toBeFocused();
+  await page.keyboard.press("Alt+ArrowRight");
+  await expect(radio(page, "1:1")).toHaveAttribute("aria-checked", "true");
+  await expect(radio(page, "1:1")).toBeFocused();
+  await expect(radio(page, "1:1")).toHaveAttribute("tabindex", "0");
+  const contrast = await radio(page, "1:1").evaluate((chip) => {
+    const rgb = (c: string) => (c.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number);
+    const lum = ([r, g, b]: number[]) => {
+      const f = (v: number) => {
+        const s = v / 255;
+        return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+      };
+      return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+    };
+    const fg = lum(rgb(getComputedStyle(chip.querySelector(".warn")!).color));
+    const bg = lum(rgb(getComputedStyle(chip).backgroundColor));
+    return (Math.max(fg, bg) + 0.05) / (Math.min(fg, bg) + 0.05);
+  });
+  expect(contrast).toBeGreaterThanOrEqual(4.5);
+});
