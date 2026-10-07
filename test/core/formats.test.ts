@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import ts from "typescript";
 import {
   CHIP_ORDER, FORMAT_ID_RE, MAX_FORMATS, chipOrder, durationWarning, formatTag, labelOfId, noteShowsOn, ratioId, ratioLabel, ratioValue, settleLabel, versionFormats,
   type FormatSource,
@@ -183,9 +184,22 @@ describe("which notes show where (§21.2)", () => {
 
 it("MAX_FORMATS is eight shapes, the primary included (R3)", () => expect(MAX_FORMATS).toBe(8));
 
-it("formats.ts has only type imports, so the dashboard can import it without zod or Node", () => {
+// What would pull zod or Node into the web bundle: an import, a re-export from a module, a dynamic import, require.
+const pullsInAModule = (js: string): boolean =>
+  /^\s*import\b/m.test(js) || /^\s*export\s*(\*|\{[^}]*\})\s*from\b/m.test(js) || /\bimport\s*\(/.test(js) || /\brequire\s*\(/.test(js);
+
+it("formats.ts compiles to JavaScript with no import, re-export or require, so the dashboard can bundle it without zod or Node", () => {
   const text = readFileSync(new URL("../../src/core/formats.ts", import.meta.url), "utf8");
-  const imports = text.split("\n").filter((l) => /^\s*import\s/.test(l));
-  expect(imports.length).toBeGreaterThan(0);
-  for (const line of imports) expect(line).toMatch(/^\s*import type\s/);
+  const js = ts.transpileModule(text, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022, removeComments: true } }).outputText;
+  expect(js).toContain("export const MAX_FORMATS");
+  expect(pullsInAModule(js)).toBe(false);
+});
+
+it("the check above would catch each way of pulling a module in", () => {
+  for (const src of [`import { z } from "zod";\nconsole.log(z);`, `import{z}from"zod";console.log(z);`, `import "./x.js";`, `export * from "./x.js";`, `export { a } from "./x.js";`, `export {\n a\n} from "./x.js";`, `const m = await import("x");`, `const m = require("x");`]) {
+    const js = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
+    expect(pullsInAModule(js), src).toBe(true);
+  }
+  // An `import type` is erased, so it passes.
+  expect(pullsInAModule(ts.transpileModule(`import type { Note } from "./schema.js";\nexport const a = 1;`, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText)).toBe(false);
 });
