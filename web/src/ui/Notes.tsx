@@ -36,6 +36,8 @@ export interface NotesProps {
   onLabel?(note: Note): string | null;
   /** Times are shown as saved, never placed on another cut, and with no "from vN" (audio tabs). */
   fixedTimes?: boolean;
+  /** The note last clicked (R6): its card is marked current. */
+  selectedId?: string | null;
 }
 
 const MARK_KINDS: { kind: MarkKind; label: string }[] = [
@@ -48,7 +50,7 @@ const onFull = (on: NonNullable<NotesProps["on"]>): string | undefined => on.opt
 
 /** The notes column used on every tab: list, filter, done circles and the note box. */
 export function Notes({
-  notes, version, placeholder, attachments, inputRef, toast, onAdd, onSeek, onChanged, onTextChange, on, scope, chips, marks, onLabel, fixedTimes,
+  notes, version, placeholder, attachments, inputRef, toast, onAdd, onSeek, onChanged, onTextChange, on, scope, chips, marks, onLabel, fixedTimes, selectedId,
 }: NotesProps) {
   const [filter, setFilter] = useState<Filter>("all");
   const ownInput = useRef<HTMLTextAreaElement>(null);
@@ -115,7 +117,7 @@ export function Notes({
       <div class="list">
         {placed.length === 0 && <div class="none">{filter === "all" ? "No notes yet." : "Nothing here."}</div>}
         {placed.map(({ n, at }) => (
-          <div class={`note${n.status === "done" ? " done" : ""}`} data-note={n.id}>
+          <div class={`note${n.status === "done" ? " done" : ""}`} data-note={n.id} aria-current={selectedId === n.id ? "true" : undefined}>
             <button class="chk" aria-label={n.status === "done" ? "Reopen" : "Mark done"} title={n.status === "done" ? "Reopen" : "Mark done"} onClick={() => void toggle(n)}>
               <Icon name="check" />
             </button>

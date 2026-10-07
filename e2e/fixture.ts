@@ -64,6 +64,13 @@ export interface VariantOptions {
   round?: string;
 }
 
+/** One render of a cut, for the format tests (§21): its picture size, and its length (default 4 s). */
+export interface FormatSize {
+  width: number;
+  height: number;
+  seconds?: number;
+}
+
 /** A file for `writeFiles`: a generated sine WAV (the default), a copy of the 4 s test clip (`video`), or text. */
 export interface TreeFile {
   /** Relative to the project folder, forward slashes. Folders are made as needed. */
@@ -93,6 +100,14 @@ export interface Rushes {
   addVerticalCut(note?: string): Promise<{ version: { id: string } }>;
   /** Generate a ProRes test pattern (640x360, 6 s by default) into the project and register it as a new cut of "Hero". Needs ffmpeg. */
   addProResCut(opts?: ProResOptions, note?: string): Promise<{ version: { id: string }; proxySuggested?: true; proxyReason?: string; proxyJob?: { id: string; state: string } }>;
+  /**
+   * Register a new cut of `video` (default "Hero") in several shapes (§21): the first size is the
+   * primary, the rest its formats. `audio` gives the primary a tone. Needs ffmpeg. Generated H.264
+   * testsrc renders with invented names.
+   */
+  addFormatsCut(sizes: FormatSize[], opts?: { video?: string; note?: string; audio?: boolean }): Promise<{ version: { id: string; formats: { id: string; label: string; file: string }[] } }>;
+  /** Register one more shape of a cut (default: the newest of "Hero"). Needs ffmpeg. Generated H.264 testsrc renders with invented names. */
+  addFormatFile(size: FormatSize, opts?: { video?: string; version?: string }): Promise<{ format: { id: string; label: string; file: string } }>;
   /** Write a generated sine WAV into the project and register it as a variant on `stage`. */
   addVariant(stage: "voice" | "music" | "sfx", name: string, opts: VariantOptions): Promise<{ lane: { id: string }; variant: { id: string; cues: { id: string; name: string; t: number }[] } }>;
   /** Write generated files into the project folder (invented names, small WAVs, or the 4 s clip for a cut). Nothing is registered. */
@@ -311,6 +326,34 @@ export const test = base.extend<{ rushes: Rushes; noFfmpeg: boolean }>({
       }
       return api("POST", "/api/versions", { video: "Hero", file, note });
     };
+    const render = async (slug: string, n: number, s: FormatSize, tag: string, audio = false) => {
+      const file = `renders/${slug}_v${n}_${s.width}x${s.height}${tag}.mp4`;
+      const seconds = s.seconds ?? 4;
+      const tone = audio ? ["-f", "lavfi", "-i", `sine=frequency=440:sample_rate=48000:duration=${seconds}`, "-c:a", "aac", "-b:a", "64k", "-shortest"] : [];
+      await ffmpeg([
+        "-f", "lavfi", "-i", `testsrc=size=${s.width}x${s.height}:rate=30:duration=${seconds}`,
+        ...tone,
+        "-c:v", "libx264", "-preset", "ultrafast", "-g", "30", "-pix_fmt", "yuv420p", join(root, file),
+      ]);
+      return file;
+    };
+    const slugOf = (video: string) => video.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+    const addFormatsCut = async (sizes: FormatSize[], opts: { video?: string; note?: string; audio?: boolean } = {}) => {
+      needsH264(browserName);
+      const video = opts.video ?? "Hero";
+      const slug = slugOf(video);
+      const n = (cutsByVideo.get(slug) ?? 0) + 1;
+      cutsByVideo.set(slug, n);
+      const files = await Promise.all(sizes.map((s, i) => render(slug, n, s, "", opts.audio && i === 0)));
+      return api("POST", "/api/versions", { video, file: files[0], note: opts.note, formats: files.slice(1).map((file) => ({ file })) });
+    };
+    const addFormatFile = async (size: FormatSize, opts: { video?: string; version?: string } = {}) => {
+      needsH264(browserName);
+      const video = opts.video ?? "Hero";
+      const slug = slugOf(video);
+      const file = await render(slug, cutsByVideo.get(slug) ?? 1, size, "_extra");
+      return api("POST", "/api/formats", { file, video, ...(opts.version ? { version: opts.version } : {}) });
+    };
     let wavs = 0;
     const addVariant = async (stage: "voice" | "music" | "sfx", name: string, opts: VariantOptions) => {
       const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
@@ -373,6 +416,8 @@ export const test = base.extend<{ rushes: Rushes; noFfmpeg: boolean }>({
       addCut,
       addVerticalCut,
       addProResCut,
+      addFormatsCut,
+      addFormatFile,
       addVariant,
       writeFiles,
       scan,

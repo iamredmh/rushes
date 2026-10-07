@@ -31,4 +31,8 @@ describe("styles.css", () => {
     expect(rest).not.toMatch(/\d(cqw|cqh|cqi|cqb|cqmin|cqmax)\b/);
     expect(rest).not.toMatch(/container-type\s*:/);
   });
+  it("the format toggle and the note's format switch use explicit grid tracks (§21.8, Safari)", () => {
+    expect(css).toMatch(/\.fmts \{[^}]*display: inline-grid/);
+    expect(css).toMatch(/\.fscope \{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
+  });
 });

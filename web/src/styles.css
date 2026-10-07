@@ -548,4 +548,23 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
   .frow { grid-template-columns: 22px 34px minmax(0, 1fr) 150px; }
   .frow .fdur, .frow .fsize { display: none; }
 }
+/* §21.5: the format toggle in Picture's header (mockup). Explicit grid tracks, for Safari (§21.8). */
+.fmtwrap { position: relative; display: inline-flex; }
+.fmts { display: inline-grid; gap: 2px; padding: 3px; background: var(--bg); border: 1px solid var(--line); border-radius: 999px; }
+.fmts [role="radio"] { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 30px; padding: 4px 12px; border: 0; border-radius: 999px; background: transparent; color: var(--text-2); font: 500 15px/1.2 var(--sans); white-space: nowrap; cursor: pointer; }
+.fmts [role="radio"]:hover { background: var(--hover); color: var(--text); }
+.fmts [role="radio"][aria-checked="true"] { background: var(--accent); color: var(--on-accent); font-weight: 600; }
+.fmts [role="radio"][aria-disabled="true"] { background: transparent; color: var(--text-3); cursor: not-allowed; }
+.fmts .shape, .fscope .shape { display: inline-block; border: 1.5px solid currentColor; border-radius: 2px; }
+.fmts .n { padding: 0 7px; border-radius: 999px; background: var(--todo-soft); color: var(--todo); font-size: 15px; line-height: 20px; font-variant-numeric: tabular-nums; }
+.fmts [aria-checked="true"] .n { background: rgba(11, 16, 38, 0.18); color: var(--on-accent); }
+.fmts .warn { color: var(--todo); font-weight: 700; }
+.fmtpop { position: absolute; top: calc(100% + 8px); left: 0; z-index: 30; width: max-content; max-width: 340px; padding: 8px 12px; border: 1px solid var(--line-2); border-radius: 8px; background: #000; color: var(--text); font-size: 15px; opacity: 0; pointer-events: none; transition: opacity 0.12s; }
+.fmtpop::before { content: ""; position: absolute; left: 0; right: 0; top: -9px; height: 9px; }
+.fmtpop p { margin: 0 0 6px; }
+.fmtpop code { font-family: var(--mono); color: var(--accent-2); }
+.fmtwrap:hover .fmtpop, .fmtpop:focus-within { opacity: 1; pointer-events: auto; }
+/* §21.5: the composer's and the card's This format | All formats switch (Task 5 uses it). */
+.fscope { display: inline-grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px; padding: 3px; background: var(--bg); border: 1px solid var(--line); border-radius: 999px; }
+.note[aria-current="true"] { background: var(--hover); box-shadow: inset 2px 0 0 var(--accent); }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } .fspin, .ib[aria-busy="true"] { animation: none !important; } }
