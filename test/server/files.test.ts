@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
 import { createApp } from "../../src/server/app.js";
+import { addVariant } from "../../src/core/project.js";
 import { parseRange, inside, contentDisposition } from "../../src/server/files.js";
 
 // The smallest valid PNG (1×1, transparent).
@@ -198,6 +199,84 @@ describe("media", () => {
     const r = await call("/media?path=renders%2Fgone.mp4");
     expect(r.status).toBe(404);
     expect(await r.json()).toMatchObject({ error: "missing_file" });
+  });
+});
+
+describe("registered files that are symlinks (§15.5)", () => {
+  /** A project, a folder beside it ("outside"), and a way to register any path as a music variant. */
+  async function linked() {
+    const s = await setup();
+    const outside = join(dirname(s.root), "outside drive");
+    await mkdir(outside, { recursive: true });
+    let n = 0;
+    const reg = (file: string) => s.store.update("project", (p) => addVariant(p, { stage: "music", name: `v${++n}`, file }));
+    const get = (path: string) => s.call(`/media?path=${encodeURIComponent(path)}`);
+    await mkdir(join(s.root, "takes"), { recursive: true });
+    return { ...s, outside, reg, get };
+  }
+
+  it("serves a symlink to media outside the project (footage on another drive)", async () => {
+    const { root, outside, reg, get } = await linked();
+    await writeFile(join(outside, "A001 clip.mov"), "footage");
+    await symlink(join(outside, "A001 clip.mov"), join(root, "takes", "clip.mov"));
+    await reg("takes/clip.mov");
+    const res = await get("takes/clip.mov");
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("footage");
+  });
+
+  it("refuses a symlink out of the project to a file that isn't media, whatever the link is called", async () => {
+    const { root, outside, reg, get } = await linked();
+    for (const [link, target] of [["take1.wav", "credentials.json"], ["take2.wav", "id_ed25519"], ["take3.mp4", "server.pem"]]) {
+      await writeFile(join(outside, target), "secret");
+      await symlink(join(outside, target), join(root, "takes", link));
+      await reg(`takes/${link}`);
+      const res = await get(`takes/${link}`);
+      expect(res.status, link).toBe(404);
+      expect(await res.text(), link).not.toContain("secret");
+    }
+  });
+
+  it("checks the final real path: a media-named link to a link to a secret is refused", async () => {
+    const { root, outside, reg, get } = await linked();
+    await writeFile(join(outside, "secret.pem"), "secret");
+    await symlink(join(outside, "secret.pem"), join(outside, "looks like.wav"));
+    await symlink(join(outside, "looks like.wav"), join(root, "takes", "chain.wav"));
+    await reg("takes/chain.wav");
+    expect((await get("takes/chain.wav")).status).toBe(404);
+  });
+
+  it("applies the same rule through a symlinked folder", async () => {
+    const { root, outside, reg, get } = await linked();
+    await writeFile(join(outside, "bed.wav"), "music");
+    await writeFile(join(outside, "keys.json"), "secret");
+    await symlink(outside, join(root, "drive"));
+    await reg("drive/bed.wav");
+    await reg("drive/keys.json");
+    expect((await get("drive/bed.wav")).status).toBe(200);
+    expect((await get("drive/keys.json")).status).toBe(404);
+  });
+
+  it("serves a symlink to a file inside the project as before, and an absolute registered path outside only if it's media", async () => {
+    const { root, outside, reg, get } = await linked();
+    await writeFile(join(root, "takes", "real.wav"), "inside");
+    await symlink(join(root, "takes", "real.wav"), join(root, "takes", "alias.wav"));
+    await reg("takes/alias.wav");
+    expect(await (await get("takes/alias.wav")).text()).toBe("inside");
+    await writeFile(join(outside, "render.mp4"), "render");
+    await writeFile(join(outside, "notes.json"), "secret");
+    await reg(join(outside, "render.mp4"));
+    await reg(join(outside, "notes.json"));
+    expect((await get(join(outside, "render.mp4"))).status).toBe(200);
+    expect((await get(join(outside, "notes.json"))).status).toBe(404);
+  });
+
+  it("refuses an edit-app project file outside the project: it can be revealed, never downloaded", async () => {
+    const { root, outside, reg, get } = await linked();
+    await writeFile(join(outside, "Edit.prproj"), "project");
+    await symlink(join(outside, "Edit.prproj"), join(root, "takes", "edit.prproj"));
+    await reg("takes/edit.prproj");
+    expect((await get("takes/edit.prproj")).status).toBe(404);
   });
 });
 

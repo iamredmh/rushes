@@ -400,6 +400,13 @@ Rushes creates `screenshots/` itself on the first grab. It never creates the oth
 - **The MCP tool `rushes_list_assets`** (optional `kind`) returns the same list. The CLI command is `rushes assets [--kind K] [--json]`. There are now 14 tools.
 - **The project guard (§14.1)** applies to every one of these routes, as to any other.
 
+### 15.5 Serving files that are symlinks (0.2.1)
+- **Every file `/media` accepts** (cuts and their proxies, variants, takes, library files, the docs, captions and exports found automatically, screenshots and grabs) is served from its real path, with every symlink resolved.
+  - When that real path is inside the project folder, the file is served as before.
+  - When it lies outside, the file is served only if the **final** real file's extension is media: `wav mp3 m4a aif aiff flac ogg opus mp4 mov m4v webm png jpg jpeg gif webp pdf md txt srt vtt`.
+  - Anything else is a 404, whatever the link itself is called. That includes edit-app project files (`.prproj`, `.drp`) and anything else that isn't media: outside the project they no longer download, though Show in Finder still finds them.
+  - So footage linked in from another drive keeps playing, but a take swapped for a link to a key or credentials file is never served.
+
 ## 16. The Assets library (agreed 3 October 2026)
 
 Once a project has hundreds of screenshots, the Assets tab as one long page buries everything below them. Red also wants every project file in one place: music, scripts, images, captions, exports, deliverables and edit files, each one quick to find, open, download or locate on disk. This section is binding, and it wins over §15.3 where they differ.
@@ -430,7 +437,7 @@ Once a project has hundreds of screenshots, the Assets tab as one long page buri
   - every `*.srt` and `*.vtt` directly in the root becomes a `caption`;
   - every file directly in `exports/` becomes an `export`.
   - Hidden files and anything inside `.rushes/` never appear.
-- **Media types:** `/media` serves every listed asset, with content types added for `.md`, `.txt`, `.srt`, `.vtt`, `.pdf`, `.gif`, `.webp`, `.prproj` and `.drp`.
+- **Media types:** `/media` serves every listed asset, with content types added for `.md`, `.txt`, `.srt`, `.vtt`, `.pdf`, `.gif`, `.webp`, `.prproj` and `.drp`. A listed file whose real path is outside the project is served only if it is media (§15.5).
 
 ### 16.3 Open in the default app
 - Every item gets an **Open** button (`POST /api/open { path }`). It runs the platform's open command, without a shell:

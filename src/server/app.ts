@@ -18,7 +18,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { GRAB_PATH, SCREENSHOT_PATH, contentDisposition, contentType, inside, isInlineSafeType, mediaSecurityHeaders, registeredMedia, sendFile } from "./files.js";
+import { GRAB_PATH, SCREENSHOT_PATH, contentDisposition, contentType, inside, isInlineSafeType, mediaSecurityHeaders, registeredMedia, sendFile, servableFile } from "./files.js";
 import { candidatePaths, listAssets, fpsFor, screenshotName } from "./assets.js";
 import { osRevealer, osOpener, OPEN_SAFE_EXT, type Revealer, type Opener } from "./reveal.js";
 import type { CorruptEvent } from "./watch.js";
@@ -338,9 +338,12 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
       const info = await lstat(fromManifestPath(store.root, path)).catch(() => null);
       if (!info || !info.isFile() || info.isSymbolicLink()) throw new NotFoundError("media", path);
     }
+    // §15.5: a registered file reached through a symlink out of the project is served only if it is media.
+    const file = await servableFile(store.root, fromManifestPath(store.root, path));
+    if (!file) throw new NotFoundError("media", path);
     const type = contentType(path);
     const inlineSafe = isInlineSafeType(type);
-    const res = await sendFile(fromManifestPath(store.root, path), c.req.header("range"), inlineSafe ? type : "application/octet-stream");
+    const res = await sendFile(file, c.req.header("range"), inlineSafe ? type : "application/octet-stream");
     res.headers.set("cross-origin-resource-policy", "same-origin");
     for (const [name, value] of Object.entries(mediaSecurityHeaders())) res.headers.set(name, value);
     if (res.status !== 404 && (!inlineSafe || c.req.query("download") === "1")) {
