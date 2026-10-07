@@ -620,6 +620,9 @@ export async function removePartials(root: string): Promise<string[]> {
 export function frameArgs(orig: string, seconds: number): string[] {
   return [
     "-hide_banner", "-v", "error",
+    // Local files only, as for ffprobe: a container that names a URL is never followed. An input
+    // option, so the PNG still goes out through pipe:1.
+    "-protocol_whitelist", "file",
     // -ss before -i seeks fast to the keyframe before, then accurate_seek decodes forward to the exact frame.
     "-accurate_seek", "-ss", seconds.toFixed(6), "-i", orig,
     "-frames:v", "1", "-an", "-pix_fmt", "rgb24", "-c:v", "png", "-f", "image2pipe", "pipe:1",

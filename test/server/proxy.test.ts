@@ -14,6 +14,8 @@ import {
   KILL_GRACE_MS,
   ProxyJobs,
   encodeArgs,
+  extractFrame,
+  frameArgs,
   hasFpsMode,
   makeFfmpegRunner,
   parseFfmpegVersion,
@@ -695,5 +697,32 @@ describe("ProxyJobs.close stops frame extractions and probes in flight (Minor 12
     await jobs.close();
     expect(await jobs.frame(join(root, "renders", "hero.mov"), 1)).toBeNull();
     expect(ran).toBe(0);
+  });
+});
+
+describe("frame extraction reads local files only (review M3)", () => {
+  it("restricts ffmpeg's input protocols to file, ahead of the input", () => {
+    const args = frameArgs("/some/where/hero.mp4", 1.5);
+    const at = args.indexOf("-protocol_whitelist");
+    expect(at).toBeGreaterThan(-1);
+    expect(args[at + 1]).toBe("file");
+    expect(at).toBeLessThan(args.indexOf("-i"));
+  });
+
+  const hasFfmpeg = (() => {
+    try {
+      execFileSync("ffmpeg", ["-version"], { stdio: "ignore" });
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+
+  it.skipIf(!hasFfmpeg)("still reads a frame of a normal render, as before", async () => {
+    const { root } = await tmpProject("frames");
+    const file = join(root, "hero.mp4");
+    execFileSync("ffmpeg", ["-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=64x36:rate=30:duration=1", "-c:v", "libx264", "-pix_fmt", "yuv420p", file]);
+    const png = await extractFrame(makeFfmpegRunner(), file, 0.5);
+    expect(png?.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))).toBe(true);
   });
 });
