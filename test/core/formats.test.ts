@@ -152,6 +152,23 @@ describe("versionFormats", () => {
   });
 });
 
+describe("a cut whose primary size is unknown but whose file lists formats (fix round 1, M7)", () => {
+  it("keeps the listed formats, and invents no primary", () => {
+    const shapes = versionFormats(source({ width: null, height: null, formats: [tall] }));
+    expect(shapes.map((f) => [f.id, f.primary])).toEqual([["9x16", false]]);
+    // The player's measured size still gives the primary.
+    expect(versionFormats(source({ width: null, height: null, formats: [tall] }), { width: 1920, height: 1080 }).map((f) => f.id)).toEqual(["16x9", "9x16"]);
+  });
+  it("a size that isn't a picture size is treated as unknown, not thrown on", () => {
+    expect(() => versionFormats(source({ width: 0, height: 1080, formats: [tall] }))).not.toThrow();
+    expect(versionFormats(source({ width: 200000, height: 1080, formats: [tall] })).map((f) => f.id)).toEqual(["9x16"]);
+  });
+  it("formatTag still says All on such a cut", () => {
+    const videos = [{ id: "hero", versions: [{ id: "v1", ...source({ width: null, height: null, formats: [tall] }) }] }];
+    expect(formatTag({ stage: "picture", video: "hero", version: "v1", format: null }, videos)).toBe("All");
+  });
+});
+
 describe("durationWarning (§21.3)", () => {
   it("speaks only past 0.1 s, in §21.3's words", () => {
     expect(durationWarning("9:16", 8.4, 8)).toBe("9:16 is 8.4 s; the cut is 8.0 s");

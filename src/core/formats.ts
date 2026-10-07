@@ -137,19 +137,16 @@ export type FormatSource = Pick<Version, "file" | "width" | "height" | "duration
 
 /**
  * A version's shapes: the primary first (§21.2 (2): its ratio is read from its own size), then
- * the formats as stored. Empty while the primary's size is unknown, unless `fallback` (the
- * player's measured size, R2) gives it.
+ * the formats as stored. While the primary's size is unknown the primary is left out (never
+ * guessed), unless `fallback` (the player's measured size, R2) gives it; the listed formats stay.
  */
 export function versionFormats(v: FormatSource, fallback?: { width: number; height: number } | null): FormatView[] {
-  const width = v.width ?? fallback?.width ?? null;
-  const height = v.height ?? fallback?.height ?? null;
-  if (width === null || height === null) return [];
-  const label = ratioLabel(width, height);
-  const primary: FormatView = { id: ratioId(label), label, file: v.file, width, height, duration: v.duration, fps: v.fps, primary: true };
-  return [
-    primary,
-    ...v.formats.map((f) => ({ id: f.id, label: f.label, file: f.file, width: f.width, height: f.height, duration: f.duration, fps: f.fps, primary: false })),
-  ];
+  const stored = v.width !== null && v.height !== null && isPictureSize(v.width, v.height) ? { width: v.width, height: v.height } : null;
+  const size = stored ?? (fallback && isPictureSize(fallback.width, fallback.height) ? fallback : null);
+  const rest: FormatView[] = v.formats.map((f) => ({ id: f.id, label: f.label, file: f.file, width: f.width, height: f.height, duration: f.duration, fps: f.fps, primary: false }));
+  if (!size) return rest;
+  const label = ratioLabel(size.width, size.height);
+  return [{ id: ratioId(label), label, file: v.file, width: size.width, height: size.height, duration: v.duration, fps: v.fps, primary: true }, ...rest];
 }
 
 /** §21.3: "9:16 is 8.4 s; the cut is 8.0 s" when a format's length is more than 0.1 s off the cut's. */
@@ -175,5 +172,6 @@ export function formatTag(
   if (note.stage !== "picture") return null;
   if (note.format !== null) return labelOfId(note.format);
   const version = videos.find((v) => v.id === note.video)?.versions.find((v) => v.id === note.version);
-  return version && versionFormats(version).length >= 2 ? "All" : null;
+  // Any listed format means two or more shapes, whether or not the primary's size is known.
+  return version && version.formats.length >= 1 ? "All" : null;
 }

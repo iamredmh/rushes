@@ -276,6 +276,21 @@ describe("notes and formats (§21.2, §21.3)", () => {
     expect(code(() => checkNoteFormat({ next: next({ box, format: "16x9" }), prev: { box, format: "9x16" }, boxRedrawn: true }, project()))).toBeNull();
   });
 
+  // Fix round 1, M7: a hand-edited cut with formats listed but no stored primary size.
+  it("a note naming a format that is listed is accepted when the primary's size is unknown, and no primary is invented", () => {
+    const p = project();
+    p.videos[0].versions[0].width = null;
+    p.videos[0].versions[0].height = null;
+    expect(code(() => checkNoteFormat({ next: next({ format: "9x16" }) }, p))).toBeNull();
+    expect(code(() => checkNoteFormat({ next: next({ format: "9x16", box }) }, p))).toBeNull();
+    // A box still needs a format on a cut that has formats, and the primary can't be named as one.
+    expect(code(() => checkNoteFormat({ next: next({ box }) }, p))).toBe("box_needs_format");
+    expect(code(() => checkNoteFormat({ next: next({ format: "16x9" }) }, p))).toBe("unknown_format");
+    // An older boxed note (format null) can't be judged against a primary nobody knows: it isn't refused.
+    expect(code(() => checkNoteFormat({ next: next({ box, format: "9x16" }), prev: { box, format: null } }, p))).toBeNull();
+    expect(code(() => checkNoteFormat({ next: next({ box, format: "9x16" }), prev: { box, format: "9x16" } }, p))).toBeNull();
+  });
+
   it("applyUserEdit carries format, and runs the check before changing anything", () => {
     const f = empty();
     const p = project();

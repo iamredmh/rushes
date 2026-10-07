@@ -114,11 +114,13 @@ export function checkNoteFormat({ next, prev, boxRedrawn = false }: NoteFormatCh
   if (next.format !== null && !shapes.some((f) => f.id === next.format)) {
     throw new RushesError(`${next.version ?? "That cut"} has no ${labelOfId(next.format)} format.`, 400, "unknown_format", { format: next.format });
   }
-  if (!next.box || shapes.length < 2) return;
+  if (!next.box || !version || version.formats.length === 0) return;
   if (next.format === null) throw new RushesError("A drawn box belongs to one frame, so this note stays on one format.", 400, "box_needs_format");
   if (prev?.box && !boxRedrawn) {
-    const drawnOn = prev.format ?? shapes[0].id;
-    if (next.format !== drawnOn) {
+    // An older note drew its box on the primary. If the primary's size isn't stored, nobody can say
+    // which format that is, so the box isn't judged (and no primary is invented).
+    const drawnOn = prev.format ?? shapes.find((f) => f.primary)?.id;
+    if (drawnOn !== undefined && next.format !== drawnOn) {
       throw new RushesError(`A drawn box belongs to the frame it was drawn on (${labelOfId(drawnOn)}), so this note stays there.`, 400, "box_fixes_format", { format: drawnOn });
     }
   }
