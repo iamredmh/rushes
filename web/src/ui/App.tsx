@@ -11,6 +11,7 @@ import { Picture, type Source } from "./Picture.js";
 import { Script } from "./Script.js";
 import { VariantTab } from "./VariantTab.js";
 import { Voice } from "./Voice.js";
+import { VersionMenu } from "./VersionMenu.js";
 
 declare global {
   interface Window {
@@ -360,23 +361,18 @@ export function App() {
           <>
             <span class="plabel">Picture</span>
             {version && (
-              <select
-                class="sel mono"
-                aria-label="Version"
-                value={version.id}
-                onChange={(e) => {
-                  const el = e.target as HTMLSelectElement;
+              <VersionMenu
+                versions={video.versions}
+                shown={version}
+                lockedVersion={video.lockedVersion}
+                onPick={(id) => {
                   // Picking the version the film would follow anyway collapses back to "follow"
                   // (null); picking anything else pins it explicitly — including the newest, on a
                   // locked film, which must show what you asked for rather than snap back to the lock.
-                  setVersionId(el.value === target?.id ? null : el.value);
+                  setVersionId(id === target?.id ? null : id);
                   setHeld(false);
-                  // So ←/→ go back to stepping frames rather than the select.
-                  el.blur();
                 }}
-              >
-                {[...video.versions].reverse().map((v) => <option value={v.id}>{v.id}{v.note ? ` · ${v.note}` : ""}</option>)}
-              </select>
+              />
             )}
             {version && (
               <button
