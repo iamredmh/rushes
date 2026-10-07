@@ -178,7 +178,20 @@ test("the frame reshapes over 160 ms, and at once under reduced motion", async (
   await rushes.addFormatsCut([WIDE, TALL]);
   await page.goto(rushes.testUrl());
   await videoReady(page);
-  await radio(page, "9:16").click();
+  // The reshape is held mid-way, as a quick second switch would find it: that switch must stop it,
+  // or the frame would keep the first switch's size. Clicked and paused in one go, so it can't end first.
+  const running = await page.evaluate(async () => {
+    document.querySelector<HTMLElement>('[data-format="9x16"]')!.click();
+    await new Promise((r) => setTimeout(r, 0));
+    const anims = document.querySelector(".frame")!.getAnimations();
+    // Nearly at 9:16, so a reshape left running would plainly not be the 16:9 shape asked for next.
+    anims.forEach((a) => {
+      a.pause();
+      a.currentTime = 150;
+    });
+    return anims.length;
+  });
+  expect(running).toBe(1);
   await expect.poll(() => page.evaluate(() => (window as any).__rushesLastReshape)).toEqual({ animated: true, ms: 160 });
   await page.emulateMedia({ reducedMotion: "reduce" });
   await radio(page, "16:9").click();
