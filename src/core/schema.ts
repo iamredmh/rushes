@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { FORMAT_ID_RE, labelOfId, ratioId, ratioLabel } from "./formats.js";
+import { FORMAT_ID_RE, isPictureSize, labelOfId, ratioId, ratioLabel } from "./formats.js";
 
 export const STAGES = ["script", "picture", "voice", "music", "sfx", "mix"] as const;
 export const StageSchema = z.enum(STAGES);
@@ -64,7 +64,8 @@ export const VersionSchema = z
   })
   .superRefine((v, ctx) => {
     // One shape per ratio: no two formats share an id, and none repeats the primary's.
-    const primary = v.width !== null && v.height !== null ? ratioId(ratioLabel(v.width, v.height)) : null;
+    // A bad width or height is reported by its own field check; the ratio is only worked out for a real size.
+    const primary = v.width !== null && v.height !== null && isPictureSize(v.width, v.height) ? ratioId(ratioLabel(v.width, v.height)) : null;
     const seen = new Set<string>(primary ? [primary] : []);
     v.formats.forEach((f, i) => {
       if (f.label !== labelOfId(f.id)) ctx.addIssue({ code: "custom", path: ["formats", i, "label"], message: `label "${f.label}" doesn't match id "${f.id}"` });

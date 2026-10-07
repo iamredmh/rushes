@@ -6,7 +6,7 @@ import { fromManifestPath, toManifestPath } from "../../src/core/paths.js";
 import { newProjectId, PROJECT_ID_ALPHABET, slugify, uniqueId } from "../../src/core/ids.js";
 import { parseRate } from "../../src/core/media.js";
 import { NoteSchema, ProjectSchema, type Project, type Shot } from "../../src/core/schema.js";
-import { InvalidError, NotFoundError, RushesError } from "../../src/core/errors.js";
+import { CorruptFileError, InvalidError, NotFoundError, RushesError } from "../../src/core/errors.js";
 import { tmpProject } from "../helpers/tmp.js";
 
 const empty = (): Project => ({ schema: 1, rev: 0, name: "demo", fps: 30, videos: [], lanes: [], files: [], autoProxy: false });
@@ -514,6 +514,19 @@ describe("formats in the data (§21.3)", () => {
     variants[2].videos[0].versions[0].formats[0] = { ...f0, label: "4:5" };
     variants[3].videos[0].versions[0].formats = Array.from({ length: 9 }, (_, i) => ({ ...f0, id: `${i + 1}x40`, label: `${i + 1}:40` }));
     for (const v of variants) expect(ProjectSchema.safeParse(v).success).toBe(false);
+  });
+
+  // Fix round 1, I2: a bad size is a schema failure, never a crash inside the refinement.
+  it.each([0, -5, 1.5])("a primary width of %s is reported as a corrupt file, not thrown as a RangeError", async (bad) => {
+    const p = withCut();
+    addFormat(p, shape("renders/t.mp4", 1080, 1920));
+    const raw = structuredClone(p);
+    raw.videos[0].versions[0].width = bad;
+    expect(() => ProjectSchema.safeParse(raw)).not.toThrow();
+    expect(ProjectSchema.safeParse(raw).success).toBe(false);
+    const { store } = await tmpProject();
+    await writeFile(store.path("project"), JSON.stringify(raw));
+    await expect(store.read("project")).rejects.toBeInstanceOf(CorruptFileError);
   });
 
   it("the store refuses to write a duplicated format, and reports a hand edit that has one", async () => {

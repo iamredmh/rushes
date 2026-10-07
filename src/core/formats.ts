@@ -17,6 +17,14 @@ export const MAX_FORMATS = 8;
 /** The order the chips always take (§21.5), so a chip never moves between projects. */
 export const CHIP_ORDER: readonly string[] = ["9x16", "4x5", "1x1", "4x3", "16x9"];
 
+/** The largest side, in pixels, that counts as a picture size (a guard against nonsense, not a codec limit). */
+export const MAX_PICTURE_SIDE = 100000;
+
+/** A picture size: two whole numbers, each from 1 to MAX_PICTURE_SIDE. */
+export function isPictureSize(width: number, height: number): boolean {
+  return [width, height].every((n) => Number.isInteger(n) && n >= 1 && n <= MAX_PICTURE_SIDE);
+}
+
 function gcd(a: number, b: number): number {
   while (b) [a, b] = [b, a % b];
   return a;
