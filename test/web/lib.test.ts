@@ -1406,3 +1406,49 @@ describe("format chips (§21.5)", () => {
     expect(reshapeKeyframes({ width: 800, height: 450 }, { width: 800.4, height: 450 }, false)).toBeNull();
   });
 });
+
+import {
+  BOX_REASON, boxShowsOn, noteFormatTag, otherFormatAction, otherFormatNotes, scopeHint, visibleNotes,
+} from "../../web/src/lib.js";
+
+describe("notes per format (§21.2, §21.5)", () => {
+  const n = (id: string, format: string | null, box: Note["box"] = null) => note({ id, format, box });
+  const box = { x: 0.1, y: 0.1, w: 0.2, h: 0.2 };
+  const v = (id: string, primary = false): FormatView => ({ id, label: id.replace("x", ":"), file: `${id}.mp4`, width: 1, height: 1, duration: 8, fps: 30, primary });
+
+  it("shows this format's notes and the all-format ones, and keeps the rest one row away", () => {
+    const notes = [n("a", null), n("b", "9x16"), n("c", "16x9")];
+    expect(visibleNotes(notes, "16x9").map((x) => x.id)).toEqual(["a", "c"]);
+    expect(otherFormatNotes(notes, "16x9").map((x) => x.id)).toEqual(["b"]);
+    expect(visibleNotes(notes, null)).toHaveLength(3);
+    expect(otherFormatNotes(notes, null)).toEqual([]);
+  });
+  it("a box shows on its own format, and an older boxed note's on the primary only (Review Focus 1)", () => {
+    expect(boxShowsOn(n("a", "9x16", box), "9x16", "16x9")).toBe(true);
+    expect(boxShowsOn(n("a", "9x16", box), "16x9", "16x9")).toBe(false);
+    expect(boxShowsOn(n("a", null, box), "16x9", "16x9")).toBe(true);
+    expect(boxShowsOn(n("a", null, box), "9x16", "16x9")).toBe(false);
+    expect(boxShowsOn(n("a", null, box), null, null)).toBe(true);
+    expect(boxShowsOn(n("a", null), "16x9", "16x9")).toBe(false);
+  });
+  it("the composer's hint says where a note will show (mockup)", () => {
+    expect(scopeHint("9:16", "this", false)).toBe("Shows only while you're viewing 9:16.");
+    expect(scopeHint("9:16", "all", false)).toBe("Shows on every format.");
+    expect(scopeHint("9:16", "this", true)).toBe("A drawn box fixes this note to 9:16.");
+    expect(BOX_REASON).toBe("A drawn box belongs to one frame, so this note stays on this format.");
+  });
+  it("a note's tag is its format, All on a cut with formats, and nothing on a one-format cut (R4)", () => {
+    expect(noteFormatTag({ format: "9x16" }, true)).toBe("9:16");
+    expect(noteFormatTag({ format: null }, true)).toBe("All");
+    expect(noteFormatTag({ format: null }, false)).toBeNull();
+    expect(noteFormatTag({ format: "9x16" }, false)).toBe("9:16");
+  });
+  it("the Other formats row offers Show on 9:16, or Restore when its format has gone from its own cut, never for a box (R17)", () => {
+    const here = [v("16x9", true), v("9x16")];
+    expect(otherFormatAction(n("a", "9x16"), here, here)).toEqual({ kind: "show", id: "9x16", label: "9:16" });
+    expect(otherFormatAction(n("a", "4x5"), here, [v("16x9", true), v("4x5")])).toBeNull();
+    expect(otherFormatAction(n("a", "4x5"), here, here)).toEqual({ kind: "restore" });
+    expect(otherFormatAction(n("a", "4x5", box), here, here)).toBeNull();
+    expect(otherFormatAction(n("a", null), here, here)).toBeNull();
+  });
+});

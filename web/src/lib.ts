@@ -1393,3 +1393,44 @@ export function reshapeKeyframes(from: { width: number; height: number }, to: { 
   if (Math.abs(from.width - to.width) < 1 && Math.abs(from.height - to.height) < 1) return null;
   return [{ width: `${from.width}px`, height: `${from.height}px` }, { width: `${to.width}px`, height: `${to.height}px` }];
 }
+
+// ---- §21 notes per format ----
+import { labelOfId as labelFor, noteShowsOn as showsOn } from "../../src/core/formats.js";
+
+/** §21.2 (5): the notes that show on the format on screen (every note on a one-format cut). */
+export const visibleNotes = (notes: Note[], current: string | null): Note[] => notes.filter((n) => showsOn(n, current));
+/** §21.5: the rest, for the "Other formats (N)" row. */
+export const otherFormatNotes = (notes: Note[], current: string | null): Note[] => (current === null ? [] : notes.filter((n) => !showsOn(n, current)));
+
+/** R7: a box belongs to the format it was drawn on; an older note's to the primary. */
+export function boxShowsOn(note: Pick<Note, "box" | "format">, current: string | null, primaryId: string | null): boolean {
+  if (!note.box) return false;
+  if (current === null) return true;
+  return note.format !== null ? note.format === current : current === primaryId;
+}
+
+/** §21.2 (6): why a boxed note can't be widened to every format. */
+export const BOX_REASON = "A drawn box belongs to one frame, so this note stays on this format.";
+
+/** The composer's hint line (mockup; R15: only with two or more formats). */
+export function scopeHint(label: string, scope: "this" | "all", hasBox: boolean): string {
+  if (hasBox) return `A drawn box fixes this note to ${label}.`;
+  return scope === "this" ? `Shows only while you're viewing ${label}.` : "Shows on every format.";
+}
+
+/** R4: a listed note's tag: its format, "All" on a cut with two or more formats, else none. */
+export function noteFormatTag(note: Pick<Note, "format">, many: boolean): string | null {
+  if (note.format !== null) return labelFor(note.format);
+  return many ? "All" : null;
+}
+
+export type OtherFormatAction = { kind: "show"; id: string; label: string } | { kind: "restore" } | null;
+
+/** R17: what a read-only note in the Other formats row offers. */
+export function otherFormatAction(note: Pick<Note, "format" | "box">, viewsHere: View[], ownViews: View[]): OtherFormatAction {
+  if (note.format === null) return null;
+  const here = viewsHere.find((f) => f.id === note.format);
+  if (here) return { kind: "show", id: here.id, label: here.label };
+  if (!note.box && !ownViews.some((f) => f.id === note.format)) return { kind: "restore" };
+  return null;
+}
