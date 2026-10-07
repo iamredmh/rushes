@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rushes version list and change log mockup</title>
+<style>
+:root{color-scheme:dark;--bg:#0c0d0f;--app:#141518;--raised:#1c1e22;--hover:#25282d;--press:#2d3036;--line:#26282d;--line-2:#34373d;--text:#eeeef0;--text-2:#a3a6ad;--text-3:#70737a;--accent:#7c93ff;--accent-2:#9eaeff;--on-accent:#0b1026;--accent-soft:rgba(124,147,255,.14);--todo:#f5b740;--done:#4cc38a;--vo:#4fd1c5;--music:#a78bfa;--sfx:#fb923c;--mix:#f07167;--mono:ui-monospace,"SF Mono",Menlo,monospace}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg)}
+body{color:var(--text);font:15px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.demo{display:flex;gap:10px;align-items:center;padding:10px 20px;border-bottom:1px solid var(--line);background:#0a0b0d;color:var(--text-2);flex-wrap:wrap}
+.demo b{color:var(--text)}
+.demo button{padding:6px 12px;border:1px solid var(--line-2);border-radius:999px;color:var(--text-2)}
+.demo button[aria-pressed=true]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-2)}
+.app{max-width:1280px;margin:0 auto;background:var(--app);min-height:100vh;position:relative;overflow:hidden}
+header{display:flex;align-items:center;gap:12px;padding:12px 20px;border-bottom:1px solid var(--line);position:relative;z-index:6;background:var(--app)}
+.logo{width:28px;height:28px;border-radius:8px;background:var(--accent-soft);display:grid;place-items:center;color:var(--accent)}
+.crumb{color:var(--text-2);white-space:nowrap} .crumb b{color:var(--text);font-weight:600}
+.pill{padding:3px 12px;border:1px solid var(--line-2);border-radius:999px;color:var(--text-2)}
+.sp{flex:1}
+.send{background:var(--accent);color:var(--on-accent);padding:8px 16px;border-radius:12px;font-weight:600;white-space:nowrap}
+/* version menu button */
+.vwrap{position:relative;min-width:0}
+.vbtn{display:inline-flex;align-items:center;gap:8px;max-width:340px;padding:4px 12px;border:1px solid var(--line-2);border-radius:999px;color:var(--text)}
+.vbtn:hover{background:var(--hover)}
+.vbtn .id{font-family:var(--mono);color:var(--accent-2)}
+.vbtn .lbl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-2);min-width:0}
+.vbtn svg{flex:none}
+.vmenu{position:absolute;left:0;top:calc(100% + 8px);z-index:20;display:grid;width:min(700px,calc(100vw - 40px));grid-template-columns:minmax(0,1fr) minmax(0,300px);background:var(--raised);border:1px solid var(--line-2);border-radius:14px;box-shadow:0 18px 48px rgba(0,0,0,.5);overflow:hidden}
+.vmenu[hidden]{display:none}
+.vlist{display:grid;padding:6px;gap:2px;grid-template-columns:minmax(0,1fr)}
+.vrow{display:grid;grid-template-columns:36px minmax(0,1fr) auto;gap:10px;align-items:center;text-align:left;padding:8px 10px;border-radius:10px}
+.vrow:hover,.vrow[data-on=true]{background:var(--hover)}
+.vrow[aria-selected=true] .id{color:var(--accent-2)}
+.vrow .id{font-family:var(--mono);color:var(--text-2)}
+.vrow .lbl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vrow .when{color:var(--text-3);font-size:15px;white-space:nowrap;display:flex;gap:6px;align-items:center}
+.vdetail{border-left:1px solid var(--line);padding:12px 14px;background:var(--app);display:grid;align-content:start;gap:8px}
+.vdetail h4{margin:0;font-size:15px;color:var(--text-2);font-weight:600;font-family:var(--mono)}
+.vdetail p{margin:0;color:var(--text);overflow-wrap:anywhere}
+.vdetail .meta{color:var(--text-3);font-family:var(--mono)}
+/* page body */
+nav.tabs{display:flex;gap:6px;padding:0 20px;border-bottom:1px solid var(--line);color:var(--text-3)}
+nav.tabs span{padding:12px 14px} nav.tabs .on{color:var(--text);border-bottom:2px solid var(--accent)}
+main{padding:20px;display:grid;grid-template-columns:minmax(0,1fr);gap:12px}
+.stage{background:var(--bg);border:1px solid var(--line);border-radius:14px;height:300px;display:grid;place-items:center;color:var(--text-3)}
+.under{background:var(--raised);border:1px solid var(--line);border-radius:10px;padding:10px 14px;color:var(--text-2);display:grid;gap:4px}
+.under .clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.under button{justify-self:start;color:var(--accent-2)}
+/* change log button + drawer */
+.clog{display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border:1px solid var(--line-2);border-radius:12px;color:var(--text-2);position:relative;white-space:nowrap}
+.clog:hover{background:var(--hover);color:var(--text)}
+.clog[aria-expanded=true]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-2)}
+.clog .dot{position:absolute;top:-3px;right:-3px;width:10px;height:10px;border-radius:50%;background:var(--todo);border:2px solid var(--app)}
+.drawer{position:absolute;top:var(--hh,58px);right:0;bottom:0;width:440px;max-width:100%;background:var(--app);border-left:1px solid var(--line-2);box-shadow:-16px 0 40px rgba(0,0,0,.35);z-index:10;display:grid;grid-template-rows:auto auto auto minmax(0,1fr) auto;transform:translateX(0);transition:transform .16s}
+.drawer[hidden]{display:grid!important;transform:translateX(105%);visibility:hidden}
+@media (prefers-reduced-motion:reduce){.drawer{transition:none}}
+.dhead{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line)}
+.dhead h2{margin:0;font-size:16px;font-weight:600}
+.dhead .x{margin-left:auto;padding:4px 10px;border:1px solid var(--line-2);border-radius:10px;color:var(--text-2)}
+.add{padding:10px 16px;border-bottom:1px solid var(--line);display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}
+.add input{background:var(--bg);border:1px solid var(--line-2);border-radius:10px;padding:8px 12px;color:var(--text);min-width:0}
+.add button{padding:8px 14px;border-radius:10px;background:var(--accent-soft);color:var(--accent-2);border:1px solid var(--accent)}
+.chips{display:flex;gap:6px;padding:10px 16px;flex-wrap:wrap;border-bottom:1px solid var(--line)}
+.chips [role=radio]{padding:2px 12px;border-radius:999px;border:1px solid var(--line-2);color:var(--text-2)}
+.chips [aria-checked=true]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-2)}
+.dlist{overflow:auto;padding:4px 0 12px;position:relative}
+.newpill{position:sticky;top:8px;margin:8px auto 0;display:block;background:var(--accent);color:var(--on-accent);padding:4px 14px;border-radius:999px;font-weight:600;z-index:2}
+.newpill[hidden]{display:none}
+.day{padding:12px 16px 4px;color:var(--text-3);font-weight:600;position:sticky;top:0;background:var(--app)}
+.lrow{display:grid;grid-template-columns:48px 78px minmax(0,1fr) 16px;gap:10px;align-items:start;width:100%;text-align:left;padding:8px 16px}
+.lrow:hover{background:var(--hover)}
+.lrow .t{font-family:var(--mono);color:var(--text-3)}
+.lrow .tag{padding:0 8px;border-radius:999px;border:1px solid;font-size:15px;line-height:22px;text-align:center;white-space:nowrap}
+.tag.picture{color:var(--accent-2);border-color:var(--accent)} .tag.voice{color:var(--vo);border-color:var(--vo)} .tag.music{color:var(--music);border-color:var(--music)}
+.tag.sfx{color:var(--sfx);border-color:var(--sfx)} .tag.mix{color:var(--mix);border-color:var(--mix)} .tag.notes{color:var(--todo);border-color:var(--todo)} .tag.assets{color:var(--text-2);border-color:var(--line-2)} .tag.script{color:var(--done);border-color:var(--done)}
+.lrow .txt{overflow-wrap:anywhere}
+.lrow .by{color:var(--text-3);font-size:15px;display:block}
+.lrow .go{color:var(--text-3)}
+.before{margin:10px 16px 0;padding-top:10px;border-top:1px dashed var(--line-2);color:var(--text-2)}
+.before h3{margin:0 0 6px;font-size:15px;font-weight:600;color:var(--text-3)}
+.dfoot{padding:10px 16px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;color:var(--text-3)}
+.dfoot button{padding:6px 14px;border:1px solid var(--line-2);border-radius:10px;color:var(--text-2)}
+.empty{padding:28px 20px;color:var(--text-3)}
+</style>
+</head>
+<body>
+<div class="demo" role="group" aria-label="Mockup controls">
+  <b>Mockup:</b>
+  <button id="d1" aria-pressed="false">Open the version list</button>
+  <button id="d2" aria-pressed="true">Open the Change Log</button>
+  <button id="d3">Simulate a new entry</button>
+  <button id="d4" aria-pressed="false">Empty log</button>
+  <span>(Esc closes either. Click a row in the list to switch version; use the arrow keys in the list.)</span>
+</div>
+
+<div class="app" id="app">
+  <header>
+    <div class="logo" aria-hidden="true">▶</div>
+    <span class="crumb"><b>Lumen launch film</b> <span style="font-family:var(--mono);color:var(--text-3)">k7m2q9ab</span></span>
+    <span class="pill">Picture</span>
+    <div class="vwrap">
+      <button class="vbtn" id="vbtn" aria-haspopup="listbox" aria-expanded="false" aria-label="Version"><span class="id" id="vid">v6</span><span class="lbl" id="vlbl">launch 1.45x slower</span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+      <div class="vmenu" id="vmenu" hidden>
+        <div class="vlist" id="vlist" role="listbox" aria-label="Versions"></div>
+        <div class="vdetail" id="vdetail"></div>
+      </div>
+    </div>
+    <span class="sp"></span>
+    <button class="clog" id="clog" aria-expanded="true" aria-controls="drawer"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/></svg>Change Log<span class="dot" id="dot" hidden></span></button>
+    <button class="send">Send to agent <span class="pill" style="padding:0 8px;margin-left:4px">3</span></button>
+  </header>
+  <nav class="tabs"><span>Script</span><span class="on">Picture</span><span>Voiceover</span><span>Music</span><span>Sound effects</span><span>Mix</span><span>Assets</span></nav>
+  <main>
+    <div class="stage">picture</div>
+    <div class="under"><span id="unote" class="clamp"></span><button id="more">More</button></div>
+  </main>
+
+  <aside class="drawer" id="drawer" aria-label="Change Log">
+    <div class="dhead"><h2>Change Log</h2><span style="color:var(--text-3)">newest first</span><button class="x" id="dx" aria-label="Close the change log">Close</button></div>
+    <form class="add" id="addform"><input id="addin" placeholder="Add a line to the log" aria-label="Add a line to the log" maxlength="160"><button type="submit">Add</button></form>
+    <div class="chips" id="chips" role="radiogroup" aria-label="Show"></div>
+    <div class="dlist" id="dlist"><button class="newpill" id="newpill" hidden>1 new</button><div id="entries"></div></div>
+    <div class="dfoot"><span id="count"></span><button id="export">Export as Markdown</button></div>
+  </aside>
+</div>
+
+<script>
+const VERSIONS = [
+  {id:"v6", when:"2 h ago", locked:true,  label:"launch 1.45x slower", note:"v6: launch 1.45x slower; each zoomed request types itself out; crowd on a wider oval, 22 bubbles, zero overlaps; the address bar fades in as the end line arrives. 39.7 s, silent.", dur:"39.7 s", shots:11},
+  {id:"v5", when:"yesterday", label:"button morphs into a dot", note:"v5: the button morphs into a node-sized dot and rides the pull-back onto the globe; labels and bubbles drawn as sharp images so text no longer wobbles; the crowd builds to 22 all round the globe. End line B. 34.2 s, silent.", dur:"34.2 s", shots:10},
+  {id:"v4", when:"yesterday", label:"softer zooms, eased in and out", note:"v4 (batch b_2): softer zooms (0.95 s, eased in and out, each pull-out blends into the next push-in); New York to London to Cape Town to Rio; crowd spread all round the globe with no overlaps; end line B. 32.6 s, silent.", dur:"32.6 s", shots:10},
+  {id:"v3", when:"3 days ago", label:"zoom in on each of the first four…", note:"v3 (batch b_1): zoom in on each of the first four requests and back out (New York, London, Lagos, Cape Town during the outage); crowd starts 1, 2, 3, 4 then speeds up, bigger bubbles; end line A. 31 s, silent.", dur:"31 s", shots:9},
+  {id:"v2", when:"3 days ago", label:"new narrative", note:"v2, new narrative (notes): centred button, then pull back off the globe (button = first node), 7 nodes go live around the world, a calendar launches, people everywhere ask it things, requests scale to 48k.", dur:"36 s", shots:12},
+  {id:"v1", when:"4 days ago", label:"Picture v1, silent", note:"Picture v1, silent. Night globe on demo nodes (Frankfurt, Mumbai, Singapore, Sydney); São Paulo drops, São Paulo joins; the calendar keeps booking with uptime unbroken; city burst; end line and logo lockup. Score after picture lock.", dur:"28 s", shots:8},
+];
+let ENTRIES = [
+  {at:"Today 14:32", d:"Today",     tag:"picture", text:"v6 added: launch 1.45x slower", by:"agent", go:true},
+  {at:"Today 14:30", d:"Today",     tag:"notes",   text:"Agent replied to 3 notes (2 done)", by:"agent", go:true},
+  {at:"Today 13:05", d:"Today",     tag:"notes",   text:"3 notes sent from Picture", by:"user", go:true},
+  {at:"Today 11:48", d:"Today",     tag:"picture", text:"Picture locked at v5", by:"user", go:true},
+  {at:"Today 10:12", d:"Today",     tag:"mix",     text:"Picks: voice “Vo Jules, full read”, music “Night drive, held back”", by:"user", go:true},
+  {at:"Yesterday 17:20", d:"Yesterday", tag:"music", text:"Music: 3 variants added to night-drive", by:"agent", go:true},
+  {at:"Yesterday 16:41", d:"Yesterday", tag:"picture", text:"Decided to slow the zooms; the first cut felt rushed", by:"agent"},
+  {at:"Yesterday 15:03", d:"Yesterday", tag:"picture", text:"v5 added: button morphs into a dot", by:"agent", go:true},
+  {at:"Yesterday 09:30", d:"Yesterday", tag:"voice", text:"Voiceover: take 2 added to “Intro”", by:"agent", go:true},
+  {at:"Mon 5 Oct 18:10", d:"Mon 5 Oct", tag:"assets", text:"2 files added: Scripts & docs", by:"agent", go:true},
+  {at:"Mon 5 Oct 17:55", d:"Mon 5 Oct", tag:"script", text:"Script set: 6 sections", by:"agent", go:true},
+  {at:"Mon 5 Oct 12:20", d:"Mon 5 Oct", tag:"picture", text:"v1 added: Picture v1, silent", by:"rushes", go:true},
+];
+const CHIPS=[["all","All"],["picture","Picture"],["voice","Voice"],["music","Music"],["sfx","Sound effects"],["mix","Mix"],["notes","Notes"],["assets","Files"]];
+let cur="v6", filter="all", seen=false, open_v=false, open_l=true, empty=false, more=false;
+const $=(s)=>document.querySelector(s);
+
+function renderChips(){
+  $("#chips").innerHTML=CHIPS.map(([k,l])=>`<button role="radio" aria-checked="${filter===k}" data-k="${k}" tabindex="${filter===k?0:-1}">${l}</button>`).join("");
+  $("#chips").querySelectorAll("button").forEach(b=>b.onclick=()=>{filter=b.dataset.k;renderLog()});
+}
+function renderLog(){
+  renderChips();
+  const list=(empty?[]:ENTRIES).filter(e=>filter==="all"||e.tag===filter);
+  let out="",day="";
+  for(const e of list){
+    if(e.d!==day){day=e.d;out+=`<div class="day">${day}</div>`}
+    const t=e.at.split(" ").slice(-1)[0];
+    out+=`<button class="lrow"><span class="t">${t}</span><span class="tag ${e.tag}">${CHIPS.find(c=>c[0]===e.tag)?.[1]||e.tag}</span><span class="txt">${e.text}<span class="by">${e.by==="user"?"added by you":e.by==="agent"?"agent":"Rushes"}</span></span><span class="go" aria-hidden="true">${e.go?"›":""}</span></button>`;
+  }
+  if(!list.length) out=`<div class="empty">${empty?"Nothing yet. Rushes writes a line here whenever a cut, a take or a variant is added.":"Nothing for this filter."}</div>`;
+  else if(filter==="all"||filter==="music"||filter==="voice") out+=`<div class="before"><h3>Before the log</h3><div>Music: night-drive (3 variants)</div><div>Voiceover: 2 sections with takes</div></div>`;
+  $("#entries").innerHTML=out;
+  $("#count").textContent=empty?"":`${ENTRIES.length} entries`;
+}
+function renderVersions(){
+  $("#vlist").innerHTML=VERSIONS.map(v=>`<button class="vrow" role="option" aria-selected="${v.id===cur}" data-id="${v.id}"><span class="id">${v.id}</span><span class="lbl">${v.label}</span><span class="when">${v.locked?"🔒 ":""}${v.when}</span></button>`).join("");
+  const rows=[...document.querySelectorAll(".vrow")];
+  const show=(id)=>{const v=VERSIONS.find(x=>x.id===id);rows.forEach(r=>r.dataset.on=r.dataset.id===id);$("#vdetail").innerHTML=`<h4>${v.id}</h4><p>${v.note}</p><span class="meta">${v.dur} · ${v.shots} shots · ${v.when}</span>`};
+  rows.forEach(r=>{r.onmouseenter=r.onfocus=()=>show(r.dataset.id);r.onclick=()=>{cur=r.dataset.id;setV(false);renderPage()}});
+  rows.forEach((r,i)=>r.onkeydown=(e)=>{if(e.key==="ArrowDown"){e.preventDefault();(rows[i+1]||rows[0]).focus()}if(e.key==="ArrowUp"){e.preventDefault();(rows[i-1]||rows[rows.length-1]).focus()}});
+  show(cur);
+}
+function renderPage(){
+  const v=VERSIONS.find(x=>x.id===cur);$("#vid").textContent=v.id;$("#vlbl").textContent=v.label;
+  $("#unote").textContent=v.note;$("#unote").classList.toggle("clamp",!more);$("#more").textContent=more?"Less":"More";
+}
+function setV(o){open_v=o;$("#vmenu").hidden=!o;$("#vbtn").setAttribute("aria-expanded",o);$("#d1").setAttribute("aria-pressed",o);if(o){setL(false);renderVersions();($(".vrow[aria-selected=true]")||$(".vrow")).focus()}}
+function setL(o){open_l=o;$("#drawer").hidden=!o;$("#clog").setAttribute("aria-expanded",o);$("#d2").setAttribute("aria-pressed",o);if(o){seen=true;$("#dot").hidden=true;if(open_v)setV(false)}}
+$("#vbtn").onclick=()=>setV(!open_v);$("#clog").onclick=()=>setL(!open_l);$("#dx").onclick=()=>{setL(false);$("#clog").focus()};
+$("#d1").onclick=()=>setV(!open_v);$("#d2").onclick=()=>setL(!open_l);
+$("#more").onclick=()=>{more=!more;renderPage()};
+$("#d4").onclick=()=>{empty=!empty;$("#d4").setAttribute("aria-pressed",empty);renderLog()};
+$("#d3").onclick=()=>{
+  ENTRIES.unshift({at:"Today 14:41",d:"Today",tag:"music",text:"Music: “Night drive, quiet bed” added to night-drive",by:"agent",go:true});
+  if(open_l){const el=$("#dlist");if(el.scrollTop>40){$("#newpill").hidden=false}else renderLog()}else{$("#dot").hidden=false}
+  empty=false;$("#d4").setAttribute("aria-pressed",false);$("#count").textContent=ENTRIES.length+" entries";
+};
+$("#newpill").onclick=()=>{$("#newpill").hidden=true;$("#dlist").scrollTop=0;renderLog()};
+$("#addform").onsubmit=(e)=>{e.preventDefault();const v=$("#addin").value.trim();if(!v)return;ENTRIES.unshift({at:"Today 14:44",d:"Today",tag:"picture",text:v.slice(0,160),by:"user"});$("#addin").value="";empty=false;renderLog()};
+document.addEventListener("keydown",(e)=>{if(e.key==="Escape"){if(open_v){setV(false);$("#vbtn").focus()}else if(open_l){setL(false);$("#clog").focus()}}});
+document.documentElement.style.setProperty('--hh',document.querySelector('header').offsetHeight+'px');addEventListener('resize',()=>document.documentElement.style.setProperty('--hh',document.querySelector('header').offsetHeight+'px'));
+renderPage();renderLog();setL(true);
+</script>
+</body>
+</html>
