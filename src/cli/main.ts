@@ -10,6 +10,7 @@ import { ApiError, RushesClient, dashboardUrlFor } from "../mcp/client.js";
 import { openBrowser, runStdio } from "../mcp/stdio.js";
 import { VERSION } from "../server/app.js";
 import { BRING_IN_MAX } from "../server/found.js";
+import { LABEL_MAX, oneLineOf } from "../core/labels.js";
 import { markLabel, type Mark, type Note } from "../core/schema.js";
 import { onLabel, type OnContext } from "../core/notes.js";
 import { setup, type SetupEnv } from "../setup/setup.js";
@@ -320,8 +321,15 @@ export async function main(argv: string[], io: Io): Promise<number> {
         const [what, a, b] = rest;
         if (what === "version") {
           if (!a || !o.video) return usage(io, "rushes add version <file> --video NAME");
+          // The server refuses a longer label too, but only in a generic "Request body is invalid".
+          if (o.label !== undefined && Array.from(oneLineOf(o.label)).length > LABEL_MAX) {
+            io.err(`label is ${LABEL_MAX} characters at most: put the detail in note`);
+            return 2;
+          }
           const r = await (await client()).post("/api/versions", { video: o.video, file: resolve(io.cwd, a), note: o.note, label: o.label });
           io.out(`Added ${r.video.name} ${r.version.id}`);
+          // A Rushes started by an older version ignores `label` and its reply has none.
+          if (o.label?.trim() && r.version.label === undefined) io.err("An older Rushes is running and dropped the label: the cut was added without it. Run `rushes stop`, then open again.");
           // §19.5: the server says when this cut is likely to play badly in a browser.
           if (r.proxySuggested) io.out(`Proxy suggested: ${r.proxyReason}.${r.proxyJob ? " Making one now (autoProxy is on)." : " Create one from Picture."}`);
           return 0;
