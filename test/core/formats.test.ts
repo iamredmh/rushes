@@ -37,6 +37,42 @@ describe("ratioLabel (§21.3)", () => {
   });
 });
 
+describe("ratioLabel, fix round 1 (M1, M2, M4)", () => {
+  it("a portrait picture is labelled as the mirror of its landscape twin", () => {
+    // 1309x729 is 1.0100 of 16:9 (just out); 729x1309 used to snap to 9:16 on a linear error. Now both miss.
+    expect(ratioLabel(1309, 729)).toBe("1.8:1");
+    expect(ratioLabel(729, 1309)).toBe("1:1.8");
+    // Just in, both ways.
+    expect(ratioLabel(1308, 729)).toBe("16:9");
+    expect(ratioLabel(729, 1308)).toBe("9:16");
+  });
+  it("the decimal of a portrait is the height over the width, so 738×720 and 720×738 mirror", () => {
+    const [a, b] = ratioLabel(738, 720).split(":");
+    expect(a).not.toBe("1");
+    expect(ratioLabel(720, 738)).toBe(`${b}:${a}`);
+  });
+  it("the reduced fraction is used while both terms are 32 or less, and not past that", () => {
+    expect(ratioLabel(3840, 1080)).toBe("32:9");
+    expect(ratioLabel(1080, 3840)).toBe("9:32");
+    expect(ratioLabel(3300, 1000)).toBe("3.3:1"); // 33:10 has a term over 32
+    expect(ratioLabel(1000, 3300)).toBe("1:3.3");
+  });
+  it("needs two whole numbers from 1 to 100000, and says RangeError for anything else", () => {
+    for (const [w, h] of [[0.4, 1000], [1e20, 1], [1e21, 1], [Number.NaN, 1080], [Number.POSITIVE_INFINITY, 1080], [1920, Number.NEGATIVE_INFINITY], [100001, 1000], [1080.5, 1920], [-1080, 1920]]) {
+      expect(() => ratioLabel(w, h), `${w}x${h}`).toThrow(RangeError);
+    }
+    expect(ratioLabel(100000, 1)).toBe("100000:1");
+    expect(ratioLabel(1, 100000)).toBe("1:100000");
+  });
+  it("every label it makes is a valid format id of 16 characters or fewer", () => {
+    for (const [w, h] of [[100000, 1], [1, 100000], [99999, 100000], [100000, 99999], [3300, 1000], [7, 100000]]) {
+      const label = ratioLabel(w, h);
+      expect(label.length).toBeLessThanOrEqual(16);
+      expect(FORMAT_ID_RE.test(ratioId(label))).toBe(true);
+    }
+  });
+});
+
 describe("format ids", () => {
   it("are the label with ':' as 'x', and back", () => {
     expect(ratioId("9:16")).toBe("9x16");

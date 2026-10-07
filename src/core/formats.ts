@@ -36,12 +36,15 @@ const decimal = (n: number): string => String(Number(n.toFixed(2)));
 /** R13: the long side over the short, to two decimals: "2.39:1", "1:2.39". */
 const decimalLabel = (r: number): string => (r >= 1 ? `${decimal(r)}:1` : `1:${decimal(1 / r)}`);
 
-/** The standard ratio nearest `r`, and how far off it is (a fraction of the standard). */
+/** 1% as a log ratio: |ln(a/b)| is the same for a landscape picture and its portrait twin. */
+const SNAP = Math.log(1.01) + 1e-12;
+
+/** The standard ratio nearest `r`, and how far off it is: |ln(r / standard)|, so 16:9 and 9:16 mirror. */
 function nearestStandard(r: number): { best: readonly [number, number] | null; err: number } {
   let best: readonly [number, number] | null = null;
   let err = Infinity;
   for (const s of STANDARD_RATIOS) {
-    const e = Math.abs(r - s[0] / s[1]) / (s[0] / s[1]);
+    const e = Math.abs(Math.log(r / (s[0] / s[1])));
     if (e < err) {
       err = e;
       best = s;
@@ -56,17 +59,14 @@ function nearestStandard(r: number): { best: readonly [number, number] | null; e
  * decimal with the long side over the short (R13): "2.39:1", "1:2.39".
  */
 export function ratioLabel(width: number, height: number): string {
-  if (!(Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0)) {
-    throw new RangeError(`Not a picture size: ${width}×${height}`);
-  }
+  if (!isPictureSize(width, height)) throw new RangeError(`Not a picture size: ${width}×${height}`);
   const r = width / height;
   const { best, err } = nearestStandard(r);
-  if (best && err <= 0.01 + 1e-12) return `${best[0]}:${best[1]}`;
-  const w = Math.round(width);
-  const h = Math.round(height);
-  const g = gcd(w, h);
-  if (w / g <= 32 && h / g <= 32) return `${w / g}:${h / g}`;
-  return decimalLabel(r);
+  if (best && err <= SNAP) return `${best[0]}:${best[1]}`;
+  const g = gcd(width, height);
+  if (width / g <= 32 && height / g <= 32) return `${width / g}:${height / g}`;
+  // The long side over the short, worked out the same way for a picture and its portrait twin.
+  return width >= height ? `${decimal(width / height)}:1` : `1:${decimal(height / width)}`;
 }
 
 export const ratioId = (label: string): string => label.replace(":", "x");
@@ -103,11 +103,11 @@ export function settleLabel(width: number, height: number, hint?: string): { lab
   if (v === null) return { label: measured, note: `"${given}" isn't a ratio like 2.39:1, so Rushes used the measured ${measured}.` };
   if (isStandard(measured)) return { label: measured, note: `The file measures ${measured}, a standard ratio, so the label "${given}" wasn't needed.` };
   const standard = nearestStandard(v);
-  if (standard.best && standard.err <= 0.01 + 1e-12) {
+  if (standard.best && standard.err <= SNAP) {
     return { label: measured, note: `"${given}" is a standard ratio, and the file isn't one, so Rushes used the measured ${measured}.` };
   }
   const r = width / height;
-  if (Math.abs(v - r) / r > 0.02) return { label: measured, note: `The file measures ${measured}, too far from "${given}" to use it.` };
+  if (Math.abs(Math.log(v / r)) > Math.log(1.02)) return { label: measured, note: `The file measures ${measured}, too far from "${given}" to use it.` };
   const canonical = decimalLabel(v);
   return { label: canonical, note: canonical === given ? null : `Rushes wrote the label "${given}" as ${canonical}.` };
 }

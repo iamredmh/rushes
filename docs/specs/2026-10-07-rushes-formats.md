@@ -15,7 +15,7 @@ What Red asked for:
 
 1. **A format is a render of a cut version, not a new cut.** Version v1 of a film can carry several renders, one per aspect ratio. Shots, notes' timecodes, picture lock, replies and the audio stages all stay at the version level.
 2. **The version's own `file` stays the primary render.** Nothing about an existing project changes. `formats` lists the additional renders. The primary is a format too: its ratio is read from the file.
-3. **A ratio is measured, never typed.** The width and height come from ffprobe; the label is the nearest standard ratio (1:1, 4:5, 5:4, 4:3, 3:4, 3:2, 2:3, 16:9, 9:16, 21:9, 9:21) within 1%, otherwise the reduced fraction if both terms are ≤ 32, otherwise the decimal ("2.35:1").
+3. **A ratio is measured, never typed.** The width and height come from ffprobe; the label is the nearest standard ratio (1:1, 4:5, 5:4, 4:3, 3:4, 3:2, 2:3, 16:9, 9:16, 21:9, 9:21) within 1%, otherwise the reduced fraction if both terms are ≤ 32, otherwise the decimal ("2.37:1").
 4. **A new note belongs to the format being viewed.** When a cut has two or more formats, a new note defaults to "This format". A switch in the note composer says **This format** or **All formats** and can be changed on the note afterwards. With one format there is no switch and the note is saved for all formats (the two are the same thing).
 5. **A note shows on the formats it belongs to.** Viewing 16:9 shows the 16:9 notes and the all-format notes. Notes for other formats are not shown, not dimmed.
 6. **An all-format note has no drawn box.** A box is positions on one frame and means nothing on another shape. Drawing a box fixes the note to the format on screen and disables the switch with a tooltip that says why.
@@ -30,7 +30,7 @@ All additions are optional with defaults, so every existing file loads unchanged
 formats: z.array(FormatSchema).max(8).default([])
 
 FormatSchema = {
-  id: string,          // "1x1" | "4x5" | "9x16" | "16x9" | "2.35x1" … the label with ":" replaced by "x"
+  id: string,          // "1x1" | "4x5" | "9x16" | "16x9" | "2.37x1" … the label with ":" replaced by "x"
   label: string,       // "9:16"
   file: string,        // path, same rules as Version.file (inside the project, or an absolute media path)
   width: int, height: int,
