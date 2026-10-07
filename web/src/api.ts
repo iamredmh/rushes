@@ -11,7 +11,12 @@ export function projectId(): string | null {
   return m ? m[1] : null;
 }
 
-async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
+/** `keepalive`: the request outlives the page (a save sent as the tab is hidden or closed). */
+export interface CallOptions {
+  keepalive?: boolean;
+}
+
+async function call<T>(method: string, path: string, body?: unknown, opts: CallOptions = {}): Promise<T> {
   const id = projectId();
   const headers: Record<string, string> = {};
   if (body !== undefined) headers["content-type"] = "application/json";
@@ -20,6 +25,7 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
     method,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
+    ...(opts.keepalive ? { keepalive: true } : {}),
   });
   const text = await res.text();
   const json = text ? JSON.parse(text) : {};
@@ -31,7 +37,7 @@ export const api = {
   get: <T>(path: string) => call<T>("GET", path),
   post: <T>(path: string, body: unknown = {}) => call<T>("POST", path, body),
   patch: <T>(path: string, body: unknown) => call<T>("PATCH", path, body),
-  put: <T>(path: string, body: unknown) => call<T>("PUT", path, body),
+  put: <T>(path: string, body: unknown, opts?: CallOptions) => call<T>("PUT", path, body, opts),
   del: <T>(path: string, body: unknown = {}) => call<T>("DELETE", path, body),
 };
 

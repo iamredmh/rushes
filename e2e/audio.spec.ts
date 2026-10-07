@@ -1393,6 +1393,7 @@ test("a Mix level: drags live, saves on reload, resets on double-click, and re-m
   await expect(musicDb).toHaveText("0.0 dB");
 
   // Dragging to −14 is heard immediately through the engine, at roughly 10^(-14/20).
+  const saved = page.waitForResponse((r) => r.url().endsWith("/api/picks") && r.request().method() === "PUT" && r.request().postDataJSON()?.levels?.music === -14);
   await dragLevel(page, "Music level", -14);
   await expect(musicDb).toHaveText("−14.0 dB");
   await expect.poll(async () => (await inspect(page)).lanes.music).toBeCloseTo(0.1995, 3);
@@ -1401,7 +1402,9 @@ test("a Mix level: drags live, saves on reload, resets on double-click, and re-m
   const before = asked.length;
   await expect.poll(() => asked.length, { timeout: 10_000 }).toBeGreaterThan(before);
 
-  // It survives a reload: saved with the picks.
+  // It survives a reload: saved with the picks. The reload waits for the debounced save to land,
+  // so it tests the saved value rather than racing the 300 ms debounce.
+  expect((await saved).ok()).toBe(true);
   await page.reload();
   await openTab(page, /Mix/, "6");
   await loaded(page, 3);
@@ -1415,6 +1418,34 @@ test("a Mix level: drags live, saves on reload, resets on double-click, and re-m
   await expect.poll(async () => (await inspect(page)).lanes.music).toBeCloseTo(1, 3);
   await expect.poll(async () => (await rushes.api("GET", "/api/picks")).levels).toEqual({});
 });
+
+for (const how of ["hidden", "pagehide"] as const) {
+  test(`a level changed and the page ${how === "hidden" ? "hidden" : "left"} within 300 ms is still saved, once`, async ({ page, rushes }) => {
+    await mixProject(page, rushes);
+    await openMix(page, rushes, 3);
+    await expect(page.locator('.lane[data-row="music"] .level .db')).toHaveText("0.0 dB");
+    const puts: unknown[] = [];
+    page.on("request", (r) => {
+      if (r.url().endsWith("/api/picks") && r.method() === "PUT") puts.push(r.postDataJSON());
+    });
+    // The drag and the page going away happen in one step, well inside the 300 ms debounce, and
+    // the page is closed straight after: only a save sent at that moment can reach the server.
+    await page.locator('input[aria-label="Music level"]').evaluate((el: HTMLInputElement, h: string) => {
+      el.value = "-9";
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      if (h === "hidden") {
+        Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+        document.dispatchEvent(new Event("visibilitychange"));
+      } else {
+        window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: false }));
+      }
+    }, how);
+    await page.close();
+    await expect.poll(async () => (await rushes.api("GET", "/api/picks")).levels, { timeout: 5_000 }).toEqual({ music: -9 });
+    // Sent once: the hide took the pending save, so no timer or unmount sent it again.
+    expect(puts).toEqual([{ levels: { music: -9 } }]);
+  });
+}
 
 test("a refresh from elsewhere never snaps a slider you're mid-drag on (regression)", async ({ page, rushes }) => {
   await mixProject(page, rushes);
