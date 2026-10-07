@@ -1,4 +1,4 @@
-import { test as base, expect, type Page } from "@playwright/test";
+import { test as base, expect, type Locator, type Page } from "@playwright/test";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -387,6 +387,19 @@ export const test = base.extend<{ rushes: Rushes; noFfmpeg: boolean }>({
 /** Wait until the player has loaded the cut's metadata, so seeking works. */
 export async function videoReady(page: Page): Promise<void> {
   await expect.poll(() => page.locator("video").evaluate((v: HTMLVideoElement) => v.readyState), { timeout: 10_000 }).toBeGreaterThanOrEqual(1);
+}
+
+/** §22.8: Picture's version control, a menu button whose accessible name starts "Version". */
+export function versionButton(page: Page): Locator {
+  return page.getByRole("button", { name: /^Version/ });
+}
+
+/** Picks a version from the version list, the way a person would, and waits until it's on screen. */
+export async function pickVersion(page: Page, id: string): Promise<void> {
+  const button = versionButton(page);
+  if ((await button.getAttribute("aria-expanded")) !== "true") await button.click();
+  await page.getByRole("listbox", { name: "Versions" }).locator(`[role="option"][data-version="${id}"]`).click();
+  await expect(button).toHaveAttribute("data-version", id);
 }
 
 export { expect };

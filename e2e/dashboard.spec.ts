@@ -2,7 +2,7 @@ import { access, copyFile, mkdir, readFile, readdir, rm, writeFile } from "node:
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { BrowserContext, Page } from "@playwright/test";
-import { expect, hasFfmpeg, needsH264, type Rushes, test, videoReady } from "./fixture.js";
+import { expect, hasFfmpeg, needsH264, pickVersion, type Rushes, test, versionButton, videoReady } from "./fixture.js";
 
 const CLIP = fileURLToPath(new URL("./fixtures/clip.mp4", import.meta.url));
 // A 1x1 transparent PNG, reused for every screenshot the library tests need on disk: its
@@ -21,7 +21,7 @@ test("tabs stay locked until the project has something, then unlock live", async
   await expect(page.getByRole("tab", { name: /Picture/ })).not.toHaveAttribute("data-locked");
   await page.getByRole("tab", { name: /Picture/ }).click();
   await videoReady(page);
-  await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v1");
+  await expect(versionButton(page)).toHaveAttribute("data-version", "v1");
 });
 
 test("a locked tab opens, explains itself and offers a prompt for your agent (locked, §19.1)", async ({ page, rushes, context, browserName }) => {
@@ -203,7 +203,7 @@ test("a new cut mid-review waits for a click instead of dropping pending marks",
   await page.getByLabel("New note").fill("Still deciding what this is about.");
   await rushes.addCut("tighter cut");
   await expect(page.locator(".chipx.go")).toContainText("v2 ready");
-  await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v1");
+  await expect(versionButton(page)).toHaveAttribute("data-version", "v1");
   // The marks made before the cut arrived are all still there.
   await expect(page.locator(".bar .chipx")).toContainText("0:01.00–0:02.00");
   await expect(page.locator(".comp .chipx", { hasText: "Box" })).toBeVisible();
@@ -211,7 +211,7 @@ test("a new cut mid-review waits for a click instead of dropping pending marks",
   // A second cut while still holding: the chip names the newest one.
   await rushes.addCut("tighter still");
   await expect(page.locator(".chipx.go")).toContainText("v3 ready");
-  await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v1");
+  await expect(versionButton(page)).toHaveAttribute("data-version", "v1");
   await page.getByLabel("New note").press("Enter");
   await expect(page.locator(".note")).toHaveCount(1);
   const { notes } = await rushes.api("GET", "/api/notes?stage=picture");
@@ -219,10 +219,10 @@ test("a new cut mid-review waits for a click instead of dropping pending marks",
   expect(notes[0].box.x).toBeCloseTo(0.25, 1);
   expect(notes[0].box.w).toBeCloseTo(0.5, 1);
   // The chip stays up rather than auto-switching once the pending work clears.
-  await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v1");
+  await expect(versionButton(page)).toHaveAttribute("data-version", "v1");
   await expect(page.locator(".chipx.go")).toContainText("v3 ready");
   await page.locator(".chipx.go").click();
-  await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v3");
+  await expect(versionButton(page)).toHaveAttribute("data-version", "v3");
   await expect(page.locator(".chipx.go")).not.toBeVisible();
 });
 
@@ -246,7 +246,7 @@ test("a note fixed in the newer cut shows where it landed and where it came from
   await rushes.addCut("held title");
   await rushes.api("POST", "/api/replies", { replies: [{ id: note.id, reply: "Held 0.6 s longer.", status: "done", fixT: 2.1, fixVersion: "v2" }] });
   await page.goto(rushes.url);
-  await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v2");
+  await expect(versionButton(page)).toHaveAttribute("data-version", "v2");
   await expect(page.locator(".note .t")).toHaveText("0:02.10");
   await expect(page.locator(".note .from")).toHaveText("from v1 at 0:01.50");
 });
@@ -388,7 +388,7 @@ test("a film's restored playhead is used once on return, not reapplied when you 
   await rushes.addCut("cutdown cut", "Cutdown");
   await page.goto(rushes.url);
   await videoReady(page);
-  await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v2");
+  await expect(versionButton(page)).toHaveAttribute("data-version", "v2");
   for (let i = 0; i < 15; i++) await page.keyboard.press("ArrowRight");
   await expect(page.getByLabel("Timecode")).toContainText("0:00.50");
   await page.keyboard.press("]");
@@ -398,7 +398,7 @@ test("a film's restored playhead is used once on return, not reapplied when you 
   await expect(page.getByLabel("Timecode")).toContainText("0:00.50");
   // The restore point was for coming back to the film, not for every cut on it: picking
   // another version now must start at 0, not reuse 0:00.50 a second time.
-  await page.getByRole("combobox", { name: "Version" }).selectOption("v1");
+  await pickVersion(page, "v1");
   await videoReady(page);
   await expect(page.getByLabel("Timecode")).toContainText("0:00.00");
 });
@@ -439,7 +439,7 @@ test("a locked picture opens on the locked cut", async ({ page, rushes }) => {
   await rushes.api("PUT", "/api/videos/Hero/lock", { version: v1.id });
   await page.goto(rushes.url);
   await videoReady(page);
-  await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v1");
+  await expect(versionButton(page)).toHaveAttribute("data-version", "v1");
   const lockBtn = page.getByRole("button", { name: "Picture locked at v1 · unlock" });
   await expect(lockBtn).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator(".chipx.go")).toContainText("v2 ready");
@@ -453,10 +453,10 @@ test("choosing the newest cut by hand on a locked film doesn't snap back to the 
   await rushes.api("PUT", "/api/videos/Hero/lock", { version: v1.id });
   await page.goto(rushes.url);
   await videoReady(page);
-  await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v1");
-  await page.getByRole("combobox", { name: "Version" }).selectOption("v2");
+  await expect(versionButton(page)).toHaveAttribute("data-version", "v1");
+  await pickVersion(page, "v2");
   await videoReady(page);
-  await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v2");
+  await expect(versionButton(page)).toHaveAttribute("data-version", "v2");
   const { project } = await rushes.api("GET", "/api/state");
   expect(project.videos[0].lockedVersion).toBe("v1");
 });
@@ -467,7 +467,7 @@ test("the lock button names the locked cut even while viewing a newer one", asyn
   await rushes.api("PUT", "/api/videos/Hero/lock", { version: v1.id });
   await page.goto(rushes.url);
   await videoReady(page);
-  await page.getByRole("combobox", { name: "Version" }).selectOption("v2");
+  await pickVersion(page, "v2");
   await videoReady(page);
   await expect(page.getByRole("button", { name: "Picture locked at v1 · unlock" })).toHaveAttribute("aria-pressed", "true");
 });
@@ -481,11 +481,11 @@ test("a version pin left over from peeking at a cut doesn't block the next one f
   await expect(page.locator(".chipx.go")).toContainText("v2 ready");
   await page.locator(".chipx.go").click(); // peek at v2 without unlocking: a version pin
   await videoReady(page);
-  await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v2");
+  await expect(versionButton(page)).toHaveAttribute("data-version", "v2");
   await page.getByRole("button", { name: /unlock/ }).click();
   await expect.poll(async () => (await rushes.api("GET", "/api/state")).project.videos[0].lockedVersion).toBeNull();
   await rushes.addCut("third cut"); // v3, now unlocked: the stale v2 pin must not swallow this
-  await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v3");
+  await expect(versionButton(page)).toHaveAttribute("data-version", "v3");
 });
 
 test("Space on a button reached by keyboard presses it; after a mouse click it still plays (§19.8)", async ({ page, rushes }) => {
@@ -783,7 +783,7 @@ test("a late grab doesn't attach to a newer cut of the same film", async ({ page
   // grab alone doesn't count), so the player follows it straight away -- no held chip, just
   // a new version prop under the same mounted Picture instance.
   await rushes.addCut("tighter cut");
-  await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v2");
+  await expect(versionButton(page)).toHaveAttribute("data-version", "v2");
 
   release();
   await expect(page.getByRole("status")).toContainText("Saved to screenshots/");
@@ -1378,7 +1378,7 @@ test.describe("proxies (§19.5)", () => {
 
     const added = await rushes.addProResCut({ long: true }, "prores cut");
     expect(added.proxyJob?.state).toBe("running");
-    await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v2");
+    await expect(versionButton(page)).toHaveAttribute("data-version", "v2");
     const offer = page.locator(".proxybar");
     await expect(offer).toContainText("Creating proxy");
     await expect(offer.locator(".proxyrow.working .mono")).toHaveText(/^\d+%$/);
@@ -1462,10 +1462,10 @@ test.describe("proxies (§19.5)", () => {
     });
     await page.goto(rushes.url);
     const bar = page.locator(".proxybar");
-    await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v2");
+    await expect(versionButton(page)).toHaveAttribute("data-version", "v2");
     await bar.getByRole("button", { name: "Create proxy" }).click();
     await expect(bar).toContainText("Creating proxy");
-    await page.getByRole("combobox", { name: "Version" }).selectOption("v1");
+    await pickVersion(page, "v1");
     await expect(bar.getByRole("button", { name: "Create proxy" })).toBeVisible();
     await expect(bar).not.toContainText("Creating proxy");
     release();
@@ -1568,7 +1568,7 @@ test.describe("tabs share one live connection (§19.8)", () => {
     const tabs = [page, ...(await Promise.all([1, 2, 3].map(() => context.newPage())))];
     for (const tab of tabs) {
       await tab.goto(rushes.testUrl());
-      await expect(tab.getByRole("combobox", { name: "Version" })).toHaveValue("v1");
+      await expect(versionButton(tab)).toHaveAttribute("data-version", "v1");
     }
     await expect.poll(() => Promise.all(tabs.map((t) => t.evaluate(() => (window as Live).__rushesLive?.role() ?? null)))).toEqual(
       ["leader", "follower", "follower", "follower"],
@@ -1737,11 +1737,11 @@ test.describe("the Picture waveform (§19.9)", () => {
       await route.continue().catch(() => undefined);
     });
     await page.goto(rushes.url);
-    const versions = page.getByRole("combobox", { name: "Version" });
-    await versions.selectOption("v1");
+    const versions = versionButton(page);
+    await pickVersion(page, "v1");
     await expect.poll(() => wavePixels(page)).toBeGreaterThan(50);
-    await versions.selectOption("v2");
-    await expect(versions).toHaveValue("v2");
+    await pickVersion(page, "v2");
+    await expect(versions).toHaveAttribute("data-version", "v2");
     await settledNoWave(page);
     const answered = page.waitForResponse((r) => r.url().includes("/versions/v2/peaks") && r.status() === 200);
     release();
@@ -1762,12 +1762,12 @@ test.describe("the Picture waveform (§19.9)", () => {
       await route.continue().catch(() => undefined);
     });
     await page.goto(rushes.url);
-    const versions = page.getByRole("combobox", { name: "Version" });
-    await expect(versions).toHaveValue("v2");
+    const versions = versionButton(page);
+    await expect(versions).toHaveAttribute("data-version", "v2");
     await expect.poll(() => asked).toBeGreaterThan(0);
     const v1Answered = page.waitForResponse((r) => r.url().includes("/versions/v1/peaks") && r.status() === 204);
-    await versions.selectOption("v1");
-    await expect(versions).toHaveValue("v1");
+    await pickVersion(page, "v1");
+    await expect(versions).toHaveAttribute("data-version", "v1");
     await v1Answered;
     release();
     await settledNoWave(page);
@@ -1801,14 +1801,14 @@ test.describe("the Picture waveform (§19.9)", () => {
     expect(await peaksSettled(rushes, "v1")).toBe(200);
     expect(await peaksSettled(rushes, "v2")).toBe(204);
     await page.goto(rushes.url);
-    const versions = page.getByRole("combobox", { name: "Version" });
-    await expect(versions).toHaveValue("v2");
+    const versions = versionButton(page);
+    await expect(versions).toHaveAttribute("data-version", "v2");
     await expect(page.locator(".track canvas.pwave")).toHaveCount(0);
-    await versions.selectOption("v1");
+    await pickVersion(page, "v1");
     await expect.poll(() => wavePixels(page)).toBeGreaterThan(50);
-    await versions.selectOption("v2");
+    await pickVersion(page, "v2");
     await expect(page.locator(".track canvas.pwave")).toHaveCount(0);
-    await versions.selectOption("v1");
+    await pickVersion(page, "v1");
     await expect(page.locator(".track canvas.pwave")).toHaveCount(1);
   });
 
@@ -1817,7 +1817,7 @@ test.describe("the Picture waveform (§19.9)", () => {
     await page.goto(rushes.url);
     await videoReady(page);
     await rushes.addProResCut({ codec: "h264", seconds: 3, audio: true });
-    await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v2");
+    await expect(versionButton(page)).toHaveAttribute("data-version", "v2");
     await expect.poll(() => wavePixels(page)).toBeGreaterThan(50);
   });
 
