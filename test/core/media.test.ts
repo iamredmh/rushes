@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { spawnSync } from "node:child_process";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { PROBE_TIMEOUT_MS, probe as mediaProbe, proxyNeed, type Probe } from "../../src/core/media.js";
+import { PROBE_TIMEOUT_MS, parseVideoProbe, probe as mediaProbe, probeVideo, proxyNeed, type Probe } from "../../src/core/media.js";
 
 const probe = (p: Partial<Probe>): Probe => ({ duration: 10, fps: 25, codec: "h264", width: 1920, height: 1080, pixFmt: "yuv420p", ...p });
 
@@ -108,6 +109,59 @@ describe("probe: only local files (the scan runs it on every media file it finds
       expect(at).toBeLessThan(args.indexOf("/some/where/a.wav"));
     } finally {
       process.env.PATH = path;
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("parseVideoProbe (§21.3)", () => {
+  const stream = (over: Record<string, unknown> = {}) => ({ codec_type: "video", width: 1920, height: 1080, avg_frame_rate: "30/1", ...over });
+  const json = (streams: unknown[], format: Record<string, unknown> = { duration: "8.000000", format_name: "mov,mp4,m4a,3gp,3g2,mj2" }) => ({ streams, format });
+
+  it("reads the size, length and rate", () => {
+    expect(parseVideoProbe(json([stream()]))).toEqual({ ok: true, width: 1920, height: 1080, duration: 8, fps: 30 });
+  });
+  it("stands a quarter-turned phone video upright, from side data or the older rotate tag", () => {
+    expect(parseVideoProbe(json([stream({ side_data_list: [{ side_data_type: "Display Matrix", rotation: -90 }] })]))).toMatchObject({ width: 1080, height: 1920 });
+    expect(parseVideoProbe(json([stream({ tags: { rotate: "270" } })]))).toMatchObject({ width: 1080, height: 1920 });
+    expect(parseVideoProbe(json([stream({ side_data_list: [{ rotation: 180 }] })]))).toMatchObject({ width: 1920, height: 1080 });
+  });
+  it("widens non-square pixels to the shape on screen", () => {
+    expect(parseVideoProbe(json([stream({ width: 1440, height: 1080, sample_aspect_ratio: "4:3" })]))).toMatchObject({ width: 1920, height: 1080 });
+    expect(parseVideoProbe(json([stream({ sample_aspect_ratio: "0:1" })]))).toMatchObject({ width: 1920 });
+  });
+  it("skips cover art, and refuses audio, stills and a stream with no size", () => {
+    expect(parseVideoProbe(json([{ codec_type: "audio" }]))).toEqual({ ok: false, code: "not_video", reason: "it has no video stream" });
+    expect(parseVideoProbe(json([{ codec_type: "audio" }, stream({ disposition: { attached_pic: 1 } })]))).toMatchObject({ ok: false, code: "not_video" });
+    expect(parseVideoProbe(json([stream()], { format_name: "png_pipe" }))).toEqual({ ok: false, code: "not_video", reason: "it's a still image" });
+    expect(parseVideoProbe(json([stream({ width: 0 })]))).toMatchObject({ ok: false, code: "unreadable" });
+  });
+});
+
+const hasFf = ["ffmpeg", "ffprobe"].every((b) => spawnSync(b, ["-version"], { stdio: "ignore" }).status === 0);
+
+describe.skipIf(!hasFf)("probeVideo with the real ffprobe", () => {
+  const make = (dir: string, name: string, args: string[]) => {
+    const out = join(dir, name);
+    const r = spawnSync("ffmpeg", ["-v", "error", "-y", ...args, out]);
+    if (r.status !== 0) throw new Error(String(r.stderr));
+    return out;
+  };
+  it("reads a 9:16 render and an anamorphic one, and refuses a still and a file that isn't video", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "rushes probe "));
+    try {
+      const tall = make(dir, "tall.mp4", ["-f", "lavfi", "-i", "testsrc=size=180x320:rate=30:duration=2", "-c:v", "libx264", "-pix_fmt", "yuv420p"]);
+      expect(await probeVideo(tall)).toMatchObject({ ok: true, width: 180, height: 320, fps: 30 });
+      const ana = make(dir, "ana.mp4", ["-f", "lavfi", "-i", "testsrc=size=240x240:rate=30:duration=1", "-vf", "setsar=4/3", "-c:v", "libx264", "-pix_fmt", "yuv420p"]);
+      expect(await probeVideo(ana)).toMatchObject({ ok: true, width: 320, height: 240 });
+      const still = make(dir, "still.png", ["-f", "lavfi", "-i", "color=c=red:s=16x16", "-frames:v", "1"]);
+      expect(await probeVideo(still)).toMatchObject({ ok: false, code: "not_video" });
+      const junk = join(dir, "junk.mp4");
+      await writeFile(junk, "not a video at all");
+      const r = await probeVideo(junk);
+      expect(r).toMatchObject({ ok: false, code: "unreadable" });
+      expect(r.ok ? "" : r.reason).not.toContain(dir);
+    } finally {
       await rm(dir, { recursive: true, force: true });
     }
   });

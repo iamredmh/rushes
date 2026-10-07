@@ -107,6 +107,69 @@ function positiveInt(n: unknown): number | null {
   return typeof n === "number" && Number.isInteger(n) && n > 0 ? n : null;
 }
 
+/** §21.6: the extensions a cut or a format may have. Anything else isn't video. */
+export const VIDEO_EXT: ReadonlySet<string> = new Set(["mp4", "mov", "m4v", "webm", "mkv"]);
+
+/** §21.3: a render's shape on screen, its length and rate, or why it can't be a format. */
+export type VideoProbe =
+  | { ok: true; width: number; height: number; duration: number | null; fps: number | null }
+  | { ok: false; code: "no_ffprobe" | "not_video" | "unreadable"; reason: string };
+export type VideoProber = (abs: string) => Promise<VideoProbe>;
+
+interface FfStream {
+  codec_type?: string;
+  width?: number;
+  height?: number;
+  sample_aspect_ratio?: string;
+  avg_frame_rate?: string;
+  r_frame_rate?: string;
+  tags?: { rotate?: string };
+  side_data_list?: { rotation?: number }[];
+  disposition?: { attached_pic?: number };
+}
+
+/**
+ * ffprobe's `-show_format -show_streams` JSON as a VideoProbe. The size is the one on screen (Review
+ * Focus 2): non-square pixels widen it, and a quarter turn of rotation metadata swaps its sides.
+ */
+export function parseVideoProbe(json: unknown): VideoProbe {
+  const j = (json ?? {}) as { format?: { duration?: string; format_name?: string }; streams?: FfStream[] };
+  if (/(^|,)image2(,|$)|_pipe(,|$)/.test(j.format?.format_name ?? "")) return { ok: false, code: "not_video", reason: "it's a still image" };
+  const s = j.streams?.find((x) => x.codec_type === "video" && x.disposition?.attached_pic !== 1);
+  if (!s) return { ok: false, code: "not_video", reason: "it has no video stream" };
+  const w = positiveInt(s.width);
+  const h = positiveInt(s.height);
+  if (w === null || h === null) return { ok: false, code: "unreadable", reason: "it has no picture size" };
+  const sar = /^(\d+):(\d+)$/.exec(s.sample_aspect_ratio ?? "");
+  const pixel = sar && Number(sar[1]) > 0 && Number(sar[2]) > 0 ? Number(sar[1]) / Number(sar[2]) : 1;
+  let width = Math.round(w * pixel);
+  let height = h;
+  const rotation = s.side_data_list?.find((d) => typeof d.rotation === "number")?.rotation ?? Number(s.tags?.rotate ?? 0);
+  if (Math.abs(Math.round(rotation)) % 180 === 90) [width, height] = [height, width];
+  const d = j.format?.duration ? Number(j.format.duration) : Number.NaN;
+  return { ok: true, width, height, duration: Number.isFinite(d) ? d : null, fps: parseRate(s.avg_frame_rate) ?? parseRate(s.r_frame_rate) };
+}
+
+/** §21.3: reads a render with ffprobe, local files only. The reason never repeats the file's path. */
+export async function probeVideo(file: string, opts: { timeout?: number } = {}): Promise<VideoProbe> {
+  if (!(await hasFfprobe())) return { ok: false, code: "no_ffprobe", reason: "needs ffprobe to read the ratio" };
+  try {
+    const { stdout } = await run(
+      "ffprobe",
+      // Local files only: a playlist or container that names a URL is never followed.
+      ["-v", "error", "-protocol_whitelist", "file", "-show_format", "-show_streams", "-of", "json", file],
+      { timeout: opts.timeout ?? PROBE_TIMEOUT_MS, killSignal: "SIGKILL", maxBuffer: 8 * 1024 * 1024 },
+    );
+    return parseVideoProbe(JSON.parse(stdout));
+  } catch (e) {
+    const last = String((e as { stderr?: unknown }).stderr ?? "").trim().split("\n").pop() ?? "";
+    const trimmed = last.startsWith(`${file}: `) ? last.slice(file.length + 2) : last;
+    // Belt and braces: the path never appears anywhere in what goes back to the caller.
+    const reason = trimmed.split(file).join("the file");
+    return { ok: false, code: "unreadable", reason: reason.slice(0, 200) || "ffprobe couldn't read it" };
+  }
+}
+
 // §19.5: when Rushes offers a proxy.
 const PLAYABLE_CODECS = new Set(["h264", "vp9", "av1"]);
 const MAX_EDGE = 3000;
