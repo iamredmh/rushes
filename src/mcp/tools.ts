@@ -3,6 +3,7 @@ import { z } from "zod";
 import { ApiError, dashboardUrlFor, type RushesClient } from "./client.js";
 import { VERSION } from "../server/app.js";
 import { BRING_IN_MAX } from "../server/found.js";
+import { LABEL_MAX } from "../core/labels.js";
 import type { Check } from "../cli/doctor.js";
 
 export interface ToolContext {
@@ -193,7 +194,7 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     {
       title: "Add a cut",
       description:
-        "Register a new cut of a video. The first cut creates the video. Returns the new version id (v1, v2 ...). When the cut is likely to play badly in a browser (4K, over 1.5 GB, or a codec such as ProRes), it also returns proxySuggested: true and proxyReason; Picture offers the user a proxy. If the project has autoProxy on, proxyJob is the proxy already being made. Give every cut a short `label` (48 characters at most) saying what changed, e.g. \"launch 1.45x slower\", and put the detail in `note`: the version list shows the label.",
+        "Register a new cut of a video. The first cut creates the video. Returns the new version id (v1, v2 ...). When the cut is likely to play badly in a browser (4K, over 1.5 GB, or a codec such as ProRes), it also returns proxySuggested: true and proxyReason; Picture offers the user a proxy. If the project has autoProxy on, proxyJob is the proxy already being made. Give every cut a short `label` (" + LABEL_MAX + " characters at most) saying what changed, e.g. \"launch 1.45x slower\", and put the detail in `note`: the version list shows the label.",
       inputSchema: {
         project,
         video: z.string().describe("Video id or name, e.g. \"Hero 60s\"."),
@@ -202,12 +203,19 @@ export function createMcpServer(ctx: ToolContext): McpServer {
         label: z
           .string()
           .trim()
-          .max(48, "label is 48 characters at most: put the detail in note")
+          .max(LABEL_MAX, `label is ${LABEL_MAX} characters at most: put the detail in note`)
           .optional()
-          .describe('A short label for the version list, 48 characters at most, e.g. "launch 1.45x slower". The detail goes in note.'),
+          .describe(`A short label for the version list, ${LABEL_MAX} characters at most, e.g. "launch 1.45x slower". The detail goes in note.`),
       },
     },
-    safe(async ({ project, ...b }) => (await ctx.client(project)).post("/api/versions", b)),
+    safe(async ({ project, ...b }) => {
+      const r = await (await ctx.client(project)).post("/api/versions", b);
+      // A Rushes started by an older version ignores `label`, and its reply has none: say so, so the agent isn't left thinking it was kept.
+      if (b.label && r?.version && r.version.label === undefined) {
+        return { ...r, note: "An older Rushes is running and dropped the label: the cut was added without it. Run `rushes stop`, then open again." };
+      }
+      return r;
+    }),
   );
 
   server.registerTool(

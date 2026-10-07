@@ -609,6 +609,21 @@ describe("MCP tools against a server that isn't the current one", () => {
     await f.close();
   });
 
+  it("rushes_add_version against an older Rushes that drops the label says so, and still adds the cut", async () => {
+    const f = await fakeServer((_req, res) => {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ video: { id: "hero", name: "Hero" }, version: { id: "v1", file: "renders/hero.mp4", note: "" } }));
+    });
+    const r = await f.call("rushes_add_version", { video: "Hero", file: "renders/hero.mp4", label: "First pass" });
+    expect(r.isError).toBe(false);
+    const json = JSON.parse(r.text);
+    expect(json.version.id).toBe("v1");
+    expect(json.note).toMatch(/older Rushes.*label.*rushes stop/);
+    // With no label asked for, there's nothing to say.
+    expect(JSON.parse((await f.call("rushes_add_version", { video: "Hero", file: "renders/hero.mp4" })).text).note).toBeUndefined();
+    await f.close();
+  });
+
   it("rushes_open opens the browser before it asks for the scan, so a slow or failing scan can't delay it", async () => {
     const f = await fakeServer((_req, res) => { res.statusCode = 500; res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ error: "boom", message: "scan blew up" })); });
     const r = await f.call("rushes_open");
