@@ -260,12 +260,35 @@ export const BatchesFileSchema = z.object({
 });
 export type BatchesFile = z.infer<typeof BatchesFileSchema>;
 
+// §20.6: the found files the user dismissed ("Not these"), as manifest paths. The candidates
+// themselves live in the server's memory; only this list is kept. Created on its first write.
+export const FoundFileSchema = z.object({
+  schema: z.literal(1),
+  rev: z.number().int().nonnegative(),
+  dismissed: z.array(z.string().max(1024)).max(10000).default([]),
+  // §20.7: the kinds an agent's `include` settled for a cut (the anchor: its video and version
+  // ids), so the scoring never also adds a file of that kind for that cut, on any later scan,
+  // start-up or restart. Files from before this field read as empty.
+  settled: z
+    .array(
+      z.object({
+        video: z.string().max(200),
+        version: z.string().max(200),
+        kinds: z.array(z.enum(["voice", "music", "sfx", "cut", "other"])).max(5),
+      }),
+    )
+    .max(200)
+    .default([]),
+});
+export type FoundFileData = z.infer<typeof FoundFileSchema>;
+
 export const FILES = {
   project: { name: "project.json", schema: ProjectSchema },
   script: { name: "script.json", schema: ScriptSchema },
   notes: { name: "notes.json", schema: NotesFileSchema },
   picks: { name: "picks.json", schema: PicksSchema },
   batches: { name: "batches.json", schema: BatchesFileSchema },
+  found: { name: "found.json", schema: FoundFileSchema },
 } as const;
 export type FileKey = keyof typeof FILES;
 export type FileData = {
@@ -274,4 +297,5 @@ export type FileData = {
   notes: NotesFile;
   picks: Picks;
   batches: BatchesFile;
+  found: FoundFileData;
 };

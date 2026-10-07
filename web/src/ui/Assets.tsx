@@ -2,20 +2,41 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { api, mediaUrl } from "../api.js";
 import { claim, release } from "../audio/bus.js";
 import {
-  FOLDERS, type FolderDef, type FolderId, folderItems, groupByFilm, isPreviewable, PREVIEW_FOLDER_IDS,
+  FOLDERS, type FolderDef, type FolderId, folderItems, foundChip, foundTotal, groupByFilm, isPreviewable, PREVIEW_FOLDER_IDS,
 } from "../lib.js";
 import { safeMarkdownHtml } from "../markdown.js";
-import type { Asset, Video } from "../types.js";
+import type { Asset, FoundKind, State, Video } from "../types.js";
 import {
   AssetRow, AudioRow, Lightbox, PosterTile, PreviewRow, ProxyRow, ShotTile,
 } from "./AssetViews.js";
+import { Found } from "./Found.js";
 import { Icon } from "./Icon.js";
+
+/**
+ * A request to open Assets › Found, optionally filtered to one kind (the header chip; Task 6's
+ * locked-tab links). `n` counts requests, so asking twice still lands. A request is used once:
+ * `pending` goes false as Assets acts on it, so a later plain visit to Assets opens where it
+ * always did, with no kind held over.
+ */
+export interface FoundRequest {
+  n: number;
+  kind?: FoundKind;
+  pending: boolean;
+}
 
 export interface AssetsProps {
   assets: Asset[];
   /** To resolve a cut's film name and version note. */
   videos: Video[];
-  toast(message: string): void;
+  /** §20.5: the project and what has been found in its folder, for the Found folder at the top of the sidebar. */
+  state: State;
+  /** Opens on Found while `pending`, and again whenever `n` changes. */
+  foundRequest: FoundRequest;
+  /** Told once Assets has acted on a request, so it is not acted on again. */
+  onFoundRequestUsed(): void;
+  /** Reports what the server had found while Found was open (see Found's `onSeen`). */
+  onFoundSeen(signature: string): void;
+  toast(message: string, ms?: number): void;
   /** Called after an action (Export notes) writes a file the server's own change events won't
    *  otherwise announce quickly -- the same pattern Picture.tsx uses after a grab. */
   onChanged(): void;
@@ -24,6 +45,7 @@ export interface AssetsProps {
 type Sort = "newest" | "oldest" | "name";
 type View = "grid" | "list";
 
+type SelectedId = FolderId | "found";
 const AUDIO_FOLDERS = new Set<FolderId>(["voiceover", "music", "sfx"]);
 const GRID_POSTER_FOLDERS = new Set<FolderId>(["cut", "delivery"]);
 const MAX_PREVIEW_BYTES = 1024 * 1024;
@@ -95,32 +117,60 @@ async function fetchPreview(path: string): Promise<{ text: string; truncated: bo
 /** The Assets library (§16): a folder sidebar, search/sort/film/grid-list controls, and a
  *  folder-specific view -- thumbnail grids, poster-frame grids, inline-audio lists or
  *  list+preview splits -- over every registered or auto-discovered project file. */
-export function Assets({ assets, videos, toast, onChanged }: AssetsProps) {
+export function Assets({ assets, videos, state, foundRequest, onFoundRequestUsed, onFoundSeen, toast, onChanged }: AssetsProps) {
   const visibleFolders = useMemo(
     () => FOLDERS.filter((f) => f.id === "export" || assets.some((a) => f.kinds.includes(a.kind))),
     [assets],
   );
   // Lazily seeded from the very first render's folders, so the first paint already shows the
   // right folder instead of a one-frame flash of "nothing selected" while an effect catches up.
-  const [selectedId, setSelectedId] = useState<FolderId | null>(() => visibleFolders[0]?.id ?? null);
+  // Found (§20.5) is always there, first in the sidebar: it is what opens when asked for, and when
+  // nothing else is in Assets yet.
+  // The folder a first look opens on: the first real one, else Found when it has something (Exports is
+  // always listed, so it can't count), else whatever is first.
+  const firstFolder = visibleFolders.find((f) => f.id !== "export")?.id;
+  const foundHasSomething = foundChip(state.found) !== null;
+  const [selectedId, setSelectedId] = useState<SelectedId | null>(() =>
+    foundRequest.pending ? "found" : (firstFolder ?? (foundHasSomething ? "found" : (visibleFolders[0]?.id ?? "found"))),
+  );
   // Whether selectedId was ever set by an explicit sidebar pick (click or arrow key), as opposed
   // to the default-following effect below. Until it has, the default must keep following
-  // visibleFolders[0] even as the list grows -- e.g. a screenshot grabbed just before switching
+  // the first folder even as the list grows -- e.g. a screenshot grabbed just before switching
   // to Assets often isn't in `assets` yet on this component's first render (Picture's onChanged()
   // after a grab is fire-and-forget, racing the keypress that opens this tab), so Cuts can be the
   // only folder visible for a beat before Screenshots (which sorts first) joins it. Without this,
   // the effect below would see its previously-picked "cut" is still present and never promote
   // Screenshots to the front, leaving the folder stuck on the wrong one for the rest of the visit.
-  const pickedByHand = useRef(false);
+  const pickedByHand = useRef(foundRequest.pending);
   useEffect(() => {
-    if (pickedByHand.current && selectedId && visibleFolders.some((f) => f.id === selectedId)) return;
-    setSelectedId(visibleFolders[0]?.id ?? null);
+    // Found is never moved off: bringing files in adds folders (Voiceover, say) mid-visit, and it
+    // must not whisk you away from the list you are working through.
+    if (selectedId === "found") return;
+    const valid = !!selectedId && visibleFolders.some((f) => f.id === selectedId);
+    if (pickedByHand.current && valid) return;
+    const next = firstFolder ?? (valid ? selectedId : (visibleFolders[0]?.id ?? "found"));
+    if (next !== selectedId) setSelectedId(next);
   }, [visibleFolders, selectedId]);
-  const selectFolder = (id: FolderId) => {
+  // Found's own view: remounted (a new key) with the kind a request asked for, which only that request sets.
+  const [foundView, setFoundView] = useState<{ key: number; kind?: FoundKind }>(() => ({ key: 0, kind: foundRequest.pending ? foundRequest.kind : undefined }));
+  const selectFolder = (id: SelectedId) => {
     pickedByHand.current = true;
     setSelectedId(id);
   };
-  const folder: FolderDef | null = visibleFolders.find((f) => f.id === selectedId) ?? null;
+  // The chip, or a locked tab's Review button, asked for Found: go there, whatever is open, and
+  // say it has been done. (A request already waiting when this opens has set the folder above.)
+  const handled = useRef(foundRequest.pending ? foundRequest.n : -1);
+  useEffect(() => {
+    if (!foundRequest.pending) return;
+    if (handled.current !== foundRequest.n) {
+      handled.current = foundRequest.n;
+      selectFolder("found");
+      setFoundView((v) => ({ key: v.key + 1, kind: foundRequest.kind }));
+    }
+    onFoundRequestUsed();
+  }, [foundRequest.n, foundRequest.pending]);
+  const isFound = selectedId === "found";
+  const folder: FolderDef | null = isFound ? null : (visibleFolders.find((f) => f.id === selectedId) ?? null);
 
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<Sort>("newest");
@@ -183,22 +233,22 @@ export function Assets({ assets, videos, toast, onChanged }: AssetsProps) {
     release(busOwner.current);
     setAudioState({ path: null, paused: true });
   };
-  const toggleAudio = (asset: Asset) => {
+  const togglePath = (path: string, label: string) => {
     const audio = audioRef.current;
     if (!audio) return;
-    if (audioState.path === asset.path && !audioState.paused) {
+    if (audioState.path === path && !audioState.paused) {
       audio.pause();
       release(busOwner.current);
-      setAudioState({ path: asset.path, paused: true });
+      setAudioState({ path, paused: true });
       return;
     }
-    if (audioState.path !== asset.path) audio.src = mediaUrl(asset.path);
+    if (audioState.path !== path) audio.src = mediaUrl(path);
     // Another player (an audio tab's engine) stops; if one claims later, this one pauses in place.
     claim(busOwner.current, () => {
       audioRef.current?.pause();
       setAudioState((s) => ({ ...s, paused: true }));
     });
-    setAudioState({ path: asset.path, paused: false });
+    setAudioState({ path, paused: false });
     audio.play().catch((err: unknown) => {
       // An AbortError means the play was interrupted by a pause (an audio tab claiming the bus,
       // or the user moving on), not that it failed: the interrupter has already set the state.
@@ -206,10 +256,11 @@ export function Assets({ assets, videos, toast, onChanged }: AssetsProps) {
       // M4: a rejected play() (the browser blocking it, a bad file) must not leave the row
       // claiming to be playing when it isn't.
       release(busOwner.current);
-      setAudioState({ path: asset.path, paused: true });
-      toast(`Couldn't play ${asset.label ?? asset.name}`);
+      setAudioState({ path, paused: true });
+      toast(`Couldn't play ${label}`);
     });
   };
+  const toggleAudio = (asset: Asset) => togglePath(asset.path, asset.label ?? asset.name);
   // Stops on folder change and film-filter change; unmounting (a tab switch, since Assets is
   // only ever rendered while stage === "assets") drops the <audio> element itself, which stops
   // playback the same way.
@@ -390,6 +441,11 @@ export function Assets({ assets, videos, toast, onChanged }: AssetsProps) {
   return (
     <div class="assets-lib">
       <nav class="asidebar" aria-label="Folders" onKeyDown={onSidebarKeyDown}>
+        {/* §20.5: first, with how many files are left to look at, in the accent colour. */}
+        <button type="button" class="afolder-btn afound" aria-current={isFound ? "true" : undefined} onClick={() => { if (!isFound) setFoundView((v) => ({ key: v.key + 1 })); selectFolder("found"); }}>
+          <span>Found</span>
+          <span class="count">{foundTotal(state.found?.counts)}</span>
+        </button>
         {visibleFolders.map((f) => (
           <button
             type="button"
@@ -408,7 +464,19 @@ export function Assets({ assets, videos, toast, onChanged }: AssetsProps) {
         </button>
       </nav>
 
-      {folder ? (
+      {isFound ? (
+        <Found
+          key={foundView.key}
+          state={state}
+          initialKind={foundView.kind}
+          playing={audioState}
+          onPlay={togglePath}
+          onStop={stopAudio}
+          toast={toast}
+          onChanged={onChanged}
+          onSeen={onFoundSeen}
+        />
+      ) : folder ? (
         <div class="amain">
           <header class="aheader">
             <h2>{folder.title} <span class="count">{items.length}</span></h2>

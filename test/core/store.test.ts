@@ -74,6 +74,41 @@ describe("Store", () => {
     expect((await store.read("project")).rev).toBe(0);
   });
 
+  it("found.json isn't written by init, reads as its default, and is created on its first write", async () => {
+    const { store } = await tmpProject();
+    await expect(readFile(store.path("found"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await store.read("found")).toEqual({ schema: 1, rev: 0, dismissed: [], settled: [] });
+    const events: ChangeEvent[] = [];
+    store.on("change", (e: ChangeEvent) => events.push(e));
+    await store.update("found", (f) => { f.dismissed.push("vo/take 2.wav"); });
+    expect(JSON.parse(await readFile(store.path("found"), "utf8"))).toEqual({ schema: 1, rev: 1, dismissed: ["vo/take 2.wav"], settled: [] });
+    expect(await store.read("found")).toEqual({ schema: 1, rev: 1, dismissed: ["vo/take 2.wav"], settled: [] });
+    expect(events).toEqual([{ file: "found", rev: 1 }]);
+  });
+
+  it("a found.json from before `settled` reads with it empty, and keeps what it had on the next write", async () => {
+    const { store } = await tmpProject();
+    await writeFile(store.path("found"), JSON.stringify({ schema: 1, rev: 3, dismissed: ["a.wav"] }), "utf8");
+    expect(await store.read("found")).toEqual({ schema: 1, rev: 3, dismissed: ["a.wav"], settled: [] });
+    await store.update("found", (f) => { f.settled.push({ video: "hero", version: "v1", kinds: ["music"] }); });
+    expect(JSON.parse(await readFile(store.path("found"), "utf8"))).toEqual({
+      schema: 1,
+      rev: 4,
+      dismissed: ["a.wav"],
+      settled: [{ video: "hero", version: "v1", kinds: ["music"] }],
+    });
+  });
+
+  it("reports a hand-edited found.json that fails the schema as corrupt", async () => {
+    const { store } = await tmpProject();
+    await writeFile(store.path("found"), JSON.stringify({ schema: 1, rev: 0, dismissed: [42] }), "utf8");
+    await expect(store.read("found")).rejects.toBeInstanceOf(CorruptFileError);
+    await expect(store.read("found")).rejects.toThrow(/found\.json.*dismissed/);
+    await writeFile(store.path("found"), "{ nope", "utf8");
+    await expect(store.update("found", (f) => { f.dismissed = []; })).rejects.toBeInstanceOf(CorruptFileError);
+    expect(await readFile(store.path("found"), "utf8")).toBe("{ nope");
+  });
+
   it("a failed update does not block the next one", async () => {
     const { store } = await tmpProject();
     await expect(store.update("project", () => { throw new Error("boom"); })).rejects.toThrow("boom");

@@ -1,6 +1,6 @@
 {
   "name": "rushes",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "A local review desk for video made with AI agents: timecoded notes, script edits and audio picks your agent can read and act on.",
   "type": "module",
   "license": "MIT",

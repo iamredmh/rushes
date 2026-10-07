@@ -68,6 +68,8 @@ async function readProbe(file: string, timeout: number, signal: AbortSignal | un
       "ffprobe",
       [
         "-v", "error",
+        // Local files only: a playlist or container that names a URL is never followed.
+        "-protocol_whitelist", "file",
         "-show_entries", "format=duration:stream=codec_type,codec_name,width,height,pix_fmt,avg_frame_rate,r_frame_rate",
         "-of", "json",
         file,

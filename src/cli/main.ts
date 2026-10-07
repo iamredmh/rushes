@@ -9,6 +9,7 @@ import { AlreadyRunningError, canonicalRoot } from "../server/lock.js";
 import { ApiError, RushesClient, dashboardUrlFor } from "../mcp/client.js";
 import { openBrowser, runStdio } from "../mcp/stdio.js";
 import { VERSION } from "../server/app.js";
+import { BRING_IN_MAX } from "../server/found.js";
 import { markLabel, type Mark, type Note } from "../core/schema.js";
 import { onLabel, type OnContext } from "../core/notes.js";
 import { setup, type SetupEnv } from "../setup/setup.js";
@@ -33,7 +34,8 @@ export interface Io {
 export const HELP = `rushes ${VERSION}: a local review desk for video made with AI agents
 
 Usage
-  rushes open [dir] [--port 4580] [--no-browser]   start the review desk and open it
+  rushes open [dir] [--film NAME] [--port 4580] [--no-browser]
+                                                    start the review desk, bring in the files that go with the cut, and open it
   rushes serve [dir] [--port 4580] [--idle-minutes N]
                                                     start the server without a browser (stops after N idle minutes)
   rushes stop [dir]                                 stop the project's running server
@@ -54,6 +56,10 @@ Usage
   rushes notes [--stage S] [--status todo|done] [--batch ID] [--json]
   rushes reply <note-id> <text> [--done] [--fix-t SECONDS] [--fix-version V]
   rushes assets [--kind K] [--json]                 cuts, takes, variants, screenshots and library files
+  rushes scan [--film NAME] [--json]                look through the folder for the files that go with the cut; also brings in the current set
+  rushes bring-in <file>... [--kind voice|music|sfx|cut|doc] [--round NAME] [--film NAME]
+                                                    register files from inside the project folder (nothing is picked);
+                                                    exits 1 if any file can't come in
   rushes export notes                               write notes to exports/<slug>-notes-<date>.md
 
 Options
@@ -73,6 +79,7 @@ const OPTIONS = {
   status: { type: "string" },
   batch: { type: "string" },
   kind: { type: "string" },
+  film: { type: "string" },
   json: { type: "boolean" },
   done: { type: "boolean" },
   "fix-t": { type: "string" },
@@ -200,10 +207,25 @@ export async function main(argv: string[], io: Io): Promise<number> {
         const show = (url: string) => {
           if (cmd === "open" && !o["no-browser"]) (io.openBrowser ?? openBrowser)(url);
         };
+        // §20.1: opening looks through the folder and brings in the current set, then says what it did.
+        // The desk is open either way, so a scan that fails says nothing.
+        const lookThrough = async (url: string) => {
+          if (cmd !== "open") return;
+          io.err(LOOKING);
+          try {
+            const r = await new RushesClient(url).post("/api/found/scan", { wait: true, ...(o.film ? { film: o.film } : {}) });
+            if (r.added?.length) io.out(broughtLine(r.added));
+            const left = foundTotal(r.found);
+            if (left) io.out(`Found, left for you: ${count(left, "file")} \u2014 open Assets \u203a Found.`);
+          } catch {
+            // Nothing to add to the line above.
+          }
+        };
         const already = async (url: string) => {
           const dashboardUrl = await dashboardUrlFor(url);
           io.out(`Rushes is already running for ${root}\n${dashboardUrl}`);
           show(dashboardUrl);
+          await lookThrough(url);
           return 0;
         };
         const running = await findServer(root);
@@ -220,12 +242,16 @@ export async function main(argv: string[], io: Io): Promise<number> {
         }
         io.out(`Rushes is running for ${root}\n${s.dashboardUrl}`);
         show(s.dashboardUrl);
-        if (io.onServer) return io.onServer(s), 0;
-        // Exit once the server closes for any reason: a signal, `rushes stop`, or the idle timer.
-        void s.closed.then(() => process.exit(0));
-        const stopSig = () => void s.close();
-        process.once("SIGINT", stopSig);
-        process.once("SIGTERM", stopSig);
+        if (io.onServer) {
+          io.onServer(s);
+        } else {
+          // Exit once the server closes for any reason: a signal, `rushes stop`, or the idle timer.
+          void s.closed.then(() => process.exit(0));
+          const stopSig = () => void s.close();
+          process.once("SIGINT", stopSig);
+          process.once("SIGTERM", stopSig);
+        }
+        await lookThrough(s.url);
         return 0;
       }
       case "stop": {
@@ -381,6 +407,44 @@ export async function main(argv: string[], io: Io): Promise<number> {
         if (!assets.length) io.out("No assets");
         return 0;
       }
+      case "scan": {
+        const c = await client();
+        io.err(LOOKING);
+        const r = await c.post("/api/found/scan", { wait: true, ...(o.film ? { film: o.film } : {}) });
+        const { files } = await c.get<{ files: FoundRow[] }>("/api/found");
+        if (o.json) return io.out(JSON.stringify({ files, counts: r.found ?? null, broughtIn: r.added ?? [], alreadyIn: r.alreadyIn ?? [], failed: r.failed ?? [], ...(r.scanning ? { scanning: true } : {}) }, null, 2)), 0;
+        if (r.added?.length) io.out(broughtLine(r.added));
+        const left = foundTotal(r.found);
+        if (!left && !r.added?.length) return io.out("Nothing found in this folder."), 0;
+        if (left) {
+          const kinds = (Object.entries(r.found) as [string, number][]).filter(([, n]) => n > 0).map(([k, n]) => `${n} ${k === "cut" && n !== 1 ? "cuts" : k}`);
+          io.out(`Found, left for you: ${count(left, "file")} (${kinds.join(", ")})`);
+          for (const f of files.slice(0, SCAN_ROWS)) {
+            const why = f.reasons.length ? `  ${stripControl(f.reasons.join(" \u00b7 "))}` : "";
+            io.out(`  ${f.kind.padEnd(6)} ${f.score === null ? "-" : String(f.score)}  ${stripControl(f.path)}${why}`);
+          }
+          if (files.length > SCAN_ROWS) io.out(`  and ${files.length - SCAN_ROWS} more (rushes scan --json lists them all)`);
+        }
+        return 0;
+      }
+      case "bring-in": {
+        const bringInUsage = "rushes bring-in <file>... [--kind voice|music|sfx|cut|doc] [--round NAME]";
+        if (!rest.length) return usage(io, bringInUsage);
+        if (o.kind !== undefined && !["voice", "music", "sfx", "cut", "doc"].includes(o.kind)) {
+          io.err(`--kind must be voice, music, sfx, cut or doc (got "${o.kind}")`);
+          return usage(io, bringInUsage);
+        }
+        if (rest.length > BRING_IN_MAX) {
+          io.err(`Up to ${BRING_IN_MAX} files at a time (and 12 of a kind), so the tabs stay quick. You gave ${rest.length}: bring the rest in with a second command.`);
+          return usage(io, bringInUsage);
+        }
+        // Paths are taken from the folder the command runs in; the server checks they're inside the project.
+        const files = rest.map((f) => ({ path: resolve(io.cwd, f), ...(o.kind ? { kind: o.kind } : {}), ...(o.round ? { round: o.round } : {}) }));
+        const r = await (await client()).post("/api/found/bring-in", { files, ...(o.film ? { film: o.film } : {}) });
+        for (const a of r.added as { path: string; kind: string }[]) io.out(`Brought in: ${stripControl(a.path)} (${a.kind})`);
+        for (const f of r.failed as { path: string; reason: string }[]) io.err(`Not brought in: ${stripControl(f.path)}: ${f.reason}`);
+        return r.failed.length ? 1 : 0;
+      }
       case "export": {
         const [what] = rest;
         if (what !== "notes") return usage(io, "rushes export notes");
@@ -417,6 +481,35 @@ export async function main(argv: string[], io: Io): Promise<number> {
     io.err(e instanceof ApiError ? `${e.message}` : (e as Error).message);
     return 1;
   }
+}
+
+/** Said on stderr while a scan is waited on, which can take several seconds on a big folder. */
+const LOOKING = "Looking through the folder\u2026";
+
+/** How many candidate rows `rushes scan` prints; --json has them all. */
+const SCAN_ROWS = 10;
+
+interface FoundRow {
+  path: string;
+  kind: string;
+  score: number | null;
+  reasons: string[];
+}
+
+function count(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? "" : "s"}`;
+}
+
+/** Everything a scan left, by kind, as one number. */
+function foundTotal(counts: Record<string, number> | null | undefined): number {
+  return Object.values(counts ?? {}).reduce((sum, n) => sum + n, 0);
+}
+
+/** "Brought in: a.wav (voice), b.wav (music)", the first few and then how many more. */
+function broughtLine(added: { path: string; kind: string }[]): string {
+  const shown = added.slice(0, 6).map((a) => `${stripControl(a.path)} (${a.kind})`);
+  const more = added.length > 6 ? `, and ${added.length - 6} more` : "";
+  return `Brought in: ${shown.join(", ")}${more}`;
 }
 
 function usage(io: Io, line: string): number {

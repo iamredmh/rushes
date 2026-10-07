@@ -4,9 +4,10 @@ import { dirname, join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
 import { createApp } from "../../src/server/app.js";
 import { addVariant } from "../../src/core/project.js";
-import { parseRange, inside, contentDisposition, OUTSIDE_MEDIA_EXT, CONTENT_TYPES, isInlineSafeType } from "../../src/server/files.js";
+import { parseRange, inside, contentDisposition, foundMediaFile, OUTSIDE_MEDIA_EXT, CONTENT_TYPES, isInlineSafeType } from "../../src/server/files.js";
 import { OPEN_SAFE_EXT as SERVER_OPEN_SAFE_EXT } from "../../src/server/reveal.js";
 import { OPEN_SAFE_EXT as WEB_OPEN_SAFE_EXT, PREVIEWABLE_EXT, VIDEO_EXT as WEB_VIDEO_EXT } from "../../web/src/lib.js";
+import { AUDIO_EXT, VIDEO_EXT } from "../../src/core/found.js";
 
 // The smallest valid PNG (1×1, transparent).
 const PNG_1PX = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
@@ -69,6 +70,43 @@ describe("inside", () => {
     expect(inside("/web", "assets/a.js")).toBe("/web/assets/a.js");
     expect(inside("/web", "../etc/passwd")).toBeNull();
     expect(inside("/web", "assets/../../etc/passwd")).toBeNull();
+  });
+});
+
+describe("foundMediaFile", () => {
+  it("gives the real file for a plain relative path inside the root, odd names included", async () => {
+    const { root } = await tmpProject();
+    const name = "Voice memo 10.02 AM é.wav";
+    await mkdir(join(root, "vo jules"), { recursive: true });
+    await writeFile(join(root, "vo jules", name), "x");
+    expect(await foundMediaFile(root, `vo jules/${name}`)).toBe(join(root, "vo jules", name));
+  });
+
+  it("refuses absolute, dotted, empty-segment and backslash paths, folders and missing files", async () => {
+    const { root } = await tmpProject();
+    await mkdir(join(root, "vo"), { recursive: true });
+    await writeFile(join(root, "vo", "a.wav"), "x");
+    for (const bad of [join(root, "vo", "a.wav"), "../a.wav", "vo/../vo/a.wav", "./vo/a.wav", "vo//a.wav", "vo\\a.wav", "", "vo", "vo/missing.wav", "vo/a.wav/"]) {
+      expect(await foundMediaFile(root, bad)).toBeNull();
+    }
+  });
+
+  it("refuses a symlinked file, or a file reached through a symlinked folder, wherever it points", async () => {
+    const { root } = await tmpProject();
+    const outside = join(dirname(root), "outside");
+    await mkdir(outside, { recursive: true });
+    await writeFile(join(outside, "a.wav"), "secret");
+    await mkdir(join(root, "vo"), { recursive: true });
+    await writeFile(join(root, "vo", "real.wav"), "x");
+    await symlink(join(outside, "a.wav"), join(root, "vo", "out.wav"));
+    await symlink(join(root, "vo", "real.wav"), join(root, "vo", "in.wav"));
+    await symlink(outside, join(root, "linked"));
+    await symlink(join(root, "vo"), join(root, "alias"));
+    expect(await foundMediaFile(root, "vo/out.wav")).toBeNull();
+    expect(await foundMediaFile(root, "vo/in.wav")).toBeNull();
+    expect(await foundMediaFile(root, "linked/a.wav")).toBeNull();
+    expect(await foundMediaFile(root, "alias/real.wav")).toBeNull();
+    expect(await foundMediaFile(root, "vo/real.wav")).toBe(join(root, "vo", "real.wav"));
   });
 });
 
@@ -354,6 +392,8 @@ describe("the outside-the-project allow-list matches every list of media extensi
     "the server's open-safe list": bare(SERVER_OPEN_SAFE_EXT),
     "the dashboard's video list": bare(WEB_VIDEO_EXT),
     "the dashboard's previewable list": bare(PREVIEWABLE_EXT),
+    "the scan's audio list": bare(AUDIO_EXT),
+    "the scan's video list": bare(VIDEO_EXT),
     "every inline-safe content type": Object.entries(CONTENT_TYPES).filter(([, t]) => isInlineSafeType(t)).map(([e]) => e.slice(1)),
   };
 

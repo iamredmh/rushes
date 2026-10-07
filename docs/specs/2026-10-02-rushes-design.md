@@ -400,10 +400,12 @@ Rushes creates `screenshots/` itself on the first grab. It never creates the oth
 - **The MCP tool `rushes_list_assets`** (optional `kind`) returns the same list. The CLI command is `rushes assets [--kind K] [--json]`. There are now 14 tools.
 - **The project guard (§14.1)** applies to every one of these routes, as to any other.
 
-### 15.5 Serving files that are symlinks (0.2.1)
-- **Every file `/media` accepts** (cuts and their proxies, variants, takes, library files, the docs, captions and exports found automatically, screenshots and grabs) is served from its real path, with every symlink resolved.
+### 15.5 Serving files that are symlinks (0.2.1; found files 0.2.2)
+This is the one statement of the rule; §20.9 points here.
+- **Found files** (§20.5: files a scan recorded that haven't been brought in) are never symlinks. `/media` refuses a found file that is a symlink, or that is reached through a symlinked folder, and it refuses one whose real path isn't exactly the project folder's real path plus its own path. So nothing outside the project folder is ever reached through Assets › Found.
+- **Every other file `/media` accepts** (cuts and their proxies, variants, takes, library files, the docs, captions and exports Rushes lists on its own, screenshots and grabs) is served from its real path, with every symlink resolved.
   - When that real path is inside the project folder, the file is served as before.
-  - When it lies outside, the file is served only if the **final** real file's extension is media: `wav mp3 m4a aac aif aiff flac ogg opus mp4 mov m4v webm mkv png jpg jpeg gif webp pdf md txt srt vtt`. That is every extension the dashboard treats as media or a document, except edit-app project files (`prproj`, `drp`); a unit test fails if the lists drift apart.
+  - When it lies outside, the file is served only if the **final** real file's extension is media: `wav mp3 m4a aac aif aiff flac ogg opus mp4 mov m4v webm mkv png jpg jpeg gif webp pdf md txt srt vtt`. That is every extension the dashboard treats as media or a document, and every extension the scan (§20.2) looks for, except edit-app project files (`prproj`, `drp`); a unit test fails if any of these lists drifts from the others.
   - Anything else is a 404, whatever the link itself is called. That includes edit-app project files (`.prproj`, `.drp`) and anything else that isn't media: outside the project they no longer download, though Show in Finder still finds them.
   - So footage linked in from another drive keeps playing, but a take swapped for a link to a key or credentials file is never served.
 
@@ -748,3 +750,94 @@ This section is binding and replaces §17.5.
   - The browser's decoder gives the samples but not when the audio starts, so in the fallback a cut whose audio starts late is drawn from 0:00, early by that much. The server's waveform doesn't have this problem.
   - On 204, or any other answer, nothing is drawn.
   - Results are cached per version and file revision. Switching versions or films never shows the previous cut's waveform.
+
+## 20. Finding the project's other files (agreed 6 October 2026)
+
+**Why.** Red tested Rushes on a real project and asked an agent to open the film. Only the film came in. The voiceover and music made for it were in the same folder, but nothing registered them, so those tabs stayed locked. Rushes only shows what an agent registers. Red's expectation: opening a project in Rushes should bring in the work that goes with the cut, so he can review it.
+
+A real project folder can be large: about 130 audio files in a dozen folders (`vo`, `vo_name`, `bed`, `audition`, `clean`, `score` …) and about 20 renders. So Rushes must propose the *current set* and keep the rest one step away, never import everything.
+
+This section is binding.
+
+### 20.1 When it runs
+- **On open.** Whenever a project is opened (`rushes_open`, `rushes open`, or the dashboard first loading it in a server session).
+- **On demand.** A **Look again** button in Assets › Found, the MCP tool `rushes_scan` and `rushes scan`.
+- **Never continuously.** There's no folder watcher. Plan 6 may add one.
+
+### 20.2 What it scans
+- **Where.** Only inside the project folder (the folder that holds `.rushes`).
+  - Up to 8 levels deep.
+  - Symlinks are never followed, and symlinked files are skipped.
+  - Every path is checked against the folder's real path, so nothing outside is read or listed.
+- **Skipped folders:** hidden folders (a leading `.`), `node_modules`, and Rushes' own `.rushes`, `proxies`, `screenshots` and `exports`.
+- **Limits.** At most 5,000 files examined and 2,000 kept. The first pass has a 3 s budget; if it runs out, the scan carries on in the background and updates the tabs when it finishes. The dashboard and `GET /api/state` never wait on it.
+- **What it reads.** File name, size and modified time, plus the duration from ffprobe for candidates (two at a time, cached by path, size and modified time). Without ffprobe the duration is unknown and the scoring uses names and times only. It never reads file contents.
+- **Which files.**
+  - Audio: `wav mp3 m4a aif aiff flac ogg opus`.
+  - Video: `mp4 mov m4v webm`. Offered as cuts.
+  - Scripts and documents (`md txt pdf`) are listed under Assets › Scripts & docs when brought in, but never turned into script lines. A script needs timings Rushes can't guess.
+
+### 20.3 What each file probably is
+The kind comes from the **nearest folder name or file-name word** to the file, lower-cased and split on non-letters and camel case:
+- **Voiceover:** `vo`, `voice`, `voiceover`, `narration`, `narrator`, `vox`, `speech`, `dub`, `read`.
+- **Music:** `bed`, `music`, `score`, `track`, `song`, `theme`.
+- **Sound effects:** `sfx`, `fx`, `foley`, `whoosh`, `hit`, `riser`, `impact`.
+- **Other audio:** any audio file with no match, including `stems`. When brought in, the user chooses its kind.
+- **Cuts:** video files other than the cut already registered, grouped as "Other cuts".
+
+### 20.4 The current set
+For the film being opened (the cut the agent names, otherwise the newest registered cut), each audio candidate is scored against the cut's duration `d`, its modified time `m` and its name words.
+
+| Signal | Score |
+|---|---|
+| Length within 2 % of `d` / 10 % / 25 % | +3 / +2 / +1 |
+| Modified within 6 hours before to 1 hour after `m` | +2 |
+| Modified in the 24 hours before `m` | +1 |
+| A shared name word (not common to every file in the project) | +1 each, up to +2 |
+| The same version word (`v20`) | +2 |
+
+- **Sound effects** get no length score, because passes are usually short.
+- **Auto-add.** For each kind, the top candidate is brought in automatically only when it scores at least **4** and beats the runner-up by at least **1**. At most one file per kind. Otherwise nothing is added for that kind.
+- **Never picked.** Auto-added files are registered as variants but not picked, so the user chooses. Voiceover goes into a round named after its folder (e.g. "Vo Jules"), music into the `music` lane and effects into the `sfx` lane, each with the reasons as its description.
+- **Reasons** are shown for every file in plain words, e.g. "same length as the cut (68.6 s vs 68.7 s) · made 12 min before it · name shares “jules”".
+
+### 20.5 Assets › Found
+- Assets gains a **Found** folder at the top of its sidebar, with a count. It is the "More files found" list.
+- **Groups.** Files are grouped by folder, with "Other cuts" last. Each group shows its count and can collapse.
+- **Rows.** Checkbox, play button, file name, a kind chip the user can change, duration, size and the reasons line, muted.
+- **Playing.** A found file can be auditioned inline before it's brought in. `/media` serves a found file only after a scan recorded it, only inside the project folder, and only with the same sandbox headers as other files.
+- **Actions.**
+  - **Bring in N** registers the ticked files as variants, or cuts as versions, through the same code as `rushes_add_variant` and `rushes_add_version`. Up to 12 per kind per click, with the line "Up to 12 at a time, so the tabs stay quick." Each voiceover folder becomes its own round.
+  - **Not these** hides the ticked files for good.
+  - **Look again** rescans.
+  - A filter box and a kind filter.
+- **Already in the project** is never offered. Files are matched by their real path.
+- **A header chip** reads "3 brought in · 118 more found" and opens Assets › Found. It shows only while something is found and not yet dealt with.
+- **Locked tabs** (§19.1) add one line when files of that kind were found: "14 music files found in this project", with a **Review** button that opens Assets › Found filtered to that kind.
+
+### 20.6 Data
+- `.rushes/found.json`: `{ schema: 1, rev, dismissed: string[], settled: [{ video, version, kinds: FoundKind[] }] }`. `dismissed` holds the manifest paths the user dismissed. `settled` holds, for a cut (its video and version ids, the anchor), the kinds an agent's `include` has settled (§20.7), so the scoring never also adds a file of that kind for that cut; the newest 200 are kept. A file from before `settled` reads it as empty. Candidates themselves are held in memory.
+- `GET /api/state` gains `found: { scanning, scannedAt, counts: { voice, music, sfx, cut, other }, broughtIn: string[], digest }`. `digest` is a short hash of the kind and path of every file found and every file brought in, so it changes when one file is swapped for another with the same counts; the header chip uses it to know whether you have seen what is there now.
+- `GET /api/found` returns the list: `{ files: [{ path, kind, folder, size, duration, modified, score, reasons, suggested }] }`, newest-scoring first, capped at 2,000. It also returns `hidden: [{ path, kind, folder, size, duration, modified }]`, the files hidden with Not these that the last walk still found, so Assets › Found can list them with a Restore.
+- `POST /api/found/scan { film?, wait?, include? }`, `POST /api/found/bring-in { files: [{ path, kind?, round? }], film? }`, `POST /api/found/dismiss { paths }` and `POST /api/found/restore { paths }`.
+  - Without `wait`, `scan` answers `{ ok: true }` at once and the scan and adoption run in the background.
+  - With `wait: true` it answers once the first pass and the adoption are done, or after 20 s, with `{ ok, added, alreadyIn, failed, found, scanning? }`. `added` is every file brought in during the server's session, each with `kind`, `lane`/`variant` or `video`/`version`, `reasons` and `origin` (`auto`, `include` or `hand`). `alreadyIn` lists included paths that were already registered, `failed` is `{ path, reason, code }` for the rest, `found` is the counts of what is left, and `scanning: true` is present only when the 20 s cap came first (the work carries on in the background).
+  - `include: [{ path, kind?, round? }]` (up to 60, only with `wait`) is brought in after the first pass and before the current set is adopted.
+- Every refused item, in `bring-in` and in `scan`'s `failed`, is `{ path, reason, code }`. `reason` is the words for the user; `code` is the stable name (`outside`, `gone`, `already`, `cap`, `link`, `folder`, `hiddenFile`, `skippedFolder`, `chooseKind`, `notAudio`, `notVideo`, `notDoc`, `unknownType`, or `other` for a message that comes from elsewhere, such as a lane-name clash). Callers match on `code`, never on the words.
+- The SSE `change` event fires when a scan finishes or files are brought in.
+
+### 20.7 Agent side
+- **`rushes_open`** now returns `broughtIn` (what it registered, each with its reasons) and `found` (counts of what it left). It accepts `film` and `include: [{ path, kind?, round? }]` for files the agent knows belong, and returns `alreadyIn`, `failed` and `scanning` as the scan route does. `include` wins over the scoring: the audio kinds of the included files (the kind given, else what the name says, else the lane a registered file is in) are recorded in `found.json` `settled` against the anchor cut, before the scan, and every adoption (this call, a later scan, the start-up scan, a restart) leaves those kinds alone for that cut. Registrations are never removed: if a start-up adoption had already brought in its own pick before the call arrived, both are in, unpicked. A newer cut is a fresh decision, but a cut that comes in with the same `include` (or the first cut of a project with none) is settled for too, and that request's adoption also holds back the included kinds. `FoundScanner.adoptCurrentSet` also takes `skipKinds` for a caller that has settled kinds of its own. The wait is capped at 20 s (§20.6).
+- **`rushes_scan`** returns the ranked candidates (default 100, up to 200), with reasons, and the counts of what is left. It also brings in the current set, as Look again does.
+- **`rushes_bring_in { files }`** registers chosen files. It refuses any path outside the project folder.
+- **CLI:** `rushes scan [--json]` and `rushes bring-in <file>… [--kind voice|music|sfx|cut] [--round NAME]`.
+- **AGENTS.md and SKILL.md** say: when asked to open or review work in Rushes, call `rushes_open`, then tell the user what came in and what was left. Pass `include` for files you made for this cut.
+
+### 20.8 Not in this section
+- Watching the folder live.
+- Turning scripts into script lines.
+- Guessing rounds beyond the folder name.
+- Anything outside the project folder.
+
+### 20.9 Serving files that are symlinks
+The rule is §15.5, for found files and registered files alike. In short: a found file (one a scan recorded but nobody has brought in) is never served if it is a symlink or sits behind one, and a registered file whose real path lies outside the project is served only if it is media.

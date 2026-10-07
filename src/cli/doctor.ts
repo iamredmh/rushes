@@ -327,7 +327,7 @@ export async function runDoctor(env: DoctorEnv): Promise<Check[]> {
       await store.read(key);
       checks.push({ id: `file:${key}`, label: name, ok: true, required: true, detail: "valid." });
     } catch (e) {
-      checks.push({ id: `file:${key}`, label: name, ok: false, required: true, detail: (e as Error).message, fix: `Fix or restore ${name}, or delete the ${RUSHES_DIR} folder and run rushes init to start over.` });
+      checks.push({ id: `file:${key}`, label: name, ok: false, required: true, detail: (e as Error).message, fix: key === "found" ? `Delete ${RUSHES_DIR}/${name}. Rushes recreates it; files you hid come back in Found and the current set may be chosen again. Nothing else is lost.` : `Fix or restore ${name}, or delete the ${RUSHES_DIR} folder and run rushes init to start over.` });
     }
   }
 

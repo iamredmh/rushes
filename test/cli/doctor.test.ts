@@ -258,6 +258,20 @@ describe("runDoctor", () => {
     expect(find(checks, "project")).toBeUndefined();
   });
 
+  it("a corrupt found.json says to delete found.json only, not the whole .rushes folder", async () => {
+    const { root, store } = await tmpProject();
+    await writeFile(store.path("found"), "{ not json", "utf8");
+    const checks = await runDoctor(fakeEnv(root, await tmpHome()));
+    const found = find(checks, "file:found")!;
+    expect(found.ok).toBe(false);
+    expect(found.fix).toContain("Delete .rushes/found.json");
+    expect(found.fix).toMatch(/recreates it/);
+    expect(found.fix).not.toMatch(/delete the \.rushes folder/i);
+    // The other files still point at the usual advice.
+    await writeFile(store.path("notes"), "{ not json", "utf8");
+    expect(find(await runDoctor(fakeEnv(root, await tmpHome())), "file:notes")!.fix).toMatch(/delete the \.rushes folder/);
+  });
+
   it("outside a project, the project checks collapse into one line and nothing else project-shaped runs", async () => {
     const empty = await mkdtemp(join(tmpdir(), "rushes doctor empty "));
     dirs.push(empty);

@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ApiError, dashboardUrlFor, type RushesClient } from "./client.js";
 import { VERSION } from "../server/app.js";
+import { BRING_IN_MAX } from "../server/found.js";
 import type { Check } from "../cli/doctor.js";
 
 export interface ToolContext {
@@ -18,12 +19,31 @@ const stage = z.enum(["script", "picture", "voice", "music", "sfx", "mix"]);
 const fileKind = z.enum(["doc", "image", "caption", "export", "delivery", "edit"]);
 const assetKind = z.enum(["screenshot", "cut", "proxy", "take", "music", "sfx", "voice", "doc", "image", "caption", "export", "delivery", "edit"]);
 
+// §20.7: a file to bring in. The server checks everything else (inside the project, the kind, the limits).
+const film = z.string().min(1).max(200);
+const bringInItem = z.object({
+  path: z.string().min(1).max(1024).describe("Absolute, or relative to the project folder."),
+  kind: z.enum(["voice", "music", "sfx", "cut", "doc"]).optional(),
+  round: z.string().trim().min(1).max(64).optional().describe('Voice only: the round the read joins, e.g. "Round 2 · Gerald, tone". Defaults to its folder\'s name.'),
+});
+
 function ok(data: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
 }
 
+/** "include.0.path: Too small", for each issue the server's own validation reported. */
+function issuesOf(body: ApiError["body"]): string {
+  if (!Array.isArray(body.issues) || body.issues.length === 0) return "";
+  const lines = (body.issues as { path?: unknown; message?: unknown }[]).slice(0, 5).map((i) => {
+    const where = Array.isArray(i.path) ? i.path.join(".") : "";
+    return `${where ? `${where}: ` : ""}${String(i.message ?? "invalid")}`;
+  });
+  return `: ${lines.join("; ")}`;
+}
+
 function fail(e: unknown) {
-  const message = e instanceof ApiError ? `${e.message} (${e.body.error ?? e.status})` : (e as Error).message;
+  const message =
+    e instanceof ApiError ? (e.body.error === "not_json" ? e.message : `${e.message} (${e.body.error ?? e.status})${issuesOf(e.body)}`) : (e as Error).message;
   return { content: [{ type: "text" as const, text: message }], isError: true };
 }
 
@@ -45,15 +65,80 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     "rushes_open",
     {
       title: "Open Rushes",
-      description: "Start the Rushes review desk for a project (if it isn't running) and open it in the browser. Returns the URL.",
-      inputSchema: { project, browser: z.boolean().optional().describe("Open the browser. Default true.") },
+      description:
+        "Starts Rushes if needed, brings in the current set of files that go with the cut, and opens it. Pass `include` for files you know belong. It waits about 20 seconds for the folder to be looked through; on a big folder it returns what it has with `scanning: true` and carries on in the background (rushes_scan, or opening again, shows the rest). Returns `broughtIn` (everything brought in since Rushes started, each with its kind, lane, reasons and `origin`: auto, include or hand), `alreadyIn` (your include files that were already registered), `failed` (files that couldn't come in, with why) and `found` (what was left, counts by kind).",
+      inputSchema: {
+        project,
+        browser: z.boolean().optional().describe("Open the browser. Default true."),
+        film: film.optional().describe("The film whose newest cut the files are matched to (id or name). Defaults to the newest cut in the project."),
+        include: z
+          .array(bringInItem)
+          .max(BRING_IN_MAX)
+          .optional()
+          .describe(
+            "Files you made for this cut or know belong to it, inside the project folder. They are brought in whatever they score, and win over the scoring: a kind you include (voice, music or sfx) is not also guessed for this cut, now or on later scans or restarts. Nothing already registered is ever removed. Each: path, and kind (voice, music, sfx, cut, doc) when the name doesn't say, and round for a voice read.",
+          ),
+      },
     },
-    safe(async ({ project, browser }) => {
+    safe(async ({ project, browser, film, include }) => {
       const c = await ctx.client(project);
       const url = await dashboardUrlFor(c.baseUrl);
+      // Open first: the dashboard shows the folder being looked through, and fills in as files arrive.
       if (browser !== false) ctx.openBrowser(url);
-      return { url };
+      let r;
+      try {
+        r = await c.post("/api/found/scan", { wait: true, ...(film ? { film } : {}), ...(include ? { include } : {}) });
+      } catch (e) {
+        // A Rushes started by an older version has no such route: it's open, just not scanned.
+        if (e instanceof ApiError && e.status === 404) {
+          return { url, broughtIn: [], failed: [], found: null, note: "An older Rushes is running and can't look through the folder. Run `rushes stop`, then open again." };
+        }
+        throw e;
+      }
+      return {
+        url,
+        broughtIn: r.added ?? [],
+        alreadyIn: r.alreadyIn ?? [],
+        failed: r.failed ?? [],
+        found: r.found ?? null,
+        ...(r.scanning ? { scanning: true } : {}),
+      };
     }),
+  );
+
+  server.registerTool(
+    "rushes_scan",
+    {
+      title: "Look through the project folder",
+      description:
+        "Looks through the project folder for files that go with the cut and returns the candidates, best score first, each with its kind, folder, size, length and the reasons in plain words. It also brings in the current set, as opening does (`broughtIn`), and returns what is left, with `counts` by kind (the same as `found` from rushes_open). It waits about 20 seconds; on a big folder `scanning: true` says it is still looking. Bring a chosen file in with rushes_bring_in.",
+      inputSchema: {
+        project,
+        film: film.optional().describe("The film whose newest cut the files are matched to (id or name). Defaults to the newest cut."),
+        limit: z.number().int().min(1).max(200).default(100).describe("How many candidates to return, best first. Default 100, at most 200."),
+      },
+    },
+    safe(async ({ project, film, limit }) => {
+      const c = await ctx.client(project);
+      const r = await c.post("/api/found/scan", { wait: true, ...(film ? { film } : {}) });
+      const { files } = await c.get<{ files: unknown[] }>("/api/found");
+      return { files: files.slice(0, limit ?? 100), counts: r.found ?? null, broughtIn: r.added ?? [], ...(r.scanning ? { scanning: true } : {}) };
+    }),
+  );
+
+  server.registerTool(
+    "rushes_bring_in",
+    {
+      title: "Bring files in",
+      description:
+        "Registers files from inside the project folder: voice reads, music and sfx as unpicked variants, video as cuts, md, txt and pdf as docs. Nothing is picked. Returns what was added and, for each file that couldn't come in, why (a path outside the project folder is refused). Up to 60 files, 12 of a kind.",
+      inputSchema: {
+        project,
+        files: z.array(bringInItem).min(1).max(BRING_IN_MAX).describe("Each: path (absolute or relative to the project), kind when the name doesn't say, round for a voice read."),
+        film: film.optional().describe("The film a cut joins (id or name). Defaults to the newest cut's film."),
+      },
+    },
+    safe(async ({ project, files, film }) => (await ctx.client(project)).post("/api/found/bring-in", { files, ...(film ? { film } : {}) })),
   );
 
   server.registerTool(

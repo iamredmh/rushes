@@ -2,7 +2,7 @@ import { test as base, expect, type Page } from "@playwright/test";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { makeWav } from "./fixtures/wav.js";
@@ -64,6 +64,19 @@ export interface VariantOptions {
   round?: string;
 }
 
+/** A file for `writeFiles`: a generated sine WAV (the default), a copy of the 4 s test clip (`video`), or text. */
+export interface TreeFile {
+  /** Relative to the project folder, forward slashes. Folders are made as needed. */
+  path: string;
+  /** WAV length. Defaults to 2 s. */
+  seconds?: number;
+  freq?: number;
+  /** Write the 4 s test clip instead of a WAV. */
+  video?: boolean;
+  /** Write this text instead. */
+  text?: string;
+}
+
 export interface Rushes {
   /** The dashboard URL this tab should be on: `http://127.0.0.1:PORT/p/<id>/`. */
   url: string;
@@ -82,6 +95,13 @@ export interface Rushes {
   addProResCut(opts?: ProResOptions, note?: string): Promise<{ version: { id: string }; proxySuggested?: true; proxyReason?: string; proxyJob?: { id: string; state: string } }>;
   /** Write a generated sine WAV into the project and register it as a variant on `stage`. */
   addVariant(stage: "voice" | "music" | "sfx", name: string, opts: VariantOptions): Promise<{ lane: { id: string }; variant: { id: string; cues: { id: string; name: string; t: number }[] } }>;
+  /** Write generated files into the project folder (invented names, small WAVs, or the 4 s clip for a cut). Nothing is registered. */
+  writeFiles(files: TreeFile[]): Promise<void>;
+  /**
+   * Ask the server to look through the folder (the way Look again does, so the current set is
+   * brought in too) and wait until it has, and until every length ffprobe can give is known.
+   */
+  scan(): Promise<{ added: { path: string; kind: string }[]; found: Record<string, number> }>;
   /**
    * Stop this project's server and start a different, fresh project on exactly the
    * same port, simulating port reuse after `rushes stop`. Updates `url`, `base` and
@@ -299,6 +319,39 @@ export const test = base.extend<{ rushes: Rushes; noFfmpeg: boolean }>({
       await writeFile(join(root, file), makeWav({ seconds: opts.seconds, freq: opts.freq }));
       return api("POST", "/api/variants", { stage, name, file, lane: opts.lane, round: opts.round, meta: opts.meta, cues: opts.cues });
     };
+    const writeFiles = async (files: TreeFile[]) => {
+      for (const f of files) {
+        const abs = join(root, ...f.path.split("/"));
+        await mkdir(dirname(abs), { recursive: true });
+        if (f.video) await copyFile(CLIP, abs);
+        else if (f.text !== undefined) await writeFile(abs, f.text);
+        else await writeFile(abs, makeWav({ seconds: f.seconds ?? 2, freq: f.freq ?? 330 }));
+      }
+    };
+    const scan = async () => {
+      // A scan asked for while another's first pass is running joins it, and a walk that began before
+      // the test wrote its files (the one at start-up, slow on a busy machine) has not seen them. Let
+      // any walk already running finish first, so the scan asked for here is a fresh look.
+      for (let i = 0; i < 400; i++) {
+        const { found } = await api("GET", "/api/state");
+        if (!found.scanning) break;
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      const result = await api("POST", "/api/found/scan", { wait: true });
+      // The first pass and the adoption are done; the other lengths arrive in the background.
+      if (!noFfmpeg && hasFfmpeg) {
+        const deadline = Date.now() + 10_000;
+        for (;;) {
+          const { files } = await api("GET", "/api/found");
+          const unknown = files.filter((f: { duration: number | null }) => f.duration === null).map((f: { path: string }) => f.path);
+          if (unknown.length === 0) break;
+          // Never carry on with lengths missing: a test that reads them would flake. Say which, loudly.
+          if (Date.now() > deadline) throw new Error(`scan(): ffprobe had not given a length for ${unknown.length} file(s) after 10 s: ${unknown.slice(0, 5).join(", ")}`);
+          await new Promise((r) => setTimeout(r, 50));
+        }
+      }
+      return result;
+    };
     const swapProject = async () => {
       const port = Number(new URL(url).port);
       await stop(child);
@@ -321,6 +374,8 @@ export const test = base.extend<{ rushes: Rushes; noFfmpeg: boolean }>({
       addVerticalCut,
       addProResCut,
       addVariant,
+      writeFiles,
+      scan,
       swapProject,
     });
 

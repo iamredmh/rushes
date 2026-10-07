@@ -92,6 +92,9 @@ describe("watching .rushes for hand edits", () => {
     // read of its own, unrelated to what this test is about.
     await store.update("project", ensureProjectId);
     const s = await startServer(root, { port: 0 });
+    // The start-up scan (§20.1) reads the project once in the background; let it
+    // finish, so the spy below only sees what the poll does.
+    await s.found.settled();
     // Attached after startServer() resolves, so it only sees reads from here on —
     // the watcher's own startup seed (one read per file) has already happened.
     const spy = vi.spyOn(s.store, "read");

@@ -10,6 +10,8 @@ import { watchStore } from "./watch.js";
 import type { Revealer } from "./reveal.js";
 import { ProxyJobs, removePartials, type ProxyJobsOptions } from "./proxy.js";
 import { PeakJobs, removeOrphanPeaks, removePeakTemps, type PeakJobsOptions } from "./peaks.js";
+import { FoundScanner, ffprobeDuration, foundAnnouncer, type FoundProbe } from "./found.js";
+import type { ScanLimits } from "../core/found.js";
 
 export const DEFAULT_PORT = 4580;
 
@@ -21,6 +23,8 @@ export interface Running {
   /** `${url}/p/${id}/`: the one address every open tab and printed link should use. */
   dashboardUrl: string;
   store: Store;
+  /** §20's scanner. Its first scan was started (not awaited) by startServer. */
+  found: FoundScanner;
   close(): Promise<void>;
   /** Resolves once the server has closed, for any reason (close(), shutdown request or idle). */
   closed: Promise<void>;
@@ -40,6 +44,8 @@ export interface StartOptions {
   proxy?: ProxyJobsOptions;
   /** How §19.9's waveforms run ffmpeg. Defaults to the real one; tests inject fakes. */
   peaks?: PeakJobsOptions;
+  /** How §20's scanner probes durations, and its limits. Defaults to ffprobe and §20.2's limits; tests inject fakes. */
+  found?: { probe?: FoundProbe; limits?: Partial<ScanLimits> };
 }
 
 function listen(server: Server, port: number, host: string): Promise<number> {
@@ -79,7 +85,9 @@ export async function startServer(rootDir: string, opts: StartOptions = {}): Pro
   // §19.9: waveforms use their own runner (a test's fake proxy encoder is no audio decoder), and
   // ffmpeg is there exactly when proxies say so.
   const peakJobs = new PeakJobs(store, { available: () => proxyJobs.available(), ...opts.peaks });
-  const appOpts: AppOptions = { webDir: opts.webDir, onShutdown: () => void close(), reveal: opts.reveal, proxyJobs, peakJobs };
+  // §20: the project's other files. Its first scan starts once this server owns the project (below).
+  const found = new FoundScanner({ store, probe: opts.found?.probe ?? ffprobeDuration, announce: foundAnnouncer(store), limits: opts.found?.limits });
+  const appOpts: AppOptions = { webDir: opts.webDir, onShutdown: () => void close(), reveal: opts.reveal, proxyJobs, peakJobs, found };
   const app = createApp(store, appOpts);
   const listener = getRequestListener(app.fetch);
   let lastRequest = Date.now();
@@ -108,6 +116,7 @@ export async function startServer(rootDir: string, opts: StartOptions = {}): Pro
     token = (await writeLock(root, port)).token;
   } catch (e) {
     // Another server owns this project, or the lock couldn't be written: don't leave a socket open.
+    found.close();
     server.closeAllConnections?.();
     await new Promise<void>((ok) => server.close(() => ok()));
     throw e;
@@ -129,6 +138,13 @@ export async function startServer(rootDir: string, opts: StartOptions = {}): Pro
   appOpts.projectId = id;
   const url = `http://${host}:${port}`;
   const stopWatching = await watchStore(store);
+  // §20.1: a first look through the folder on open. Never awaited, so it never delays start-up;
+  // the tabs hear a change when it lands.
+  // Then §20.4's current set comes in (a no-op without a cut, or when it's already in).
+  void found
+    .scan()
+    .then(() => found.adoptCurrentSet())
+    .catch(() => undefined);
   let idleTimer: NodeJS.Timeout | undefined;
   let done: () => void = () => undefined;
   const closed = new Promise<void>((ok) => { done = ok; });
@@ -137,6 +153,8 @@ export async function startServer(rootDir: string, opts: StartOptions = {}): Pro
     closing ??= (async () => {
       clearTimeout(idleTimer);
       stopWatching();
+      // No probe starts after this, and those in flight are stopped.
+      found.close();
       // A running proxy's ffmpeg must not outlive the server; its partial file is deleted too.
       // From here no new job starts either (a POST or an autoProxy cut racing the close).
       await Promise.all([proxyJobs.close(), peakJobs.close()]);
@@ -159,5 +177,5 @@ export async function startServer(rootDir: string, opts: StartOptions = {}): Pro
     idleTimer = setTimeout(tick, idleMs);
     idleTimer.unref?.();
   }
-  return { url, port, id, dashboardUrl: `${url}/p/${id}/`, store, close, closed };
+  return { url, port, id, dashboardUrl: `${url}/p/${id}/`, store, found, close, closed };
 }

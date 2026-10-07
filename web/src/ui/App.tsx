@@ -1,16 +1,23 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, ApiError } from "../api.js";
-import { LOCKED_TAB, STAGE_NAMES, agentPrompt, copyShortcut, defaultVersion, firstTab, latest, neighbourVideo, proxyKey, snap } from "../lib.js";
-import type { Batch, Stage, Video } from "../types.js";
+import { LOCKED_TAB, testFlags, STAGE_NAMES, agentPrompt, copyShortcut, defaultVersion, firstTab, foundChip, foundSignature, latest, lockedFound, neighbourVideo, proxyKey, snap } from "../lib.js";
+import type { Batch, FoundCounts, FoundKind, Stage, Video } from "../types.js";
 import { useRushes } from "../useRushes.js";
 import { assetRev } from "../audio/timeline.js";
-import { Assets } from "./Assets.js";
+import { Assets, type FoundRequest } from "./Assets.js";
 import { Icon, STAGE_ICONS } from "./Icon.js";
 import { Mix } from "./Mix.js";
 import { Picture, type Source } from "./Picture.js";
 import { Script } from "./Script.js";
 import { VariantTab } from "./VariantTab.js";
 import { Voice } from "./Voice.js";
+
+declare global {
+  interface Window {
+    /** Test-only (`?test=1`): opens Assets › Found, filtered to a kind when given. */
+    __rushesOpenFound?: (kind?: FoundKind) => void;
+  }
+}
 
 const ORDER: Stage[] = ["script", "picture", "voice", "music", "sfx", "mix"];
 // Assets isn't a review stage (§15.3): it's a dashboard-only tab after the six stages, so it's
@@ -19,11 +26,13 @@ type View = Stage | "assets";
 const typing = (el: EventTarget | null) => el instanceof HTMLElement && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
 
 /** §19.1: a locked tab's own page -- what it's for, what unlocks it, and a prompt to copy for your agent. */
-function Locked({ tab, projectName, filmName, toast }: { tab: Stage | "assets"; projectName: string; filmName: string | null; toast: (m: string) => void }) {
+function Locked({ tab, projectName, filmName, found, onReview, toast }: { tab: Stage | "assets"; projectName: string; filmName: string | null; found: FoundCounts | undefined; onReview: (kind: FoundKind) => void; toast: (m: string) => void }) {
   const { what, unlocks } = LOCKED_TAB[tab];
   const name = tab === "assets" ? "Assets" : STAGE_NAMES[tab];
   const icon = tab === "assets" ? "grid" : STAGE_ICONS[tab];
   const prompt = agentPrompt(tab, projectName, filmName);
+  // §20.5: when the folder holds files of this tab's kind, say so, and offer to look at them.
+  const files = lockedFound(tab, found);
   const boxRef = useRef<HTMLTextAreaElement>(null);
   const copyPrompt = async () => {
     try {
@@ -46,6 +55,14 @@ function Locked({ tab, projectName, filmName, toast }: { tab: Stage | "assets"; 
         <Icon name="copy" />
         Copy prompt for your agent
       </button>
+      {files && (
+        <p class="foundline">
+          <span>{files.text}</span>
+          <button type="button" class="btn" aria-label={files.review} onClick={() => onReview(files.kind)}>
+            Review
+          </button>
+        </p>
+      )}
     </div>
   );
 }
@@ -84,11 +101,15 @@ export function App() {
   // Proxy jobs whose failure has already been toasted, so each is said once.
   const toastedFailures = useRef(new Set<string>());
 
-  const toast = (message: string) => {
+  // `ms`: how long it stays, for a message that takes longer than a glance to read.
+  const toast = (message: string, ms = 2400) => {
     setToastText(message);
     clearTimeout(toastTimer.current);
-    toastTimer.current = window.setTimeout(() => setToastText(null), 2400);
+    toastTimer.current = window.setTimeout(() => setToastText(null), ms);
   };
+  // §20.5: a request to open Assets › Found (the header chip), and what the chip last said while Found was open.
+  const [foundRequest, setFoundRequest] = useState<FoundRequest>({ n: 0, pending: false });
+  const [foundSeen, setFoundSeen] = useState<string | null>(null);
 
   // §19.5: a proxy that fails says why, in whichever tab is open; the bar returns to the offer.
   useEffect(() => {
@@ -179,7 +200,9 @@ export function App() {
 
   const tabs = state?.tabs ?? [];
   const tab = (s: Stage) => tabs.find((t) => t.stage === s);
-  const assetsUnlocked = assets.length > 0;
+  const chip = foundChip(state?.found);
+  // Found files are worth opening Assets for even before anything is registered: the chip leads there.
+  const assetsUnlocked = assets.length > 0 || chip !== null;
   // Leaving a tab unmounts it, so a note in the making there (the same `pending` that holds the
   // film and New take) would be lost: refuse the switch instead, by click or by 1–7. A locked
   // tab always opens (§19.1): it shows its own page rather than a toast.
@@ -193,6 +216,20 @@ export function App() {
     setStage("assets");
     setSent(null);
   };
+  /** Opens Assets › Found, filtered to one kind when given (the header chip; a locked tab's Review). */
+  const openFound = (kind?: FoundKind) => {
+    if (pending && stage !== "assets") return toast("Add or clear your note first");
+    setFoundRequest((r) => ({ n: r.n + 1, kind, pending: true }));
+    setStage("assets");
+    setSent(null);
+  };
+
+  // Test-only (`?test=1`): what a locked tab's Review button does, which has no way in from the page yet.
+  const openFoundRef = useRef(openFound);
+  openFoundRef.current = openFound;
+  useEffect(() => {
+    if (testFlags(location.search).test) window.__rushesOpenFound = (kind) => openFoundRef.current(kind);
+  }, []);
 
   // A layout effect, not a plain one: a plain effect's re-registration is deferred past the next
   // paint, so a key pressed right after a DOM update that this same closure needs (e.g. `]` then
@@ -302,6 +339,12 @@ export function App() {
             </>
           )}
         </nav>
+        {chip !== null && foundSignature(state.found) !== foundSeen && (
+          <button type="button" class="foundchip" data-tip="Open the other files found in this project" onClick={() => openFound()}>
+            <span class="dot" />
+            {chip}
+          </button>
+        )}
         {video && state.project.videos.length > 1 && (
           <nav class="pack" aria-label="Films">
             {state.project.videos.map((v, i) => (
@@ -464,12 +507,21 @@ export function App() {
       <main class="body" ref={bodyRef}>
         {stage === "assets" ? (
           unlocked ? (
-            <Assets assets={assets} videos={state.project.videos} toast={toast} onChanged={() => void refresh()} />
+            <Assets
+              assets={assets}
+              videos={state.project.videos}
+              state={state}
+              foundRequest={foundRequest}
+              onFoundRequestUsed={() => setFoundRequest((r) => (r.pending ? { n: r.n, pending: false } : r))}
+              onFoundSeen={setFoundSeen}
+              toast={toast}
+              onChanged={() => void refresh()}
+            />
           ) : (
-            <Locked tab="assets" projectName={state.project.name} filmName={video?.name ?? null} toast={toast} />
+            <Locked tab="assets" projectName={state.project.name} filmName={video?.name ?? null} found={state.found?.counts} onReview={openFound} toast={toast} />
           )
         ) : !unlocked ? (
-          <Locked tab={stage} projectName={state.project.name} filmName={video?.name ?? null} toast={toast} />
+          <Locked tab={stage} projectName={state.project.name} filmName={video?.name ?? null} found={state.found?.counts} onReview={openFound} toast={toast} />
         ) : stage === "picture" && video && version ? (
           <Picture
             key={video.id}

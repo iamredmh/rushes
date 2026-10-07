@@ -1,6 +1,6 @@
 import { createReadStream } from "node:fs";
-import { realpath, stat } from "node:fs/promises";
-import { extname, join, normalize, sep } from "node:path";
+import { lstat, realpath, stat } from "node:fs/promises";
+import { extname, isAbsolute, join, normalize, sep } from "node:path";
 import { Readable } from "node:stream";
 import type { Project, Script } from "../core/schema.js";
 import { PROXY_PATH } from "./proxy.js";
@@ -86,6 +86,29 @@ export function registeredMedia(project: Project, script: Script): Set<string> {
   for (const s of script.sections) for (const t of s.takes) files.add(t.file);
   for (const f of project.files) files.add(f.file);
   return files;
+}
+
+/**
+ * §15.5 and §20.5: the file on disk for a found candidate `rel` (a manifest path the scan recorded), or null
+ * when it may not be served. It must be a plain relative path (no absolute path, no `.` or `..`
+ * segment, no backslash), a plain file and not a symlink, and its real path must be exactly the
+ * root's real path plus `rel`: so no folder on the way has been swapped for a symlink since the
+ * scan, and nothing outside the project folder is ever reached.
+ */
+export async function foundMediaFile(root: string, rel: string): Promise<string | null> {
+  if (rel === "" || rel.includes("\\") || rel.includes("\0") || isAbsolute(rel) || /^[A-Za-z]:/.test(rel)) return null;
+  const parts = rel.split("/");
+  if (parts.some((p) => p === "" || p === "." || p === "..")) return null;
+  try {
+    const realRoot = await realpath(root);
+    const abs = join(realRoot, ...parts);
+    const info = await lstat(abs);
+    if (!info.isFile() || info.isSymbolicLink()) return null;
+    if ((await realpath(abs)) !== abs) return null;
+    return abs;
+  } catch {
+    return null;
+  }
 }
 
 /** §15.5: the only kinds of file /media serves when its real path lies outside the project (footage on another drive, say). */

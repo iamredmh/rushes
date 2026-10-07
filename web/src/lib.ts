@@ -1,5 +1,6 @@
 // Pure helpers for the dashboard. No DOM, so they're unit-tested in Node.
-import type { Asset, AssetKind, Cue, Lane, LaneStage, LoudnessResult, Mark, Note, ProxyEvent, ProxyJob, Section, Shot, Stage, TabState, Video, Version } from "./types.js";
+import type { Asset, AssetKind, Cue, FoundCounts, FoundItem, FoundKind, FoundSummary, Lane, LaneStage, LoudnessResult, Mark, Note, Project, ProxyEvent, ProxyJob, Section, Shot, Stage, TabState, Video, Version } from "./types.js";
+export type { FoundItem } from "./types.js";
 
 /** 72.4 -> "1:12.40" (minutes, seconds, hundredths). */
 export function fmt(t: number): string {
@@ -1099,4 +1100,202 @@ export function proxyMeta(asset: Pick<Asset, "size" | "width" | "height" | "vers
 /** The copy keys to name in a hint: ⌘C on Apple platforms, Ctrl+C everywhere else. `platform` is `navigator.platform`. */
 export function copyShortcut(platform: string): string {
   return /Mac|iPhone|iPad|iPod/.test(platform) ? "⌘C" : "Ctrl+C";
+}
+
+// ---- §20.5: Assets › Found ----
+
+/** The kinds a found file can be, in the order the filter bar and the kind menu list them. */
+export const FOUND_KIND_ORDER: readonly FoundKind[] = ["voice", "music", "sfx", "other", "cut"];
+export const FOUND_KIND_LABEL: Record<FoundKind, string> = {
+  voice: "Voiceover",
+  music: "Music",
+  sfx: "Sound effects",
+  other: "Other audio",
+  cut: "Cut",
+};
+
+/** How many files a scan left, all kinds together. */
+export function foundTotal(counts: FoundCounts | undefined): number {
+  return counts ? counts.voice + counts.music + counts.sfx + counts.cut + counts.other : 0;
+}
+
+/** §20.5: a locked tab's line when files of its kind were found: "14 music files found in this project", or
+ *  null when none were (and for every tab that takes no files of its own). The count is the live one. */
+const LOCKED_FOUND: Partial<Record<Stage | "assets", { kind: FoundKind; one: string; many: string }>> = {
+  voice: { kind: "voice", one: "voiceover file", many: "voiceover files" },
+  music: { kind: "music", one: "music file", many: "music files" },
+  sfx: { kind: "sfx", one: "sound effect file", many: "sound effect files" },
+};
+export function lockedFound(tab: Stage | "assets", counts: FoundCounts | undefined): { kind: FoundKind; text: string; review: string } | null {
+  const spec = LOCKED_FOUND[tab];
+  const n = spec && counts ? counts[spec.kind] : 0;
+  if (!spec || !(n > 0)) return null;
+  return { kind: spec.kind, text: `${n} ${n === 1 ? spec.one : spec.many} found in this project`, review: `Review ${spec.many} in Found` };
+}
+
+/** The header chip's text (§20.5): "3 brought in · 118 more found", with whichever half is empty left
+ *  out, or null when there is nothing to say. */
+export function foundChip(found: Pick<FoundSummary, "broughtIn" | "counts"> | null | undefined): string | null {
+  if (!found) return null;
+  const n = found.broughtIn.length;
+  const m = foundTotal(found.counts);
+  if (n > 0 && m > 0) return `${n} brought in · ${m} more found`;
+  if (n > 0) return `${n} brought in`;
+  if (m > 0) return `${m} found`;
+  return null;
+}
+
+/** Changes whenever the files found or brought in change, not only their number: the chip stays hidden until it does. The server's `digest` names the files; without one (an older server), the counts stand in. */
+export function foundSignature(found: { broughtIn: string[]; counts: FoundCounts; digest?: string } | null | undefined): string {
+  if (!found) return "";
+  if (found.digest) return `d:${found.digest}`;
+  return `${found.broughtIn.length}:${FOUND_KIND_ORDER.map((k) => found.counts[k]).join(",")}`;
+}
+
+const sameItem = (a: FoundItem, b: FoundItem): boolean =>
+  a.path === b.path && a.kind === b.kind && a.folder === b.folder && a.size === b.size && a.modified === b.modified && a.duration === b.duration &&
+  a.score === b.score && a.suggested === b.suggested && a.reasons.length === b.reasons.length && a.reasons.every((r, i) => r === b.reasons[i]);
+
+/**
+ * A fresh read of the list, keeping the old objects for files that have not changed, so a row
+ * whose file is the same can tell it need not draw again. Returns `prev` itself when nothing
+ * differs at all (same files, same order), so the whole list can be left alone.
+ */
+export function reuseItems(prev: FoundItem[], next: FoundItem[]): FoundItem[] {
+  const before = new Map(prev.map((f) => [f.path, f]));
+  const merged = next.map((f) => {
+    const old = before.get(f.path);
+    return old && sameItem(old, f) ? old : f;
+  });
+  return merged.length === prev.length && merged.every((f, i) => f === prev[i]) ? prev : merged;
+}
+
+/** "vo_jules" -> "Vo Jules", "hyperframes/out" -> "Hyperframes / Out", "" -> "Project folder". */
+export function humanFolder(folder: string): string {
+  if (!folder) return "Project folder";
+  return folder
+    .split("/")
+    .map((level) =>
+      level
+        .replace(/([a-z\d])([A-Z])/g, "$1 $2")
+        .split(/[^\p{L}\p{N}]+/u)
+        .filter(Boolean)
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(" "),
+    )
+    .filter(Boolean)
+    .join(" / ");
+}
+
+export interface FoundGroup<T> {
+  /** Stable across renders (a folder path), for keys and for remembering a collapse. Cuts share one key that no folder can have. */
+  key: string;
+  title: string;
+  /** The real folder ("" for the project folder); null for Other cuts. */
+  folder: string | null;
+  files: T[];
+}
+
+export const CUTS_GROUP_KEY = "\0cuts";
+
+/** §20.5: by folder, in the order each folder first appears (the list arrives best score first), with every cut in one "Other cuts" group last. */
+export function groupFound<T extends { folder: string; kind: FoundKind }>(files: T[]): FoundGroup<T>[] {
+  const byFolder = new Map<string, FoundGroup<T>>();
+  const cuts: T[] = [];
+  for (const f of files) {
+    if (f.kind === "cut") {
+      cuts.push(f);
+      continue;
+    }
+    let g = byFolder.get(f.folder);
+    if (!g) byFolder.set(f.folder, (g = { key: f.folder, title: humanFolder(f.folder), folder: f.folder, files: [] }));
+    g.files.push(f);
+  }
+  const groups = [...byFolder.values()];
+  if (cuts.length) groups.push({ key: CUTS_GROUP_KEY, title: "Other cuts", folder: null, files: cuts });
+  return groups;
+}
+
+/** The search box and the kind filter, applied together. The search is a case-insensitive match on the whole path. */
+export function filterFound<T extends { path: string; kind: FoundKind }>(files: T[], kind: FoundKind | "all", query: string): T[] {
+  const q = query.trim().toLowerCase();
+  return files.filter((f) => (kind === "all" || f.kind === kind) && (!q || f.path.toLowerCase().includes(q)));
+}
+
+/** The kinds present, with how many of each, in the filter bar's order. */
+export function foundKinds<T extends { kind: FoundKind }>(files: T[]): [FoundKind, number][] {
+  return FOUND_KIND_ORDER.map((k): [FoundKind, number] => [k, files.filter((f) => f.kind === k).length]).filter(([, n]) => n > 0);
+}
+
+/** 68.6 -> "1:08.6"; "—" when the length isn't known (no ffprobe, or not probed yet). */
+export function foundDuration(seconds: number | null): string {
+  if (seconds === null || !Number.isFinite(seconds) || seconds < 0) return "—";
+  const tenths = Math.round(seconds * 10);
+  const m = Math.floor(tenths / 600);
+  const s = (tenths - m * 600) / 10;
+  return `${m}:${s.toFixed(1).padStart(4, "0")}`;
+}
+
+/** A refusal in a sentence: "That file has gone" -> "that file has gone". */
+const reasonText = (reason: string): string => reason.replace(/\.$/, "").replace(/^(\p{Lu})(?=\p{Ll})/u, (c) => c.toLowerCase());
+
+/** The toast after Bring in: what came in, and, when something didn't, how many and why. */
+export function bringInMessage(added: number, failed: { path: string; reason: string }[]): string {
+  const files = (n: number) => `${n} ${n === 1 ? "file" : "files"}`;
+  if (failed.length === 0) return `Brought in ${files(added)}`;
+  const why = [...new Set(failed.map((f) => reasonText(f.reason)))].join("; ");
+  const head = added > 0 ? `Brought in ${files(added)}.` : "Nothing was brought in.";
+  return `${head} ${failed.length} couldn't be added: ${why}.`;
+}
+
+/** One row of the "Brought in with this cut" card. */
+export interface BroughtInRow {
+  path: string;
+  name: string;
+  /** What it became, or null when the project doesn't list it (it moved, or was removed). */
+  kind: FoundKind | "doc" | null;
+  label: string;
+  /** The reasons Rushes gave when it came in (a variant's description). */
+  reasons: string;
+  /** Audio, so it has a play button. */
+  playable: boolean;
+}
+
+/** §20.5: the files brought in this session, each described from where it was registered. */
+export function broughtInRows(project: Pick<Project, "videos" | "lanes" | "files">, paths: string[]): BroughtInRow[] {
+  return paths.map((path) => {
+    const name = path.slice(path.lastIndexOf("/") + 1);
+    for (const lane of project.lanes) {
+      const variant = lane.variants.find((v) => v.file === path);
+      if (!variant) continue;
+      const description = variant.meta.description;
+      return {
+        path,
+        name,
+        kind: lane.stage,
+        label: lane.stage === "voice" && lane.name !== FOUND_KIND_LABEL.voice ? `Voiceover · ${lane.name}` : FOUND_KIND_LABEL[lane.stage],
+        reasons: typeof description === "string" ? description : "",
+        playable: true,
+      };
+    }
+    for (const video of project.videos) {
+      const version = video.versions.find((v) => v.file === path);
+      if (version) return { path, name, kind: "cut" as const, label: `Cut · ${video.name} ${version.id}`, reasons: "", playable: false };
+    }
+    if (project.files.some((f) => f.file === path)) return { path, name, kind: "doc" as const, label: "Doc", reasons: "", playable: false };
+    return { path, name, kind: null, label: "", reasons: "", playable: false };
+  });
+}
+
+/** What a Found row shows: when none of it changed, the row needn't draw again (there can be 2,000). */
+export interface FoundRowShown {
+  item: FoundItem;
+  kind: FoundKind;
+  ticked: boolean;
+  playing: boolean;
+  failure: string | undefined;
+}
+
+export function foundRowChanged(a: FoundRowShown, b: FoundRowShown): boolean {
+  return a.item !== b.item || a.kind !== b.kind || a.ticked !== b.ticked || a.playing !== b.playing || a.failure !== b.failure;
 }

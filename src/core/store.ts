@@ -20,8 +20,16 @@ function defaults(key: FileKey, name: string): FileData[FileKey] {
       return { schema: 1, rev: 0, lanes: {}, sections: {}, levels: {} };
     case "batches":
       return { schema: 1, rev: 0, batches: [] };
+    case "found":
+      return { schema: 1, rev: 0, dismissed: [], settled: [] };
   }
 }
+
+/**
+ * Files `init` doesn't write. Each is created by its first write, and reads as its default until
+ * then, so a project made before the file existed needs nothing done to it.
+ */
+const CREATED_ON_WRITE: ReadonlySet<FileKey> = new Set<FileKey>(["found"]);
 
 export interface ChangeEvent {
   file: FileKey;
@@ -52,6 +60,7 @@ export class Store extends EventEmitter {
     await mkdir(join(this.dir, "grabs"), { recursive: true });
     await writeIfMissing(join(this.dir, ".gitignore"), GITIGNORE);
     for (const key of Object.keys(FILES) as FileKey[]) {
+      if (CREATED_ON_WRITE.has(key)) continue;
       await writeIfMissing(this.path(key), serialise(defaults(key, name)));
     }
   }
@@ -62,7 +71,10 @@ export class Store extends EventEmitter {
     try {
       raw = await readFile(this.path(key), "utf8");
     } catch (e) {
-      if ((e as NodeJS.ErrnoException).code === "ENOENT") throw new CorruptFileError(file, "missing; run rushes init");
+      if ((e as NodeJS.ErrnoException).code === "ENOENT") {
+        if (CREATED_ON_WRITE.has(key)) return FILES[key].schema.parse(defaults(key, "")) as FileData[K];
+        throw new CorruptFileError(file, "missing; run rushes init");
+      }
       throw e;
     }
     let json: unknown;

@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { createServer } from "node:http";
+import { dirname, join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
 import { main, longRunningCommand, type Io } from "../../src/cli/main.js";
 import { startServer, type Running } from "../../src/server/start.js";
+import { addVersion } from "../../src/core/project.js";
+import { lockPath } from "../../src/server/lock.js";
 
 function io(cwd: string) {
   const out: string[] = [];
@@ -611,5 +614,197 @@ describe("cli: rushes add version and proxies (§19.5)", () => {
     } finally {
       await s.close();
     }
+  });
+
+  it("prints the scan and bring-in commands in its help", async () => {
+    const a = io("/tmp");
+    expect(await main(["help"], a.x)).toBe(0);
+    const text = a.out.join("\n");
+    expect(text).toMatch(/rushes scan \[--film NAME\] \[--json\]/);
+    expect(text).toMatch(/rushes bring-in <file>\.\.\. \[--kind voice\|music\|sfx\|cut\|doc\] \[--round NAME\] \[--film NAME\]/);
+    expect(text).toMatch(/also brings in the current set/);
+    expect(text).toMatch(/exits 1 if any file can't come in/);
+  });
+
+  describe("finding the project's other files (§20.7)", () => {
+    // The cut is "launch film"; the read and the theme share its name words, so the current set picks them.
+    const FILES = ["renders/launch film.mp4", "vo/launch film read.wav", "bed/launch film theme.wav", "sfx/whoosh.wav", "stems/other pad.wav", "stems/spare.wav"];
+
+    async function project(files = FILES, opts: { cut?: boolean } = {}) {
+      const { root, store } = await tmpProject();
+      for (const f of files) {
+        await mkdir(dirname(join(root, f)), { recursive: true });
+        await writeFile(join(root, f), "bytes");
+      }
+      if (opts.cut !== false) await addCut(store);
+      return { root, store };
+    }
+    const addCut = (store: Awaited<ReturnType<typeof tmpProject>>["store"]) =>
+      store.update("project", (p) => addVersion(p, { video: "launch", file: "renders/launch film.mp4", duration: null, fps: 25 }));
+
+    // A server whose start-up scan has finished with no cut, and then the cut: only the command's own
+    // request can bring the current set in, never the start-up adoption.
+    async function startedBeforeTheCut() {
+      const { root, store } = await project(FILES, { cut: false });
+      const s = await startServer(root, { port: 0 });
+      await s.found.settled();
+      await addCut(store);
+      return { root, store, s };
+    }
+
+    it("scan prints what was brought in, the counts and the top candidates", async () => {
+      const { root, s } = await startedBeforeTheCut();
+      const a = io(root);
+      expect(await main(["scan", "--film", "launch"], a.x)).toBe(0);
+      const text = a.out.join("\n");
+      expect(text).toMatch(/^Brought in: .*vo\/launch film read\.wav \(voice\)/m);
+      expect(text).toMatch(/^Brought in: .*bed\/launch film theme\.wav \(music\)/m);
+      expect(text).toContain("Found, left for you: 3 files (1 sfx, 2 other)");
+      // Candidates are the indented lines; the files just brought in are no longer among them.
+      const candidates = a.out.filter((l) => l.startsWith("  "));
+      expect(candidates.map((l) => l.trim().split(/\s+/)[0])).toEqual(expect.arrayContaining(["sfx", "other"]));
+      expect(candidates.join("\n")).toContain("sfx/whoosh.wav");
+      expect(candidates.join("\n")).toContain("stems/other pad.wav");
+      expect(candidates.join("\n")).not.toContain("launch film");
+      await s.close();
+    });
+
+    it("scan --json prints the full result, and it parses", async () => {
+      const { root, s } = await startedBeforeTheCut();
+      const a = io(root);
+      expect(await main(["scan", "--json", "--film", "launch"], a.x)).toBe(0);
+      expect(a.out).toHaveLength(1);
+      const r = JSON.parse(a.out[0]);
+      expect(r.files.map((f: any) => f.path).sort()).toEqual(["sfx/whoosh.wav", "stems/other pad.wav", "stems/spare.wav"]);
+      expect(r.files[0]).toMatchObject({ kind: expect.any(String), reasons: expect.any(Array), size: 5 });
+      expect(r.counts).toEqual({ voice: 0, music: 0, sfx: 1, cut: 0, other: 2 });
+      expect(r.broughtIn.map((x: any) => x.path).sort()).toEqual(["bed/launch film theme.wav", "vo/launch film read.wav"]);
+      expect(r.failed).toEqual([]);
+      expect(r.alreadyIn).toEqual([]);
+      await s.close();
+    });
+
+    it("scan and open say on stderr that they are looking, so a wait isn't silent (and --json stays clean)", async () => {
+      const { root, s } = await startedBeforeTheCut();
+      const a = io(root);
+      expect(await main(["scan", "--json"], a.x)).toBe(0);
+      expect(a.err).toEqual(["Looking through the folder\u2026"]);
+      expect(() => JSON.parse(a.out.join("\n"))).not.toThrow();
+      const b = io(root);
+      expect(await main(["open", "."], b.x)).toBe(0);
+      expect(b.err).toEqual(["Looking through the folder\u2026"]);
+      expect(b.out.join("\n")).not.toContain("Looking through");
+      await s.close();
+    });
+
+    it("scan says so when there is nothing to find", async () => {
+      const { root } = await tmpProject();
+      const s = await startServer(root, { port: 0 });
+      const a = io(root);
+      expect(await main(["scan"], a.x)).toBe(0);
+      expect(a.out).toEqual(["Nothing found in this folder."]);
+      await s.close();
+    });
+
+    it("bring-in posts each file with --kind and --round, resolved against the folder it runs in", async () => {
+      const { root, store } = await project();
+      const s = await startServer(root, { port: 0 });
+      const a = io(join(root, "stems"));
+      expect(await main(["bring-in", "other pad.wav", "spare.wav", "--kind", "voice", "--round", "Round 1", "--dir", root], a.x)).toBe(0);
+      expect(a.out).toEqual(["Brought in: stems/other pad.wav (voice)", "Brought in: stems/spare.wav (voice)"]);
+      const lane = (await store.read("project")).lanes.find((l) => l.id === "round-1")!;
+      expect(lane.name).toBe("Round 1");
+      expect(lane.variants.map((v) => v.file)).toEqual(["stems/other pad.wav", "stems/spare.wav"]);
+      expect(await store.read("picks")).toMatchObject({ lanes: {} });
+      await s.close();
+    });
+
+    it("bring-in reports a file that can't come in, in the server's words, and exits 1", async () => {
+      const { root } = await project();
+      const s = await startServer(root, { port: 0 });
+      const a = io(root);
+      expect(await main(["bring-in", "stems/spare.wav", "--kind", "music", "../outside.wav", "gone.wav"], a.x)).toBe(1);
+      expect(a.out).toContain("Brought in: stems/spare.wav (music)");
+      expect(a.err).toEqual([`Not brought in: ${join(root, "..", "outside.wav")}: That file isn't in the project folder`, `Not brought in: ${join(root, "gone.wav")}: That file has gone`]);
+      await s.close();
+    });
+
+    it("bring-in with more than 60 files says so, in words, without asking the server", async () => {
+      const { root } = await tmpProject();
+      const a = io(root);
+      expect(await main(["bring-in", ...Array.from({ length: 61 }, (_, i) => `vo/take ${i}.wav`)], a.x)).toBe(2);
+      expect(a.err.join("\n")).toMatch(/Up to 60 files at a time/);
+      expect(a.err.join("\n")).toMatch(/second command/);
+    });
+
+    it("scan and bring-in against an older Rushes say to restart it", async () => {
+      const { root } = await tmpProject();
+      const old = createServer((req, res) => {
+        if (req.url === "/api/health") return void res.end(JSON.stringify({ app: "rushes", root, id: "abcdefgh" }));
+        res.statusCode = 404;
+        res.end("404 Not Found");
+      });
+      await new Promise<void>((r) => old.listen(0, "127.0.0.1", r));
+      await writeFile(lockPath(root), JSON.stringify({ port: (old.address() as { port: number }).port, pid: process.pid, startedAt: "x" }), "utf8");
+      for (const argv of [["scan"], ["bring-in", "a.wav"]]) {
+        const a = io(root);
+        expect(await main(argv, a.x), argv[0]).toBe(1);
+        expect(a.err.join("\n"), argv[0]).toMatch(/older than/);
+      }
+      old.close();
+    });
+
+    it("bring-in with no file prints its usage and exits 2", async () => {
+      const { root } = await tmpProject();
+      const a = io(root);
+      expect(await main(["bring-in"], a.x)).toBe(2);
+      expect(a.err[0]).toMatch(/^Usage: rushes bring-in <file>/);
+    });
+
+    it("open scans and adopts, then prints what came in and what it left", async () => {
+      const { root, store } = await project();
+      const a = io(root);
+      let server: Running | undefined;
+      a.x.onServer = (x) => { server = x; };
+      expect(await main(["open", ".", "--port", "0", "--no-browser"], a.x)).toBe(0);
+      expect(a.out[0]).toMatch(/^Rushes is running for /);
+      const brought = a.out.find((l) => l.startsWith("Brought in: "))!;
+      expect(brought).toContain("vo/launch film read.wav (voice)");
+      expect(brought).toContain("bed/launch film theme.wav (music)");
+      expect(a.out).toContain("Found, left for you: 3 files \u2014 open Assets \u203a Found.");
+      expect(a.out).toHaveLength(3); // the running line (with the address), what came in, what was left
+      expect((await store.read("project")).lanes.map((l) => l.stage).sort()).toEqual(["music", "voice"]);
+      await server!.close();
+    });
+
+    it("open on a server that is already running scans and adopts too (the start-up scan had no cut)", async () => {
+      const { root, store, s } = await startedBeforeTheCut();
+      const a = io(root);
+      expect(await main(["open", "."], a.x)).toBe(0);
+      const brought = a.out.find((l) => l.startsWith("Brought in: "))!;
+      expect(brought).toContain("vo/launch film read.wav (voice)");
+      expect(brought).toContain("bed/launch film theme.wav (music)");
+      expect(a.out).toContain("Found, left for you: 3 files \u2014 open Assets \u203a Found.");
+      expect((await store.read("project")).lanes.map((l) => l.stage).sort()).toEqual(["music", "voice"]);
+      await s.close();
+    });
+
+    it("open --film matches the files to that film", async () => {
+      const { root, s } = await startedBeforeTheCut();
+      const a = io(root);
+      expect(await main(["open", ".", "--film", "launch"], a.x)).toBe(0);
+      expect(a.out.find((l) => l.startsWith("Brought in: "))).toContain("launch film read.wav");
+      await s.close();
+    });
+
+    it("open stays silent about files when there are none", async () => {
+      const { root } = await tmpProject();
+      const a = io(root);
+      let server: Running | undefined;
+      a.x.onServer = (x) => { server = x; };
+      expect(await main(["open", ".", "--port", "0", "--no-browser"], a.x)).toBe(0);
+      expect(a.out).toHaveLength(1);
+      await server!.close();
+    });
   });
 });

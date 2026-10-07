@@ -18,14 +18,15 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { GRAB_PATH, SCREENSHOT_PATH, contentDisposition, contentType, inside, isInlineSafeType, mediaSecurityHeaders, registeredMedia, sendFile, servableFile } from "./files.js";
+import { GRAB_PATH, SCREENSHOT_PATH, contentDisposition, contentType, foundMediaFile, inside, isInlineSafeType, mediaSecurityHeaders, registeredMedia, sendFile, servableFile } from "./files.js";
+import { BRING_IN_MAX, FoundScanner, type BringInFailure, type BringInKind, ffprobeDuration, foundAnnouncer, type FoundEntry } from "./found.js";
 import { candidatePaths, listAssets, fpsFor, screenshotName } from "./assets.js";
 import { osRevealer, osOpener, OPEN_SAFE_EXT, type Revealer, type Opener } from "./reveal.js";
 import type { CorruptEvent } from "./watch.js";
 import { LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, FileKindSchema, MarkSchema, ProjectIdSchema, ShotSchema, LEVEL_MIN, LEVEL_MAX, LEVEL_STEP, type Batch, type Note } from "../core/schema.js";
 import { defaultRunner, measureMix, type LoudnessRunner } from "./loudness.js";
 
-export const VERSION = "0.2.1";
+export const VERSION = "0.2.2";
 
 async function body<T>(c: Context, schema: z.ZodType<T>): Promise<T> {
   let json: unknown;
@@ -151,6 +152,27 @@ const AddFileBody = z.object({
   video: z.string().optional(),
 });
 
+// §20.6: the found routes. A scan may name the film whose newest cut anchors the scoring.
+const FoundItem = z.object({
+  path: z.string().min(1).max(1024),
+  kind: z.enum(["voice", "music", "sfx", "cut", "doc"]).optional(),
+  round: z.string().trim().min(1).max(64).optional(),
+});
+// §20.7: `wait` makes the scan answer once it and the adoption are done, with what's in and what's
+// left. `include` (only with `wait`) brings in files the agent knows belong, before adopting.
+const FoundScanBody = z
+  .object({
+    film: z.string().min(1).max(200).optional(),
+    wait: z.boolean().optional(),
+    include: z.array(FoundItem).max(BRING_IN_MAX).optional(),
+  })
+  .refine((b) => b.include === undefined || b.wait === true, { message: "include needs wait: true", path: ["include"] });
+const FoundPathsBody = z.object({ paths: z.array(z.string().min(1).max(1024)).min(1).max(500) });
+const FoundBringInBody = z.object({
+  files: z.array(FoundItem).min(1).max(BRING_IN_MAX),
+  film: z.string().min(1).max(200).optional(),
+});
+
 // Big enough for a full-quality frame of a 4K original from the frame endpoint (§19.5), which
 // Picture posts here as the grab: 3840×2160 RGB is 24.9 MB before PNG compression.
 const MAX_GRAB_BYTES = 64 * 1024 * 1024;
@@ -159,7 +181,12 @@ const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 /** Where the built dashboard lives: <package>/web-dist, next to dist/ and src/. */
 export const DEFAULT_WEB_DIR = fileURLToPath(new URL("../../web-dist/", import.meta.url));
 
+/** How long a waiting scan (§20.7) answers at most, before it says it is still scanning. */
+export const FOUND_WAIT_MS = 20_000;
+
 export interface AppOptions {
+  /** Overrides FOUND_WAIT_MS (tests). */
+  foundWaitMs?: number;
   /** Folder with the built dashboard (index.html + assets/). */
   webDir?: string;
   /** Called after POST /api/shutdown has replied. */
@@ -186,6 +213,8 @@ export interface AppOptions {
   proxyJobs?: ProxyJobs;
   /** §19.9's waveform jobs. startServer passes its own so it can stop them on close; defaults to the proxy jobs' ffmpeg. */
   peakJobs?: PeakJobs;
+  /** §20's scanner for the project's other files. startServer passes its own (it runs the first scan and closes it); tests inject one with a fake probe. */
+  found?: FoundScanner;
 }
 
 const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost"]);
@@ -208,6 +237,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   const open = opts.open ?? osOpener;
   const jobs = opts.proxyJobs ?? new ProxyJobs(store);
   const peaks = opts.peakJobs ?? new PeakJobs(store, { run: jobs.run, available: () => jobs.available() });
+  const found = opts.found ?? new FoundScanner({ store, probe: ffprobeDuration, announce: foundAnnouncer(store) });
   const app = new Hono();
   // Every SSE client adds a change listener, so lift Node's default limit of ten.
   store.setMaxListeners(0);
@@ -323,9 +353,28 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     // falls through to candidatePaths, which does the readdir-backed discovery (§16.2's
     // auto-discovered docs/captions/exports) that a registered path never needs.
     const known = registeredMedia(project, script).has(path) || GRAB_PATH.test(path) || SCREENSHOT_PATH.test(path);
+    // The file on disk to send. For a found file it's exactly the path that was checked.
+    let file = fromManifestPath(store.root, path);
+    let viaFound = false;
     if (!known) {
-      const candidates = await candidatePaths(store, project, script);
-      if (!candidates.has(path)) throw new NotFoundError("media", path);
+      if (found.has(path)) {
+        // §20.5: a found file can be auditioned before it's brought in -- only one the last scan
+        // recorded (and not dismissed), only as a plain file inside the project folder, never
+        // through a symlink. Served with the same headers as everything else below.
+        const checked = await foundMediaFile(store.root, path);
+        if (!checked) throw new NotFoundError("media", path);
+        file = checked;
+        viaFound = true; // already refused any symlink outright
+      } else {
+        const candidates = await candidatePaths(store, project, script);
+        if (!candidates.has(path)) throw new NotFoundError("media", path);
+      }
+    }
+    if (!viaFound) {
+      // §15.5: a registered file reached through a symlink out of the project is served only if it is media.
+      const servable = await servableFile(store.root, file);
+      if (!servable) throw new NotFoundError("media", path);
+      file = servable;
     }
     // C1: a type a browser could render as a document (HTML, XML, SVG -- an SVG can carry
     // script -- or anything this server doesn't otherwise recognise) is never served inline,
@@ -338,9 +387,6 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
       const info = await lstat(fromManifestPath(store.root, path)).catch(() => null);
       if (!info || !info.isFile() || info.isSymbolicLink()) throw new NotFoundError("media", path);
     }
-    // §15.5: a registered file reached through a symlink out of the project is served only if it is media.
-    const file = await servableFile(store.root, fromManifestPath(store.root, path));
-    if (!file) throw new NotFoundError("media", path);
     const type = contentType(path);
     const inlineSafe = isInlineSafeType(type);
     const res = await sendFile(file, c.req.header("range"), inlineSafe ? type : "application/octet-stream");
@@ -483,8 +529,9 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   });
 
   app.get("/api/state", async (c) => {
-    const [project, script, notes, picks, batches, ffmpeg] = await Promise.all([
-      store.read("project"), store.read("script"), store.read("notes"), store.read("picks"), store.read("batches"), jobs.available(),
+    // §20.6: found is what the last scan left in memory; it never waits on a scan or a probe.
+    const [project, script, notes, picks, batches, ffmpeg, foundSummary] = await Promise.all([
+      store.read("project"), store.read("script"), store.read("notes"), store.read("picks"), store.read("batches"), jobs.available(), found.summary(),
     ]);
     const tabs = tabStates(project, script, notes);
     // §19.5: why each cut may play badly (or null). Never waits on a probe: an unprobed cut is
@@ -495,7 +542,87 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
         versions: await Promise.all(v.versions.map(async (ver) => ({ ...ver, proxyNeed: await jobs.needNow(fromManifestPath(store.root, ver.file)) }))),
       })),
     );
-    return c.json({ project: { ...project, videos }, script, notes, picks, batches, tabs, proxies: { ffmpeg, jobs: jobs.list() } });
+    return c.json({ project: { ...project, videos }, script, notes, picks, batches, tabs, proxies: { ffmpeg, jobs: jobs.list() }, found: foundSummary });
+  });
+
+  // ---- found: the project's other files (§20) ----
+  app.get("/api/found", async (c) => {
+    // `abs` stays on the server: the list speaks in manifest paths, as /media and the actions do.
+    const files = (await found.list()).map(({ abs: _abs, ...rest }: FoundEntry) => rest);
+    // The hidden ones ride along, so Assets › Found can list them and restore any.
+    const hidden = (await found.hidden()).map(({ abs: _abs, ...rest }) => rest);
+    return c.json({ files, hidden });
+  });
+
+  app.post("/api/found/scan", async (c) => {
+    const b = await body(c, FoundScanBody);
+    if (b.wait) {
+      // §20.7. What the agent included wins over the scoring: its kinds are settled for the cut
+      // first (kept in found.json, ahead of any adoption), then the first pass, then the included
+      // files, then the current set. `added` is everything brought in this session, so a start-up
+      // adoption racing this request is never missed. Waiting stops at the cap: the rest carries
+      // on in the background and the answer says `scanning`.
+      const failed: BringInFailure[] = [];
+      const alreadyIn: string[] = [];
+      const work = (async () => {
+        const settling = b.include?.length ? found.settleKinds(b.include, b.film) : Promise.resolve<BringInKind[]>([]);
+        const [, kinds] = await Promise.all([found.scan({ film: b.film }), settling]);
+        let skipKinds = kinds;
+        if (b.include?.length) {
+          const included = await found.bringIn(b.include, { film: b.film, origin: "include" });
+          // An included cut becomes the cut the scoring is matched to, and a project with no cut
+          // had nothing to record against: settle again now that the cut exists.
+          if (included.added.some((a) => a.kind === "cut")) skipKinds = await found.settleKinds(b.include, b.film);
+          for (const f of included.failed) {
+            if (f.code === "already") alreadyIn.push(f.path);
+            else failed.push(f);
+          }
+        }
+        // The kinds are also passed on, so this adoption holds back whatever happens to the record.
+        failed.push(...(await found.adoptCurrentSet({ film: b.film, skipKinds })).failed);
+      })();
+      work.catch(() => undefined); // after the cap, a failure has nobody to tell
+      let timer: NodeJS.Timeout | undefined;
+      const capped = await Promise.race([
+        work.then(() => false),
+        new Promise<boolean>((r) => {
+          timer = setTimeout(() => r(true), opts.foundWaitMs ?? FOUND_WAIT_MS);
+          timer.unref?.();
+        }),
+      ]).finally(() => clearTimeout(timer));
+      return c.json({
+        ok: true,
+        added: found.broughtInDetail(),
+        alreadyIn,
+        failed,
+        found: (await found.summary()).counts,
+        ...(capped ? { scanning: true } : {}),
+      });
+    }
+    // Answers at once; the scan runs in the background and announces a change when it lands.
+    // Then §20.4's current set is adopted (a no-op without a cut, or when it's already in).
+    void found
+      .scan({ film: b.film })
+      .then(() => found.adoptCurrentSet({ film: b.film }))
+      .catch(() => undefined);
+    return c.json({ ok: true });
+  });
+
+  app.post("/api/found/bring-in", async (c) => {
+    const b = await body(c, FoundBringInBody);
+    return c.json(await found.bringIn(b.files, { film: b.film }));
+  });
+
+  app.post("/api/found/dismiss", async (c) => {
+    const b = await body(c, FoundPathsBody);
+    await found.dismiss(b.paths);
+    return c.json({ ok: true });
+  });
+
+  app.post("/api/found/restore", async (c) => {
+    const b = await body(c, FoundPathsBody);
+    await found.restore(b.paths);
+    return c.json({ ok: true });
   });
 
   app.get("/api/tabs", async (c) => {

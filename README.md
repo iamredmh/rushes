@@ -40,7 +40,7 @@ If your user asked you to use Rushes, do this:
 2. If it added anything, tell the user to restart the app (or start a new session) so the `rushes_*` tools load.
 3. From then on, follow [AGENTS.md](AGENTS.md). In short: register what you made, call `rushes_open`, wait for the user to press **Send to agent**, then `rushes_get_batch`, fix the notes, and `rushes_reply`.
 
-The MCP server has seventeen tools: `rushes_open`, `rushes_status`, `rushes_add_version`, `rushes_add_variant`, `rushes_set_script`, `rushes_get_script`, `rushes_add_take`, `rushes_list_notes`, `rushes_list_assets`, `rushes_get_batch`, `rushes_reply`, `rushes_get_picks`, `rushes_set_shots`, `rushes_lock_picture`, `rushes_add_file`, `rushes_export_notes` and `rushes_doctor`.
+The MCP server has nineteen tools: `rushes_open`, `rushes_status`, `rushes_add_version`, `rushes_add_variant`, `rushes_set_script`, `rushes_get_script`, `rushes_add_take`, `rushes_list_notes`, `rushes_list_assets`, `rushes_get_batch`, `rushes_reply`, `rushes_get_picks`, `rushes_set_shots`, `rushes_lock_picture`, `rushes_add_file`, `rushes_export_notes`, `rushes_scan`, `rushes_bring_in` and `rushes_doctor`.
 
 If you can't run commands, give the user the matching line from **Manual setup** below.
 
@@ -68,6 +68,8 @@ cd your-project
 npx -y rushes open    # opens the review desk in your browser
 npx -y rushes stop    # stops it
 ```
+
+`rushes open` also looks through the folder for the files that go with the cut, and says what it brought in and what it left (see **Finding your other files**).
 
 Each project opens at its own address, `http://127.0.0.1:4580/p/<id>/` — safe to run several projects at once.
 
@@ -123,7 +125,36 @@ Every tab is visible from the start, in workflow order, even before there's anyt
 
 > In Rushes project "Launch", make two or three music beds for "Hero" and add each with rushes_add_variant (stage "music") with a one-line description.
 
+When the project's folder already holds files for a locked Voiceover, Music or Sound effects tab, its page also says how many were found and offers a **Review** button, such as "14 music files found in this project". See **Finding your other files**, below.
+
 Hovering a locked tab shows a short tooltip, e.g. "Locked: ask your agent for music beds". The Assets tab follows the same rule.
+
+## Finding your other files
+
+An agent only shows what it registers, but the work that goes with a cut usually sits in the same folder: the voiceover, the music, the effects. So when a project is opened, Rushes looks through the folder itself, and brings in the **current set** for the newest cut so those tabs have something to review.
+
+- **When.** On open (`rushes open`, or your agent's `rushes_open`) and whenever you press **Look again** or run `rushes scan`. There's no folder watcher.
+- **Where.** Only inside the project folder, up to eight folders deep. It never follows a symlink out of it, never reads a file's contents, and skips hidden folders, `node_modules` and Rushes' own `.rushes`, `proxies`, `screenshots` and `exports`. It examines up to 5,000 files. The dashboard never waits for it: a big folder shows "Looking through the folder…" and fills in as it goes.
+- **What each file probably is.** The nearest folder or file-name word decides: `vo`, `voice`, `narration` for voiceover; `bed`, `music`, `score` for music; `sfx`, `foley`, `whoosh` for sound effects. Audio with no such word is "Other audio", and you choose its kind. Video files other than the registered cut are offered as other cuts.
+- **The current set.** Each audio file is scored against the cut: a similar length, being made around the same time, and sharing a word or version (such as `v20`) with its name. For each kind, the best file comes in on its own only when it clearly beats the rest. That's at most one voice read, one music bed and one sound effects pass, and nothing else. Nothing is ever picked: files come in unpicked, and you choose in the dashboard. Each one carries its reasons, in plain words.
+- **Assets › Found.** Everything else stays one step away, in the **Found** folder at the top of Assets. Files are grouped by folder, with their length, size and reasons, and you can play one before you bring it in. A chip in the header ("3 brought in · 118 more found") opens it while there's something new to look at.
+  - **Bring in** registers the ticked files: voiceover, music and sound effects as variants, and video as cuts. It takes up to 12 files of each kind at a time, so the tabs stay quick; each voiceover folder becomes its own round.
+  - **Not these** hides the ticked files for good. A **Hidden** list brings them back with **Restore**.
+  - **Look again** runs the scan once more, and a filter box and kind buttons narrow the list.
+  - Files already in the project are never offered twice.
+- **Locked tabs say so.** If the folder holds files for a tab that's still locked, its page adds a line under the prompt, such as "14 music files found in this project" (or "1 music file found in this project"), with a **Review** button that opens Found filtered to that kind. The line follows the live count.
+
+If the guess is wrong, ask your agent to bring in the right file: `rushes_bring_in`, or `include` on `rushes_open` for files it made for this cut, which come in whatever they score and win over the guess. `rushes_scan` lists what's left, with reasons.
+
+The same from the command line:
+
+```bash
+npx -y rushes scan [--film NAME] [--json]
+npx -y rushes bring-in <file>... [--kind voice|music|sfx|cut|doc] [--round NAME] [--film NAME]
+```
+
+- `rushes scan` looks again, brings in the current set as opening does, and prints what it brought in and the top candidates left with their reasons. `--json` prints all of them as data.
+- `rushes bring-in` brings the named files in. Paths are read from the folder you run it in. `--kind` is needed when a name doesn't say (`doc` takes `md`, `txt` and `pdf`), `--round` names the voiceover round, and `--film` picks the film a cut joins. It prints one line per file, says why for any it can't bring in (a path outside the project folder is always refused), and exits 1 if any failed.
 
 ## Screenshots and the Assets library
 

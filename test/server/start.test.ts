@@ -63,8 +63,9 @@ describe("startServer", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ stage: "picture", scope: "point", t: 1, text: "x" }),
     });
-    await until("event: change");
-    expect(text).toContain('"file":"notes"');
+    // Waits for the note's own change: the start-up scan (§20.1) may announce one of its own first.
+    await until('"file":"notes"');
+    expect(text).toMatch(/event: change\ndata: \{"file":"notes"/);
     ctrl.abort();
     await s.close();
   });

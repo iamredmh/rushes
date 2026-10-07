@@ -20,7 +20,19 @@ export class RushesClient {
       body: json === undefined ? undefined : JSON.stringify(json),
     });
     const text = await res.text();
-    const body = text ? JSON.parse(text) : {};
+    let body: any = {};
+    try {
+      body = text ? JSON.parse(text) : {};
+    } catch {
+      // Not JSON: an older Rushes answering a route it doesn't have, or something else on the port.
+      throw new ApiError(res.status, {
+        error: "not_json",
+        message:
+          res.status === 404
+            ? "The Rushes server running for this project is older than this command and doesn't have that feature. Run `rushes stop`, then try again."
+            : `Rushes server returned ${res.status} with a body that isn't JSON`,
+      });
+    }
     if (!res.ok) throw new ApiError(res.status, body);
     return body as T;
   }

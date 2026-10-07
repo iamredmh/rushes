@@ -1119,3 +1119,218 @@ describe("copyShortcut (Minor 11)", () => {
     expect(copyShortcut("")).toBe("Ctrl+C");
   });
 });
+
+// ---- Plan 5, Task 5: Assets › Found (§20.5) ----
+import {
+  bringInMessage, broughtInRows, filterFound, foundChip, foundDuration, foundKinds, foundRowChanged, foundSignature, foundTotal, groupFound, humanFolder, lockedFound, reuseItems,
+  type FoundItem,
+} from "../../web/src/lib.js";
+
+const counts = (c: Partial<Record<"voice" | "music" | "sfx" | "cut" | "other", number>> = {}) => ({ voice: 0, music: 0, sfx: 0, cut: 0, other: 0, ...c });
+const item = (path: string, kind: FoundItem["kind"] = "other", extra: Partial<FoundItem> = {}): FoundItem => {
+  const i = path.lastIndexOf("/");
+  return { path, kind, folder: i === -1 ? "" : path.slice(0, i), size: 1000, modified: 0, duration: null, score: null, reasons: [], suggested: false, ...extra };
+};
+
+describe("humanFolder", () => {
+  it("turns a folder name into words", () => {
+    expect(humanFolder("vo_jules")).toBe("Vo Jules");
+    expect(humanFolder("vo-jules")).toBe("Vo Jules");
+    expect(humanFolder("bed")).toBe("Bed");
+    expect(humanFolder("voJules")).toBe("Vo Jules");
+    expect(humanFolder("VO")).toBe("VO");
+    expect(humanFolder("clean  takes")).toBe("Clean Takes");
+  });
+  it("keeps each level of a nested folder, and names the project folder itself", () => {
+    expect(humanFolder("hyperframes/out")).toBe("Hyperframes / Out");
+    expect(humanFolder("")).toBe("Project folder");
+  });
+});
+
+describe("groupFound", () => {
+  it("groups by folder in the order each folder first appears, with all cuts last as Other cuts", () => {
+    const files = [
+      item("renders/final.mp4", "cut"),
+      item("vo_jules/a.wav", "voice"),
+      item("bed/b.wav", "music"),
+      item("vo_jules/c.wav", "voice"),
+      item("old/render.mov", "cut"),
+      item("audition/t.wav"),
+    ];
+    const groups = groupFound(files);
+    expect(groups.map((g) => g.title)).toEqual(["Vo Jules", "Bed", "Audition", "Other cuts"]);
+    expect(groups.map((g) => g.files.map((f) => f.path))).toEqual([
+      ["vo_jules/a.wav", "vo_jules/c.wav"], ["bed/b.wav"], ["audition/t.wav"], ["renders/final.mp4", "old/render.mov"],
+    ]);
+    expect(groups.map((g) => g.key)).toEqual(["vo_jules", "bed", "audition", "\0cuts"]);
+  });
+  it("is stable: the same input gives the same groups, and nothing is lost", () => {
+    const files = [item("b/x.wav"), item("a/y.wav"), item("b/z.wav"), item("top.wav")];
+    const once = groupFound(files);
+    expect(groupFound(files)).toEqual(once);
+    expect(once.flatMap((g) => g.files).length).toBe(4);
+    expect(once.map((g) => g.title)).toEqual(["B", "A", "Project folder"]);
+  });
+  it("has no groups for no files", () => {
+    expect(groupFound([])).toEqual([]);
+  });
+});
+
+describe("lockedFound (§20.5)", () => {
+  it("says how many files of the tab's kind were found, in the singular for one", () => {
+    expect(lockedFound("music", counts({ music: 14 }))).toEqual({ kind: "music", text: "14 music files found in this project", review: "Review music files in Found" });
+    expect(lockedFound("music", counts({ music: 1 }))?.text).toBe("1 music file found in this project");
+    expect(lockedFound("voice", counts({ voice: 2 }))?.text).toBe("2 voiceover files found in this project");
+    expect(lockedFound("sfx", counts({ sfx: 1 }))?.text).toBe("1 sound effect file found in this project");
+    expect(lockedFound("sfx", counts({ sfx: 3 }))?.kind).toBe("sfx");
+  });
+  it("has no line for none found, another kind's files, or a tab that takes no files of its own", () => {
+    expect(lockedFound("music", counts({ voice: 5 }))).toBeNull();
+    expect(lockedFound("music", counts())).toBeNull();
+    expect(lockedFound("music", undefined)).toBeNull();
+    for (const tab of ["script", "picture", "mix", "assets"] as const) expect(lockedFound(tab, counts({ voice: 1, music: 1, sfx: 1, cut: 1, other: 1 }))).toBeNull();
+  });
+});
+
+describe("foundChip", () => {
+  it("reads 'N brought in · M more found'", () => {
+    expect(foundChip({ broughtIn: ["a", "b", "c"], counts: counts({ voice: 100, music: 19 }) })).toBe("3 brought in · 119 more found");
+  });
+  it("drops the half with nothing in it, and is null when both are empty", () => {
+    expect(foundChip({ broughtIn: ["a"], counts: counts() })).toBe("1 brought in");
+    expect(foundChip({ broughtIn: [], counts: counts({ cut: 4 }) })).toBe("4 found");
+    expect(foundChip({ broughtIn: [], counts: counts() })).toBeNull();
+    expect(foundChip(undefined)).toBeNull();
+  });
+  it("counts every kind that is left", () => {
+    expect(foundTotal(counts({ voice: 1, music: 2, sfx: 3, cut: 4, other: 5 }))).toBe(15);
+  });
+  it("names the files, not just how many: the same counts with another file is another signature", () => {
+    const c = counts({ voice: 2 });
+    const a = foundSignature({ broughtIn: [], counts: c, digest: "aaaa" });
+    expect(foundSignature({ broughtIn: [], counts: c, digest: "aaaa" })).toBe(a);
+    expect(foundSignature({ broughtIn: [], counts: c, digest: "bbbb" })).not.toBe(a);
+    // An older server sends no digest: the counts stand in.
+    expect(foundSignature({ broughtIn: [], counts: c })).not.toBe(a);
+    expect(foundSignature(undefined)).toBe("");
+  });
+  it("changes its signature when what is found changes, so the chip can come back", () => {
+    const a = foundSignature({ broughtIn: [], counts: counts({ voice: 2 }) });
+    expect(foundSignature({ broughtIn: [], counts: counts({ voice: 2 }) })).toBe(a);
+    expect(foundSignature({ broughtIn: ["x"], counts: counts({ voice: 2 }) })).not.toBe(a);
+    expect(foundSignature({ broughtIn: [], counts: counts({ voice: 3 }) })).not.toBe(a);
+  });
+});
+
+describe("foundDuration", () => {
+  it("is m:ss.s, with a dash when unknown", () => {
+    expect(foundDuration(68.6)).toBe("1:08.6");
+    expect(foundDuration(4.1)).toBe("0:04.1");
+    expect(foundDuration(59.96)).toBe("1:00.0");
+    expect(foundDuration(null)).toBe("—");
+    expect(foundDuration(Number.NaN)).toBe("—");
+  });
+});
+
+describe("filterFound and foundKinds", () => {
+  const files = [item("vo/a.wav", "voice"), item("bed/Warm Pad.wav", "music"), item("x/t1.wav", "other"), item("x/t2.wav", "other"), item("r/c.mp4", "cut")];
+  it("filters by kind and by a search over the path, ignoring case", () => {
+    expect(filterFound(files, "all", "").length).toBe(5);
+    expect(filterFound(files, "other", "").map((f) => f.path)).toEqual(["x/t1.wav", "x/t2.wav"]);
+    expect(filterFound(files, "all", "warm pad").map((f) => f.path)).toEqual(["bed/Warm Pad.wav"]);
+    expect(filterFound(files, "all", "  BED/ ").map((f) => f.path)).toEqual(["bed/Warm Pad.wav"]);
+    expect(filterFound(files, "music", "a.wav").map((f) => f.path)).toEqual([]);
+  });
+  it("counts the kinds that are there, in a fixed order", () => {
+    expect(foundKinds(files)).toEqual([["voice", 1], ["music", 1], ["other", 2], ["cut", 1]]);
+  });
+});
+
+describe("bringInMessage", () => {
+  it("says what came in", () => {
+    expect(bringInMessage(3, [])).toBe("Brought in 3 files");
+    expect(bringInMessage(1, [])).toBe("Brought in 1 file");
+  });
+  it("says what couldn't, and why", () => {
+    expect(bringInMessage(2, [{ path: "a.wav", reason: "That file has gone" }])).toBe("Brought in 2 files. 1 couldn't be added: that file has gone.");
+    expect(bringInMessage(12, [{ path: "m.wav", reason: "Up to 12 at a time, so the tabs stay quick." }])).toBe(
+      "Brought in 12 files. 1 couldn't be added: up to 12 at a time, so the tabs stay quick.",
+    );
+  });
+  it("names each different reason once", () => {
+    const failed = [
+      { path: "a", reason: "That file has gone" },
+      { path: "b", reason: "That file has gone" },
+      { path: "c", reason: "Choose a kind for this file" },
+    ];
+    expect(bringInMessage(0, failed)).toBe("Nothing was brought in. 3 couldn't be added: that file has gone; choose a kind for this file.");
+  });
+});
+
+describe("broughtInRows", () => {
+  const project = {
+    videos: [{ id: "hero", name: "Hero", lockedVersion: null, versions: [{ id: "v2", file: "renders/cut-b.mp4" }] }],
+    lanes: [
+      { id: "vo-jules", stage: "voice" as const, name: "Vo Jules", variants: [{ id: "read", name: "read", file: "vo_jules/read.wav", meta: { description: "same length as the cut · made 12 min before it" }, cues: [] }] },
+      { id: "music", stage: "music" as const, name: "Music", variants: [{ id: "bed", name: "bed", file: "bed/bed.wav", meta: {}, cues: [] }] },
+    ],
+    files: [{ id: "f1", kind: "doc" as const, file: "notes/brief.md", name: "brief", note: "", video: null, addedAt: "" }],
+  };
+  it("describes each brought-in file from where it was registered", () => {
+    const rows = broughtInRows(project as never, ["vo_jules/read.wav", "bed/bed.wav", "renders/cut-b.mp4", "notes/brief.md"]);
+    expect(rows.map((r) => [r.name, r.kind, r.label, r.reasons, r.playable])).toEqual([
+      ["read.wav", "voice", "Voiceover · Vo Jules", "same length as the cut · made 12 min before it", true],
+      ["bed.wav", "music", "Music", "", true],
+      ["cut-b.mp4", "cut", "Cut · Hero v2", "", false],
+      ["brief.md", "doc", "Doc", "", false],
+    ]);
+  });
+  it("still lists a file it can't place", () => {
+    expect(broughtInRows(project as never, ["gone/x.wav"])).toEqual([
+      { path: "gone/x.wav", name: "x.wav", kind: null, label: "", reasons: "", playable: false },
+    ]);
+  });
+});
+
+describe("reuseItems", () => {
+  const a = item("vo/a.wav", "voice", { reasons: ["one"], duration: 3 });
+  const b = item("vo/b.wav", "voice");
+  const copy = (f: FoundItem): FoundItem => ({ ...f, reasons: [...f.reasons] });
+  it("keeps the very same list when nothing changed", () => {
+    const prev = [a, b];
+    expect(reuseItems(prev, [copy(a), copy(b)])).toBe(prev);
+  });
+  it("keeps the old object for each unchanged file and takes the new one for a changed file", () => {
+    const next = [copy(a), { ...copy(b), duration: 9 }, item("vo/c.wav", "voice")];
+    const out = reuseItems([a, b], next);
+    expect(out).not.toEqual([a, b]);
+    expect(out[0]).toBe(a);
+    expect(out[1]).toBe(next[1]);
+    expect(out[1].duration).toBe(9);
+    expect(out[2].path).toBe("vo/c.wav");
+  });
+  it("notices a changed reason, a removed file and a new order", () => {
+    expect(reuseItems([a, b], [{ ...copy(a), reasons: ["two"] }, copy(b)])[0].reasons).toEqual(["two"]);
+    expect(reuseItems([a, b], [copy(a)])).toEqual([a]);
+    const swapped = reuseItems([a, b], [copy(b), copy(a)]);
+    expect(swapped.map((f) => f.path)).toEqual(["vo/b.wav", "vo/a.wav"]);
+    expect(swapped[0]).toBe(b);
+  });
+});
+
+describe("foundRowChanged: a Found row draws again only when something it shows changed", () => {
+  const a = item("vo/a.wav", "voice");
+  const props = { item: a, kind: "voice" as const, ticked: false, playing: false, failure: undefined as string | undefined };
+
+  it("is false for the same props, whatever the callbacks are", () => {
+    expect(foundRowChanged(props, { ...props })).toBe(false);
+  });
+
+  it("is true for a new item, kind, tick, play state or failure", () => {
+    expect(foundRowChanged(props, { ...props, item: { ...a } })).toBe(true);
+    expect(foundRowChanged(props, { ...props, kind: "music" })).toBe(true);
+    expect(foundRowChanged(props, { ...props, ticked: true })).toBe(true);
+    expect(foundRowChanged(props, { ...props, playing: true })).toBe(true);
+    expect(foundRowChanged(props, { ...props, failure: "Already in the project." })).toBe(true);
+  });
+});

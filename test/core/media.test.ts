@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { PROBE_TIMEOUT_MS, probe as mediaProbe, proxyNeed, type Probe } from "../../src/core/media.js";
@@ -87,5 +87,28 @@ describe("probe: a hung ffprobe never holds a slot for good (Minor 8)", () => {
 
   it("waits 20 s by default", () => {
     expect(PROBE_TIMEOUT_MS).toBe(20_000);
+  });
+});
+
+describe("probe: only local files (the scan runs it on every media file it finds)", () => {
+  it.runIf(process.platform !== "win32")("restricts ffprobe's protocols to file, ahead of the file name", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "rushes-ffprobe-"));
+    const log = join(dir, "args.txt");
+    const bin = join(dir, "ffprobe");
+    await writeFile(bin, `#!/bin/sh\nif [ "$1" = "-version" ]; then echo "ffprobe version 8.1"; exit 0; fi\nprintf '%s\\n' "$@" > "${log}"\necho '{}'\n`, "utf8");
+    await chmod(bin, 0o755);
+    const path = process.env.PATH;
+    process.env.PATH = `${dir}${delimiter}${path ?? ""}`;
+    try {
+      await mediaProbe("/some/where/a.wav");
+      const args = (await readFile(log, "utf8")).trim().split("\n");
+      const at = args.indexOf("-protocol_whitelist");
+      expect(at).toBeGreaterThan(-1);
+      expect(args[at + 1]).toBe("file");
+      expect(at).toBeLessThan(args.indexOf("/some/where/a.wav"));
+    } finally {
+      process.env.PATH = path;
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

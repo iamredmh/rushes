@@ -1,22 +1,30 @@
 import { describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { readFile, writeFile } from "node:fs/promises";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
 import { startServer } from "../../src/server/start.js";
 import { createMcpServer } from "../../src/mcp/tools.js";
-import { RushesClient } from "../../src/mcp/client.js";
+import { ApiError, RushesClient } from "../../src/mcp/client.js";
 import { ensureServer, findServer } from "../../src/mcp/ensure.js";
 import { resolveProjectRoot, stdioContext } from "../../src/mcp/stdio.js";
 import { lockPath } from "../../src/server/lock.js";
 import { SOURCE } from "../../src/setup/harnesses.js";
 import { runDoctor, realDoctorEnv } from "../../src/cli/doctor.js";
+import { addVariant, addVersion } from "../../src/core/project.js";
 
-async function connect() {
+type Probe = (abs: string) => Promise<number | null>;
+
+async function connect(opts: { files?: string[]; probe?: Probe } = {}) {
   const { root } = await tmpProject("spring-launch");
-  const running = await startServer(root, { port: 0 });
+  for (const f of opts.files ?? []) {
+    await mkdir(dirname(join(root, f)), { recursive: true });
+    await writeFile(join(root, f), "bytes");
+  }
+  const running = await startServer(root, { port: 0, found: opts.probe ? { probe: opts.probe } : undefined });
   const opened: string[] = [];
   const server = createMcpServer({
     client: async () => new RushesClient(running.url),
@@ -35,13 +43,13 @@ async function connect() {
 }
 
 describe("MCP tools", () => {
-  it("lists the seventeen tools", async () => {
+  it("lists the nineteen tools", async () => {
     const t = await connect();
     const { tools } = await t.client.listTools();
     expect(tools.map((x) => x.name).sort()).toEqual([
-      "rushes_add_file", "rushes_add_take", "rushes_add_variant", "rushes_add_version", "rushes_doctor", "rushes_export_notes",
+      "rushes_add_file", "rushes_add_take", "rushes_add_variant", "rushes_add_version", "rushes_bring_in", "rushes_doctor", "rushes_export_notes",
       "rushes_get_batch", "rushes_get_picks", "rushes_get_script", "rushes_list_assets", "rushes_list_notes",
-      "rushes_lock_picture", "rushes_open", "rushes_reply", "rushes_set_script", "rushes_set_shots", "rushes_status",
+      "rushes_lock_picture", "rushes_open", "rushes_reply", "rushes_scan", "rushes_set_script", "rushes_set_shots", "rushes_status",
     ]);
     const set = tools.find((x) => x.name === "rushes_set_script")!;
     expect((set.inputSchema.properties as Record<string, { description?: string }>).replace.description).toMatch(/replace the whole script; default merges by id/);
@@ -326,5 +334,342 @@ describe("project root for stdio", () => {
     }
     expect(spawns).toBe(0);
     await client.close();
+  });
+});
+
+// §20.7: the agent surface for finding the project's other files.
+describe("MCP tools: finding the project's other files", () => {
+  // The cut is "hero v3" (60 s). The theme and the read match its length, time and name.
+  const FILES = ["renders/hero v3.mov", "bed/hero v3 theme.wav", "vo_jules/hero v3 read.wav", "stems/other pad.wav", "sfx/whoosh.wav", "notes/brief.md"];
+  const LENGTHS: Record<string, number> = { "hero v3.mov": 60, "hero v3 theme.wav": 60, "hero v3 read.wav": 60.4, "other pad.wav": 31 };
+  const probe: Probe = async (abs) => LENGTHS[abs.split("/").pop()!] ?? null;
+
+  async function withCut(opts: { files?: string[] } = {}) {
+    const t = await connect({ files: opts.files ?? FILES, probe });
+    // Let the start-up scan finish before there is a cut, so it can't adopt ahead of the call under test.
+    await t.running.found.settled();
+    await t.running.store.update("project", (p) => addVersion(p, { video: "hero", file: "renders/hero v3.mov", duration: 60, fps: 25 }));
+    return t;
+  }
+
+  const props = (tool: { inputSchema: unknown }) => (tool.inputSchema as { properties: Record<string, any>; required?: string[] });
+
+  it("describes rushes_open, rushes_scan and rushes_bring_in, and gives them their schemas", async () => {
+    const t = await connect();
+    const { tools } = await t.client.listTools();
+    const tool = (n: string) => tools.find((x) => x.name === n)!;
+    expect(tool("rushes_open").description).toMatch(
+      /^Starts Rushes if needed, brings in the current set of files that go with the cut, and opens it\. Pass `include` for files you know belong\./,
+    );
+    const open = props(tool("rushes_open"));
+    expect(Object.keys(open.properties).sort()).toEqual(["browser", "film", "include", "project"]);
+    expect(open.properties.film.type).toBe("string");
+    expect(open.properties.include.type).toBe("array");
+    expect(open.properties.include.items.properties.kind.enum).toEqual(["voice", "music", "sfx", "cut", "doc"]);
+    expect(Object.keys(open.properties.include.items.properties).sort()).toEqual(["kind", "path", "round"]);
+    expect(open.properties.include.items.required).toEqual(["path"]);
+    expect(open.properties.include.description).toMatch(/win over the scoring/i);
+
+    expect(tool("rushes_scan").description).toMatch(/best score first/);
+    expect(tool("rushes_scan").description).toMatch(/reasons/);
+    const scan = props(tool("rushes_scan"));
+    expect(Object.keys(scan.properties).sort()).toEqual(["film", "limit", "project"]);
+    expect(scan.properties.limit).toMatchObject({ type: "integer", default: 100, maximum: 200, minimum: 1 });
+
+    expect(tool("rushes_bring_in").description).toMatch(/inside the project folder/);
+    const bring = props(tool("rushes_bring_in"));
+    expect(Object.keys(bring.properties).sort()).toEqual(["files", "film", "project"]);
+    expect(bring.required).toEqual(["files"]);
+    expect(bring.properties.files.items.required).toEqual(["path"]);
+    await t.close();
+  });
+
+  it("rushes_open scans, adopts the current set and returns what came in and what was left", async () => {
+    const t = await withCut();
+    const r = await t.call("rushes_open", { browser: false, film: "hero" });
+    expect(r.isError).toBe(false);
+    expect(r.json.url).toBe(t.running.dashboardUrl);
+    expect(r.json.broughtIn.map((a: any) => [a.path, a.kind]).sort()).toEqual([
+      ["bed/hero v3 theme.wav", "music"],
+      ["vo_jules/hero v3 read.wav", "voice"],
+    ]);
+    expect(r.json.broughtIn[0].reasons.join(" ")).toMatch(/same length as the cut/);
+    expect(r.json.failed).toEqual([]);
+    // Left for the user: the pad (no kind), the effect and the brief is a doc (never a candidate).
+    expect(r.json.found).toEqual({ voice: 0, music: 0, sfx: 1, cut: 0, other: 1 });
+    // Registered unpicked.
+    const project = await t.running.store.read("project");
+    expect(project.lanes.find((l) => l.id === "music")!.variants.map((v) => v.file)).toEqual(["bed/hero v3 theme.wav"]);
+    expect(await t.running.store.read("picks")).toMatchObject({ lanes: {} });
+    // A second call brings nothing new in, and still lists this session's.
+    const again = await t.call("rushes_open", { browser: false, film: "hero" });
+    expect(again.json.broughtIn).toHaveLength(2);
+    expect((await t.running.store.read("project")).rev).toBe(project.rev);
+    await t.close();
+  });
+
+  it("rushes_open's include wins over the scoring and takes files the scoring would never offer", async () => {
+    const t = await withCut();
+    const r = await t.call("rushes_open", {
+      browser: false,
+      film: "hero",
+      include: [{ path: "stems/other pad.wav", kind: "music" }, { path: "notes/brief.md" }],
+    });
+    expect(r.json.failed).toEqual([]);
+    expect(r.json.broughtIn.map((a: any) => [a.path, a.kind]).sort()).toEqual([
+      ["notes/brief.md", "doc"],
+      ["stems/other pad.wav", "music"],
+      ["vo_jules/hero v3 read.wav", "voice"],
+    ]);
+    // The scoring's own music pick is not also added: the agent's file is the music.
+    const music = (await t.running.store.read("project")).lanes.find((l) => l.id === "music")!;
+    expect(music.variants.map((v) => v.file)).toEqual(["stems/other pad.wav"]);
+    expect(r.json.found.music).toBe(1);
+    await t.close();
+  });
+
+  it("rushes_open reports an included file outside the project and still opens", async () => {
+    const t = await withCut();
+    const r = await t.call("rushes_open", { film: "hero", include: [{ path: "../elsewhere.wav", kind: "music" }] });
+    expect(r.isError).toBe(false);
+    expect(r.json.failed).toEqual([{ path: "../elsewhere.wav", reason: "That file isn't in the project folder", code: "outside" }]);
+    expect(t.opened).toEqual([t.running.dashboardUrl]);
+    await t.close();
+  });
+
+  it("rushes_open without a cut brings nothing in and says how many files it found", async () => {
+    const t = await connect({ files: FILES, probe });
+    const r = await t.call("rushes_open", { browser: false });
+    expect(r.json.broughtIn).toEqual([]);
+    expect(r.json.found).toMatchObject({ voice: 1, music: 1, sfx: 1 });
+    await t.close();
+  });
+
+  it("rushes_scan returns the ranked candidates with reasons, and the counts", async () => {
+    const t = await withCut();
+    const r = await t.call("rushes_scan", { film: "hero" });
+    expect(r.isError).toBe(false);
+    // The scan adopts, as Look again does: the theme and read are in, so the rest are left.
+    expect(r.json.files.map((f: any) => f.path).sort()).toEqual(["sfx/whoosh.wav", "stems/other pad.wav"]);
+    const pad = r.json.files.find((f: any) => f.path === "stems/other pad.wav");
+    expect(pad).toMatchObject({ kind: "other", folder: "stems" });
+    expect(pad.reasons).toEqual(expect.any(Array));
+    expect(pad).not.toHaveProperty("abs");
+    expect(r.json.counts).toEqual({ voice: 0, music: 0, sfx: 1, cut: 0, other: 1 });
+    // Best score first.
+    const scores = r.json.files.map((f: any) => f.score ?? -1);
+    expect(scores).toEqual([...scores].sort((a: number, b: number) => b - a));
+    await t.close();
+  });
+
+  it("rushes_scan's limit trims the list but not the counts, and refuses more than 200", async () => {
+    const many = Array.from({ length: 5 }, (_, i) => `misc/take ${i}.wav`);
+    const t = await connect({ files: many, probe });
+    const r = await t.call("rushes_scan", { limit: 2 });
+    expect(r.json.files).toHaveLength(2);
+    expect(r.json.counts.other).toBe(5);
+    expect((await t.call("rushes_scan")).json.files).toHaveLength(5);
+    expect((await t.call("rushes_scan", { limit: 201 })).isError).toBe(true);
+    expect((await t.call("rushes_scan", { limit: 0 })).isError).toBe(true);
+    await t.close();
+  });
+
+  it("rushes_scan returns 100 candidates by default, whatever the folder holds", async () => {
+    const many = Array.from({ length: 120 }, (_, i) => `misc/take ${i}.wav`);
+    const t = await connect({ files: many, probe });
+    const r = await t.call("rushes_scan");
+    expect(r.json.files).toHaveLength(100);
+    expect(r.json.counts.other).toBe(120);
+    expect((await t.call("rushes_scan", { limit: 200 })).json.files).toHaveLength(120);
+    await t.close();
+  });
+
+  it("rushes_open lists an include the agent registered itself as alreadyIn, and keeps it winning on the next open", async () => {
+    const t = await withCut();
+    await t.running.store.update("project", (p) => addVariant(p, { stage: "music", name: "pad", file: "stems/other pad.wav" }));
+    const r = await t.call("rushes_open", { browser: false, film: "hero", include: [{ path: "stems/other pad.wav" }] });
+    expect(r.json.alreadyIn).toEqual(["stems/other pad.wav"]);
+    expect(r.json.failed).toEqual([]);
+    const again = await t.call("rushes_open", { browser: false, film: "hero" });
+    const music = (await t.running.store.read("project")).lanes.find((l) => l.id === "music")!;
+    expect(music.variants.map((v) => v.file)).toEqual(["stems/other pad.wav"]);
+    expect(again.json.broughtIn.map((a: any) => [a.path, a.origin]).sort()).toEqual([["vo_jules/hero v3 read.wav", "auto"]]);
+    await t.close();
+  });
+
+  it("says in its descriptions that the wait is capped and what rushes_scan brings in", async () => {
+    const t = await connect();
+    const { tools } = await t.client.listTools();
+    const d = (n: string) => tools.find((x) => x.name === n)!.description!;
+    expect(d("rushes_open")).toMatch(/^Starts Rushes if needed, brings in the current set of files that go with the cut, and opens it\. Pass `include` for files you know belong\./);
+    expect(d("rushes_open")).toMatch(/waits about 20 seconds/);
+    expect(d("rushes_open")).toMatch(/`scanning: true`/);
+    expect(d("rushes_scan")).toMatch(/brings in the current set/);
+    expect(d("rushes_scan")).toMatch(/waits about 20 seconds/);
+    await t.close();
+  });
+
+  it("rushes_bring_in registers the files, reports each refusal in the route's words, and picks nothing", async () => {
+    const t = await withCut();
+    const r = await t.call("rushes_bring_in", {
+      film: "hero",
+      files: [
+        { path: "stems/other pad.wav", kind: "music" },
+        { path: "vo_jules/hero v3 read.wav", round: "Round 1" },
+        { path: "../elsewhere.wav" },
+        { path: join(t.root, "..", "nope.wav"), kind: "voice" },
+        { path: "missing.wav", kind: "sfx" },
+      ],
+    });
+    expect(r.isError).toBe(false);
+    expect(r.json.added.map((a: any) => [a.path, a.kind, a.lane])).toEqual([
+      ["stems/other pad.wav", "music", "music"],
+      ["vo_jules/hero v3 read.wav", "voice", "round-1"],
+    ]);
+    expect(r.json.failed).toEqual([
+      { path: "../elsewhere.wav", reason: "That file isn't in the project folder", code: "outside" },
+      { path: join(t.root, "..", "nope.wav"), reason: "That file isn't in the project folder", code: "outside" },
+      { path: "missing.wav", reason: "That file has gone", code: "gone" },
+    ]);
+    expect(await t.running.store.read("picks")).toMatchObject({ lanes: {} });
+    // Again: already in.
+    const again = await t.call("rushes_bring_in", { files: [{ path: "stems/other pad.wav", kind: "music" }] });
+    expect(again.json).toEqual({ added: [], failed: [{ path: "stems/other pad.wav", reason: "Already in the project.", code: "already" }] });
+    await t.close();
+  });
+
+  it("rushes_bring_in passes the server's own limits through as a tool error", async () => {
+    const t = await withCut();
+    const r = await t.call("rushes_bring_in", { files: Array.from({ length: 61 }, (_, i) => ({ path: `vo/${i}.wav` })) });
+    expect(r.isError).toBe(true);
+    expect((await t.call("rushes_bring_in", { files: [] })).isError).toBe(true);
+    await t.close();
+  });
+});
+
+// A stand-in for a Rushes server, to see what the tools do when the real one is old, slow or unhappy.
+async function fakeServer(handle: (req: IncomingMessage, res: ServerResponse, log: string[]) => void) {
+  const log: string[] = [];
+  const server: Server = createServer((req, res) => {
+    log.push(`${req.method} ${req.url}`);
+    if (req.url === "/api/health") {
+      res.setHeader("content-type", "application/json");
+      return void res.end(JSON.stringify({ ok: true }));
+    }
+    handle(req, res, log);
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const url = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  const opened: string[] = [];
+  const mcp = createMcpServer({
+    client: async () => new RushesClient(url),
+    openBrowser: (u) => void (log.push("open"), opened.push(u)),
+    doctor: async () => [],
+  });
+  const [a, b] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: "test", version: "0" });
+  await Promise.all([mcp.connect(a), client.connect(b)]);
+  const call = async (name: string, args: Record<string, unknown> = {}) => {
+    const r = (await client.callTool({ name, arguments: args })) as { content: { text: string }[]; isError?: boolean };
+    return { isError: !!r.isError, text: r.content[0].text };
+  };
+  return { url, log, opened, call, close: async () => { await client.close(); server.closeAllConnections(); await new Promise((r) => server.close(r)); } };
+}
+
+describe("MCP tools against a server that isn't the current one", () => {
+  it("RushesClient turns a body that isn't JSON into an ApiError", async () => {
+    const f = await fakeServer((_req, res) => { res.statusCode = 404; res.end("404 Not Found"); });
+    const err = await new RushesClient(f.url).post("/api/found/scan", {}).catch((e) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.status).toBe(404);
+    await expect(new RushesClient(f.url).get("/api/anything")).rejects.toBeInstanceOf(ApiError);
+    await f.close();
+  });
+
+  it("rushes_scan and rushes_bring_in against an older Rushes say to restart it, in words", async () => {
+    const f = await fakeServer((_req, res) => { res.statusCode = 404; res.end("404 Not Found"); });
+    for (const [name, args] of [["rushes_scan", {}], ["rushes_bring_in", { files: [{ path: "a.wav" }] }]] as const) {
+      const r = await f.call(name, args);
+      expect(r.isError, name).toBe(true);
+      expect(r.text, name).toMatch(/older than/);
+      expect(r.text, name).toMatch(/rushes stop/);
+      expect(r.text, name).not.toMatch(/not_json|isn't JSON/);
+    }
+    await f.close();
+  });
+
+  it("rushes_open against an older Rushes still opens, and says to restart it", async () => {
+    const f = await fakeServer((_req, res) => { res.statusCode = 404; res.end("404 Not Found"); });
+    const r = await f.call("rushes_open");
+    expect(r.isError).toBe(false);
+    const json = JSON.parse(r.text);
+    expect(json).toMatchObject({ broughtIn: [], failed: [], found: null });
+    expect(json.note).toMatch(/older Rushes.*rushes stop/);
+    expect(f.opened).toHaveLength(1);
+    await f.close();
+  });
+
+  it("rushes_open opens the browser before it asks for the scan, so a slow or failing scan can't delay it", async () => {
+    const f = await fakeServer((_req, res) => { res.statusCode = 500; res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ error: "boom", message: "scan blew up" })); });
+    const r = await f.call("rushes_open");
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain("scan blew up");
+    expect(f.log.indexOf("open")).toBeGreaterThan(-1);
+    expect(f.log.indexOf("open")).toBeLessThan(f.log.indexOf("POST /api/found/scan"));
+    await f.close();
+  });
+
+  it("rushes_open has the browser open while the scan hasn't answered", async () => {
+    const f = await fakeServer(() => undefined); // the scan never answers
+    const pending = f.call("rushes_open");
+    await new Promise<void>((resolve, reject) => {
+      const t0 = Date.now();
+      const tick = () => (f.opened.length ? resolve() : Date.now() - t0 > 3000 ? reject(new Error("never opened")) : setTimeout(tick, 10));
+      tick();
+    });
+    expect(f.log).toContain("POST /api/found/scan");
+    await f.close();
+    await pending.catch(() => undefined);
+  });
+
+  it("surfaces the server's own validation issues, not just 'Request body is invalid'", async () => {
+    const f = await fakeServer((_req, res) => {
+      res.statusCode = 400;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ error: "invalid", message: "Request body is invalid", issues: [{ path: ["include", 0, "path"], message: "Too small: expected string to have >=1 characters" }] }));
+    });
+    const r = await f.call("rushes_open", { film: "hero" });
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain("Request body is invalid");
+    expect(r.text).toContain("include.0.path: Too small");
+    await f.close();
+  });
+
+  it("rushes_open passes through alreadyIn, scanning and where each file came from", async () => {
+    const answer = { ok: true, added: [{ path: "a.wav", kind: "music", origin: "include", reasons: [] }], alreadyIn: ["b.wav"], failed: [], found: { voice: 0, music: 0, sfx: 0, cut: 0, other: 2 }, scanning: true };
+    const f = await fakeServer((_req, res) => { res.setHeader("content-type", "application/json"); res.end(JSON.stringify(answer)); });
+    const json = JSON.parse((await f.call("rushes_open", { browser: false })).text);
+    expect(json).toMatchObject({ broughtIn: answer.added, alreadyIn: ["b.wav"], failed: [], found: answer.found, scanning: true });
+    await f.close();
+  });
+});
+
+describe("MCP tools: input limits mirror the server's", () => {
+  it("rejects what the server would, before it is asked", async () => {
+    const t = await connect();
+    const bad = async (name: string, args: Record<string, unknown>) => (await t.call(name, args)).isError;
+    expect(await bad("rushes_open", { include: Array.from({ length: 61 }, () => ({ path: "a.wav" })) })).toBe(true);
+    expect(await bad("rushes_open", { include: [{ path: "" }] })).toBe(true);
+    expect(await bad("rushes_open", { include: [{ path: "a.wav", round: "" }] })).toBe(true);
+    expect(await bad("rushes_open", { include: [{ path: "a.wav", round: "x".repeat(65) }] })).toBe(true);
+    expect(await bad("rushes_open", { film: "" })).toBe(true);
+    expect(await bad("rushes_bring_in", { files: [] })).toBe(true);
+    expect(await bad("rushes_bring_in", { files: Array.from({ length: 61 }, () => ({ path: "a.wav" })) })).toBe(true);
+    const { tools } = await t.client.listTools();
+    const items = (tools.find((x) => x.name === "rushes_open")!.inputSchema as any).properties.include;
+    expect(items.maxItems).toBe(60);
+    expect(items.items.properties.path).toMatchObject({ minLength: 1, maxLength: 1024 });
+    expect(items.items.properties.round).toMatchObject({ minLength: 1, maxLength: 64 });
+    await t.close();
   });
 });
