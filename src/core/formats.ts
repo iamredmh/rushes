@@ -33,6 +33,23 @@ function gcd(a: number, b: number): number {
 /** 2.388 -> "2.39", 2.4 -> "2.4", 2 -> "2". */
 const decimal = (n: number): string => String(Number(n.toFixed(2)));
 
+/** R13: the long side over the short, to two decimals: "2.39:1", "1:2.39". */
+const decimalLabel = (r: number): string => (r >= 1 ? `${decimal(r)}:1` : `1:${decimal(1 / r)}`);
+
+/** The standard ratio nearest `r`, and how far off it is (a fraction of the standard). */
+function nearestStandard(r: number): { best: readonly [number, number] | null; err: number } {
+  let best: readonly [number, number] | null = null;
+  let err = Infinity;
+  for (const s of STANDARD_RATIOS) {
+    const e = Math.abs(r - s[0] / s[1]) / (s[0] / s[1]);
+    if (e < err) {
+      err = e;
+      best = s;
+    }
+  }
+  return { best, err };
+}
+
 /**
  * §21.3: the label for a picture `width` × `height` (its shape on screen). The nearest standard
  * ratio within 1%, otherwise the reduced fraction when both terms are 32 or less, otherwise a
@@ -43,21 +60,13 @@ export function ratioLabel(width: number, height: number): string {
     throw new RangeError(`Not a picture size: ${width}×${height}`);
   }
   const r = width / height;
-  let best: readonly [number, number] | null = null;
-  let bestErr = Infinity;
-  for (const s of STANDARD_RATIOS) {
-    const err = Math.abs(r - s[0] / s[1]) / (s[0] / s[1]);
-    if (err < bestErr) {
-      bestErr = err;
-      best = s;
-    }
-  }
-  if (best && bestErr <= 0.01 + 1e-12) return `${best[0]}:${best[1]}`;
+  const { best, err } = nearestStandard(r);
+  if (best && err <= 0.01 + 1e-12) return `${best[0]}:${best[1]}`;
   const w = Math.round(width);
   const h = Math.round(height);
   const g = gcd(w, h);
   if (w / g <= 32 && h / g <= 32) return `${w / g}:${h / g}`;
-  return r >= 1 ? `${decimal(r)}:1` : `1:${decimal(1 / r)}`;
+  return decimalLabel(r);
 }
 
 export const ratioId = (label: string): string => label.replace(":", "x");
@@ -74,20 +83,33 @@ export function ratioValue(label: string): number | null {
 
 const isStandard = (label: string): boolean => STANDARD_RATIOS.some(([a, b]) => `${a}:${b}` === label);
 
+/** The longest a label can be (it becomes a format id, which the schema caps at 16 characters). */
+const MAX_LABEL = 16;
+
 /**
- * §21.4's `label`, which is only a hint (R10): used when the measured ratio isn't a standard one and
- * the hint is within 2% of it. Otherwise the measured label stands, with a note saying why.
+ * §21.4's `label`, which is only a hint (R10). It is used only when the measured ratio isn't a
+ * standard one, the hint isn't itself within 1% of a standard ratio (that would be §21.3's job, and
+ * a render can't be labelled as a ratio it isn't), and the hint is within 2% of the measured shape.
+ * A hint that is used is rewritten into the canonical R13 form ("12:5", "2.40:1" and "2.4:1.0"
+ * all become "2.4:1"), so two spellings can never make two ids for one shape. Otherwise the
+ * measured label stands, with a note saying why.
  */
 export function settleLabel(width: number, height: number, hint?: string): { label: string; note: string | null } {
   const measured = ratioLabel(width, height);
   const given = hint?.trim() ?? "";
   if (given === "" || given === measured) return { label: measured, note: null };
+  if (given.length > MAX_LABEL) return { label: measured, note: `The label is too long to be a ratio, so Rushes used the measured ${measured}.` };
   const v = ratioValue(given);
   if (v === null) return { label: measured, note: `"${given}" isn't a ratio like 2.39:1, so Rushes used the measured ${measured}.` };
   if (isStandard(measured)) return { label: measured, note: `The file measures ${measured}, a standard ratio, so the label "${given}" wasn't needed.` };
+  const standard = nearestStandard(v);
+  if (standard.best && standard.err <= 0.01 + 1e-12) {
+    return { label: measured, note: `"${given}" is a standard ratio, and the file isn't one, so Rushes used the measured ${measured}.` };
+  }
   const r = width / height;
-  if (Math.abs(v - r) / r <= 0.02) return { label: given, note: null };
-  return { label: measured, note: `The file measures ${measured}, too far from "${given}" to use it.` };
+  if (Math.abs(v - r) / r > 0.02) return { label: measured, note: `The file measures ${measured}, too far from "${given}" to use it.` };
+  const canonical = decimalLabel(v);
+  return { label: canonical, note: canonical === given ? null : `Rushes wrote the label "${given}" as ${canonical}.` };
 }
 
 /** §21.5: 9:16, 4:5, 1:1, 4:3, 16:9, then anything else from narrow to wide (width over height). */

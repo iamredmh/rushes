@@ -68,6 +68,28 @@ describe("settleLabel: the label hint (§21.4, R10)", () => {
   });
 });
 
+describe("settleLabel: a hint can't make a second spelling of one shape (fix round 1, I3)", () => {
+  it.each(["2.4:1", "12:5", "2.40:1", "2.4:1.0", " 2.4:1 "])("the hint %j is written as the canonical 2.4:1", (hint) => {
+    expect(settleLabel(1920, 804, hint).label).toBe("2.4:1");
+  });
+  it("says so when it rewrites a hint, and stays quiet when it doesn't", () => {
+    expect(settleLabel(1920, 804, "12:5").note).toMatch(/12:5/);
+    expect(settleLabel(1920, 804, "2.4:1").note).toBeNull();
+  });
+  it("a portrait hint is canonical too: the long side over the short, 1:2.4", () => {
+    expect(settleLabel(804, 1920, "5:12").label).toBe("1:2.4");
+  });
+  it("rejects a hint within 1% of a standard ratio, so it can't mislabel a render as a ratio it isn't", () => {
+    // 1950x1080 is 1.81:1, outside 1% of 16:9; the hint "16:9" must not make it 16x9.
+    expect(settleLabel(1950, 1080, "16:9")).toEqual({ label: "1.81:1", note: expect.stringContaining("standard") });
+    expect(settleLabel(1950, 1080, "1.78:1").label).toBe("1.81:1");
+  });
+  it("rejects a hint too long to be a label", () => {
+    const long = "2.4000000000000000:1";
+    expect(settleLabel(1920, 804, long)).toEqual({ label: "2.39:1", note: expect.stringMatching(/too long/) });
+  });
+});
+
 describe("chipOrder (§21.5)", () => {
   const f = (id: string, width: number, height: number) => ({ id, width, height });
   it("puts 9:16, 4:5, 1:1, 4:3 and 16:9 first, then the rest from narrow to wide", () => {

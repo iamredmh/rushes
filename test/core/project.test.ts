@@ -452,6 +452,15 @@ describe("formats in the data (§21.3)", () => {
     expect(addFormat(withCut(), { ...shape("renders/t.mp4", 1080, 1920), label: "4:5" }).labelNote).toMatch(/standard ratio/);
   });
 
+  it("two spellings of one unusual ratio can't make two shapes (I3)", () => {
+    const p = withCut();
+    addFormat(p, { ...shape("renders/a.mp4", 1920, 804), label: "2.4:1" });
+    for (const hint of ["12:5", "2.40:1", "2.4:1.0"]) {
+      expect(() => addFormat(p, { ...shape("renders/b.mp4", 1920, 806), label: hint })).toThrow("v1 already has 2.4:1.");
+    }
+    expect(p.videos[0].versions[0].formats.map((f) => f.id)).toEqual(["2.4x1"]);
+  });
+
   it("uses the primary's size given for a cut from before formats, and refuses without one", () => {
     const p = withCut({ width: null, height: null });
     expect(() => addFormat(p, shape("renders/t.mp4", 1080, 1920))).toThrow(/can't read v1's own picture size/);
