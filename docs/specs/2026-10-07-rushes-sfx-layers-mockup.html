@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sound effects: seeing the cues</title>
+<style>
+:root{color-scheme:dark;--bg:#0c0d0f;--app:#141518;--raised:#1c1e22;--hover:#25282d;--line:#26282d;--line-2:#34373d;--text:#eeeef0;--text-2:#a3a6ad;--text-3:#70737a;--accent:#7c93ff;--accent-2:#9eaeff;--on-accent:#0b1026;--accent-soft:rgba(124,147,255,.14);--sfx:#fb923c;--done:#4cc38a;--mono:ui-monospace,"SF Mono",Menlo,monospace}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg)}
+body{color:var(--text);font:15px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.demo{display:flex;gap:10px;align-items:center;padding:12px 20px;border-bottom:1px solid var(--line);background:#0a0b0d;color:var(--text-2);flex-wrap:wrap}
+.demo b{color:var(--text)}
+.opt{padding:6px 14px;border:1px solid var(--line-2);border-radius:999px;color:var(--text-2)}
+.opt[aria-pressed=true]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-2)}
+.opt small{color:var(--text-3);margin-left:6px}
+.wrap{max-width:1280px;margin:0 auto;padding:20px}
+h1{font-size:18px;margin:0 0 4px}
+.desc{color:var(--text-2);margin:0 0 16px;max-width:900px}
+.stage{background:var(--app);border:1px solid var(--line);border-radius:14px;padding:16px 18px}
+.head{display:flex;align-items:center;gap:14px;margin-bottom:12px;color:var(--text-2)}
+.head .t{font-family:var(--mono);color:var(--text);font-size:18px}
+.lane{display:grid;grid-template-columns:200px minmax(0,1fr) 70px;gap:12px;align-items:stretch;margin-bottom:8px}
+.nm{display:grid;align-content:center;gap:2px;padding-right:6px}
+.nm .row1{display:flex;align-items:center;gap:8px}
+.chev{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;color:var(--text-2);border:1px solid var(--line-2);flex:none}
+.chev:hover{background:var(--hover);color:var(--text)}
+.chev svg{transition:transform .16s}
+.chev[aria-expanded=true] svg{transform:rotate(90deg)}
+.dot{width:9px;height:9px;border-radius:2px;background:var(--sfx);flex:none}
+.nm b{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nm small{color:var(--text-3);font-size:15px}
+.track{position:relative;height:84px;background:var(--raised);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.track.sel{border-color:var(--accent)}
+.wave{position:absolute;left:0;right:0;top:12px;height:34px;display:flex;align-items:center}
+.wave i{flex:1;background:var(--sfx);opacity:.55;min-width:1px;border-radius:1px}
+.tick{position:absolute;top:8px;width:1.5px;height:44px;background:var(--sfx);opacity:.8;transform:translateX(-50%)}
+.tick.hot{background:#fff;opacity:1;width:2px}
+.cuel{position:absolute;bottom:6px;transform:translateX(-50%);color:var(--sfx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:15px;text-align:center;padding:0 2px;border-radius:4px}
+.cuel.hot{color:#fff;background:rgba(251,146,60,.35)}
+.play{position:absolute;top:0;bottom:0;width:2px;background:#fff;z-index:3}
+.use{align-self:center;padding:5px 12px;border:1px solid var(--line-2);border-radius:999px;color:var(--text-2)}
+.use.on{background:rgba(76,195,138,.14);border-color:var(--done);color:var(--done)}
+/* layers */
+.layers{margin:0 0 10px;padding-left:212px;padding-right:82px}
+.layers[hidden]{display:none}
+.layer{display:grid;grid-template-columns:0 minmax(0,1fr);position:relative;height:30px;margin-bottom:3px}
+.lbl{position:absolute;right:calc(100% + 12px);top:0;width:200px;height:30px;display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--text-2)}
+.lbl span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lbl em{font-style:normal;font-family:var(--mono);color:var(--text-3)}
+.ltrack{grid-column:2;position:relative;height:30px;background:var(--raised);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.ltrack .play{opacity:.9}
+.lt{position:absolute;top:4px;height:20px;width:6px;border-radius:3px;background:var(--sfx);transform:translateX(-50%);cursor:pointer;border:0;padding:0}
+.lt:hover,.lt.hot{background:#fff;outline:2px solid var(--sfx)}
+.pk{position:absolute;top:3px;height:22px;display:flex;align-items:center;gap:5px;transform:translateX(-3px);cursor:pointer;color:var(--sfx);white-space:nowrap;font-size:15px}
+.pk i{width:6px;height:20px;border-radius:3px;background:var(--sfx);flex:none}
+.pk:hover,.pk.hot{color:#fff}
+.pk:hover i,.pk.hot i{background:#fff}
+.tip{position:fixed;z-index:50;pointer-events:none;background:#000;border:1px solid var(--line-2);border-radius:10px;padding:8px 12px;min-width:200px;box-shadow:0 12px 32px rgba(0,0,0,.5);display:none}
+.tip b{display:block;font-weight:600}
+.tip .m{font-family:var(--mono);color:var(--text-2)}
+.tip .f{color:var(--sfx);font-family:var(--mono);word-break:break-all}
+.tip .h{color:var(--text-3)}
+.notes{margin-top:14px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.card{background:var(--app);border:1px solid var(--line);border-radius:12px;padding:12px 14px;color:var(--text-2)}
+.card b{color:var(--text);display:block;margin-bottom:4px}
+.pill{display:inline-block;padding:0 8px;border-radius:999px;border:1px solid var(--line-2);color:var(--text-2);font-size:15px;margin-left:6px}
+label.chk{display:inline-flex;gap:8px;align-items:center;color:var(--text-2)}
+</style>
+</head>
+<body>
+<div class="demo" role="group" aria-label="Options">
+  <b>Option:</b>
+  <button class="opt" data-o="1" aria-pressed="false">1 · Hover only <small>nothing opens</small></button>
+  <button class="opt" data-o="2" aria-pressed="true">2 · Layers by sound <small>repeats share a row</small></button>
+  <button class="opt" data-o="3" aria-pressed="false">3 · Layers by time <small>packed so labels fit</small></button>
+  <label class="chk"><input type="checkbox" id="src" checked> show the source file</label>
+</div>
+
+<div class="wrap">
+  <h1>Sound effects: seeing the cues</h1>
+  <p class="desc" id="desc"></p>
+  <div class="stage">
+    <div class="head"><span>Sound effects</span><span class="t" id="time">0:16.64</span><span style="font-family:var(--mono);color:var(--text-3)">/ 0:39.67</span></div>
+
+    <div class="lane">
+      <div class="nm"><div class="row1"><button class="chev" id="chev" aria-expanded="false" aria-label="Show the layers for this pass"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></button><span class="dot"></span><b>Effects for Weave</b></div><small>80 cues on picture events</small></div>
+      <div class="track sel" id="track"></div>
+      <div class="ctl"><button class="use on">✓ In use</button></div>
+    </div>
+    <div class="layers" id="layers" hidden></div>
+
+    <div class="lane">
+      <div class="nm"><div class="row1"><button class="chev" disabled style="opacity:.4" aria-label="Show the layers"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></button><span class="dot"></span><b>Effects for Load-bearing</b></div><small>The same 80 cues, levelled</small></div>
+      <div class="track"><div class="wave" id="wave2"></div></div>
+      <div class="ctl"><button class="use">Use</button></div>
+    </div>
+  </div>
+
+  <div class="notes">
+    <div class="card"><b>Hover, every option</b>Rest the pointer on any cue (or Tab to it) and a card shows the full name, the time, and the source file when an agent sent one.</div>
+    <div class="card"><b>The arrow</b>The chevron by the pass name opens the layers under that row. Clicking a tick moves the playhead there. The playhead stays in step with the main row.</div>
+    <div class="card"><b>Which is it?</b>Option 2 answers "where does this sound come in?". Option 3 answers "what is happening around this moment?". Option 1 is the smallest change.</div>
+  </div>
+</div>
+<div class="tip" id="tip"></div>
+
+<script>
+const LEN = 39.67;
+const SOUNDS = [
+  ["click","sfx/click_soft_02.wav"],["whoosh","sfx/whoosh_long_01.wav"],["thud","sfx/thud_low_03.wav"],
+  ["shimmer","sfx/shimmer_up_01.wav"],["tick","sfx/tick_dry_04.wav"],["chime","sfx/chime_glass_02.wav"],
+  ["pop","sfx/pop_bubble_05.wav"],["sweep","sfx/sweep_air_02.wav"],["impact","sfx/impact_sub_01.wav"],
+  ["static","sfx/static_burst_03.wav"],["swoosh · end line","sfx/swoosh_end_01.wav"],["power-down · offline","sfx/powerdown_02.wav"]
+];
+function rng(seed){return()=> (seed=(seed*1664525+1013904223)>>>0)/4294967296}
+const r = rng(7);
+const CUES = [];
+let t = 0.6;
+while (CUES.length < 80 && t < LEN - 0.6) {
+  const burst = r() < .35;
+  const k = burst ? Math.floor(r()*3) : Math.floor(r()*SOUNDS.length);
+  const [name,file] = SOUNDS[Math.min(k, SOUNDS.length-1)];
+  CUES.push({id:CUES.length, t:+t.toFixed(2), name, file});
+  t += burst ? 0.12 + r()*0.25 : 0.25 + r()*0.9;
+}
+CUES.push({id:CUES.length,t:33.1,name:"power-down · offline",file:SOUNDS[11][1]},{id:CUES.length+1,t:38.1,name:"swoosh · end line",file:SOUNDS[10][1]});
+CUES.sort((a,b)=>a.t-b.t); CUES.forEach((c,i)=>c.id=i);
+const NAMES = [...new Set(CUES.map(c=>c.name))];
+const GROUPS = NAMES.map(n=>({name:n, cues:CUES.filter(c=>c.name===n)}));
+let opt = 2, open = false, playT = 16.64, hot = null;
+const $=(s)=>document.querySelector(s);
+const pct=(t)=>(t/LEN*100).toFixed(3)+"%";
+const fmt=(t)=>{const m=Math.floor(t/60), s=(t-m*60).toFixed(2).padStart(5,"0");return m+":"+s};
+
+function wave(el, seed){const rr=rng(seed);let h="";for(let i=0;i<220;i++){const spike=rr()<.08;h+=`<i style="height:${spike?30:3+rr()*5}px"></i>`}el.innerHTML=h}
+function tipShow(c, x, y){
+  const showFile=$("#src").checked;
+  $("#tip").innerHTML=`<b>${c.name}</b><span class="m">${fmt(c.t)} · cue ${c.id+1} of ${CUES.length}</span>${showFile?`<br><span class="f">${c.file}</span>`:`<br><span class="h">no source file sent</span>`}`;
+  const el=$("#tip");el.style.display="block";el.style.left=Math.min(x+14,innerWidth-260)+"px";el.style.top=(y+18)+"px";
+}
+function tipHide(){ $("#tip").style.display="none" }
+function setHot(c){hot=c?c.id:null;document.querySelectorAll("[data-cue]").forEach(e=>e.classList.toggle("hot",+e.dataset.cue===hot))}
+function bind(el,c){
+  el.dataset.cue=c.id;el.tabIndex=0;
+  el.onmousemove=(e)=>{tipShow(c,e.clientX,e.clientY);setHot(c)};
+  el.onmouseleave=()=>{tipHide();setHot(null)};
+  el.onfocus=()=>{const b=el.getBoundingClientRect();tipShow(c,b.left,b.top);setHot(c)};
+  el.onblur=()=>{tipHide();setHot(null)};
+  el.onclick=(e)=>{e.stopPropagation();playT=c.t;render()};
+}
+function mainTrack(){
+  const tr=$("#track");tr.innerHTML="";
+  const w=document.createElement("div");w.className="wave";tr.appendChild(w);wave(w,11);
+  const W=tr.clientWidth;
+  CUES.forEach((c,i)=>{
+    const tk=document.createElement("i");tk.className="tick";tk.style.left=pct(c.t);tr.appendChild(tk);
+    const prev=CUES[i-1]?c.t-CUES[i-1].t:99, next=CUES[i+1]?CUES[i+1].t-c.t:99;
+    const room=Math.max(10,Math.min(prev,next)/LEN*W*0.5*2-8);
+    const l=document.createElement("span");l.className="cuel";l.textContent=c.name;l.style.left=pct(c.t);l.style.maxWidth=Math.min(room,170)+"px";
+    bind(l,c);tr.appendChild(l);
+    tk.dataset.cue=c.id;
+  });
+  const p=document.createElement("div");p.className="play";p.style.left=pct(playT);tr.appendChild(p);
+  tr.onclick=(e)=>{const b=tr.getBoundingClientRect();playT=Math.max(0,Math.min(LEN,(e.clientX-b.left)/b.width*LEN));render(true)};
+}
+function layers(){
+  const box=$("#layers");box.hidden=!(open&&opt!==1);box.innerHTML="";
+  if(box.hidden)return;
+  if(opt===2){
+    GROUPS.forEach(g=>{
+      const row=document.createElement("div");row.className="layer";
+      row.innerHTML=`<div class="lbl"><span>${g.name}</span><em>×${g.cues.length}</em></div>`;
+      const tr=document.createElement("div");tr.className="ltrack";
+      g.cues.forEach(c=>{const b=document.createElement("button");b.className="lt";b.style.left=pct(c.t);b.setAttribute("aria-label",`${c.name} at ${fmt(c.t)}`);bind(b,c);tr.appendChild(b)});
+      const p=document.createElement("div");p.className="play";p.style.left=pct(playT);tr.appendChild(p);
+      row.appendChild(tr);box.appendChild(row);
+    });
+  } else {
+    const W=$("#track").clientWidth, rows=[];
+    CUES.forEach(c=>{
+      const x=c.t/LEN*W, wpx=c.name.length*7.6+22;
+      let k=rows.findIndex(end=>end<x-4); if(k<0){rows.push(0);k=rows.length-1}
+      rows[k]=x+wpx; (c._row=k);
+    });
+    rows.forEach((_,k)=>{
+      const row=document.createElement("div");row.className="layer";
+      row.innerHTML=`<div class="lbl"><span style="color:var(--text-3)">layer ${k+1}</span></div>`;
+      const tr=document.createElement("div");tr.className="ltrack";
+      CUES.filter(c=>c._row===k).forEach(c=>{const b=document.createElement("button");b.className="pk";b.style.left=pct(c.t);b.innerHTML=`<i></i>${c.name}`;b.setAttribute("aria-label",`${c.name} at ${fmt(c.t)}`);bind(b,c);tr.appendChild(b)});
+      const p=document.createElement("div");p.className="play";p.style.left=pct(playT);tr.appendChild(p);
+      row.appendChild(tr);box.appendChild(row);
+    });
+  }
+}
+function desc(){
+  $("#desc").textContent = opt===1
+    ? "Option 1: nothing opens. The row stays as it is today, but every cue label and tick can be hovered (or tabbed to) for its full name, time and source file. Smallest change; it still can't show you where each sound repeats."
+    : opt===2
+    ? "Option 2: the arrow opens one layer per distinct sound, in order of first appearance. A sound that repeats shares its layer, with a tick at every place it comes in, and a count on the left. Hover a tick for the details."
+    : "Option 3: the arrow opens layers only so every label fits in full. Cues are packed by time, so a layer isn't one sound: it reads like a score of what happens when. Hover a label for the details.";
+}
+function render(keepLayers){
+  $("#time").textContent=fmt(playT);
+  mainTrack();layers();desc();
+  $("#chev").style.visibility=opt===1?"hidden":"visible";
+  $("#chev").setAttribute("aria-expanded",open&&opt!==1);
+}
+document.querySelectorAll(".opt").forEach(b=>b.onclick=()=>{opt=+b.dataset.o;document.querySelectorAll(".opt").forEach(x=>x.setAttribute("aria-pressed",x===b));if(opt!==1&&!open)open=true;render()});
+$("#chev").onclick=()=>{open=!open;render()};
+$("#src").onchange=()=>{};
+wave($("#wave2"),31);
+open=true;render();addEventListener("resize",()=>render());
+</script>
+</body>
+</html>
