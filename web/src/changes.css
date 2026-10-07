@@ -1,0 +1,35 @@
+/* §22.8: the version list and the cut's note under the picture (the approved mockup). Explicit grid
+   tracks throughout (§22.11, Safari). Task 6 adds the Change Log below. */
+.vwrap { position: relative; min-width: 0; }
+.vbtn { display: inline-flex; align-items: center; gap: 8px; max-width: 340px; min-width: 0; height: 32px; padding: 0 12px; border: 1px solid var(--line-2); border-radius: 999px; background: transparent; color: var(--text); font-size: 15px; cursor: pointer; }
+.vbtn:hover, .vbtn[aria-expanded="true"] { background: var(--hover); }
+.vbtn .vid { flex: none; font-family: var(--mono); color: var(--accent-2); }
+.vbtn .vlbl { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
+.vbtn .ic { flex: none; width: 15px; height: 15px; }
+.vmenu { position: absolute; left: 0; top: calc(100% + 8px); z-index: 45; display: grid; width: min(700px, calc(100vw - 40px)); grid-template-columns: minmax(0, 1fr) minmax(0, 300px); background: var(--raised); border: 1px solid var(--line-2); border-radius: var(--r-lg); box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5); overflow: hidden; animation: vmenu-in 0.12s ease-out; }
+@keyframes vmenu-in { from { opacity: 0; transform: translateY(-4px); } }
+.vmenu.touch { grid-template-columns: minmax(0, 1fr); }
+.vlist { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 2px; padding: 6px; max-height: min(420px, 60vh); overflow: auto; }
+.vrow { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 10px; align-items: center; min-width: 0; padding: 8px 10px; border: 0; border-radius: var(--r); background: transparent; color: var(--text); text-align: left; font: inherit; font-size: 15px; cursor: pointer; }
+.vrow:focus-visible { outline-offset: -2px; }
+.vrow[data-on="true"] { background: var(--hover); }
+.vrow .vid { font-family: var(--mono); color: var(--text-2); }
+.vrow[aria-selected="true"] .vid { color: var(--accent-2); }
+.vrow .vlbl { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vrow .vwhen { display: flex; gap: 6px; align-items: center; color: var(--text-3); white-space: nowrap; }
+.vrow .vwhen .ic { flex: none; width: 15px; height: 15px; }
+.vrow .vinline { grid-column: 1 / -1; display: grid; gap: 4px; color: var(--text-2); overflow-wrap: anywhere; white-space: normal; }
+.vdetail { display: grid; align-content: start; gap: 8px; min-width: 0; padding: 12px 14px; border-left: 1px solid var(--line); background: var(--app); font-size: 15px; }
+.vdetail h4 { margin: 0; font: 600 15px var(--mono); color: var(--text-2); }
+.vdetail p { margin: 0; overflow-wrap: anywhere; }
+.vmeta { color: var(--text-3); font-family: var(--mono); }
+.vnote { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; margin-top: 10px; padding: 10px 14px; border: 1px solid var(--line); border-radius: var(--r); background: var(--raised); color: var(--text-2); font-size: 15px; }
+.vnote .vtext { overflow-wrap: anywhere; }
+.vnote .vclamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.vnote .vmore { justify-self: start; padding: 0; border: 0; background: none; color: var(--accent-2); font: inherit; font-size: 15px; cursor: pointer; }
+/* A narrow window has no room beside the list: the note goes under it. */
+@media (max-width: 640px) {
+  .vmenu { grid-template-columns: minmax(0, 1fr); }
+  .vdetail { border-left: 0; border-top: 1px solid var(--line); }
+}
+@media (prefers-reduced-motion: reduce) { .vmenu { animation: none; } }
