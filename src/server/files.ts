@@ -90,7 +90,7 @@ export function registeredMedia(project: Project, script: Script): Set<string> {
 
 /** §15.5: the only kinds of file /media serves when its real path lies outside the project (footage on another drive, say). */
 export const OUTSIDE_MEDIA_EXT: ReadonlySet<string> = new Set([
-  "wav", "mp3", "m4a", "aif", "aiff", "flac", "ogg", "opus", "mp4", "mov", "m4v", "webm",
+  "wav", "mp3", "m4a", "aac", "aif", "aiff", "flac", "ogg", "opus", "mp4", "mov", "m4v", "webm", "mkv",
   "png", "jpg", "jpeg", "gif", "webp", "pdf", "md", "txt", "srt", "vtt",
 ]);
 

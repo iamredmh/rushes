@@ -403,7 +403,7 @@ Rushes creates `screenshots/` itself on the first grab. It never creates the oth
 ### 15.5 Serving files that are symlinks (0.2.1)
 - **Every file `/media` accepts** (cuts and their proxies, variants, takes, library files, the docs, captions and exports found automatically, screenshots and grabs) is served from its real path, with every symlink resolved.
   - When that real path is inside the project folder, the file is served as before.
-  - When it lies outside, the file is served only if the **final** real file's extension is media: `wav mp3 m4a aif aiff flac ogg opus mp4 mov m4v webm png jpg jpeg gif webp pdf md txt srt vtt`.
+  - When it lies outside, the file is served only if the **final** real file's extension is media: `wav mp3 m4a aac aif aiff flac ogg opus mp4 mov m4v webm mkv png jpg jpeg gif webp pdf md txt srt vtt`. That is every extension the dashboard treats as media or a document, except edit-app project files (`prproj`, `drp`); a unit test fails if the lists drift apart.
   - Anything else is a 404, whatever the link itself is called. That includes edit-app project files (`.prproj`, `.drp`) and anything else that isn't media: outside the project they no longer download, though Show in Finder still finds them.
   - So footage linked in from another drive keeps playing, but a take swapped for a link to a key or credentials file is never served.
 

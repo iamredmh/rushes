@@ -4,7 +4,9 @@ import { dirname, join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
 import { createApp } from "../../src/server/app.js";
 import { addVariant } from "../../src/core/project.js";
-import { parseRange, inside, contentDisposition } from "../../src/server/files.js";
+import { parseRange, inside, contentDisposition, OUTSIDE_MEDIA_EXT, CONTENT_TYPES, isInlineSafeType } from "../../src/server/files.js";
+import { OPEN_SAFE_EXT as SERVER_OPEN_SAFE_EXT } from "../../src/server/reveal.js";
+import { OPEN_SAFE_EXT as WEB_OPEN_SAFE_EXT, PREVIEWABLE_EXT, VIDEO_EXT as WEB_VIDEO_EXT } from "../../web/src/lib.js";
 
 // The smallest valid PNG (1×1, transparent).
 const PNG_1PX = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
@@ -225,6 +227,18 @@ describe("registered files that are symlinks (§15.5)", () => {
     expect(await res.text()).toBe("footage");
   });
 
+  it("serves a .mkv and a .aac linked in from another drive, which the dashboard plays", async () => {
+    const { root, outside, reg, get } = await linked();
+    for (const name of ["film.mkv", "bed.aac"]) {
+      await writeFile(join(outside, name), "media");
+      await symlink(join(outside, name), join(root, "takes", name));
+      await reg(`takes/${name}`);
+      const res = await get(`takes/${name}`);
+      expect(res.status, name).toBe(200);
+      expect(await res.text()).toBe("media");
+    }
+  });
+
   it("refuses a symlink out of the project to a file that isn't media, whatever the link is called", async () => {
     const { root, outside, reg, get } = await linked();
     for (const [link, target] of [["take1.wav", "credentials.json"], ["take2.wav", "id_ed25519"], ["take3.mp4", "server.pem"]]) {
@@ -325,5 +339,32 @@ describe("frame grabs", () => {
     const back = await call(`/media?path=${encodeURIComponent(".rushes/grabs/hero_v1_f60.png")}`);
     expect(back.status).toBe(200);
     expect(back.headers.get("content-type")).toBe("image/png");
+  });
+});
+
+// §15.5: what /media serves from outside the project must be exactly what the dashboard treats as
+// media. A format the dashboard plays but /media refuses would stop playing, so any list that
+// drifts from the others fails here.
+describe("the outside-the-project allow-list matches every list of media extensions", () => {
+  // Project files for an editing app: revealed from the dashboard, never served from outside.
+  const EDIT_FILES = new Set(["prproj", "drp"]);
+  const bare = (exts: Iterable<string>) => [...exts].map((e) => e.replace(/^\./, ""));
+  const sources: Record<string, string[]> = {
+    "the dashboard's open-safe list": bare(WEB_OPEN_SAFE_EXT),
+    "the server's open-safe list": bare(SERVER_OPEN_SAFE_EXT),
+    "the dashboard's video list": bare(WEB_VIDEO_EXT),
+    "the dashboard's previewable list": bare(PREVIEWABLE_EXT),
+    "every inline-safe content type": Object.entries(CONTENT_TYPES).filter(([, t]) => isInlineSafeType(t)).map(([e]) => e.slice(1)),
+  };
+
+  it.each(Object.entries(sources))("serves every extension in %s", (_name, exts) => {
+    const missing = exts.filter((e) => !EDIT_FILES.has(e) && !OUTSIDE_MEDIA_EXT.has(e));
+    expect(missing).toEqual([]);
+  });
+
+  it("serves nothing the dashboard doesn't treat as media, and gives each extension a content type", () => {
+    const known = new Set(Object.values(sources).flat());
+    expect([...OUTSIDE_MEDIA_EXT].filter((e) => !known.has(e))).toEqual([]);
+    for (const e of OUTSIDE_MEDIA_EXT) expect(CONTENT_TYPES[`.${e}`], e).toBeDefined();
   });
 });
