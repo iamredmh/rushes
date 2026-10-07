@@ -356,10 +356,12 @@ export function oneLine(text: string, max: number): string {
 // §22.4 (3): a note's first clause ends at the first of these that comes after its first 12 characters.
 const CLAUSE_ENDS = [";", ". ", " — ", " ("];
 
-function firstClause(text: string): string {
+// `skipped` is how many characters the id and batch prefixes took off the front: the 12-character
+// minimum counts the note AS WRITTEN, so "v1: first pass; rough" gives "first pass" (Task 1 ruling).
+function firstClause(text: string, skipped: number): string {
   let end = text.length;
   for (const sep of CLAUSE_ENDS) {
-    const i = text.indexOf(sep, 12);
+    const i = text.indexOf(sep, Math.max(0, 12 - skipped));
     if (i >= 0 && i < end) end = i;
   }
   return text.slice(0, end).trim();
@@ -380,11 +382,12 @@ function fileStem(file: string): string {
 export function shortLabel(v: Labelled): string {
   const own = oneLineOf(v.label ?? "");
   if (own) return clip(own, LABEL_MAX);
-  let text = oneLineOf(v.note ?? "");
+  const note = oneLineOf(v.note ?? "");
+  let text = note;
   const n = /^v(\d+)$/i.exec(v.id)?.[1];
   if (n !== undefined) text = text.replace(new RegExp(`^v0*${Number(n)}(?![\\p{L}\\p{N}])[\\s:,.\\-–—]*`, "iu"), "");
   text = text.replace(/^\(batch[^)]*\)\s*:?\s*/i, "");
-  text = firstClause(text);
+  text = firstClause(text, note.length - text.length);
   if (WORD.test(text)) return clip(text, LABEL_MAX);
   return clip(fileStem(v.file), LABEL_MAX) || v.id;
 }
