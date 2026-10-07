@@ -402,7 +402,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         for (const n of notes) {
           const label = state ? onLabel(n, state) : null;
           const on = label ? `${stripControl(label)}  ` : "";
-          const tag = state ? formatTag(n, state.project.videos) : null;
+          const tag = state ? formatTag(n, state.project?.videos ?? []) : null;
           const fmtCol = tag ? `${stripControl(tag)}  ` : "";
           const shot = n.shot ? `shot ${String(n.shot.n).padStart(2, "0")} ` : "";
           const marks = (n.marks as Mark[] | undefined)?.length ? `${(n.marks as Mark[]).map(markLabel).join(" · ")}  ` : "";

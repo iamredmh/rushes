@@ -877,4 +877,45 @@ describe("formats on the CLI (§21.4)", () => {
     expect(c.out).toEqual(["Added 9:16 to Hero v1", 'Label: The file measures 9:16, a standard ratio, so the label "2.39:1" wasn\'t needed.']);
     await s.close();
   });
+
+  // Review I1: a Rushes from before formats sends notes with no `format` and versions with no `formats`
+  // or size. `rushes notes` printed these lines then, and prints them now.
+  async function oldServer(notes: object[]) {
+    const { root } = await tmpProject();
+    const asked: string[] = [];
+    const old = createServer((req, res) => {
+      asked.push(req.url ?? "");
+      res.setHeader("content-type", "application/json");
+      if (req.url === "/api/health") return void res.end(JSON.stringify({ app: "rushes", root, id: "abcdefgh" }));
+      if (req.url === "/api/notes") return void res.end(JSON.stringify({ notes }));
+      if (req.url === "/api/state") {
+        const project = { name: "Demo", fps: 30, lanes: [], files: [], autoProxy: false, videos: [{ id: "hero", name: "Hero", lockedVersion: null, versions: [{ id: "v1", file: "renders/hero.mp4", duration: 8, fps: 30, shots: [] }] }] };
+        return void res.end(JSON.stringify({ project, script: { sections: [] }, picks: { lanes: {} } }));
+      }
+      res.statusCode = 404;
+      res.end("404 Not Found");
+    });
+    await new Promise<void>((r) => old.listen(0, "127.0.0.1", r));
+    await writeFile(lockPath(root), JSON.stringify({ port: (old.address() as { port: number }).port, pid: process.pid, startedAt: "x" }), "utf8");
+    return { root, asked, close: () => void old.close() };
+  }
+  const oldNote = (over: object) => ({ id: "n_1", stage: "picture", video: "hero", version: "v1", scope: "point", t: 1, tOut: null, text: "Hold longer.", status: "todo", marks: [], shot: null, ...over });
+
+  it("notes against a 0.2.x server, whose notes have no format and whose versions have no formats, prints what it printed before", async () => {
+    const f = await oldServer([oldNote({})]);
+    const a = io(f.root);
+    expect(await main(["notes"], a.x)).toBe(0);
+    expect(a.out).toEqual([`n_1  todo  picture ${"0:01.00".padEnd(17)} Hold longer.`]);
+    f.close();
+  });
+
+  it("a Script-only notes listing asks the server for no state", async () => {
+    const f = await oldServer([oldNote({ id: "n_2", stage: "script", video: null, version: null, scope: "whole", t: null })]);
+    const a = io(f.root);
+    expect(await main(["notes"], a.x)).toBe(0);
+    expect(a.out).toEqual([`n_2  todo  script  ${"whole".padEnd(17)} Hold longer.`]);
+    expect(f.asked).not.toContain("/api/state");
+    f.close();
+  });
 });
+

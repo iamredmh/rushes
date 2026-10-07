@@ -197,6 +197,13 @@ describe("which notes show where (§21.2)", () => {
     expect(formatTag(n("solo", null), videos)).toBeNull();
     expect(formatTag(n("hero", null, "music"), videos)).toBeNull();
   });
+  // Data from a 0.2.x server has no `format` on a note and no `formats` on a version (review I1).
+  it("formatTag reads a 0.2.x server's notes and versions: no format, no formats, nothing to say", () => {
+    const old = [{ id: "hero", versions: [{ id: "v1", file: "renders/hero.mp4" } as never] }];
+    expect(formatTag({ stage: "picture", video: "hero", version: "v1" } as never, old)).toBeNull();
+    expect(formatTag({ stage: "picture", video: "hero", version: "v1", format: undefined } as never, old)).toBeNull();
+    expect(formatTag({ stage: "picture", video: "gone", version: "v9" } as never, old)).toBeNull();
+  });
 });
 
 it("MAX_FORMATS is eight shapes, the primary included (R3)", () => expect(MAX_FORMATS).toBe(8));

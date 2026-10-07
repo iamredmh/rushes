@@ -170,8 +170,10 @@ export function formatTag(
   videos: readonly { id: string; versions: readonly (FormatSource & { id: string })[] }[],
 ): string | null {
   if (note.stage !== "picture") return null;
-  if (note.format !== null) return labelOfId(note.format);
+  // Null-safe: the CLI and agents read data from a 0.2.x server too, whose notes have no `format` and
+  // whose versions have no `formats` (review I1).
+  if (note.format != null) return labelOfId(note.format);
   const version = videos.find((v) => v.id === note.video)?.versions.find((v) => v.id === note.version);
   // Any listed format means two or more shapes, whether or not the primary's size is known.
-  return version && version.formats.length >= 1 ? "All" : null;
+  return (version?.formats?.length ?? 0) >= 1 ? "All" : null;
 }
