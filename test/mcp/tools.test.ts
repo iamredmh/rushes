@@ -706,6 +706,7 @@ describe("formats for agents (§21.4)", () => {
     const t = await connect({ files: FILES, formatProbe: sizedProbe });
     const r = await t.call("rushes_add_version", { video: "Hero", file: "renders/hero_1920x1080.mp4", formats: [{ file: "renders/hero_1080x1920.mp4" }, { file: "renders/hero_1080x1080.mp4" }] });
     expect(r.json.version.formats.map((f: any) => f.id)).toEqual(["9x16", "1x1"]);
+    expect(r.json.note).toBeUndefined();
     await t.close();
   });
 
@@ -719,8 +720,14 @@ describe("formats for agents (§21.4)", () => {
     await add("Logo too close to the top.", "9x16", 2);
     await add("Rows land late on wide.", "16x9", 3);
     expect((await t.call("rushes_list_notes", { stage: "picture" })).json.notes.every((n: any) => "format" in n)).toBe(true);
-    expect((await t.call("rushes_list_notes", { format: "9x16" })).json.notes.map((n: any) => n.text).sort()).toEqual(["Drop the first sound.", "Logo too close to the top."]);
-    const only = (await t.call("rushes_list_notes", { format: "9x16", onlyThisFormat: true })).json.notes;
+    const withFormat = (await t.call("rushes_list_notes", { format: "9x16" })).json;
+    expect(withFormat.notes.map((n: any) => n.text).sort()).toEqual(["Drop the first sound.", "Logo too close to the top."]);
+    expect(withFormat.note).toBeUndefined();
+    // A ratio label such as "9:16" is the same format.
+    expect((await t.call("rushes_list_notes", { format: "9:16" })).json.notes).toEqual(withFormat.notes);
+    const onlyCall = (await t.call("rushes_list_notes", { format: "9x16", onlyThisFormat: true })).json;
+    expect(onlyCall.note).toBeUndefined();
+    const only = onlyCall.notes;
     expect(only.map((n: any) => n.text)).toEqual(["Logo too close to the top."]);
     await t.call("rushes_reply", { replies: [{ id: only[0].id, reply: "Moved the logo down on 9:16.", status: "done" }] });
     const after = (await t.call("rushes_list_notes", { stage: "picture" })).json.notes;
@@ -737,6 +744,37 @@ describe("formats for agents (§21.4)", () => {
     expect(schema("rushes_add_version").formats).toMatchObject({ type: "array", maxItems: 7 });
     expect(schema("rushes_add_version").formats.items.properties.file).toMatchObject({ type: "string", maxLength: 1024 });
     expect(schema("rushes_list_notes").format).toMatchObject({ type: "string", maxLength: 16 });
+    expect(schema("rushes_list_notes").format.pattern).toBeTruthy();
+    expect(schema("rushes_add_format").video).toMatchObject({ minLength: 1, maxLength: 200 });
+    expect(schema("rushes_add_format").version).toMatchObject({ minLength: 1, maxLength: 64 });
+    expect(schema("rushes_add_format").label).toMatchObject({ minLength: 1, maxLength: 16 });
+    await t.close();
+  });
+
+  it("refuses a malformed format id or a blank label before asking the server", async () => {
+    const f = await fakeServer((_req, res) => { res.statusCode = 500; res.end("never asked"); });
+    for (const format of ["tall", "9x", "x16", "9:16:1"]) {
+      const r = await f.call("rushes_list_notes", { format });
+      expect(r.isError, format).toBe(true);
+      expect(r.text, format).toMatch(/format/);
+    }
+    const blank = await f.call("rushes_add_format", { file: "renders/hero_1080x1920.mp4", label: "   " });
+    expect(blank.isError).toBe(true);
+    expect(blank.text).toMatch(/label/);
+    expect(f.log).toEqual([]);
+    await f.close();
+  });
+
+  it("describes every way a format is refused, and that the format filters are for Picture", async () => {
+    const t = await connect();
+    const { tools } = await t.client.listTools();
+    const add = tools.find((x) => x.name === "rushes_add_format")!.description!;
+    for (const part of [/same ratio|ratio the cut already has/, /isn't a video|not a video/, /ffprobe/, /8 shapes|eight shapes/i, /own file.*main shape|main shape/]) expect(add).toMatch(part);
+    const notes = (tools.find((x) => x.name === "rushes_list_notes")!.inputSchema.properties as Record<string, { description?: string }>);
+    expect(notes.format.description).toMatch(/Picture/);
+    const version = tools.find((x) => x.name === "rushes_add_version")!.description!;
+    expect(version).toMatch(/formatWarnings/);
+    expect(version).toMatch(/more than 0\.1 s/);
     await t.close();
   });
 
@@ -747,6 +785,18 @@ describe("formats for agents (§21.4)", () => {
     expect(r.isError).toBe(true);
     expect(r.text).toMatch(/format/);
     await t.close();
+  });
+
+  it("the server's own validation issues come through a format tool's error", async () => {
+    const f = await fakeServer((_req, res) => {
+      res.statusCode = 400;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ error: "invalid", message: "Request body is invalid", issues: [{ path: ["label"], message: "Too long" }] }));
+    });
+    const r = await f.call("rushes_add_format", { file: "a_1080x1920.mp4" });
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain("Request body is invalid (invalid): label: Too long");
+    await f.close();
   });
 });
 

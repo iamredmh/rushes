@@ -86,6 +86,13 @@ describe("shipped agent docs (final review I3)", () => {
     for (const tool of ["rushes_scan", "rushes_bring_in", "rushes_add_format"]) expect(text).toContain(`\`${tool}\``);
   });
 
+  it("AGENTS.md names the key each tool uses for a shape that is off the cut's length, and the format filter spellings (§21.3, §21.4)", () => {
+    const text = read("AGENTS.md");
+    expect(text).toMatch(/`rushes_add_format`[^.]*`warning`/);
+    expect(text).toMatch(/`rushes_add_version`[^.]*`formatWarnings`/);
+    expect(text).toMatch(/Picture is locked/);
+  });
+
   it.each(["README.md", "AGENTS.md", "skills/rushes/SKILL.md"])("%s names exactly the tools the server registers", (file) => {
     const registered = [...read("src/mcp/tools.ts").matchAll(/registerTool\(\s*"(rushes_\w+)"/g)].map((m) => m[1]);
     expect(registered).toHaveLength(20);
