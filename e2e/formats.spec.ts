@@ -237,7 +237,14 @@ test("at 1440×900 a 9:16 format keeps the timeline and note box on screen; the 
   await page.goto(rushes.url);
   await videoReady(page);
   await expect(page.locator(".track canvas")).toBeVisible({ timeout: 15_000 });
+  const floor = () => page.locator(".stack").evaluate((el) => parseFloat((el as HTMLElement).style.getPropertyValue("--player-floor")));
+  await expect.poll(floor).toBeGreaterThan(0);
+  const onPrimary = await floor();
   await radio(page, "9:16").click();
+  await expect(page.locator(".proxybar")).toBeHidden();
+  // The hidden proxy bar takes no room, so the column's floor shrinks by its height, never grows (review M4).
+  expect(await page.locator(".proxybar").evaluate((el) => { el.hidden = false; const h = el.getBoundingClientRect().height; el.hidden = true; return h; })).toBeGreaterThan(0);
+  await expect.poll(floor).toBeLessThan(onPrimary);
   await expect(page.locator(".shots .shot")).toHaveCount(2);
   await expect(page.locator(".ends span").last()).toHaveText("0:04.00");
   await expect(page.locator(".track canvas")).toBeVisible();
@@ -372,7 +379,15 @@ test("a remembered format whose file has gone keeps its shape after a film switc
   const films = page.getByRole("navigation", { name: "Films" });
   await films.getByRole("button", { name: /Teaser/ }).click();
   await videoReady(page);
-  await films.getByRole("button", { name: /Hero/ }).click();
+  // The very first frame painted after the remount is already 9:16, not 16:9 corrected later.
+  const first = await page.evaluate(async () => {
+    const hero = [...document.querySelectorAll<HTMLButtonElement>('nav[aria-label="Films"] button')].find((b) => /Hero/.test(b.textContent ?? ""))!;
+    hero.click();
+    await new Promise((r) => requestAnimationFrame(r));
+    const b = document.querySelector(".frame")!.getBoundingClientRect();
+    return b.width / b.height;
+  });
+  expect(first).toBeCloseTo(180 / 320, 1);
   await expect(radio(page, "9:16")).toHaveAttribute("aria-checked", "true");
   await expect(page.locator(".frame .msg")).toHaveText("File not found");
   await expect.poll(ratio).toBeCloseTo(180 / 320, 1);
@@ -560,4 +575,16 @@ test("Alt+arrows do nothing off the Picture tab, and the radio group never wraps
   await expect(radio(page, "9:16")).toBeFocused();
   await page.keyboard.press("Alt+ArrowLeft");
   await expect(radio(page, "9:16")).toHaveAttribute("aria-checked", "true");
+});
+
+// M7: chips are keyed, so a format registered mid-review never moves focus onto another chip.
+test("a format arriving while a chip has focus leaves focus on that chip", async ({ page, rushes }) => {
+  await rushes.addFormatsCut([WIDE, TALL]);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await radio(page, "16:9").focus();
+  await rushes.addFormatFile(PORTRAIT);
+  await expect(page.getByRole("radiogroup", { name: "Format" }).getByRole("radio")).toHaveText([/^9:16/, /^4:5/, /^16:9/]);
+  await expect(radio(page, "16:9")).toBeFocused();
+  await expect(radio(page, "16:9")).toHaveAttribute("aria-checked", "true");
 });
