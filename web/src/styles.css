@@ -576,3 +576,23 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .fscope { display: inline-grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px; padding: 3px; background: var(--bg); border: 1px solid var(--line); border-radius: 999px; }
 .note[aria-current="true"] { background: var(--hover); box-shadow: inset 2px 0 0 var(--accent); }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } .fspin, .ib[aria-busy="true"] { animation: none !important; } }
+/* §21.5 notes per format (mockup): the switch, its hint, ratio tags, ring markers and the Other formats row. */
+.fscope [role="radio"] { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 4px 14px; border: 0; border-radius: 999px; background: transparent; color: var(--text-2); font: 500 15px/1.4 var(--sans); white-space: nowrap; cursor: pointer; }
+.fscope [role="radio"]:hover { color: var(--text); }
+.fscope [role="radio"][aria-checked="true"] { background: var(--accent-soft); color: var(--accent-2); box-shadow: inset 0 0 0 1px var(--accent); }
+.fscope [role="radio"][aria-disabled="true"] { color: var(--text-3); cursor: not-allowed; }
+.fhint { margin: 0; color: var(--text-3); font-size: 15px; line-height: 1.4; }
+.ftag { display: inline-block; padding: 0 8px; border: 1px solid var(--line-2); border-radius: 999px; color: var(--text-2); font: 15px/22px var(--mono); }
+.ftag.all { border-color: var(--accent); color: var(--accent-2); background: var(--accent-soft); }
+.nfmt, .nact { grid-column: 2; margin-top: 6px; }
+.mk.ring { background: var(--app); border: 2px solid var(--accent-2); }
+.mk.ring.done { border-color: var(--done); }
+.otherfmts { margin: 8px 0; display: grid; gap: 4px; }
+.otherrow { display: flex; width: 100%; align-items: center; gap: 8px; padding: 8px 12px; border: 1px dashed var(--line-2); border-radius: var(--r); background: transparent; color: var(--text-2); font: 500 15px/1.4 var(--sans); text-align: left; cursor: pointer; }
+.otherrow:hover { background: var(--hover); color: var(--text); }
+.otherrow .act { color: var(--accent-2); }
+.note.ro:hover { background: transparent; }
+.note.ro .t { cursor: default; }
+.nact .flink { margin-left: -8px; }
+/* The reason fits inside the notes column, which clips anything wider. */
+.fscope .tip-wrap[data-tip]::after { max-width: 220px; }

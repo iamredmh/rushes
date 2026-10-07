@@ -3,6 +3,7 @@ import { useRef, useState } from "preact/hooks";
 import { api, mediaUrl } from "../api.js";
 import { MARK_DB, type MarkKind, marksLabel, noteTime, onOptionGroups, type OnOption, placeNote, type Scope, scopeOptions, setMarkDb, shotLabel, toggleMark } from "../lib.js";
 import type { Mark, Note } from "../types.js";
+import { FormatScope } from "./FormatScope.js";
 import { Icon } from "./Icon.js";
 
 type Filter = "all" | "todo" | "done";
@@ -38,6 +39,28 @@ export interface NotesProps {
   fixedTimes?: boolean;
   /** The note last clicked (R6): its card is marked current. */
   selectedId?: string | null;
+  // §21 formats. All optional: the audio tabs, and a one-format cut, pass none of them (R4, R15).
+  /** §21.5: a listed note's ratio tag ("9:16", or "All"), or null for none. */
+  formatTag?(n: Note): string | null;
+  /** §21.5: shown under the selected card (its This format | All formats switch). */
+  cardExtra?(n: Note): ComponentChildren;
+  /** §21.2 (4): the composer's This format | All formats switch and its hint line. */
+  formatScope?: ComposerFormat;
+  /** §21.5: at the bottom of the list (the "Other formats (N)" row). */
+  listFooter?: ComponentChildren;
+}
+
+/** §21.2 (4), §21.5: the composer's switch, for the format on screen. */
+export interface ComposerFormat {
+  label: string;
+  width: number;
+  height: number;
+  value: "this" | "all";
+  onChange(v: "this" | "all"): void;
+  /** Why All formats can't be chosen (a drawn box: §21.2 (6)), or null. */
+  lockedReason: string | null;
+  /** The line under the note box: where the note will show. */
+  hint: string;
 }
 
 const MARK_KINDS: { kind: MarkKind; label: string }[] = [
@@ -51,6 +74,7 @@ const onFull = (on: NonNullable<NotesProps["on"]>): string | undefined => on.opt
 /** The notes column used on every tab: list, filter, done circles and the note box. */
 export function Notes({
   notes, version, placeholder, attachments, inputRef, toast, onAdd, onSeek, onChanged, onTextChange, on, scope, chips, marks, onLabel, fixedTimes, selectedId,
+  formatTag, cardExtra, formatScope, listFooter,
 }: NotesProps) {
   const [filter, setFilter] = useState<Filter>("all");
   const ownInput = useRef<HTMLTextAreaElement>(null);
@@ -115,7 +139,7 @@ export function Notes({
         </div>
       </div>
       <div class="list">
-        {placed.length === 0 && <div class="none">{filter === "all" ? "No notes yet." : "Nothing here."}</div>}
+        {placed.length === 0 && <div class="none">{filter !== "all" ? "Nothing here." : listFooter ? "None on this format." : "No notes yet."}</div>}
         {placed.map(({ n, at }) => (
           <div class={`note${n.status === "done" ? " done" : ""}`} data-note={n.id} aria-current={selectedId === n.id ? "true" : undefined}>
             <button class="chk" aria-label={n.status === "done" ? "Reopen" : "Mark done"} title={n.status === "done" ? "Reopen" : "Mark done"} onClick={() => void toggle(n)}>
@@ -124,6 +148,10 @@ export function Notes({
             <div class="nt">
               <button class="t" onClick={() => at.t !== null && onSeek?.(at.t, n)}>{noteTime(at.t, at.tOut)}</button>
               {onLabel && onLabel(n) && <span class="on">{onLabel(n)}</span>}
+              {(() => {
+                const tag = formatTag?.(n) ?? null;
+                return tag && <span class={`ftag${tag === "All" ? " all" : ""}`}>{tag}</span>;
+              })()}
               {at.from && <span class="from">from {at.from}</span>}
             </div>
             {marksLabel(n.marks) && <div class="nmarks">{marksLabel(n.marks)}</div>}
@@ -140,8 +168,10 @@ export function Notes({
                 <span>{n.reply}</span>
               </div>
             )}
+            {selectedId === n.id && cardExtra && <div class="nfmt">{cardExtra(n)}</div>}
           </div>
         ))}
+        {listFooter}
       </div>
       <div class="comp">
         {(on || scope) && (
@@ -216,6 +246,19 @@ export function Notes({
             })}
           </div>
         )}
+        {formatScope && (
+          <div class="row">
+            <FormatScope
+              name="This note applies to"
+              label={formatScope.label}
+              width={formatScope.width}
+              height={formatScope.height}
+              value={formatScope.value}
+              onChange={formatScope.onChange}
+              lockedReason={formatScope.lockedReason}
+            />
+          </div>
+        )}
         {attachments && <div class="row">{attachments}</div>}
         <div class="cbox">
           <textarea
@@ -242,6 +285,7 @@ export function Notes({
             <Icon name="send" />
           </button>
         </div>
+        {formatScope && <p class="fhint">{formatScope.hint}</p>}
       </div>
     </aside>
   );
