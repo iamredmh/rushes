@@ -7,6 +7,7 @@ import { main, longRunningCommand, type Io } from "../../src/cli/main.js";
 import { startServer, type Running } from "../../src/server/start.js";
 import { addVersion } from "../../src/core/project.js";
 import { lockPath } from "../../src/server/lock.js";
+import { sizedProbe } from "../helpers/probe.js";
 
 function io(cwd: string) {
   const out: string[] = [];
@@ -806,5 +807,74 @@ describe("cli: rushes add version and proxies (§19.5)", () => {
       expect(a.out).toHaveLength(1);
       await server!.close();
     });
+  });
+});
+
+describe("formats on the CLI (§21.4)", () => {
+  async function server(files: string[]) {
+    const { root } = await tmpProject();
+    for (const f of files) {
+      await mkdir(dirname(join(root, f)), { recursive: true });
+      await writeFile(join(root, f), "bytes");
+    }
+    const s = await startServer(root, { port: 0, formats: { probe: sizedProbe } });
+    return { root, s };
+  }
+
+  it("add format says what it settled on and any warning; a refusal exits 1 with the reason", async () => {
+    const { root, s } = await server(["renders/hero_1920x1080.mp4", "renders/hero_1080x1920@8.4.mp4", "renders/hero_720x1280.mp4"]);
+    const a = io(root);
+    expect(await main(["add", "version", "renders/hero_1920x1080.mp4", "--video", "Hero"], a.x)).toBe(0);
+    expect(await main(["add", "format", "renders/hero_1080x1920@8.4.mp4"], a.x)).toBe(0);
+    expect(a.out).toContain("Added 9:16 to Hero v1");
+    expect(a.out).toContain("Warning: 9:16 is 8.4 s; the cut is 8.0 s");
+    const b = io(root);
+    expect(await main(["add", "format", "renders/hero_720x1280.mp4", "--video", "Hero", "--version", "v1"], b.x)).toBe(1);
+    expect(b.err.join("\n")).toContain("v1 already has 9:16. Register a re-render as a new version.");
+    await s.close();
+  });
+
+  it("notes shows a format column for a cut with formats, and none for a one-format cut (R4)", async () => {
+    const { root, s } = await server(["renders/hero_1920x1080.mp4", "renders/hero_1080x1920.mp4", "renders/solo_1920x1080.mp4"]);
+    const a = io(root);
+    await main(["add", "version", "renders/hero_1920x1080.mp4", "--video", "Hero"], a.x);
+    await main(["add", "format", "renders/hero_1080x1920.mp4", "--video", "Hero"], a.x);
+    await main(["add", "version", "renders/solo_1920x1080.mp4", "--video", "Solo"], a.x);
+    const post = (body: object) => fetch(`${s.url}/api/notes`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    await post({ stage: "picture", video: "hero", version: "v1", scope: "point", t: 1, text: "Logo too close to the top.", format: "9x16" });
+    await post({ stage: "picture", video: "hero", version: "v1", scope: "point", t: 2, text: "Drop the first sound." });
+    await post({ stage: "picture", video: "solo", version: "v1", scope: "point", t: 3, text: "Hold longer." });
+    const b = io(root);
+    expect(await main(["notes"], b.x)).toBe(0);
+    expect(b.out.find((l) => l.includes("Logo too close"))).toMatch(/ 9:16 {2}Logo too close/);
+    expect(b.out.find((l) => l.includes("Drop the first"))).toMatch(/ All {2}Drop the first/);
+    expect(b.out.find((l) => l.includes("Hold longer"))).not.toMatch(/ All /);
+    await s.close();
+  });
+
+  it("help lists add format", async () => {
+    const a = io("/tmp");
+    await main([], a.x);
+    expect(a.out.join("\n")).toContain("rushes add format <file> [--video NAME] [--version V] [--label RATIO]");
+  });
+
+  it("add format with no file is a usage error, exit 2", async () => {
+    const a = io("/tmp");
+    expect(await main(["add", "format"], a.x)).toBe(2);
+    expect(a.err.join("\n")).toContain("rushes add format <file>");
+  });
+
+  it("add format --label passes the hint on, and prints the server's Label line when it has one", async () => {
+    const { root, s } = await server(["renders/hero_1920x1080.mp4", "renders/hero_2390x1000.mp4", "renders/hero_1080x1920.mp4"]);
+    const a = io(root);
+    await main(["add", "version", "renders/hero_1920x1080.mp4", "--video", "Hero"], a.x);
+    const b = io(root);
+    expect(await main(["add", "format", "renders/hero_2390x1000.mp4", "--label", "2.39:1"], b.x)).toBe(0);
+    expect(b.out).toEqual(["Added 2.39:1 to Hero v1"]);
+    // A hint on a standard ratio is not needed: the server's note comes through as a Label line.
+    const c = io(root);
+    expect(await main(["add", "format", "renders/hero_1080x1920.mp4", "--label", "2.39:1"], c.x)).toBe(0);
+    expect(c.out).toEqual(["Added 9:16 to Hero v1", 'Label: The file measures 9:16, a standard ratio, so the label "2.39:1" wasn\'t needed.']);
+    await s.close();
   });
 });

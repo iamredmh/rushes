@@ -1,4 +1,5 @@
-import type { Batch, BatchesFile, NotesFile, Project, Script, Stage } from "./schema.js";
+import { chipOrder, versionFormats } from "./formats.js";
+import type { Batch, BatchesFile, Note, NotesFile, Project, Script, Stage } from "./schema.js";
 import { EmptyBatchError } from "./errors.js";
 import { isChanged } from "./script.js";
 
@@ -32,7 +33,7 @@ export function createBatch(
     noteIds: notes.map((n) => n.id),
     sectionIds: sections.map((s) => s.id),
     sentAt: now.toISOString(),
-    prompt: buildPrompt(ctx.project.name, stage, id, notes.length, sections.length),
+    prompt: buildPrompt(ctx.project.name, stage, id, notes.length, sections.length, stage === "picture" ? formatLines(ctx.project, notes) : []),
   };
   ctx.batches.batches.push(batch);
   return batch;
@@ -43,7 +44,35 @@ export function createBatch(
 // and re-picking it, not just posting a new cut.
 const AUDIO_STAGES: readonly Stage[] = ["voice", "music", "sfx", "mix"];
 
-export function buildPrompt(project: string, stage: Stage, batchId: string, notes: number, sections: number): string {
+const FORMAT_STEPS =
+  "A note with a format is for that format only: fix it there and leave the others. An all-format note is for every format: say in your reply which formats you fixed. Register every shape of the new cut (rushes_add_version with formats, or rushes_add_format).";
+
+/** §21.5: for a Picture batch, each cut with formats, its shapes and how many notes each has, then how to fix them. */
+export function formatLines(project: Pick<Project, "videos">, notes: Pick<Note, "video" | "version" | "format">[]): string[] {
+  const lines: string[] = [];
+  const seen = new Set<string>();
+  for (const n of notes) {
+    const key = `${n.video}\u0000${n.version}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const video = project.videos.find((v) => v.id === n.video);
+    const version = video?.versions.find((v) => v.id === n.version);
+    const shapes = version ? versionFormats(version) : [];
+    if (!video || !version || shapes.length < 2) continue;
+    const [main, ...rest] = shapes;
+    const ordered = chipOrder(rest);
+    const here = notes.filter((x) => x.video === n.video && x.version === n.version);
+    const counts = [
+      { label: "all formats", k: here.filter((x) => x.format === null).length },
+      ...[main, ...ordered].map((f) => ({ label: f.label, k: here.filter((x) => x.format === f.id).length })),
+    ].filter((c) => c.k > 0);
+    lines.push(`${video.name} ${version.id} has ${shapes.length} formats: ${[`${main.label} (main)`, ...ordered.map((f) => f.label)].join(", ")}. Notes: ${counts.map((c) => `${c.k} for ${c.label}`).join(", ")}.`);
+  }
+  if (lines.length) lines.push(FORMAT_STEPS);
+  return lines;
+}
+
+export function buildPrompt(project: string, stage: Stage, batchId: string, notes: number, sections: number, extra: string[] = []): string {
   const parts: string[] = [];
   if (notes) parts.push(`${notes} note${notes === 1 ? "" : "s"}`);
   if (sections) parts.push(`${sections} script section${sections === 1 ? "" : "s"}`);
@@ -58,7 +87,7 @@ export function buildPrompt(project: string, stage: Stage, batchId: string, note
           : AUDIO_STAGES.includes(stage)
             ? 'Use rushes_get_batch and rushes_get_picks, fix each note (marks such as "Fall" or "Quieter 3 dB" are part of the note), register the new variant, then rushes_reply.'
             : "Use rushes_get_batch, fix each note, then rushes_reply with a fixT for each and rushes_add_version for the new cut.";
-  return `Work through ${STAGE_NAMES[stage]} batch ${batchId} on ${project}: ${parts.join(" and ")}.\n${steps}`;
+  return `Work through ${STAGE_NAMES[stage]} batch ${batchId} on ${project}: ${parts.join(" and ")}.\n${[...extra, steps].join("\n")}`;
 }
 
 export function latestBatch(file: BatchesFile): Batch | undefined {

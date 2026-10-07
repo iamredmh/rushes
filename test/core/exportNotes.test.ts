@@ -3,7 +3,7 @@ import { exportFileName, notesMarkdown } from "../../src/core/exportNotes.js";
 import { addNote, onLabel } from "../../src/core/notes.js";
 import { voiceOnLabel, voiceRounds } from "../../web/src/lib.js";
 import type { Lane } from "../../web/src/types.js";
-import { addVersion } from "../../src/core/project.js";
+import { addFormat, addVersion } from "../../src/core/project.js";
 import type { NotesFile, Project } from "../../src/core/schema.js";
 
 const project = (): Project => ({ schema: 1, rev: 0, name: "Spring Launch", fps: 30, videos: [], lanes: [], files: [], autoProxy: false });
@@ -235,4 +235,19 @@ describe("notesMarkdown", () => {
     const now = new Date(2026, 9, 3, 9, 0);
     expect(notesMarkdown(p, notes.notes, now)).toBe(notesMarkdown(p, notes.notes, now));
   });
+});
+
+it("on a cut with formats every Picture note carries its format; a one-format cut's notes read as before (§21.4, R4)", () => {
+  const p = project();
+  addVersion(p, { video: "Hero", file: "renders/hero_v1.mp4", duration: 8, width: 1920, height: 1080 });
+  addFormat(p, { video: "hero", file: "renders/hero_v1_9x16.mp4", width: 1080, height: 1920, duration: 8, fps: 30 });
+  addVersion(p, { video: "Solo", file: "renders/solo_v1.mp4", width: 1920, height: 1080 });
+  const notes: NotesFile = { schema: 1, rev: 0, notes: [] };
+  addNote(notes, { stage: "picture", video: "hero", version: "v1", scope: "point", t: 1, text: "Drop the first sound." });
+  addNote(notes, { stage: "picture", video: "hero", version: "v1", scope: "point", t: 2, text: "Logo too close to the top.", format: "9x16" });
+  addNote(notes, { stage: "picture", video: "solo", version: "v1", scope: "point", t: 1, text: "Hold longer." });
+  const md = notesMarkdown(p, notes.notes, new Date(2026, 9, 7, 9, 0));
+  expect(md).toContain("- **0:01.00** · All · to do — Drop the first sound.");
+  expect(md).toContain("- **0:02.00** · 9:16 · to do — Logo too close to the top.");
+  expect(md).toContain("- **0:01.00** · to do — Hold longer.");
 });

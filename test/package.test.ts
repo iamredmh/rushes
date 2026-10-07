@@ -79,11 +79,27 @@ describe("shipped agent docs (final review I3)", () => {
     expect(text).toMatch(/both are in, unpicked/);
   });
 
-  it.each(["README.md", "AGENTS.md", "skills/rushes/SKILL.md"])("%s counts nineteen tools, and names every one", (file) => {
+  it.each(["README.md", "AGENTS.md", "skills/rushes/SKILL.md"])("%s counts twenty tools, and names every one", (file) => {
     const text = read(file);
-    expect(text).toMatch(/nineteen tools/);
-    expect(text).not.toMatch(/seventeen/);
-    for (const tool of ["rushes_scan", "rushes_bring_in"]) expect(text).toContain(`\`${tool}\``);
+    expect(text).toMatch(/twenty tools/);
+    expect(text).not.toMatch(/nineteen/);
+    for (const tool of ["rushes_scan", "rushes_bring_in", "rushes_add_format"]) expect(text).toContain(`\`${tool}\``);
+  });
+
+  it.each(["README.md", "AGENTS.md", "skills/rushes/SKILL.md"])("%s names exactly the tools the server registers", (file) => {
+    const registered = [...read("src/mcp/tools.ts").matchAll(/registerTool\(\s*"(rushes_\w+)"/g)].map((m) => m[1]);
+    expect(registered).toHaveLength(20);
+    const text = read(file);
+    for (const tool of registered) expect(text, tool).toContain(`\`${tool}\``);
+  });
+
+  it.each(["skills/rushes/SKILL.md", "AGENTS.md"])("%s tells the agent to register every shape, main one first, and fix only a note's own format (§21.4)", (file) => {
+    const text = read(file);
+    expect(text).toContain("`rushes_add_format`");
+    expect(text).toMatch(/register every shape you rendered/i);
+    expect(text).toMatch(/main one first/i);
+    expect(text).toMatch(/fix only that format/i);
+    expect(text).toMatch(/`format`/);
   });
 });
 

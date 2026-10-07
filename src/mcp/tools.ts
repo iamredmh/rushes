@@ -27,6 +27,15 @@ const bringInItem = z.object({
   round: z.string().trim().min(1).max(64).optional().describe('Voice only: the round the read joins, e.g. "Round 2 · Gerald, tone". Defaults to its folder\'s name.'),
 });
 
+// §21.4: the server's own limits on formats (src/server/app.ts), so a request that can't land is refused here, in words.
+const FORMAT_PATH_MAX = 1024;
+const FORMAT_ID_MAX = 16;
+const FORMAT_LABEL_MAX = 16;
+const FORMATS_BESIDE_CUT_MAX = 7;
+// What an agent is told when a Rushes started by an older version quietly ignores the new fields.
+const OLDER_DROPPED = "An older Rushes is running and ignored `formats`: the cut is in, its other shapes are not. Run `rushes stop`, then add them with rushes_add_format.";
+const OLDER_UNFILTERED = "An older Rushes is running and ignores `format`: these are every note, not that format's. Run `rushes stop`, then ask again.";
+
 function ok(data: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
 }
@@ -193,15 +202,44 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     {
       title: "Add a cut",
       description:
-        "Register a new cut of a video. The first cut creates the video. Returns the new version id (v1, v2 ...). When the cut is likely to play badly in a browser (4K, over 1.5 GB, or a codec such as ProRes), it also returns proxySuggested: true and proxyReason; Picture offers the user a proxy. If the project has autoProxy on, proxyJob is the proxy already being made.",
+        "Register a new cut of a video. The first cut creates the video. Returns the new version id (v1, v2 ...). When the cut is likely to play badly in a browser (4K, over 1.5 GB, or a codec such as ProRes), it also returns proxySuggested: true and proxyReason; Picture offers the user a proxy. If the project has autoProxy on, proxyJob is the proxy already being made. Pass `formats` to register the other shapes of the same cut in one call.",
       inputSchema: {
         project,
         video: z.string().describe("Video id or name, e.g. \"Hero 60s\"."),
         file: z.string().describe("Path to the rendered file, absolute or relative to the project."),
         note: z.string().optional().describe("What changed in this cut."),
+        formats: z
+          .array(z.object({ file: z.string().min(1).max(FORMAT_PATH_MAX) }))
+          .max(FORMATS_BESIDE_CUT_MAX)
+          .optional()
+          .describe(
+            "Other shapes of this same cut (the same edit at other aspect ratios, e.g. a 9:16 and a 1:1 of the 16:9), registered as its formats in one call. `file` is the main one.",
+          ),
       },
     },
-    safe(async ({ project, ...b }) => (await ctx.client(project)).post("/api/versions", b)),
+    safe(async ({ project, ...b }) => {
+      const r = await (await ctx.client(project)).post("/api/versions", b);
+      // A Rushes from before formats drops `formats` without a word: the cut is in, its shapes are not.
+      if (b.formats?.length && !Array.isArray(r?.version?.formats)) return { ...r, note: OLDER_DROPPED };
+      return r;
+    }),
+  );
+
+  server.registerTool(
+    "rushes_add_format",
+    {
+      title: "Add a format",
+      description:
+        "Register another shape of a cut: the same edit rendered at another aspect ratio, e.g. the 9:16 or 1:1 of a 16:9 cut. Rushes measures the ratio with ffprobe. Defaults to the newest cut of the only or newest film. Returns the format's id and label (e.g. \"9x16\", \"9:16\"), and `warning` when its length is more than 0.1 s off the cut's. A second render with a ratio the cut already has is refused: a re-render is a new version.",
+      inputSchema: {
+        project,
+        video: z.string().optional().describe("Video id or name. Defaults to the newest cut's film."),
+        version: z.string().optional().describe("Defaults to that film's newest cut."),
+        file: z.string().min(1).max(FORMAT_PATH_MAX).describe("Path to the render, absolute or relative to the project."),
+        label: z.string().max(FORMAT_LABEL_MAX).optional().describe('Only a hint, used when the measured ratio isn\'t a standard one, e.g. "2.39:1".'),
+      },
+    },
+    safe(async ({ project, ...b }) => (await ctx.client(project)).post("/api/formats", b)),
   );
 
   server.registerTool(
@@ -279,18 +317,23 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     {
       title: "List notes",
       description:
-        "Notes left in Rushes, filtered by tab, status, batch or version. A note's `on` says what it's about: null on Picture or for the whole mix, \"<lane>/<variant>\" for a music bed, SFX pass or voice variant, \"<lane>/<variant>:<cue>\" for an SFX cue, \"vo\" for the VO lane on Mix. Older notes may carry a bare variant id, \"vo\" for the assembled read, \"<section>:<take>\" for a take, or a section id.",
+        "Notes left in Rushes, filtered by tab, status, batch or version. A note's `on` says what it's about: null on Picture or for the whole mix, \"<lane>/<variant>\" for a music bed, SFX pass or voice variant, \"<lane>/<variant>:<cue>\" for an SFX cue, \"vo\" for the VO lane on Mix. Older notes may carry a bare variant id, \"vo\" for the assembled read, \"<section>:<take>\" for a take, or a section id. On Picture, a note's `format` is null when it's for every format, or a format id such as \"9x16\" when it's for that shape only.",
       inputSchema: {
         project,
         stage: stage.optional(),
         status: z.enum(["todo", "done"]).optional(),
         batch: z.string().optional(),
         version: z.string().optional(),
+        format: z.string().max(FORMAT_ID_MAX).optional().describe('A format id such as "9x16": that format\'s Picture notes plus the all-format ones.'),
+        onlyThisFormat: z.boolean().optional().describe("With format: only that format's notes, not the all-format ones."),
       },
     },
     safe(async ({ project, ...f }) => {
-      const q = new URLSearchParams(Object.entries(f).filter(([, v]) => v !== undefined) as [string, string][]);
-      return (await ctx.client(project)).get(`/api/notes${q.size ? `?${q}` : ""}`);
+      const q = new URLSearchParams(Object.entries(f).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)]));
+      const r = await (await ctx.client(project)).get(`/api/notes${q.size ? `?${q}` : ""}`);
+      // A Rushes from before formats ignores the filter and sends every note, none with a `format`.
+      if (f.format !== undefined && Array.isArray(r?.notes) && r.notes.some((n: object) => !("format" in n))) return { ...r, note: OLDER_UNFILTERED };
+      return r;
     }),
   );
 
