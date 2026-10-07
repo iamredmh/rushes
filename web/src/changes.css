@@ -19,7 +19,7 @@
 .vrow .vwhen { display: flex; gap: 6px; align-items: center; color: var(--text-3); white-space: nowrap; }
 .vrow .vwhen .ic { flex: none; width: 15px; height: 15px; }
 .vrow .vinline { grid-column: 1 / -1; display: grid; gap: 4px; color: var(--text-2); overflow-wrap: anywhere; white-space: normal; }
-.vdetail { display: grid; align-content: start; gap: 8px; min-width: 0; padding: 12px 14px; border-left: 1px solid var(--line); background: var(--app); font-size: 15px; }
+.vdetail { display: grid; align-content: start; gap: 8px; min-width: 0; max-height: min(420px, 60vh); overflow: auto; padding: 12px 14px; border-left: 1px solid var(--line); background: var(--app); font-size: 15px; }
 .vdetail h4 { margin: 0; font: 600 15px var(--mono); color: var(--text-2); }
 .vdetail p { margin: 0; overflow-wrap: anywhere; }
 .vmeta { color: var(--text-3); font-family: var(--mono); }
@@ -27,9 +27,11 @@
 .vnote .vtext { overflow-wrap: anywhere; }
 .vnote .vclamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .vnote .vmore { justify-self: start; padding: 0; border: 0; background: none; color: var(--accent-2); font: inherit; font-size: 15px; cursor: pointer; }
-/* A narrow window has no room beside the list: the note goes under it. */
+/* A narrow window has no room beside the list: the note goes under it, and the two share one
+   height cap (at most 65% of the window between them). */
 @media (max-width: 640px) {
   .vmenu { grid-template-columns: minmax(0, 1fr); }
-  .vdetail { border-left: 0; border-top: 1px solid var(--line); }
+  .vlist { max-height: min(260px, 35vh); }
+  .vdetail { max-height: min(220px, 30vh); border-left: 0; border-top: 1px solid var(--line); }
 }
 @media (prefers-reduced-motion: reduce) { .vmenu { animation: none; } }
