@@ -7,7 +7,7 @@ const LONG =
 // A real-world agent note, about 300 characters, and one long unbroken token (a path or a hash).
 const HUGE =
   "v3: launch 1.45x slower through the whole opening so each zoomed request has time to type itself out; the crowd sits on a wider oval and the chat bubbles now stagger in three waves rather than all at once; end card holds two seconds longer; music bed swapped to the warmer take; captions moved up 40 px off the safe zone.";
-const TOKEN = `v4: ${"renders/night-drive/".repeat(14)}final`;
+const TOKEN = `v4: ${"9f3c2a7e".repeat(32)}`; // no break opportunity in 256 characters
 const option = (page: import("@playwright/test").Page, id: string) => page.locator(`[role="option"][data-version="${id}"]`);
 
 test("Assets › Cuts shows a cut's short label, not its whole note (§22.4)", async ({ page, rushes }) => {
@@ -100,6 +100,9 @@ test("the version list works from the keyboard: arrows, Home, End, type-ahead, E
   await page.keyboard.press("1");
   await expect(option(page, "v1")).toBeFocused();
   await expect(page.getByRole("tab", { name: /Picture/ })).toHaveAttribute("aria-selected", "true");
+  // Other keys stay in the open list too: "?" doesn't open the shortcuts behind it.
+  await page.keyboard.press("?");
+  await expect(page.getByRole("dialog", { name: "Keyboard shortcuts" })).toHaveCount(0);
   await page.keyboard.press("Enter");
   await expect(button).toHaveAttribute("data-version", "v1");
   await expect(button).toBeFocused();
@@ -107,6 +110,13 @@ test("the version list works from the keyboard: arrows, Home, End, type-ahead, E
   // Closed, the arrows step frames again.
   await page.keyboard.press("ArrowRight");
   await expect(page.getByLabel("Timecode")).toContainText("0:00.03");
+  // Tab from an open list closes it and carries on to the next control, the lock.
+  await button.focus();
+  await page.keyboard.press("ArrowDown");
+  await expect(option(page, "v1")).toBeFocused();
+  await page.keyboard.press(test.info().project.name === "webkit" ? "Alt+Tab" : "Tab");
+  await expect(page.getByRole("listbox")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Lock picture at v1" })).toBeFocused();
 });
 
 test("type-ahead joins digits typed together: 1 then 1 is v11, and a lone 1 later is v1 (§22.8)", async ({ page, rushes }) => {

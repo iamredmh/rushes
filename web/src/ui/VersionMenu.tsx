@@ -92,6 +92,11 @@ export function VersionMenu({ versions, shown, lockedVersion, onPick }: VersionM
   // the digits don't switch tabs (App's and Picture's handlers listen on window). Other letters stop
   // here too while the list is open (G would grab a frame behind it).
   const onListKey = (e: KeyboardEvent) => {
+    if (e.key === "Tab") {
+      // Tab (or Alt+Tab in Safari) closes the list and carries on to the next control.
+      close(false);
+      return;
+    }
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     const i = rows.findIndex((v) => v.id === active);
     const to = moveActive(e.key, i, rows.length);
@@ -112,11 +117,6 @@ export function VersionMenu({ versions, shown, lockedVersion, onPick }: VersionM
       e.preventDefault();
       e.stopPropagation();
       pick(active);
-      return;
-    }
-    if (e.key === "Tab") {
-      // Back to the button first, so Tab carries on from the control rather than from a row that's gone.
-      close(true);
       return;
     }
     if (/^\d$/.test(e.key)) {
