@@ -37,8 +37,13 @@ test("the version control shows the cut and its short label, and lists every cut
   await expect(rows).toHaveCount(2);
   await expect(rows.nth(0)).toHaveAttribute("data-version", "v2");
   await expect(rows.nth(0)).toContainText("the button morphs into a node-sized dot and…");
-  await expect(rows.nth(1)).toContainText("Locked");
   await expect(rows.nth(1)).toContainText("just now");
+  // Each row's name is said in full words, with commas between the parts (M4).
+  await expect(rows.nth(1)).toHaveAccessibleName("v1, first pass, locked, just now");
+  await expect(rows.nth(0)).toHaveAccessibleName("v2, the button morphs into a node-sized dot and…, just now");
+  // The button names the list it opens (M7).
+  await expect(button).toHaveAttribute("aria-controls", "vlist");
+  await expect(page.locator("#vlist")).toHaveAttribute("role", "listbox");
   await expect(rows.nth(1)).toHaveAttribute("aria-selected", "true");
   await expect(rows.nth(0)).toHaveAttribute("aria-selected", "false");
   // The lock mark sits on the locked cut only.
@@ -76,6 +81,13 @@ test("the version list works from the keyboard: arrows, Home, End, type-ahead, E
   await page.keyboard.press("Enter");
   await expect(option(page, "v3")).toBeFocused();
   await page.keyboard.press("ArrowDown");
+  await expect(option(page, "v2")).toBeFocused();
+  // Focus moves; the selection stays on the cut on screen until one is picked (I2).
+  await expect(option(page, "v3")).toHaveAttribute("aria-selected", "true");
+  await expect(option(page, "v2")).toHaveAttribute("aria-selected", "false");
+  // Left and right stay in the open list: they don't step frames behind it (I1).
+  for (const key of ["ArrowRight", "ArrowLeft", "Shift+ArrowRight", "ArrowRight"]) await page.keyboard.press(key);
+  await expect(page.getByLabel("Timecode")).toContainText("0:00.00");
   await expect(option(page, "v2")).toBeFocused();
   await page.keyboard.press("End");
   await expect(option(page, "v1")).toBeFocused();
@@ -203,6 +215,7 @@ test("long notes never widen the page or the list, at any window width (§22.8, 
         // A page that already scrolls sideways may have been scrolled by the hover: measure from its left edge.
         x: window.scrollX,
         menu: r(".vmenu"),
+        list: r(".vlist"),
         detail: r("#vdetail"),
         button: r(".vbtn"),
         rows,
@@ -214,7 +227,14 @@ test("long notes never widen the page or the list, at any window width (§22.8, 
     expect(m.menu.right + m.x, `${width}: list right edge`).toBeLessThanOrEqual(m.inner);
     expect(m.button.width, `${width}: button`).toBeLessThanOrEqual(340);
     expect(Math.max(...m.rows) - Math.min(...m.rows), `${width}: rows one line`).toBeLessThan(2);
-    if (width > 640) expect(m.detail.width, `${width}: detail`).toBeLessThanOrEqual(301);
+    if (width > 640) {
+      expect(m.detail.width, `${width}: detail`).toBeLessThanOrEqual(301);
+      expect(m.detail.left, `${width}: detail beside the list`).toBeGreaterThanOrEqual(m.list.right - 1);
+    } else {
+      // A narrow window puts the detail under the list, the list's full width (I2).
+      expect(m.detail.top, `${width}: detail under the list`).toBeGreaterThanOrEqual(m.list.bottom - 1);
+      expect(m.detail.width, `${width}: detail full width`).toBeGreaterThan(m.menu.width - 4);
+    }
     // The unbroken token wraps inside the panel rather than push it out.
     await option(page, "v4").hover();
     await expect(page.locator("#vdetail h4")).toHaveText("v4");
@@ -249,10 +269,102 @@ test("the cut's full note sits under the picture, two lines at most, with More (
   await more.click();
   await expect(note.getByRole("button", { name: "Less" })).toHaveAttribute("aria-expanded", "true");
   expect(await text.evaluate((el) => el.scrollHeight <= el.clientHeight + 1)).toBe(true);
+  // The next cut's note opens clamped, and never shows expanded even for a frame (I2, M5).
+  await page.evaluate(() => {
+    const w = window as unknown as { __flash: boolean };
+    w.__flash = false;
+    new MutationObserver(() => {
+      const t = document.querySelector(".vnote .vtext");
+      if (t && t.textContent!.startsWith("v2:") && !t.classList.contains("vclamp")) w.__flash = true;
+    }).observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true });
+  });
+  await rushes.addCut(HUGE.replace(/^v3:/, "v2:"));
+  await expect(versionButton(page)).toHaveAttribute("data-version", "v2");
+  await expect(note.locator(".vtext")).toContainText("v2: launch 1.45x slower");
+  await expect(note.getByRole("button", { name: "More" })).toHaveAttribute("aria-expanded", "false");
+  expect(await page.evaluate(() => (window as unknown as { __flash: boolean }).__flash)).toBe(false);
   // A cut with no note has no line.
   await rushes.addCut();
-  await expect(versionButton(page)).toHaveAttribute("data-version", "v2");
+  await expect(versionButton(page)).toHaveAttribute("data-version", "v3");
   await expect(note).toHaveCount(0);
+});
+
+test("a note of only invisible characters reads as no note, under the picture and in the list (M2)", async ({ page, rushes }) => {
+  await rushes.addCut("​‏");
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await expect(page.locator(".vnote")).toHaveCount(0);
+  await versionButton(page).click();
+  await expect(page.locator("#vdetail p")).toHaveText("No note.");
+});
+
+test("a 1,950-character note and a long list scroll inside the window (M1, I2)", async ({ page, rushes }) => {
+  const essay = `v1: ${"the crowd sits on a wider oval and the chat bubbles stagger in three waves; ".repeat(26)}`.slice(0, 1950);
+  await rushes.addCut(essay);
+  for (let n = 2; n <= 14; n++) await rushes.addCut(`v${n}: pass ${n}`);
+  for (const [width, height] of [[1440, 900], [600, 800]] as const) {
+    await page.setViewportSize({ width, height });
+    await page.goto(rushes.url);
+    await videoReady(page);
+    await versionButton(page).click();
+    await page.keyboard.press("End");
+    await expect(option(page, "v1")).toBeFocused();
+    await expect(page.locator("#vdetail p")).toContainText("stagger in three waves");
+    const m = await page.evaluate(() => {
+      const el = (s: string) => document.querySelector(s) as HTMLElement;
+      const rect = (s: string) => el(s).getBoundingClientRect();
+      const row = rect('[role="option"][data-version="v1"]');
+      return {
+        inner: window.innerHeight,
+        menu: rect(".vmenu"),
+        list: rect(".vlist"),
+        listScrolls: el(".vlist").scrollHeight > el(".vlist").clientHeight,
+        detail: rect("#vdetail"),
+        detailScrolls: el("#vdetail").scrollHeight > el("#vdetail").clientHeight,
+        row,
+      };
+    });
+    expect(m.list.height, `${width}: list height`).toBeLessThanOrEqual(420);
+    expect(m.listScrolls, `${width}: the list scrolls`).toBe(true);
+    expect(m.row.bottom, `${width}: End shows v1`).toBeLessThanOrEqual(m.list.bottom + 1);
+    expect(m.row.top, `${width}: End shows v1`).toBeGreaterThanOrEqual(m.list.top - 1);
+    expect(m.detail.height, `${width}: detail height`).toBeLessThanOrEqual(420);
+    expect(m.detailScrolls, `${width}: the detail scrolls`).toBe(true);
+    expect(m.menu.bottom, `${width}: inside the window`).toBeLessThanOrEqual(m.inner);
+  }
+});
+
+test("the list stays inside the window when it's resized while open (M7)", async ({ page, rushes }) => {
+  await rushes.addCut("v1: first pass; rough");
+  await rushes.addCut(HUGE);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await versionButton(page).click();
+  const right = () => page.locator(".vmenu").evaluate((el) => el.getBoundingClientRect().right);
+  expect(await right()).toBeLessThanOrEqual(1440);
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await expect.poll(right).toBeLessThanOrEqual(1024 - 16);
+  await expect(page.getByRole("listbox", { name: "Versions" })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1024);
+});
+
+test("if the focused cut is deleted by hand while the list is open, the list closes and focus goes back to the button (M6)", async ({ page, rushes }) => {
+  for (const note of ["first cut", "second cut", "third cut"]) await rushes.addCut(note);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  const button = versionButton(page);
+  await button.focus();
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("End");
+  await expect(option(page, "v1")).toBeFocused();
+  const path = join(rushes.root, ".rushes", "project.json");
+  const p = JSON.parse(await readFile(path, "utf8"));
+  p.videos[0].versions = p.videos[0].versions.filter((v: { id: string }) => v.id !== "v1");
+  p.rev += 1;
+  await writeFile(path, JSON.stringify(p, null, 2));
+  await expect(page.getByRole("listbox")).toHaveCount(0);
+  await expect(button).toBeFocused();
+  await expect(button).toHaveAttribute("data-version", "v3");
 });
 
 test("a short note under the picture has no More (R23)", async ({ page, rushes }) => {
