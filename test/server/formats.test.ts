@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import { existsSync } from "node:fs";
 import { mkdir, symlink, writeFile } from "node:fs/promises";
+import type { VideoProbe } from "../../src/core/media.js";
 import { dirname, join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
 import { sizedProbe } from "../helpers/probe.js";
@@ -156,6 +158,103 @@ describe("POST /api/versions with formats (§21.4)", () => {
     expect(r.status).toBe(404);
     expect((await store.read("project")).videos).toEqual([]);
   });
+
+  // Review I3: a refusal raised while saving (two files of one ratio) leaves nothing behind either.
+  it("refuses two formats of one ratio in one call, saving nothing and starting nothing (R11)", async () => {
+    let jobs!: ProxyJobs;
+    const { root, call, store } = await setup([WIDE, TALL, "renders/alt_720x1280.mp4"], (s) => {
+      jobs = new ProxyJobs(s, { available: async () => true });
+      return { proxyJobs: jobs };
+    });
+    await store.update("project", (p) => {
+      p.autoProxy = true;
+    });
+    const r = await call("POST", "/api/versions", { video: "Hero", file: WIDE, formats: [{ file: TALL }, { file: "renders/alt_720x1280.mp4" }] });
+    expect(r.status).toBe(409);
+    expect(r.json).toMatchObject({ error: "same_ratio", message: "v1 already has 9:16. Register a re-render as a new version." });
+    expect((await store.read("project")).videos).toEqual([]);
+    expect(jobs.list()).toEqual([]);
+    expect(existsSync(join(root, "proxies"))).toBe(false);
+    expect(existsSync(join(root, ".rushes", "peaks"))).toBe(false);
+  });
+
+  it("says when a format is off the cut's length (review M1)", async () => {
+    const { call } = await setup([WIDE, "renders/hero_1080x1920@8.4.mp4", SQUARE]);
+    const r = await call("POST", "/api/versions", { video: "Hero", file: WIDE, formats: [{ file: "renders/hero_1080x1920@8.4.mp4" }, { file: SQUARE }] });
+    expect(r.status).toBe(201);
+    expect(r.json.formatWarnings).toEqual(["9:16 is 8.4 s; the cut is 8.0 s"]);
+    expect((await call("POST", "/api/versions", { video: "Hero", file: WIDE })).json.formatWarnings).toBeUndefined();
+  });
+
+  it("stores a cut's own size only when it's a picture size, and only when it's a file (review M1)", async () => {
+    const { root, call } = await setup(["renders/huge_200000x1080.mp4"]);
+    expect((await call("POST", "/api/versions", { video: "Hero", file: "renders/huge_200000x1080.mp4" })).json.version).toMatchObject({ width: null, height: null });
+    await mkdir(join(root, "renders", "folder_1920x1080.mp4"), { recursive: true });
+    expect((await call("POST", "/api/versions", { video: "Teaser", file: "renders/folder_1920x1080.mp4" })).json.version).toMatchObject({ width: null, height: null });
+  });
+
+  it("refuses a folder named like a render as a format, as a missing file (review M1)", async () => {
+    const { root, call } = await setup([WIDE]);
+    await mkdir(join(root, "renders", "folder_1080x1920.mp4"), { recursive: true });
+    await call("POST", "/api/versions", { video: "Hero", file: WIDE });
+    expect((await call("POST", "/api/formats", { file: "renders/folder_1080x1920.mp4" })).json).toMatchObject({ error: "missing_file" });
+  });
+
+  // Review M2: the cut's own file is judged the same with formats as without.
+  it("takes a cut in any container with formats, as it does without, and says plainly when its size is nonsense", async () => {
+    const { call, store } = await setup(["renders/hero_1920x1080.mxf", TALL, "renders/huge_200000x1080.mp4"]);
+    expect((await call("POST", "/api/versions", { video: "Hero", file: "renders/hero_1920x1080.mxf", formats: [{ file: TALL }] })).status).toBe(201);
+    const r = await call("POST", "/api/versions", { video: "Teaser", file: "renders/huge_200000x1080.mp4", formats: [{ file: TALL }] });
+    expect(r.status).toBe(422);
+    expect(r.json).toMatchObject({ error: "no_primary_size", message: "renders/huge_200000x1080.mp4 measures 200000×1080, which isn't a picture size, so Rushes can't tell its formats' shapes from it." });
+    expect((await store.read("project")).videos.map((v) => v.id)).toEqual(["hero"]);
+  });
+
+  // Review M6.
+  it("stops reading the other files once one is refused", async () => {
+    const signals: AbortSignal[] = [];
+    const waits = async (abs: string, signal?: AbortSignal): Promise<VideoProbe> => {
+      // The voice file is refused a moment after the reads have started.
+      if (abs.endsWith("voice.mp4")) return new Promise((res) => setTimeout(() => res({ ok: false, code: "not_video", reason: "it has no video stream" }), 50));
+      if (!abs.endsWith("hero_1080x1920.mp4")) return sizedProbe(abs);
+      signals.push(signal!);
+      return new Promise<VideoProbe>((res) => signal?.addEventListener("abort", () => res({ ok: false, code: "unreadable", reason: "stopped" })));
+    };
+    const { call } = await setup([WIDE, TALL, "renders/voice.mp4"], { formatProbe: waits, formatProbeTimeoutMs: 60_000 });
+    const r = await call("POST", "/api/versions", { video: "Hero", file: WIDE, formats: [{ file: TALL }, { file: "renders/voice.mp4" }] });
+    expect(r.json.error).toBe("not_video");
+    await vi.waitFor(() => expect(signals.length === 1 && signals[0].aborted).toBe(true));
+  });
+});
+
+describe("a read that never answers (review I2)", () => {
+  const never = () => new Promise<VideoProbe>(() => undefined);
+
+  it("gives up: the cut goes in with no size, and a format is refused with the reason", async () => {
+    const { call } = await setup([WIDE, TALL], { formatProbe: never, formatProbeTimeoutMs: 50 });
+    const started = Date.now();
+    const cut = await call("POST", "/api/versions", { video: "Hero", file: WIDE });
+    expect(cut.status).toBe(201);
+    expect(cut.json.version).toMatchObject({ width: null, height: null });
+    const r = await call("POST", "/api/versions", { video: "Hero", file: WIDE, formats: [{ file: TALL }] });
+    expect(r.status).toBe(422);
+    expect(r.json.message).toBe("ffprobe couldn't read renders/hero_1920x1080.mp4: ffprobe took too long");
+    expect(Date.now() - started).toBeLessThan(8_000);
+  }, 15_000);
+
+  it("stops when the server closes", async () => {
+    let jobs!: ProxyJobs;
+    const { call, store } = await setup([WIDE, TALL], (s) => {
+      jobs = new ProxyJobs(s, { available: async () => true });
+      return { proxyJobs: jobs, formatProbe: never, formatProbeTimeoutMs: 60_000 };
+    });
+    await store.update("project", (p) => void addVersion(p, { video: "Hero", file: WIDE, width: 1920, height: 1080, duration: 8 }));
+    const pending = call("POST", "/api/formats", { file: TALL });
+    setTimeout(() => void jobs.close(), 50);
+    const r = await pending;
+    expect(r.status).toBe(422);
+    expect(r.json.message).toBe("ffprobe couldn't read renders/hero_1080x1920.mp4: ffprobe was stopped");
+  }, 10_000);
 });
 
 describe("serving format files (§21.6, §15.5)", () => {
@@ -238,12 +337,21 @@ describe("notes and formats on the server (§21.3, R7)", () => {
     expect((await call("POST", "/api/notes", { stage: "picture", video: "solo", version: "v1", scope: "point", t: 1, text: "x", box })).status).toBe(201);
   });
 
+  it("a box drawn again belongs to the format it's drawn on now (review M1)", async () => {
+    const { call, note } = await withNotes();
+    const id = (await note({ box, format: "9x16" })).json.note.id;
+    const moved = await call("PATCH", `/api/notes/${id}`, { box: { x: 0.2, y: 0.2, w: 0.1, h: 0.1 }, format: "16x9" });
+    expect(moved.status).toBe(200);
+    expect(moved.json.note).toMatchObject({ format: "16x9", box: { x: 0.2 } });
+  });
+
   it("GET /api/notes filters by format, with the all-format notes unless onlyThisFormat", async () => {
     const { call, note } = await withNotes();
     await note({ text: "all" });
     await note({ text: "tall", format: "9x16", t: 2 });
     await note({ text: "wide", format: "16x9", t: 3 });
     expect((await call("GET", "/api/notes?format=9x16")).json.notes.map((n: any) => n.text)).toEqual(["all", "tall"]);
+    expect((await call("GET", "/api/notes?format=9x16&onlyThisFormat=false")).json.notes.map((n: any) => n.text)).toEqual(["all", "tall"]);
     expect((await call("GET", "/api/notes?format=9x16&onlyThisFormat=true")).json.notes.map((n: any) => n.text)).toEqual(["tall"]);
     expect((await call("GET", "/api/notes?format=portrait")).status).toBe(400);
   });

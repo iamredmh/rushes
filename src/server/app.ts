@@ -11,7 +11,7 @@ import { createBatch, latestBatch } from "../core/batches.js";
 import { exportFileName, notesMarkdown } from "../core/exportNotes.js";
 import { tabStates } from "../core/tabs.js";
 import { fromManifestPath, toManifestPath } from "../core/paths.js";
-import { VIDEO_EXT, probe, probeVideo, type VideoProber } from "../core/media.js";
+import { PROBE_TIMEOUT_MS, VIDEO_EXT, giveUpAfter, probe, probeVideo, videoGaveUp, type VideoProbe, type VideoProber } from "../core/media.js";
 import { PROXY_PATH, ProxyJobs, type ProxyEvent } from "./proxy.js";
 import { PeakJobs } from "./peaks.js";
 import { lstat, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
@@ -243,6 +243,8 @@ export interface AppOptions {
   found?: FoundScanner;
   /** §21: reads a render's shape on screen for formats. Defaults to ffprobe (probeVideo); tests inject a fake. */
   formatProbe?: VideoProber;
+  /** How long a render's read may take before Rushes gives up on it. Defaults to PROBE_TIMEOUT_MS; tests set it low. */
+  formatProbeTimeoutMs?: number;
 }
 
 const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost"]);
@@ -266,19 +268,34 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   const jobs = opts.proxyJobs ?? new ProxyJobs(store);
   const peaks = opts.peakJobs ?? new PeakJobs(store, { run: jobs.run, available: () => jobs.available() });
   const found = opts.found ?? new FoundScanner({ store, probe: ffprobeDuration, announce: foundAnnouncer(store) });
-  const readVideo = opts.formatProbe ?? probeVideo;
+  const prober: VideoProber = opts.formatProbe ?? ((abs, signal) => probeVideo(abs, { signal }));
+  const proberTimeout = opts.formatProbeTimeoutMs ?? PROBE_TIMEOUT_MS;
+  /**
+   * Every read of a render (review I2): given up on like any ffprobe, so a stalled drive never holds
+   * a request, and stopped when the server closes or `stop` aborts.
+   */
+  const readVideo = (abs: string, stop?: AbortSignal): Promise<VideoProbe> =>
+    jobs.tracked((closing) => {
+      const signal = stop ? AbortSignal.any([closing, stop]) : closing;
+      if (signal.aborted) return Promise.resolve(videoGaveUp("aborted"));
+      return giveUpAfter(prober(abs, signal), { timeout: proberTimeout, signal, gaveUp: videoGaveUp });
+    });
+  const isPlainFile = (abs: string) => stat(abs).then((s) => s.isFile(), () => false);
   /**
    * §21.3/§21.6: a render's shape on screen, length and rate, or the refusal in the user's words.
-   * Only a path with a video extension that is a plain file on disk reaches the probe. The size
-   * comes back untouched: addFormat judges it (a size that isn't a picture is its RushesError).
+   * Only a plain file on disk reaches the probe, and a format must have a video extension; the
+   * cut's own file (`primary`) is judged as it is without formats, by what ffprobe makes of it.
+   * The size comes back untouched: addFormat judges it (a size that isn't a picture is its RushesError).
    */
-  async function readRender(given: string): Promise<{ file: string; width: number; height: number; duration: number | null; fps: number | null }> {
+  async function readRender(
+    given: string,
+    how: { primary?: boolean; stop?: AbortSignal } = {},
+  ): Promise<{ file: string; width: number; height: number; duration: number | null; fps: number | null }> {
     const file = toManifestPath(store.root, given);
     const abs = fromManifestPath(store.root, file);
-    if (!VIDEO_EXT.has(extname(file).toLowerCase().replace(/^\./, ""))) throw new RushesError(`${file} isn't a video file.`, 400, "not_video", { path: file });
-    const isFile = await stat(abs).then((s) => s.isFile(), () => false);
-    if (!isFile) throw new RushesError(`File not found: ${file}`, 404, "missing_file", { path: file });
-    const r = await readVideo(abs);
+    if (!how.primary && !VIDEO_EXT.has(extname(file).toLowerCase().replace(/^\./, ""))) throw new RushesError(`${file} isn't a video file.`, 400, "not_video", { path: file });
+    if (!(await isPlainFile(abs))) throw new RushesError(`File not found: ${file}`, 404, "missing_file", { path: file });
+    const r = await readVideo(abs, how.stop);
     if (!r.ok) {
       if (r.code === "no_ffprobe") throw new RushesError("Registering a format needs ffprobe to read the ratio. Run `rushes doctor` for how to add it.", 501, "no_ffprobe");
       if (r.code === "not_video") throw new RushesError(`${file} isn't a video: ${r.reason}.`, 400, "not_video", { path: file });
@@ -722,14 +739,35 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   app.post("/api/versions", async (c) => {
     const b = await body(c, VersionBody);
     // §21.4 (R11): with formats, every file is read first and one refusal refuses the whole call.
-    const shapes = b.formats?.length ? await Promise.all([b.file, ...b.formats.map((f) => f.file)].map(readRender)) : null;
+    // The first refusal stops the other reads (review M6): nothing waits on them any more.
+    let shapes: Awaited<ReturnType<typeof readRender>>[] | null = null;
+    if (b.formats?.length) {
+      const stop = new AbortController();
+      const files = [b.file, ...b.formats.map((f) => f.file)];
+      shapes = await Promise.all(
+        files.map((f, i) =>
+          readRender(f, { primary: i === 0, stop: stop.signal }).catch((e: unknown) => {
+            stop.abort();
+            throw e;
+          }),
+        ),
+      );
+      const own = shapes[0];
+      if (!isPictureSize(own.width, own.height)) {
+        throw new RushesError(
+          `${own.file} measures ${own.width}×${own.height}, which isn't a picture size, so Rushes can't tell its formats' shapes from it.`,
+          422, "no_primary_size", { path: own.file },
+        );
+      }
+    }
     const file = shapes ? shapes[0].file : toManifestPath(store.root, b.file);
     const abs = fromManifestPath(store.root, file);
     // The proxy jobs' probe is ffprobe (tests inject a fake), so the cut's need is read from the same
-    // answer. §21.3 (R2): the primary's shape on screen is stored too, when it can be read.
-    const [info, read] = await Promise.all([jobs.probe(abs), shapes ? Promise.resolve(shapes[0]) : readVideo(abs).then((r) => (r.ok ? r : null))]);
-    // Only a real picture size is stored. Without one, a formats call is refused by addFormat below
-    // (no_primary_size), and a plain cut goes in with no size, as cuts did before formats.
+    // answer. §21.3 (R2): the primary's shape on screen is stored too, when it is a file that can be read.
+    const readOwn = async () => ((await isPlainFile(abs)) ? readVideo(abs).then((r) => (r.ok ? r : null)) : null);
+    const [info, read] = await Promise.all([jobs.probe(abs), shapes ? Promise.resolve(shapes[0]) : readOwn()]);
+    // Only a real picture size is stored; a plain cut without one goes in with no size, as cuts did
+    // before formats (a formats call was refused above).
     const size = read && isPictureSize(read.width, read.height) ? read : null;
     const formatWarnings: string[] = [];
     let lockedVersion: string | null = null;
@@ -773,8 +811,15 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     const cut = resolveCut(await store.read("project"), b.video, b.version);
     let primarySize: { width: number; height: number } | null = null;
     if (cut.version.width === null || cut.version.height === null) {
-      const r = await readVideo(fromManifestPath(store.root, cut.version.file));
-      if (r.ok) primarySize = { width: r.width, height: r.height };
+      const own = fromManifestPath(store.root, cut.version.file);
+      const r = (await isPlainFile(own)) ? await readVideo(own) : null;
+      if (r?.ok && !isPictureSize(r.width, r.height)) {
+        throw new RushesError(
+          `${cut.version.file} measures ${r.width}×${r.height}, which isn't a picture size, so Rushes can't tell a new shape from it.`,
+          422, "no_primary_size", { version: cut.version.id },
+        );
+      }
+      if (r?.ok) primarySize = { width: r.width, height: r.height };
     }
     // Inside the update, so two registrations of one shape at once can't both land: the second
     // sees the first's format and gets §21.3's sentence.

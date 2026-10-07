@@ -324,8 +324,11 @@ export class ProxyJobs {
     await Promise.all([...this.byId.keys()].map((id) => this.cancel(id).catch(() => undefined)));
   }
 
-  /** Runs `work` with a signal close() aborts. Once closing, the signal starts aborted. */
-  private async tracked<T>(work: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  /**
+   * Runs `work` with a signal close() aborts. Once closing, the signal starts aborted. The app
+   * reads formats' renders through this too (§21), so closing the server stops those reads.
+   */
+  async tracked<T>(work: (signal: AbortSignal) => Promise<T>): Promise<T> {
     const c = new AbortController();
     if (this.closing) c.abort();
     this.inflight.add(c);
