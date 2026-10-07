@@ -540,3 +540,24 @@ test("focus follows the selection under Alt+arrows, and the warning mark on a se
   });
   expect(contrast).toBeGreaterThanOrEqual(4.5);
 });
+
+// M9.
+test("Alt+arrows do nothing off the Picture tab, and the radio group never wraps them (R1)", async ({ page, rushes }) => {
+  await rushes.addFormatsCut(FOUR);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await page.keyboard.press("7");
+  await expect(page.getByRole("tab", { name: /Assets/ })).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("Alt+ArrowLeft");
+  await page.keyboard.press("2");
+  await videoReady(page);
+  await expect(radio(page, "16:9")).toHaveAttribute("aria-checked", "true");
+  // Focus on the last chip: Alt+→ stays there, where the group's own → would wrap to 9:16.
+  await radio(page, "16:9").focus();
+  await page.keyboard.press("Alt+ArrowRight");
+  await expect(radio(page, "16:9")).toHaveAttribute("aria-checked", "true");
+  await page.keyboard.press("Home");
+  await expect(radio(page, "9:16")).toBeFocused();
+  await page.keyboard.press("Alt+ArrowLeft");
+  await expect(radio(page, "9:16")).toHaveAttribute("aria-checked", "true");
+});
