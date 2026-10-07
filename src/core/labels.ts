@@ -1,6 +1,7 @@
 // §22.4: a cut's short label, and the one-line clipping the Change Log shares. Pure and import-free,
 // because the dashboard bundles this file: nothing here may pull zod or Node in, and no lookbehind
-// (Safari before 16.4 can't parse one). test/core/labels.test.ts checks both.
+// (Safari before 16.4 can't parse one). test/core/labels.test.ts checks both, and that every
+// invisible character below is written as an escape.
 
 /** A version's short label is at most this long (§22.3). */
 export const LABEL_MAX = 48;
@@ -18,15 +19,32 @@ const SPACE = /\s/;
 const JOINER = /[_\-/]/;
 // Left at the end of a cut, these read as a broken sentence, so they go before the ellipsis.
 const TRAILING = /[\s,;:.\-–—(_/]+$/u;
-// Code points that belong to the character before them: combining marks, the joiner, variation
-// selectors, skin-tone modifiers and tag characters.
-const EXTENDS = /^[\p{M}‍️\u{1F3FB}-\u{1F3FF}\u{E0020}-\u{E007F}]$/u;
+// Code points that belong to the character before them: combining marks, the zero-width joiner
+// (U+200D), variation selectors (U+FE0F), skin-tone modifiers and tag characters.
+const EXTENDS = /^[\p{M}\u200d\ufe0f\u{1F3FB}-\u{1F3FF}\u{E0020}-\u{E007F}]$/u;
 const REGIONAL = /^[\u{1F1E6}-\u{1F1FF}]$/u;
+// A surrogate that has no partner: a paired one is a single code point under the u flag.
+const LONE_SURROGATE = /[\uD800-\uDFFF]/gu;
+// Control characters, including the C1 ones (U+0085), and the line and paragraph separators.
+const BREAKS = /[\p{Cc}\p{Zl}\p{Zp}]+/gu;
+// Format characters (bidi overrides, zero-width spaces, the word joiner, the byte-order mark) go,
+// except the two joiners (U+200C, U+200D) and the tag characters, which emoji sequences need.
+const INVISIBLE = /(?![\u200c\u200d\u{E0000}-\u{E007F}])\p{Cf}/gu;
+const NOTHING_VISIBLE = /^[\p{Cf}\s]*$/u;
 
-/** Control characters and every run of whitespace become one space; the ends are trimmed. */
+/**
+ * One clean line: a lone surrogate becomes U+FFFD, control characters and every run of whitespace
+ * become one space, bidi and zero-width characters go, and the ends are trimmed. Text with nothing
+ * visible in it comes back empty.
+ */
 export function oneLineOf(text: string): string {
-  // eslint-disable-next-line no-control-regex -- the point is to match control characters.
-  return text.replace(/[\x00-\x1f\x7f]+/g, " ").replace(/\s+/g, " ").trim();
+  const line = text
+    .replace(LONE_SURROGATE, "\uFFFD")
+    .replace(BREAKS, " ")
+    .replace(INVISIBLE, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return NOTHING_VISIBLE.test(line) ? "" : line;
 }
 
 /** Code points grouped into what a reader sees as one character: an emoji sequence, a letter and its accents, a flag. */
@@ -43,7 +61,7 @@ function characters(points: string[]): string[] {
       out.push(p);
       regionals = REGIONAL.test(p) ? 1 : 0;
     }
-    joined = p === "‍";
+    joined = p === "\u200d";
   }
   return out;
 }
@@ -90,39 +108,70 @@ export function oneLine(text: string, max: number): string {
 
 // §22.4 (3): a note's first clause ends at the first of these that comes after its first 12 characters.
 const CLAUSE_ENDS = [";", ". ", " — ", " ("];
+const CLAUSE_MIN = 12;
 
-// `skipped` is how much of the note's start was stripped (a "v6: " or "(batch b_1): "): the 12
-// characters count from the note as written, so "v1: first pass; rough" still ends at "first pass".
+/** How many UTF-16 units the first `n` code points of `text` take up. */
+function unitsOfFirst(text: string, n: number): number {
+  let units = 0;
+  let seen = 0;
+  for (const ch of text) {
+    if (seen++ >= n) break;
+    units += ch.length;
+  }
+  return units;
+}
+
+// `skipped` is how many code points were stripped from the note's start (a "v6: " or a
+// "(batch b_1): "): the 12 count from the note as written, so "v1: first pass; rough" still ends at
+// "first pass".
 function firstClause(text: string, skipped: number): string {
+  const from = unitsOfFirst(text, Math.max(0, CLAUSE_MIN - skipped));
   let end = text.length;
   for (const sep of CLAUSE_ENDS) {
-    const i = text.indexOf(sep, Math.max(0, 12 - skipped));
+    const i = text.indexOf(sep, from);
     if (i >= 0 && i < end) end = i;
   }
   return text.slice(0, end).trim();
 }
 
-/** The file's name without its folder or extension: "renders/lumen_v6.mp4" gives "lumen_v6". */
+/** The file's name without its folder or extension, on one line: "renders/lumen_v6.mp4" gives "lumen_v6". */
 function fileStem(file: string): string {
   const name = file.split(/[\\/]/).pop() ?? "";
   const dot = name.lastIndexOf(".");
-  return dot > 0 ? name.slice(0, dot) : name;
+  return oneLineOf(dot > 0 ? name.slice(0, dot) : name);
 }
+
+// A leading "v6" is this cut's own id when it's followed by ":", ",", a dash, a full stop and a
+// space, the end, or a "(batch …)": "v6.5 slower" and "v60: x" are not.
+function leadingId(digits: string): RegExp {
+  const n = digits.replace(/^0+/, "") || "0";
+  return new RegExp(`^v0*${n}(?![\\p{L}\\p{N}])(?:(?:\\s*[:,\\-–—]|\\.(?=\\s|$))[\\s:,.\\-–—]*|\\s*$|\\s+(?=\\(batch\\b))`, "iu");
+}
+
+// Something to show: not empty, and not a bare ellipsis left by a cut that had nothing before it.
+const usable = (s: string): boolean => s !== "" && s !== "…";
 
 /**
  * §22.4: the version's own label when it has one. Otherwise its note's first clause, without a
- * leading "v6:" that repeats the id or a "(batch b_1):". Otherwise the file's name. Always one
- * line, never over LABEL_MAX characters.
+ * leading "v6:" that repeats the id or a "(batch b_1):". Otherwise the file's name, then the id.
+ * Always one line, never over LABEL_MAX characters, never empty.
  */
 export function shortLabel(v: Labelled): string {
-  const own = oneLineOf(v.label ?? "");
-  if (own) return clip(own, LABEL_MAX);
+  const own = clip(oneLineOf(v.label ?? ""), LABEL_MAX);
+  if (usable(own)) return own;
   const note = oneLineOf(v.note ?? "");
   let text = note;
   const n = /^v(\d+)$/i.exec(v.id)?.[1];
-  if (n !== undefined) text = text.replace(new RegExp(`^v0*${Number(n)}(?![\\p{L}\\p{N}])[\\s:,.\\-–—]*`, "iu"), "");
-  text = text.replace(/^\(batch[^)]*\)\s*:?\s*/i, "");
-  text = firstClause(text, note.length - text.length);
-  if (WORD.test(text)) return clip(text, LABEL_MAX);
-  return clip(fileStem(v.file), LABEL_MAX) || v.id;
+  if (n !== undefined) text = text.replace(leadingId(n), "");
+  text = text.replace(/^\(batch\b[^)]*\)\s*:?\s*/i, "");
+  const skipped = Array.from(note.slice(0, note.length - text.length)).length;
+  text = firstClause(text, skipped);
+  if (WORD.test(text)) {
+    const fromNote = clip(text, LABEL_MAX);
+    if (usable(fromNote)) return fromNote;
+  }
+  const stem = clip(fileStem(v.file), LABEL_MAX);
+  if (usable(stem)) return stem;
+  const id = clip(oneLineOf(v.id), LABEL_MAX);
+  return usable(id) ? id : "Untitled";
 }

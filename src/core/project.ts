@@ -2,6 +2,7 @@ import { basename } from "node:path";
 import type { Cue, FileEntry, FileKind, Lane, LaneStage, Project, Shot, Variant, Version, Video } from "./schema.js";
 import { newProjectId, slugify, uniqueId } from "./ids.js";
 import { InvalidError, NotFoundError } from "./errors.js";
+import { oneLineOf } from "./labels.js";
 import type { Store } from "./store.js";
 
 /** Sets `p.id` when missing. Returns whether it changed anything. */
@@ -40,7 +41,7 @@ export interface AddVersionInput {
   /** Manifest path (already passed through toManifestPath). */
   file: string;
   note?: string;
-  /** §22.4: a short label, 48 characters at most (checked by the caller). Stored trimmed. */
+  /** §22.4: a short label, 48 characters at most (checked by the caller). Stored on one clean line. */
   label?: string;
   duration?: number | null;
   fps?: number | null;
@@ -67,7 +68,7 @@ export function addVersion(p: Project, input: AddVersionInput, now = new Date())
     fps: input.fps ?? null,
     addedAt: now.toISOString(),
     note: input.note ?? "",
-    label: input.label?.trim() ?? "",
+    label: oneLineOf(input.label ?? ""),
     shots: shots.map((s) => ({ ...s })),
     proxy: null,
   };
