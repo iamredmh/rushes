@@ -37,6 +37,10 @@ export const VersionSchema = z.object({
   fps: z.number().positive().nullable().default(null),
   addedAt: z.string(),
   note: z.string().default(""),
+  // §22.3: a short label the agent writes, shown in the version list. The 48-character limit is
+  // enforced where labels come in (the route, the tool, the CLI). A hand-edited longer one still
+  // loads, and shortLabel shows it cut (§22.9, R2).
+  label: z.string().default(""),
   shots: z.array(ShotSchema).max(200).default([]),
   // §19.5: a lightweight H.264 copy for smooth preview. Set only once a render has completed.
   proxy: ProxySchema.nullable().default(null),

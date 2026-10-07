@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { api, mediaUrl } from "../api.js";
 import { extOf, formatBytes, fmt, metaLine, OPEN_SAFE_EXT, proxyMeta, VIDEO_EXT } from "../lib.js";
 import type { Asset, Video } from "../types.js";
+import { cutSubtitle } from "../versions.js";
 import { Icon } from "./Icon.js";
 
 export const canSaveAs = typeof window !== "undefined" && "showSaveFilePicker" in window;
@@ -151,7 +152,7 @@ export function Missing({ tip = "Missing" }: { tip?: string }) {
   return <span class="amiss" data-tip={tip} aria-label={tip}>●</span>;
 }
 
-/** A cut or delivery's title and subtitle: "Film · vN" plus its version note, when it has one
+/** A cut or delivery's title and subtitle: "Film · vN" plus its short label (§22.4), when it has one
  *  and a version to find one on. */
 export function cutLabel(asset: Asset, videos: Video[]): { title: string; subtitle: string | null } {
   const video = videos.find((v) => v.id === asset.video);
@@ -159,7 +160,7 @@ export function cutLabel(asset: Asset, videos: Video[]): { title: string; subtit
   // label ?? name (I2): a registered delivery with no video match still shows its own display
   // name rather than its bare file name.
   const title = video && asset.version ? `${video.name} · ${asset.version}` : asset.label ?? asset.name;
-  return { title, subtitle: version?.note || null };
+  return { title, subtitle: cutSubtitle(version) };
 }
 
 /** A plain list row: name, folder path, size/date, actions. Used for anything without its own

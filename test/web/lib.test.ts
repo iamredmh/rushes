@@ -171,7 +171,7 @@ describe("isChanged and latest", () => {
     expect(isChanged(sec("Line.", "New line."))).toBe(true);
   });
   it("picks a video's newest version", () => {
-    const v = (id: string) => ({ id, file: `${id}.mp4`, duration: null, fps: null, addedAt: "", note: "", shots: [], proxy: null });
+    const v = (id: string) => ({ id, file: `${id}.mp4`, duration: null, fps: null, addedAt: "", note: "", label: "", shots: [], proxy: null });
     expect(latest({ id: "hero", name: "Hero", versions: [v("v1"), v("v2")], lockedVersion: null })?.id).toBe("v2");
     expect(latest({ id: "hero", name: "Hero", versions: [], lockedVersion: null })).toBeUndefined();
     expect(latest(undefined)).toBeUndefined();
@@ -179,7 +179,7 @@ describe("isChanged and latest", () => {
 });
 
 describe("defaultVersion", () => {
-  const v = (id: string) => ({ id, file: `${id}.mp4`, duration: null, fps: null, addedAt: "", note: "", shots: [], proxy: null });
+  const v = (id: string) => ({ id, file: `${id}.mp4`, duration: null, fps: null, addedAt: "", note: "", label: "", shots: [], proxy: null });
   it("follows the newest version when nothing is locked", () => {
     const video: Video = { id: "hero", name: "Hero", versions: [v("v1"), v("v2")], lockedVersion: null };
     expect(defaultVersion(video)?.id).toBe("v2");
@@ -335,7 +335,7 @@ describe("folderItems", () => {
     ...over,
   });
   const videos: Video[] = [
-    { id: "hero", name: "Hero", versions: [{ id: "v1", file: "renders/hero_v1.mp4", duration: null, fps: null, addedAt: "2026-10-01T00:00:00Z", note: "First pass", shots: [], proxy: null }], lockedVersion: null },
+    { id: "hero", name: "Hero", versions: [{ id: "v1", file: "renders/hero_v1.mp4", duration: null, fps: null, addedAt: "2026-10-01T00:00:00Z", note: "First pass", label: "", shots: [], proxy: null }], lockedVersion: null },
     { id: "cutdown", name: "Cutdown", versions: [], lockedVersion: null },
   ];
 

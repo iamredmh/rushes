@@ -10,7 +10,7 @@ Rushes shows your work to the user stage by stage (script, picture, voiceover, m
 If the user pastes a prompt copied from a locked tab, act on it directly — it already names the project, the film and the tool to use.
 
 1. Register what you made:
-   - `rushes_add_version` for a render. If the cut is likely to play badly in a browser, the reply carries `proxySuggested: true` and `proxyReason`; Picture offers the user a proxy. Prefer H.264 MP4 to avoid this;
+   - `rushes_add_version` for a render. Give every cut a short `label` (48 characters at most) saying what changed, and put the detail in `note`. If the cut is likely to play badly in a browser, the reply carries `proxySuggested: true` and `proxyReason`; Picture offers the user a proxy. Prefer H.264 MP4 to avoid this;
    - `rushes_set_script` for the VO script. It merges by `id`, so send only the sections you changed; sections you leave out are kept. `rushes_get_script` reads the whole script;
    - `rushes_add_variant` for each voice read, music bed or SFX pass. Voice reads carry `stage: "voice"` and a `round` (its name — reads in one round are compared side by side; a new direction gets a new round); say what the read is, or what changed, in `description`. Music and SFX carry `meta.description` for their lane card;
    - `rushes_set_shots` for the storyboard's shots, once you have the first cut; send new timings when a later cut moves them.

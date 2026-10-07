@@ -46,7 +46,7 @@ Usage
   rushes mcp                                        run the MCP server over stdio
   rushes status [dir]                               tabs and open items
   rushes doctor [dir] [--json]                      check Node, ffmpeg, agent harnesses and this project
-  rushes add version <file> --video NAME [--note TEXT]
+  rushes add version <file> --video NAME [--label TEXT] [--note TEXT]
   rushes add variant <music|sfx|voice> <file> --name NAME [--lane ID] [--round NAME] [--description TEXT]
   rushes add shots <file.json> --video NAME [--version V]
   rushes add file <path> --kind K [--name NAME] [--note TEXT] [--video V]
@@ -72,6 +72,7 @@ const OPTIONS = {
   name: { type: "string" },
   video: { type: "string" },
   note: { type: "string" },
+  label: { type: "string" },
   lane: { type: "string" },
   round: { type: "string" },
   description: { type: "string" },
@@ -319,7 +320,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         const [what, a, b] = rest;
         if (what === "version") {
           if (!a || !o.video) return usage(io, "rushes add version <file> --video NAME");
-          const r = await (await client()).post("/api/versions", { video: o.video, file: resolve(io.cwd, a), note: o.note });
+          const r = await (await client()).post("/api/versions", { video: o.video, file: resolve(io.cwd, a), note: o.note, label: o.label });
           io.out(`Added ${r.video.name} ${r.version.id}`);
           // §19.5: the server says when this cut is likely to play badly in a browser.
           if (r.proxySuggested) io.out(`Proxy suggested: ${r.proxyReason}.${r.proxyJob ? " Making one now (autoProxy is on)." : " Create one from Picture."}`);

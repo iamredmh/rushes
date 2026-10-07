@@ -40,6 +40,8 @@ export interface AddVersionInput {
   /** Manifest path (already passed through toManifestPath). */
   file: string;
   note?: string;
+  /** §22.4: a short label, 48 characters at most (checked by the caller). Stored trimmed. */
+  label?: string;
   duration?: number | null;
   fps?: number | null;
 }
@@ -65,6 +67,7 @@ export function addVersion(p: Project, input: AddVersionInput, now = new Date())
     fps: input.fps ?? null,
     addedAt: now.toISOString(),
     note: input.note ?? "",
+    label: input.label?.trim() ?? "",
     shots: shots.map((s) => ({ ...s })),
     proxy: null,
   };
