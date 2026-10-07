@@ -585,6 +585,7 @@ export function App() {
             formatMissing={!!format && missingFiles.has(views.find((f) => f.id === format)?.file ?? "")}
             onPrimarySize={(file, width, height) => setMeasured((m) => (m[file] ? m : { ...m, [file]: { width, height } }))}
             onBoxPendingChange={setBoxPending}
+            onFormatChange={switchFormat}
           />
         ) : stage === "script" ? (
           <Script script={state.script} toast={toast} onChanged={() => void refresh()} />

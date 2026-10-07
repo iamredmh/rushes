@@ -1,12 +1,15 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, mediaUrl, originalFrame } from "../api.js";
 import {
-  boxFrom, contentRect, fmt, frameAt, noteTime, placeNote, RESHAPE_MS, reshapeKeyframes, shotAt, shotLabel, shotSeek, snap, spacePressesButton, stepFrame, testFlags,
+  BOX_REASON, boxFrom, boxShowsOn, contentRect, fmt, frameAt, noteFormatTag, noteTime, otherFormatNotes, placeNote, RESHAPE_MS, reshapeKeyframes, scopeHint, shotAt,
+  shotLabel, shotSeek, snap, spacePressesButton, stepFrame, testFlags, versionFormats, visibleNotes,
   type FormatView, type ProxyProgress,
 } from "../lib.js";
 import type { Note, ProxyJob, Video, Version } from "../types.js";
+import { FormatScope } from "./FormatScope.js";
 import { Icon } from "./Icon.js";
 import { Notes } from "./Notes.js";
+import { OtherFormats } from "./OtherFormats.js";
 import { ProxyBar } from "./ProxyBar.js";
 import { PictureWave, usePictureWave } from "./PictureWave.js";
 import { usePlayerFloor } from "./playerFloor.js";
@@ -67,6 +70,8 @@ export interface PictureProps {
   onPrimarySize?(file: string, width: number, height: number): void;
   /** R7: whether a drawn box is waiting, so the caller can refuse a format switch meanwhile. */
   onBoxPendingChange?(has: boolean): void;
+  /** §21.5: switch to a format ("Show on 9:16" in the Other formats row); the caller's switch, refused while a box waits. */
+  onFormatChange?(id: string): void;
 }
 
 const typing = (el: EventTarget | null) => el instanceof HTMLElement && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
@@ -75,7 +80,7 @@ const typing = (el: EventTarget | null) => el instanceof HTMLElement && (el.isCo
 export function Picture({
   video, version, fps, notes, toast, onChanged, onPendingChange, startAt, grab, onGrabChange, playerRef,
   ffmpeg = false, autoProxy = false, proxyJob, noteProxyJob, source = "proxy", onSourceChange, fileSize = null, fileRev,
-  formats = [], format = null, formatMissing = false, onPrimarySize, onBoxPendingChange,
+  formats = [], format = null, formatMissing = false, onPrimarySize, onBoxPendingChange, onFormatChange,
 }: PictureProps) {
   const ref = useRef<HTMLVideoElement>(null);
   const frameRef = useRef<HTMLDivElement>(null);
@@ -94,6 +99,14 @@ export function Picture({
   // for a file that never loads (a missing one), and the player's own reading refines it.
   const shape = view ?? formats.find((f) => f.primary) ?? null;
   const shapeAspect = shape ? shape.width / shape.height : null;
+  // §21.2 (5): the notes for the format on screen; the others wait one row away. On a one-format
+  // cut `format` is null, so every note shows and nothing new appears (R4, R15).
+  const many = format !== null && formats.length >= 2;
+  const primaryId = formats.find((f) => f.primary)?.id ?? null;
+  const visible = visibleNotes(notes, format);
+  const others = otherFormatNotes(notes, format);
+  // §21.2 (4): a new note starts on This format, every time; a box fixes it there (§21.2 (6)).
+  const [noteScope, setNoteScope] = useState<"this" | "all">("this");
   const [aspect, setAspect] = useState(shapeAspect ?? 16 / 9);
   const [playing, setPlaying] = useState(false);
   // The file found unplayable, if any (review M5): `broken` is true only while that same file is
@@ -149,6 +162,8 @@ export function Picture({
   }, [range.in, box, noteHasText]);
   // R7: tell the caller while a drawn box waits, so a format switch can wait for it.
   useEffect(() => {
+    // As in the mockup, drawing a box puts the note back on This format, and it stays there.
+    if (box !== null) setNoteScope("this");
     onBoxPendingChange?.(box !== null);
     return () => onBoxPendingChange?.(false);
   }, [box]);
@@ -169,7 +184,26 @@ export function Picture({
     if (mountedFile.current !== undefined) onGrabChange(video.id, null);
     mountedFile.current = version.file;
     setSelectedId(null);
+    setNoteScope("this");
   }, [version.file]);
+
+  const scopeNow: "this" | "all" = box ? "this" : noteScope;
+  // A note's own cut's shapes (it may be from an older version), for the Other formats row (R17).
+  const ownViews = (n: Note) => versionFormats(video.versions.find((v) => v.id === n.version) ?? version);
+  // §21.5: widen a note to every format, or narrow it to the one on screen. The server checks it
+  // (a box can't be widened, a format must be one of the note's cut), and says why in plain words.
+  const setNoteFormat = async (n: Note, to: string | null) => {
+    try {
+      await api.patch(`/api/notes/${n.id}`, { format: to });
+    } catch (e) {
+      toast(`Couldn't change that note: ${(e as Error).message}`);
+    }
+    onChanged();
+  };
+  // R6: a selected note that doesn't show on the new format lets go of the selection.
+  useEffect(() => {
+    if (selectedId && !visible.some((n) => n.id === selectedId)) setSelectedId(null);
+  }, [format]);
 
   // §19.5: the proxy plays unless you've picked Original. The switch never changes the cut, so
   // notes, timecodes and frame numbers are the same on both.
@@ -373,8 +407,12 @@ export function Picture({
       text,
       box,
       grab,
+      // §21.2 (4): the format on screen, or every format. A one-format cut names none (R4; Task 2
+      // review M4: a format in a request on an older cut with no stored size is refused).
+      ...(many ? { format: scopeNow === "this" ? format : null } : {}),
     });
     clearRange();
+    setNoteScope("this");
     setBox(null);
     onGrabChange(video.id, null);
     onChanged();
@@ -472,10 +510,10 @@ export function Picture({
     shotRefs.current[current.n]?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [current?.n]);
 
-  const placed = notes.map((n) => ({ n, at: placeNote(n, version.id) })).filter(({ at }) => at.t !== null);
-  // R6: the selected note's box, on the cut it was drawn on.
-  const selected = notes.find((n) => n.id === selectedId) ?? null;
-  const shownBox = selected?.box && (!selected.version || selected.version === version.id) ? selected.box : null;
+  const placed = visible.map((n) => ({ n, at: placeNote(n, version.id) })).filter(({ at }) => at.t !== null);
+  // R6: the selected note's box, on the cut and the format it was drawn on (R7).
+  const selected = visible.find((n) => n.id === selectedId) ?? null;
+  const shownBox = selected?.box && (!selected.version || selected.version === version.id) && boxShowsOn(selected, format, primaryId) ? selected.box : null;
   const rangeLabel = range.in === null ? null : range.out === null ? `${fmt(range.in)} →` : noteTime(range.in, range.out);
   const placeholder = range.in !== null && range.out === null ? "Set an Out point" : `Note at ${rangeLabel && range.out !== null ? rangeLabel : fmt(t)}`;
 
@@ -654,7 +692,11 @@ export function Picture({
           {placed.map(({ n, at }) => at.tOut !== null && <div class={`span ${n.status}`} style={{ left: pct(at.t!), width: pct(at.tOut - at.t!) }} />)}
           {range.in !== null && <div class="span live" style={{ left: pct(range.in), width: pct((range.out ?? range.in + 0.2) - range.in) }} />}
           {shots.filter((s) => s.start > 0).map((s) => <div class="tick" style={{ left: pct(s.start) }} />)}
-          {placed.map(({ n, at }) => <div class={`mk ${n.status}`} style={{ left: pct(at.t!) }} title={n.text} />)}
+          {/* §21.5: an all-format note's marker is a ring, a format note's a dot. */}
+          {placed.map(({ n, at }) => {
+            const tag = noteFormatTag(n, many);
+            return <div class={`mk ${n.status}${many && n.format === null ? " ring" : ""}`} style={{ left: pct(at.t!) }} title={tag ? `${tag} · ${n.text}` : n.text} />;
+          })}
           <div class="playhead" style={{ left: pct(t) }} />
         </div>
         <div class="ends"><span>0:00</span><span>{fmt(duration)}</span></div>
@@ -681,7 +723,7 @@ export function Picture({
       )}
 
       <Notes
-        notes={notes}
+        notes={visible}
         version={version.id}
         selectedId={selectedId}
         placeholder={placeholder}
@@ -690,6 +732,25 @@ export function Picture({
         onAdd={add}
         onChanged={onChanged}
         onTextChange={setNoteHasText}
+        formatTag={(n) => noteFormatTag(n, many)}
+        cardExtra={many && view ? (n) => (
+          <FormatScope
+            name="Note applies to"
+            label={view.label}
+            width={view.width}
+            height={view.height}
+            value={n.format === null ? "all" : "this"}
+            lockedReason={n.box ? BOX_REASON : null}
+            onChange={(to) => void setNoteFormat(n, to === "all" ? null : view.id)}
+          />
+        ) : undefined}
+        formatScope={many && view ? {
+          label: view.label, width: view.width, height: view.height, value: scopeNow, onChange: setNoteScope,
+          lockedReason: box ? BOX_REASON : null, hint: scopeHint(view.label, scopeNow, box !== null),
+        } : undefined}
+        listFooter={others.length > 0 ? (
+          <OtherFormats notes={others} version={version.id} viewsHere={formats} ownViews={ownViews} onShow={(id) => onFormatChange?.(id)} onRestore={(n) => void setNoteFormat(n, null)} />
+        ) : undefined}
         onSeek={(to, n) => {
           ref.current?.pause();
           seek(to);

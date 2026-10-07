@@ -588,3 +588,313 @@ test("a format arriving while a chip has focus leaves focus on that chip", async
   await expect(radio(page, "16:9")).toBeFocused();
   await expect(radio(page, "16:9")).toHaveAttribute("aria-checked", "true");
 });
+
+// ---- Task 5: notes per format (§21.2 (4)–(6), §21.5 Notes) ----
+
+const notesOf = async (rushes: { api: (m: string, p: string) => Promise<any> }) => (await rushes.api("GET", "/api/notes?stage=picture")).notes as any[];
+const BOX_REASON = "A drawn box belongs to one frame, so this note stays on this format.";
+
+test("a note written on 9:16 stays on 9:16; an all-format note shows on every format; markers and counts follow", async ({ page, rushes }) => {
+  await rushes.addFormatsCut(FOUR);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  const scope = page.getByRole("radiogroup", { name: "This note applies to" });
+  await expect(scope.getByRole("radio", { name: "This format, 16:9" })).toHaveAttribute("aria-checked", "true");
+  await expect(page.locator(".fhint")).toHaveText("Shows only while you're viewing 16:9.");
+  await radio(page, "9:16").click();
+  await expect(scope.getByRole("radio", { name: "This format, 9:16" })).toHaveAttribute("aria-checked", "true");
+  await page.keyboard.press("n");
+  await page.keyboard.type("Logo sits too close to the top edge.");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".list > .note .ftag")).toHaveText(["9:16"]);
+  await scope.getByRole("radio", { name: "All formats" }).click();
+  await expect(page.locator(".fhint")).toHaveText("Shows on every format.");
+  await page.keyboard.press("n");
+  await page.keyboard.type("Drop the first sound.");
+  await page.keyboard.press("Enter");
+  // Every new note starts on This format again: nothing is remembered between notes.
+  await expect(page.locator(".list > .note")).toHaveCount(2);
+  await expect(scope.getByRole("radio", { name: /^This format/ })).toHaveAttribute("aria-checked", "true");
+  await expect(page.locator(".fhint")).toHaveText("Shows only while you're viewing 9:16.");
+  expect((await notesOf(rushes)).map((n) => [n.text, n.format]).sort()).toEqual([["Drop the first sound.", null], ["Logo sits too close to the top edge.", "9x16"]]);
+  // A chip counts its own notes and the all-format ones.
+  await expect(radio(page, "9:16")).toHaveAccessibleName("9:16, 2 open notes");
+  await expect(radio(page, "16:9")).toHaveAccessibleName("16:9, 1 open note");
+  await expect(radio(page, "4:5")).toHaveAccessibleName("4:5, 1 open note");
+  await expect(page.locator(".track .mk")).toHaveCount(2);
+  await expect(page.locator(".track .mk.ring")).toHaveCount(1);
+  await expect(page.locator(".track .mk.ring")).toHaveAttribute("title", "All · Drop the first sound.");
+  await expect(page.locator(".track .mk:not(.ring)")).toHaveAttribute("title", "9:16 · Logo sits too close to the top edge.");
+  // Type is 15 px or larger: the switch, the hint and the tags.
+  const sizes = await page.locator(".fscope [role=radio], .fhint, .list .ftag").evaluateAll((els) => els.map((el) => parseFloat(getComputedStyle(el).fontSize)));
+  expect(sizes.length).toBeGreaterThanOrEqual(5);
+  expect(Math.min(...sizes)).toBeGreaterThanOrEqual(15);
+  await radio(page, "16:9").click();
+  await expect(page.locator(".list > .note .nx")).toHaveText(["Drop the first sound."]);
+  await expect(page.locator(".list > .note .ftag.all")).toHaveText("All");
+  await expect(page.locator(".track .mk")).toHaveCount(1);
+  await expect(page.locator(".track .mk.ring")).toHaveCount(1);
+  await radio(page, "9:16").click();
+  await expect(page.locator(".track .mk")).toHaveCount(2);
+  await expect(page.locator(".track .mk.ring")).toHaveCount(1);
+});
+
+test("one format: no switch in the composer, notes save for the whole cut, and nothing new shows", async ({ page, rushes }) => {
+  // The carried ruling: no request on a one-format cut carries `format` at all, not even null.
+  const bodies: Record<string, unknown>[] = [];
+  page.on("request", (r) => {
+    if (r.method() === "POST" && new URL(r.url()).pathname === "/api/notes") bodies.push(r.postDataJSON());
+  });
+  const seen = watchFormatRequests(page);
+  await rushes.addCut();
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await expect(page.getByRole("radiogroup", { name: "This note applies to" })).toHaveCount(0);
+  await expect(page.locator(".fhint")).toHaveCount(0);
+  await drawBox(page);
+  await page.keyboard.press("n");
+  await page.keyboard.type("Hold longer.");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".note")).toHaveCount(1);
+  await expect(page.locator(".note .ftag")).toHaveCount(0);
+  await expect(page.locator(".track .mk.ring")).toHaveCount(0);
+  await expect(page.locator(".track .mk")).toHaveAttribute("title", "Hold longer.");
+  await expect(page.locator(".otherrow")).toHaveCount(0);
+  await page.locator(".note .t").click();
+  await expect(page.locator(".note .fscope")).toHaveCount(0);
+  await expect(page.locator(".frame .bx.saved")).toHaveCount(1);
+  const [saved] = await notesOf(rushes);
+  expect(saved.format).toBeNull();
+  expect(saved.box).not.toBeNull();
+  expect(bodies).toHaveLength(1);
+  expect("format" in bodies[0]).toBe(false);
+  expect(seen).toEqual([]);
+});
+
+test("a boxed note stays on its format: the composer locks to This format and the card can't widen it; others widen and narrow", async ({ page, rushes }) => {
+  await rushes.addFormatsCut([WIDE, TALL]);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  const scope = page.getByRole("radiogroup", { name: "This note applies to" });
+  await scope.getByRole("radio", { name: "All formats" }).click();
+  await drawBox(page);
+  // Drawing a box puts the note back on This format, and All formats says why it can't be chosen.
+  await expect(scope.getByRole("radio", { name: /^This format/ })).toHaveAttribute("aria-checked", "true");
+  await expect(scope.getByRole("radio", { name: "All formats" })).toHaveAttribute("aria-disabled", "true");
+  await expect(scope.getByRole("radio", { name: "All formats" })).toHaveAccessibleDescription(BOX_REASON);
+  await expect(page.locator(".fhint")).toHaveText("A drawn box fixes this note to 16:9.");
+  await scope.getByRole("radio", { name: "All formats" }).click({ force: true });
+  await expect(scope.getByRole("radio", { name: /^This format/ })).toHaveAttribute("aria-checked", "true");
+  await page.keyboard.press("n");
+  await page.keyboard.type("Title safe.");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".list > .note")).toHaveCount(1);
+  await scope.getByRole("radio", { name: "All formats" }).click();
+  await page.keyboard.press("n");
+  await page.keyboard.type("Hold longer.");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".list > .note")).toHaveCount(2);
+  const byText = async (t: string) => (await notesOf(rushes)).find((n) => n.text === t);
+  expect(await byText("Title safe.")).toMatchObject({ format: "16x9", box: expect.any(Object) });
+  expect((await byText("Hold longer.")).format).toBeNull();
+  const card = page.locator(".list > .note", { hasText: "Hold longer." });
+  await expect(card.locator(".fscope")).toHaveCount(0); // only the selected card has the switch
+  await card.locator(".t").click();
+  const cardScope = card.getByRole("radiogroup", { name: "Note applies to" });
+  await expect(cardScope.getByRole("radio", { name: "All formats" })).toHaveAttribute("aria-checked", "true");
+  await cardScope.getByRole("radio", { name: /^This format/ }).click();
+  await expect.poll(async () => (await byText("Hold longer.")).format).toBe("16x9");
+  await expect(card.locator(".ftag")).toHaveText("16:9");
+  await expect(page.locator(".track .mk.ring")).toHaveCount(0);
+  await cardScope.getByRole("radio", { name: "All formats" }).click();
+  await expect.poll(async () => (await byText("Hold longer.")).format).toBeNull();
+  await expect(card.locator(".ftag.all")).toHaveText("All");
+  const boxed = page.locator(".list > .note", { hasText: "Title safe." });
+  await boxed.locator(".t").click();
+  await expect(page.locator(".frame .bx.saved")).toHaveCount(1);
+  const all = boxed.getByRole("radiogroup", { name: "Note applies to" }).getByRole("radio", { name: "All formats" });
+  await expect(all).toHaveAttribute("aria-disabled", "true");
+  await expect(all).toHaveAttribute("data-tip", BOX_REASON);
+  await expect(all).toHaveAccessibleDescription(BOX_REASON);
+  await all.click({ force: true });
+  await expect(all).toHaveAttribute("aria-checked", "false");
+  expect((await byText("Title safe.")).format).toBe("16x9");
+  // The server refuses it too.
+  const res = await fetch(`${rushes.base}/api/notes/${(await byText("Title safe.")).id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ format: null }) });
+  expect(res.status).toBe(400);
+  expect((await res.json()).error).toBe("box_needs_format");
+});
+
+test("notes of other formats wait in a quiet row, read only, with a button that switches to their format", async ({ page, rushes }) => {
+  await rushes.addFormatsCut(FOUR);
+  const add = (t: number, text: string, format: string) => rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t, text, format });
+  await add(1, "Logo sits too close to the top edge.", "9x16");
+  await add(2, "Rows land late against the beat.", "9x16");
+  await add(3, "End card cropped at the bottom.", "4x5");
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await expect(page.locator(".list .none")).toHaveText("None on this format.");
+  const row = page.getByRole("button", { name: "Other formats (3)" });
+  await expect(row).toHaveAttribute("aria-expanded", "false");
+  await expect(page.locator(".otherfmts .note")).toHaveCount(0);
+  await row.click();
+  await expect(row).toHaveAttribute("aria-expanded", "true");
+  const ro = page.locator(".otherfmts .note");
+  await expect(ro).toHaveCount(3);
+  await expect(ro.locator(".chk")).toHaveCount(0);
+  await expect(ro.locator("button.t")).toHaveCount(0);
+  await expect(ro.locator(".ftag")).toHaveText(["9:16", "9:16", "4:5"]);
+  const sizes = await page.locator(".otherrow, .otherfmts .ftag, .otherfmts .nx, .otherfmts .flink").evaluateAll((els) => els.map((el) => parseFloat(getComputedStyle(el).fontSize)));
+  expect(Math.min(...sizes)).toBeGreaterThanOrEqual(15);
+  // Read only: the time doesn't seek, and nothing there selects.
+  await ro.filter({ hasText: "Rows land late" }).locator(".t").click();
+  await expect(page.getByLabel("Timecode")).toContainText("0:00.00");
+  await expect(page.locator(".track .mk")).toHaveCount(0);
+  await ro.filter({ hasText: "End card cropped" }).getByRole("button", { name: "Show on 4:5" }).click();
+  await expect(radio(page, "4:5")).toHaveAttribute("aria-checked", "true");
+  await expect(page.locator(".list > .note .nx")).toHaveText(["End card cropped at the bottom."]);
+  await expect(page.locator(".otherrow")).toContainText("Other formats (2)");
+  await expect(page.locator(".track .mk")).toHaveCount(1);
+  await page.getByRole("button", { name: "Other formats (2)" }).click();
+  await expect(page.locator(".otherfmts .note")).toHaveCount(0);
+});
+
+test("switching lets go of a selected note that doesn't show on the new format (R6)", async ({ page, rushes }) => {
+  await rushes.addFormatsCut([WIDE, TALL]);
+  await rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 1, text: "Logo edge.", format: "9x16" });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await radio(page, "9:16").click();
+  await page.locator(".list > .note", { hasText: "Logo edge." }).locator(".t").click();
+  await expect(page.locator('.note[aria-current="true"]')).toHaveCount(1);
+  await radio(page, "16:9").click();
+  await radio(page, "9:16").click();
+  await expect(page.locator(".list > .note", { hasText: "Logo edge." })).toHaveCount(1);
+  await expect(page.locator('.note[aria-current="true"]')).toHaveCount(0);
+  await expect(page.locator(".list .fscope")).toHaveCount(0);
+});
+
+// Review Focus 1.
+test("a boxed note from before formats keeps showing everywhere, but draws its box on the primary only", async ({ page, rushes }) => {
+  await rushes.addCut();
+  await rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 1, text: "Old boxed note.", box: { x: 0.1, y: 0.1, w: 0.3, h: 0.3 } });
+  await rushes.addFormatFile(TALL);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  const card = page.locator(".list > .note", { hasText: "Old boxed note." });
+  await expect(card.locator(".ftag.all")).toHaveText("All");
+  await card.locator(".t").click();
+  await expect(page.locator(".frame .bx.saved")).toHaveCount(1);
+  await radio(page, "9:16").click();
+  await expect(card).toHaveCount(1);
+  await expect(card).toHaveAttribute("aria-current", "true");
+  await expect(page.locator(".frame .bx.saved")).toHaveCount(0);
+  // Its box was drawn on 16:9, so narrowing it to 9:16 is refused, in plain words.
+  await card.getByRole("radiogroup", { name: "Note applies to" }).getByRole("radio", { name: /^This format/ }).click();
+  await expect(page.locator(".toast")).toHaveText("Couldn't change that note: A drawn box belongs to the frame it was drawn on (16:9), so this note stays there.");
+  expect((await notesOf(rushes))[0].format).toBeNull();
+});
+
+test("the server's refusal of a narrowed note shows as a plain message, and the note is unchanged", async ({ page, rushes }) => {
+  await rushes.addCut();
+  await rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 1, text: "From the first cut." });
+  await rushes.addFormatsCut([WIDE, TALL]);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await radio(page, "9:16").click();
+  const card = page.locator(".list > .note", { hasText: "From the first cut." });
+  await expect(card.locator(".from")).toHaveText(/^from v1/);
+  await card.locator(".t").click();
+  await card.getByRole("radiogroup", { name: "Note applies to" }).getByRole("radio", { name: /^This format/ }).click();
+  await expect(page.locator(".toast")).toHaveText("Couldn't change that note: v1 has no 9:16 format.");
+  await expect(card.getByRole("radiogroup", { name: "Note applies to" }).getByRole("radio", { name: "All formats" })).toHaveAttribute("aria-checked", "true");
+  expect((await notesOf(rushes))[0].format).toBeNull();
+});
+
+// Review Focus 3, §21.8 (3).
+test("a half-typed note, its All formats choice and a drawn box all survive a format switch; the box keeps its format", async ({ page, rushes }) => {
+  await rushes.addFormatsCut([WIDE, TALL]);
+  await rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 1, text: "Logo edge.", format: "9x16" });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  const scope = page.getByRole("radiogroup", { name: "This note applies to" });
+  const textbox = page.getByRole("textbox", { name: "New note" });
+  await scope.getByRole("radio", { name: "All formats" }).click();
+  await page.keyboard.press("n");
+  await page.keyboard.type("Half a thought");
+  await page.getByRole("button", { name: "Other formats (1)" }).click();
+  await page.getByRole("button", { name: "Show on 9:16" }).click();
+  await expect(radio(page, "9:16")).toHaveAttribute("aria-checked", "true");
+  await expect(textbox).toHaveValue("Half a thought");
+  await expect(scope.getByRole("radio", { name: "All formats" })).toHaveAttribute("aria-checked", "true");
+  await expect(page.locator(".fhint")).toHaveText("Shows on every format.");
+  // A box drawn on 9:16 belongs to 9:16: no switch moves it to another shape.
+  await textbox.press("Escape");
+  await drawBox(page);
+  await expect(page.locator(".fhint")).toHaveText("A drawn box fixes this note to 9:16.");
+  await radio(page, "16:9").click();
+  await expect(page.locator(".toast")).toHaveText("Add or clear your box on 9:16 first");
+  await page.keyboard.press("Alt+ArrowRight");
+  await expect(radio(page, "9:16")).toHaveAttribute("aria-checked", "true");
+  await expect(page.locator(".frame .bx:not(.saved)")).toHaveCount(1);
+  await expect(textbox).toHaveValue("Half a thought");
+  await textbox.click();
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".list > .note")).toHaveCount(2);
+  const saved = (await notesOf(rushes)).find((n) => n.text === "Half a thought");
+  expect(saved).toMatchObject({ format: "9x16", box: expect.any(Object) });
+});
+
+test("the composer's and the card's switches work from the keyboard, and their keys never reach the player", async ({ page, rushes }) => {
+  await rushes.addFormatsCut([WIDE, TALL]);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  const scope = page.getByRole("radiogroup", { name: "This note applies to" });
+  const thisR = scope.getByRole("radio", { name: /^This format/ });
+  const allR = scope.getByRole("radio", { name: "All formats" });
+  await expect(thisR).toHaveAttribute("tabindex", "0");
+  await expect(allR).toHaveAttribute("tabindex", "-1");
+  await thisR.focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(allR).toHaveAttribute("aria-checked", "true");
+  await expect(allR).toBeFocused();
+  await expect(allR).toHaveAttribute("tabindex", "0");
+  await page.keyboard.press("Home");
+  await expect(thisR).toHaveAttribute("aria-checked", "true");
+  await expect(thisR).toBeFocused();
+  await page.keyboard.press("End");
+  await expect(allR).toHaveAttribute("aria-checked", "true");
+  await page.keyboard.press("ArrowLeft");
+  await expect(thisR).toHaveAttribute("aria-checked", "true");
+  await page.keyboard.press("ArrowDown");
+  await expect(allR).toHaveAttribute("aria-checked", "true");
+  // Neither the frame step nor Alt-free arrows on the format toggle saw any of that.
+  await expect(page.getByLabel("Timecode")).toContainText("0:00.00");
+  await expect(radio(page, "16:9")).toHaveAttribute("aria-checked", "true");
+  await page.keyboard.press("n");
+  await page.keyboard.type("Everywhere.");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".list > .note")).toHaveCount(1);
+  expect((await notesOf(rushes))[0].format).toBeNull();
+  // With a box, the arrows can't reach All formats, and removing the box leaves This format chosen.
+  await page.keyboard.press("Escape");
+  await drawBox(page);
+  await thisR.focus();
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("End");
+  await expect(thisR).toHaveAttribute("aria-checked", "true");
+  await expect(thisR).toBeFocused();
+  await page.getByRole("button", { name: "Remove box" }).click();
+  await expect(thisR).toHaveAttribute("aria-checked", "true");
+  await expect(allR).not.toHaveAttribute("aria-disabled", "true");
+  // The card's switch: narrow, then widen, by keys alone.
+  await page.locator(".list > .note .t").click();
+  const card = page.locator(".list > .note").getByRole("radiogroup", { name: "Note applies to" });
+  await card.getByRole("radio", { name: "All formats" }).focus();
+  await page.keyboard.press("ArrowLeft");
+  await expect.poll(async () => (await notesOf(rushes))[0].format).toBe("16x9");
+  await expect(card.getByRole("radio", { name: /^This format/ })).toBeFocused();
+  await page.keyboard.press("End");
+  await expect.poll(async () => (await notesOf(rushes))[0].format).toBeNull();
+  await expect(page.getByLabel("Timecode")).toContainText("0:00.00");
+});
