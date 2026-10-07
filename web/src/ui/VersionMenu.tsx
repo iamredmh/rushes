@@ -4,7 +4,7 @@
 // cut's full note under the picture, two lines at most.
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { Version } from "../types.js";
-import { ago, moveActive, shortLabel, typeAhead, versionMeta } from "../versions.js";
+import { ago, agoSpoken, moveActive, oneLineOf, shortLabel, typeAhead, versionMeta } from "../versions.js";
 import { Icon } from "./Icon.js";
 
 export interface VersionMenuProps {
@@ -56,10 +56,14 @@ export function VersionMenu({ versions, shown, lockedVersion, onPick }: VersionM
     if (id !== shown.id) onPick(id);
   };
 
-  // Roving focus: while the list is open, the active row has it.
+  // Roving focus: while the list is open, the active row has it. If that cut has gone (deleted by
+  // hand while the list was open), the list closes and focus goes back to the button, rather than
+  // falling to the page where the shortcuts would work behind the open list.
+  const activeGone = open && !versions.some((v) => v.id === active);
   useLayoutEffect(() => {
-    if (open) rowEls.current[active]?.focus();
-  }, [open, active]);
+    if (activeGone) close(true);
+    else if (open) rowEls.current[active]?.focus();
+  }, [open, active, activeGone]);
   // Keep the list inside the window: measured once as it opens, and again if the window is resized.
   useLayoutEffect(() => {
     if (!open) return;
@@ -119,6 +123,12 @@ export function VersionMenu({ versions, shown, lockedVersion, onPick }: VersionM
       pick(active);
       return;
     }
+    if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      // The list is vertical: sideways arrows do nothing here, and never step frames behind it.
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     if (/^\d$/.test(e.key)) {
       e.preventDefault();
       e.stopPropagation();
@@ -153,6 +163,7 @@ export function VersionMenu({ versions, shown, lockedVersion, onPick }: VersionM
         data-version={shown.id}
         aria-haspopup="listbox"
         aria-expanded={open}
+        aria-controls={open ? "vlist" : undefined}
         aria-label={`Version: ${shown.id} · ${label}`}
         onClick={() => (open ? close(false) : show(shown.id))}
         onKeyDown={(e) => {
@@ -169,7 +180,7 @@ export function VersionMenu({ versions, shown, lockedVersion, onPick }: VersionM
       </button>
       {open && (
         <div ref={menu} class={`vmenu${touch ? " touch" : ""}`} style={shift ? { left: `${-shift}px` } : undefined}>
-          <div class="vlist" role="listbox" aria-label="Versions" onKeyDown={onListKey} onMouseLeave={() => setHover(null)}>
+          <div class="vlist" id="vlist" role="listbox" aria-label="Versions" onKeyDown={onListKey} onMouseLeave={() => setHover(null)}>
             {rows.map((v) => (
               <button
                 type="button"
@@ -178,6 +189,7 @@ export function VersionMenu({ versions, shown, lockedVersion, onPick }: VersionM
                 data-version={v.id}
                 data-on={v.id === (hover ?? active) ? "true" : "false"}
                 aria-selected={v.id === shown.id}
+                aria-label={rowName(v, lockedVersion, now)}
                 aria-describedby={!touch && v.id === detail.id ? "vdetail" : undefined}
                 tabIndex={v.id === active ? 0 : -1}
                 ref={(el) => { rowEls.current[v.id] = el; }}
@@ -187,17 +199,12 @@ export function VersionMenu({ versions, shown, lockedVersion, onPick }: VersionM
                 <span class="vid">{v.id}</span>
                 <span class="vlbl">{shortLabel(v)}</span>
                 <span class="vwhen">
-                  {v.id === lockedVersion && (
-                    <>
-                      <Icon name="lock" />
-                      <span class="vh">Locked, </span>
-                    </>
-                  )}
+                  {v.id === lockedVersion && <Icon name="lock" />}
                   {ago(v.addedAt, now)}
                 </span>
                 {touch && tapped === v.id && (
                   <span class="vinline">
-                    {v.note.trim() || "No note."}
+                    {oneLineOf(v.note) || "No note."}
                     <span class="vmeta">{versionMeta(v, now)}</span>
                   </span>
                 )}
@@ -207,7 +214,7 @@ export function VersionMenu({ versions, shown, lockedVersion, onPick }: VersionM
           {!touch && (
             <div class="vdetail" id="vdetail">
               <h4>{detail.id}</h4>
-              <p>{detail.note.trim() || "No note."}</p>
+              <p>{oneLineOf(detail.note) || "No note."}</p>
               <span class="vmeta">{versionMeta(detail, now)}</span>
             </div>
           )}
@@ -218,11 +225,19 @@ export function VersionMenu({ versions, shown, lockedVersion, onPick }: VersionM
 }
 
 /** §22.8: the full note of the cut on show, under the picture. Two lines at most, with More when it's cut short (R23). */
+/** A row's accessible name, in full words with commas (M4): "v6, launch 1.45x slower, locked, 2 hours ago". */
+function rowName(v: Version, lockedVersion: string | null, now: Date): string {
+  return [v.id, shortLabel(v), v.id === lockedVersion ? "locked" : "", agoSpoken(v.addedAt, now)].filter(Boolean).join(", ");
+}
+
+/**
+ * Picture keys it by the version's id, so a new cut's note always starts clamped: no frame of the
+ * previous cut's More state (M5).
+ */
 export function VersionNote({ version }: { version: Version }) {
   const [more, setMore] = useState(false);
   const [clamped, setClamped] = useState(false);
   const text = useRef<HTMLSpanElement>(null);
-  useEffect(() => setMore(false), [version.id]);
   useLayoutEffect(() => {
     const el = text.current;
     if (!el) return;
@@ -232,7 +247,7 @@ export function VersionNote({ version }: { version: Version }) {
     ro.observe(el);
     return () => ro.disconnect();
   }, [version.id, version.note, more]);
-  const note = version.note.trim();
+  const note = oneLineOf(version.note);
   if (!note) return null;
   const id = `vnote-${version.id}`;
   return (

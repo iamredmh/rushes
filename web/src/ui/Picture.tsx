@@ -547,7 +547,7 @@ export function Picture({
           <div class="playhead" style={{ left: pct(t) }} />
         </div>
         <div class="ends"><span>0:00</span><span>{fmt(duration)}</span></div>
-        <VersionNote version={version} />
+        <VersionNote key={version.id} version={version} />
       </div>
 
       {/* Outside the player's column, so the note box stays level with the timeline: the strip
