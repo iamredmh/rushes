@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { FORMAT_ID_RE, labelOfId, ratioId, ratioLabel } from "./formats.js";
 
 export const STAGES = ["script", "picture", "voice", "music", "sfx", "mix"] as const;
 export const StageSchema = z.enum(STAGES);
@@ -30,17 +31,47 @@ export const ProxySchema = z.object({
 });
 export type Proxy = z.infer<typeof ProxySchema>;
 
-export const VersionSchema = z.object({
-  id,
+// §21.3: another render of the same cut at another aspect ratio. Its id is its label with ":" as "x".
+export const FormatSchema = z.object({
+  id: z.string().max(16).regex(FORMAT_ID_RE),
+  label: z.string().min(3).max(16),
   file: z.string().min(1),
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
   duration: seconds.nullable().default(null),
   fps: z.number().positive().nullable().default(null),
   addedAt: z.string(),
-  note: z.string().default(""),
-  shots: z.array(ShotSchema).max(200).default([]),
-  // §19.5: a lightweight H.264 copy for smooth preview. Set only once a render has completed.
-  proxy: ProxySchema.nullable().default(null),
 });
+export type Format = z.infer<typeof FormatSchema>;
+
+export const VersionSchema = z
+  .object({
+    id,
+    file: z.string().min(1),
+    duration: seconds.nullable().default(null),
+    fps: z.number().positive().nullable().default(null),
+    addedAt: z.string(),
+    note: z.string().default(""),
+    shots: z.array(ShotSchema).max(200).default([]),
+    // §19.5: a lightweight H.264 copy for smooth preview. Set only once a render has completed.
+    proxy: ProxySchema.nullable().default(null),
+    // §21.3 (R2): the primary render's picture size as shown, read when the cut is added. Null for a
+    // cut from before formats until its first format is registered.
+    width: z.number().int().positive().nullable().default(null),
+    height: z.number().int().positive().nullable().default(null),
+    // §21.3: the other renders of this cut, one per aspect ratio. The primary (`file`) is a format too.
+    formats: z.array(FormatSchema).max(8).default([]),
+  })
+  .superRefine((v, ctx) => {
+    // One shape per ratio: no two formats share an id, and none repeats the primary's.
+    const primary = v.width !== null && v.height !== null ? ratioId(ratioLabel(v.width, v.height)) : null;
+    const seen = new Set<string>(primary ? [primary] : []);
+    v.formats.forEach((f, i) => {
+      if (f.label !== labelOfId(f.id)) ctx.addIssue({ code: "custom", path: ["formats", i, "label"], message: `label "${f.label}" doesn't match id "${f.id}"` });
+      if (seen.has(f.id)) ctx.addIssue({ code: "custom", path: ["formats", i, "id"], message: `${v.id} already has ${f.label}` });
+      seen.add(f.id);
+    });
+  });
 export type Version = z.infer<typeof VersionSchema>;
 
 export const VideoSchema = z.object({
@@ -180,6 +211,9 @@ export const NoteSchema = z
     grab: z.string().nullable().default(null),
     shot: z.object({ n: z.number().int().positive(), name: z.string() }).nullable().default(null),
     marks: z.array(MarkSchema).max(4).default([]),
+    // §21.3: the format this note belongs to (a Format id such as "9x16"), or null for every format:
+    // the default, and every note from before formats. The server checks it against the note's version.
+    format: z.string().max(16).regex(FORMAT_ID_RE).nullable().default(null),
     status: z.enum(["todo", "done"]).default("todo"),
     reply: z.string().default(""),
     fixT: seconds.nullable().default(null),

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { addNote, applyReply, applyUserEdit, filterNotes, onLabel, type OnContext } from "../../src/core/notes.js";
-import { markLabel, NoteSchema, type Note, type NotesFile } from "../../src/core/schema.js";
+import { addNote, applyReply, applyUserEdit, checkNoteFormat, filterNotes, onLabel, type OnContext } from "../../src/core/notes.js";
+import { markLabel, NoteSchema, type Note, type NotesFile, type Project } from "../../src/core/schema.js";
+import { addFormat, addVersion } from "../../src/core/project.js";
+import type { RushesError } from "../../src/core/errors.js";
 
 const empty = (): NotesFile => ({ schema: 1, rev: 0, notes: [] });
 
@@ -232,5 +234,71 @@ describe("onLabel (what an audio note is on, for export and the CLI)", () => {
     expect(label("music", "music/gone")).toBeNull();
     expect(label("sfx", "sfx/option-a:gone")).toBeNull();
     expect(label("voice", "s9")).toBeNull();
+  });
+});
+
+describe("notes and formats (§21.2, §21.3)", () => {
+  const project = (): Project => {
+    const p: Project = { schema: 1, rev: 0, name: "demo", fps: 30, videos: [], lanes: [], files: [], autoProxy: false };
+    addVersion(p, { video: "Hero", file: "renders/hero_v1.mp4", duration: 8, width: 1920, height: 1080 });
+    addFormat(p, { video: "hero", file: "renders/hero_v1_9x16.mp4", width: 1080, height: 1920, duration: 8, fps: 30 });
+    addVersion(p, { video: "Solo", file: "renders/solo_v1.mp4", duration: 8, width: 1920, height: 1080 });
+    return p;
+  };
+  const next = (over: Partial<Pick<Note, "stage" | "video" | "version" | "format" | "box">> = {}) =>
+    ({ stage: "picture" as const, video: "hero", version: "v1", format: null, box: null, ...over });
+  const box = { x: 0.1, y: 0.1, w: 0.2, h: 0.2 };
+  const code = (fn: () => void): string | null => {
+    try {
+      fn();
+      return null;
+    } catch (e) {
+      return (e as RushesError).code;
+    }
+  };
+
+  it("a format must be one of the note's own cut's, and only Picture notes have one", () => {
+    expect(code(() => checkNoteFormat({ next: next({ format: "9x16" }) }, project()))).toBeNull();
+    expect(code(() => checkNoteFormat({ next: next({ format: "16x9" }) }, project()))).toBeNull();
+    expect(() => checkNoteFormat({ next: next({ format: "4x5" }) }, project())).toThrow("v1 has no 4:5 format.");
+    expect(code(() => checkNoteFormat({ next: next({ format: "9x16", stage: "music" }) }, project()))).toBe("format_not_picture");
+  });
+
+  it("a box needs a format on a cut with formats, and keeps the one it was drawn on (R7)", () => {
+    expect(code(() => checkNoteFormat({ next: next({ box }) }, project()))).toBe("box_needs_format");
+    expect(code(() => checkNoteFormat({ next: next({ box, format: "9x16" }) }, project()))).toBeNull();
+    expect(code(() => checkNoteFormat({ next: next({ box, video: "solo" }) }, project()))).toBeNull();
+    expect(code(() => checkNoteFormat({ next: next({ box, format: "16x9" }), prev: { box, format: "9x16" } }, project()))).toBe("box_fixes_format");
+    // Review Focus 1: a note from before formats drew its box on the primary, so it narrows to the primary only.
+    expect(code(() => checkNoteFormat({ next: next({ box, format: "16x9" }), prev: { box, format: null } }, project()))).toBeNull();
+    expect(code(() => checkNoteFormat({ next: next({ box, format: "9x16" }), prev: { box, format: null } }, project()))).toBe("box_fixes_format");
+    // A box drawn again in the same edit belongs to the format it's drawn on now.
+    expect(code(() => checkNoteFormat({ next: next({ box, format: "16x9" }), prev: { box, format: "9x16" }, boxRedrawn: true }, project()))).toBeNull();
+  });
+
+  it("applyUserEdit carries format, and runs the check before changing anything", () => {
+    const f = empty();
+    const p = project();
+    const check = (nx: Note, pv: Note) => checkNoteFormat({ next: nx, prev: pv }, p);
+    const boxed = addNote(f, { stage: "picture", video: "hero", version: "v1", scope: "point", t: 1, text: "x", format: "9x16", box });
+    expect(() => applyUserEdit(f, { id: boxed.id, format: null }, check)).toThrow(/box/);
+    expect(f.notes[0].format).toBe("9x16");
+    const plain = addNote(f, { stage: "picture", video: "hero", version: "v1", scope: "point", t: 2, text: "y", format: "9x16" });
+    applyUserEdit(f, { id: plain.id, format: null }, check);
+    expect(f.notes[1].format).toBeNull();
+  });
+
+  it("filterNotes takes a format: its notes and the all-format ones, or only its own (R14)", () => {
+    const f = empty();
+    addNote(f, { stage: "picture", scope: "point", t: 1, text: "all" });
+    addNote(f, { stage: "picture", scope: "point", t: 2, text: "tall", format: "9x16" });
+    addNote(f, { stage: "picture", scope: "point", t: 3, text: "wide", format: "16x9" });
+    addNote(f, { stage: "music", scope: "whole", text: "bed" });
+    expect(filterNotes(f.notes, { format: "9x16" }).map((n) => n.text)).toEqual(["all", "tall"]);
+    expect(filterNotes(f.notes, { format: "9x16", onlyThisFormat: true }).map((n) => n.text)).toEqual(["tall"]);
+  });
+
+  it("a format that isn't an id is refused by the schema", () => {
+    expect(() => addNote(empty(), { stage: "picture", scope: "point", t: 1, text: "x", format: "portrait" })).toThrow(/invalid/i);
   });
 });

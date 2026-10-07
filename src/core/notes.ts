@@ -1,7 +1,8 @@
 import {
   NoteSchema, type Lane, type LaneStage, type Note, type NotesFile, type Picks, type Project, type Script, type Stage, type Variant,
 } from "./schema.js";
-import { InvalidError, NotFoundError } from "./errors.js";
+import { InvalidError, NotFoundError, RushesError } from "./errors.js";
+import { labelOfId, versionFormats } from "./formats.js";
 import { newId } from "./ids.js";
 
 export interface NewNote {
@@ -20,6 +21,8 @@ export interface NewNote {
   shot?: Note["shot"];
   /** User-owned, like text (§14.5): the quick marks on a range note on an audio tab. */
   marks?: Note["marks"];
+  /** §21.3: a Format id, or null for every format. User-owned, like text. */
+  format?: string | null;
   by?: Note["by"];
 }
 
@@ -71,20 +74,54 @@ export interface UserEdit {
   tOut?: number | null;
   /** User-owned, like text (§14.5): applyReply never touches this. */
   marks?: Note["marks"];
+  /** §21.3: a Format id, or null for every format. User-owned, like text. */
+  format?: string | null;
   status?: Note["status"];
 }
 
-export function applyUserEdit(file: NotesFile, e: UserEdit): Note {
+export function applyUserEdit(file: NotesFile, e: UserEdit, check?: (next: Note, prev: Note) => void): Note {
   const n = find(file, e.id);
   const next = { ...n };
-  for (const k of ["text", "box", "grab", "scope", "t", "tOut", "marks", "status"] as const) {
+  for (const k of ["text", "box", "grab", "scope", "t", "tOut", "marks", "status", "format"] as const) {
     if (e[k] !== undefined) (next as Record<string, unknown>)[k] = e[k];
   }
   const parsed = NoteSchema.safeParse(next);
   if (!parsed.success) throw new InvalidError("Note edit is invalid", parsed.error.issues);
+  check?.(parsed.data, n);
   reopen(n, e.status);
   Object.assign(n, { ...parsed.data, batch: n.batch });
   return n;
+}
+
+export interface NoteFormatCheck {
+  next: Pick<Note, "stage" | "video" | "version" | "format" | "box">;
+  /** The note as it was, for an edit. */
+  prev?: Pick<Note, "format" | "box">;
+  /** The edit draws the box again (so it belongs to the format it's drawn on now). */
+  boxRedrawn?: boolean;
+}
+
+/**
+ * §21.3 and R7, checked when a note is written: a format must be one of the note's version's;
+ * only Picture notes have one; on a cut with two or more formats a box needs a format, and a box
+ * kept from before stays on the format it was drawn on (the primary, for a note from before formats).
+ */
+export function checkNoteFormat({ next, prev, boxRedrawn = false }: NoteFormatCheck, project: Pick<Project, "videos">): void {
+  if (next.format !== null && next.stage !== "picture") throw new RushesError("Only Picture notes belong to a format.", 400, "format_not_picture");
+  if (next.stage !== "picture") return;
+  const version = project.videos.find((v) => v.id === next.video)?.versions.find((v) => v.id === next.version);
+  const shapes = version ? versionFormats(version) : [];
+  if (next.format !== null && !shapes.some((f) => f.id === next.format)) {
+    throw new RushesError(`${next.version ?? "That cut"} has no ${labelOfId(next.format)} format.`, 400, "unknown_format", { format: next.format });
+  }
+  if (!next.box || shapes.length < 2) return;
+  if (next.format === null) throw new RushesError("A drawn box belongs to one frame, so this note stays on one format.", 400, "box_needs_format");
+  if (prev?.box && !boxRedrawn) {
+    const drawnOn = prev.format ?? shapes[0].id;
+    if (next.format !== drawnOn) {
+      throw new RushesError(`A drawn box belongs to the frame it was drawn on (${labelOfId(drawnOn)}), so this note stays there.`, 400, "box_fixes_format", { format: drawnOn });
+    }
+  }
 }
 
 /** What `onLabel` needs to resolve a note's `on`. `picks` only steers an older bare id on Mix. */
@@ -157,6 +194,8 @@ export interface NoteFilter {
   status?: Note["status"];
   batch?: string;
   version?: string;
+  format?: string;
+  onlyThisFormat?: boolean;
 }
 
 export function filterNotes(notes: Note[], f: NoteFilter = {}): Note[] {
@@ -165,6 +204,7 @@ export function filterNotes(notes: Note[], f: NoteFilter = {}): Note[] {
       (f.stage === undefined || n.stage === f.stage) &&
       (f.status === undefined || n.status === f.status) &&
       (f.batch === undefined || n.batch === f.batch) &&
-      (f.version === undefined || n.version === f.version),
+      (f.version === undefined || n.version === f.version) &&
+      (f.format === undefined || (n.stage === "picture" && (n.format === f.format || (!f.onlyThisFormat && n.format === null)))),
   );
 }

@@ -350,7 +350,7 @@ describe("frame grabs", () => {
     const { post, call, store } = await setup();
     await store.update("project", (p) => {
       p.videos.push({ id: "hero-60s", name: "Hero 60s", lockedVersion: null, versions: [
-        { id: "v3", file: "renders/hero.mp4", duration: null, fps: 60, addedAt: new Date().toISOString(), note: "", shots: [], proxy: null },
+        { id: "v3", file: "renders/hero.mp4", duration: null, fps: 60, addedAt: new Date().toISOString(), note: "", shots: [], proxy: null, width: null, height: null, formats: [] },
       ] });
     });
     const r = await post("/api/grabs", { video: "hero-60s", version: "v3", frame: 726, png: `data:image/png;base64,${PNG_1PX}` });
