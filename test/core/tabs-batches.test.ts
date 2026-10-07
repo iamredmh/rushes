@@ -132,6 +132,33 @@ describe("createBatch", () => {
     expect(formatLines(c.project, [])).toEqual([]);
   });
 
+  // Review M2: a hand-edited cut whose own size isn't stored still has its listed formats, and the count includes its own file.
+  it("formatLines on a cut whose own size is unknown counts its own file and names no main shape", () => {
+    const c = ctx();
+    addVersion(c.project, { video: "Hero", file: "renders/hero_v1.mp4", duration: 8, width: 1920, height: 1080 });
+    addFormat(c.project, { video: "hero", file: "renders/hero_v1_9x16.mp4", width: 1080, height: 1920, duration: 8, fps: 30 });
+    addFormat(c.project, { video: "hero", file: "renders/hero_v1_1x1.mp4", width: 1080, height: 1080, duration: 8, fps: 30 });
+    const v = c.project.videos[0].versions[0];
+    v.width = null;
+    v.height = null;
+    const note = (format: string | null) => ({ video: "hero", version: "v1", format });
+    expect(formatLines(c.project, [note(null), note("9x16"), note("1x1")])[0]).toBe(
+      "Hero v1 has 3 formats: 9:16, 1:1 and the cut's own file. Notes: 1 for all formats, 1 for 9:16, 1 for 1:1.",
+    );
+    // One listed format is two shapes, so the notes are tagged All and the prompt speaks of them.
+    c.project.videos[0].versions[0].formats = c.project.videos[0].versions[0].formats.slice(0, 1);
+    expect(formatLines(c.project, [note(null)])[0]).toBe("Hero v1 has 2 formats: 9:16 and the cut's own file. Notes: 1 for all formats.");
+  });
+
+  it("a one-format Picture batch's prompt is exactly what it was before formats", () => {
+    const c = ctx();
+    addVersion(c.project, { video: "Hero", file: "renders/hero_v1.mp4", duration: 8, width: 1920, height: 1080 });
+    addNote(c.notes, { stage: "picture", video: "hero", version: "v1", scope: "point", t: 1, text: "a" });
+    expect(createBatch(c, "picture").prompt).toBe(
+      "Work through picture batch b_1 on spring-launch: 1 note.\nUse rushes_get_batch, fix each note, then rushes_reply with a fixT for each and rushes_add_version for the new cut.",
+    );
+  });
+
   it("puts changed and flagged sections in a script batch", () => {
     const c = ctx();
     setSections(c.script, [{ start: 0, end: 5, current: "A" }, { start: 5, end: 9, current: "B" }, { start: 9, end: 12, current: "C" }]);

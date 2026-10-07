@@ -57,16 +57,19 @@ export function formatLines(project: Pick<Project, "videos">, notes: Pick<Note, 
     seen.add(key);
     const video = project.videos.find((v) => v.id === n.video);
     const version = video?.versions.find((v) => v.id === n.version);
-    const shapes = version ? versionFormats(version) : [];
-    if (!video || !version || shapes.length < 2) continue;
-    const [main, ...rest] = shapes;
-    const ordered = chipOrder(rest);
+    // The cut's own file is a shape beside the listed formats, even while its size is unknown (hand-edited).
+    const total = (version?.formats?.length ?? 0) + 1;
+    if (!video || !version || total < 2) continue;
+    const views = versionFormats(version);
+    const main = views.find((f) => f.primary);
+    const ordered = chipOrder(views.filter((f) => !f.primary));
+    const names = main ? [`${main.label} (main)`, ...ordered.map((f) => f.label)].join(", ") : `${ordered.map((f) => f.label).join(", ")} and the cut's own file`;
     const here = notes.filter((x) => x.video === n.video && x.version === n.version);
     const counts = [
       { label: "all formats", k: here.filter((x) => x.format === null).length },
-      ...[main, ...ordered].map((f) => ({ label: f.label, k: here.filter((x) => x.format === f.id).length })),
+      ...(main ? [main, ...ordered] : ordered).map((f) => ({ label: f.label, k: here.filter((x) => x.format === f.id).length })),
     ].filter((c) => c.k > 0);
-    lines.push(`${video.name} ${version.id} has ${shapes.length} formats: ${[`${main.label} (main)`, ...ordered.map((f) => f.label)].join(", ")}. Notes: ${counts.map((c) => `${c.k} for ${c.label}`).join(", ")}.`);
+    lines.push(`${video.name} ${version.id} has ${total} formats: ${names}. Notes: ${counts.map((c) => `${c.k} for ${c.label}`).join(", ")}.`);
   }
   if (lines.length) lines.push(FORMAT_STEPS);
   return lines;
