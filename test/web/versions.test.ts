@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ago, cutSubtitle, moveActive, shortLabel, typeAhead, versionMeta } from "../../web/src/versions.js";
+import { ago, agoSpoken, cutSubtitle, dayDiff, moveActive, oneLineOf, shortLabel, typeAhead, versionMeta } from "../../web/src/versions.js";
 
 describe("versions.ts (§22.4)", () => {
   it("re-exports the server's shortLabel, so both sides say the same", () => {
@@ -27,18 +27,55 @@ describe("the version list's helpers (§22.8)", () => {
     expect(ago("", now)).toBe("");
     expect(ago(before(-60_000), now)).toBe("just now"); // a clock a little ahead
   });
-  it("ago's boundaries: 59 s, 60 s, 59 min, 1 h, 23 h, 24 h, 47 h, 48 h, 6 days, 7 days", () => {
+  it("ago's boundaries: 59 s, 60 s, 59 min, 1 h, midnight, 23 h, 24 h, 47 h, 48 h, 6 days, 7 days", () => {
     expect(ago(before(59_000), now)).toBe("just now");
     expect(ago(before(60_000), now)).toBe("1 min ago");
     expect(ago(before(59 * 60_000), now)).toBe("59 min ago");
     expect(ago(before(3_600_000), now)).toBe("1 h ago");
-    expect(ago(before(23 * 3_600_000), now)).toBe("23 h ago");
+    expect(ago(before(12 * 3_600_000), now)).toBe("12 h ago"); // midnight today
+    expect(ago(before(12 * 3_600_000 + 60_000), now)).toBe("yesterday"); // 23:59 the day before
+    expect(ago(before(23 * 3_600_000), now)).toBe("yesterday");
     expect(ago(before(24 * 3_600_000), now)).toBe("yesterday");
-    expect(ago(before(47 * 3_600_000), now)).toBe("yesterday");
+    expect(ago(before(47 * 3_600_000), now)).toBe("2 days ago");
     expect(ago(before(48 * 3_600_000), now)).toBe("2 days ago");
     expect(ago(before(6 * 86_400_000), now)).toBe("6 days ago");
     expect(ago(before(7 * 86_400_000), now)).toBe("30 Sep");
     expect(ago("not a date", now)).toBe("");
+  });
+  it("ago: 'yesterday' is the previous calendar day, not 24 to 48 hours (M3 ruling)", () => {
+    const justAfterMidnight = new Date(2026, 9, 7, 0, 30);
+    expect(ago(new Date(2026, 9, 6, 23, 50).toISOString(), justAfterMidnight)).toBe("40 min ago");
+    expect(ago(new Date(2026, 9, 6, 22, 0).toISOString(), justAfterMidnight)).toBe("yesterday");
+    expect(ago(new Date(2026, 9, 5, 23, 59).toISOString(), justAfterMidnight)).toBe("2 days ago");
+    const lateEvening = new Date(2026, 9, 7, 23, 59);
+    expect(ago(new Date(2026, 9, 6, 0, 1).toISOString(), lateEvening)).toBe("yesterday"); // 47 h 58 min
+    expect(ago(new Date(2026, 9, 7, 0, 1).toISOString(), lateEvening)).toBe("23 h ago");
+  });
+  it("dayDiff counts calendar days in local time", () => {
+    const at = (d: number, h: number, m = 0) => new Date(2026, 9, d, h, m).toISOString();
+    expect(dayDiff(at(7, 0, 0), new Date(2026, 9, 7, 23, 59))).toBe(0);
+    expect(dayDiff(at(6, 23, 59), new Date(2026, 9, 7, 0, 0))).toBe(1);
+    expect(dayDiff(at(1, 12), new Date(2026, 9, 7, 12))).toBe(6);
+    expect(dayDiff(new Date(2025, 11, 31, 23).toISOString(), new Date(2026, 0, 1, 1))).toBe(1); // over a new year
+    expect(dayDiff(at(8, 1), new Date(2026, 9, 7, 23))).toBe(-1); // a clock ahead
+    expect(dayDiff("", new Date())).toBeNull();
+    expect(dayDiff("not a date", new Date())).toBeNull();
+  });
+  it("agoSpoken says the same in full words, for a row's accessible name (M4)", () => {
+    expect(agoSpoken(before(30_000), now)).toBe("just now");
+    expect(agoSpoken(before(60_000), now)).toBe("1 minute ago");
+    expect(agoSpoken(before(12 * 60_000), now)).toBe("12 minutes ago");
+    expect(agoSpoken(before(3_600_000), now)).toBe("1 hour ago");
+    expect(agoSpoken(before(2 * 3_600_000), now)).toBe("2 hours ago");
+    expect(agoSpoken(before(30 * 3_600_000), now)).toBe("yesterday");
+    expect(agoSpoken(before(3 * 86_400_000), now)).toBe("3 days ago");
+    expect(agoSpoken(new Date(2026, 8, 27, 9, 0).toISOString(), now)).toBe("27 September");
+    expect(agoSpoken(new Date(2025, 9, 5, 9, 0).toISOString(), now)).toBe("5 October 2025");
+    expect(agoSpoken("", now)).toBe("");
+  });
+  it("re-exports oneLineOf, so a note made only of invisible characters reads as none (M2)", () => {
+    expect(oneLineOf("​")).toBe("");
+    expect(oneLineOf("  first line\nsecond\tline ")).toBe("first line second line");
   });
   it("typeAhead finds the exact number first, then the newest that starts with it", () => {
     const ids = ["v12", "v11", "v10", "v2", "v1"];
