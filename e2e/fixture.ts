@@ -69,6 +69,8 @@ export interface FormatSize {
   width: number;
   height: number;
   seconds?: number;
+  /** "mpeg2": an MPEG-2 .mkv that ffprobe reads and no browser plays. Defaults to an H.264 MP4. */
+  codec?: "h264" | "mpeg2";
 }
 
 /** A file for `writeFiles`: a generated sine WAV (the default), a copy of the 4 s test clip (`video`), or text. */
@@ -327,13 +329,15 @@ export const test = base.extend<{ rushes: Rushes; noFfmpeg: boolean }>({
       return api("POST", "/api/versions", { video: "Hero", file, note });
     };
     const render = async (slug: string, n: number, s: FormatSize, tag: string, audio = false) => {
-      const file = `renders/${slug}_v${n}_${s.width}x${s.height}${tag}.mp4`;
+      const mpeg2 = s.codec === "mpeg2";
+      const file = `renders/${slug}_v${n}_${s.width}x${s.height}${tag}.${mpeg2 ? "mkv" : "mp4"}`;
       const seconds = s.seconds ?? 4;
       const tone = audio ? ["-f", "lavfi", "-i", `sine=frequency=440:sample_rate=48000:duration=${seconds}`, "-c:a", "aac", "-b:a", "64k", "-shortest"] : [];
+      const codec = mpeg2 ? ["-c:v", "mpeg2video", "-q:v", "5"] : ["-c:v", "libx264", "-preset", "ultrafast", "-g", "30"];
       await ffmpeg([
         "-f", "lavfi", "-i", `testsrc=size=${s.width}x${s.height}:rate=30:duration=${seconds}`,
         ...tone,
-        "-c:v", "libx264", "-preset", "ultrafast", "-g", "30", "-pix_fmt", "yuv420p", join(root, file),
+        ...codec, "-pix_fmt", "yuv420p", join(root, file),
       ]);
       return file;
     };

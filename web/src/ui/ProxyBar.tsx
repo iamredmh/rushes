@@ -23,6 +23,8 @@ export interface ProxyBarProps {
   toast(message: string): void;
   onChanged(): void;
   noteProxyJob(job: ProxyJob): void;
+  /** §21.5 (review M4): hidden, not unmounted, while another format than the primary is on screen. */
+  hidden?: boolean;
 }
 
 const ensureStop = (s: string) => (/[.!?]$/.test(s) ? s : `${s}.`);
@@ -34,7 +36,7 @@ const ensureStop = (s: string) => (/[.!?]$/.test(s) ? s : `${s}.`);
  * before it, when there's no room). "✓ Proxy ready" folds away after DONE_SHOWN_MS or on its ×,
  * leaving the checkbox alone. Picture keys this by version, so nothing carries across cuts.
  */
-export function ProxyBar({ video, version, ffmpeg, autoProxy, job, broken, duration, toast, onChanged, noteProxyJob }: ProxyBarProps) {
+export function ProxyBar({ video, version, ffmpeg, autoProxy, job, broken, duration, toast, onChanged, noteProxyJob, hidden = false }: ProxyBarProps) {
   const [starting, setStarting] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [auto, setAuto] = useState(autoProxy);
@@ -126,7 +128,7 @@ export function ProxyBar({ video, version, ffmpeg, autoProxy, job, broken, durat
   );
 
   return (
-    <div class={`proxybar${shown === "none" ? " quiet" : ""}`}>
+    <div class={`proxybar${shown === "none" ? " quiet" : ""}`} hidden={hidden}>
       <div class={`proxyrow${shown === "none" ? "" : ` ${shown}`}`}>
         {shown === "offer" && reason && (
           <>

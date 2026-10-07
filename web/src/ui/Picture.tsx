@@ -86,9 +86,19 @@ export function Picture({
   // Which cut `duration` was read from: until a new cut's metadata loads, it's still the last one's.
   const [durationOf, setDurationOf] = useState<string | null>(version.duration ? version.file : null);
   // The frame's shape: the video's own aspect ratio once metadata loads, 16:9 before then.
-  const [aspect, setAspect] = useState(16 / 9);
+  // §21.5: the format on screen. The primary is the version's own file; any other plays its own
+  // render. Proxies belong to the primary only (§21.3), so the switch and the offer go with it.
+  const view = format ? formats.find((f) => f.id === format) ?? null : null;
+  const onPrimary = !view || view.primary;
+  // The shape on screen as stored, when it's known (review M1): the frame takes it at once, even
+  // for a file that never loads (a missing one), and the player's own reading refines it.
+  const shape = view ?? formats.find((f) => f.primary) ?? null;
+  const shapeAspect = shape ? shape.width / shape.height : null;
+  const [aspect, setAspect] = useState(shapeAspect ?? 16 / 9);
   const [playing, setPlaying] = useState(false);
-  const [broken, setBroken] = useState(false);
+  // The file found unplayable, if any (review M5): `broken` is true only while that same file is
+  // on screen, so leaving it never shows its message on the next file, not even for a frame.
+  const [brokenSrc, setBrokenSrc] = useState<string | null>(null);
   const [range, setRange] = useState<{ in: number | null; out: number | null }>({ in: null, out: null });
   const [boxMode, setBoxMode] = useState(false);
   const [drag, setDrag] = useState<{ x0: number; y0: number; x1: number; y1: number; w: number; h: number } | null>(null);
@@ -151,9 +161,9 @@ export function Picture({
   // already-mounted film clears it.
   const mountedFile = useRef<string | undefined>(undefined);
   useEffect(() => {
-    setBroken(false);
+    setBrokenSrc(null);
     setT(0);
-    setAspect(16 / 9);
+    setAspect(shapeAspect ?? 16 / 9);
     setRange({ in: null, out: null });
     setBox(null);
     if (mountedFile.current !== undefined) onGrabChange(video.id, null);
@@ -163,12 +173,9 @@ export function Picture({
 
   // §19.5: the proxy plays unless you've picked Original. The switch never changes the cut, so
   // notes, timecodes and frame numbers are the same on both.
-  // §21.5: the format on screen. The primary is the version's own file; any other plays its own
-  // render. Proxies belong to the primary only (§21.3), so the switch and the offer go with it.
-  const view = format ? formats.find((f) => f.id === format) ?? null : null;
-  const onPrimary = !view || view.primary;
   const playsProxy = onPrimary && !!version.proxy && source !== "original";
   const src = mediaUrl(playsProxy ? version.proxy!.file : onPrimary ? version.file : view!.file);
+  const broken = brokenSrc === src;
 
   // When the file changes under the same cut (the switch, or a proxy arriving), the new one picks
   // up where the old one was: its time, and whether it was playing. That's read off the element
@@ -197,7 +204,6 @@ export function Picture({
       firstShape.current = false;
       return;
     }
-    const shape = view ?? formats.find((f) => f.primary);
     const el = frameRef.current;
     if (!shape || !el) return;
     const next = shape.width / shape.height;
@@ -223,21 +229,33 @@ export function Picture({
 
   // A file the browser can't decode can fail before any handler is attached, so check the element too.
   useEffect(() => {
-    setBroken(false);
     const v = ref.current;
     if (!v) return;
-    const fail = () => setBroken(true);
+    const fail = () => setBrokenSrc(src);
     if (v.error) fail();
     v.addEventListener("error", fail);
     return () => v.removeEventListener("error", fail);
   }, [src]);
 
   // Smooth playhead while playing.
+  // R9 and review M6: the timeline is the cut's, so a format that runs longer stops at the cut's
+  // end, as the cut itself would. Read through a ref, so a switch mid-play is seen at once.
+  const cutEnd = useRef<number | null>(null);
+  cutEnd.current = !onPrimary && duration > 0 ? duration : null;
+  const holdAtCutEnd = (v: HTMLVideoElement) => {
+    const end = cutEnd.current;
+    if (end === null || v.paused || v.currentTime < end) return;
+    v.pause();
+    v.currentTime = end;
+  };
   useEffect(() => {
     if (!playing) return;
     let id = 0;
     const loop = () => {
-      if (ref.current) setT(ref.current.currentTime);
+      if (ref.current) {
+        holdAtCutEnd(ref.current);
+        setT(ref.current.currentTime);
+      }
       id = requestAnimationFrame(loop);
     };
     id = requestAnimationFrame(loop);
@@ -266,7 +284,11 @@ export function Picture({
   const toggle = () => {
     const v = ref.current;
     if (!v) return;
-    if (v.paused) void v.play().catch(() => toast("Couldn't play this file"));
+    if (v.paused) {
+      // From the cut's end, play starts again from the top, as the cut does (review M6).
+      if (cutEnd.current !== null && v.currentTime >= cutEnd.current - 1e-3) v.currentTime = 0;
+      void v.play().catch(() => toast("Couldn't play this file"));
+    }
     else v.pause();
   };
   const step = (n: number) => {
@@ -435,7 +457,8 @@ export function Picture({
   const pic = picture(overlaySize.w, overlaySize.h);
   const style = (b: Box) => ({ left: `${b.x * 100}%`, top: `${b.y * 100}%`, width: `${b.w * 100}%`, height: `${b.h * 100}%` });
 
-  const pct = (s: number) => `${duration ? (s / duration) * 100 : 0}%`;
+  // Clamped to the timeline, whatever the file on screen reports (review M6).
+  const pct = (s: number) => `${duration ? Math.min(100, Math.max(0, (s / duration) * 100)) : 0}%`;
   // Belt-and-braces: an inherited shot that runs past a shorter cut's duration is hidden here
   // too, even though the server already trims these on addVersion.
   const shots = duration ? version.shots.filter((s) => s.start < duration) : version.shots;
@@ -467,7 +490,10 @@ export function Picture({
     setDuration(onPrimary ? v.duration || version.duration || 0 : version.duration ?? view?.duration ?? (v.duration || 0));
     setDurationOf(version.file);
     // R2: a cut stored without its size learns it from the player, for the single chip.
-    if (onPrimary && !playsProxy && version.width === null && v.videoWidth && v.videoHeight) onPrimarySize?.(version.file, v.videoWidth, v.videoHeight);
+    // The proxy has the cut's shape (review M2), so a cut playing its proxy is measured too.
+    if (onPrimary && version.width === null && v.videoWidth && v.videoHeight) onPrimarySize?.(version.file, v.videoWidth, v.videoHeight);
+    // This file plays, so whatever was said about it before no longer holds.
+    setBrokenSrc((b) => (b === src ? null : b));
     if (v.videoWidth && v.videoHeight) setAspect(v.videoWidth / v.videoHeight);
     if (!startApplied.current) {
       startApplied.current = true;
@@ -518,7 +544,12 @@ export function Picture({
               preload="auto"
               playsInline
               onLoadedMetadata={(e) => applyMetadata(e.target as HTMLVideoElement)}
-              onTimeUpdate={(e) => !playing && !resume.current && setT((e.target as HTMLVideoElement).currentTime)}
+              onTimeUpdate={(e) => {
+                const v = e.target as HTMLVideoElement;
+                // The playhead loop may not run (a background tab): the cut's end holds here too.
+                holdAtCutEnd(v);
+                if (!playing && !resume.current) setT(v.currentTime);
+              }}
               onSeeked={(e) => !resume.current && setT((e.target as HTMLVideoElement).currentTime)}
               onPlay={() => setPlaying(true)}
               onPause={() => setPlaying(false)}
@@ -569,8 +600,11 @@ export function Picture({
           </div>
         </div>
 
-        {noteProxyJob && onPrimary && (
+        {noteProxyJob && (
+          // Hidden, never unmounted, on another format (review M4): it keeps "✓ Proxy ready" and its
+          // place, so coming back to the primary neither loses it nor makes the column jump.
           <ProxyBar
+            hidden={!onPrimary}
             key={version.id}
             video={video}
             version={version}

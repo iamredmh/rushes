@@ -1,4 +1,4 @@
-import { rm } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Page } from "@playwright/test";
 import { expect, hasFfmpeg, test, videoReady } from "./fixture.js";
@@ -210,7 +210,8 @@ test("a format whose file has gone warns on its chip and says File not found; a 
   await expect(radio(page, "1:1")).toHaveAttribute("data-tip", "1:1 is 4.5 s; the cut is 4.0 s");
   await radio(page, "9:16").click();
   await expect(page.locator(".frame .msg")).toHaveText("File not found");
-  await expect(page.locator(".proxybar")).toHaveCount(0);
+  // Kept, but hidden: no proxy is offered for another format's file (review M4).
+  await expect(page.locator(".proxybar")).toBeHidden();
   // R9: the timeline stays the cut's length on the longer render.
   await radio(page, "1:1").click();
   await videoReady(page);
@@ -352,6 +353,60 @@ test("the chips never move: not when a count appears or reaches two digits, nor 
   }
 });
 
+// M1.
+test("a remembered format whose file has gone keeps its shape after a film switch and after a version change", async ({ page, rushes }) => {
+  const v1 = await rushes.addFormatsCut([WIDE, TALL]);
+  const v2 = await rushes.addFormatsCut([WIDE, TALL]);
+  await rushes.addCut(undefined, "Teaser");
+  await rm(join(rushes.root, v2.version.formats[0].file));
+  await page.goto(rushes.url);
+  await videoReady(page);
+  const ratio = async () => {
+    const b = (await page.locator(".frame").boundingBox())!;
+    return b.width / b.height;
+  };
+  await radio(page, "9:16").click();
+  await expect(page.locator(".frame .msg")).toHaveText("File not found");
+  await expect.poll(ratio).toBeCloseTo(180 / 320, 1);
+  // Away and back: Picture mounts afresh on 9:16, whose file never loads.
+  const films = page.getByRole("navigation", { name: "Films" });
+  await films.getByRole("button", { name: /Teaser/ }).click();
+  await videoReady(page);
+  await films.getByRole("button", { name: /Hero/ }).click();
+  await expect(radio(page, "9:16")).toHaveAttribute("aria-checked", "true");
+  await expect(page.locator(".frame .msg")).toHaveText("File not found");
+  await expect.poll(ratio).toBeCloseTo(180 / 320, 1);
+  // v1's 9:16 plays; back on v2 the missing one keeps the shape too.
+  await page.getByRole("combobox", { name: "Version" }).selectOption(v1.version.id);
+  await expect(page.locator("video")).toHaveAttribute("src", /hero_v1_180x320\.mp4/);
+  await videoReady(page);
+  await page.getByRole("combobox", { name: "Version" }).selectOption(v2.version.id);
+  await expect(page.locator(".frame .msg")).toHaveText("File not found");
+  await page.waitForTimeout(300);
+  expect(await ratio()).toBeCloseTo(180 / 320, 1);
+});
+
+// M2, R2.
+test("a cut stored with no size, playing its proxy, still gets its single chip and the Copy prompt", async ({ page, rushes }) => {
+  await rushes.addProResCut({ seconds: 2 });
+  await rushes.api("POST", "/api/videos/hero/versions/v1/proxy", {});
+  await expect.poll(async () => (await rushes.api("GET", "/api/state")).project.videos[0].versions[0].proxy !== null, { timeout: 20_000 }).toBe(true);
+  // As a 0.2.x file has it: no stored size.
+  const file = join(rushes.root, ".rushes", "project.json");
+  const project = JSON.parse(await readFile(file, "utf8"));
+  delete project.videos[0].versions[0].width;
+  delete project.videos[0].versions[0].height;
+  project.rev += 1;
+  await writeFile(file, JSON.stringify(project, null, 2));
+  await expect.poll(async () => (await rushes.api("GET", "/api/state")).project.videos[0].versions[0].width, { timeout: 10_000 }).toBeNull();
+  await page.goto(rushes.url);
+  await expect(page.getByRole("button", { name: "Proxy", exact: true })).toHaveAttribute("aria-pressed", "true");
+  const chip = page.getByRole("radiogroup", { name: "Format" }).getByRole("radio");
+  await expect(chip).toHaveText(/^16:9/);
+  await expect(chip).toHaveAttribute("aria-disabled", "true");
+  await expect(page.getByRole("button", { name: "Copy a prompt for your agent" })).toHaveCount(1);
+});
+
 // M3.
 test("the one-format popover opens only for its own chip, never over a Not in v2 tooltip, and closes on Esc and after a click", async ({ page, rushes, context, browserName }) => {
   if (browserName === "chromium") await context.grantPermissions(["clipboard-read", "clipboard-write"]);
@@ -389,6 +444,73 @@ test("the one-format popover opens only for its own chip, never over a Not in v2
   await expect(pop).toHaveCSS("opacity", "1");
   await radio(page, "4:5").hover();
   await expect(pop).toHaveCSS("opacity", "0");
+});
+
+// M4.
+test("leaving the primary and coming back keeps the proxy bar itself, never a new one", async ({ page, rushes }) => {
+  await rushes.addProResCut({ seconds: 2 });
+  await rushes.addFormatFile({ width: 360, height: 640, seconds: 2 });
+  await page.goto(rushes.url);
+  const bar = page.locator(".proxybar");
+  await expect(bar).toBeVisible();
+  await bar.evaluate((el) => { (el as HTMLElement).dataset.kept = "yes"; });
+  await radio(page, "9:16").click();
+  await expect(bar).toBeHidden();
+  await radio(page, "16:9").click();
+  await expect(bar).toBeVisible();
+  await expect(bar).toHaveAttribute("data-kept", "yes");
+});
+
+// M5.
+test("leaving a render that won't play never shows its message on the next one, even for a frame", async ({ page, rushes }) => {
+  await rushes.addFormatsCut([WIDE, TALL]);
+  await rushes.addFormatsCut([WIDE, { ...TALL, codec: "mpeg2" }]);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await radio(page, "9:16").click();
+  await expect(page.locator(".frame .msg")).toHaveText("This file won't play in a browser. Ask your agent for an H.264 MP4 of this format.");
+  // To v1's 9:16, which plays: the same shape, so nothing else re-renders the player first.
+  // Sampled before each of the next frames is painted, starting with the first after the change.
+  const frames = await page.evaluate(async () => {
+    const select = document.querySelector<HTMLSelectElement>('select[aria-label="Version"]')!;
+    select.value = "v1";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    const seen: string[] = [];
+    for (let i = 0; i < 12; i++) {
+      await new Promise((r) => requestAnimationFrame(r));
+      seen.push(document.querySelector(".frame .msg")?.textContent ?? "");
+    }
+    return seen;
+  });
+  expect(frames).toEqual(new Array(12).fill(""));
+  await expect(page.locator("video")).toHaveAttribute("src", /hero_v1_180x320\.mp4/);
+  // And back on v2 the broken one still says so.
+  await page.getByRole("combobox", { name: "Version" }).selectOption("v2");
+  await expect(page.locator(".frame .msg")).toHaveText(/won't play/);
+});
+
+// M6.
+test("a format longer than the cut stops at the cut's end, and the playhead never runs past the timeline", async ({ page, rushes }) => {
+  await rushes.addFormatsCut([WIDE, { ...SQUARE, seconds: 4.5 }]);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await radio(page, "1:1").click();
+  await videoReady(page);
+  const track = (await page.locator(".track").boundingBox())!;
+  await page.mouse.click(track.x + track.width * 0.9, track.y + track.height / 2);
+  await expect(page.getByLabel("Timecode")).toContainText("0:03.6");
+  await page.keyboard.press(" ");
+  const video = page.locator("video");
+  await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.paused && v.currentTime > 3.9), { timeout: 5_000 }).toBe(true);
+  await page.waitForTimeout(300);
+  expect(await video.evaluate((v: HTMLVideoElement) => v.paused && v.currentTime <= 4.0 + 1e-3)).toBe(true);
+  await expect(page.getByLabel("Timecode")).toContainText("0:04.00");
+  const left = await page.locator(".playhead").evaluate((el) => parseFloat((el as HTMLElement).style.left));
+  expect(left).toBeLessThanOrEqual(100);
+  // Play again from the end starts from the top, as the cut itself does.
+  await page.keyboard.press(" ");
+  await expect.poll(() => video.evaluate((v: HTMLVideoElement) => !v.paused && v.currentTime < 1)).toBe(true);
+  await page.keyboard.press(" ");
 });
 
 // M7.

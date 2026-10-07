@@ -194,6 +194,7 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 
 /* proxies (§19.5): the bar under the player -- one row, so the timeline and the note box stay on
    screen -- and the Proxy/Original switch on the frame */
+.proxybar[hidden] { display: none; }
 .proxybar { background: var(--raised); border-radius: var(--r-lg); padding: 8px 12px 8px 14px; font-size: 15px; min-width: 0; }
 .proxybar.quiet { background: transparent; padding: 0 2px; }
 /* The reason (or the path) gives way first: its basis is small, so the checkbox only wraps, after the
