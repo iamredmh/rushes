@@ -18,7 +18,7 @@ import { tmpProject } from "../helpers/tmp.js";
 import { createApp } from "../../src/server/app.js";
 import { FoundScanner, roundName, type FoundEntry } from "../../src/server/found.js";
 import { startServer } from "../../src/server/start.js";
-import { addVariant, addVersion, ensureProjectIdOnce } from "../../src/core/project.js";
+import { addFormat, addVariant, addVersion, ensureProjectIdOnce } from "../../src/core/project.js";
 import type { Store } from "../../src/core/store.js";
 import type { ScanLimits } from "../../src/core/found.js";
 
@@ -68,6 +68,22 @@ async function isCaseInsensitive(dir: string): Promise<boolean> {
 }
 
 describe("FoundScanner", () => {
+  it("never offers a file that is registered as another format of a cut (§21)", async () => {
+    const { store, scanner, post } = await setup({ files: ["renders/hero_1920x1080.mp4", "renders/hero_1080x1920.mp4", "renders/teaser.mov"] });
+    await store.update("project", (p) => {
+      addVersion(p, { video: "Hero", file: "renders/hero_1920x1080.mp4", width: 1920, height: 1080 });
+      addFormat(p, { file: "renders/hero_1080x1920.mp4", width: 1080, height: 1920, duration: 8, fps: 30 });
+    });
+    await scanner.scan();
+    expect(paths(await scanner.list())).toEqual(["renders/teaser.mov"]);
+    expect(scanner.has("renders/hero_1080x1920.mp4")).toBe(false);
+    // Bringing it in by hand says it's already in, rather than registering it again as a cut.
+    const r = (await (await post("/api/found/bring-in", { files: [{ path: "renders/hero_1080x1920.mp4", kind: "cut" }] })).json()) as { added: unknown[]; failed: { code: string }[] };
+    expect(r.added).toEqual([]);
+    expect(r.failed.map((f) => f.code)).toEqual(["already"]);
+    expect((await store.read("project")).videos[0].versions).toHaveLength(1);
+  });
+
   it("lists the folder's audio and cuts with their kinds, and leaves out a file once it's registered", async () => {
     const { store, scanner } = await setup({ files: ["vo_jules/line 1.wav", "bed/theme a.mp3", "sfx/whoosh.wav", "stems/drums.wav", "renders/alt cut.mov", "notes.txt"] });
     await scanner.scan();

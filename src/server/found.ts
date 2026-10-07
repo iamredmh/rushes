@@ -352,10 +352,16 @@ export function foundAnnouncer(store: Store): () => void {
   };
 }
 
-/** Every manifest path the project has registered: cuts, variants, library files and script takes. */
+/** Every manifest path the project has registered: cuts and their formats, variants, library files and script takes. */
 export function registeredPaths(project: Project, script: Script): string[] {
   const out: string[] = [];
-  for (const v of project.videos) for (const ver of v.versions) out.push(ver.file);
+  for (const v of project.videos) {
+    for (const ver of v.versions) {
+      out.push(ver.file);
+      // §21: a cut's other formats are in the project too, so the scan never offers them as new cuts.
+      for (const f of ver.formats) out.push(f.file);
+    }
+  }
   for (const l of project.lanes) for (const variant of l.variants) out.push(variant.file);
   for (const f of project.files) out.push(f.file);
   for (const s of script.sections) for (const t of s.takes) out.push(t.file);
