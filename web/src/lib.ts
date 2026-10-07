@@ -1299,3 +1299,97 @@ export interface FoundRowShown {
 export function foundRowChanged(a: FoundRowShown, b: FoundRowShown): boolean {
   return a.item !== b.item || a.kind !== b.kind || a.ticked !== b.ticked || a.playing !== b.playing || a.failure !== b.failure;
 }
+
+// ---- §21 formats ----
+export { CHIP_ORDER, chipOrder, durationWarning, labelOfId, noteShowsOn, ratioLabel, versionFormats, type FormatView } from "../../src/core/formats.js";
+import { chipOrder as orderChips, durationWarning as lengthWarning, type FormatView as View } from "../../src/core/formats.js";
+
+/** One chip of the format toggle (§21.5). */
+export interface FormatChip {
+  id: string;
+  label: string;
+  width: number;
+  height: number;
+  /** Part of this cut and selectable (false: the one-format chip, or a format only the previous cut had). */
+  enabled: boolean;
+  selected: boolean;
+  /** Open notes you'd see on this format; 0 shows none. */
+  count: number;
+  /** "File not found", or the length warning; null for none. */
+  warn: string | null;
+  /** Why it's greyed: the only format, or not in this cut; null when it's selectable. */
+  reason: "single" | "absent" | null;
+}
+
+/** The version before `versionId`, for §21.5's "Not in v2". */
+export function previousVersion(video: Video, versionId: string): Version | undefined {
+  const i = video.versions.findIndex((v) => v.id === versionId);
+  return i > 0 ? video.versions[i - 1] : undefined;
+}
+
+/** The format on screen: the film's remembered choice when this cut has it, else the primary; null for one format. */
+export function currentFormat(views: View[], remembered: string | undefined): string | null {
+  if (views.length < 2) return null;
+  if (remembered && views.some((v) => v.id === remembered)) return remembered;
+  return (views.find((v) => v.primary) ?? views[0]).id;
+}
+
+/** §21.5: the toggle's chips, in the fixed order, with this cut's formats and any the previous cut had that this one lacks. */
+export function formatChips(o: { views: View[]; previous: View[]; current: string | null; versionDuration: number | null; notes: Note[]; missing: ReadonlySet<string> }): FormatChip[] {
+  if (o.views.length === 0) return [];
+  const single = o.views.length === 1;
+  const here = new Set(o.views.map((v) => v.id));
+  const all = orderChips([...o.views.map((v) => ({ ...v, absent: false })), ...o.previous.filter((p) => !here.has(p.id)).map((v) => ({ ...v, absent: true }))]);
+  return all.map((v) => {
+    const enabled = !v.absent && !single;
+    const count = enabled ? o.notes.filter((n) => n.status === "todo" && (n.format === null || n.format === v.id)).length : 0;
+    const warn = v.absent || v.primary ? null : o.missing.has(v.file) ? "File not found" : lengthWarning(v.label, v.duration, o.versionDuration);
+    return {
+      id: v.id, label: v.label, width: v.width, height: v.height, enabled,
+      selected: !v.absent && (single || v.id === o.current), count, warn,
+      reason: v.absent ? "absent" : single ? "single" : null,
+    };
+  });
+}
+
+/** R1: the next or previous selectable format, stopping at the ends. */
+export function neighbourFormat(chips: FormatChip[], current: string | null, dir: -1 | 1): string | null {
+  const list = chips.filter((c) => c.enabled);
+  const i = list.findIndex((c) => c.id === current);
+  if (i === -1) return null;
+  return list[i + dir]?.id ?? null;
+}
+
+/** The chip's accessible name: "9:16, 2 open notes", "4:5, not in v2", "1:1, 1 open note, File not found". */
+export function chipLabel(c: FormatChip, versionId: string): string {
+  const parts = [c.label];
+  if (c.reason === "absent") parts.push(`not in ${versionId}`);
+  if (c.reason === "single") parts.push("the only format");
+  if (c.count > 0) parts.push(`${c.count} open note${c.count === 1 ? "" : "s"}`);
+  if (c.warn) parts.push(c.warn);
+  return parts.join(", ");
+}
+
+/** The shape glyph's size: the ratio inside a `size` px square. */
+export function shapeBox(width: number, height: number, size = 14): { width: number; height: number } {
+  const k = size / Math.max(width, height);
+  return { width: Math.max(4, Math.round(width * k)), height: Math.max(4, Math.round(height * k)) };
+}
+
+/** Explicit grid tracks for a segmented control of `n` (§21.8: Safari). */
+export const fmtColumns = (n: number): string => `repeat(${n}, minmax(0, 1fr))`;
+
+/** The one-format popover's ready-made request (§21.5), in the locked tabs' manner (§19.1). */
+export function formatPrompt(projectName: string, filmName: string, versionId: string): string {
+  return `In Rushes project "${projectName}", register the other shapes of "${filmName}" ${versionId} (the same cut rendered at other aspect ratios, such as 9:16, 1:1 and 4:5) with rushes_add_format, one call per file.`;
+}
+
+/** §21.5: the frame takes its new shape over 160 ms. */
+export const RESHAPE_MS = 160;
+
+/** The frame's reshape keyframes, or null under reduced motion or when the size doesn't change. */
+export function reshapeKeyframes(from: { width: number; height: number }, to: { width: number; height: number }, reduced: boolean): { width: string; height: string }[] | null {
+  if (reduced) return null;
+  if (Math.abs(from.width - to.width) < 1 && Math.abs(from.height - to.height) < 1) return null;
+  return [{ width: `${from.width}px`, height: `${from.height}px` }, { width: `${to.width}px`, height: `${to.height}px` }];
+}

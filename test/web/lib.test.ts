@@ -1334,3 +1334,75 @@ describe("foundRowChanged: a Found row draws again only when something it shows 
     expect(foundRowChanged(props, { ...props, failure: "Already in the project." })).toBe(true);
   });
 });
+
+import {
+  chipLabel, currentFormat, fmtColumns, formatChips, formatPrompt, neighbourFormat, previousVersion, RESHAPE_MS, reshapeKeyframes, shapeBox,
+  type FormatView,
+} from "../../web/src/lib.js";
+
+describe("format chips (§21.5)", () => {
+  const view = (id: string, w: number, h: number, primary = false, over: Partial<FormatView> = {}): FormatView =>
+    ({ id, label: id.replace("x", ":"), file: `renders/hero_${id}.mp4`, width: w, height: h, duration: 8, fps: 30, primary, ...over });
+  const FOUR = [view("16x9", 1920, 1080, true), view("9x16", 1080, 1920), view("1x1", 1080, 1080), view("4x5", 1080, 1350)];
+
+  it("are in the fixed order, with the current one selected and a count of the open notes you'd see", () => {
+    const notes = [note({ format: null }), note({ id: "n_2", format: "9x16" }), note({ id: "n_3", format: "9x16", status: "done" })];
+    const chips = formatChips({ views: FOUR, previous: [], current: "16x9", versionDuration: 8, notes, missing: new Set() });
+    expect(chips.map((c) => [c.id, c.selected, c.enabled, c.count])).toEqual([
+      ["9x16", false, true, 2], ["4x5", false, true, 1], ["1x1", false, true, 1], ["16x9", true, true, 1],
+    ]);
+  });
+  it("one format: one chip, greyed and selected, with no count", () => {
+    const [chip] = formatChips({ views: [FOUR[0]], previous: [], current: null, versionDuration: 8, notes: [note({})], missing: new Set() });
+    expect(chip).toMatchObject({ id: "16x9", enabled: false, selected: true, count: 0, reason: "single" });
+  });
+  it("a format the previous cut had and this one lacks stays, greyed: Not in v2", () => {
+    const chips = formatChips({ views: FOUR.filter((v) => v.id !== "4x5"), previous: FOUR, current: "16x9", versionDuration: 8, notes: [], missing: new Set() });
+    expect(chips.map((c) => c.id)).toEqual(["9x16", "4x5", "1x1", "16x9"]);
+    expect(chips[1]).toMatchObject({ enabled: false, selected: false, reason: "absent" });
+    expect(chipLabel(chips[1], "v2")).toBe("4:5, not in v2");
+  });
+  it("warns about a missing file and a length mismatch, never about the primary", () => {
+    const chips = formatChips({
+      views: [FOUR[0], view("9x16", 1080, 1920, false, { duration: 8.4 }), FOUR[2]],
+      previous: [], current: "16x9", versionDuration: 8, notes: [], missing: new Set(["renders/hero_1x1.mp4", "renders/hero_16x9.mp4"]),
+    });
+    expect(chips.map((c) => c.warn)).toEqual(["9:16 is 8.4 s; the cut is 8.0 s", "File not found", null]);
+  });
+  it("chipLabel names the ratio, its open notes and its warning", () => {
+    expect(chipLabel({ id: "9x16", label: "9:16", width: 1080, height: 1920, enabled: true, selected: false, count: 2, warn: null, reason: null }, "v1")).toBe("9:16, 2 open notes");
+    expect(chipLabel({ id: "1x1", label: "1:1", width: 1, height: 1, enabled: true, selected: false, count: 1, warn: "File not found", reason: null }, "v1")).toBe("1:1, 1 open note, File not found");
+  });
+  it("currentFormat is the film's choice when this cut has it, else the primary; null for one format", () => {
+    expect(currentFormat(FOUR, "9x16")).toBe("9x16");
+    expect(currentFormat(FOUR, "21x9")).toBe("16x9");
+    expect(currentFormat(FOUR, undefined)).toBe("16x9");
+    expect(currentFormat([FOUR[0]], "16x9")).toBeNull();
+  });
+  it("neighbourFormat steps through the enabled chips and stops at the ends (R1)", () => {
+    const chips = formatChips({ views: FOUR, previous: [], current: "1x1", versionDuration: 8, notes: [], missing: new Set() });
+    expect(neighbourFormat(chips, "1x1", -1)).toBe("4x5");
+    expect(neighbourFormat(chips, "1x1", 1)).toBe("16x9");
+    expect(neighbourFormat(chips, "16x9", 1)).toBeNull();
+    expect(neighbourFormat(chips, null, 1)).toBeNull();
+  });
+  it("previousVersion is the version before this one", () => {
+    const vid = { id: "hero", name: "Hero", lockedVersion: null, versions: [{ id: "v1" }, { id: "v2" }] } as unknown as Video;
+    expect(previousVersion(vid, "v2")?.id).toBe("v1");
+    expect(previousVersion(vid, "v1")).toBeUndefined();
+  });
+  it("the glyph keeps the shape inside 14 px, the grid has explicit tracks, and the prompt names the tool", () => {
+    expect(shapeBox(1080, 1920)).toEqual({ width: 8, height: 14 });
+    expect(shapeBox(1920, 1080)).toEqual({ width: 14, height: 8 });
+    expect(fmtColumns(4)).toBe("repeat(4, minmax(0, 1fr))");
+    expect(formatPrompt("Lumen", "Lumen launch film", "v1")).toBe(
+      'In Rushes project "Lumen", register the other shapes of "Lumen launch film" v1 (the same cut rendered at other aspect ratios, such as 9:16, 1:1 and 4:5) with rushes_add_format, one call per file.',
+    );
+  });
+  it("the reshape runs 160 ms between two sizes, and not under reduced motion", () => {
+    expect(RESHAPE_MS).toBe(160);
+    expect(reshapeKeyframes({ width: 800, height: 450 }, { width: 253, height: 450 }, false)).toEqual([{ width: "800px", height: "450px" }, { width: "253px", height: "450px" }]);
+    expect(reshapeKeyframes({ width: 800, height: 450 }, { width: 253, height: 450 }, true)).toBeNull();
+    expect(reshapeKeyframes({ width: 800, height: 450 }, { width: 800.4, height: 450 }, false)).toBeNull();
+  });
+});
