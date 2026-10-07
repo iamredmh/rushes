@@ -713,7 +713,10 @@ describe.skipIf(!FFMPEG)("peaks with real ffmpeg", () => {
     expect(Math.max(...data.peaks)).toBe(1);
     const loud = data.peaks.slice(100, 900);
     const quiet = data.peaks.slice(1200, 1900);
-    expect(Math.min(...loud)).toBeGreaterThan(0.5);
+    // A 440 Hz tone read at 8 kHz has about eight samples per bucket, so a bucket's peak dips well
+    // under the tone's own; how far depends on the AAC decoder and resampler (0.62 on ffmpeg 8.1 here,
+    // 0.49 on the macOS CI runner). The point is loud against quiet, with plenty of room between.
+    expect(Math.min(...loud)).toBeGreaterThan(0.3);
     expect(Math.max(...quiet)).toBeLessThan(0.05);
     await expect.poll(async () => (await app.request(URL2)).status, { timeout: 10_000 }).toBe(204);
     await peaks.close();
