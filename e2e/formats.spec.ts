@@ -859,6 +859,7 @@ test("the composer's and the card's switches work from the keyboard, and their k
   await expect(allR).toHaveAttribute("aria-checked", "true");
   await expect(allR).toBeFocused();
   await expect(allR).toHaveAttribute("tabindex", "0");
+  await expect(page.getByLabel("Timecode")).toContainText("0:00.00"); // no frame step
   await page.keyboard.press("Home");
   await expect(thisR).toHaveAttribute("aria-checked", "true");
   await expect(thisR).toBeFocused();
@@ -876,8 +877,11 @@ test("the composer's and the card's switches work from the keyboard, and their k
   await page.keyboard.press("Enter");
   await expect(page.locator(".list > .note")).toHaveCount(1);
   expect((await notesOf(rushes))[0].format).toBeNull();
-  // With a box, the arrows can't reach All formats, and removing the box leaves This format chosen.
+  // Drawing a box puts the note on This format; the arrows can't reach All formats, and removing
+  // the box leaves This format chosen.
   await page.keyboard.press("Escape");
+  await allR.click();
+  await expect(allR).toHaveAttribute("aria-checked", "true");
   await drawBox(page);
   await thisR.focus();
   await page.keyboard.press("ArrowRight");
@@ -897,4 +901,16 @@ test("the composer's and the card's switches work from the keyboard, and their k
   await page.keyboard.press("End");
   await expect.poll(async () => (await notesOf(rushes))[0].format).toBeNull();
   await expect(page.getByLabel("Timecode")).toContainText("0:00.00");
+});
+
+test("a new cut starts its composer on This format again", async ({ page, rushes }) => {
+  await rushes.addFormatsCut([WIDE, TALL]);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  const scope = page.getByRole("radiogroup", { name: "This note applies to" });
+  await scope.getByRole("radio", { name: "All formats" }).click();
+  await expect(scope.getByRole("radio", { name: "All formats" })).toHaveAttribute("aria-checked", "true");
+  await rushes.addFormatsCut([WIDE, TALL]);
+  await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v2");
+  await expect(scope.getByRole("radio", { name: /^This format/ })).toHaveAttribute("aria-checked", "true");
 });
