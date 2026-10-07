@@ -281,22 +281,36 @@ export interface AddFormatInput {
 
 export interface AddFormatResult { video: Video; version: Version; format: Format; warning: string | null; labelNote: string | null }
 
-/** §21.3: registers another shape of a cut. Refuses a ratio the cut already has, and a ninth shape. */
+/** A size the probe or the caller gave that isn't a picture size is a refusal, not a crash. */
+function checkedLabel(width: number, height: number, hint?: string): { label: string; note: string | null } {
+  try {
+    return settleLabel(width, height, hint);
+  } catch (e) {
+    if (e instanceof RangeError) throw new RushesError(`${width}×${height} isn't a picture size.`, 400, "bad_size", { width, height });
+    throw e;
+  }
+}
+
+/**
+ * §21.3: registers another shape of a cut. Refuses a ratio the cut already has, and a ninth shape.
+ * Atomic: every check runs on local values, and the version is written only once all of them pass.
+ */
 export function addFormat(p: Project, input: AddFormatInput, now = new Date()): AddFormatResult {
   const { video, version } = resolveCut(p, input.video, input.version);
-  if (version.width === null || version.height === null) {
+  let primary: { width: number; height: number } | null = version.width !== null && version.height !== null ? { width: version.width, height: version.height } : null;
+  if (!primary) {
     if (!input.primarySize) {
       throw new RushesError(
         `Rushes can't read ${version.id}'s own picture size, so it can't tell a new shape from it. Check that the cut's file is there and that ffprobe is installed.`,
         422, "no_primary_size", { version: version.id },
       );
     }
-    version.width = input.primarySize.width;
-    version.height = input.primarySize.height;
+    primary = { width: input.primarySize.width, height: input.primarySize.height };
+    checkedLabel(primary.width, primary.height);
   }
-  const { label, note } = settleLabel(input.width, input.height, input.label);
+  const { label, note } = checkedLabel(input.width, input.height, input.label);
   const id = ratioId(label);
-  const shapes = versionFormats(version);
+  const shapes = versionFormats({ ...version, width: primary.width, height: primary.height });
   if (shapes.some((f) => f.id === id)) {
     throw new RushesError(`${version.id} already has ${label}. Register a re-render as a new version.`, 409, "same_ratio", { version: version.id, id });
   }
@@ -304,6 +318,9 @@ export function addFormat(p: Project, input: AddFormatInput, now = new Date()): 
     throw new RushesError(`${version.id} already has ${MAX_FORMATS} formats, the most one cut can have.`, 400, "too_many_formats", { version: version.id });
   }
   const format: Format = { id, label, file: input.file, width: input.width, height: input.height, duration: input.duration, fps: input.fps, addedAt: now.toISOString() };
+  // Every check has passed: now, and only now, the version changes.
+  version.width = primary.width;
+  version.height = primary.height;
   version.formats.push(format);
   return { video, version, format, warning: durationWarning(label, input.duration, version.duration), labelNote: note };
 }

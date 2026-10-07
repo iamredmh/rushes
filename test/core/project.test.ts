@@ -459,6 +459,35 @@ describe("formats in the data (§21.3)", () => {
     expect(p.videos[0].versions[0]).toMatchObject({ width: 1920, height: 1080 });
   });
 
+  // Fix round 1, I1: a refusal leaves the project exactly as it was.
+  it("addFormat is atomic: after any refusal the project is unchanged, a primarySize included", () => {
+    const old = withCut({ width: null, height: null });
+    const before = structuredClone(old);
+    const primarySize = { width: 1920, height: 1080 };
+    // 16:9 against a primary that primarySize says is 16:9 (409).
+    expect(() => addFormat(old, { ...shape("renders/same.mp4", 1280, 720), primarySize })).toThrow("v1 already has 16:9.");
+    expect(old).toEqual(before);
+    // A bad size for the new render, and a bad primarySize: a RushesError, never a RangeError, and no change.
+    for (const bad of [{ ...shape("renders/z.mp4", 0, 1920), primarySize }, { ...shape("renders/z.mp4", 1080, 1920), primarySize: { width: 0, height: 1080 } }]) {
+      let err: unknown;
+      try { addFormat(old, bad); } catch (e) { err = e; }
+      expect(err).toBeInstanceOf(RushesError);
+      expect(err).not.toBeInstanceOf(RangeError);
+      expect(old).toEqual(before);
+    }
+    // The ninth shape (400) and no primary size (422) change nothing either.
+    const full = withCut();
+    [[1080, 1920], [1080, 1080], [1080, 1350], [1440, 1080], [1620, 1080], [1080, 1620], [2520, 1080]].forEach(([w, h], i) => addFormat(full, shape(`renders/f${i}.mp4`, w, h)));
+    const full0 = structuredClone(full);
+    expect(() => addFormat(full, shape("renders/f8.mp4", 1080, 2520))).toThrow(RushesError);
+    expect(full).toEqual(full0);
+    expect(() => addFormat(old, shape("renders/t.mp4", 1080, 1920))).toThrow(RushesError);
+    expect(old).toEqual(before);
+    // And a success does backfill the primary's size.
+    addFormat(old, { ...shape("renders/t.mp4", 1080, 1920), primarySize });
+    expect(old.videos[0].versions[0]).toMatchObject({ width: 1920, height: 1080 });
+  });
+
   it("adds to a locked cut too (§21.6)", () => {
     const p = withCut();
     lockPicture(p, "hero", "v1");
