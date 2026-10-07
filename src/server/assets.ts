@@ -5,6 +5,7 @@ import type { Store } from "../core/store.js";
 import { fromManifestPath } from "../core/paths.js";
 import { GRAB_PATH, SCREENSHOT_PATH, registeredMedia } from "./files.js";
 import { PROXY_PATH } from "./proxy.js";
+import { chipOrder, labelOfId, versionFormats } from "../core/formats.js";
 
 export type AssetKind = "screenshot" | "cut" | "proxy" | "take" | "music" | "sfx" | "voice" | FileKind;
 
@@ -37,6 +38,9 @@ export interface Asset {
   /** A proxy's picture size (§19.5), from its record. */
   width?: number;
   height?: number;
+  /** §21: a cut's format row (its id), and the ratio label on a cut with formats. */
+  format?: string;
+  formatLabel?: string;
 }
 
 /**
@@ -132,7 +136,7 @@ async function fileAsset(
   store: Store,
   kind: AssetKind,
   path: string,
-  extra: Partial<Pick<Asset, "video" | "version" | "section" | "lane" | "variant" | "note" | "label" | "laneName" | "meta" | "width" | "height">>,
+  extra: Partial<Pick<Asset, "video" | "version" | "section" | "lane" | "variant" | "note" | "label" | "laneName" | "meta" | "width" | "height" | "format" | "formatLabel">>,
 ): Promise<Asset> {
   const abs = fromManifestPath(store.root, path);
   const info = await statInfo(abs);
@@ -243,8 +247,16 @@ function variantEntries(
  * in parallel within each group, so a large project doesn't pay for it one file at a time.
  */
 export async function listAssets(store: Store, project: Project, script: Script): Promise<Asset[]> {
-  const cutEntries = project.videos.flatMap((video) =>
-    [...video.versions].reverse().map((version) => ({ video: video.id, version: version.id, file: version.file })),
+  // §21.5: each cut, then its formats as sub-rows in chip order, each with the ratio it is.
+  type CutEntry = { video: string; version: string; file: string; formatLabel?: string; format?: string; width?: number; height?: number };
+  const cutEntries: CutEntry[] = project.videos.flatMap((video) =>
+    [...video.versions].reverse().flatMap((version): CutEntry[] => {
+      const views = versionFormats(version);
+      const primary = views.find((f) => f.primary);
+      const own: CutEntry = { video: video.id, version: version.id, file: version.file, ...(version.formats.length > 0 && primary ? { formatLabel: primary.label } : {}) };
+      const subs = chipOrder(version.formats).map((f) => ({ video: video.id, version: version.id, file: f.file, format: f.id, formatLabel: labelOfId(f.id), width: f.width, height: f.height }));
+      return [own, ...subs];
+    }),
   );
   const proxyEntries = project.videos.flatMap((video) =>
     // Only a file this server would have written into proxies/: a hand-edited record pointing
@@ -262,7 +274,7 @@ export async function listAssets(store: Store, project: Project, script: Script)
 
   const [[freshNames, oldNames], cuts, proxies, takes, voice, music, sfx] = await Promise.all([
     Promise.all([pngNames(store, SCREENSHOT_DIRS[0][0]), pngNames(store, SCREENSHOT_DIRS[1][0])]),
-    Promise.all(cutEntries.map((e) => fileAsset(store, "cut", e.file, { video: e.video, version: e.version }))),
+    Promise.all(cutEntries.map((e) => fileAsset(store, "cut", e.file, { video: e.video, version: e.version, format: e.format, formatLabel: e.formatLabel, width: e.width, height: e.height }))),
     Promise.all(proxyEntries.map((e) => fileAsset(store, "proxy", e.proxy.file, { video: e.video, version: e.version, width: e.proxy.width, height: e.proxy.height }))),
     Promise.all(takeEntries.map((e) => fileAsset(store, "take", e.file, { section: e.section, label: e.label }))),
     Promise.all(variantEntries(project, "voice").map((e) => fileAsset(store, "voice", e.file, { lane: e.lane, laneName: e.laneName, variant: e.variant, label: e.label, meta: e.meta }))),

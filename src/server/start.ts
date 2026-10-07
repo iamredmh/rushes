@@ -12,6 +12,7 @@ import { ProxyJobs, removePartials, type ProxyJobsOptions } from "./proxy.js";
 import { PeakJobs, removeOrphanPeaks, removePeakTemps, type PeakJobsOptions } from "./peaks.js";
 import { FoundScanner, ffprobeDuration, foundAnnouncer, type FoundProbe } from "./found.js";
 import type { ScanLimits } from "../core/found.js";
+import type { VideoProber } from "../core/media.js";
 
 export const DEFAULT_PORT = 4580;
 
@@ -46,6 +47,8 @@ export interface StartOptions {
   peaks?: PeakJobsOptions;
   /** How §20's scanner probes durations, and its limits. Defaults to ffprobe and §20.2's limits; tests inject fakes. */
   found?: { probe?: FoundProbe; limits?: Partial<ScanLimits> };
+  /** How §21's formats are read. Defaults to ffprobe; tests inject a fake. */
+  formats?: { probe?: VideoProber };
 }
 
 function listen(server: Server, port: number, host: string): Promise<number> {
@@ -87,7 +90,7 @@ export async function startServer(rootDir: string, opts: StartOptions = {}): Pro
   const peakJobs = new PeakJobs(store, { available: () => proxyJobs.available(), ...opts.peaks });
   // §20: the project's other files. Its first scan starts once this server owns the project (below).
   const found = new FoundScanner({ store, probe: opts.found?.probe ?? ffprobeDuration, announce: foundAnnouncer(store), limits: opts.found?.limits });
-  const appOpts: AppOptions = { webDir: opts.webDir, onShutdown: () => void close(), reveal: opts.reveal, proxyJobs, peakJobs, found };
+  const appOpts: AppOptions = { webDir: opts.webDir, onShutdown: () => void close(), reveal: opts.reveal, proxyJobs, peakJobs, found, formatProbe: opts.formats?.probe };
   const app = createApp(store, appOpts);
   const listener = getRequestListener(app.fetch);
   let lastRequest = Date.now();

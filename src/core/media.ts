@@ -147,7 +147,7 @@ export function parseVideoProbe(json: unknown): VideoProbe {
   const rotation = s.side_data_list?.find((d) => typeof d.rotation === "number")?.rotation ?? Number(s.tags?.rotate ?? 0);
   if (Math.abs(Math.round(rotation)) % 180 === 90) [width, height] = [height, width];
   const d = j.format?.duration ? Number(j.format.duration) : Number.NaN;
-  return { ok: true, width, height, duration: Number.isFinite(d) ? d : null, fps: parseRate(s.avg_frame_rate) ?? parseRate(s.r_frame_rate) };
+  return { ok: true, width, height, duration: Number.isFinite(d) && d >= 0 ? d : null, fps: parseRate(s.avg_frame_rate) ?? parseRate(s.r_frame_rate) };
 }
 
 /** §21.3: reads a render with ffprobe, local files only. The reason never repeats the file's path. */

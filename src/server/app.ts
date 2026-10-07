@@ -3,14 +3,15 @@ import { streamSSE } from "hono/streaming";
 import { z } from "zod";
 import type { Store, ChangeEvent } from "../core/store.js";
 import { RushesError, InvalidError, NotFoundError } from "../core/errors.js";
-import { addFile, addVariant, addVersion, ensureProjectIdOnce, lockPicture, resolveVideo, setShots, shotAt } from "../core/project.js";
+import { addFile, addFormat, addVariant, addVersion, ensureProjectIdOnce, lockPicture, resolveCut, resolveVideo, setShots, shotAt } from "../core/project.js";
 import { addTake, editSection, setSections } from "../core/script.js";
-import { addNote, applyReply, applyUserEdit, filterNotes } from "../core/notes.js";
+import { addNote, applyReply, applyUserEdit, checkNoteFormat, filterNotes } from "../core/notes.js";
+import { FORMAT_ID_RE, MAX_FORMATS, isPictureSize, versionFormats } from "../core/formats.js";
 import { createBatch, latestBatch } from "../core/batches.js";
 import { exportFileName, notesMarkdown } from "../core/exportNotes.js";
 import { tabStates } from "../core/tabs.js";
 import { fromManifestPath, toManifestPath } from "../core/paths.js";
-import { probe } from "../core/media.js";
+import { VIDEO_EXT, probe, probeVideo, type VideoProber } from "../core/media.js";
 import { PROXY_PATH, ProxyJobs, type ProxyEvent } from "./proxy.js";
 import { PeakJobs } from "./peaks.js";
 import { lstat, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
@@ -41,6 +42,10 @@ async function body<T>(c: Context, schema: z.ZodType<T>): Promise<T> {
 }
 
 const t = z.number().nonnegative();
+// §21.3: a format id, "9x16" or "2.39x1". Capped like the schema's own id.
+const formatId = z.string().max(16).regex(FORMAT_ID_RE);
+/** The longest path a format may be registered under (FoundItem and FoundPathsBody use the same). */
+const MAX_PATH = 1024;
 
 const NewNoteBody = z.object({
   stage: StageSchema,
@@ -55,6 +60,7 @@ const NewNoteBody = z.object({
   box: BoxSchema.nullish(),
   grab: z.string().nullish(),
   marks: z.array(MarkSchema).max(4).optional(),
+  format: formatId.nullish(),
 });
 
 const UserEditBody = z.object({
@@ -66,6 +72,7 @@ const UserEditBody = z.object({
   tOut: t.nullable().optional(),
   marks: z.array(MarkSchema).max(4).optional(),
   status: z.enum(["todo", "done"]).optional(),
+  format: formatId.nullable().optional(),
 });
 
 const RepliesBody = z.object({
@@ -82,7 +89,19 @@ const RepliesBody = z.object({
     .min(1),
 });
 
-const VersionBody = z.object({ video: z.string().min(1), file: z.string().min(1), note: z.string().optional() });
+const VersionBody = z.object({
+  video: z.string().min(1),
+  file: z.string().min(1),
+  note: z.string().optional(),
+  // §21.4: the other shapes of this same cut, registered in the same call. `file` is the main one.
+  formats: z.array(z.object({ file: z.string().min(1).max(MAX_PATH) })).max(MAX_FORMATS - 1).optional(),
+});
+const FormatBody = z.object({
+  video: z.string().min(1).max(200).optional(),
+  version: z.string().min(1).max(64).optional(),
+  file: z.string().min(1).max(MAX_PATH),
+  label: z.string().trim().min(1).max(16).optional(),
+});
 const VariantBody = z.object({
   stage: LaneStageSchema,
   lane: z.string().optional(),
@@ -117,6 +136,9 @@ const NoteQuery = z.object({
   status: z.enum(["todo", "done"]).optional(),
   batch: z.string().optional(),
   version: z.string().optional(),
+  // §21.4: a format's notes, with the all-format notes unless onlyThisFormat (R14: Picture only).
+  format: formatId.optional(),
+  onlyThisFormat: z.enum(["true", "false"]).optional(),
 });
 
 // ShotSchema's own limits (name trimmed 1-80 chars, tag at most 24) apply at the boundary; `n` is server-assigned.
@@ -131,7 +153,11 @@ const MixLoudnessBody = z.object({ lanes: z.array(LaneStageSchema).min(1) });
 
 const SettingsBody = z.object({ autoProxy: z.boolean() }).strict();
 // A time in seconds, 0 to 24 h: an empty value, NaN, Infinity or anything huge is a 400.
-const FrameQuery = z.object({ t: z.string().min(1).pipe(z.coerce.number<string>().finite().min(0).max(86400)) });
+const FrameQuery = z.object({
+  t: z.string().min(1).pipe(z.coerce.number<string>().finite().min(0).max(86400)),
+  // R12: the format whose own file the frame is read from. The cut's primary when left out.
+  format: formatId.optional(),
+});
 
 const GrabBody = z.object({
   video: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
@@ -215,6 +241,8 @@ export interface AppOptions {
   peakJobs?: PeakJobs;
   /** §20's scanner for the project's other files. startServer passes its own (it runs the first scan and closes it); tests inject one with a fake probe. */
   found?: FoundScanner;
+  /** §21: reads a render's shape on screen for formats. Defaults to ffprobe (probeVideo); tests inject a fake. */
+  formatProbe?: VideoProber;
 }
 
 const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost"]);
@@ -238,6 +266,26 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   const jobs = opts.proxyJobs ?? new ProxyJobs(store);
   const peaks = opts.peakJobs ?? new PeakJobs(store, { run: jobs.run, available: () => jobs.available() });
   const found = opts.found ?? new FoundScanner({ store, probe: ffprobeDuration, announce: foundAnnouncer(store) });
+  const readVideo = opts.formatProbe ?? probeVideo;
+  /**
+   * §21.3/§21.6: a render's shape on screen, length and rate, or the refusal in the user's words.
+   * Only a path with a video extension that is a plain file on disk reaches the probe. The size
+   * comes back untouched: addFormat judges it (a size that isn't a picture is its RushesError).
+   */
+  async function readRender(given: string): Promise<{ file: string; width: number; height: number; duration: number | null; fps: number | null }> {
+    const file = toManifestPath(store.root, given);
+    const abs = fromManifestPath(store.root, file);
+    if (!VIDEO_EXT.has(extname(file).toLowerCase().replace(/^\./, ""))) throw new RushesError(`${file} isn't a video file.`, 400, "not_video", { path: file });
+    const isFile = await stat(abs).then((s) => s.isFile(), () => false);
+    if (!isFile) throw new RushesError(`File not found: ${file}`, 404, "missing_file", { path: file });
+    const r = await readVideo(abs);
+    if (!r.ok) {
+      if (r.code === "no_ffprobe") throw new RushesError("Registering a format needs ffprobe to read the ratio. Run `rushes doctor` for how to add it.", 501, "no_ffprobe");
+      if (r.code === "not_video") throw new RushesError(`${file} isn't a video: ${r.reason}.`, 400, "not_video", { path: file });
+      throw new RushesError(`ffprobe couldn't read ${file}: ${r.reason}`, 422, "unreadable", { path: file });
+    }
+    return { file, width: r.width, height: r.height, duration: r.duration, fps: r.fps };
+  }
   const app = new Hono();
   // Every SSE client adds a change listener, so lift Node's default limit of ten.
   store.setMaxListeners(0);
@@ -635,17 +683,21 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     const q = NoteQuery.safeParse(c.req.query());
     if (!q.success) throw new InvalidError("Query is invalid", q.error.issues);
     const { notes } = await store.read("notes");
-    return c.json({ notes: filterNotes(notes, q.data) });
+    return c.json({ notes: filterNotes(notes, { ...q.data, onlyThisFormat: q.data.onlyThisFormat === "true" }) });
   });
 
   app.post("/api/notes", async (c) => {
     const b = await body(c, NewNoteBody);
     // The client never sends shot; the server stamps it from the version's shots.
     let shot: Note["shot"] = null;
-    if (b.stage === "picture" && b.video && b.version && b.t != null) {
+    if (b.stage === "picture" || b.format != null) {
       const project = await store.read("project");
-      const version = project.videos.find((v) => v.id === b.video)?.versions.find((v) => v.id === b.version);
-      if (version) shot = shotAt(version.shots, b.t);
+      // §21.3: a format must be one of this cut's, and on a cut with formats a box belongs to one.
+      checkNoteFormat({ next: { stage: b.stage, video: b.video ?? null, version: b.version ?? null, format: b.format ?? null, box: b.box ?? null } }, project);
+      if (b.stage === "picture" && b.video && b.version && b.t != null) {
+        const version = project.videos.find((v) => v.id === b.video)?.versions.find((v) => v.id === b.version);
+        if (version) shot = shotAt(version.shots, b.t);
+      }
     }
     const { result } = await store.update("notes", (f) => addNote(f, { ...b, shot, by: "user" }));
     return c.json({ note: result }, 201);
@@ -653,7 +705,10 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
 
   app.patch("/api/notes/:id", async (c) => {
     const b = await body(c, UserEditBody);
-    const { result } = await store.update("notes", (f) => applyUserEdit(f, { id: c.req.param("id"), ...b }));
+    // §21.3 and R7: a change of format or box is checked against the note's cut as it is now.
+    const project = b.format !== undefined || b.box !== undefined ? await store.read("project") : null;
+    const check = project ? (next: Note, prev: Note) => checkNoteFormat({ next, prev, boxRedrawn: b.box !== undefined }, project) : undefined;
+    const { result } = await store.update("notes", (f) => applyUserEdit(f, { id: c.req.param("id"), ...b }, check));
     return c.json({ note: result });
   });
 
@@ -666,14 +721,29 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   // ---- media ----
   app.post("/api/versions", async (c) => {
     const b = await body(c, VersionBody);
-    const file = toManifestPath(store.root, b.file);
+    // §21.4 (R11): with formats, every file is read first and one refusal refuses the whole call.
+    const shapes = b.formats?.length ? await Promise.all([b.file, ...b.formats.map((f) => f.file)].map(readRender)) : null;
+    const file = shapes ? shapes[0].file : toManifestPath(store.root, b.file);
     const abs = fromManifestPath(store.root, file);
-    // The proxy jobs' probe is ffprobe (tests inject a fake), so the cut's need is read from the same answer.
-    const info = await jobs.probe(abs);
+    // The proxy jobs' probe is ffprobe (tests inject a fake), so the cut's need is read from the same
+    // answer. §21.3 (R2): the primary's shape on screen is stored too, when it can be read.
+    const [info, read] = await Promise.all([jobs.probe(abs), shapes ? Promise.resolve(shapes[0]) : readVideo(abs).then((r) => (r.ok ? r : null))]);
+    // Only a real picture size is stored. Without one, a formats call is refused by addFormat below
+    // (no_primary_size), and a plain cut goes in with no size, as cuts did before formats.
+    const size = read && isPictureSize(read.width, read.height) ? read : null;
+    const formatWarnings: string[] = [];
     let lockedVersion: string | null = null;
     let autoProxy = false;
     const { result } = await store.update("project", (p) => {
-      const out = addVersion(p, { video: b.video, file, note: b.note, duration: info.duration, fps: info.fps });
+      const out = addVersion(p, {
+        video: b.video, file, note: b.note, duration: info.duration ?? read?.duration ?? null, fps: info.fps ?? read?.fps ?? null,
+        width: size?.width ?? null, height: size?.height ?? null,
+      });
+      // Throwing here leaves project.json unwritten: the cut and its formats land together or not at all.
+      for (const s of shapes?.slice(1) ?? []) {
+        const added = addFormat(p, { video: out.video.id, version: out.version.id, ...s });
+        if (added.warning) formatWarnings.push(added.warning);
+      }
       lockedVersion = out.video.lockedVersion;
       autoProxy = p.autoProxy;
       if (info.fps && p.videos.length === 1 && p.videos[0].versions.length === 1) p.fps = info.fps;
@@ -690,8 +760,37 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
       proxy.proxyReason = reason;
       if (autoProxy && !jobs.isClosing) proxy.proxyJob = jobs.start(result.video.id, result.version.id);
     }
-    if (lockedVersion) return c.json({ ...result, ...proxy, warning: `Picture is locked at ${lockedVersion}` }, 201);
-    return c.json({ ...result, ...proxy }, 201);
+    const warnings = formatWarnings.length ? { formatWarnings } : {};
+    if (lockedVersion) return c.json({ ...result, ...proxy, ...warnings, warning: `Picture is locked at ${lockedVersion}` }, 201);
+    return c.json({ ...result, ...proxy, ...warnings }, 201);
+  });
+
+  // ---- formats (§21.4) ----
+  app.post("/api/formats", async (c) => {
+    const b = await body(c, FormatBody);
+    const render = await readRender(b.file);
+    // The cut it joins, pinned now, and its own shape when it has none yet (a cut from before formats).
+    const cut = resolveCut(await store.read("project"), b.video, b.version);
+    let primarySize: { width: number; height: number } | null = null;
+    if (cut.version.width === null || cut.version.height === null) {
+      const r = await readVideo(fromManifestPath(store.root, cut.version.file));
+      if (r.ok) primarySize = { width: r.width, height: r.height };
+    }
+    // Inside the update, so two registrations of one shape at once can't both land: the second
+    // sees the first's format and gets §21.3's sentence.
+    const { result } = await store.update("project", (p) =>
+      addFormat(p, { ...render, video: cut.video.id, version: cut.version.id, label: b.label, primarySize }),
+    );
+    return c.json(
+      {
+        video: { id: result.video.id, name: result.video.name },
+        version: result.version,
+        format: result.format,
+        ...(result.warning ? { warning: result.warning } : {}),
+        ...(result.labelNote ? { labelNote: result.labelNote } : {}),
+      },
+      201,
+    );
   });
 
   // ---- proxies (§19.5) ----
@@ -759,13 +858,18 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     if (!q.success) throw new InvalidError("Query is invalid: t must be a time in seconds", q.error.issues);
     await jobs.requireFfmpeg();
     const { project, version } = await cutOf(c.req.param("video"), c.req.param("version"));
-    const orig = fromManifestPath(store.root, version.file);
+    // R12: Grab Frame on a format reads that format's own file. Frames are counted at the cut's fps.
+    const view = q.data.format ? versionFormats(version).find((f) => f.id === q.data.format) : undefined;
+    if (q.data.format && !view) throw new NotFoundError("format", q.data.format);
+    const source = view && !view.primary ? view.file : version.file;
+    const orig = fromManifestPath(store.root, source);
     const exists = await stat(orig).then((s) => s.isFile(), () => false);
-    if (!exists) throw new RushesError("The original file is missing", 404, "missing_file", { path: version.file });
+    if (!exists) throw new RushesError("The original file is missing", 404, "missing_file", { path: source });
     const fps = version.fps ?? project.fps;
     let frame = Math.round(q.data.t * fps);
     // A time at or past the end lands on the last frame rather than on nothing.
-    if (version.duration !== null) frame = Math.min(frame, Math.max(0, Math.ceil(version.duration * fps - 1e-6) - 1));
+    const length = view?.duration ?? version.duration;
+    if (length !== null) frame = Math.min(frame, Math.max(0, Math.ceil(length * fps - 1e-6) - 1));
     const png = await jobs.frame(orig, frame / fps);
     if (!png) throw new RushesError(`ffmpeg couldn't read frame ${frame}`, 422, "no_frame", { frame });
     return new Response(new Uint8Array(png), {

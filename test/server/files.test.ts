@@ -3,8 +3,8 @@ import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
 import { createApp } from "../../src/server/app.js";
-import { addVariant } from "../../src/core/project.js";
-import { parseRange, inside, contentDisposition, foundMediaFile, OUTSIDE_MEDIA_EXT, CONTENT_TYPES, isInlineSafeType } from "../../src/server/files.js";
+import { addFormat, addVariant, addVersion } from "../../src/core/project.js";
+import { parseRange, inside, contentDisposition, foundMediaFile, OUTSIDE_MEDIA_EXT, CONTENT_TYPES, isInlineSafeType, registeredMedia } from "../../src/server/files.js";
 import { OPEN_SAFE_EXT as SERVER_OPEN_SAFE_EXT } from "../../src/server/reveal.js";
 import { OPEN_SAFE_EXT as WEB_OPEN_SAFE_EXT, PREVIEWABLE_EXT, VIDEO_EXT as WEB_VIDEO_EXT } from "../../web/src/lib.js";
 import { AUDIO_EXT, VIDEO_EXT } from "../../src/core/found.js";
@@ -239,6 +239,15 @@ describe("media", () => {
     const r = await call("/media?path=renders%2Fgone.mp4");
     expect(r.status).toBe(404);
     expect(await r.json()).toMatchObject({ error: "missing_file" });
+  });
+});
+
+describe("registeredMedia and formats", () => {
+  it("registeredMedia includes every format file of every cut (§21.6)", () => {
+    const p = { schema: 1 as const, rev: 0, name: "demo", fps: 30, videos: [], lanes: [], files: [], autoProxy: false };
+    addVersion(p, { video: "Hero", file: "renders/hero_v1.mp4", width: 1920, height: 1080 });
+    addFormat(p, { file: "/elsewhere/hf/hero_v1_9x16.mp4", width: 1080, height: 1920, duration: 8, fps: 30 });
+    expect(registeredMedia(p, { schema: 1, rev: 0, wordsPerSecond: 2.6, sections: [] }).has("/elsewhere/hf/hero_v1_9x16.mp4")).toBe(true);
   });
 });
 

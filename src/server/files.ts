@@ -80,6 +80,8 @@ export function registeredMedia(project: Project, script: Script): Set<string> {
       // §19.5: a cut's proxy plays in Picture just like the cut itself -- but only a name this
       // server would write, so a hand-edited record can't open up any other file.
       if (ver.proxy && PROXY_PATH.test(ver.proxy.file)) files.add(ver.proxy.file);
+      // §21: a cut's other formats play in Picture like the cut itself, under the same §15.5 rules.
+      for (const f of ver.formats) files.add(f.file);
     }
   }
   for (const l of project.lanes) for (const variant of l.variants) files.add(variant.file);
