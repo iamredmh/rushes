@@ -5,6 +5,8 @@ import type { Note, ProxyJob, Video, Version } from "../types.js";
 import { Icon } from "./Icon.js";
 import { Notes } from "./Notes.js";
 import { ProxyBar } from "./ProxyBar.js";
+import { PictureWave, usePictureWave } from "./PictureWave.js";
+import { usePlayerFloor } from "./playerFloor.js";
 
 /** Which file the player shows when the cut has a proxy (§19.5). */
 export type Source = "proxy" | "original";
@@ -41,6 +43,10 @@ export interface PictureProps {
   /** This film's Proxy/Original choice, remembered by the caller. Proxy unless you've picked Original. */
   source?: Source;
   onSourceChange?(video: string, source: Source): void;
+  /** §19.9: the cut's file size (null when unknown), for the waveform's no-ffmpeg fallback. */
+  fileSize?: number | null;
+  /** The cut's file revision (its modified time), so a file re-rendered in place gets a fresh waveform. */
+  fileRev?: string;
 }
 
 const typing = (el: EventTarget | null) => el instanceof HTMLElement && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
@@ -48,13 +54,15 @@ const typing = (el: EventTarget | null) => el instanceof HTMLElement && (el.isCo
 /** The cut, with notes down the right: frame stepping, In/Out ranges, a box on the frame and frame grabs. */
 export function Picture({
   video, version, fps, notes, toast, onChanged, onPendingChange, startAt, grab, onGrabChange, playerRef,
-  ffmpeg = false, autoProxy = false, proxyJob, noteProxyJob, source = "proxy", onSourceChange,
+  ffmpeg = false, autoProxy = false, proxyJob, noteProxyJob, source = "proxy", onSourceChange, fileSize = null, fileRev,
 }: PictureProps) {
   const ref = useRef<HTMLVideoElement>(null);
   const overlay = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const [t, setT] = useState(0);
   const [duration, setDuration] = useState(version.duration ?? 0);
+  // Which cut `duration` was read from: until a new cut's metadata loads, it's still the last one's.
+  const [durationOf, setDurationOf] = useState<string | null>(version.duration ? version.file : null);
   // The frame's shape: the video's own aspect ratio once metadata loads, 16:9 before then.
   const [aspect, setAspect] = useState(16 / 9);
   const [playing, setPlaying] = useState(false);
@@ -67,6 +75,11 @@ export function Picture({
   const [box, setBox] = useState<Box | null>(null);
   const [shown, setShown] = useState<Box | null>(null);
   const [noteHasText, setNoteHasText] = useState(false);
+  // Fix round 3 (M2): in a very short window the player column holds what's in it.
+  const stackRef = useRef<HTMLDivElement>(null);
+  usePlayerFloor(stackRef);
+  // §19.9: the cut's own audio, drawn quietly in the timeline. Always the original's, even with a proxy.
+  const wave = usePictureWave(video.id, version, fileSize, fileRev, durationOf === version.file ? duration : (version.duration ?? 0));
   // The click that ends a box drag shouldn't also start playback.
   const justDrew = useRef(false);
   // startAt restores a film's remembered playhead, but only once: the first metadata load
@@ -378,6 +391,7 @@ export function Picture({
    *  frame letterboxed at the 16:9 default forever). */
   const applyMetadata = (v: HTMLVideoElement) => {
     setDuration(v.duration || version.duration || 0);
+    setDurationOf(version.file);
     if (v.videoWidth && v.videoHeight) setAspect(v.videoWidth / v.videoHeight);
     if (!startApplied.current) {
       startApplied.current = true;
@@ -402,8 +416,10 @@ export function Picture({
 
   return (
     <div class="split">
-      <div class="stack">
-        <div class="framebox">
+      <div class="stack" ref={stackRef}>
+        {/* The box's height is written out in full rather than through a custom property: Chromium
+            doesn't always redo a container-unit height when only the variable inside it changes. */}
+        <div class="framebox" style={{ height: `min(640px, 70vh, calc(100cqw / ${aspect}))` }}>
           <div class="frame" style={{ aspectRatio: String(aspect), "--ar": String(aspect) }}>
             {/* One message, never two: with ffmpeg, the proxy offer under the player speaks for a
                 file that won't play. Only the original, with a proxy to switch back to, says so here. */}
@@ -522,6 +538,7 @@ export function Picture({
             seek(((e.clientX - r.left) / r.width) * duration);
           }}
         >
+          {wave && <PictureWave wave={wave} length={duration} />}
           {placed.map(({ n, at }) => at.tOut !== null && <div class={`span ${n.status}`} style={{ left: pct(at.t!), width: pct(at.tOut - at.t!) }} />)}
           {range.in !== null && <div class="span live" style={{ left: pct(range.in), width: pct((range.out ?? range.in + 0.2) - range.in) }} />}
           {shots.filter((s) => s.start > 0).map((s) => <div class="tick" style={{ left: pct(s.start) }} />)}
@@ -529,25 +546,27 @@ export function Picture({
           <div class="playhead" style={{ left: pct(t) }} />
         </div>
         <div class="ends"><span>0:00</span><span>{fmt(duration)}</span></div>
-
-        {shots.length > 0 && (
-          <div class="shots" data-player>
-            {shots.map((s) => (
-              <button
-                type="button"
-                class="shot"
-                ref={(el) => { shotRefs.current[s.n] = el; }}
-                aria-current={current?.n === s.n ? "true" : undefined}
-                onClick={() => { ref.current?.pause(); seek(shotSeek(s.start, fps)); }}
-              >
-                <span class="mono">{shotLabel(s.n)} · {s.start.toFixed(2)}s</span>
-                <span class="name">{s.name}</span>
-                {s.tag && <span class="tag">{s.tag}</span>}
-              </button>
-            ))}
-          </div>
-        )}
       </div>
+
+      {/* Outside the player's column, so the note box stays level with the timeline: the strip
+          may run below the window on a tall cut (fix round 1). */}
+      {shots.length > 0 && (
+        <div class="shots" data-player>
+          {shots.map((s) => (
+            <button
+              type="button"
+              class="shot"
+              ref={(el) => { shotRefs.current[s.n] = el; }}
+              aria-current={current?.n === s.n ? "true" : undefined}
+              onClick={() => { ref.current?.pause(); seek(shotSeek(s.start, fps)); }}
+            >
+              <span class="mono">{shotLabel(s.n)} · {s.start.toFixed(2)}s</span>
+              <span class="name">{s.name}</span>
+              {s.tag && <span class="tag">{s.tag}</span>}
+            </button>
+          ))}
+        </div>
+      )}
 
       <Notes
         notes={notes}

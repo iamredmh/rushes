@@ -6,6 +6,7 @@ Your agent renders a cut, writes a voiceover script or generates music beds. Rus
 
 - **Script:** your edits sit beside the agent's lines.
 - **Picture:** timecoded notes, ranges, boxes on the frame and frame grabs.
+- **Picture waveform:** the cut's own audio, drawn quietly in the timeline, so you can see where the sound is.
 - **Voiceover, Music, Sound effects:** variants you can switch between with no gap.
 - **Mix:** everything playing together.
 
@@ -128,7 +129,7 @@ Hovering a locked tab shows a short tooltip, e.g. "Locked: ask your agent for mu
 
 Press **G**, or the camera button, to grab the current frame. It's saved as a PNG to `screenshots/`, named for the film, version and timecode — grabbing the same frame twice overwrites the same file.
 
-The **Assets** tab (key `7`) is a library with a folder sidebar: Screenshots, Cuts, Voiceover, Music, Sound effects, Scripts & docs, Images, Captions, Exports, Delivery, Edit files and Proxies. Each folder has search and a sort order; Screenshots, Images, Cuts and Delivery also get a grid/list toggle, and Screenshots, Cuts and Delivery get a film filter — every other folder is list-only. Audio plays inline, one at a time, and Markdown or text files get a read-only preview. Every item has five actions: Download, Save as (Chrome and Edge only — other browsers just get Download), Open, Show in Finder and Copy path. **Open** appears, and is accepted, only for a fixed list of safe, non-executable types — never scripts, apps or archives. Top-level `.md`, `.txt`, `.pdf`, `.srt` and `.vtt` files, plus anything in `exports/`, are picked up automatically; everything else your agent registers with `rushes_add_file`. The Exports folder also has an **Export notes** button, which writes every note to a dated Markdown file there.
+The **Assets** tab (key `7`) is a library with a folder sidebar: Screenshots, Cuts, Voiceover, Music, Sound effects, Scripts & docs, Images, Captions, Exports, Delivery, Edit files and Proxies. Each folder has search and a sort order; Screenshots, Images, Cuts and Delivery also get a grid/list toggle, and Screenshots, Cuts and Delivery get a film filter — every other folder is list-only. Audio plays inline, one at a time, and Markdown or text files get a read-only preview. Every item has five actions: Download, Save as (Chrome and Edge only — other browsers just get Download), Open, Show in Finder and Copy path. A file your agent registered from outside the project folder (or reached through a link out of it) plays and downloads only if it is a media or document type (audio, video, images, PDF, Markdown, text, captions); for anything else, such as an editor project file on another drive, use Show in Finder or Copy path. **Open** appears, and is accepted, only for a fixed list of safe, non-executable types — never scripts, apps or archives. Top-level `.md`, `.txt`, `.pdf`, `.srt` and `.vtt` files, plus anything in `exports/`, are picked up automatically; everything else your agent registers with `rushes_add_file`. The Exports folder also has an **Export notes** button, which writes every note to a dated Markdown file there.
 
 Rushes recommends this layout for a project folder:
 

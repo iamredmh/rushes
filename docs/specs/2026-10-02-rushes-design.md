@@ -400,6 +400,13 @@ Rushes creates `screenshots/` itself on the first grab. It never creates the oth
 - **The MCP tool `rushes_list_assets`** (optional `kind`) returns the same list. The CLI command is `rushes assets [--kind K] [--json]`. There are now 14 tools.
 - **The project guard (§14.1)** applies to every one of these routes, as to any other.
 
+### 15.5 Serving files that are symlinks (0.2.1)
+- **Every file `/media` accepts** (cuts and their proxies, variants, takes, library files, the docs, captions and exports found automatically, screenshots and grabs) is served from its real path, with every symlink resolved.
+  - When that real path is inside the project folder, the file is served as before.
+  - When it lies outside, the file is served only if the **final** real file's extension is media: `wav mp3 m4a aac aif aiff flac ogg opus mp4 mov m4v webm mkv png jpg jpeg gif webp pdf md txt srt vtt`. That is every extension the dashboard treats as media or a document, except edit-app project files (`prproj`, `drp`); a unit test fails if the lists drift apart.
+  - Anything else is a 404, whatever the link itself is called. That includes edit-app project files (`.prproj`, `.drp`) and anything else that isn't media: outside the project they no longer download, though Show in Finder still finds them.
+  - So footage linked in from another drive keeps playing, but a take swapped for a link to a key or credentials file is never served.
+
 ## 16. The Assets library (agreed 3 October 2026)
 
 Once a project has hundreds of screenshots, the Assets tab as one long page buries everything below them. Red also wants every project file in one place: music, scripts, images, captions, exports, deliverables and edit files, each one quick to find, open, download or locate on disk. This section is binding, and it wins over §15.3 where they differ.
@@ -430,7 +437,7 @@ Once a project has hundreds of screenshots, the Assets tab as one long page buri
   - every `*.srt` and `*.vtt` directly in the root becomes a `caption`;
   - every file directly in `exports/` becomes an `export`.
   - Hidden files and anything inside `.rushes/` never appear.
-- **Media types:** `/media` serves every listed asset, with content types added for `.md`, `.txt`, `.srt`, `.vtt`, `.pdf`, `.gif`, `.webp`, `.prproj` and `.drp`.
+- **Media types:** `/media` serves every listed asset, with content types added for `.md`, `.txt`, `.srt`, `.vtt`, `.pdf`, `.gif`, `.webp`, `.prproj` and `.drp`. A listed file whose real path is outside the project is served only if it is media (§15.5).
 
 ### 16.3 Open in the default app
 - Every item gets an **Open** button (`POST /api/open { path }`). It runs the platform's open command, without a shell:
@@ -715,3 +722,29 @@ This section is binding and replaces §17.5.
   - A folded round's buffers are released, under a small LRU cap.
 - **Re-rendering a file mid-play** no longer stops playback. That lane rejoins once it decodes.
 - **Space on a focused button** activates the button, e.g. "Measure again", instead of playing.
+
+### 19.9 Picture waveform
+- **Where it shows.** A quiet waveform of the cut's own audio inside Picture's timeline bar.
+  - The bar keeps its height, so nothing in the layout moves.
+  - It's drawn in a muted grey-blue (`--text-3` at low opacity), under the ranges, shot ticks, note markers and playhead.
+  - It's a `<canvas>` scaled for the screen's pixel ratio and redrawn only when its peaks, its size or the timeline's length change, never per frame. It's `aria-hidden`, since the slider already has a label.
+- **How the server makes it.**
+  - When a cut is added, or the dashboard asks for one that has none, ffmpeg decodes the **original's** first audio stream (never a proxy's), mono at 8 kHz as raw floats, and the server reduces it while it streams to about 2000 buckets, each the largest absolute amplitude, normalised to 0..1. A long film is never held in memory.
+  - Audio that starts after 0:00 is padded with silence from 0:00 (`aresample=async=1:first_pts=0`), so the waveform lines up with the picture.
+  - ffmpeg reads only local files (`-protocol_whitelist file,pipe`) in ordinary video and audio containers (`-format_whitelist`), so a playlist or concat list registered as a cut is refused rather than followed to other files or the network.
+  - Decodes run in the background, two at a time and never twice for the same cut, and are killed when the server closes. Each has a timeout of 60 s plus the file's size read at 5 MB/s, held between 5 and 60 minutes. `GET /api/state` never waits on one.
+  - The result is `.rushes/peaks/<video>_<version>_<hash>.json`, where the hash is of the file's path, size and mtime: `{ "v": 1, "buckets": 2000, "duration": 68.67, "peaks": [0..1, 3 decimals] }`. A cut with no audio stream is saved as `{ "v": 1, "audio": false }`, so it isn't decoded again on the next start.
+  - It's written to a temp name and renamed into place. At start-up, a temp file left by a stopped server is deleted, and so is any peaks file in `.rushes/peaks/` that no current cut owns (by its `<video>_<version>_` prefix). Only names Rushes writes are ever removed, and a `.rushes/peaks` that is a link to another folder is never swept or written into. A peaks file is only read when it's under 64 KB with at most 2000 peaks in 0..1, matching its `buckets`; anything else is made again. A failed decode writes nothing (it's remembered until the server restarts). When the file is re-rendered, the old revision's peaks file for that cut is removed. A file rewritten with its size and mtime both kept (`cp -p`, `rsync -t`) looks unchanged, so it keeps its old waveform until either changes.
+  - A `change` event goes out when a peaks file lands, so open tabs ask again.
+- **The route.** `GET /api/videos/:video/versions/:version/peaks`, behind the same project guard as every other route:
+  - 200 with the JSON when it's ready;
+  - 202 while it's being made;
+  - 204 when the cut has no audio;
+  - 501 `{ "error": "no_ffmpeg" }` without ffmpeg;
+  - 404 `missing_file` when the original isn't there, and 422 `no_peaks` when the decode failed.
+- **The dashboard.**
+  - It asks for the shown cut's peaks. On 202 it asks again when the next `change` arrives, or after a gentle back-off.
+  - On 501, a cut under 100 MB and 15 minutes (the length as the player reads it) is fetched through `/media` and decoded in the browser (`decodeAudioData`, then `mixPeaks`, which takes `computePeaks` of each channel); anything larger or longer, or a length the player never learns, gets no waveform.
+  - The browser's decoder gives the samples but not when the audio starts, so in the fallback a cut whose audio starts late is drawn from 0:00, early by that much. The server's waveform doesn't have this problem.
+  - On 204, or any other answer, nothing is drawn.
+  - Results are cached per version and file revision. Switching versions or films never shows the previous cut's waveform.

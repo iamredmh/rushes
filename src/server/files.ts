@@ -1,5 +1,5 @@
 import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
+import { realpath, stat } from "node:fs/promises";
 import { extname, join, normalize, sep } from "node:path";
 import { Readable } from "node:stream";
 import type { Project, Script } from "../core/schema.js";
@@ -86,6 +86,37 @@ export function registeredMedia(project: Project, script: Script): Set<string> {
   for (const s of script.sections) for (const t of s.takes) files.add(t.file);
   for (const f of project.files) files.add(f.file);
   return files;
+}
+
+/** §15.5: the only kinds of file /media serves when its real path lies outside the project (footage on another drive, say). */
+export const OUTSIDE_MEDIA_EXT: ReadonlySet<string> = new Set([
+  "wav", "mp3", "m4a", "aac", "aif", "aiff", "flac", "ogg", "opus", "mp4", "mov", "m4v", "webm", "mkv",
+  "png", "jpg", "jpeg", "gif", "webp", "pdf", "md", "txt", "srt", "vtt",
+]);
+
+/**
+ * The file /media sends for a path it has already accepted: its real path, every symlink
+ * resolved. A real path inside the project is served whatever it is, as before. Policy (§15.5):
+ * one outside the project is served only if the FINAL real file's extension is media
+ * (`OUTSIDE_MEDIA_EXT`), so a take swapped for a link to a key file is never served. Null means
+ * refuse. A file that isn't there gives back the plain path, so the send reports it missing.
+ */
+export async function servableFile(root: string, abs: string): Promise<string | null> {
+  let real: string;
+  try {
+    real = await realpath(abs);
+  } catch {
+    return abs;
+  }
+  let realRoot: string;
+  try {
+    realRoot = await realpath(root);
+  } catch {
+    return null;
+  }
+  if (real === realRoot || real.startsWith(realRoot.endsWith(sep) ? realRoot : realRoot + sep)) return real;
+  const ext = extname(real).toLowerCase().replace(/^\./, "");
+  return OUTSIDE_MEDIA_EXT.has(ext) ? real : null;
 }
 
 /** Parse a single "bytes=a-b" range against a file size. Returns null for a missing or unusable range. */

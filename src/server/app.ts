@@ -12,19 +12,20 @@ import { tabStates } from "../core/tabs.js";
 import { fromManifestPath, toManifestPath } from "../core/paths.js";
 import { probe } from "../core/media.js";
 import { PROXY_PATH, ProxyJobs, type ProxyEvent } from "./proxy.js";
+import { PeakJobs } from "./peaks.js";
 import { lstat, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { GRAB_PATH, SCREENSHOT_PATH, contentDisposition, contentType, inside, isInlineSafeType, mediaSecurityHeaders, registeredMedia, sendFile } from "./files.js";
+import { GRAB_PATH, SCREENSHOT_PATH, contentDisposition, contentType, inside, isInlineSafeType, mediaSecurityHeaders, registeredMedia, sendFile, servableFile } from "./files.js";
 import { candidatePaths, listAssets, fpsFor, screenshotName } from "./assets.js";
 import { osRevealer, osOpener, OPEN_SAFE_EXT, type Revealer, type Opener } from "./reveal.js";
 import type { CorruptEvent } from "./watch.js";
 import { LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, FileKindSchema, MarkSchema, ProjectIdSchema, ShotSchema, LEVEL_MIN, LEVEL_MAX, LEVEL_STEP, type Batch, type Note } from "../core/schema.js";
 import { defaultRunner, measureMix, type LoudnessRunner } from "./loudness.js";
 
-export const VERSION = "0.2.0";
+export const VERSION = "0.2.1";
 
 async function body<T>(c: Context, schema: z.ZodType<T>): Promise<T> {
   let json: unknown;
@@ -183,6 +184,8 @@ export interface AppOptions {
   loudnessTimeoutMs?: number;
   /** §19.5's proxy jobs (and the ffmpeg/ffprobe they use). startServer passes its own so it can cancel them on close; tests inject fakes. */
   proxyJobs?: ProxyJobs;
+  /** §19.9's waveform jobs. startServer passes its own so it can stop them on close; defaults to the proxy jobs' ffmpeg. */
+  peakJobs?: PeakJobs;
 }
 
 const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost"]);
@@ -204,6 +207,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   const reveal = opts.reveal ?? osRevealer;
   const open = opts.open ?? osOpener;
   const jobs = opts.proxyJobs ?? new ProxyJobs(store);
+  const peaks = opts.peakJobs ?? new PeakJobs(store, { run: jobs.run, available: () => jobs.available() });
   const app = new Hono();
   // Every SSE client adds a change listener, so lift Node's default limit of ten.
   store.setMaxListeners(0);
@@ -334,9 +338,12 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
       const info = await lstat(fromManifestPath(store.root, path)).catch(() => null);
       if (!info || !info.isFile() || info.isSymbolicLink()) throw new NotFoundError("media", path);
     }
+    // §15.5: a registered file reached through a symlink out of the project is served only if it is media.
+    const file = await servableFile(store.root, fromManifestPath(store.root, path));
+    if (!file) throw new NotFoundError("media", path);
     const type = contentType(path);
     const inlineSafe = isInlineSafeType(type);
-    const res = await sendFile(fromManifestPath(store.root, path), c.req.header("range"), inlineSafe ? type : "application/octet-stream");
+    const res = await sendFile(file, c.req.header("range"), inlineSafe ? type : "application/octet-stream");
     res.headers.set("cross-origin-resource-policy", "same-origin");
     for (const [name, value] of Object.entries(mediaSecurityHeaders())) res.headers.set(name, value);
     if (res.status !== 404 && (!inlineSafe || c.req.query("download") === "1")) {
@@ -547,6 +554,8 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     });
     // §19.5: say when the cut is likely to play badly, and start its proxy straight away when the
     // project asks for that. Without ffmpeg, nothing is offered (needFor is null).
+    // §19.9: its waveform is made in the background; nothing here waits for it.
+    void peaks.queueCut(result.video.id, result.version.id, file).catch(() => undefined);
     const reason = await jobs.needFrom(abs, info);
     const proxy: { proxySuggested?: true; proxyReason?: string; proxyJob?: ReturnType<ProxyJobs["start"]> } = {};
     if (reason) {
@@ -636,6 +645,29 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
       status: 200,
       headers: { "content-type": "image/png", "cache-control": "no-store", "x-rushes-frame": String(frame), "content-length": String(png.length) },
     });
+  });
+
+  // §19.9: the cut's own audio as about 2000 peaks, for the waveform in Picture's timeline. 200 with
+  // the peaks, 202 while they're being made (a `change` goes out when they land), 204 when the cut
+  // has no audio, 501 without ffmpeg (the dashboard then decodes a small file itself).
+  app.get("/api/videos/:video/versions/:version/peaks", async (c) => {
+    const { video, version } = await cutOf(c.req.param("video"), c.req.param("version"));
+    if (!(await peaks.available())) {
+      throw new RushesError("The waveform needs ffmpeg, which isn't installed. Run `rushes doctor` for how to add it.", 501, "no_ffmpeg");
+    }
+    const a = await peaks.answer(video.id, version.id, version.file);
+    switch (a.state) {
+      case "ready":
+        return c.json(a.data, 200, { "cache-control": "no-store" });
+      case "computing":
+        return c.json({ state: "computing" }, 202, { "cache-control": "no-store" });
+      case "silent":
+        return c.body(null, 204, { "cache-control": "no-store" });
+      case "missing":
+        throw new RushesError("The original file is missing", 404, "missing_file", { path: version.file });
+      case "failed":
+        throw new RushesError(a.reason, 422, "no_peaks");
+    }
   });
 
   app.put("/api/videos/:video/shots", async (c) => {

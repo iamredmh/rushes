@@ -1615,3 +1615,358 @@ test.describe("tabs share one live connection (§19.8)", () => {
     expect((await rushes.api("GET", "/api/state")).proxies.jobs).toEqual([]);
   });
 });
+
+// ---- §19.9 the Picture waveform ----
+
+/** How many of the waveform canvas's pixels are drawn on (alpha above 0); 0 when there's no canvas. */
+function wavePixels(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const c = document.querySelector<HTMLCanvasElement>(".track canvas.pwave");
+    if (!c || !c.width || !c.height) return 0;
+    const data = c.getContext("2d")!.getImageData(0, 0, c.width, c.height).data;
+    let n = 0;
+    for (let i = 3; i < data.length; i += 4) if (data[i] > 0) n++;
+    return n;
+  });
+}
+
+/** Two animation frames, then a few checks over half a second: long enough for an answer the page
+ *  has just had to be rendered, if it was going to be. */
+async function settledNoWave(page: Page): Promise<void> {
+  await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
+  for (let i = 0; i < 5; i++) {
+    await expect(page.locator(".track canvas.pwave")).toHaveCount(0);
+    await page.waitForTimeout(100);
+  }
+}
+
+/** Wait until the server has answered a cut's peaks with something other than 202. */
+async function peaksSettled(rushes: Rushes, version: string): Promise<number> {
+  let status = 0;
+  await expect
+    .poll(async () => {
+      status = (await fetch(`${rushes.base}/api/videos/hero/versions/${version}/peaks`)).status;
+      return status;
+    }, { timeout: 15_000 })
+    .not.toBe(202);
+  return status;
+}
+
+test.describe("the Picture waveform (§19.9)", () => {
+  test.skip(!hasFfmpeg, "needs ffmpeg and ffprobe");
+
+  test("a vertical cut with audio draws its waveform in the timeline, hidden from screen readers, and playback never redraws it", async ({ page, rushes }) => {
+    await rushes.addProResCut({ codec: "h264", width: 360, height: 640, seconds: 3, audio: true });
+    await page.goto(rushes.testUrl());
+    const wave = page.locator(".track canvas.pwave");
+    await expect(wave).toBeVisible();
+    await expect(wave).toHaveAttribute("aria-hidden", "true");
+    await expect.poll(() => wavePixels(page)).toBeGreaterThan(50);
+    // It sits inside the bar, under the playhead.
+    const box = await page.evaluate(() => {
+      const t = document.querySelector(".track")!.getBoundingClientRect();
+      const c = document.querySelector(".track canvas.pwave")!.getBoundingClientRect();
+      const z = (sel: string) => Number(getComputedStyle(document.querySelector(sel)!).zIndex);
+      return { th: t.height, inside: c.top >= t.top && c.bottom <= t.bottom && c.left >= t.left && c.right <= t.right, wave: z(".track canvas.pwave"), head: z(".track .playhead") };
+    });
+    expect(box.th).toBe(40);
+    expect(box.inside).toBe(true);
+    expect(box.wave).toBeLessThan(box.head);
+
+    await videoReady(page);
+    const draws = () => page.evaluate(() => window.__rushesPicture!.waveDraws());
+    const before = await draws();
+    await page.getByRole("button", { name: "Play" }).click();
+    await expect.poll(() => page.locator("video").evaluate((v: HTMLVideoElement) => v.currentTime)).toBeGreaterThan(0.5);
+    await page.getByRole("button", { name: "Pause" }).click();
+    expect(await draws()).toBe(before);
+  });
+
+  test("moving to a screen with another pixel ratio redraws the waveform at that ratio (fix round 2)", async ({ page, rushes }) => {
+    // Neither browser can move a page to another screen, and Chromium's CDP override changes the
+    // ratio without firing the media query, so the window's ratio and its (resolution) queries are
+    // stood in for: `__moveToScreen(n)` sets devicePixelRatio and fires what a real move would.
+    await page.addInitScript(() => {
+      let dpr = 1;
+      Object.defineProperty(window, "devicePixelRatio", { get: () => dpr, configurable: true });
+      const lists: { query: string; fns: Set<EventListener> }[] = [];
+      const real = window.matchMedia.bind(window);
+      window.matchMedia = ((query: string) => {
+        if (!/resolution/.test(query)) return real(query);
+        const entry = { query, fns: new Set<EventListener>() };
+        lists.push(entry);
+        return {
+          media: query,
+          get matches() { return query === `(resolution: ${dpr}dppx)`; },
+          addEventListener: (_: string, fn: EventListener) => entry.fns.add(fn),
+          removeEventListener: (_: string, fn: EventListener) => entry.fns.delete(fn),
+        } as unknown as MediaQueryList;
+      }) as typeof window.matchMedia;
+      (window as unknown as { __moveToScreen(n: number): void }).__moveToScreen = (n: number) => {
+        const was = `(resolution: ${dpr}dppx)`;
+        dpr = n;
+        for (const l of lists.filter((x) => x.query === was)) for (const fn of [...l.fns]) fn(new Event("change"));
+      };
+    });
+    await rushes.addProResCut({ codec: "h264", seconds: 3, audio: true });
+    await page.goto(rushes.url);
+    await expect.poll(() => wavePixels(page)).toBeGreaterThan(50);
+    const backing = () => page.evaluate(() => { const c = document.querySelector<HTMLCanvasElement>(".track canvas.pwave")!; return { w: c.width, css: c.getBoundingClientRect().width }; });
+    const one = await backing();
+    expect(one.w).toBe(Math.round(one.css));
+    const move = (n: number) => page.evaluate((x) => (window as unknown as { __moveToScreen(n: number): void }).__moveToScreen(x), n);
+    await move(2);
+    await expect.poll(async () => (await backing()).w).toBe(Math.round(one.css * 2));
+    // Listening again at the new ratio: a second move is heard too.
+    await move(1);
+    await expect.poll(async () => (await backing()).w).toBe(Math.round(one.css));
+    expect(await wavePixels(page)).toBeGreaterThan(50);
+  });
+
+  test("while the next cut's waveform is still on its way, the last cut's is never shown (fix round 2)", async ({ page, rushes }) => {
+    // Both cuts have audio, so the last check can only pass if v2's own waveform is drawn.
+    await rushes.addProResCut({ codec: "h264", seconds: 3, audio: true });
+    await rushes.addProResCut({ codec: "h264", seconds: 3, audio: true });
+    expect(await peaksSettled(rushes, "v1")).toBe(200);
+    expect(await peaksSettled(rushes, "v2")).toBe(200);
+    // v2's answer is held back until the test lets it go.
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    await page.route("**/api/videos/hero/versions/v2/peaks", async (route) => {
+      await held;
+      await route.continue().catch(() => undefined);
+    });
+    await page.goto(rushes.url);
+    const versions = page.getByRole("combobox", { name: "Version" });
+    await versions.selectOption("v1");
+    await expect.poll(() => wavePixels(page)).toBeGreaterThan(50);
+    await versions.selectOption("v2");
+    await expect(versions).toHaveValue("v2");
+    await settledNoWave(page);
+    const answered = page.waitForResponse((r) => r.url().includes("/versions/v2/peaks") && r.status() === 200);
+    release();
+    await answered;
+    await expect.poll(() => wavePixels(page)).toBeGreaterThan(50);
+  });
+
+  test("a slow answer for a cut you've already left is never drawn on the one you're on (fix round 2)", async ({ page, rushes }) => {
+    await rushes.addCut();
+    await rushes.addProResCut({ codec: "h264", seconds: 3, audio: true });
+    expect(await peaksSettled(rushes, "v2")).toBe(200);
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let asked = 0;
+    await page.route("**/api/videos/hero/versions/v2/peaks", async (route) => {
+      asked++;
+      await held;
+      await route.continue().catch(() => undefined);
+    });
+    await page.goto(rushes.url);
+    const versions = page.getByRole("combobox", { name: "Version" });
+    await expect(versions).toHaveValue("v2");
+    await expect.poll(() => asked).toBeGreaterThan(0);
+    const v1Answered = page.waitForResponse((r) => r.url().includes("/versions/v1/peaks") && r.status() === 204);
+    await versions.selectOption("v1");
+    await expect(versions).toHaveValue("v1");
+    await v1Answered;
+    release();
+    await settledNoWave(page);
+  });
+
+  test("a cut with no audio shows no waveform", async ({ page, rushes }) => {
+    await rushes.addCut();
+    expect(await peaksSettled(rushes, "v1")).toBe(204);
+    // The dashboard asks, hears "no audio", and draws nothing.
+    const answered = page.waitForResponse((r) => r.url().includes("/versions/v1/peaks") && r.status() === 204);
+    await page.goto(rushes.url);
+    await answered;
+    await videoReady(page);
+    await expect(page.locator(".track")).toBeVisible();
+    // Checked once the answer has had time to be drawn, not straight after it arrives.
+    await settledNoWave(page);
+  });
+
+  test("with the proxy offer showing, the timeline and its waveform still sit inside a 1440×900 window", async ({ page, rushes }) => {
+    await rushes.addProResCut({ audio: true });
+    await page.goto(rushes.url);
+    await expect(page.locator(".proxybar").getByRole("button", { name: "Create proxy" })).toBeVisible();
+    await expect.poll(() => wavePixels(page)).toBeGreaterThan(50);
+    await expectPlayerOnScreen(page);
+    expect(await page.evaluate(() => document.querySelector(".track")!.getBoundingClientRect().height)).toBe(40);
+  });
+
+  test("switching to another cut never shows the last one's waveform", async ({ page, rushes }) => {
+    await rushes.addProResCut({ codec: "h264", seconds: 3, audio: true });
+    await rushes.addCut();
+    expect(await peaksSettled(rushes, "v1")).toBe(200);
+    expect(await peaksSettled(rushes, "v2")).toBe(204);
+    await page.goto(rushes.url);
+    const versions = page.getByRole("combobox", { name: "Version" });
+    await expect(versions).toHaveValue("v2");
+    await expect(page.locator(".track canvas.pwave")).toHaveCount(0);
+    await versions.selectOption("v1");
+    await expect.poll(() => wavePixels(page)).toBeGreaterThan(50);
+    await versions.selectOption("v2");
+    await expect(page.locator(".track canvas.pwave")).toHaveCount(0);
+    await versions.selectOption("v1");
+    await expect(page.locator(".track canvas.pwave")).toHaveCount(1);
+  });
+
+  test("a cut added while you watch gets its waveform once the server has made it", async ({ page, rushes }) => {
+    await rushes.addCut();
+    await page.goto(rushes.url);
+    await videoReady(page);
+    await rushes.addProResCut({ codec: "h264", seconds: 3, audio: true });
+    await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v2");
+    await expect.poll(() => wavePixels(page)).toBeGreaterThan(50);
+  });
+
+  test("without ffmpeg on the server (501), the browser decodes a small cut itself", async ({ page, rushes }) => {
+    await rushes.addProResCut({ codec: "h264", seconds: 3, audio: true });
+    const peaksAsked: number[] = [];
+    await page.route("**/api/videos/*/versions/*/peaks", (route) => {
+      peaksAsked.push(Date.now());
+      return route.fulfill({ status: 501, contentType: "application/json", body: JSON.stringify({ error: "no_ffmpeg", message: "no ffmpeg" }) });
+    });
+    const media = page.waitForRequest((r) => r.url().includes("/media?path=renders%2Fhero_v1.mp4") && !r.headers()["range"]);
+    await page.goto(rushes.url);
+    await media;
+    await expect.poll(() => wavePixels(page)).toBeGreaterThan(50);
+    expect(peaksAsked.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// ---- a tall cut leaves room for the timeline and the note box (§19.9, fix round 1) ----
+
+/** The bottoms of everything that must stay on screen under the picture, and the window's height. */
+async function playerBottoms(page: Page) {
+  return page.evaluate(() => {
+    const bottom = (sel: string) => document.querySelector(sel)!.getBoundingClientRect().bottom;
+    return { height: innerHeight, bar: bottom(".bar"), track: bottom(".track"), ends: bottom(".ends"), composer: bottom(".comp") };
+  });
+}
+
+/** The column ends at the window's edge less the body's 24 px padding: the picture gave way only as much as it had to. */
+async function expectColumnFilled(page: Page): Promise<void> {
+  const b = await playerBottoms(page);
+  expect(b.ends).toBeGreaterThanOrEqual(b.height - 24 - 2);
+}
+
+async function expectAllOnScreen(page: Page): Promise<void> {
+  // The frame settles to the cut's shape once its metadata loads.
+  await expect.poll(async () => {
+    const b = await playerBottoms(page);
+    return Math.max(b.bar, b.track, b.ends, b.composer) <= b.height;
+  }, { timeout: 5000 }).toBe(true);
+  const b = await playerBottoms(page);
+  for (const k of ["bar", "track", "ends", "composer"] as const) expect(b[k], k).toBeLessThanOrEqual(b.height);
+}
+
+const frameBox = async (page: Page) => (await page.locator(".frame").boundingBox())!;
+
+test.describe("a tall cut (fix round 1)", () => {
+  test("a 9:16 cut at 1440×900 keeps the controls, the timeline, its labels and the note box on screen", async ({ page, rushes }) => {
+    await rushes.addVerticalCut();
+    await page.goto(rushes.url);
+    await videoReady(page);
+    await expectAllOnScreen(page);
+    await expectColumnFilled(page);
+    const f = await frameBox(page);
+    // Still the cut's own shape, just shorter.
+    expect(f.width / f.height).toBeCloseTo(360 / 640, 1);
+    expect(f.height).toBeGreaterThan(500);
+  });
+
+  test("a 9:16 4K cut with the proxy offer showing still fits", async ({ page, rushes }) => {
+    test.skip(!hasFfmpeg, "needs ffmpeg and ffprobe");
+    await rushes.addProResCut({ codec: "h264", width: 2160, height: 3840, seconds: 2 });
+    await page.goto(rushes.url);
+    await expect(page.locator(".proxybar").getByRole("button", { name: "Create proxy" })).toBeVisible();
+    // Measured once the frame has taken the cut's shape (16:9 until its metadata loads).
+    await expect.poll(async () => { const f = await frameBox(page); return Math.abs(f.width / f.height - 9 / 16) < 0.05; }, { timeout: 10_000 }).toBe(true);
+    await expectAllOnScreen(page);
+    await expectColumnFilled(page);
+  });
+
+  test("with a shot list, the note box still fits; the shot strip may run below", async ({ page, rushes }) => {
+    await rushes.addVerticalCut();
+    await rushes.api("PUT", "/api/videos/hero/shots", { shots: [{ name: "Open", start: 0 }, { name: "Turn", start: 1 }] });
+    await page.goto(rushes.url);
+    await videoReady(page);
+    await expect(page.locator(".shot")).toHaveCount(2);
+    await expectAllOnScreen(page);
+    // The strip, beside the note box rather than above it, doesn't shrink the picture either.
+    await expectColumnFilled(page);
+    // The strip comes straight after the timeline.
+    const shots = (await page.locator(".shots").boundingBox())!;
+    const ends = (await page.locator(".ends").boundingBox())!;
+    expect(shots.y).toBeGreaterThan(ends.y + ends.height);
+    expect(shots.y - (ends.y + ends.height)).toBeLessThan(30);
+  });
+
+  test("a 16:9 cut looks as it did: the picture is the column's full width at 1440×900", async ({ page, rushes }) => {
+    await rushes.addCut();
+    await page.goto(rushes.url);
+    await videoReady(page);
+    // 1440 less the body's padding (2 × 24), the notes column (380) and the gap (20).
+    await expect.poll(async () => Math.round((await frameBox(page)).width)).toBe(992);
+    const f = await frameBox(page);
+    expect(Math.abs(f.height - 992 * (9 / 16))).toBeLessThanOrEqual(2);
+    await expectAllOnScreen(page);
+  });
+
+  test("a taller window doesn't shrink a 9:16 cut: at 1440×1100 it keeps its full 640 px", async ({ page, rushes }) => {
+    await page.setViewportSize({ width: 1440, height: 1100 });
+    await rushes.addVerticalCut();
+    await page.goto(rushes.url);
+    await videoReady(page);
+    await expect.poll(async () => Math.round((await frameBox(page)).height)).toBe(640);
+    expect((await frameBox(page)).width).toBeCloseTo(360, 0);
+    await expectAllOnScreen(page);
+  });
+});
+
+test.describe("the player follows the real header height (fix round 2)", () => {
+  test("a header that grows without the page re-rendering still leaves the timeline and note box on screen", async ({ page, rushes }) => {
+    await rushes.addVerticalCut();
+    await page.goto(rushes.url);
+    await videoReady(page);
+    await expectAllOnScreen(page);
+    // A taller header (a wrapped crumb, a late web font): no state changes, so the app doesn't render.
+    await page.addStyleTag({ content: ".head { padding-top: 70px; }" });
+    await expectAllOnScreen(page);
+    await expectColumnFilled(page);
+  });
+});
+
+test.describe("a very short window (fix round 3, M2)", () => {
+  for (const height of [520, 440]) test(`at ${height} px high the player stops shrinking and the shot strip sits below the timeline, never over it`, async ({ page, rushes }) => {
+    await page.setViewportSize({ width: 1440, height });
+    await rushes.addVerticalCut();
+    await rushes.api("PUT", "/api/videos/hero/shots", { shots: [{ name: "Open", start: 0 }, { name: "Turn", start: 1 }] });
+    await page.goto(rushes.url);
+    await videoReady(page);
+    await expect(page.locator(".shot")).toHaveCount(2);
+    const r = await page.evaluate(() => {
+      const box = (sel: string) => document.querySelector(sel)!.getBoundingClientRect();
+      return { frame: box(".frame").height, track: box(".track").bottom, ends: box(".ends").bottom, shots: box(".shots").top, stack: box(".split > .stack").bottom };
+    });
+    // The frame keeps its 200 px floor, and the column grows to hold what's in it.
+    expect(r.frame).toBeGreaterThanOrEqual(199);
+    expect(r.stack).toBeGreaterThanOrEqual(r.ends - 1);
+    expect(r.shots).toBeGreaterThanOrEqual(r.ends);
+    expect(r.shots).toBeGreaterThanOrEqual(r.track);
+  });
+});
+
+test.describe("a tall cut without ffmpeg (fix round 1)", () => {
+  test.use({ noFfmpeg: true });
+
+  test("with no proxy row at all, a 9:16 cut still fits at 1440×900", async ({ page, rushes }) => {
+    await rushes.addVerticalCut();
+    await page.goto(rushes.url);
+    await videoReady(page);
+    await expect(page.locator(".proxybar")).toHaveCount(0);
+    await expectAllOnScreen(page);
+  });
+});

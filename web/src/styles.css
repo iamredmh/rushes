@@ -27,6 +27,8 @@
   --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
   --r: 10px;
   --r-lg: 14px;
+  /* The page body's padding, and where it starts (App sets --body-top from the real header and tabs). */
+  --body-pad: 24px;
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
@@ -110,7 +112,7 @@ svg.ic { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-wid
 .pop h3 { margin: 0; font-size: 15px; font-weight: 600; }
 .keys { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; font-size: 15px; color: var(--text-2); }
 kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; padding: 3px 7px; color: var(--text); box-shadow: inset 0 -1px 0 var(--line-2); }
-.body { padding: 24px; flex: 1; }
+.body { padding: var(--body-pad); flex: 1; }
 .col { max-width: 1000px; margin: 0 auto; display: grid; gap: 16px; }
 .empty { max-width: 420px; margin: 12vh auto 0; text-align: center; display: grid; gap: 10px; justify-items: center; color: var(--text-2); }
 .empty svg.ic { width: 32px; height: 32px; color: var(--text-3); }
@@ -133,6 +135,21 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
    max-height across the ratio to shrink the width, so a vertical cut stayed 16:9 wide (§19.4).
    --ar is the cut's own ratio, set alongside aspect-ratio. */
 .framebox .frame { width: min(100%, calc(min(70vh, 640px) * var(--ar, 16 / 9))); }
+/* Picture's player column is never taller than the window below the header and tabs, so the
+   controls, the timeline and the note box beside it stay on screen with a tall cut. Only the
+   picture gives way: the frame box shrinks (never below 200px) and the frame, still the cut's
+   shape, fits inside it. Its width is worked out from the box's height (container units), since
+   Safari doesn't narrow a width from max-height through aspect-ratio. A 16:9 cut, or a taller
+   window, leaves the picture as it was. The frame box's height here is the 16:9 default; Picture
+   writes it inline with the cut's own ratio. It's all behind @supports: a browser without
+   container units keeps the earlier layout, the min(70vh, 640px) cap above. */
+@supports (width: 1cqw) {
+  .split > .stack { display: flex; flex-direction: column; align-self: start; container-type: inline-size; max-height: max(calc(100vh - var(--body-top, 114px) - 2 * var(--body-pad)), var(--player-floor, 0px)); }
+  .split > .stack > * { flex: none; }
+  .split > .stack > .framebox { flex: 0 1 auto; height: min(640px, 70vh, calc(100cqw * 9 / 16)); min-height: 200px; container-type: size; }
+  .split > .stack > .framebox .frame { width: min(100cqw, calc(100cqh * var(--ar, 16 / 9))); }
+}
+.split > .shots { grid-column: 1; grid-row: 2; margin-top: -6px; }
 .frame video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
 .frame .overlay { position: absolute; inset: 0; }
 /* The picture's own rect inside the overlay (contentRect): saved and drawn boxes sit in it. */
@@ -158,6 +175,8 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .span.done { background: var(--done-soft); box-shadow: inset 0 0 0 1px rgba(76, 195, 138, 0.45); }
 .span.live { background: rgba(124, 147, 255, 0.18); box-shadow: inset 0 0 0 1.5px var(--accent); }
 .ends { display: flex; justify-content: space-between; font: 12px var(--mono); color: var(--text-3); margin-top: -6px; }
+/* §19.9: the cut's own audio, quiet, under the spans, ticks, markers and playhead. */
+.pwave { position: absolute; left: 0; top: 6px; width: 100%; height: calc(100% - 12px); z-index: 0; pointer-events: none; color: var(--text-3); opacity: 0.35; }
 .tick { position: absolute; top: 3px; bottom: 3px; width: 1px; background: var(--line-2); opacity: 0.7; z-index: 1; pointer-events: none; }
 .shots { display: flex; gap: 8px; overflow-x: auto; overflow-y: hidden; white-space: nowrap; padding-bottom: 2px; }
 .shot { flex: none; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 150px; padding: 8px 10px; border-radius: var(--r); border: 1.5px solid transparent; background: var(--raised); color: var(--text); cursor: pointer; text-align: left; white-space: normal; }
@@ -460,7 +479,7 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
   .side { height: auto; min-height: 480px; }
 }
 @media (max-width: 680px) {
-  .body { padding: 16px; }
+  :root { --body-pad: 16px; }
   .head { padding: 12px 14px; }
   .sgrid, .sfoot { grid-template-columns: minmax(0, 1fr); }
   .scols { display: none; }

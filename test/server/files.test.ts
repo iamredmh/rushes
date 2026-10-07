@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
 import { createApp } from "../../src/server/app.js";
-import { parseRange, inside, contentDisposition } from "../../src/server/files.js";
+import { addVariant } from "../../src/core/project.js";
+import { parseRange, inside, contentDisposition, OUTSIDE_MEDIA_EXT, CONTENT_TYPES, isInlineSafeType } from "../../src/server/files.js";
+import { OPEN_SAFE_EXT as SERVER_OPEN_SAFE_EXT } from "../../src/server/reveal.js";
+import { OPEN_SAFE_EXT as WEB_OPEN_SAFE_EXT, PREVIEWABLE_EXT, VIDEO_EXT as WEB_VIDEO_EXT } from "../../web/src/lib.js";
 
 // The smallest valid PNG (1×1, transparent).
 const PNG_1PX = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
@@ -201,6 +204,96 @@ describe("media", () => {
   });
 });
 
+describe("registered files that are symlinks (§15.5)", () => {
+  /** A project, a folder beside it ("outside"), and a way to register any path as a music variant. */
+  async function linked() {
+    const s = await setup();
+    const outside = join(dirname(s.root), "outside drive");
+    await mkdir(outside, { recursive: true });
+    let n = 0;
+    const reg = (file: string) => s.store.update("project", (p) => addVariant(p, { stage: "music", name: `v${++n}`, file }));
+    const get = (path: string) => s.call(`/media?path=${encodeURIComponent(path)}`);
+    await mkdir(join(s.root, "takes"), { recursive: true });
+    return { ...s, outside, reg, get };
+  }
+
+  it("serves a symlink to media outside the project (footage on another drive)", async () => {
+    const { root, outside, reg, get } = await linked();
+    await writeFile(join(outside, "A001 clip.mov"), "footage");
+    await symlink(join(outside, "A001 clip.mov"), join(root, "takes", "clip.mov"));
+    await reg("takes/clip.mov");
+    const res = await get("takes/clip.mov");
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("footage");
+  });
+
+  it("serves a .mkv and a .aac linked in from another drive, which the dashboard plays", async () => {
+    const { root, outside, reg, get } = await linked();
+    for (const name of ["film.mkv", "bed.aac"]) {
+      await writeFile(join(outside, name), "media");
+      await symlink(join(outside, name), join(root, "takes", name));
+      await reg(`takes/${name}`);
+      const res = await get(`takes/${name}`);
+      expect(res.status, name).toBe(200);
+      expect(await res.text()).toBe("media");
+    }
+  });
+
+  it("refuses a symlink out of the project to a file that isn't media, whatever the link is called", async () => {
+    const { root, outside, reg, get } = await linked();
+    for (const [link, target] of [["take1.wav", "credentials.json"], ["take2.wav", "id_ed25519"], ["take3.mp4", "server.pem"]]) {
+      await writeFile(join(outside, target), "secret");
+      await symlink(join(outside, target), join(root, "takes", link));
+      await reg(`takes/${link}`);
+      const res = await get(`takes/${link}`);
+      expect(res.status, link).toBe(404);
+      expect(await res.text(), link).not.toContain("secret");
+    }
+  });
+
+  it("checks the final real path: a media-named link to a link to a secret is refused", async () => {
+    const { root, outside, reg, get } = await linked();
+    await writeFile(join(outside, "secret.pem"), "secret");
+    await symlink(join(outside, "secret.pem"), join(outside, "looks like.wav"));
+    await symlink(join(outside, "looks like.wav"), join(root, "takes", "chain.wav"));
+    await reg("takes/chain.wav");
+    expect((await get("takes/chain.wav")).status).toBe(404);
+  });
+
+  it("applies the same rule through a symlinked folder", async () => {
+    const { root, outside, reg, get } = await linked();
+    await writeFile(join(outside, "bed.wav"), "music");
+    await writeFile(join(outside, "keys.json"), "secret");
+    await symlink(outside, join(root, "drive"));
+    await reg("drive/bed.wav");
+    await reg("drive/keys.json");
+    expect((await get("drive/bed.wav")).status).toBe(200);
+    expect((await get("drive/keys.json")).status).toBe(404);
+  });
+
+  it("serves a symlink to a file inside the project as before, and an absolute registered path outside only if it's media", async () => {
+    const { root, outside, reg, get } = await linked();
+    await writeFile(join(root, "takes", "real.wav"), "inside");
+    await symlink(join(root, "takes", "real.wav"), join(root, "takes", "alias.wav"));
+    await reg("takes/alias.wav");
+    expect(await (await get("takes/alias.wav")).text()).toBe("inside");
+    await writeFile(join(outside, "render.mp4"), "render");
+    await writeFile(join(outside, "notes.json"), "secret");
+    await reg(join(outside, "render.mp4"));
+    await reg(join(outside, "notes.json"));
+    expect((await get(join(outside, "render.mp4"))).status).toBe(200);
+    expect((await get(join(outside, "notes.json"))).status).toBe(404);
+  });
+
+  it("refuses an edit-app project file outside the project: it can be revealed, never downloaded", async () => {
+    const { root, outside, reg, get } = await linked();
+    await writeFile(join(outside, "Edit.prproj"), "project");
+    await symlink(join(outside, "Edit.prproj"), join(root, "takes", "edit.prproj"));
+    await reg("takes/edit.prproj");
+    expect((await get("takes/edit.prproj")).status).toBe(404);
+  });
+});
+
 describe("frame grabs", () => {
   it("saves a PNG under screenshots/, named by time, and serves it back", async () => {
     const { post, call, root } = await setup();
@@ -246,5 +339,32 @@ describe("frame grabs", () => {
     const back = await call(`/media?path=${encodeURIComponent(".rushes/grabs/hero_v1_f60.png")}`);
     expect(back.status).toBe(200);
     expect(back.headers.get("content-type")).toBe("image/png");
+  });
+});
+
+// §15.5: what /media serves from outside the project must be exactly what the dashboard treats as
+// media. A format the dashboard plays but /media refuses would stop playing, so any list that
+// drifts from the others fails here.
+describe("the outside-the-project allow-list matches every list of media extensions", () => {
+  // Project files for an editing app: revealed from the dashboard, never served from outside.
+  const EDIT_FILES = new Set(["prproj", "drp"]);
+  const bare = (exts: Iterable<string>) => [...exts].map((e) => e.replace(/^\./, ""));
+  const sources: Record<string, string[]> = {
+    "the dashboard's open-safe list": bare(WEB_OPEN_SAFE_EXT),
+    "the server's open-safe list": bare(SERVER_OPEN_SAFE_EXT),
+    "the dashboard's video list": bare(WEB_VIDEO_EXT),
+    "the dashboard's previewable list": bare(PREVIEWABLE_EXT),
+    "every inline-safe content type": Object.entries(CONTENT_TYPES).filter(([, t]) => isInlineSafeType(t)).map(([e]) => e.slice(1)),
+  };
+
+  it.each(Object.entries(sources))("serves every extension in %s", (_name, exts) => {
+    const missing = exts.filter((e) => !EDIT_FILES.has(e) && !OUTSIDE_MEDIA_EXT.has(e));
+    expect(missing).toEqual([]);
+  });
+
+  it("serves nothing the dashboard doesn't treat as media, and gives each extension a content type", () => {
+    const known = new Set(Object.values(sources).flat());
+    expect([...OUTSIDE_MEDIA_EXT].filter((e) => !known.has(e))).toEqual([]);
+    for (const e of OUTSIDE_MEDIA_EXT) expect(CONTENT_TYPES[`.${e}`], e).toBeDefined();
   });
 });

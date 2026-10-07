@@ -48,6 +48,8 @@ export interface ProResOptions {
    * near instant and keeps the file small; encoding its audio back to AAC is what takes the time.
    */
   long?: boolean;
+  /** Adds a 440 Hz tone as AAC, so the cut has audio for the Picture waveform (§19.9). */
+  audio?: boolean;
 }
 
 export interface VariantOptions {
@@ -262,9 +264,13 @@ export const test = base.extend<{ rushes: Rushes; noFfmpeg: boolean }>({
       cutsByVideo.set("hero", n);
       const file = `renders/hero_v${n}.${opts.codec === "h264" ? "mp4" : "mov"}`;
       const out = join(root, file);
+      const tone = opts.audio
+        ? ["-f", "lavfi", "-i", `sine=frequency=440:sample_rate=48000:duration=${opts.seconds ?? 6}`, "-c:a", "aac", "-b:a", "64k", "-shortest"]
+        : [];
       if (opts.codec === "h264") {
         await ffmpeg([
           "-f", "lavfi", "-i", `testsrc=size=${opts.width ?? 640}x${opts.height ?? 360}:rate=30:duration=${opts.seconds ?? 6}`,
+          ...tone,
           "-c:v", "libx264", "-preset", "ultrafast", "-g", "30", "-pix_fmt", "yuv420p", out,
         ]);
       } else if (opts.long) {
@@ -279,6 +285,7 @@ export const test = base.extend<{ rushes: Rushes; noFfmpeg: boolean }>({
       } else {
         await ffmpeg([
           "-f", "lavfi", "-i", `testsrc=size=${opts.width ?? 640}x${opts.height ?? 360}:rate=30:duration=${opts.seconds ?? 6}`,
+          ...tone,
           "-c:v", "prores_ks", "-profile:v", "0", out,
         ]);
       }

@@ -3,6 +3,7 @@ import { api, ApiError } from "../api.js";
 import { LOCKED_TAB, STAGE_NAMES, agentPrompt, copyShortcut, defaultVersion, firstTab, latest, neighbourVideo, proxyKey, snap } from "../lib.js";
 import type { Batch, Stage, Video } from "../types.js";
 import { useRushes } from "../useRushes.js";
+import { assetRev } from "../audio/timeline.js";
 import { Assets } from "./Assets.js";
 import { Icon, STAGE_ICONS } from "./Icon.js";
 import { Mix } from "./Mix.js";
@@ -117,6 +118,8 @@ export function App() {
   const version = video?.versions.find((v) => v.id === versionId) ?? target;
   const locked = !!video?.lockedVersion;
   const fps = version?.fps ?? state?.project.fps ?? 30;
+  // §19.9: the cut's file as Assets lists it: its size and revision, for the Picture waveform.
+  const cutAsset = version ? assets.find((a) => a.kind === "cut" && a.path === version.file) : undefined;
 
   // A new cut arriving mid-review mustn't rewind the player or drop pending marks. So the
   // moment something's pending, hold the cut on screen; a newer one then waits behind a chip.
@@ -215,6 +218,41 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   });
 
+  // Where the page body starts (below the header, tabs and any banner), as --body-top, so Picture
+  // can cap its player at the window's height (fix round 1: a tall cut leaves room for the timeline
+  // and the note box). Read after every render (a banner moves it), on resize, whenever the header
+  // or the tabs change size without a render (a wrapped crumb, say), and once the web fonts have
+  // loaded; written only when it changes.
+  const bodyRef = useRef<HTMLElement>(null);
+  const headRef = useRef<HTMLElement>(null);
+  const tabsRef = useRef<HTMLElement>(null);
+  const placeBody = () => {
+    const el = bodyRef.current;
+    if (!el) return;
+    const top = `${Math.round(el.getBoundingClientRect().top + window.scrollY)}px`;
+    const root = document.documentElement.style;
+    if (root.getPropertyValue("--body-top") !== top) root.setProperty("--body-top", top);
+  };
+  useLayoutEffect(placeBody);
+  useEffect(() => {
+    const onResize = () => placeBody();
+    window.addEventListener("resize", onResize);
+    let live = true;
+    void document.fonts?.ready.then(() => { if (live) placeBody(); });
+    return () => {
+      live = false;
+      window.removeEventListener("resize", onResize);
+    };
+  }, []);
+  // The header and tabs exist once the project has loaded, so they're observed from then on.
+  const shellUp = !!state && !!stage;
+  useEffect(() => {
+    if (!shellUp) return;
+    const ro = new ResizeObserver(() => placeBody());
+    for (const el of [headRef.current, tabsRef.current]) if (el) ro.observe(el, { box: "border-box" });
+    return () => ro.disconnect();
+  }, [shellUp]);
+
   const send = async () => {
     if (!stage || stage === "assets") return;
     setKeysOpen(false);
@@ -252,7 +290,7 @@ export function App() {
 
   return (
     <div class="shell">
-      <header class="head">
+      <header class="head" ref={headRef}>
         <span class="logo"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg></span>
         <nav class="crumb" aria-label="Project">
           <span>{state.project.name}</span>
@@ -374,7 +412,7 @@ export function App() {
         </div>
       )}
 
-      <nav class="tabs" role="tablist" aria-label="Stages">
+      <nav class="tabs" ref={tabsRef} role="tablist" aria-label="Stages">
         {ORDER.map((s) => {
           const t = tab(s);
           return (
@@ -423,7 +461,7 @@ export function App() {
       </nav>
       {problem && !wrongProject && <div class="banner"><Icon name="alert" />{problem}</div>}
 
-      <main class="body">
+      <main class="body" ref={bodyRef}>
         {stage === "assets" ? (
           unlocked ? (
             <Assets assets={assets} videos={state.project.videos} toast={toast} onChanged={() => void refresh()} />
@@ -452,6 +490,8 @@ export function App() {
             noteProxyJob={noteProxyJob}
             source={sources[video.id] ?? "proxy"}
             onSourceChange={setSourceFor}
+            fileSize={cutAsset?.size ?? null}
+            fileRev={cutAsset ? assetRev(cutAsset) : undefined}
           />
         ) : stage === "script" ? (
           <Script script={state.script} toast={toast} onChanged={() => void refresh()} />

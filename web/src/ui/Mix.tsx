@@ -81,7 +81,7 @@ export function Mix({ state, assets, video, toast, onChanged, onPendingChange }:
   const [levels, setLevels] = useState<Record<MixLane, number>>(() => ({ vo: savedLevel("vo"), music: savedLevel("music"), sfx: savedLevel("sfx") }));
   // Each lane's debounced save still to go: its timer, and the save itself, so leaving Mix can
   // send it straight away rather than lose it.
-  const saveTimers = useRef<Partial<Record<MixLane, { id: number; send: () => void }>>>({});
+  const saveTimers = useRef<Partial<Record<MixLane, { id: number; send: (keepalive?: boolean) => void }>>>({});
   // Picked up elsewhere (another tab, the agent, or your own save landing) -- but never for a lane
   // with a save still pending: a refresh racing your own debounce must not snap the slider you're
   // dragging back to the stale server value underneath your hand.
@@ -102,28 +102,43 @@ export function Mix({ state, assets, video, toast, onChanged, onPendingChange }:
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [savedKey]);
+  // Sends every save still waiting on its debounce, now. Each is taken off the list as it goes, so
+  // whichever of these fires first sends it and the rest find nothing: never sent twice.
+  const flushSaves = (keepalive: boolean) => {
+    const timers = saveTimers.current;
+    for (const lane of MIX_LANES) {
+      const pending = timers[lane];
+      if (!pending) continue;
+      window.clearTimeout(pending.id);
+      delete timers[lane];
+      pending.send(keepalive);
+    }
+  };
   // Leaving Mix (a tab key pressed mid-drag, say) flushes every pending save instead of dropping it.
-  useEffect(
-    () => () => {
-      const timers = saveTimers.current;
-      for (const lane of MIX_LANES) {
-        const pending = timers[lane];
-        if (!pending) continue;
-        window.clearTimeout(pending.id);
-        delete timers[lane];
-        pending.send();
-      }
-    },
-    [],
-  );
+  // So does the page being hidden or left (a reload, a closed tab): React never unmounts then, and
+  // the timer dies with the page, so the save goes as a keepalive request that outlives it.
+  useEffect(() => {
+    const onHide = () => flushSaves(true);
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") flushSaves(true);
+    };
+    window.addEventListener("pagehide", onHide);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("pagehide", onHide);
+      document.removeEventListener("visibilitychange", onVisibility);
+      flushSaves(false);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const setLevel = (lane: MixLane, db: number) => {
     const clamped = clampLevel(db);
     setLevels((v) => (v[lane] === clamped ? v : { ...v, [lane]: clamped }));
     const timers = saveTimers.current;
     if (timers[lane] !== undefined) window.clearTimeout(timers[lane].id);
     // 0 dB is the default: saved as a clear (null), same as the key never having been set.
-    const send = () =>
-      void api.put("/api/picks", { levels: { [MIX_STAGE[lane]]: clamped === 0 ? null : clamped } }).then(onChanged, (e) => {
+    const send = (keepalive = false) =>
+      void api.put("/api/picks", { levels: { [MIX_STAGE[lane]]: clamped === 0 ? null : clamped } }, { keepalive }).then(onChanged, (e) => {
         toast(e instanceof ApiError ? e.message : "Couldn't save the level");
       });
     const id = window.setTimeout(() => {
