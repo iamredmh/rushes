@@ -3,6 +3,7 @@ import { lstat, realpath, stat } from "node:fs/promises";
 import { extname, isAbsolute, join, normalize, sep } from "node:path";
 import { Readable } from "node:stream";
 import type { Project, Script } from "../core/schema.js";
+import { cueFiles } from "../core/cues.js";
 import { VIDEO_EXT } from "../core/media.js";
 import { PROXY_PATH } from "./proxy.js";
 
@@ -86,6 +87,8 @@ export function registeredMedia(project: Project, script: Script): Set<string> {
     }
   }
   for (const l of project.lanes) for (const variant of l.variants) files.add(variant.file);
+  // §23: each cue's sample, when it is an audio file; served only because it is registered.
+  for (const f of cueFiles(project)) files.add(f);
   for (const s of script.sections) for (const t of s.takes) files.add(t.file);
   for (const f of project.files) files.add(f.file);
   return files;

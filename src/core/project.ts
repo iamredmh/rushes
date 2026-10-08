@@ -2,6 +2,7 @@ import { basename } from "node:path";
 import type { Cue, FileEntry, FileKind, Format, Lane, LaneStage, Project, Shot, Variant, Version, Video } from "./schema.js";
 import { newProjectId, slugify, uniqueId } from "./ids.js";
 import { InvalidError, NotFoundError, RushesError } from "./errors.js";
+import { checkCueFile } from "./cues.js";
 import { MAX_FORMATS, durationWarning, ratioId, sameShape, settleLabel, versionFormats } from "./formats.js";
 import { oneLineOf } from "./labels.js";
 import type { Store } from "./store.js";
@@ -114,12 +115,19 @@ export interface AddVariantInput {
   meta?: Record<string, string | number>;
   /** The one-line description the lane card shows. Stored as `meta.description`; wins over a `description` inside `meta`. */
   description?: string;
-  cues?: { name: string; t: number }[];
+  cues?: { name: string; t: number; file?: string }[];
 }
 
 const LANE_NAMES: Record<LaneStage, string> = { voice: "Voiceover", music: "Music", sfx: "Sound effects" };
 
 export function addVariant(p: Project, input: AddVariantInput): { lane: Lane; variant: Variant } {
+  // §23: the cues first, so a cue refused for its file leaves the project untouched.
+  const cues: Cue[] = [];
+  for (const c of input.cues ?? []) {
+    const cue: Cue = { id: uniqueId(slugify(c.name), cues.map((x) => x.id)), name: c.name, t: c.t };
+    if (c.file !== undefined) cue.file = checkCueFile(c.name, c.file);
+    cues.push(cue);
+  }
   // Lane ids are capped at 64 by the schema; a slug can outgrow its source (NFKD splits ligatures).
   const laneId = slugify(input.lane ?? input.round ?? input.stage).slice(0, 64).replace(/-+$/, "");
   let lane = p.lanes.find((l) => l.id === laneId);
@@ -127,10 +135,6 @@ export function addVariant(p: Project, input: AddVariantInput): { lane: Lane; va
   if (!lane) {
     lane = { id: laneId, stage: input.stage, name: input.round ?? input.lane ?? LANE_NAMES[input.stage], variants: [] };
     p.lanes.push(lane);
-  }
-  const cues: Cue[] = [];
-  for (const c of input.cues ?? []) {
-    cues.push({ id: uniqueId(slugify(c.name), cues.map((x) => x.id)), name: c.name, t: c.t });
   }
   const variant: Variant = {
     id: uniqueId(slugify(input.name), lane.variants.map((v) => v.id)),

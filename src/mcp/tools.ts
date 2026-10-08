@@ -295,7 +295,21 @@ export function createMcpServer(ctx: ToolContext): McpServer {
           .max(200)
           .optional()
           .describe("One line on what this read, bed or pass is, shown on its lane card. Stored as meta.description, and wins over one given in meta."),
-        cues: z.array(z.object({ name: z.string(), t: z.number().nonnegative() })).optional().describe("SFX cues with times in seconds."),
+        cues: z
+          .array(
+            z.object({
+              name: z.string(),
+              t: z.number().nonnegative(),
+              file: z
+                .string()
+                .min(1)
+                .max(1024)
+                .optional()
+                .describe("Optional: the sample you placed at this cue (an audio file), so the user can see which it is and hear it on its own."),
+            }),
+          )
+          .optional()
+          .describe("SFX cues with times in seconds, each optionally with the `file` of its sample. Give a sound the same name every time it comes back: the tab groups cues by name."),
       },
     },
     safe(async ({ project, ...b }) => (await ctx.client(project)).post("/api/variants", b)),

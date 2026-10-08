@@ -24,6 +24,7 @@ import { fromManifestPath, toManifestPath } from "../core/paths.js";
 import { addFile, addVariant, addVersion, resolveVideo } from "../core/project.js";
 import type { Project, Script, Version, Video } from "../core/schema.js";
 import type { ChangeEvent, Store } from "../core/store.js";
+import { cueFiles } from "../core/cues.js";
 import { logBookFor } from "./logbook.js";
 import { broughtInEvent, cutName } from "../core/logEvents.js";
 
@@ -354,7 +355,7 @@ export function foundAnnouncer(store: Store): () => void {
   };
 }
 
-/** Every manifest path the project has registered: cuts and their formats, variants, library files and script takes. */
+/** Every manifest path the project has registered: cuts and their formats, variants, cue samples, library files and script takes. */
 export function registeredPaths(project: Project, script: Script): string[] {
   const out: string[] = [];
   for (const v of project.videos) {
@@ -365,6 +366,8 @@ export function registeredPaths(project: Project, script: Script): string[] {
     }
   }
   for (const l of project.lanes) for (const variant of l.variants) out.push(variant.file);
+  // §23: a cue's sample is part of its pass, not a pass of its own to bring in.
+  for (const f of cueFiles(project)) out.push(f);
   for (const f of project.files) out.push(f.file);
   for (const s of script.sections) for (const t of s.takes) out.push(t.file);
   return out;

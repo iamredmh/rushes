@@ -90,7 +90,14 @@ export const VideoSchema = z.object({
 });
 export type Video = z.infer<typeof VideoSchema>;
 
-export const CueSchema = z.object({ id, name: z.string().min(1), t: seconds });
+export const CueSchema = z.object({
+  id,
+  name: z.string().min(1),
+  t: seconds,
+  // §23: the sample placed at this cue, as a manifest path (CUE_FILE_MAX in cues.ts). Optional and
+  // absent on every older cue, so a 0.2.x project loads and writes back unchanged.
+  file: z.string().min(1).max(1024).optional(),
+});
 export type Cue = z.infer<typeof CueSchema>;
 
 export const VariantSchema = z.object({

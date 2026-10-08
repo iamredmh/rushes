@@ -124,7 +124,7 @@ const VariantBody = z.object({
   file: z.string().min(1),
   meta: z.record(z.string(), z.union([z.string(), z.number()])).optional(),
   description: z.string().min(1).max(200).optional(),
-  cues: z.array(z.object({ name: z.string().min(1), t })).optional(),
+  cues: z.array(z.object({ name: z.string().min(1), t, file: z.string().min(1).max(1024).optional() })).optional(),
 });
 const ScriptBody = z.object({
   wordsPerSecond: z.number().positive().optional(),
@@ -1079,7 +1079,9 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
 
   app.post("/api/variants", async (c) => {
     const b = await body(c, VariantBody);
-    const { result } = await store.update("project", (p) => addVariant(p, { ...b, file: toManifestPath(store.root, b.file) }));
+    // §23: a cue's file is stored as a manifest path, like the variant's own.
+    const cues = b.cues?.map((q) => (q.file === undefined ? q : { ...q, file: toManifestPath(store.root, q.file) }));
+    const { result } = await store.update("project", (p) => addVariant(p, { ...b, cues, file: toManifestPath(store.root, b.file) }));
     await log.add(() => variantEvent(result.lane, result.variant), by(c));
     return c.json(result, 201);
   });
