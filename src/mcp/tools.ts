@@ -300,12 +300,12 @@ export function createMcpServer(ctx: ToolContext): McpServer {
             z.object({
               name: z.string(),
               t: z.number().nonnegative(),
+              // No .max here: the 1024 limit is on the stored path, so checkCueFile enforces it and names the cue (§23.6).
               file: z
                 .string()
                 .min(1)
-                .max(1024)
                 .optional()
-                .describe("Optional: the sample you placed at this cue (an audio file), so the user can see which it is and hear it on its own."),
+                .describe("Optional: the sample you placed at this cue (an audio file, a path of up to 1024 characters), so the user can see which it is and hear it on its own."),
             }),
           )
           .optional()

@@ -17,7 +17,7 @@ async function connect() {
     const r = (await client.callTool({ name, arguments: args })) as { content: { text: string }[]; isError?: boolean };
     return { isError: !!r.isError, text: r.content[0].text, json: r.isError ? null : JSON.parse(r.content[0].text) };
   };
-  return { client, call, close: async () => { await client.close(); await running.close(); } };
+  return { root, client, call, close: async () => { await client.close(); await running.close(); } };
 }
 
 type Prop = { description?: string; items?: { properties: Record<string, Prop>; required?: string[] } };
@@ -44,10 +44,21 @@ describe("rushes_add_variant: a cue's file (§23.4)", () => {
     const bad = await t.call("rushes_add_variant", { stage: "sfx", name: "Pass", file: "pass.wav", cues: [{ name: "key", t: 1, file: "notes.json" }] });
     expect(bad.isError).toBe(true);
     expect(bad.text).toMatch(/Cue "key": "notes\.json" isn't an audio file/);
-    const long = await t
-      .call("rushes_add_variant", { stage: "sfx", name: "Pass", file: "pass.wav", cues: [{ name: "thud", t: 1, file: `${"a".repeat(1021)}.wav` }] })
-      .catch((e: Error) => ({ isError: true, text: e.message, json: null }));
+    // §23.6: 1025 characters reaches checkCueFile (the tool's schema has no cap of its own), which names the cue.
+    const long = await t.call("rushes_add_variant", { stage: "sfx", name: "Pass", file: "pass.wav", cues: [{ name: "thud", t: 1, file: `${"a".repeat(1021)}.wav` }] });
     expect(long.isError).toBe(true);
+    expect(long.text).toMatch(/^Cue "thud": its file path is over 1024 characters/);
+    await t.close();
+  });
+
+  it("takes a long absolute path inside the project whose stored form is short, as the HTTP route does", async () => {
+    const t = await connect();
+    // Built by hand: join() would normalise the "x/.." segments away.
+    const file = `${t.root}/${"x/../".repeat(210)}audio/sfx/thud.wav`;
+    expect(file.length).toBeGreaterThan(1024);
+    const r = await t.call("rushes_add_variant", { stage: "sfx", name: "Pass", file: "pass.wav", cues: [{ name: "thud", t: 1, file }] });
+    expect(r.isError).toBe(false);
+    expect(r.json.variant.cues).toEqual([{ id: "thud", name: "thud", t: 1, file: "audio/sfx/thud.wav" }]);
     await t.close();
   });
 });
