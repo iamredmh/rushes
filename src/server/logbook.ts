@@ -50,6 +50,8 @@ function backfillBefore(f: LogFile, since: number): number {
 
 /** Thrown inside an update to leave the file exactly as it was: nothing is written and rev stays. */
 const UNCHANGED = Symbol("unchanged");
+/** Thrown inside an append that finds the log no longer backfilled: it was deleted or replaced while this server ran. */
+const STALE = Symbol("stale");
 
 export class LogBook {
   /** When this log began, for this server: the backfill reads in only what's older (R6). */
@@ -57,6 +59,14 @@ export class LogBook {
   private readying: Promise<void> | null = null;
   private fixing: Promise<LogFile> | null = null;
   private cache: { key: string; file: LogFile } | null = null;
+  /**
+   * M3: the log is known to be backfilled, so `ready` needn't read it first. This can't go stale
+   * unseen, because it's only a shortcut: every append checks the marker on the very copy it is
+   * rewriting, inside the store's one-at-a-time update (so for free), and every read checks it on
+   * what it read. A log deleted, reset or damaged by another process since is noticed at once,
+   * this flag drops, and the log is backfilled again or set aside before the line is written.
+   */
+  private known = false;
   /** Lines that couldn't be written since this server started; /api/health carries it for `rushes doctor` (ruling e). */
   failures = 0;
 
@@ -73,9 +83,13 @@ export class LogBook {
   }
 
   private async prepare(): Promise<void> {
+    if (this.known) return;
     const file = await this.read(true);
     // Ruling b: once backfilled, reading never writes.
-    if (file.backfilled) return;
+    if (file.backfilled) {
+      this.known = true;
+      return;
+    }
     const [project, batches, script] = await Promise.all([this.store.read("project"), this.store.read("batches"), this.store.read("script")]);
     // update runs one at a time per file, so a second LogBook racing this one finds the marker set
     // and leaves the file untouched: the history is read in once and written once (Review Focus 1).
@@ -87,6 +101,7 @@ export class LogBook {
       .catch((e: unknown) => {
         if (e !== UNCHANGED) throw e;
       });
+    this.known = true;
   }
 
   /** The file, parsed once per change on disk. With `fix`, a corrupt one is set aside as log.json.bad and the log starts again (R7). */
@@ -132,13 +147,24 @@ export class LogBook {
     try {
       const event = typeof make === "function" ? make() : make;
       await this.ready();
-      const { result } = await this.store.update("log", (f) => {
-        // A line going into a log that isn't backfilled yet (its backfill failed): remember when
-        // this server started, so a later backfill never reads in what was logged live (M2).
-        if (!f.backfilled) f.began ??= new Date(this.since).toISOString();
-        return appendEvent(f, event, by, at);
-      });
-      return result;
+      const write = () =>
+        this.store.update("log", (f) => {
+          if (!f.backfilled && this.known) throw STALE;
+          // A line going into a log that isn't backfilled yet (its backfill failed): remember when
+          // this server started, so a later backfill never reads in what was logged live (M2).
+          if (!f.backfilled) f.began ??= new Date(this.since).toISOString();
+          return appendEvent(f, event, by, at);
+        });
+      try {
+        return (await write()).result;
+      } catch (e) {
+        // M3: the log was deleted, reset or damaged since it was last seen. Make it ready again
+        // (backfill it, or set it aside), then write the line once more.
+        if (e !== STALE && !(e instanceof CorruptFileError)) throw e;
+        this.known = false;
+        await this.ready();
+        return (await write()).result;
+      }
     } catch (e) {
       this.failures += 1;
       console.error(`Rushes: couldn't write to the Change Log: ${(e as Error).message}`);
@@ -149,7 +175,14 @@ export class LogBook {
   /** §22.7: a page of the log, newest first. The first read backfills (R6). */
   async view(q: LogQuery, ctx: UndatedContext): Promise<LogView> {
     await this.ready();
-    return logView(await this.read(true), q, ctx);
+    let file = await this.read(true);
+    if (!file.backfilled && this.known) {
+      // M3: deleted or reset since it was last seen: backfill it again before answering.
+      this.known = false;
+      await this.ready();
+      file = await this.read(true);
+    }
+    return logView(file, q, ctx);
   }
 
   /** The head for the header's dot. Read-only: it never backfills or fixes, and null means it couldn't be read. */

@@ -132,7 +132,8 @@ describe("the server writes the log as things happen (§22.5)", () => {
 
   it("the current set the scanner brings in is one line by Rushes, and never also Before the log (R5, R9)", async () => {
     const { root, store } = await tmpProject("adopt");
-    await store.update("project", (p) => addVersion(p, { video: "hero", file: "renders/hero v3.mov", duration: 60, fps: 25 }));
+    // A minute old: a cut dated in the very millisecond the server starts isn't history to it (R6).
+    await store.update("project", (p) => addVersion(p, { video: "hero", file: "renders/hero v3.mov", duration: 60, fps: 25 }, new Date(Date.now() - 60_000)));
     for (const f of ["renders/hero v3.mov", "bed/hero v3 theme.wav", "vo_jules/hero v3 read.wav"]) {
       await mkdir(dirname(join(root, f)), { recursive: true });
       await writeFile(join(root, f), "bytes");
@@ -284,6 +285,44 @@ describe("projects that already exist (§22.6)", () => {
     await writeFile(store.path("log"), JSON.stringify({ schema: 1, rev: 3, backfilled: false, undated: [], dropped: 0, entries: [live] }));
     const view = await (await createApp(store).request("/api/log?limit=50")).json();
     expect(view.entries.map((e: { text: string; by: string }) => `${e.text} | ${e.by}`)).toEqual(["Chose the wide | agent", "v1 added: first pass | rushes"]);
+  });
+
+  it("once the log is known to be backfilled, each line reads it once: the write's own read (M3)", async () => {
+    const { store } = await tmpProject("reads");
+    // Backfilled by an earlier server: this one learns it on its first line.
+    await writeFile(store.path("log"), JSON.stringify({ schema: 1, rev: 1, backfilled: true, undated: [], dropped: 0, entries: [] }));
+    const book = new LogBook(store);
+    await book.add(lineEvent("First", "project"), "agent");
+    const real = store.read.bind(store);
+    let reads = 0;
+    store.read = ((key: "log") => {
+      if (key === "log") reads += 1;
+      return real(key);
+    }) as Store["read"];
+    for (const text of ["Second", "Third", "Fourth"]) expect(await book.add(lineEvent(text, "project"), "agent")).not.toBeNull();
+    expect(reads).toBe(3);
+    expect((await real("log")).entries.map((e) => e.text)).toEqual(["First", "Second", "Third", "Fourth"]);
+  });
+
+  it("a log deleted while the server runs is started again on its next write or read, with its history read in (M3)", async () => {
+    const { root, store } = await tmpProject("deleted");
+    await store.update("project", (p) => addVersion(p, { video: "Hero", file: "renders/hero_v1.mp4", note: "v1: first pass; rough" }, new Date(Date.now() - 3 * DAY)));
+    const app = createApp(store);
+    const post = (path: string, json: unknown) => app.request(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(json) });
+    const texts = async () => (await (await app.request("/api/log?limit=50")).json()).entries.map((e: { text: string; by: string }) => `${e.text} | ${e.by}`);
+    await post("/api/log", { text: "Chose the wide" });
+    expect(await texts()).toEqual(["Chose the wide | agent", "v1 added: first pass | rushes"]);
+    // `rushes doctor` says a damaged log can be deleted: the next write starts it again.
+    await rm(store.path("log"));
+    await post("/api/versions", { video: "Hero", file: `${root}/renders/hero_v2.mp4`, note: "v2: tighter cut; more" });
+    // The write itself noticed, before anything read the log.
+    const written = await store.read("log");
+    expect(written.backfilled).toBe(true);
+    expect(written.entries.map((e) => e.text)).toEqual(["v1 added: first pass", "v2 added: tighter cut"]);
+    expect(await texts()).toEqual(["v2 added: tighter cut | agent", "v1 added: first pass | rushes"]);
+    // And so does the next read. v2 came after this server started: its line went with the file.
+    await rm(store.path("log"));
+    expect(await texts()).toEqual(["v1 added: first pass | rushes"]);
   });
 
   it("a cut registered on a new project is logged once, never also read in as history (R6)", async () => {
