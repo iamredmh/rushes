@@ -325,6 +325,23 @@ describe("backfill and reading back (§22.6)", () => {
     // `since` is "after": a line at exactly that time was already seen.
     expect(logView(f, { since: at(5).toISOString() }, ctx).entries.map((e) => e.text)).toEqual(["Line 2"]);
   });
+  it("a long-lived project's backfill (30,000 dated items) keeps the newest 5000, unique, and stays linear (minor 7)", () => {
+    const iso = (i: number) => at(-(40_000 - i) * 3).toISOString();
+    const p: Project = { schema: 1, rev: 0, name: "Lumen launch film", fps: 30, videos: [], lanes: [], files: [], autoProxy: false };
+    for (let f = 0; f < 10; f++) p.videos.push({ id: `film-${f}`, name: `Film ${f}`, lockedVersion: null, versions: Array.from({ length: 1000 }, (_, i) => ({ id: `v${i + 1}`, file: "r/a.mp4", duration: null, fps: null, addedAt: iso(f * 1000 + i), note: `v${i + 1}: a tighter cut`, label: "", shots: [], proxy: null })) });
+    p.files = Array.from({ length: 10_000 }, (_, i) => ({ id: `f${i}`, kind: "doc" as const, file: "d.md", name: `Doc ${i}`, note: "", video: null, addedAt: iso(i + 3) }));
+    const b: BatchesFile = { schema: 1, rev: 0, batches: Array.from({ length: 10_000 }, (_, i) => ({ id: `b${i}`, stage: "picture" as const, noteIds: ["n_1"], sectionIds: [], sentAt: iso(i + 7), prompt: "" })) };
+    const f: LogFile = { schema: 1, rev: 0, backfilled: false, undated: [], dropped: 0, entries: [] };
+    const start = performance.now();
+    backfillLog(f, { project: p, batches: b, script }, T0);
+    const ms = performance.now() - start;
+    expect(f.entries).toHaveLength(LOG_MAX);
+    expect(f.dropped).toBe(25_000);
+    expect(new Set(f.entries.map((e) => e.id)).size).toBe(LOG_MAX);
+    expect(LogFileSchema.safeParse(f).success).toBe(true);
+    // Measured at about 170 ms warm on a busy Mac; a copy per line (the old per-append cap) took seconds.
+    expect(ms).toBeLessThan(5000);
+  });
   it("logView: a limit that isn't a number reads as the default", () => {
     const f = empty();
     appendEvent(f, lineEvent("Line", "project"), "agent", at(0));

@@ -83,6 +83,12 @@ function mergeInto(e: LogEntry, event: LogEvent, text: string, subject: string, 
  * refused with an error, and the file is left as it was.
  */
 export function appendEvent(file: LogFile, event: LogEvent, by: LogBy, at: Date, id?: string): LogEntry {
+  return place(file, event, by, at, id, (x) => file.entries.some((e) => e.id === x), true);
+}
+
+// appendEvent's work. `taken` says whether an id is in use; `cap` keeps the newest LOG_MAX as it
+// goes. The backfill passes a Set and caps once at the end, so 30,000 dated items stay linear.
+function place(file: LogFile, event: LogEvent, by: LogBy, at: Date, id: string | undefined, taken: (id: string) => boolean, cap: boolean): LogEntry {
   const t = at.getTime();
   const iso = at.toISOString();
   const text = logText(event.text);
@@ -106,10 +112,10 @@ export function appendEvent(file: LogFile, event: LogEvent, by: LogBy, at: Date,
       return e;
     }
   }
-  const entry: LogEntry = { id: freshId((x) => file.entries.some((e) => e.id === x), id), at: iso, area: event.area, kind: event.kind, text, ...link, by, n: count, subject };
+  const entry: LogEntry = { id: freshId(taken, id), at: iso, area: event.area, kind: event.kind, text, ...link, by, n: count, subject };
   file.entries.push(entry);
   const extra = file.entries.length - LOG_MAX;
-  if (extra > 0) {
+  if (cap && extra > 0) {
     file.entries.splice(0, extra);
     file.dropped += extra;
   }
@@ -141,14 +147,15 @@ export function backfillLog(file: LogFile, src: BackfillSource, before: number):
   for (const entry of src.project.files) add(entry.addedAt, fileEvent(entry));
   dated.sort((a, b) => a.t - b.t);
   const past: LogFile = { schema: 1, rev: 0, backfilled: true, undated: [], dropped: 0, entries: [] };
-  for (const d of dated) appendEvent(past, d.event, "rushes", new Date(d.t));
+  // Ids are drawn against the live lines too, so none is shared (I1).
   const ids = new Set(file.entries.map((e) => e.id));
-  for (const e of past.entries) {
-    e.id = freshId((x) => ids.has(x), e.id);
-    ids.add(e.id);
-  }
+  const taken = (x: string) => {
+    if (ids.has(x)) return true;
+    ids.add(x); // freshId keeps the first id that isn't taken, so it's now in use
+    return false;
+  };
+  for (const d of dated) place(past, d.event, "rushes", new Date(d.t), undefined, taken, false);
   file.entries = [...past.entries, ...file.entries];
-  file.dropped += past.dropped;
   const extra = file.entries.length - LOG_MAX;
   if (extra > 0) {
     file.entries.splice(0, extra);
