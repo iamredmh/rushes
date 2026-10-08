@@ -37,3 +37,13 @@ describe("shipped docs: the Change Log (§22.7)", () => {
     expect(text).toContain('rushes log add --area mix -- "-3 dB on the bed"');
   });
 });
+
+describe("README: the Change Log (§22)", () => {
+  it("has a section, the CLI and the file, and no personal paths", () => {
+    const text = read("README.md");
+    expect(text).toContain("## The Change Log");
+    for (const s of ["rushes log --md", 'rushes log add "', "change-log-<date>.md", "Before the log", "log.json"]) expect(text, s).toContain(s);
+    expect(text).toMatch(/version list/i);
+    expect(text).not.toMatch(/\/Users\//);
+  });
+});

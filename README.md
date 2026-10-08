@@ -129,6 +129,34 @@ When the project's folder already holds files for a locked Voiceover, Music or S
 
 Hovering a locked tab shows a short tooltip, e.g. "Locked: ask your agent for music beds". The Assets tab follows the same rule.
 
+## The Change Log
+
+The **Change Log** button in the header opens a log of what happened, newest first and grouped by day:
+
+- each cut, voice read, music bed, sound-effects pass and take as it arrives;
+- the script, picks and notes sent;
+- the agent's replies.
+
+Rushes writes it itself, one short line per event, and a burst of registrations is one line. You can:
+
+- type a line of your own at the top;
+- filter by tab;
+- click a line to open that cut or variant.
+
+A dot on the button means new lines since you last looked. **Export as Markdown** writes `exports/change-log-<date>.md`; **Export notes** on the Exports tab writes it too, beside the notes. A project made before the log existed starts it from the dates it already has (cuts, notes sent and files); its older audio is listed undated, under "Before the log".
+
+Picture's version list shows each cut's short label (the agent's, or one taken from its note) and how long ago it arrived, with its full note beside the list and under the picture.
+
+Agents read and write the same log with `rushes_get_log` and `rushes_log`, or from the command line:
+
+```bash
+rushes log --limit 20          # newest first
+rushes log --area music
+rushes log --md                # the same Markdown the export writes
+rushes log add "Kept the wide shot" --area picture
+rushes log add --area mix -- "-3 dB on the bed"   # text that starts with a dash goes after --
+```
+
 ## Finding your other files
 
 An agent only shows what it registers, but the work that goes with a cut usually sits in the same folder: the voiceover, the music, the effects. So when a project is opened, Rushes looks through the folder itself, and brings in the **current set** for the newest cut so those tabs have something to review.
@@ -212,6 +240,7 @@ your-project/.rushes/
   notes.json     every note, with the agent's replies
   picks.json     which variant or take is in use, and each Mix lane's level
   batches.json   what you sent to the agent
+  log.json       the Change Log: what happened, one line each
 ```
 
 Add `.rushes/` to git if you want your review history kept with the project — and `screenshots/` alongside it, since notes point to the grabs there. Keep `proxies/` out of git: proxies can run to gigabytes, and Rushes can always make them again. Rushes ignores its own temporary files.
