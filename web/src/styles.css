@@ -569,7 +569,8 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .fmts .warn { color: var(--todo); font-weight: 700; }
 /* Review M7: on the selected chip's accent the to-do colour is 1.6:1; the ink reads at 6:1. */
 .fmts [aria-checked="true"] .warn { color: var(--on-accent); }
-.fmtpop { position: absolute; top: calc(100% + 8px); left: 0; z-index: 30; width: max-content; max-width: 340px; padding: 8px 12px; border: 1px solid var(--line-2); border-radius: 8px; background: #000; color: var(--text); font-size: 15px; opacity: 0; pointer-events: none; transition: opacity 0.12s; }
+/* Inside the header (36, above the drawer at 35), and above the version list (45) that shares it. */
+.fmtpop { position: absolute; top: calc(100% + 8px); left: 0; z-index: 46; width: max-content; max-width: 340px; padding: 8px 12px; border: 1px solid var(--line-2); border-radius: 8px; background: #000; color: var(--text); font-size: 15px; opacity: 0; pointer-events: none; transition: opacity 0.12s; }
 .fmtpop::before { content: ""; position: absolute; left: 0; right: 0; top: -9px; height: 9px; }
 .fmtpop p { margin: 0 0 6px; }
 .fmtpop code { font-family: var(--mono); color: var(--accent-2); }
