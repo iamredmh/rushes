@@ -22,14 +22,16 @@ function defaults(key: FileKey, name: string): FileData[FileKey] {
       return { schema: 1, rev: 0, batches: [] };
     case "found":
       return { schema: 1, rev: 0, dismissed: [], settled: [] };
+    case "log":
+      return { schema: 1, rev: 0, backfilled: false, undated: [], dropped: 0, entries: [] };
   }
 }
 
 /**
- * Files `init` doesn't write. Each is created by its first write, and reads as its default until
- * then, so a project made before the file existed needs nothing done to it.
+ * Files `init` doesn't write (found.json, log.json). Each is created by its first write, and reads
+ * as its default until then, so a project made before the file existed needs nothing done to it.
  */
-const CREATED_ON_WRITE: ReadonlySet<FileKey> = new Set<FileKey>(["found"]);
+const CREATED_ON_WRITE: ReadonlySet<FileKey> = new Set<FileKey>(["found", "log"]);
 
 export interface ChangeEvent {
   file: FileKey;

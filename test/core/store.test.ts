@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
 import { CorruptFileError, InvalidError, RevConflictError } from "../../src/core/errors.js";
-import type { ChangeEvent } from "../../src/core/store.js";
+import { backfillLog } from "../../src/core/log.js";
+import { FILES, type FileKey } from "../../src/core/schema.js";
+import { Store, type ChangeEvent } from "../../src/core/store.js";
 
 describe("Store", () => {
   it("init writes every file with schema 1 and rev 0, plus a .gitignore", async () => {
@@ -107,6 +110,54 @@ describe("Store", () => {
     await writeFile(store.path("found"), "{ nope", "utf8");
     await expect(store.update("found", (f) => { f.dismissed = []; })).rejects.toBeInstanceOf(CorruptFileError);
     expect(await readFile(store.path("found"), "utf8")).toBe("{ nope");
+  });
+
+  it("a 0.2.2 project with no log.json loads unchanged; the log reads as its default and is created on its first write (§22.3, §22.11 (1))", async () => {
+    const base = await realpath(await mkdtemp(join(tmpdir(), "rushes test ")));
+    const root = join(base, "Lumen launch film");
+    const dir = join(root, ".rushes");
+    try {
+      await mkdir(dir, { recursive: true });
+      // Written as 0.2.2 wrote them: no `label` on the cut, no found.json, no log.json.
+      const files: Record<string, unknown> = {
+        "project.json": {
+          schema: 1, rev: 4, name: "Lumen launch film", fps: 30, autoProxy: false, lanes: [], files: [],
+          videos: [{ id: "hero", name: "Hero", lockedVersion: null, versions: [{ id: "v1", file: "renders/hero_v1.mp4", note: "v1: first pass", addedAt: "2026-10-01T09:00:00.000Z", duration: null, proxy: null, shots: [] }] }],
+        },
+        "script.json": { schema: 1, rev: 0, wordsPerSecond: 2.6, sections: [] },
+        "notes.json": { schema: 1, rev: 2, notes: [] },
+        "picks.json": { schema: 1, rev: 0, lanes: {}, sections: {}, levels: {} },
+        "batches.json": { schema: 1, rev: 1, batches: [{ id: "b_1", stage: "picture", noteIds: ["n_1"], sectionIds: [], sentAt: "2026-10-02T09:00:00.000Z", prompt: "" }] },
+      };
+      for (const [name, data] of Object.entries(files)) await writeFile(join(dir, name), JSON.stringify(data, null, 2) + "\n", "utf8");
+      const bytes = async () => Object.fromEntries(await Promise.all(Object.keys(files).map(async (n) => [n, await readFile(join(dir, n), "utf8")])));
+      const before = await bytes();
+
+      const store = new Store(root);
+      await store.init("ignored");
+      for (const key of Object.keys(FILES) as FileKey[]) await store.read(key);
+      expect(await store.read("log")).toEqual({ schema: 1, rev: 0, backfilled: false, undated: [], dropped: 0, entries: [] });
+      await expect(access(store.path("log"))).rejects.toMatchObject({ code: "ENOENT" });
+      expect(await bytes()).toEqual(before);
+
+      const src = { project: await store.read("project"), batches: await store.read("batches"), script: await store.read("script") };
+      await store.update("log", (f) => backfillLog(f, src, Date.parse("2026-10-07T09:00:00.000Z")));
+      expect((await store.read("log")).entries.map((e) => e.text)).toEqual(["v1 added: first pass", "1 note sent from Picture"]);
+      expect(await bytes()).toEqual(before);
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+
+  it("a log.json with only §22.3's fields reads with the rest defaulted; one that fails the schema is corrupt", async () => {
+    const { store } = await tmpProject();
+    const entry = { id: "l_1", at: "2026-10-07T09:00:00.000Z", area: "picture", kind: "cut", text: "v1 added: first pass", video: "hero", version: "v1", ref: null, by: "agent" };
+    await writeFile(store.path("log"), JSON.stringify({ schema: 1, rev: 2, entries: [entry] }), "utf8");
+    expect(await store.read("log")).toEqual({ schema: 1, rev: 2, backfilled: false, undated: [], dropped: 0, entries: [{ ...entry, tab: null, n: 1, subject: "" }] });
+    await writeFile(store.path("log"), JSON.stringify({ schema: 1, rev: 2, entries: [{ ...entry, text: "" }] }), "utf8");
+    await expect(store.read("log")).rejects.toThrow(/log\.json.*entries\.0\.text/);
+    await writeFile(store.path("log"), "{ half a fil", "utf8");
+    await expect(store.read("log")).rejects.toBeInstanceOf(CorruptFileError);
   });
 
   it("a failed update does not block the next one", async () => {

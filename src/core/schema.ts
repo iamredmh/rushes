@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { LOG_AREAS, LOG_BY, LOG_KINDS, LOG_MAX, LOG_TEXT_MAX } from "./logText.js";
 
 export const STAGES = ["script", "picture", "voice", "music", "sfx", "mix"] as const;
 export const StageSchema = z.enum(STAGES);
@@ -286,6 +287,39 @@ export const FoundFileSchema = z.object({
 });
 export type FoundFileData = z.infer<typeof FoundFileSchema>;
 
+// §22.3: the Change Log, .rushes/log.json, oldest first on disk. Written by the server as things
+// happen, created on its first write. Every field is new, so nothing older reads differently.
+export const LogEntrySchema = z.object({
+  id,
+  at: z.string(),
+  area: z.enum(LOG_AREAS),
+  kind: z.enum(LOG_KINDS),
+  text: z.string().min(1).max(LOG_TEXT_MAX),
+  video: z.string().nullable().default(null),
+  version: z.string().nullable().default(null),
+  ref: z.string().max(300).nullable().default(null),
+  by: z.enum(LOG_BY),
+  // R3: the tab a Notes line opens, how many events the line stands for, and what a run of them
+  // is about (a lane, a section, a film, a folder), so a burst collapses (§22.5).
+  tab: StageSchema.nullable().default(null),
+  n: z.number().int().positive().default(1),
+  subject: z.string().max(200).default(""),
+});
+export type LogEntry = z.infer<typeof LogEntrySchema>;
+
+export const LogFileSchema = z.object({
+  schema: z.literal(1),
+  rev: z.number().int().nonnegative(),
+  // §22.6: set once the dated history has been read in, so it never happens twice.
+  backfilled: z.boolean().default(false),
+  // R5: the variants and takes already there when the log began ("<lane>/<variant>", "<section>:<take>").
+  undated: z.array(z.string().max(300)).max(LOG_MAX).default([]),
+  // §22.9: how many lines the 5000 cap has dropped.
+  dropped: z.number().int().nonnegative().default(0),
+  entries: z.array(LogEntrySchema).max(LOG_MAX).default([]),
+});
+export type LogFile = z.infer<typeof LogFileSchema>;
+
 export const FILES = {
   project: { name: "project.json", schema: ProjectSchema },
   script: { name: "script.json", schema: ScriptSchema },
@@ -293,6 +327,7 @@ export const FILES = {
   picks: { name: "picks.json", schema: PicksSchema },
   batches: { name: "batches.json", schema: BatchesFileSchema },
   found: { name: "found.json", schema: FoundFileSchema },
+  log: { name: "log.json", schema: LogFileSchema },
 } as const;
 export type FileKey = keyof typeof FILES;
 export type FileData = {
@@ -302,4 +337,5 @@ export type FileData = {
   picks: Picks;
   batches: BatchesFile;
   found: FoundFileData;
+  log: LogFile;
 };
