@@ -25,6 +25,11 @@ import { osRevealer, osOpener, OPEN_SAFE_EXT, type Revealer, type Opener } from 
 import type { CorruptEvent } from "./watch.js";
 import { LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, FileKindSchema, MarkSchema, ProjectIdSchema, ShotSchema, LEVEL_MIN, LEVEL_MAX, LEVEL_STEP, type Batch, type Note } from "../core/schema.js";
 import { LABEL_MAX, oneLineOf } from "../core/labels.js";
+import { byOf, logBookFor } from "./logbook.js";
+import {
+  broughtInEvent, cutEvent, fileEvent, lineEvent, lockEvent, notesSentEvent, picksEvent, repliesEvent, scriptEvent, takeEvent, variantEvent,
+} from "../core/logEvents.js";
+import { LOG_AREAS, LOG_MAX, changeLogFileName, logText, recentChanges } from "../core/logText.js";
 import { defaultRunner, measureMix, type LoudnessRunner } from "./loudness.js";
 
 export const VERSION = "0.2.2";
@@ -185,6 +190,22 @@ const FoundBringInBody = z.object({
   film: z.string().min(1).max(200).optional(),
 });
 
+// §22.7: the Change Log's routes. A line is made one line and cut to 160 characters by the server (R21).
+// Ruling a: a query it can't use is a 400 that says what to send, never a quiet default.
+const LIMIT_WORDS = `limit must be a whole number from 1 to ${LOG_MAX}`;
+const LogQuery = z.object({
+  limit: z.string({ error: LIMIT_WORDS }).regex(/^\d+$/, LIMIT_WORDS).pipe(z.coerce.number<string>().int(LIMIT_WORDS).min(1, LIMIT_WORDS).max(LOG_MAX, LIMIT_WORDS)).optional(),
+  area: z.enum(LOG_AREAS, { error: `area must be one of ${LOG_AREAS.join(", ")}` }).optional(),
+  since: z.string().refine((s) => Number.isFinite(Date.parse(s)), "since must be a date and time, e.g. 2026-10-07T09:00:00Z").optional(),
+});
+const LogLineBody = z.object({
+  text: z.string().max(2000),
+  area: z.enum(LOG_AREAS, { error: `area must be one of ${LOG_AREAS.join(", ")}` }).optional(),
+  video: z.string().min(1).max(200).nullish(),
+  version: z.string().min(1).max(64).nullish(),
+  ref: z.string().min(1).max(300).nullish(),
+});
+
 // Big enough for a full-quality frame of a 4K original from the frame endpoint (§19.5), which
 // Picture posts here as the grab: 3840×2160 RGB is 24.9 MB before PNG compression.
 const MAX_GRAB_BYTES = 64 * 1024 * 1024;
@@ -250,6 +271,21 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   const jobs = opts.proxyJobs ?? new ProxyJobs(store);
   const peaks = opts.peakJobs ?? new PeakJobs(store, { run: jobs.run, available: () => jobs.available() });
   const found = opts.found ?? new FoundScanner({ store, probe: ffprobeDuration, announce: foundAnnouncer(store) });
+  // §22: the Change Log, shared with the found scanner (logBookFor keeps one per store).
+  const log = logBookFor(store);
+  const by = (c: Context) => byOf(c.req.header("x-rushes-project"));
+  /** R17: writes exports/change-log-YYYY-MM-DD.md (a same-day export replaces it) and returns its path. Written as Export notes writes. */
+  async function exportChangeLog(now: Date): Promise<string> {
+    const [project, script] = await Promise.all([store.read("project"), store.read("script")]);
+    const md = await log.markdown({ project, script }, now);
+    const name = changeLogFileName(now);
+    const dir = join(store.root, "exports");
+    await mkdir(dir, { recursive: true });
+    const tmp = join(dir, `.${name}.${process.pid}.${randomUUID()}.tmp`);
+    await writeFile(tmp, md, "utf8");
+    await rename(tmp, join(dir, name));
+    return `exports/${name}`;
+  }
   const app = new Hono();
   // Every SSE client adds a change listener, so lift Node's default limit of ten.
   store.setMaxListeners(0);
@@ -503,6 +539,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     const b = await body(c, AddFileBody);
     const file = toManifestPath(store.root, b.file);
     const { result } = await store.update("project", (p) => addFile(p, { ...b, file }));
+    await log.add(fileEvent(result), by(c));
     return c.json(result, 201);
   });
 
@@ -523,8 +560,17 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     const tmp = join(dir, `.${name}.${process.pid}.${randomUUID()}.tmp`);
     await writeFile(tmp, md, "utf8");
     await rename(tmp, join(dir, name));
-    return c.json({ path: `exports/${name}` }, 201);
+    // §22.7: Export notes also writes the change log, newest first, one heading per day. The notes
+    // are written by now, so a change log that can't be is left out (null), never a failed export.
+    const changeLog = await exportChangeLog(now).catch((e: unknown) => {
+      console.error(`Rushes: couldn't export the Change Log: ${(e as Error).message}`);
+      return null;
+    });
+    return c.json({ path: `exports/${name}`, changeLog }, 201);
   });
+
+  // §22.8: the drawer's Export as Markdown.
+  app.post("/api/exports/change-log", async (c) => c.json({ path: await exportChangeLog(new Date()) }, 201));
 
   app.post("/api/shutdown", (c) => {
     if (opts.onShutdown) setImmediate(opts.onShutdown);
@@ -536,14 +582,16 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   let streams = 0;
   app.get("/api/health", async (c) => {
     const [project, id] = await Promise.all([store.read("project"), getProjectId()]);
-    const health = { ok: true, app: "rushes", version: VERSION, root: store.root, id, name: project.name };
+    // Ruling e: Change Log lines that couldn't be written are counted for `rushes doctor`, only when there are any.
+    const health = { ok: true, app: "rushes", version: VERSION, root: store.root, id, name: project.name, ...(log.failures ? { logFailures: log.failures } : {}) };
     return c.json(c.req.query("test") === "1" ? { ...health, sse: streams } : health);
   });
 
   app.get("/api/state", async (c) => {
     // §20.6: found is what the last scan left in memory; it never waits on a scan or a probe.
-    const [project, script, notes, picks, batches, ffmpeg, foundSummary] = await Promise.all([
-      store.read("project"), store.read("script"), store.read("notes"), store.read("picks"), store.read("batches"), jobs.available(), found.summary(),
+    // §22.8: the log's head is read-only, so a state request never writes (R6).
+    const [project, script, notes, picks, batches, ffmpeg, foundSummary, logHead] = await Promise.all([
+      store.read("project"), store.read("script"), store.read("notes"), store.read("picks"), store.read("batches"), jobs.available(), found.summary(), log.head(),
     ]);
     const tabs = tabStates(project, script, notes);
     // §19.5: why each cut may play badly (or null). Never waits on a probe: an unprobed cut is
@@ -554,7 +602,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
         versions: await Promise.all(v.versions.map(async (ver) => ({ ...ver, proxyNeed: await jobs.needNow(fromManifestPath(store.root, ver.file)) }))),
       })),
     );
-    return c.json({ project: { ...project, videos }, script, notes, picks, batches, tabs, proxies: { ffmpeg, jobs: jobs.list() }, found: foundSummary });
+    return c.json({ project: { ...project, videos }, script, notes, picks, batches, tabs, proxies: { ffmpeg, jobs: jobs.list() }, found: foundSummary, log: logHead });
   });
 
   // ---- found: the project's other files (§20) ----
@@ -582,6 +630,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
         let skipKinds = kinds;
         if (b.include?.length) {
           const included = await found.bringIn(b.include, { film: b.film, origin: "include" });
+          if (included.added.length) await log.add(broughtInEvent(included.added, null), by(c));
           // An included cut becomes the cut the scoring is matched to, and a project with no cut
           // had nothing to record against: settle again now that the cut exists.
           if (included.added.some((a) => a.kind === "cut")) skipKinds = await found.settleKinds(b.include, b.film);
@@ -622,7 +671,9 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
 
   app.post("/api/found/bring-in", async (c) => {
     const b = await body(c, FoundBringInBody);
-    return c.json(await found.bringIn(b.files, { film: b.film }));
+    const r = await found.bringIn(b.files, { film: b.film });
+    if (r.added.length) await log.add(broughtInEvent(r.added, null), by(c));
+    return c.json(r);
   });
 
   app.post("/api/found/dismiss", async (c) => {
@@ -672,6 +723,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   app.post("/api/replies", async (c) => {
     const b = await body(c, RepliesBody);
     const { result } = await store.update("notes", (f) => b.replies.map((r) => applyReply(f, r)));
+    await log.add(repliesEvent(result), by(c));
     return c.json({ notes: result });
   });
 
@@ -684,13 +736,16 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     const info = await jobs.probe(abs);
     let lockedVersion: string | null = null;
     let autoProxy = false;
+    let films = 1;
     const { result } = await store.update("project", (p) => {
       const out = addVersion(p, { video: b.video, file, note: b.note, label: b.label, duration: info.duration, fps: info.fps });
       lockedVersion = out.video.lockedVersion;
       autoProxy = p.autoProxy;
+      films = p.videos.length;
       if (info.fps && p.videos.length === 1 && p.videos[0].versions.length === 1) p.fps = info.fps;
       return out;
     });
+    await log.add(cutEvent(films, result.video, result.version), by(c));
     // §19.5: say when the cut is likely to play badly, and start its proxy straight away when the
     // project asks for that. Without ffmpeg, nothing is offered (needFor is null).
     // §19.9: its waveform is made in the background; nothing here waits for it.
@@ -817,13 +872,22 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
 
   app.put("/api/videos/:video/lock", async (c) => {
     const b = await body(c, LockBody);
-    const { result } = await store.update("project", (p) => lockPicture(p, c.req.param("video"), b.version));
+    let before: string | null = null;
+    let films = 1;
+    const { result } = await store.update("project", (p) => {
+      before = resolveVideo(p, c.req.param("video")).lockedVersion;
+      films = p.videos.length;
+      return lockPicture(p, c.req.param("video"), b.version);
+    });
+    // R10: a lock that changes nothing isn't logged.
+    if (result.lockedVersion !== before) await log.add(lockEvent(films, result), by(c));
     return c.json({ video: result });
   });
 
   app.post("/api/variants", async (c) => {
     const b = await body(c, VariantBody);
     const { result } = await store.update("project", (p) => addVariant(p, { ...b, file: toManifestPath(store.root, b.file) }));
+    await log.add(variantEvent(result.lane, result.variant), by(c));
     return c.json(result, 201);
   });
 
@@ -836,6 +900,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
       if (b.wordsPerSecond) s.wordsPerSecond = b.wordsPerSecond;
       return setSections(s, b.sections, { replace: b.replace });
     });
+    await log.add(scriptEvent(result.length), by(c));
     return c.json({ sections: result });
   });
 
@@ -849,7 +914,9 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     const b = await body(c, TakeBody);
     const file = toManifestPath(store.root, b.file);
     const info = await probe(fromManifestPath(store.root, file));
-    const { result } = await store.update("script", (s) => addTake(s, c.req.param("id"), { file, duration: info.duration }));
+    const { data, result } = await store.update("script", (s) => addTake(s, c.req.param("id"), { file, duration: info.duration }));
+    const section = data.sections.find((s) => s.id === c.req.param("id"))!;
+    await log.add(takeEvent(section, result, section.takes.findIndex((t) => t.id === result.id) + 1), by(c));
     return c.json({ take: result }, 201);
   });
 
@@ -865,7 +932,9 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
         else into[k] = v;
       }
     };
+    let before: Record<string, string> = {};
     const { data } = await store.update("picks", (p) => {
+      before = { ...p.lanes };
       merge(p.lanes, b.lanes);
       merge(p.sections, b.sections);
       // §19.6: same merge rule as lanes/sections -- a number sets the level, null resets it to 0
@@ -877,6 +946,14 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
         else p.levels[stage] = v;
       }
     });
+    // §22.5: a change of what's picked is logged; levels alone aren't (R10).
+    const changed = Object.keys({ ...before, ...data.lanes }).some((k) => before[k] !== data.lanes[k]);
+    if (changed) {
+      // The names come from project.json; if it can't be read now, the pick still stands (ruling e).
+      const project = await store.read("project").catch(() => null);
+      if (project) await log.add(picksEvent(project, data.lanes), by(c));
+      else log.failures += 1;
+    }
     return c.json(data);
   });
 
@@ -897,7 +974,14 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     const run = batchQueue.catch(() => undefined).then(async (): Promise<Batch> => {
       const [project, script, batches] = await Promise.all([store.read("project"), store.read("script"), store.read("batches")]);
       const { result } = await store.update("notes", (notes) => createBatch({ project, script, notes, batches }, stage));
+      // R11: the prompt ends with the last five lines of the log, from before this send. A log that
+      // can't be read adds nothing: the notes are already marked as sent, so the batch must be kept.
+      const recent = await Promise.all([store.read("project"), store.read("script")])
+        .then(async ([projectNow, scriptNow]) => recentChanges((await log.view({ limit: 5 }, { project: projectNow, script: scriptNow })).entries))
+        .catch(() => "");
+      if (recent) result.prompt = `${result.prompt}\n\n${recent}`;
       await store.update("batches", (f) => { f.batches.push(result); });
+      await log.add(notesSentEvent(result), by(c));
       return result;
     });
     batchQueue = run;
@@ -914,6 +998,52 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
       notes: notes.notes.filter((n) => batch.noteIds.includes(n.id)),
       sections: script.sections.filter((s) => batch.sectionIds.includes(s.id)),
     });
+  });
+
+  // ---- the Change Log (§22.7) ----
+  app.get("/api/log", async (c) => {
+    const q = LogQuery.safeParse(c.req.query());
+    if (!q.success) throw new InvalidError(q.error.issues.map((i) => i.message).join("; "), q.error.issues);
+    const [project, script] = await Promise.all([store.read("project"), store.read("script")]);
+    return c.json(await log.view(q.data, { project, script }));
+  });
+
+  app.post("/api/log", async (c) => {
+    const b = await body(c, LogLineBody);
+    // What's refused is named back on one clean line, never with the control characters it came with.
+    const shown = (s: string) => Array.from(oneLineOf(s)).slice(0, 80).join("");
+    const text = logText(b.text);
+    if (!text) throw new InvalidError("text is empty: say what happened in one line");
+    let video: string | null = null;
+    let version: string | null = null;
+    const project = await store.read("project");
+    if (b.video) {
+      let v;
+      try {
+        v = resolveVideo(project, b.video);
+      } catch {
+        throw new NotFoundError("video", shown(b.video));
+      }
+      video = v.id;
+      if (b.version) {
+        if (!v.versions.some((x) => x.id === b.version)) throw new NotFoundError("version", shown(b.version));
+        version = b.version;
+      }
+    } else if (b.version) {
+      throw new InvalidError("version needs video");
+    }
+    // A jump goes only to a variant ("<lane>/<variant>") or a take ("<section>:<take>") that exists.
+    if (b.ref) {
+      const script = await store.read("script");
+      const refs = new Set([
+        ...project.lanes.flatMap((l) => l.variants.map((x) => `${l.id}/${x.id}`)),
+        ...script.sections.flatMap((s) => s.takes.map((x) => `${s.id}:${x.id}`)),
+      ]);
+      if (!refs.has(b.ref)) throw new NotFoundError("ref", shown(b.ref));
+    }
+    const entry = await log.add(lineEvent(text, b.area ?? "project", { video, version, ref: b.ref ?? null }), by(c));
+    if (!entry) throw new RushesError("The Change Log couldn't be written. Run `rushes doctor`.", 500, "log_unwritable");
+    return c.json({ entry }, 201);
   });
 
   // ---- live updates ----

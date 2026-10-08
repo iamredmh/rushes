@@ -339,6 +339,33 @@ describe("runDoctor", () => {
     expect(find(tight, "disk")!.fix).toBeTruthy();
   });
 
+  it("a corrupt log.json isn't required and says how to start the log again; log.json.bad is reported, not failed (R7)", async () => {
+    const { root, store } = await tmpProject();
+    await writeFile(store.path("log"), "{ nope", "utf8");
+    await writeFile(`${store.path("log")}.bad`, "{ older", "utf8");
+    const checks = await runDoctor(fakeEnv(root, await tmpHome()));
+    expect(find(checks, "file:log")).toMatchObject({ ok: false, required: false });
+    expect(find(checks, "file:log")!.fix).toContain("Delete .rushes/log.json");
+    expect(find(checks, "file:log-bad")).toMatchObject({ ok: false, required: false, label: "log.json.bad" });
+    expect(find(checks, "file:log-bad")!.detail).toMatch(/set it aside/);
+  });
+
+  it("a project with no log.json yet passes, and a running server's failed Change Log writes are reported, not failed (ruling e)", async () => {
+    const { root } = await tmpProject();
+    const home = await tmpHome();
+    const quiet = await runDoctor(fakeEnv(root, home));
+    expect(find(quiet, "file:log")).toMatchObject({ ok: true });
+    expect(find(quiet, "file:log-bad")).toBeUndefined();
+    expect(find(quiet, "log:writes")).toBeUndefined();
+    const fake = await fakeHealthServer({ ok: true, app: "rushes", root, id: "zzzzzzzz", logFailures: 3 });
+    await writeFile(lockPath(root), JSON.stringify({ port: fake.port, pid: process.pid }), "utf8");
+    const checks = await runDoctor(fakeEnv(root, home));
+    expect(find(checks, "server")).toMatchObject({ ok: true });
+    expect(find(checks, "log:writes")).toMatchObject({ ok: false, required: false, label: "Change Log" });
+    expect(find(checks, "log:writes")!.detail).toMatch(/3 changes weren't written to the Change Log/);
+    await fake.close();
+  });
+
   it("realDoctorEnv reads the real Node version and platform", () => {
     const env = realDoctorEnv(process.cwd());
     expect(env.nodeVersion).toBe(process.version);

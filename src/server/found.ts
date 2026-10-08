@@ -24,6 +24,8 @@ import { fromManifestPath, toManifestPath } from "../core/paths.js";
 import { addFile, addVariant, addVersion, resolveVideo } from "../core/project.js";
 import type { Project, Script, Version, Video } from "../core/schema.js";
 import type { ChangeEvent, Store } from "../core/store.js";
+import { logBookFor } from "./logbook.js";
+import { broughtInEvent, cutName } from "../core/logEvents.js";
 
 // §20: finding the project's other files. One scanner per server. The walk (Task 1's scanFolder)
 // runs in the background; GET /api/state and GET /api/found only ever read what the last walk
@@ -663,6 +665,7 @@ export class FoundScanner {
       if (this.closing) return none();
       let picked: FoundFile[];
       let byPath: Map<string, Scored>;
+      let withCut: string | null = null;
       try {
         const ctx = await this.context();
         const unknown = await this.pendingLengths(ctx.project);
@@ -673,12 +676,17 @@ export class FoundScanner {
         const settled = await this.settledFor(ctx.project);
         picked = s.candidates.filter((f) => s.suggested.has(f.path) && !unknown.has(f.kind) && !skip.has(f.kind as BringInKind) && !settled.has(f.kind));
         byPath = s.byPath;
+        const cut = anchorCut(ctx.project, this.film);
+        withCut = cut ? cutName(ctx.project.videos.length, cut.video, cut.version.id) : null;
       } catch {
         return none(); // project files unreadable right now: the watcher reports them
       }
       if (picked.length === 0) return none();
       const reasons = new Map(picked.map((f) => [f.path, byPath.get(f.path)?.reasons ?? []]));
-      return this.bringInNow(picked.map((f) => ({ path: f.path, kind: f.kind as BringInKind })), { reasons, film, origin: "auto" });
+      const result = await this.bringInNow(picked.map((f) => ({ path: f.path, kind: f.kind as BringInKind })), { reasons, film, origin: "auto" });
+      // §22.5: what the current set brought in is one line, by Rushes (R8, R9); its variants are dated (R5).
+      if (result.added.length) await logBookFor(this.store).add(broughtInEvent(result.added, withCut), "rushes");
+      return result;
     });
   }
 

@@ -227,9 +227,10 @@ async function harnessCheck(h: Harness, env: DoctorEnv): Promise<Check & { unkno
  * against this project's own canonical root (the same check `isRushesFor` in server/lock.ts
  * makes), falling back to a pid check when nothing answers. A server answering for a *different*
  * project is reported as a failure -- a stale server.json left behind when the project moved or
- * its folder was reused -- everything else here is informational.
+ * its folder was reused -- everything else here is informational. Also passes on how many Change
+ * Log lines that server couldn't write (ruling e), which runDoctor reports as its own check.
  */
-async function serverCheck(cwd: string): Promise<Check> {
+async function serverCheck(cwd: string): Promise<{ check: Check; logFailures: number }> {
   const base = { id: "server", label: "Rushes server", required: false };
   let lock: { port?: unknown; pid?: unknown } | null = null;
   try {
@@ -238,11 +239,11 @@ async function serverCheck(cwd: string): Promise<Check> {
     lock = null;
   }
   if (!lock || typeof lock.port !== "number" || typeof lock.pid !== "number") {
-    return { ...base, ok: true, detail: "No server is running for this folder." };
+    return { check: { ...base, ok: true, detail: "No server is running for this folder." }, logFailures: 0 };
   }
   const { port, pid } = lock as { port: number; pid: number };
   const root = await canonicalRoot(cwd);
-  type Health = { app?: string; id?: string; root?: string };
+  type Health = { app?: string; id?: string; root?: string; logFailures?: unknown };
   let health: Health | null = null;
   try {
     const res = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(800) });
@@ -253,13 +254,12 @@ async function serverCheck(cwd: string): Promise<Check> {
   if (health?.app === "rushes") {
     if (health.root !== root) {
       return {
-        ...base,
-        ok: false,
-        detail: `server.json points at another project's server (port ${port}).`,
-        fix: "Run rushes stop here, then rushes open",
+        check: { ...base, ok: false, detail: `server.json points at another project's server (port ${port}).`, fix: "Run rushes stop here, then rushes open" },
+        logFailures: 0,
       };
     }
-    return { ...base, ok: true, detail: `running on port ${port}${health.id ? `, project ${health.id}` : ""}.` };
+    const logFailures = typeof health.logFailures === "number" && Number.isFinite(health.logFailures) ? Math.max(0, Math.floor(health.logFailures)) : 0;
+    return { check: { ...base, ok: true, detail: `running on port ${port}${health.id ? `, project ${health.id}` : ""}.` }, logFailures };
   }
   let alive = false;
   try {
@@ -268,7 +268,7 @@ async function serverCheck(cwd: string): Promise<Check> {
   } catch {
     alive = false;
   }
-  return { ...base, ok: true, detail: alive ? `running on port ${port}.` : `not running (a stale lock names pid ${pid}; it clears on the next start).` };
+  return { check: { ...base, ok: true, detail: alive ? `running on port ${port}.` : `not running (a stale lock names pid ${pid}; it clears on the next start).` }, logFailures: 0 };
 }
 
 /** Free space where proxies live, only reported when a proxies/ folder exists. */
@@ -327,11 +327,36 @@ export async function runDoctor(env: DoctorEnv): Promise<Check[]> {
       await store.read(key);
       checks.push({ id: `file:${key}`, label: name, ok: true, required: true, detail: "valid." });
     } catch (e) {
-      checks.push({ id: `file:${key}`, label: name, ok: false, required: true, detail: (e as Error).message, fix: key === "found" ? `Delete ${RUSHES_DIR}/${name}. Rushes recreates it; files you hid come back in Found and the current set may be chosen again. Nothing else is lost.` : `Fix or restore ${name}, or delete the ${RUSHES_DIR} folder and run rushes init to start over.` });
+      checks.push({
+        id: `file:${key}`, label: name, ok: false, required: key !== "log", detail: (e as Error).message,
+        fix: key === "found"
+          ? `Delete ${RUSHES_DIR}/${name}. Rushes recreates it; files you hid come back in Found and the current set may be chosen again. Nothing else is lost.`
+          : key === "log"
+            ? `Delete ${RUSHES_DIR}/${name}. Rushes starts the Change Log again, reading in the cuts, notes sent and files it has dates for. Nothing else is lost.`
+            : `Fix or restore ${name}, or delete the ${RUSHES_DIR} folder and run rushes init to start over.`,
+      });
     }
   }
+  // R7: a Change Log that couldn't be read was set aside, and the log started again.
+  if (await exists(join(env.cwd, RUSHES_DIR, "log.json.bad"))) {
+    checks.push({
+      id: "file:log-bad", label: "log.json.bad", ok: false, required: false,
+      detail: "An earlier Change Log couldn't be read, so Rushes set it aside as log.json.bad and started the log again. Nothing else was affected.",
+      fix: `Nothing to do. Delete ${RUSHES_DIR}/log.json.bad once you don't need it.`,
+    });
+  }
 
-  checks.push(await serverCheck(env.cwd));
+  const server = await serverCheck(env.cwd);
+  checks.push(server.check);
+  // Ruling e: the running server counts Change Log lines it couldn't write. The changes themselves were saved.
+  if (server.logFailures > 0) {
+    const n = server.logFailures;
+    checks.push({
+      id: "log:writes", label: "Change Log", ok: false, required: false,
+      detail: `${n === 1 ? "1 change wasn't" : `${n} changes weren't`} written to the Change Log since the server started. The changes themselves were saved.`,
+      fix: `Check there's free disk space and that ${RUSHES_DIR}/log.json can be written, then restart the server with rushes stop and rushes open.`,
+    });
+  }
   const disk = await diskSpaceCheck(env);
   if (disk) checks.push(disk);
   return checks;

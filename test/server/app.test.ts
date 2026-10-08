@@ -787,7 +787,8 @@ describe("POST /api/exports/notes", () => {
     const second = await call("POST", "/api/exports/notes", {});
     const { readdir } = await import("node:fs/promises");
     const names = (await readdir(join(root, "exports"))).filter((n) => n.endsWith(".md"));
-    expect(names).toEqual([basename(second.json.path)]);
+    // §22.7 (R17): the change log written beside the notes is replaced the same way.
+    expect(names.sort()).toEqual([basename(second.json.path), basename(second.json.changeLog)].sort());
   });
 
   it("two concurrent exports in the same process don't race each other's temp file (M1)", async () => {
