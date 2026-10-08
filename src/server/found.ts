@@ -665,7 +665,8 @@ export class FoundScanner {
       if (this.closing) return none();
       let picked: FoundFile[];
       let byPath: Map<string, Scored>;
-      let withCut: string | null = null;
+      let anchor: { video: Video; version: Version } | null = null;
+      let films = 1;
       try {
         const ctx = await this.context();
         const unknown = await this.pendingLengths(ctx.project);
@@ -676,8 +677,8 @@ export class FoundScanner {
         const settled = await this.settledFor(ctx.project);
         picked = s.candidates.filter((f) => s.suggested.has(f.path) && !unknown.has(f.kind) && !skip.has(f.kind as BringInKind) && !settled.has(f.kind));
         byPath = s.byPath;
-        const cut = anchorCut(ctx.project, this.film);
-        withCut = cut ? cutName(ctx.project.videos.length, cut.video, cut.version.id) : null;
+        anchor = anchorCut(ctx.project, this.film);
+        films = ctx.project.videos.length;
       } catch {
         return none(); // project files unreadable right now: the watcher reports them
       }
@@ -685,7 +686,9 @@ export class FoundScanner {
       const reasons = new Map(picked.map((f) => [f.path, byPath.get(f.path)?.reasons ?? []]));
       const result = await this.bringInNow(picked.map((f) => ({ path: f.path, kind: f.kind as BringInKind })), { reasons, film, origin: "auto" });
       // §22.5: what the current set brought in is one line, by Rushes (R8, R9); its variants are dated (R5).
-      if (result.added.length) await logBookFor(this.store).add(broughtInEvent(result.added, withCut), "rushes");
+      // Built inside add's guard, so a line that can't be made never undoes the bring-in (M1).
+      const cut = anchor;
+      if (result.added.length) await logBookFor(this.store).add(() => broughtInEvent(result.added, cut ? cutName(films, cut.video, cut.version.id) : null), "rushes");
       return result;
     });
   }

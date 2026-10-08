@@ -107,9 +107,14 @@ export class LogBook {
     return data;
   }
 
-  /** §22.5: writes one event. A failure is reported on the console, counted, and returns null: the change it describes has already been made. */
-  async add(event: LogEvent, by: LogBy, at: Date = new Date()): Promise<LogEntry | null> {
+  /**
+   * §22.5: writes one event. Routes pass a function that builds it, so a builder that throws is
+   * caught here too (M1). A failure is reported on the console, counted, and returns null: the
+   * change it describes has already been made.
+   */
+  async add(make: LogEvent | (() => LogEvent), by: LogBy, at: Date = new Date()): Promise<LogEntry | null> {
     try {
+      const event = typeof make === "function" ? make() : make;
       await this.ready();
       const { result } = await this.store.update("log", (f) => appendEvent(f, event, by, at));
       return result;

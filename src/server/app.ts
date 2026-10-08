@@ -545,7 +545,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     const b = await body(c, AddFileBody);
     const file = toManifestPath(store.root, b.file);
     const { result } = await store.update("project", (p) => addFile(p, { ...b, file }));
-    await log.add(fileEvent(result), by(c));
+    await log.add(() => fileEvent(result), by(c));
     return c.json(result, 201);
   });
 
@@ -636,7 +636,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
         let skipKinds = kinds;
         if (b.include?.length) {
           const included = await found.bringIn(b.include, { film: b.film, origin: "include" });
-          if (included.added.length) await log.add(broughtInEvent(included.added, null), by(c));
+          if (included.added.length) await log.add(() => broughtInEvent(included.added, null), by(c));
           // An included cut becomes the cut the scoring is matched to, and a project with no cut
           // had nothing to record against: settle again now that the cut exists.
           if (included.added.some((a) => a.kind === "cut")) skipKinds = await found.settleKinds(b.include, b.film);
@@ -678,7 +678,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   app.post("/api/found/bring-in", async (c) => {
     const b = await body(c, FoundBringInBody);
     const r = await found.bringIn(b.files, { film: b.film });
-    if (r.added.length) await log.add(broughtInEvent(r.added, null), by(c));
+    if (r.added.length) await log.add(() => broughtInEvent(r.added, null), by(c));
     return c.json(r);
   });
 
@@ -729,7 +729,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   app.post("/api/replies", async (c) => {
     const b = await body(c, RepliesBody);
     const { result } = await store.update("notes", (f) => b.replies.map((r) => applyReply(f, r)));
-    await log.add(repliesEvent(result), by(c));
+    await log.add(() => repliesEvent(result), by(c));
     return c.json({ notes: result });
   });
 
@@ -751,7 +751,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
       if (info.fps && p.videos.length === 1 && p.videos[0].versions.length === 1) p.fps = info.fps;
       return out;
     });
-    await log.add(cutEvent(films, result.video, result.version), by(c));
+    await log.add(() => cutEvent(films, result.video, result.version), by(c));
     // §19.5: say when the cut is likely to play badly, and start its proxy straight away when the
     // project asks for that. Without ffmpeg, nothing is offered (needFor is null).
     // §19.9: its waveform is made in the background; nothing here waits for it.
@@ -886,14 +886,14 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
       return lockPicture(p, c.req.param("video"), b.version);
     });
     // R10: a lock that changes nothing isn't logged.
-    if (result.lockedVersion !== before) await log.add(lockEvent(films, result), by(c));
+    if (result.lockedVersion !== before) await log.add(() => lockEvent(films, result), by(c));
     return c.json({ video: result });
   });
 
   app.post("/api/variants", async (c) => {
     const b = await body(c, VariantBody);
     const { result } = await store.update("project", (p) => addVariant(p, { ...b, file: toManifestPath(store.root, b.file) }));
-    await log.add(variantEvent(result.lane, result.variant), by(c));
+    await log.add(() => variantEvent(result.lane, result.variant), by(c));
     return c.json(result, 201);
   });
 
@@ -906,7 +906,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
       if (b.wordsPerSecond) s.wordsPerSecond = b.wordsPerSecond;
       return setSections(s, b.sections, { replace: b.replace });
     });
-    await log.add(scriptEvent(result.length), by(c));
+    await log.add(() => scriptEvent(result.length), by(c));
     return c.json({ sections: result });
   });
 
@@ -921,8 +921,10 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     const file = toManifestPath(store.root, b.file);
     const info = await probe(fromManifestPath(store.root, file));
     const { data, result } = await store.update("script", (s) => addTake(s, c.req.param("id"), { file, duration: info.duration }));
-    const section = data.sections.find((s) => s.id === c.req.param("id"))!;
-    await log.add(takeEvent(section, result, section.takes.findIndex((t) => t.id === result.id) + 1), by(c));
+    await log.add(() => {
+      const section = data.sections.find((s) => s.id === c.req.param("id"))!;
+      return takeEvent(section, result, section.takes.findIndex((t) => t.id === result.id) + 1);
+    }, by(c));
     return c.json({ take: result }, 201);
   });
 
@@ -957,7 +959,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     if (changed) {
       // The names come from project.json; if it can't be read now, the pick still stands (ruling e).
       const project = await store.read("project").catch(() => null);
-      if (project) await log.add(picksEvent(project, data.lanes), by(c));
+      if (project) await log.add(() => picksEvent(project, data.lanes), by(c));
       else log.failures += 1;
     }
     return c.json(data);
@@ -987,7 +989,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
         .catch(() => "");
       if (recent) result.prompt = `${result.prompt}\n\n${recent}`;
       await store.update("batches", (f) => { f.batches.push(result); });
-      await log.add(notesSentEvent(result), by(c));
+      await log.add(() => notesSentEvent(result), by(c));
       return result;
     });
     batchQueue = run;
@@ -1047,7 +1049,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
       ]);
       if (!refs.has(b.ref)) throw new NotFoundError("ref", shown(b.ref));
     }
-    const entry = await log.add(lineEvent(text, b.area ?? "project", { video, version, ref: b.ref ?? null }), by(c));
+    const entry = await log.add(() => lineEvent(text, b.area ?? "project", { video, version, ref: b.ref ?? null }), by(c));
     if (!entry) throw new RushesError("The Change Log couldn't be written. Run `rushes doctor`.", 500, "log_unwritable");
     return c.json({ entry }, 201);
   });
