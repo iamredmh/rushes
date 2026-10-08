@@ -61,10 +61,10 @@ describe("the words of each line (§22.5, R9)", () => {
     expect(notesSentEvent({ stage: "script", noteIds: ["a"], sectionIds: ["s1", "s2"] }).text).toBe("1 note and 2 script edits sent from Script");
     expect(notesSentEvent({ stage: "script", noteIds: [], sectionIds: ["s1"] }).text).toBe("1 script edit sent from Script");
     expect(notesSentEvent({ stage: "picture", noteIds: ["a"], sectionIds: [] }).many!(5, "")).toBe("5 notes sent from several tabs");
-    expect(repliesEvent([{ status: "done", stage: "picture" }, { status: "done", stage: "picture" }, { status: "todo", stage: "picture" }])).toMatchObject({
-      area: "notes", kind: "replies", text: "Agent replied to 3 notes (2 done)", tab: "picture", merge: "once",
+    expect(repliesEvent([{ id: "n1", status: "done", stage: "picture" }, { id: "n2", status: "done", stage: "picture" }, { id: "n3", status: "todo", stage: "picture" }])).toMatchObject({
+      area: "notes", kind: "replies", text: "Agent replied to 3 notes (2 done)", tab: "picture", merge: "count", count: 3,
     });
-    expect(repliesEvent([{ status: "todo", stage: "music" }, { status: "todo", stage: "picture" }])).toMatchObject({ text: "Agent replied to 2 notes", tab: null });
+    expect(repliesEvent([{ id: "n1", status: "todo", stage: "music" }, { id: "n2", status: "todo", stage: "picture" }])).toMatchObject({ text: "Agent replied to 2 notes", tab: null });
     const file = fileEvent({ kind: "doc", name: "Creative brief" });
     expect(file).toMatchObject({ area: "assets", kind: "files", text: "File added: Creative brief (Scripts & docs)" });
     expect(file.many!(2, "Scripts & docs")).toBe("2 files added: Scripts & docs");
@@ -77,7 +77,7 @@ describe("the words of each line (§22.5, R9)", () => {
     const secret = "the client hates the blue";
     const ev = [
       notesSentEvent({ stage: "picture", noteIds: ["a"], sectionIds: [] }),
-      repliesEvent([{ status: "done", stage: "picture" }]),
+      repliesEvent([{ id: "n1", status: "done", stage: "picture" }]),
     ];
     for (const e of ev) expect(JSON.stringify({ ...e, many: e.many?.(2, "x") })).not.toContain(secret);
   });
@@ -177,11 +177,49 @@ describe("appendEvent (§22.5, R4, Review Focus 3)", () => {
   });
   it("once never merges, but an identical repeat (a retried request) isn't doubled (§22.9)", () => {
     const f = empty();
-    const reply = repliesEvent([{ status: "done", stage: "picture" }]);
+    const reply = repliesEvent([{ id: "n1", status: "done", stage: "picture" }]);
     appendEvent(f, reply, "agent", at(0));
     appendEvent(f, reply, "agent", at(0.2));
-    appendEvent(f, repliesEvent([{ status: "todo", stage: "picture" }]), "agent", at(0.3));
-    expect(texts(f)).toEqual(["Agent replied to 1 note", "Agent replied to 1 note (1 done)"]);
+    expect(texts(f)).toEqual(["Agent replied to 1 note (1 done)"]);
+    expect(f.entries[0].n).toBe(1);
+    // A different note with the same words is not a retry.
+    appendEvent(f, repliesEvent([{ id: "n2", status: "done", stage: "picture" }]), "agent", at(0.3));
+    expect(texts(f)).toEqual(["Agent replied to 2 notes (2 done)"]);
+  });
+  it("four separate replies on four different notes are one line that counts four; a genuine retry of one is still absorbed (final review I1)", () => {
+    const f = empty();
+    const r = (id: string, status: "done" | "todo", stage: "picture" | "music" = "picture") => repliesEvent([{ id, status, stage }]);
+    appendEvent(f, r("n1", "done"), "agent", at(0));
+    appendEvent(f, r("n2", "done"), "agent", at(0.2));
+    appendEvent(f, r("n2", "done"), "agent", at(0.3)); // the retry of the second
+    appendEvent(f, r("n3", "todo"), "agent", at(0.4));
+    appendEvent(f, r("n4", "done"), "agent", at(0.5));
+    expect(texts(f)).toEqual(["Agent replied to 4 notes (3 done)"]);
+    expect(f.entries[0]).toMatchObject({ n: 4, tab: "picture" });
+    // One more tab in the burst, and the line no longer opens a single tab.
+    appendEvent(f, r("n5", "todo", "music"), "agent", at(0.6));
+    expect(texts(f)).toEqual(["Agent replied to 5 notes (3 done)"]);
+    expect(f.entries[0]).toMatchObject({ n: 5, tab: null });
+    // Several notes in one call, then the whole call again.
+    const g = empty();
+    const call = repliesEvent([{ id: "a", status: "done", stage: "picture" }, { id: "b", status: "todo", stage: "picture" }]);
+    appendEvent(g, call, "agent", at(0));
+    appendEvent(g, repliesEvent([{ id: "b", status: "todo", stage: "picture" }, { id: "a", status: "done", stage: "picture" }]), "agent", at(0.1));
+    expect(texts(g)).toEqual(["Agent replied to 2 notes (1 done)"]);
+    // Outside two minutes it's its own line.
+    appendEvent(g, r("c", "done"), "agent", at(5));
+    expect(texts(g)).toEqual(["Agent replied to 1 note (1 done)", "Agent replied to 2 notes (1 done)"]);
+  });
+  it("a reply of many notes keeps an identity that fits the line, and the same set is still the same (final review I1)", () => {
+    const many = Array.from({ length: 60 }, (_, i) => ({ id: `n_${i.toString(36).padStart(8, "0")}`, status: "done" as const, stage: "picture" as const }));
+    const f = empty();
+    appendEvent(f, repliesEvent(many), "agent", at(0));
+    appendEvent(f, repliesEvent([...many].reverse()), "agent", at(0.1));
+    expect(f.entries).toHaveLength(1);
+    expect(f.entries[0].n).toBe(60);
+    expect(LogFileSchema.safeParse(f).success).toBe(true);
+    appendEvent(f, repliesEvent(many.slice(1)), "agent", at(0.2));
+    expect(f.entries[0].n).toBe(119);
   });
   it("the same words about a different place aren't a repeat (minor 4)", () => {
     const f = empty();
@@ -189,9 +227,8 @@ describe("appendEvent (§22.5, R4, Review Focus 3)", () => {
     appendEvent(f, lineEvent("Kept the wide", "picture", { video: "hero", version: "v2" }), "agent", at(0.1));
     appendEvent(f, lineEvent("Kept the wide", "picture", { video: "hero", version: "v2" }), "agent", at(0.2));
     expect(f.entries.map((e) => e.version)).toEqual(["v1", "v2"]);
-    appendEvent(f, repliesEvent([{ status: "todo", stage: "music" }]), "agent", at(0.3));
-    appendEvent(f, repliesEvent([{ status: "todo", stage: "sfx" }]), "agent", at(0.4));
-    expect(f.entries.map((e) => e.tab).slice(2)).toEqual(["music", "sfx"]);
+    appendEvent(f, repliesEvent([{ id: "n1", status: "todo", stage: "music" }]), "agent", at(0.3));
+    expect(f.entries.map((e) => e.tab).slice(2)).toEqual(["music"]);
   });
   it("a merged line opens a tab only when every event in it came from that tab (minor 5)", () => {
     const f = empty();
@@ -307,6 +344,13 @@ describe("backfill and reading back (§22.6)", () => {
       { area: "voice", text: "Voiceover: 1 section with takes" },
     ]);
     expect(undatedLines(["gone/x", "night-drive/missing", "s9:t1"], { project: p, script })).toEqual([]);
+    // Final review minor: a lane that carries its stage's own name (every 0.2.x project's default lanes) isn't named twice.
+    const defaults: Project = { ...p, lanes: [
+      { id: "music", stage: "music", name: "Music", variants: [{ id: "a", name: "A", file: "a.wav", meta: {}, cues: [] }, { id: "b", name: "B", file: "b.wav", meta: {}, cues: [] }] },
+      { id: "voice", stage: "voice", name: "Voiceover", variants: [{ id: "r", name: "R", file: "r.wav", meta: {}, cues: [] }] },
+      { id: "sfx", stage: "sfx", name: "Sound effects", variants: [{ id: "s", name: "S", file: "s.wav", meta: {}, cues: [] }] },
+    ] };
+    expect(undatedLines(undatedRefs(defaults, { sections: [] }), { project: defaults, script: { sections: [] } }).map((l) => l.text)).toEqual(["Music: 2 variants", "Voiceover: 1 read", "Sound effects: 1 variant"]);
     const voice: Project = { ...p, lanes: [{ id: "round-1", stage: "voice", name: "Round 1 · Voices", variants: [{ id: "jane", name: "Jane", file: "j.wav", meta: {}, cues: [] }, { id: "gerald", name: "Gerald", file: "g.wav", meta: {}, cues: [] }] }] };
     expect(undatedLines(["round-1/jane", "round-1/gerald"], { project: voice, script: { sections: [] } })).toEqual([{ area: "voice", text: "Voiceover: Round 1 · Voices (2 reads)" }]);
   });

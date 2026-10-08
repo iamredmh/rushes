@@ -116,13 +116,32 @@ export function notesSentEvent(batch: Pick<Batch, "stage" | "noteIds" | "section
   };
 }
 
-/** "Agent replied to 3 notes (2 done)", one line per reply call (§22.5). */
-export function repliesEvent(notes: Pick<Note, "status" | "stage">[]): LogEvent {
+/**
+ * What identifies a reply, so a retried request isn't counted twice while a different one is: its
+ * note ids, in order. A very long set is cut to a fingerprint, so the line's `ref` (300 characters)
+ * always holds it.
+ */
+function replyKey(ids: string[]): string {
+  const key = [...ids].sort().join(",");
+  if (key.length <= 200) return `notes:${key}`;
+  let h = 0x811c9dc5;
+  for (let i = 0; i < key.length; i++) h = Math.imul(h ^ key.charCodeAt(i), 0x01000193) >>> 0;
+  return `notes:${ids.length}:${h.toString(36)}:${key.length}`;
+}
+
+const doneIn = (text: string) => Number(/\((\d+) done\)/.exec(text)?.[1] ?? 0);
+
+/** "Agent replied to 3 notes (2 done)"; replies in a burst are one line that counts every note (R4, final review I1). */
+export function repliesEvent(notes: Pick<Note, "id" | "status" | "stage">[]): LogEvent {
+  const said = (n: number, done: number) => `Agent replied to ${plural(n, "note", "notes")}${done ? ` (${done} done)` : ""}`;
   const done = notes.filter((n) => n.status === "done").length;
   const stages = new Set(notes.map((n) => n.stage));
   return {
-    area: "notes", kind: "replies", merge: "once", tab: stages.size === 1 ? [...stages][0] : null,
-    text: `Agent replied to ${plural(notes.length, "note", "notes")}${done ? ` (${done} done)` : ""}`,
+    area: "notes", kind: "replies", merge: "count", count: Math.max(1, notes.length), tab: stages.size === 1 ? [...stages][0] : null,
+    ref: replyKey(notes.map((n) => n.id)),
+    text: said(notes.length, done),
+    // The line says how many were done as it stood, so this call's are added to that.
+    many: (n, _subject, before = "") => said(n, doneIn(before) + done),
   };
 }
 

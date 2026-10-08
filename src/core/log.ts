@@ -2,6 +2,7 @@
 // one-time backfill (R6), "Before the log" (R5) and reading a page back. Pure apart from new ids;
 // the server's LogBook owns the file.
 import { newId } from "./ids.js";
+import { oneLineOf } from "./labels.js";
 import { STAGE_WORDS, cutEvent, fileEvent, notesSentEvent } from "./logEvents.js";
 import { LOG_MAX, MERGE_MS, logText, type LogArea, type LogBy, type LogKind, type UndatedLine } from "./logText.js";
 import type { BatchesFile, LogEntry, LogFile, Project, Script, Stage } from "./schema.js";
@@ -21,7 +22,8 @@ export interface LogEvent {
   merge: "count" | "replace" | "once";
   count?: number;
   subject?: string;
-  many?: (n: number, subject: string) => string;
+  /** `before` is the line's own text so far, for a line that also totals something `n` doesn't (the replies' done count). */
+  many?: (n: number, subject: string, before?: string) => string;
   /** How soon after the last one this still merges (MERGE_MS unless given; picks use PICKS_MERGE_MS). */
   windowMs?: number;
   /** Undated refs this event dates, so they leave Before the log (R5). `ref` counts too. */
@@ -71,7 +73,7 @@ function mergeInto(e: LogEntry, event: LogEvent, text: string, subject: string, 
   if (sameThing(e, link)) return true;
   e.n += count;
   e.subject = e.subject === subject ? subject : "";
-  e.text = logText(event.many ? event.many(e.n, e.subject) : text) || text;
+  e.text = logText(event.many ? event.many(e.n, e.subject, e.text) : text) || text;
   // A line opens a tab only when every event in it came from that one (minor 5).
   Object.assign(e, link, { tab: e.tab === link.tab ? link.tab : null });
   return true;
@@ -188,7 +190,10 @@ export function undatedLines(refs: readonly string[], ctx: UndatedContext): Unda
     const n = lane.variants.filter((v) => set.has(`${lane.id}/${v.id}`)).length;
     if (n === 0) continue;
     const noun = lane.stage === "voice" ? (n === 1 ? "read" : "reads") : n === 1 ? "variant" : "variants";
-    out.push({ area: lane.stage, text: logText(`${STAGE_WORDS[lane.stage]}: ${lane.name} (${n} ${noun})`) });
+    // A lane that carries its stage's own name (every 0.2.x project's defaults) isn't named twice.
+    const word = STAGE_WORDS[lane.stage];
+    const name = oneLineOf(lane.name);
+    out.push({ area: lane.stage, text: logText(name && name !== word ? `${word}: ${lane.name} (${n} ${noun})` : `${word}: ${n} ${noun}`) });
   }
   const sections = ctx.script.sections.filter((s) => s.takes.some((t) => set.has(`${s.id}:${t.id}`))).length;
   if (sections) out.push({ area: "voice", text: `Voiceover: ${sections} section${sections === 1 ? "" : "s"} with takes` });

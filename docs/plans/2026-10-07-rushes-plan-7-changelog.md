@@ -56,9 +56,10 @@
   - `LogEntry` gains `tab` (the tab a Notes line opens), `n` (how many events the line stands for) and `subject` (what a run of them is about), all defaulted.
   - `LogFile` gains `backfilled` (§22.6's marker), `undated` (see R5) and `dropped` (how many the cap removed, for §22.9's "Earlier entries were removed").
 - **R4: how collapsing works.** An event merges into the **newest entry with the same kind, area and writer** whose time is within the window (2 minutes; picks 10 minutes). It doesn't have to be the very last line, so interleaved music and sound-effects registrations collapse into two lines, not ten. The merged entry moves to the top. Each kind merges one way:
-  - **count** (`cut`, `variant`, `take`, `files`, `notes-sent`): the counts add up and the line is rewritten ("Music: 3 variants added to night-drive"). The subject (lane, section, film, folder, tab) stays if it's the same, and drops out if not.
+  - **count** (`cut`, `variant`, `take`, `files`, `notes-sent`, `replies`): the counts add up and the line is rewritten ("Music: 3 variants added to night-drive"). The subject (lane, section, film, folder, tab) stays if it's the same, and drops out if not.
   - **replace** (`lock`, `script`, `picks`): the newest line wins, for the same subject only, so a lock on another film is its own line.
-  - **once** (`replies`, `entry`): never merged, except that an identical line from the same writer within the window isn't doubled (§22.9, a retried request). This keeps "one entry per reply call" (§22.5).
+  - **once** (`entry`): never merged, except that an identical line from the same writer within the window isn't doubled (§22.9, a retried request).
+  - **replies** are a count too (final review I1): a call's line says how many notes it answered, and calls in a burst are one line counting every note ("Agent replied to 4 notes (3 done)"). A retry is a call with the same note ids as the line's latest, and isn't counted twice.
 - **R5: "Before the log".** The *identity* of what was already there is recorded once, at backfill, as `undated` refs (`"<lane>/<variant>"`, `"<section>:<take>"`). The *lines* are computed when read (§22.6), from the refs that still exist. A live event about a ref (its `ref`, or a bring-in's `clears`) removes it from `undated`. That way a variant is never both dated and undated, whatever order the first write and the backfill happen in.
 - **R6: when the backfill happens.**
   - It happens on the first read or write of the log: `GET /api/log`, `rushes_get_log` or any `LogBook.add`. It reads in only items dated before the moment this server's `LogBook` was made (`since`), so nothing logged live is read in twice.
@@ -66,7 +67,7 @@
   - Batches are dated by `sentAt` (§22.6 says `createdAt`; the real field is `sentAt`).
   - Items whose dates don't parse are skipped.
 - **R7: a corrupt `log.json`.**
-  - It is moved to `log.json.bad` (replacing an older `.bad`), and a fresh log starts with `backfilled: true`. It "reads as empty" (§22.9), so there's no second backfill.
+  - It is moved to `log.json.bad` (an older `.bad` is kept: this one goes to `log.json.bad.2`, `.bad.3` and so on), and a fresh log starts with `backfilled: true`. It "reads as empty" (§22.9), so there's no second backfill.
   - Only the log's own read or write fixes it. The state's head just reports `null`.
   - The dashboard's existing corrupt banner clears on the next write.
   - `rushes doctor` reports `log.json.bad` as a non-required ✗. A corrupt `log.json` is non-required too: the log is never a reason for doctor to fail.

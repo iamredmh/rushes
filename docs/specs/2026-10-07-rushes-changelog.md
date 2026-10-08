@@ -68,7 +68,7 @@ Rushes writes an entry at the moment it commits the change. One line each. Text 
 | The script is set or replaced | script | `Script set: 6 sections` |
 | Picks change | mix | `Picks: voice "Vo Jules, full read", music "Night drive, held back"` (consecutive pick changes within 10 minutes are one entry, updated in place) |
 | Notes are sent to the agent | notes | `3 notes sent from Picture` |
-| The agent replies | notes | `Agent replied to 3 notes (2 done)` (one entry per reply call) |
+| The agent replies | notes | `Agent replied to 3 notes (2 done)` (one line per reply call; calls in a burst are one line counting every note) |
 | Files are added | assets | `2 files added: Scripts & docs` |
 | Someone adds a line | any | the line itself |
 | A format is added (once §21 is built) | picture | `9:16 added to v2` |
