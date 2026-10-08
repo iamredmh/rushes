@@ -128,7 +128,23 @@ export const VIDEO_EXT: ReadonlySet<string> = new Set(["mp4", "mov", "m4v", "web
 /** §21.3: a render's shape on screen, its length and rate, or why it can't be a format. */
 export type VideoProbe =
   | { ok: true; width: number; height: number; duration: number | null; fps: number | null }
-  | { ok: false; code: "no_ffprobe" | "not_video" | "unreadable"; reason: string };
+  // `container`: ffprobe recognised the content as a container that isn't a video one (a concat
+  // playlist, a GIF), so the file is not a video whatever its name says (final review I1).
+  | { ok: false; code: "no_ffprobe" | "not_video" | "unreadable"; reason: string; container?: string };
+
+/**
+ * The only containers a render or a cut is read as (final review I1): ffprobe and ffmpeg pick a
+ * demuxer by the file's content, not its name, so without this a playlist named cat.mp4 (ffconcat)
+ * or a GIF would be read, and a playlist would open the files it names. The video demuxers the
+ * dashboard's cuts can be: MP4/MOV, Matroska/WebM, AVI, MPEG-TS, MXF, ASF, MPEG-PS, FLV, DV and Ogg.
+ * The audio-and-video list for waveforms is peaks.ts's PEAKS_FORMATS.
+ */
+export const VIDEO_FORMATS = "mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mxf,asf,mpeg,flv,dv,ogg";
+
+/** ffprobe's "[concat @ 0x…] Format not on whitelist": the container it found, or null. */
+function refusedContainer(stderr: string): string | null {
+  return /\[([a-z0-9_]+) @ 0x[0-9a-f]+\] Format not on whitelist/i.exec(stderr)?.[1] ?? null;
+}
 /** Reads a render. `signal` aborts the read (the server closing, or a sibling file refused). */
 export type VideoProber = (abs: string, signal?: AbortSignal) => Promise<VideoProbe>;
 
@@ -190,8 +206,9 @@ async function readVideoProbe(file: string, timeout: number, signal: AbortSignal
   try {
     const { stdout } = await run(
       "ffprobe",
-      // Local files only: a playlist or container that names a URL is never followed.
-      ["-v", "error", "-protocol_whitelist", "file", "-show_format", "-show_streams", "-of", "json", file],
+      // Local files only: a playlist or container that names a URL is never followed. And only video
+      // containers: a playlist named .mp4 is refused, never read through to the files it names.
+      ["-v", "error", "-protocol_whitelist", "file", "-format_whitelist", VIDEO_FORMATS, "-show_format", "-show_streams", "-of", "json", file],
       { timeout, killSignal: "SIGKILL", maxBuffer: 8 * 1024 * 1024, signal },
     );
     return parseVideoProbe(JSON.parse(stdout));
@@ -199,7 +216,10 @@ async function readVideoProbe(file: string, timeout: number, signal: AbortSignal
     if (signal?.aborted) return videoGaveUp("aborted");
     // Killed at its timeout (execFile sets `killed`), so there are no last words to report.
     if ((e as { killed?: boolean }).killed) return videoGaveUp("timeout");
-    const last = String((e as { stderr?: unknown }).stderr ?? "").trim().split("\n").pop() ?? "";
+    const stderr = String((e as { stderr?: unknown }).stderr ?? "");
+    const container = refusedContainer(stderr);
+    if (container) return { ok: false, code: "not_video", reason: `it's a ${container} file`, container };
+    const last = stderr.trim().split("\n").pop() ?? "";
     const trimmed = last.startsWith(`${file}: `) ? last.slice(file.length + 2) : last;
     // Belt and braces: the path never appears anywhere in what goes back to the caller.
     const reason = trimmed.split(file).join("the file");

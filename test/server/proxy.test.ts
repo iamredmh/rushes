@@ -5,7 +5,7 @@ import { access, chmod, mkdir, readdir, stat, writeFile } from "node:fs/promises
 import { join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
 import { addVersion } from "../../src/core/project.js";
-import type { Probe } from "../../src/core/media.js";
+import { VIDEO_FORMATS, type Probe } from "../../src/core/media.js";
 import type { Store } from "../../src/core/store.js";
 import { EventEmitter } from "node:events";
 import { vi } from "vitest";
@@ -724,5 +724,25 @@ describe("frame extraction reads local files only (review M3)", () => {
     execFileSync("ffmpeg", ["-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=64x36:rate=30:duration=1", "-c:v", "libx264", "-pix_fmt", "yuv420p", file]);
     const png = await extractFrame(makeFfmpegRunner(), file, 0.5);
     expect(png?.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))).toBe(true);
+  });
+
+  // Final review I1: a "cut" that is really a playlist must never make ffmpeg read the files it names.
+  it("restricts the input to the video containers, ahead of the input", () => {
+    const args = frameArgs("/some/where/hero.mp4", 1.5);
+    const at = args.indexOf("-format_whitelist");
+    expect(at).toBeGreaterThan(-1);
+    expect(args[at + 1]).toBe(VIDEO_FORMATS);
+    expect(at).toBeLessThan(args.indexOf("-i"));
+  });
+
+  it.skipIf(!hasFfmpeg)("gives no frame from an ffconcat playlist or a GIF named .mp4, and still reads an AVI", async () => {
+    const { root } = await tmpProject("frames");
+    execFileSync("ffmpeg", ["-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=64x36:rate=30:duration=1", "-c:v", "libx264", "-pix_fmt", "yuv420p", join(root, "inner.mp4")]);
+    await writeFile(join(root, "cat.mp4"), "ffconcat version 1.0\nfile inner.mp4\n");
+    expect(await extractFrame(makeFfmpegRunner(), join(root, "cat.mp4"), 0.5)).toBeNull();
+    execFileSync("ffmpeg", ["-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=64x36:rate=10:duration=1", "-f", "gif", join(root, "gif.mp4")]);
+    expect(await extractFrame(makeFfmpegRunner(), join(root, "gif.mp4"), 0.5)).toBeNull();
+    execFileSync("ffmpeg", ["-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=64x36:rate=30:duration=1", "-c:v", "mpeg4", join(root, "a.avi")]);
+    expect((await extractFrame(makeFfmpegRunner(), join(root, "a.avi"), 0.5))?.subarray(1, 4).toString()).toBe("PNG");
   });
 });

@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { GIVE_UP_GRACE_MS, PROBE_TIMEOUT_MS, giveUpAfter, parseVideoProbe, probe as mediaProbe, probeVideo, proxyNeed, type Probe } from "../../src/core/media.js";
+import { GIVE_UP_GRACE_MS, PROBE_TIMEOUT_MS, giveUpAfter, parseVideoProbe, probe as mediaProbe, probeVideo, proxyNeed, VIDEO_FORMATS, type Probe } from "../../src/core/media.js";
 
 const probe = (p: Partial<Probe>): Probe => ({ duration: 10, fps: 25, codec: "h264", width: 1920, height: 1080, pixFmt: "yuv420p", ...p });
 
@@ -212,5 +212,41 @@ describe.skipIf(!hasFf)("probeVideo with the real ffprobe", () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+
+  // Final review I1: ffprobe reads a file by its content, so a playlist or a GIF named .mp4 must be
+  // refused by container, never read through to the files a playlist names.
+  it("refuses an ffconcat playlist and a GIF named .mp4, and still reads mp4, mov, webm, mkv, avi and mpegts", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "rushes probe "));
+    try {
+      make(dir, "inner.mp4", ["-f", "lavfi", "-i", "testsrc=size=64x36:rate=30:duration=1", "-c:v", "libx264", "-pix_fmt", "yuv420p"]);
+      const cat = join(dir, "cat.mp4");
+      await writeFile(cat, "ffconcat version 1.0\nfile inner.mp4\n");
+      const concat = await probeVideo(cat);
+      expect(concat).toMatchObject({ ok: false, code: "not_video", reason: "it's a concat file", container: "concat" });
+      const gif = make(dir, "gif.mp4", ["-f", "lavfi", "-i", "testsrc=size=64x36:rate=10:duration=1", "-f", "gif"]);
+      expect(await probeVideo(gif)).toMatchObject({ ok: false, code: "not_video", reason: "it's a gif file", container: "gif" });
+      for (const [name, args] of [
+        ["a.mp4", ["-c:v", "libx264", "-pix_fmt", "yuv420p"]],
+        ["a.mov", ["-c:v", "libx264", "-pix_fmt", "yuv420p"]],
+        ["a.webm", ["-c:v", "libvpx-vp9", "-b:v", "200k"]],
+        ["a.mkv", ["-c:v", "libx264", "-pix_fmt", "yuv420p"]],
+        ["a.avi", ["-c:v", "mpeg4"]],
+        ["a.ts", ["-c:v", "mpeg2video"]],
+      ] as const) {
+        const f = make(dir, name, ["-f", "lavfi", "-i", "testsrc=size=64x36:rate=30:duration=1", ...args]);
+        expect(await probeVideo(f), name).toMatchObject({ ok: true, width: 64, height: 36 });
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("VIDEO_FORMATS: the containers a render or a cut may be read as (final review I1)", () => {
+  it("names the video demuxers, and never a playlist, an image or a GIF", () => {
+    const list = VIDEO_FORMATS.split(",");
+    for (const f of ["mov", "mp4", "m4a", "3gp", "3g2", "mj2", "matroska", "webm", "avi", "mpegts", "mxf", "asf", "mpeg", "flv", "dv", "ogg"]) expect(list).toContain(f);
+    for (const f of ["concat", "hls", "gif", "image2", "png_pipe", "tee", "data", "lavfi"]) expect(list).not.toContain(f);
   });
 });

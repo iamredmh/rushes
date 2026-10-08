@@ -774,8 +774,15 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     const abs = fromManifestPath(store.root, file);
     // The proxy jobs' probe is ffprobe (tests inject a fake), so the cut's need is read from the same
     // answer. §21.3 (R2): the primary's shape on screen is stored too, when it is a file that can be read.
-    const readOwn = async () => ((await isPlainFile(abs)) ? readVideo(abs).then((r) => (r.ok ? r : null)) : null);
-    const [info, read] = await Promise.all([jobs.probe(abs), shapes ? Promise.resolve(shapes[0]) : readOwn()]);
+    const readOwn = async () => {
+      if (!(await isPlainFile(abs))) return null;
+      const r = await readVideo(abs);
+      // Final review I1: a file ffprobe reads as another kind of container (a playlist or a GIF
+      // named .mp4) is not a cut. Anything else it can't read comes in with no size, as before.
+      if (!r.ok && r.container) throw new RushesError(`${file} isn't a video: ${r.reason}.`, 400, "not_video", { path: file });
+      return r.ok ? r : null;
+    };
+    const [read, info] = await Promise.all([shapes ? Promise.resolve(shapes[0]) : readOwn(), jobs.probe(abs)]);
     // Only a real picture size is stored; a plain cut without one goes in with no size, as cuts did
     // before formats (a formats call was refused above).
     const size = read && isPictureSize(read.width, read.height) ? read : null;

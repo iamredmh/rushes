@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { access, constants, mkdir, readdir, rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { RushesError, NotFoundError } from "../core/errors.js";
-import { hasFfprobe, probe as ffprobe, proxyNeed, type Probe } from "../core/media.js";
+import { VIDEO_FORMATS, hasFfprobe, probe as ffprobe, proxyNeed, type Probe } from "../core/media.js";
 import { fromManifestPath } from "../core/paths.js";
 import type { Project, Version } from "../core/schema.js";
 import type { ChangeEvent, Store } from "../core/store.js";
@@ -626,6 +626,9 @@ export function frameArgs(orig: string, seconds: number): string[] {
     // Local files only, as for ffprobe: a container that names a URL is never followed. An input
     // option, so the PNG still goes out through pipe:1.
     "-protocol_whitelist", "file",
+    // Only video containers (final review I1): a cut or format that is really a playlist (ffconcat
+    // named .mp4) or a GIF is refused, never read through to the files it names.
+    "-format_whitelist", VIDEO_FORMATS,
     // -ss before -i seeks fast to the keyframe before, then accurate_seek decodes forward to the exact frame.
     "-accurate_seek", "-ss", seconds.toFixed(6), "-i", orig,
     "-frames:v", "1", "-an", "-pix_fmt", "rgb24", "-c:v", "png", "-f", "image2pipe", "pipe:1",

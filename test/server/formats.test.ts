@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { existsSync } from "node:fs";
 import { mkdir, symlink, writeFile } from "node:fs/promises";
-import type { VideoProbe } from "../../src/core/media.js";
+import { probeVideo, type VideoProbe } from "../../src/core/media.js";
+import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
 import { sizedProbe } from "../helpers/probe.js";
@@ -405,5 +406,64 @@ describe("grabs by format (§21.5)", () => {
     expect((await call("POST", "/api/grabs", { video: "hero", version: "v9", frame: 30, format: "9x16", png: PNG_1PX })).status).toBe(404);
     expect((await call("POST", "/api/grabs", { video: "hero", version: "v1", frame: 30, format: "9:16", png: PNG_1PX })).status).toBe(400);
     expect((await call("POST", "/api/grabs", { video: "hero", version: "v1", frame: 30, format: "../x", png: PNG_1PX })).status).toBe(400);
+  });
+});
+
+const hasFf = ["ffmpeg", "ffprobe"].every((b) => spawnSync(b, ["-version"], { stdio: "ignore" }).status === 0);
+
+// Final review I1: ffprobe reads a file by its content, so a playlist or a GIF named .mp4 is refused
+// by container, as a format and as a cut; ordinary containers still come in.
+describe.skipIf(!hasFf)("a playlist or a GIF named .mp4, with the real ffprobe (final review I1)", () => {
+  const realProbe = { formatProbe: (abs: string, signal?: AbortSignal) => probeVideo(abs, { signal }) };
+  const render = (root: string, name: string, size: string, args: string[] = ["-c:v", "libx264", "-pix_fmt", "yuv420p"]) => {
+    const r = spawnSync("ffmpeg", ["-v", "error", "-y", "-f", "lavfi", "-i", `testsrc=size=${size}:rate=30:duration=1`, ...args, join(root, name)]);
+    if (r.status !== 0) throw new Error(String(r.stderr));
+    return name;
+  };
+  const traps = async (root: string) => {
+    await mkdir(join(root, "renders"), { recursive: true });
+    render(root, "renders/inner.mp4", "64x36");
+    await writeFile(join(root, "renders", "cat.mp4"), "ffconcat version 1.0\nfile inner.mp4\n");
+    render(root, "renders/gif.mp4", "64x36", ["-f", "gif"]);
+  };
+
+  it("refuses them as a format, and as a cut on its own or with formats; nothing is registered", async () => {
+    const { root, call, store } = await setup([], realProbe);
+    await traps(root);
+    render(root, "renders/wide.mp4", "64x36");
+    render(root, "renders/tall.mp4", "36x64");
+    for (const bad of ["renders/cat.mp4", "renders/gif.mp4"]) {
+      const kind = bad.includes("cat") ? "concat" : "gif";
+      const cut = await call("POST", "/api/versions", { video: "Hero", file: bad });
+      expect(cut.status, bad).toBe(400);
+      expect(cut.json).toMatchObject({ error: "not_video", message: `${bad} isn't a video: it's a ${kind} file.` });
+      expect((await call("POST", "/api/versions", { video: "Hero", file: bad, formats: [{ file: "renders/tall.mp4" }] })).json.error).toBe("not_video");
+      expect((await call("POST", "/api/versions", { video: "Hero", file: "renders/wide.mp4", formats: [{ file: bad }] })).json.error).toBe("not_video");
+    }
+    expect((await store.read("project")).videos).toEqual([]);
+    await call("POST", "/api/versions", { video: "Hero", file: "renders/wide.mp4" });
+    for (const bad of ["renders/cat.mp4", "renders/gif.mp4"]) expect((await call("POST", "/api/formats", { file: bad })).json.error).toBe("not_video");
+    expect((await store.read("project")).videos[0].versions).toHaveLength(1);
+    expect((await store.read("project")).videos[0].versions[0].formats).toEqual([]);
+  });
+
+  it("still registers mp4, mov, webm and mkv as cuts and formats, and avi, mpegts and junk bytes as cuts (no new gate by extension)", async () => {
+    const { root, call } = await setup([], realProbe);
+    await mkdir(join(root, "renders"), { recursive: true });
+    const h264 = ["-c:v", "libx264", "-pix_fmt", "yuv420p"];
+    const cuts: [string, string[]][] = [["a.mp4", h264], ["a.mov", h264], ["a.webm", ["-c:v", "libvpx-vp9", "-b:v", "200k"]], ["a.mkv", h264], ["a.avi", ["-c:v", "mpeg4"]], ["a.ts", ["-c:v", "mpeg2video"]]];
+    for (const [name, args] of cuts) {
+      const r = await call("POST", "/api/versions", { video: `Film ${name}`, file: render(root, `renders/${name}`, "64x36", args) });
+      expect(r.status, name).toBe(201);
+      expect(r.json.version, name).toMatchObject({ width: 64, height: 36 });
+    }
+    // Junk bytes stay as they were: unreadable, so the cut comes in with no size.
+    await writeFile(join(root, "renders", "junk.mp4"), "not a video at all");
+    expect((await call("POST", "/api/versions", { video: "Junk", file: "renders/junk.mp4" })).json.version).toMatchObject({ width: null, height: null });
+    const shapes: [string, string, string[]][] = [["t.mp4", "36x64", h264], ["s.mov", "64x64", h264], ["p.webm", "64x80", ["-c:v", "libvpx-vp9", "-b:v", "200k"]], ["c.mkv", "48x36", h264]];
+    for (const [name, size, args] of shapes) {
+      const r = await call("POST", "/api/formats", { video: "Film a.mp4", file: render(root, `renders/${name}`, size, args) });
+      expect(r.status, name).toBe(201);
+    }
   });
 });
