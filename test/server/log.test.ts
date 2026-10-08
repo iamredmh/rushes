@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { access, lstat, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
+import { access, lstat, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
 import { sse } from "../helpers/sse.js";
@@ -343,6 +343,27 @@ describe("logging never changes what a change answers (ruling e)", () => {
   });
 });
 
+describe("a log that can't be read at all (ruling e)", () => {
+  it("a folder where log.json should be never stops a send, an export or the state", async () => {
+    const { root, store, call, asUser } = await setup();
+    await call("POST", "/api/versions", { video: "Hero", file: `${root}/renders/hero.mp4` });
+    await rm(store.path("log"));
+    await mkdir(store.path("log"));
+    await call("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 1, text: "Too dark" }, asUser);
+    const sent = await call("POST", "/api/batches", { stage: "picture" }, asUser);
+    expect(sent.status).toBe(201);
+    expect(sent.json.batch.prompt).not.toContain("Recent changes");
+    expect((await store.read("batches")).batches).toHaveLength(1);
+    const exp = await call("POST", "/api/exports/notes", {});
+    expect(exp).toMatchObject({ status: 201, json: { changeLog: null } });
+    expect(exp.json.path).toMatch(/^exports\//);
+    const state = await call("GET", "/api/state");
+    expect(state.status).toBe(200);
+    expect(state.json.log).toBeNull();
+    expect((await call("GET", "/api/health")).json.logFailures).toBe(1);
+  });
+});
+
 describe("the log's routes (§22.7)", () => {
   it("POST /api/log: one clean line of 160 at most, by whoever sent it; blank and unknown places are refused (R21, Review Focus 2)", async () => {
     const { root, call, asUser } = await setup();
@@ -408,6 +429,9 @@ describe("the log's routes (§22.7)", () => {
       ["limit=1.5", /limit must be a whole number from 1 to 5000/],
       ["limit=", /limit must be a whole number from 1 to 5000/],
       ["limit=-3", /limit must be a whole number from 1 to 5000/],
+      ["limit=0x10", /limit must be a whole number from 1 to 5000/],
+      ["limit=1e3", /limit must be a whole number from 1 to 5000/],
+      ["limit=%205", /limit must be a whole number from 1 to 5000/],
       ["since=yesterday", /since must be a date and time/],
       ["since=", /since must be a date and time/],
       ["area=elsewhere", /area must be one of script, picture, voice, music, sfx, mix, notes, assets, project/],
