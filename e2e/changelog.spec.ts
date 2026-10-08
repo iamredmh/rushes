@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Page } from "@playwright/test";
 import { expect, test, versionButton, videoReady } from "./fixture.js";
@@ -8,6 +8,18 @@ const drawer = (page: Page) => page.getByRole("complementary", { name: "Change L
 const rows = (page: Page) => drawer(page).locator(".lrow");
 /** Waits out the 160 ms slide, so a box is measured where it rests. */
 const settled = (page: Page) => drawer(page).evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
+
+/**
+ * Replaces a project file whole, the way Rushes writes them (a temp file, then a rename). A plain
+ * writeFile truncates first, and a server that reads in between finds a corrupt log, sets it aside
+ * as log.json.bad (§22.9) and starts a fresh one: the test's hand-made history is gone, and the
+ * drawer says "Nothing yet". That is a race the test loses now and then on a busy runner.
+ */
+async function replaceFile(path: string, text: string): Promise<void> {
+  const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(tmp, text);
+  await rename(tmp, path);
+}
 
 /** A log.json written by hand: `n` lines a minute apart, all backfilled. The file keeps them oldest first, as appends do. */
 function bigLog(n: number, dropped = 0) {
@@ -237,7 +249,7 @@ test("an empty log says so; audio from before the log is listed undated; Export 
   await expect(drawer(page).locator(".dfoot")).toContainText("0 entries");
   await rushes.addVariant("music", "Night drive", { seconds: 2, freq: 220, lane: "night-drive" });
   // History made by hand: the variant was already there when the log began.
-  await writeFile(join(rushes.root, ".rushes", "log.json"), JSON.stringify({ schema: 1, rev: 99, backfilled: true, undated: ["night-drive/night-drive"], dropped: 0, entries: [] }));
+  await replaceFile(join(rushes.root, ".rushes", "log.json"), JSON.stringify({ schema: 1, rev: 99, backfilled: true, undated: ["night-drive/night-drive"], dropped: 0, entries: [] }));
   const before = drawer(page).getByRole("region", { name: "Before the log" });
   await expect(before).toContainText("Music: night-drive (1 variant)");
   await expect(drawer(page).getByText(/^Nothing yet/)).toHaveCount(0);
@@ -286,7 +298,7 @@ test("a long line wraps inside the drawer; nothing scrolls sideways (§22.8)", a
 
 test("5,000 lines: the drawer shows the newest 1000 and says so, and stays quick (R16, §22.9)", async ({ page, rushes }) => {
   await mkdir(join(rushes.root, ".rushes"), { recursive: true });
-  await writeFile(join(rushes.root, ".rushes", "log.json"), bigLog(5000, 12));
+  await replaceFile(join(rushes.root, ".rushes", "log.json"), bigLog(5000, 12));
   await page.goto(rushes.url);
   const t0 = Date.now();
   await logButton(page).click();
@@ -340,7 +352,7 @@ test("a focused row from an older day keeps focus when today's first line arrive
   await rushes.addCut("first cut");
   // Yesterday's history, by hand: a line that goes somewhere (the cut), so its row is a button.
   const at = new Date(Date.now() - 86_400_000).toISOString();
-  await writeFile(join(rushes.root, ".rushes", "log.json"), JSON.stringify({
+  await replaceFile(join(rushes.root, ".rushes", "log.json"), JSON.stringify({
     schema: 1, rev: 5, backfilled: true, undated: [], dropped: 0,
     entries: [{ id: "l_old", at, area: "picture", kind: "entry", text: "Look at the end card", video: "hero", version: "v1", ref: null, by: "agent", tab: null, n: 1, subject: "" }],
   }));
