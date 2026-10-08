@@ -103,6 +103,25 @@ describe("appendEvent (§22.5, R4, Review Focus 3)", () => {
     for (let i = 0; i < 10; i++) appendEvent(f, variantEvent(i % 2 ? sfx : music, { id: `v${i}`, name: `V${i}` }), "agent", at(i / 600));
     expect(texts(f)).toEqual(["Sound effects: 5 variants added", "Music: 5 variants added to night-drive"]);
   });
+  it("a line dated in the future (a clock that was ahead) doesn't swallow everything after it (I2)", () => {
+    const f = empty();
+    appendEvent(f, variantEvent(music, { id: "early", name: "Early" }), "agent", at(24 * 60)); // tomorrow
+    for (let h = 0; h < 20; h++) appendEvent(f, variantEvent(music, { id: `v${h}`, name: `V${h}` }), "agent", at(h * 60));
+    expect(f.entries).toHaveLength(21);
+    expect(f.entries[0]).toMatchObject({ text: "Music: “Early” added to night-drive", n: 1, at: at(24 * 60).toISOString() });
+    expect(texts(f)[0]).toBe("Music: “V19” added to night-drive");
+  });
+  it("a line a little ahead (within one window) still merges and keeps its later time; one further ahead doesn't", () => {
+    const f = empty();
+    appendEvent(f, variantEvent(music, { id: "a", name: "A" }), "agent", at(1));
+    appendEvent(f, variantEvent(music, { id: "b", name: "B" }), "agent", at(0));
+    expect(f.entries).toHaveLength(1);
+    expect(f.entries[0]).toMatchObject({ n: 2, at: at(1).toISOString() });
+    const g = empty();
+    appendEvent(g, variantEvent(music, { id: "a", name: "A" }), "agent", at(2.5));
+    appendEvent(g, variantEvent(music, { id: "b", name: "B" }), "agent", at(0));
+    expect(g.entries).toHaveLength(2);
+  });
   it("never merges two writers, or a count across different subjects without dropping the subject", () => {
     const f = empty();
     appendEvent(f, variantEvent(music, { id: "a", name: "A" }), "agent", at(0));

@@ -33,7 +33,11 @@ function mergeTarget(entries: LogEntry[], event: LogEvent, by: LogBy, t: number)
   const window = event.windowMs ?? MERGE_MS;
   for (let i = entries.length - 1; i >= 0; i--) {
     const e = entries[i];
-    if (!(t - Date.parse(e.at) <= window)) return -1; // older than the window, and so is everything before it
+    const age = t - Date.parse(e.at);
+    // More than a window ahead (written while a clock was ahead): never a target, or it would take
+    // in everything until its time came round (I2). Look past it.
+    if (age < -window) continue;
+    if (!(age <= window)) return -1; // older than the window, and so is everything before it
     if (e.kind === event.kind && e.area === event.area && e.by === by) return i;
   }
   return -1;
