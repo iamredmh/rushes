@@ -1022,8 +1022,10 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     if (!text) throw new InvalidError("text is empty: say what happened in one line");
     let video: string | null = null;
     let version: string | null = null;
-    const project = await store.read("project");
-    if (b.video) {
+    if (b.version && !b.video) throw new InvalidError("version needs video");
+    // Read only when something must be checked against it, so a plain line never depends on project.json (M5).
+    const project = b.video || b.ref ? await store.read("project") : null;
+    if (project && b.video) {
       let v;
       try {
         v = resolveVideo(project, b.video);
@@ -1035,11 +1037,9 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
         if (!v.versions.some((x) => x.id === b.version)) throw new NotFoundError("version", shown(b.version));
         version = b.version;
       }
-    } else if (b.version) {
-      throw new InvalidError("version needs video");
     }
     // A jump goes only to a variant ("<lane>/<variant>") or a take ("<section>:<take>") that exists.
-    if (b.ref) {
+    if (project && b.ref) {
       const script = await store.read("script");
       const refs = new Set([
         ...project.lanes.flatMap((l) => l.variants.map((x) => `${l.id}/${x.id}`)),

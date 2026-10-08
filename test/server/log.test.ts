@@ -464,6 +464,14 @@ describe("the log's routes (§22.7)", () => {
     }
   });
 
+  it("POST /api/log reads project.json only for a video, version or ref, so a plain line is kept while it can't be read (M5)", async () => {
+    const { store, call } = await setup();
+    await writeFile(store.path("project"), "{ broken", "utf8");
+    expect((await call("POST", "/api/log", { text: "Kept the wide" })).status).toBe(201);
+    expect((await call("POST", "/api/log", { text: "x", version: "v1" })).status).toBe(400);
+    expect((await call("POST", "/api/log", { text: "x", video: "hero" })).json.error).toBe("corrupt_file");
+  });
+
   it("GET /api/log: newest first, with limit, area and since, and how many it left out", async () => {
     const { call } = await setup();
     for (const [text, area] of [["One", "picture"], ["Two", "music"], ["Three", "picture"]] as const) await call("POST", "/api/log", { text, area });
