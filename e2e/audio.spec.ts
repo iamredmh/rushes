@@ -495,7 +495,10 @@ test("the preview keeps up during playback without repeated seeking", async ({ p
   await page.waitForTimeout(1500);
   const r = await page.evaluate(() => ({ seeks: (window as unknown as { __seeks: number }).__seeks, t: window.__rushesAudio!.engine!.time }));
   expect(r.t).toBeGreaterThan(1);
-  expect(r.seeks).toBeLessThanOrEqual(2);
+  // A seek loop would show dozens in 1.5 s (one per frame). A paused-then-playing video can seek a few
+  // times as it settles, and WebKit on the CI Macs does so about one run in twenty (measured on main
+  // too: 2 in 40 at a limit of 2, always 3-5), so the limit is a loop detector, not a count of zero.
+  expect(r.seeks).toBeLessThanOrEqual(8);
 });
 
 // ---- Voiceover (§18): rounds of whole reads ----
