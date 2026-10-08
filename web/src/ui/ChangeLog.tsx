@@ -148,7 +148,7 @@ function Row({ entry: e, to, onGo }: { entry: LogLine; to: JumpTarget | null; on
     <>
       <span class="ltime">{time}</span>
       <span class={`ltag ${e.area}`}>{AREA_LABELS[e.area]}</span>
-      <span class="ltext">
+      <span class="ltext" dir="auto">
         {e.text}
         <span class="lby">{BY_UI[e.by]}</span>
       </span>

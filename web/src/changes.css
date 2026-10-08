@@ -112,3 +112,6 @@ button.lrow:hover { background: var(--hover); }
   .clog .clabel { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 }
 @media (min-width: 1101px) { .clog[data-tip]::after { content: none; } }
+
+/* The header sits above the drawer (35), so its tooltips, which open downwards, aren't hidden by it. The version list (45) rides inside it. */
+.head { position: relative; z-index: 36; }

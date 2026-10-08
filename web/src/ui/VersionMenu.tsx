@@ -175,7 +175,7 @@ export function VersionMenu({ versions, shown, lockedVersion, onPick }: VersionM
         }}
       >
         <span class="vid">{shown.id}</span>
-        <span class="vlbl">{label}</span>
+        <span class="vlbl" dir="auto">{label}</span>
         <Icon name="chev" />
       </button>
       {open && (
@@ -197,13 +197,13 @@ export function VersionMenu({ versions, shown, lockedVersion, onPick }: VersionM
                 onClick={() => onRowClick(v.id)}
               >
                 <span class="vid">{v.id}</span>
-                <span class="vlbl">{shortLabel(v)}</span>
+                <span class="vlbl" dir="auto">{shortLabel(v)}</span>
                 <span class="vwhen">
                   {v.id === lockedVersion && <Icon name="lock" />}
                   {ago(v.addedAt, now)}
                 </span>
                 {touch && tapped === v.id && (
-                  <span class="vinline">
+                  <span class="vinline" dir="auto">
                     {oneLineOf(v.note) || "No note."}
                     <span class="vmeta">{versionMeta(v, now)}</span>
                   </span>
@@ -214,7 +214,7 @@ export function VersionMenu({ versions, shown, lockedVersion, onPick }: VersionM
           {!touch && (
             <div class="vdetail" id="vdetail">
               <h4>{detail.id}</h4>
-              <p>{oneLineOf(detail.note) || "No note."}</p>
+              <p dir="auto">{oneLineOf(detail.note) || "No note."}</p>
               <span class="vmeta">{versionMeta(detail, now)}</span>
             </div>
           )}
@@ -252,7 +252,7 @@ export function VersionNote({ version }: { version: Version }) {
   const id = `vnote-${version.id}`;
   return (
     <div class="vnote">
-      <span ref={text} id={id} class={more ? "vtext" : "vtext vclamp"}>{note}</span>
+      <span ref={text} id={id} class={more ? "vtext" : "vtext vclamp"} dir="auto">{note}</span>
       {(clamped || more) && (
         <button type="button" class="vmore" aria-expanded={more} aria-controls={id} onClick={() => setMore(!more)}>
           {more ? "Less" : "More"}

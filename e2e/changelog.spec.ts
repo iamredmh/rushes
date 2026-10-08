@@ -624,3 +624,58 @@ test("under 1100 px the Change Log button is its icon, named for screen readers 
   expect((await button.boundingBox())!.width).toBeGreaterThan(100);
   expect(await button.evaluate((el) => getComputedStyle(el, "::after").content)).toBe("none");
 });
+
+test("a label, a note and a log line in a right-to-left script start on their own side, so truncation keeps the start (final review)", async ({ page, rushes }) => {
+  const hebrew = "גרסה ארוכה מאוד שנחתכת בסוף השורה כדי לבדוק את הקיצור של התווית";
+  await rushes.addCut("v1: first pass; rough timing");
+  await rushes.api("POST", "/api/versions", { video: "Hero", file: "renders/hero_v1.mp4", note: hebrew, label: hebrew.slice(0, 44) });
+  await rushes.api("POST", "/api/log", { text: hebrew, area: "picture" });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  const direction = (el: Element) => getComputedStyle(el).direction; // for evaluate(); evaluateAll can't see it
+  // The version button and the note under the picture.
+  await expect(versionButton(page)).toContainText(hebrew.slice(0, 10));
+  expect(await page.locator(".vbtn .vlbl").evaluate(direction)).toBe("rtl");
+  expect(await page.locator(".vnote .vtext").evaluate(direction)).toBe("rtl");
+  // The open list: each row by its own text, and the note beside it.
+  await versionButton(page).click();
+  expect(await page.locator(".vrow .vlbl").evaluateAll((els) => els.map((el) => getComputedStyle(el).direction))).toEqual(["rtl", "ltr"]);
+  await expect(page.locator(".vdetail p")).toContainText(hebrew.slice(0, 10));
+  expect(await page.locator(".vdetail p").evaluate(direction)).toBe("rtl");
+  await page.keyboard.press("Escape");
+  // The drawer's rows go by their own first letter: the Hebrew line is right-to-left, "2 cuts added, …" is not.
+  await logButton(page).click();
+  await expect(rows(page)).toHaveCount(2);
+  expect(await rows(page).locator(".ltext").evaluateAll((els) => els.map((el) => [(el.textContent ?? "").slice(0, 2), getComputedStyle(el).direction]))).toEqual([
+    [hebrew.slice(0, 2), "rtl"],
+    ["2 ", "ltr"],
+  ]);
+});
+
+test("the header's tooltips stay above the open drawer, so Shortcuts can still be read (final review)", async ({ page, rushes }) => {
+  await rushes.addCut("first cut");
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await logButton(page).click();
+  await settled(page);
+  // A tooltip is a pseudo-element with pointer-events none, so a test can't hit it; with the events
+  // on, the element under a point inside it is the button's own, unless the drawer covers it.
+  await page.addStyleTag({ content: ".head [data-tip]::after { pointer-events: auto !important; }" });
+  const keys = page.getByRole("button", { name: "Keyboard shortcuts" });
+  await keys.hover();
+  await expect(keys).toHaveCSS("position", "relative");
+  const box = (await keys.boundingBox())!;
+  const head = (await page.locator("header.head").boundingBox())!;
+  const d = (await drawer(page).boundingBox())!;
+  // A point of the tooltip that lies below the header, and so over the drawer when it covers it.
+  const x = box.x + box.width / 2;
+  const y = head.y + head.height + 4;
+  expect(y).toBeGreaterThan(box.y + box.height + 8);
+  expect(y).toBeLessThan(box.y + box.height + 8 + 20);
+  expect(x).toBeGreaterThan(d.x);
+  const hit = await page.evaluate(([px, py]) => {
+    const el = document.elementFromPoint(px, py);
+    return { inDrawer: !!el?.closest(".drawer"), tip: el?.closest("[data-tip]")?.getAttribute("aria-label") ?? null };
+  }, [x, y]);
+  expect(hit).toEqual({ inDrawer: false, tip: "Keyboard shortcuts" });
+});
