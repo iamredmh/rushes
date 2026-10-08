@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { existsSync } from "node:fs";
-import { mkdir, symlink, writeFile } from "node:fs/promises";
+import { mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { probeVideo, type VideoProbe } from "../../src/core/media.js";
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
@@ -289,6 +289,46 @@ describe("serving format files (§21.6, §15.5)", () => {
     expect(out.status).toBe(200);
     expect(await out.text()).toBe("square bytes");
     expect((await app.request(`/media?path=${encodeURIComponent("renders/link_1350x1080.mp4")}`)).status).toBe(404);
+  });
+
+  // Final review M2: a cut or a format whose real file lies outside the project is served only as
+  // video (or audio); the library's other kinds (text, images, PDFs) are never served for one.
+  it("serves a cut or format that resolves outside only as video or audio; inside the project nothing changes", async () => {
+    const { root, app, call, store } = await setup([WIDE, TALL]);
+    const out = join(root, "..", "hf");
+    await mkdir(out, { recursive: true });
+    for (const [name, bytes] of [["notes.txt", "private notes"], ["square.mkv", "mkv bytes"], ["portrait.mov", "mov bytes"], ["still.png", "png bytes"], ["bed.wav", "wav bytes"]]) {
+      await writeFile(join(out, name), bytes);
+    }
+    // A format registered as a link into the project, later swapped to point at a text file outside.
+    await symlink(join(out, "square.mkv"), join(root, "renders", "sq_1080x1080.mp4"));
+    await call("POST", "/api/versions", { video: "Hero", file: WIDE, formats: [{ file: TALL }, { file: "renders/sq_1080x1080.mp4" }] });
+    const media = (p: string) => app.request(`/media?path=${encodeURIComponent(p)}`);
+    const served = await media("renders/sq_1080x1080.mp4");
+    expect(served.status).toBe(200);
+    expect(await served.text()).toBe("mkv bytes");
+    await rm(join(root, "renders", "sq_1080x1080.mp4"));
+    await symlink(join(out, "notes.txt"), join(root, "renders", "sq_1080x1080.mp4"));
+    expect((await media("renders/sq_1080x1080.mp4")).status).toBe(404);
+    // The same for a cut, and for a format or cut named by its outside path in a hand edit.
+    await store.update("project", (p) => {
+      addVersion(p, { video: "Teaser", file: join(out, "notes.txt") });
+      addVersion(p, { video: "Still", file: join(out, "still.png") });
+      addVersion(p, { video: "Portrait", file: join(out, "portrait.mov") });
+      addVersion(p, { video: "Bed", file: join(out, "bed.wav") });
+      p.videos[0].versions[0].formats.push({ id: "4x5", label: "4:5", file: join(out, "notes.txt"), width: 1080, height: 1350, duration: 8, fps: 30, addedAt: "2026-10-08T00:00:00Z" });
+    });
+    expect((await media(join(out, "notes.txt"))).status).toBe(404);
+    expect((await media(join(out, "still.png"))).status).toBe(404);
+    expect((await media(join(out, "portrait.mov"))).status).toBe(200);
+    expect((await media(join(out, "bed.wav"))).status).toBe(200);
+    // A library file outside keeps its own rules: a registered text file there is still served.
+    await call("POST", "/api/files", { kind: "doc", file: join(out, "notes.txt") });
+    expect((await media(join(out, "notes.txt"))).status).toBe(200);
+    // Inside the project nothing changes: a cut is served whatever its extension.
+    await writeFile(join(root, "renders", "cut.txt"), "inside");
+    await store.update("project", (p) => void addVersion(p, { video: "Inside", file: "renders/cut.txt" }));
+    expect((await media("renders/cut.txt")).status).toBe(200);
   });
 
   it("the frame route reads a format's own file with ?format= (R12)", async () => {

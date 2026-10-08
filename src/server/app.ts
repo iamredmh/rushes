@@ -19,7 +19,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { GRAB_PATH, SCREENSHOT_PATH, contentDisposition, contentType, foundMediaFile, inside, isInlineSafeType, mediaSecurityHeaders, registeredMedia, sendFile, servableFile } from "./files.js";
+import { GRAB_PATH, OUTSIDE_CUT_EXT, OUTSIDE_MEDIA_EXT, SCREENSHOT_PATH, contentDisposition, contentType, cutOnlyFiles, foundMediaFile, inside, isInlineSafeType, mediaSecurityHeaders, registeredMedia, sendFile, servableFile } from "./files.js";
 import { BRING_IN_MAX, FoundScanner, type BringInFailure, type BringInKind, ffprobeDuration, foundAnnouncer, type FoundEntry } from "./found.js";
 import { candidatePaths, listAssets, fpsFor, screenshotName } from "./assets.js";
 import { osRevealer, osOpener, OPEN_SAFE_EXT, type Revealer, type Opener } from "./reveal.js";
@@ -439,7 +439,8 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     }
     if (!viaFound) {
       // §15.5: a registered file reached through a symlink out of the project is served only if it is media.
-      const servable = await servableFile(store.root, file);
+      // Final review M2: a cut or format that resolves outside the project is served only as video or audio.
+      const servable = await servableFile(store.root, file, cutOnlyFiles(project, script).has(path) ? OUTSIDE_CUT_EXT : OUTSIDE_MEDIA_EXT);
       if (!servable) throw new NotFoundError("media", path);
       file = servable;
     }

@@ -3,6 +3,7 @@ import { lstat, realpath, stat } from "node:fs/promises";
 import { extname, isAbsolute, join, normalize, sep } from "node:path";
 import { Readable } from "node:stream";
 import type { Project, Script } from "../core/schema.js";
+import { VIDEO_EXT } from "../core/media.js";
 import { PROXY_PATH } from "./proxy.js";
 
 export const CONTENT_TYPES: Record<string, string> = {
@@ -120,13 +121,33 @@ export const OUTSIDE_MEDIA_EXT: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Final review M2: a cut or a format whose real file lies outside the project is served only as
+ * video (the dashboard's VIDEO_EXT) or as the audio §15.5 already serves; never as text, an image
+ * or a PDF, which the library's other files may be. Inside the project nothing changes.
+ */
+export const OUTSIDE_CUT_EXT: ReadonlySet<string> = new Set([...VIDEO_EXT, "wav", "mp3", "m4a", "aac", "aif", "aiff", "flac", "ogg", "opus"]);
+
+/** Every path registered as a cut or a cut's format, and as nothing else (a library file keeps its own rules). */
+export function cutOnlyFiles(project: Project, script: Script): Set<string> {
+  const other = new Set<string>();
+  for (const l of project.lanes) for (const variant of l.variants) other.add(variant.file);
+  for (const s of script.sections) for (const t of s.takes) other.add(t.file);
+  for (const f of project.files) other.add(f.file);
+  const cuts = new Set<string>();
+  for (const v of project.videos) {
+    for (const ver of v.versions) for (const file of [ver.file, ...ver.formats.map((f) => f.file)]) if (!other.has(file)) cuts.add(file);
+  }
+  return cuts;
+}
+
+/**
  * The file /media sends for a path it has already accepted: its real path, every symlink
  * resolved. A real path inside the project is served whatever it is, as before. Policy (§15.5):
  * one outside the project is served only if the FINAL real file's extension is media
  * (`OUTSIDE_MEDIA_EXT`), so a take swapped for a link to a key file is never served. Null means
  * refuse. A file that isn't there gives back the plain path, so the send reports it missing.
  */
-export async function servableFile(root: string, abs: string): Promise<string | null> {
+export async function servableFile(root: string, abs: string, outsideExt: ReadonlySet<string> = OUTSIDE_MEDIA_EXT): Promise<string | null> {
   let real: string;
   try {
     real = await realpath(abs);
@@ -141,7 +162,7 @@ export async function servableFile(root: string, abs: string): Promise<string | 
   }
   if (real === realRoot || real.startsWith(realRoot.endsWith(sep) ? realRoot : realRoot + sep)) return real;
   const ext = extname(real).toLowerCase().replace(/^\./, "");
-  return OUTSIDE_MEDIA_EXT.has(ext) ? real : null;
+  return outsideExt.has(ext) ? real : null;
 }
 
 /** Parse a single "bytes=a-b" range against a file size. Returns null for a missing or unusable range. */
