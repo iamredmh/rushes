@@ -67,7 +67,8 @@ export function CueCard({ shown, onHide }: { shown: Shown | null; onHide(): void
       const next = cardPosition(
         { left: r.left, top: r.top, width: r.width, height: r.height },
         { width: el.offsetWidth, height: el.offsetHeight },
-        { width: window.innerWidth, height: window.innerHeight },
+        // The visible area: innerWidth/Height include a classic scrollbar.
+        { width: document.documentElement.clientWidth, height: document.documentElement.clientHeight },
       );
       setAt((prev) => (prev && prev.left === next.left && prev.top === next.top ? prev : next));
     };

@@ -375,7 +375,7 @@ export function Lanes({ rows, length, media, selected, marks, range, onSelect, o
                       onSeek(c.t, row, c.id);
                     }}
                   >
-                    <span>{c.name}</span>
+                    <span>{cueName(c)}</span>
                   </button>
                 );
               })}

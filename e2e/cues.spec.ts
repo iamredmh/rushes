@@ -282,6 +282,38 @@ test("the card stays 16 px inside a narrow window when ← and → walk onto a c
   expect(box.width).toBeGreaterThan(300);
 });
 
+test("the card keeps 16 px inside the visible area when a classic scrollbar takes some of the window", async ({ page, rushes }) => {
+  await page.setViewportSize({ width: 1000, height: 800 });
+  const LONG = `audio/sfx/samples/${"impact_sub_heavy_".repeat(5)}01.wav`;
+  await rushes.addVariant("sfx", "Effects for Lumen", {
+    seconds: 6,
+    freq: 880,
+    cues: [{ name: "pop", t: 5.2 }, { name: "boom", t: 5.9, file: LONG }],
+  });
+  await openSfx(page, rushes, 1);
+  // Headless browsers hide scrollbars. A classic one narrows the document's clientWidth, not the window's innerWidth.
+  await page.evaluate(() => Object.defineProperty(document.documentElement, "clientWidth", { configurable: true, get: () => window.innerWidth - 15 }));
+  await lane(page).getByRole("button", { name: "pop at 0:05.20", exact: true }).focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(card(page).locator(".f")).toHaveText(LONG);
+  const box = (await card(page).boundingBox())!;
+  expect(box.x + box.width).toBeLessThanOrEqual(1000 - 15 - 16);
+});
+
+test("a cue whose name is blank reads \"Untitled cue\" on the waveform, as it does on its card and its layer", async ({ page, rushes }) => {
+  await rushes.addVariant("sfx", "Effects for Lumen", {
+    seconds: 6,
+    freq: 880,
+    cues: [{ name: "   ", t: 2 }, { name: "pop", t: 4 }],
+  });
+  await openSfx(page, rushes, 1);
+  const blank = lane(page).getByRole("button", { name: "Untitled cue at 0:02.00", exact: true });
+  await expect(blank).toHaveText("Untitled cue");
+  await blank.hover();
+  await expect(card(page).locator("b")).toHaveText("Untitled cue");
+  await expect(lane(page).locator("button.cue")).toHaveText(["Untitled cue", "pop"]);
+});
+
 test("the first, last and after-the-end ticks of a layer show whole, inside the track", async ({ page, rushes }) => {
   await rushes.addVariant("sfx", "Effects for Lumen", {
     seconds: 4,
