@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { LABEL_MAX, clip, oneLine, oneLineOf, shortLabel } from "../../src/core/labels.js";
 import { addVersion } from "../../src/core/project.js";
 import { ProjectSchema, type Project } from "../../src/core/schema.js";
+import { modulesPulledIn } from "../helpers/imports.js";
 
 const v = (id: string, note: string, extra: { label?: string; file?: string } = {}) => ({
   id, note, file: extra.file ?? "renders/lumen_v6.mp4", ...(extra.label !== undefined ? { label: extra.label } : {}),
@@ -177,23 +178,6 @@ describe("Version.label (§22.3, R2)", () => {
     expect(addVersion(p, { video: "Hero", file: "c.mp4", label: "\u200b\u202e" }).version.label).toBe("");
   });
 });
-
-// What would pull zod or Node into the web bundle: any import or export declaration that names a
-// module (including `export * as ns from`, `import x = require()` and type-only ones), a dynamic
-// import(), or a require() call. Found by walking the syntax tree, so formatting can't hide one.
-function modulesPulledIn(text: string): string[] {
-  const sf = ts.createSourceFile("labels.ts", text, ts.ScriptTarget.ES2022, true);
-  const found: string[] = [];
-  const visit = (n: ts.Node): void => {
-    if ((ts.isImportDeclaration(n) || ts.isExportDeclaration(n)) && n.moduleSpecifier) found.push(n.moduleSpecifier.getText(sf));
-    else if (ts.isImportEqualsDeclaration(n) && ts.isExternalModuleReference(n.moduleReference)) found.push(n.moduleReference.getText(sf));
-    else if (ts.isCallExpression(n) && (n.expression.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(n.expression) && n.expression.text === "require"))) found.push(n.getText(sf));
-    else if (ts.isImportTypeNode(n)) found.push(n.getText(sf));
-    ts.forEachChild(n, visit);
-  };
-  visit(sf);
-  return found;
-}
 
 it("the import check sees every way of pulling a module in", () => {
   for (const bad of ['import "zod";', 'import { z } from "zod";', 'import type { T } from "./x.js";', 'export * from "zod";', 'export * as z from "zod";', 'export { a } from "./x.js";',

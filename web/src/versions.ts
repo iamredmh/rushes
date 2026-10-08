@@ -1,7 +1,11 @@
 // §22.4 and §22.8: the version list's helpers. Pure, so they're unit-tested in Node. shortLabel comes
 // from src/core/labels.ts, which has no imports at all, so nothing from the server reaches the bundle.
 import { shortLabel, type Labelled } from "../../src/core/labels.js";
+import { dayDiff } from "../../src/core/logText.js";
 export { LABEL_MAX, oneLineOf, shortLabel, type Labelled } from "../../src/core/labels.js";
+// The calendar-day rule lives with the Change Log's words (logText.ts imports only labels.ts), so
+// "yesterday" here and the log's "Yesterday" heading can never disagree.
+export { dayDiff } from "../../src/core/logText.js";
 
 /** Assets › Cuts (§22.4): a cut's subtitle is its short label. A cut with no label and no note has none, because its file name is already shown. */
 export function cutSubtitle(v: Labelled | undefined): string | null {
@@ -10,19 +14,6 @@ export function cutSubtitle(v: Labelled | undefined): string | null {
 }
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-
-/**
- * How many calendar days, in local time, from the day of `iso` to the day of `now`: 0 is today, 1 is
- * yesterday, negative is a clock ahead; null when `iso` isn't a date. A day with a clock change (23 or
- * 25 hours) still counts as one. The version list and the Change Log's day headings both use it.
- */
-export function dayDiff(iso: string, now: Date): number | null {
-  const t = Date.parse(iso);
-  if (!Number.isFinite(t)) return null;
-  const d = new Date(t);
-  const day = (x: Date) => Date.UTC(x.getFullYear(), x.getMonth(), x.getDate()) / 86_400_000;
-  return day(now) - day(d);
-}
 
 type Ago = { just: true } | { n: number; unit: "minute" | "hour" | "day" } | { yesterday: true } | { date: Date };
 
