@@ -41,6 +41,13 @@ function mergeTarget(entries: LogEntry[], event: LogEvent, by: LogBy, t: number)
 
 type Link = Pick<LogEntry, "video" | "version" | "ref" | "tab">;
 
+/** `wanted` when no line has it yet, otherwise a new id that none has. Ids are short and random, so a long log can draw one twice (I1). */
+function freshId(taken: (id: string) => boolean, wanted?: string): string {
+  let id = wanted ?? newId("l");
+  while (taken(id)) id = newId("l");
+  return id;
+}
+
 // §22.9: a retried request repeats the event it already logged. For a count, that's the same cut
 // (video and version) or the same variant or take (ref) as the line's latest; files and notes have
 // no identity, so two of them are two.
@@ -69,7 +76,7 @@ function mergeInto(e: LogEntry, event: LogEvent, text: string, subject: string, 
  * the newest LOG_MAX. Returns the line written or updated. A line with nothing visible in it is
  * refused with an error, and the file is left as it was.
  */
-export function appendEvent(file: LogFile, event: LogEvent, by: LogBy, at: Date, id: string = newId("l")): LogEntry {
+export function appendEvent(file: LogFile, event: LogEvent, by: LogBy, at: Date, id?: string): LogEntry {
   const t = at.getTime();
   const iso = at.toISOString();
   const text = logText(event.text);
@@ -93,7 +100,7 @@ export function appendEvent(file: LogFile, event: LogEvent, by: LogBy, at: Date,
       return e;
     }
   }
-  const entry: LogEntry = { id, at: iso, area: event.area, kind: event.kind, text, ...link, by, n: count, subject };
+  const entry: LogEntry = { id: freshId((x) => file.entries.some((e) => e.id === x), id), at: iso, area: event.area, kind: event.kind, text, ...link, by, n: count, subject };
   file.entries.push(entry);
   const extra = file.entries.length - LOG_MAX;
   if (extra > 0) {
@@ -129,6 +136,11 @@ export function backfillLog(file: LogFile, src: BackfillSource, before: number):
   dated.sort((a, b) => a.t - b.t);
   const past: LogFile = { schema: 1, rev: 0, backfilled: true, undated: [], dropped: 0, entries: [] };
   for (const d of dated) appendEvent(past, d.event, "rushes", new Date(d.t));
+  const ids = new Set(file.entries.map((e) => e.id));
+  for (const e of past.entries) {
+    e.id = freshId((x) => ids.has(x), e.id);
+    ids.add(e.id);
+  }
   file.entries = [...past.entries, ...file.entries];
   file.dropped += past.dropped;
   const extra = file.entries.length - LOG_MAX;
