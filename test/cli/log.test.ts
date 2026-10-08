@@ -33,6 +33,9 @@ describe("rushes add version --label (§22.4)", () => {
     const h = io(root);
     await main([], h.x);
     expect(h.out.join("\n")).toContain("rushes add version <file> --video NAME [--label TEXT] [--note TEXT]");
+    // --label means two things by command: the help says which (merge of §21 and §22).
+    expect(h.out.join("\n")).toMatch(/--label: the cut's short label in the version list/);
+    expect(h.out.join("\n")).toMatch(/--label here is only a ratio hint such as 2\.39:1, not the cut's label/);
     await s.close();
   });
 });

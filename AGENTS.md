@@ -92,7 +92,7 @@ The user sees the rest in **Assets › Found**, the first folder in Assets: file
 
 ## The Change Log
 
-Rushes keeps a log of what happened in the project, written as it happens (`.rushes/log.json`, oldest first on disk; every view of it is newest first): cuts, voice reads, music beds, sound-effects passes, takes, the script, picks, picture lock and unlock, notes sent, your replies, files added and bring-ins. A burst of registrations is one line. The user opens it from the **Change Log** button.
+Rushes keeps a log of what happened in the project, written as it happens (`.rushes/log.json`, oldest first on disk; every view of it is newest first): cuts, formats (another shape of a cut, e.g. "9:16 added to v2"), voice reads, music beds, sound-effects passes, takes, the script, picks, picture lock and unlock, notes sent, your replies, files added and bring-ins. A burst of registrations is one line. The user opens it from the **Change Log** button.
 
 - **At the start of a session, call `rushes_get_log`** to catch up on what changed since you last worked on the project. It takes `limit` (default 30, at most 200), `area` and `since` (a date and time). It returns `entries` newest first, `earlier` (how many it left out), `undated` (audio from before the log) and `dropped` (lines removed past 5000).
 - **When you change direction or make a decision**, add one line with `rushes_log` (`text`, optional `area`, `video`, `version`, `ref`), e.g. "Slowed the zooms: the first cut felt rushed". One line per decision, not a running commentary, 160 characters at most. The log is exported and shared, so never copy a note's or reply's text into it. Don't log what Rushes logs itself.

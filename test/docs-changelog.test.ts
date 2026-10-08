@@ -27,6 +27,8 @@ describe("shipped docs: the Change Log (§22.7)", () => {
     expect(text).toMatch(/picture lock/i);
     expect(text).toMatch(/files added/i);
     expect(text).toMatch(/bring-ins/i);
+    // §21 + §22.5: another shape of a cut is logged too.
+    expect(text).toMatch(/cuts, formats/);
     expect(text).toMatch(/one line per decision/i);
     expect(text).toMatch(/never copy a note's or reply's text/i);
   });
@@ -44,6 +46,7 @@ describe("README: the Change Log (§22)", () => {
     expect(text).toContain("## The Change Log");
     for (const s of ["rushes log --md", 'rushes log add "', "change-log-<date>.md", "Before the log", "log.json"]) expect(text, s).toContain(s);
     expect(text).toMatch(/version list/i);
+    expect(text).toContain("9:16 added to v2");
     expect(text).not.toMatch(/\/Users\//);
   });
 });

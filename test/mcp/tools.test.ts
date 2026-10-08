@@ -857,6 +857,46 @@ describe("formats against a server that isn't the current one (§21.4)", () => {
     await f.close();
   });
 
+  it("rushes_add_version against a 0.2.x Rushes that drops both the label and formats says both, exactly (merge of §21 and §22)", async () => {
+    // A 0.2.x reply: no label, no formats.
+    const old = await fakeServer((_req, res) => {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ video: { id: "hero", name: "Hero" }, version: { id: "v1", file: "a.mp4", note: "" } }));
+    });
+    const both = JSON.parse((await old.call("rushes_add_version", { video: "Hero", file: "a.mp4", label: "logo hold", formats: [{ file: "b.mp4" }] })).text).note;
+    expect(both).toBe("An older Rushes is running and dropped the label and ignored `formats`: the cut is in, without its label and without its other shapes. Run `rushes stop`, then open again and add the shapes with rushes_add_format.");
+    expect(JSON.parse((await old.call("rushes_add_version", { video: "Hero", file: "a.mp4", label: "logo hold" })).text).note).toBe(
+      "An older Rushes is running and dropped the label: the cut was added without it. Run `rushes stop`, then open again.",
+    );
+    expect(JSON.parse((await old.call("rushes_add_version", { video: "Hero", file: "a.mp4", formats: [{ file: "b.mp4" }] })).text).note).toBe(
+      "An older Rushes is running and ignored `formats`: the cut is in, its other shapes are not. Run `rushes stop`, then add them with rushes_add_format.",
+    );
+    await old.close();
+    // A Rushes that keeps the label but has no formats says only the formats; one that keeps both says nothing.
+    const labelOnly = await fakeServer((_req, res) => {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ video: { id: "hero", name: "Hero" }, version: { id: "v1", file: "a.mp4", note: "", label: "logo hold" } }));
+    });
+    expect(JSON.parse((await labelOnly.call("rushes_add_version", { video: "Hero", file: "a.mp4", label: "logo hold", formats: [{ file: "b.mp4" }] })).text).note).toMatch(/^An older Rushes is running and ignored `formats`/);
+    await labelOnly.close();
+    const current = await fakeServer((_req, res) => {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ video: { id: "hero", name: "Hero" }, version: { id: "v1", file: "a.mp4", note: "", label: "logo hold", formats: [] } }));
+    });
+    expect(JSON.parse((await current.call("rushes_add_version", { video: "Hero", file: "a.mp4", label: "logo hold", formats: [{ file: "b.mp4" }] })).text).note).toBeUndefined();
+    await current.close();
+  });
+
+  it("the two meanings of `label` are told apart in the tools' own words", async () => {
+    const t = await connect();
+    const { tools } = await t.client.listTools();
+    const prop = (tool: string) => (tools.find((x) => x.name === tool)!.inputSchema.properties as Record<string, { description?: string }>).label.description!;
+    expect(prop("rushes_add_version")).toMatch(/short label for the version list/);
+    expect(prop("rushes_add_format")).toMatch(/ratio hint only/);
+    expect(prop("rushes_add_format")).toMatch(/Not the cut's short label/);
+    await t.close();
+  });
+
   it("rushes_list_notes with a format against an older Rushes, which ignores it, says so", async () => {
     const f = await fakeServer((_req, res) => {
       res.setHeader("content-type", "application/json");

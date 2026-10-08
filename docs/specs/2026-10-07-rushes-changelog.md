@@ -32,7 +32,7 @@ LogEntry = {
   id: string,
   at: string,                         // ISO time, set by the server
   area: "script" | "picture" | "voice" | "music" | "sfx" | "mix" | "assets" | "project",
-  kind: "cut" | "variant" | "take" | "script" | "picks" | "notes-sent" | "replies" | "lock" | "files" | "entry",
+  kind: "cut" | "variant" | "take" | "script" | "picks" | "notes-sent" | "replies" | "lock" | "files" | "entry" | "format",
   text: string,                       // one line, 160 characters at most
   video: string | null,               // for a jump to Picture
   version: string | null,
@@ -71,7 +71,8 @@ Rushes writes an entry at the moment it commits the change. One line each. Text 
 | The agent replies | notes | `Agent replied to 3 notes (2 done)` (one line per reply call; calls in a burst are one line counting every note) |
 | Files are added | assets | `2 files added: Scripts & docs` |
 | Someone adds a line | any | the line itself |
-| A format is added (once §21 is built) | picture | `9:16 added to v2` |
+| A format is added (`POST /api/formats`, §21) | picture | `9:16 added to v2` (formats added to one cut in a burst: `9:16 and 1:1 added to v2`) |
+| A cut is added with its other shapes (`formats` on `POST /api/versions`) | picture | `v2 and its 9:16 and 1:1 added: launch 1.45x slower` (still one line for the one write) |
 
 **Not logged:** individual notes, mix levels, screenshots, proxies, anything automatic such as the scan's current set (that is one line: `Brought in 3 files with v6`, by `rushes`).
 

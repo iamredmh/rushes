@@ -5,7 +5,7 @@ import { oneLine, oneLineOf } from "./labels.js";
 
 export const LOG_AREAS = ["script", "picture", "voice", "music", "sfx", "mix", "notes", "assets", "project"] as const;
 export type LogArea = (typeof LOG_AREAS)[number];
-export const LOG_KINDS = ["cut", "variant", "take", "script", "picks", "notes-sent", "replies", "lock", "files", "entry"] as const;
+export const LOG_KINDS = ["cut", "variant", "take", "script", "picks", "notes-sent", "replies", "lock", "files", "entry", "format"] as const;
 export type LogKind = (typeof LOG_KINDS)[number];
 export const LOG_BY = ["user", "agent", "rushes"] as const;
 export type LogBy = (typeof LOG_BY)[number];

@@ -36,17 +36,55 @@ export function cutName(films: number, video: Pick<Video, "name">, versionId: st
   return films > 1 && film ? `${film} ${versionId}` : versionId;
 }
 
-/** "v6 added: launch 1.45x slower". */
-export function cutEvent(films: number, video: Pick<Video, "id" | "name">, version: Labelled): LogEvent {
+/** "9:16", "9:16 and 1:1", "9:16, 1:1 and 4:5". */
+function andList(items: readonly string[]): string {
+  return items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
+/** A format's ratio label as stored ("9:16", "2.39:1"): never a free text, so nothing else gets in. */
+const RATIO_LABEL = /^\d+(\.\d+)?:\d+(\.\d+)?$/;
+const ratioLabels = (labels: readonly string[] = []) => labels.map((l) => oneLineOf(l)).filter((l) => RATIO_LABEL.test(l));
+
+/**
+ * "v6 added: launch 1.45x slower". A cut registered with its other shapes in the same call
+ * (§21.4 `formats`) is still one line, one write: "v6 and its 9:16 and 1:1 added: launch 1.45x slower".
+ */
+export function cutEvent(films: number, video: Pick<Video, "id" | "name">, version: Labelled, formatLabels?: readonly string[]): LogEvent {
   const name = cutName(films, video, version.id);
   const label = shortLabel(version);
+  const shapes = ratioLabels(formatLabels);
   return {
     area: "picture", kind: "cut", merge: "count", subject: video.id,
-    text: `${name} added: ${label}`,
+    text: shapes.length ? `${name} and its ${andList(shapes)} added: ${label}` : `${name} added: ${label}`,
     video: video.id, version: version.id,
     many: (n, subject) => {
       const film = named(video.name, PLACE_MAX);
       return `${n} cuts added${films > 1 && subject && film ? ` to ${film}` : ""}, the latest ${name}: ${label}`;
+    },
+  };
+}
+
+/**
+ * §22.5: "9:16 added to v2" (POST /api/formats). Named as cuts are ("Teaser v2" when there are more
+ * films); only the ratio and the cut, never a note. Formats added to one cut in a burst are one line
+ * that names each ("9:16, 1:1 and 4:5 added to v2"); to several cuts, "3 formats added". A retried
+ * request (the same format of the same cut) is absorbed.
+ */
+export function formatEvent(films: number, video: Pick<Video, "id" | "name">, versionId: string, format: { id: string; label: string }): LogEvent {
+  const name = cutName(films, video, versionId);
+  const label = ratioLabels([format.label])[0] ?? "A format";
+  const tail = ` added to ${name}`;
+  return {
+    area: "picture", kind: "format", merge: "count", subject: `${video.id}/${versionId}`,
+    text: `${label}${tail}`,
+    video: video.id, version: versionId, ref: format.id,
+    many: (n, subject, before) => {
+      if (!subject) return `${n} formats added`;
+      // The line so far names the ratios already in it; add this one when every name still reads as a ratio.
+      const head = before?.endsWith(tail) ? before.slice(0, -tail.length) : "";
+      const names = head.split(/, | and /);
+      if (head && names.every((x) => RATIO_LABEL.test(x)) && names.length + 1 === n && !names.includes(label)) return `${andList([...names, label])}${tail}`;
+      return `${n} formats added to ${name}`;
     },
   };
 }

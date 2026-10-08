@@ -58,7 +58,7 @@ describe("the Change Log for agents (§22.7)", () => {
     expect((await t.call("rushes_get_log", { limit: 201 })).isError).toBe(true);
     expect((await t.call("rushes_log", { text: "" })).isError).toBe(true);
     const { tools } = await t.client.listTools();
-    expect(tools.find((x) => x.name === "rushes_log")!.description).toMatch(/already logs cuts/);
+    expect(tools.find((x) => x.name === "rushes_log")!.description).toMatch(/already logs cuts, formats/);
     expect(tools.find((x) => x.name === "rushes_get_log")!.description).toMatch(/start of a session/);
     expect(tools.find((x) => x.name === "rushes_export_notes")!.description).toMatch(/change-log-<date>\.md/);
     await t.client.close();

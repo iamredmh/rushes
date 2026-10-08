@@ -461,7 +461,7 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     {
       title: "Add a line to the Change Log",
       description:
-        'Adds one line to the project\'s Change Log, as the agent: a decision or a change of direction, e.g. "Slowed the zooms: the first cut felt rushed". One line, 160 characters at most (longer is cut): one line per decision, not a running commentary. The log is exported and shared, so never copy a note\'s or reply\'s text into it. Rushes already logs cuts, voice reads, music, sound effects, takes, the script, picks, picture lock and unlock, notes sent, replies, files added and bring-ins by itself, so don\'t repeat those. `area` defaults to project; `video`, `version` and `ref` ("<lane>/<variant>" or "<section>:<take>") let the line open that place in the dashboard. Returns the line.',
+        'Adds one line to the project\'s Change Log, as the agent: a decision or a change of direction, e.g. "Slowed the zooms: the first cut felt rushed". One line, 160 characters at most (longer is cut): one line per decision, not a running commentary. The log is exported and shared, so never copy a note\'s or reply\'s text into it. Rushes already logs cuts, formats (another shape of a cut), voice reads, music, sound effects, takes, the script, picks, picture lock and unlock, notes sent, replies, files added and bring-ins by itself, so don\'t repeat those. `area` defaults to project; `video`, `version` and `ref` ("<lane>/<variant>" or "<section>:<take>") let the line open that place in the dashboard. Returns the line.',
       inputSchema: {
         project,
         text: z.string().min(1).max(2000).describe("What happened, in one line."),

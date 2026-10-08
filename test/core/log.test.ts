@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { appendEvent, backfillLog, logView, undatedLines, undatedRefs } from "../../src/core/log.js";
 import {
-  FILE_FOLDERS, broughtInEvent, cutEvent, fileEvent, lineEvent, lockEvent, notesSentEvent, picksEvent, repliesEvent, scriptEvent, takeEvent, variantEvent,
+  FILE_FOLDERS, broughtInEvent, cutEvent, fileEvent, formatEvent, lineEvent, lockEvent, notesSentEvent, picksEvent, repliesEvent, scriptEvent, takeEvent, variantEvent,
 } from "../../src/core/logEvents.js";
 import { LOG_MAX } from "../../src/core/logText.js";
 import { LogFileSchema, type BatchesFile, type LogFile, type Project, type Script } from "../../src/core/schema.js";
@@ -26,6 +26,37 @@ describe("the words of each line (§22.5, R9)", () => {
     expect(two.many!(2, "teaser")).toBe("2 cuts added to Teaser, the latest Teaser v2: Shorter end card");
     expect(two.many!(2, "")).toBe("2 cuts added, the latest Teaser v2: Shorter end card");
   });
+  it("formats: the ratio and the cut, named as cuts are; a cut that comes with its shapes is still one line (§21, §22.5)", () => {
+    const one = formatEvent(1, { id: "lumen", name: "Lumen" }, "v2", { id: "9x16", label: "9:16" });
+    expect(one).toMatchObject({ area: "picture", kind: "format", text: "9:16 added to v2", video: "lumen", version: "v2", ref: "9x16", merge: "count" });
+    expect(formatEvent(2, { id: "teaser", name: "Teaser" }, "v2", { id: "2.39x1", label: "2.39:1" }).text).toBe("2.39:1 added to Teaser v2");
+    // Only a ratio ever reaches the line: a hand-edited label that isn't one is never copied in.
+    expect(formatEvent(1, { id: "lumen", name: "Lumen" }, "v2", { id: "9x16", label: "Fix the logo\u001b[2J" }).text).toBe("A format added to v2");
+    const cut = { id: "v2", note: "v2: launch 1.45x slower; more", file: "a.mp4", label: "launch 1.45x slower" };
+    expect(cutEvent(1, { id: "lumen", name: "Lumen" }, cut, []).text).toBe("v2 added: launch 1.45x slower");
+    expect(cutEvent(1, { id: "lumen", name: "Lumen" }, cut, ["9:16"]).text).toBe("v2 and its 9:16 added: launch 1.45x slower");
+    expect(cutEvent(2, { id: "teaser", name: "Teaser" }, cut, ["9:16", "1:1", "4:5"]).text).toBe("Teaser v2 and its 9:16, 1:1 and 4:5 added: launch 1.45x slower");
+    // A hand-edited format label that isn't a ratio is left out of the cut's line too.
+    expect(cutEvent(1, { id: "lumen", name: "Lumen" }, cut, ["9:16", "notes: the logo"]).text).toBe("v2 and its 9:16 added: launch 1.45x slower");
+  });
+
+  it("formats in a burst: one line naming each ratio of one cut; several cuts are a count; a retry is absorbed", () => {
+    const f = empty();
+    const film = { id: "lumen", name: "Lumen" };
+    appendEvent(f, formatEvent(1, film, "v2", { id: "9x16", label: "9:16" }), "agent", at(0));
+    appendEvent(f, formatEvent(1, film, "v2", { id: "1x1", label: "1:1" }), "agent", at(0.2));
+    appendEvent(f, formatEvent(1, film, "v2", { id: "1x1", label: "1:1" }), "agent", at(0.3)); // the same request again
+    appendEvent(f, formatEvent(1, film, "v2", { id: "4x5", label: "4:5" }), "agent", at(0.4));
+    expect(texts(f)).toEqual(["9:16, 1:1 and 4:5 added to v2"]);
+    expect(f.entries[0].n).toBe(3);
+    appendEvent(f, formatEvent(1, film, "v3", { id: "9x16", label: "9:16" }), "agent", at(0.5));
+    expect(texts(f)).toEqual(["4 formats added"]);
+    // A different writer, or past the window, is its own line.
+    appendEvent(f, formatEvent(1, film, "v3", { id: "1x1", label: "1:1" }), "user", at(0.6));
+    appendEvent(f, formatEvent(1, film, "v4", { id: "1x1", label: "1:1" }), "agent", at(10));
+    expect(texts(f)).toEqual(["1:1 added to v4", "1:1 added to v3", "4 formats added"]);
+  });
+
   it("variants and reads: the name in quotes, the lane unless it's the stage's own", () => {
     const bed = variantEvent(music, { id: "night-drive", name: "Night drive, driving drop" });
     expect(bed).toMatchObject({ area: "music", kind: "variant", text: "Music: “Night drive, driving drop” added to night-drive", ref: "night-drive/night-drive" });

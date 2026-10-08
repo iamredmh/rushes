@@ -164,7 +164,7 @@ describe("Store", () => {
 
     it("a 161-character hand edit, a blank line and a kind or area from a newer Rushes are dropped and counted; the rest reads", async () => {
       const { store } = await tmpProject();
-      const bad = [{ ...entry, id: "l_long", text: "x".repeat(161) }, { ...entry, id: "l_blank", text: "" }, { ...entry, id: "l_new", kind: "format" }, { ...entry, id: "l_area", area: "captions" }, "not a line"];
+      const bad = [{ ...entry, id: "l_long", text: "x".repeat(161) }, { ...entry, id: "l_blank", text: "" }, { ...entry, id: "l_new", kind: "render" }, { ...entry, id: "l_area", area: "captions" }, "not a line"];
       await writeFile(store.path("log"), JSON.stringify({ schema: 1, rev: 7, backfilled: true, dropped: 3, entries: [...bad, entry] }), "utf8");
       const log = await store.read("log");
       expect(log).toMatchObject({ rev: 7, backfilled: true, dropped: 8, entries: [full] });
@@ -200,7 +200,7 @@ describe("Store", () => {
 
     it("a newer schema reads its lines and is marked so nothing rewrites it; a missing or odd rev reads as 0 (final review I2)", async () => {
       const { store } = await tmpProject();
-      await writeFile(store.path("log"), JSON.stringify({ schema: 2, rev: 4, backfilled: true, entries: [entry, { ...entry, id: "l_new", kind: "format" }] }), "utf8");
+      await writeFile(store.path("log"), JSON.stringify({ schema: 2, rev: 4, backfilled: true, entries: [entry, { ...entry, id: "l_new", kind: "render" }] }), "utf8");
       expect(await store.read("log")).toMatchObject({ schema: 1, rev: 4, newer: true, entries: [full], dropped: 1 });
       for (const rev of [undefined, -1, 1.5, "7", null]) {
         await writeFile(store.path("log"), JSON.stringify({ schema: 1, ...(rev === undefined ? {} : { rev }), backfilled: true, entries: [entry] }), "utf8");

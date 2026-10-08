@@ -28,7 +28,7 @@ import { LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, FileKindS
 import { LABEL_MAX, oneLineOf } from "../core/labels.js";
 import { byOf, logBookFor } from "./logbook.js";
 import {
-  broughtInEvent, cutEvent, fileEvent, lineEvent, lockEvent, notesSentEvent, picksEvent, repliesEvent, scriptEvent, takeEvent, variantEvent,
+  broughtInEvent, cutEvent, fileEvent, formatEvent, lineEvent, lockEvent, notesSentEvent, picksEvent, repliesEvent, scriptEvent, takeEvent, variantEvent,
 } from "../core/logEvents.js";
 import { LOG_AREAS, LOG_MAX, changeLogFileName, logText, recentChanges } from "../core/logText.js";
 import { defaultRunner, measureMix, type LoudnessRunner } from "./loudness.js";
@@ -891,7 +891,9 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
       if (info.fps && p.videos.length === 1 && p.videos[0].versions.length === 1) p.fps = info.fps;
       return out;
     });
-    await log.add(() => cutEvent(films, result.video, result.version), by(c));
+    // One write, one line (R4): a cut that comes with its other shapes says so on its own line
+    // ("v2 and its 9:16 added: …"), rather than a line per shape.
+    await log.add(() => cutEvent(films, result.video, result.version, result.version.formats.map((f) => f.label)), by(c));
     // §19.5: say when the cut is likely to play badly, and start its proxy straight away when the
     // project asks for that. Without ffmpeg, nothing is offered (needFor is null).
     // §19.9: its waveform is made in the background; nothing here waits for it.
@@ -928,9 +930,13 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     }
     // Inside the update, so two registrations of one shape at once can't both land: the second
     // sees the first's format and gets §21.3's sentence.
-    const { result } = await store.update("project", (p) =>
-      addFormat(p, { ...render, video: cut.video.id, version: cut.version.id, label: b.label, primarySize }),
-    );
+    let films = 1;
+    const { result } = await store.update("project", (p) => {
+      films = p.videos.length;
+      return addFormat(p, { ...render, video: cut.video.id, version: cut.version.id, label: b.label, primarySize });
+    });
+    // §22.5: "9:16 added to v2".
+    await log.add(() => formatEvent(films, result.video, result.version.id, result.format), by(c));
     return c.json(
       {
         video: { id: result.video.id, name: result.video.name },

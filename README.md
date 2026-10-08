@@ -134,7 +134,7 @@ Hovering a locked tab shows a short tooltip, e.g. "Locked: ask your agent for mu
 
 The **Change Log** button in the header opens a log of what happened, newest first and grouped by day:
 
-- each cut, voice read, music bed, sound-effects pass and take as it arrives;
+- each cut, format (another shape of a cut: "9:16 added to v2"), voice read, music bed, sound-effects pass and take as it arrives;
 - the script, picks and notes sent;
 - the agent's replies.
 

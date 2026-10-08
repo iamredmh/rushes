@@ -543,3 +543,45 @@ describe.skipIf(!hasFf)("a playlist or a GIF named .mp4, with the real ffprobe (
     }
   });
 });
+
+describe("the Change Log line for a format (§21, §22.5)", () => {
+  const lines = async (call: Awaited<ReturnType<typeof setup>>["call"]) =>
+    (await call("GET", "/api/log?limit=200")).json.entries.map((e: { kind: string; text: string; video: string | null; version: string | null }) => `${e.kind}: ${e.text} @ ${e.video}/${e.version}`);
+
+  it("POST /api/formats writes one line naming the ratio and the cut; a refusal writes none", async () => {
+    const { call } = await setup([WIDE, TALL, "renders/hero_720x1280.mp4"]);
+    await call("POST", "/api/versions", { video: "Hero", file: WIDE, label: "logo hold" });
+    expect((await call("POST", "/api/formats", { file: TALL })).status).toBe(201);
+    expect((await call("POST", "/api/formats", { file: "renders/hero_720x1280.mp4" })).status).toBe(409);
+    expect(await lines(call)).toEqual(["format: 9:16 added to v1 @ hero/v1", "cut: v1 added: logo hold @ hero/v1"]);
+  });
+
+  it("names the film when the project has more than one, and collapses a burst on one cut into one line naming each ratio", async () => {
+    const { call } = await setup([WIDE, TALL, SQUARE, "renders/teaser_1920x1080.mp4"]);
+    await call("POST", "/api/versions", { video: "Hero", file: WIDE, label: "first pass" });
+    await call("POST", "/api/versions", { video: "Teaser", file: "renders/teaser_1920x1080.mp4", label: "short" });
+    await call("POST", "/api/formats", { video: "Hero", file: TALL });
+    await call("POST", "/api/formats", { video: "Hero", file: SQUARE });
+    const [top] = await lines(call);
+    expect(top).toBe("format: 9:16 and 1:1 added to Hero v1 @ hero/v1");
+  });
+
+  it("formats on POST /api/versions are one line with the cut (one write, one line); a refused call writes none", async () => {
+    const { call } = await setup([WIDE, TALL, SQUARE, "renders/hero2_1920x1080.mp4", "renders/hero2_1280x720.mp4"]);
+    await call("POST", "/api/versions", { video: "Hero", file: WIDE, label: "launch 1.45x slower", formats: [{ file: TALL }, { file: SQUARE }] });
+    expect(await lines(call)).toEqual(["cut: v1 and its 9:16 and 1:1 added: launch 1.45x slower @ hero/v1"]);
+    // Two renders of one shape in one call: refused, so nothing is logged.
+    const same = await call("POST", "/api/versions", { video: "Hero", file: "renders/hero2_1920x1080.mp4", formats: [{ file: "renders/hero2_1280x720.mp4" }] });
+    expect(same.status).toBe(409);
+    expect(await lines(call)).toHaveLength(1);
+  });
+
+  it("never copies a note's text into the line", async () => {
+    const { call } = await setup([WIDE, TALL]);
+    await call("POST", "/api/versions", { video: "Hero", file: WIDE, note: "secret client feedback about the logo" });
+    await call("POST", "/api/formats", { file: TALL });
+    const [format] = await lines(call);
+    expect(format).toBe("format: 9:16 added to v1 @ hero/v1");
+    expect(format).not.toMatch(/secret/);
+  });
+});
