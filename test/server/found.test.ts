@@ -30,6 +30,23 @@ const byName = (table: Record<string, number> = {}): ProbeFn => async (abs) => t
 /** A probe that never answers: nothing may wait on it. */
 const never: ProbeFn = () => new Promise<number | null>(() => undefined);
 
+/**
+ * `p`'s answer, or a failure if it hasn't answered in `ms`. With the `never` probe, anything that
+ * waited on a probe would never answer at all, so a generous bound tells the two apart without
+ * timing the request against a busy machine's clock (final review: a 500 ms bound flaked on CI).
+ */
+async function answersWithoutWaiting<T>(p: T | Promise<T>, ms = 5000): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const waited = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`still waiting after ${ms} ms: it waited on a probe`)), ms);
+  });
+  try {
+    return await Promise.race([p, waited]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function put(root: string, rel: string, text = "bytes") {
   const abs = join(root, ...rel.split("/"));
   await mkdir(dirname(abs), { recursive: true });
@@ -373,17 +390,13 @@ describe("found routes", () => {
   it("GET /api/state never waits on a probe, and carries the found summary", async () => {
     const { scanner, call } = await setup({ files: ["vo/a.wav", "bed/b.wav", "renders/c.mov"], probe: never });
     await scanner.scan();
-    const started = Date.now();
-    const res = await call("/api/state");
-    expect(Date.now() - started).toBeLessThan(500);
+    const res = await answersWithoutWaiting(call("/api/state"));
     expect(res.status).toBe(200);
     const { found } = await res.json();
     expect(found).toMatchObject({ scanning: false, complete: true, counts: { voice: 1, music: 1, sfx: 0, cut: 1, other: 0 }, broughtIn: [] });
     expect(typeof found.scannedAt).toBe("string");
     // The list route doesn't wait on the probes either.
-    const t2 = Date.now();
-    const list = await (await call("/api/found")).json();
-    expect(Date.now() - t2).toBeLessThan(500);
+    const list = await (await answersWithoutWaiting(call("/api/found"))).json();
     expect(list.files).toHaveLength(3);
     expect(list.files[0]).not.toHaveProperty("abs");
     expect(Object.keys(list.files[0]).sort()).toEqual(["duration", "folder", "kind", "modified", "path", "reasons", "score", "size", "suggested"]);

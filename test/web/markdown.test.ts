@@ -91,16 +91,19 @@ describe("safeMarkdownHtml", () => {
     expect(html).toBe("<ul><li>top<ul><li>&lt;img src=x onerror=alert(1)&gt;</li></ul></li></ul>");
   });
 
-  it("renders a 1 MB adversarial input (many `[`, and a long line of U+2028 and spaces) in under 500 ms (I4)", () => {
+  it("renders a 1 MB adversarial input (many `[`, and a long line of U+2028 and spaces) in under 500 ms of CPU time (I4)", () => {
     // Many unmatched "[" characters is what made the old link pattern rescan from every one of
     // them; a long run of spaces and U+2028 is what made \s+(.*)$ backtrack one character at a
     // time across the whole run, in both the list-item and heading matchers.
     const manyBrackets = "[".repeat(300_000);
     const u2028Line = `# ${" \u2028 ".repeat(100_000)}x\n- ${" \u2028".repeat(100_000)}y`;
     const input = `${manyBrackets}\n${u2028Line}\n${"a".repeat(500_000)}`;
-    const start = performance.now();
+    // CPU time, not the wall clock (final review): a busy CI machine stretches the wall clock, but a
+    // backtracking pattern would burn seconds of CPU here, far past the bound, however busy it is.
+    const cpu = process.cpuUsage();
     safeMarkdownHtml(input);
-    expect(performance.now() - start).toBeLessThan(500);
+    const used = process.cpuUsage(cpu);
+    expect((used.user + used.system) / 1000).toBeLessThan(500);
   });
 
   it("splits lines on U+2028 and U+2029 as well as the usual newlines (I4)", () => {
