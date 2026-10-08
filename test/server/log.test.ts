@@ -116,7 +116,8 @@ describe("the server writes the log as things happen (§22.5)", () => {
 
   it("the current set's files leave Before the log even when the log is first read after they came in (R5)", async () => {
     const { root, store } = await tmpProject("adopt first");
-    await store.update("project", (p) => addVersion(p, { video: "hero", file: "renders/hero v3.mov", duration: 60, fps: 25 }));
+    // A minute old, so it's history to the server made below, however fast the next lines run (R6).
+    await store.update("project", (p) => addVersion(p, { video: "hero", file: "renders/hero v3.mov", duration: 60, fps: 25 }, new Date(Date.now() - 60_000)));
     for (const f of ["renders/hero v3.mov", "bed/hero v3 theme.wav", "vo_jules/hero v3 read.wav"]) {
       await mkdir(dirname(join(root, f)), { recursive: true });
       await writeFile(join(root, f), "bytes");
