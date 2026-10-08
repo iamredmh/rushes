@@ -48,13 +48,14 @@ export interface Asset {
  * splitting into minutes and seconds -- the same rule fmt() uses, so 59.999s carries into the
  * next minute rather than printing 00m60.00s.
  */
-export function screenshotName(video: string, version: string, frame: number, fps: number): string {
+export function screenshotName(video: string, version: string, frame: number, fps: number, format: string | null = null): string {
   const t = frame / fps;
   const cs = Math.round(Math.max(0, t) * 100);
   const m = Math.floor(cs / 6000);
   const s = ((cs - m * 6000) / 100).toFixed(2).padStart(5, "0");
   const mm = String(m).padStart(2, "0");
-  return `${video}_${version}_${mm}m${s}s_f${frame}.png`;
+  // §21.5: a grab of a cut with formats carries the ratio it shows ("hero_v1_9x16_00m01.00s_f30.png").
+  return `${video}_${version}${format ? `_${format}` : ""}_${mm}m${s}s_f${frame}.png`;
 }
 
 /** The fps to use for a grab or screenshot: the version's own, falling back to the project's. */
@@ -63,8 +64,8 @@ export function fpsFor(project: Project, video: string, version: string): number
   return v?.fps ?? project.fps;
 }
 
-// Parses a name screenshotName() itself produced.
-const NEW_NAME = /^([a-z0-9][a-z0-9-]*)_(v\d+)_(\d{2})m(\d{2}\.\d{2})s_f(\d+)\.png$/;
+// Parses a name screenshotName() itself produced, with or without a format's ratio (§21.5).
+const NEW_NAME = /^([a-z0-9][a-z0-9-]*)_(v\d+)(?:_(\d+(?:\.\d+)?x\d+(?:\.\d+)?))?_(\d{2})m(\d{2}\.\d{2})s_f(\d+)\.png$/;
 // Parses a Plan 1-2 grab name: {video}_{version}_f{frame}.png.
 const OLD_NAME = /^([a-z0-9][a-z0-9-]*)_(v\d+)_f(\d+)\.png$/;
 
@@ -118,8 +119,12 @@ async function scanScreenshotDir(
       if (newMatch) {
         asset.video = newMatch[1];
         asset.version = newMatch[2];
-        asset.frame = Number(newMatch[5]);
+        asset.frame = Number(newMatch[6]);
         asset.t = asset.frame / fpsFor(project, asset.video, asset.version);
+        if (newMatch[3]) {
+          asset.format = newMatch[3];
+          asset.formatLabel = labelOfId(newMatch[3]);
+        }
       } else if (oldMatch) {
         asset.video = oldMatch[1];
         asset.version = oldMatch[2];

@@ -166,6 +166,8 @@ const GrabBody = z.object({
   frame: z.number().int().nonnegative().max(10_000_000),
   /** PNG bytes, base64, with or without a data: prefix. */
   png: z.string().min(1),
+  // §21.5: the format on screen when it isn't the cut's primary. Must be one of the cut's shapes.
+  format: formatId.optional(),
 });
 
 const RevealBody = z.union([z.object({ path: z.string().min(1) }), z.object({ project: z.literal(true) })]);
@@ -470,7 +472,15 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     if (!bytes.subarray(0, 8).equals(PNG_MAGIC)) throw new InvalidError("Frame grab must be a PNG");
     const project = await store.read("project");
     const fps = fpsFor(project, b.video, b.version);
-    const name = screenshotName(b.video, b.version, b.frame, fps);
+    // §21.5: a grab of a format is named with its ratio; the format must be one of this cut's. The
+    // dashboard names only a non-primary format (Task 2 review M4: an older cut with formats but no
+    // stored size has no primary id), so a grab with none is the primary's, which carries its own
+    // ratio whenever the cut has other formats and the primary's shape is known.
+    const version = project.videos.find((v) => v.id === b.video)?.versions.find((v) => v.id === b.version);
+    const shapes = version ? versionFormats(version) : [];
+    if (b.format !== undefined && !shapes.some((f) => f.id === b.format)) throw new NotFoundError("format", b.format);
+    const primary = version && version.formats.length > 0 ? shapes.find((f) => f.primary)?.id ?? null : null;
+    const name = screenshotName(b.video, b.version, b.frame, fps, b.format ?? primary);
     const grab = `screenshots/${name}`;
     await mkdir(join(store.root, "screenshots"), { recursive: true });
     // Written to a temp name in the same directory, then renamed into place. Writing the

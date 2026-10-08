@@ -8,6 +8,7 @@ import { sizedProbe } from "../helpers/probe.js";
 import { createApp, type AppOptions } from "../../src/server/app.js";
 import { addVersion } from "../../src/core/project.js";
 import { ProxyJobs } from "../../src/server/proxy.js";
+import { screenshotName } from "../../src/server/assets.js";
 import type { Store } from "../../src/core/store.js";
 
 const PNG_1PX = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
@@ -354,5 +355,55 @@ describe("notes and formats on the server (§21.3, R7)", () => {
     expect((await call("GET", "/api/notes?format=9x16&onlyThisFormat=false")).json.notes.map((n: any) => n.text)).toEqual(["all", "tall"]);
     expect((await call("GET", "/api/notes?format=9x16&onlyThisFormat=true")).json.notes.map((n: any) => n.text)).toEqual(["tall"]);
     expect((await call("GET", "/api/notes?format=portrait")).status).toBe(400);
+  });
+});
+
+describe("grabs by format (§21.5)", () => {
+  it("names a grab with its ratio, and parses the name back", async () => {
+    expect(screenshotName("hero", "v1", 30, 30, "9x16")).toBe("hero_v1_9x16_00m01.00s_f30.png");
+    expect(screenshotName("hero", "v1", 30, 30)).toBe("hero_v1_00m01.00s_f30.png");
+    const { call } = await setup([WIDE, TALL]);
+    await call("POST", "/api/versions", { video: "Hero", file: WIDE, formats: [{ file: TALL }] });
+    const r = await call("POST", "/api/grabs", { video: "hero", version: "v1", frame: 30, format: "9x16", png: PNG_1PX });
+    expect(r.json.grab).toBe("screenshots/hero_v1_9x16_00m01.00s_f30.png");
+    expect((await call("POST", "/api/grabs", { video: "hero", version: "v1", frame: 30, format: "4x5", png: PNG_1PX })).status).toBe(404);
+    const shot = (await call("GET", "/api/assets?kind=screenshot")).json.assets[0];
+    expect(shot).toMatchObject({ video: "hero", version: "v1", frame: 30, format: "9x16", formatLabel: "9:16" });
+  });
+
+  it("a decimal ratio round-trips through the name too", async () => {
+    expect(screenshotName("hero", "v1", 30, 30, "2.39x1")).toBe("hero_v1_2.39x1_00m01.00s_f30.png");
+    const { call } = await setup([WIDE, "renders/hero_2390x1000.mp4"]);
+    await call("POST", "/api/versions", { video: "Hero", file: WIDE, formats: [{ file: "renders/hero_2390x1000.mp4" }] });
+    expect((await call("POST", "/api/grabs", { video: "hero", version: "v1", frame: 45, format: "2.39x1", png: PNG_1PX })).json.grab).toBe("screenshots/hero_v1_2.39x1_00m01.50s_f45.png");
+    expect((await call("GET", "/api/assets?kind=screenshot")).json.assets[0]).toMatchObject({ frame: 45, t: 1.5, format: "2.39x1", formatLabel: "2.39:1" });
+  });
+
+  it("the primary's grab carries its ratio once the cut has formats, with or without `format` (carried ruling: the dashboard sends none for it)", async () => {
+    const { call } = await setup([WIDE, TALL]);
+    await call("POST", "/api/versions", { video: "Hero", file: WIDE, formats: [{ file: TALL }] });
+    expect((await call("POST", "/api/grabs", { video: "hero", version: "v1", frame: 30, png: PNG_1PX })).json.grab).toBe("screenshots/hero_v1_16x9_00m01.00s_f30.png");
+    expect((await call("POST", "/api/grabs", { video: "hero", version: "v1", frame: 60, format: "16x9", png: PNG_1PX })).json.grab).toBe("screenshots/hero_v1_16x9_00m02.00s_f60.png");
+  });
+
+  it("a one-format cut, an older cut with formats but no stored size, and a bad format keep today's rules", async () => {
+    const { call, store } = await setup([WIDE, TALL, "renders/solo_1920x1080.mp4"]);
+    await call("POST", "/api/versions", { video: "Solo", file: "renders/solo_1920x1080.mp4" });
+    expect((await call("POST", "/api/grabs", { video: "solo", version: "v1", frame: 30, png: PNG_1PX })).json.grab).toBe("screenshots/solo_v1_00m01.00s_f30.png");
+    // A one-format cut has only its primary: naming it with `format` is refused, as on the frame route.
+    expect((await call("POST", "/api/grabs", { video: "solo", version: "v1", frame: 30, format: "9x16", png: PNG_1PX })).status).toBe(404);
+    await call("POST", "/api/versions", { video: "Hero", file: WIDE, formats: [{ file: TALL }] });
+    await store.update("project", (p) => {
+      const v = p.videos.find((x) => x.id === "hero")!.versions[0];
+      v.width = null;
+      v.height = null;
+    });
+    // The primary's shape is unknown (a hand edit): its grab keeps the plain name, and its id is not a format.
+    expect((await call("POST", "/api/grabs", { video: "hero", version: "v1", frame: 30, png: PNG_1PX })).json.grab).toBe("screenshots/hero_v1_00m01.00s_f30.png");
+    expect((await call("POST", "/api/grabs", { video: "hero", version: "v1", frame: 30, format: "16x9", png: PNG_1PX })).status).toBe(404);
+    expect((await call("POST", "/api/grabs", { video: "hero", version: "v1", frame: 30, format: "9x16", png: PNG_1PX })).json.grab).toBe("screenshots/hero_v1_9x16_00m01.00s_f30.png");
+    expect((await call("POST", "/api/grabs", { video: "hero", version: "v9", frame: 30, format: "9x16", png: PNG_1PX })).status).toBe(404);
+    expect((await call("POST", "/api/grabs", { video: "hero", version: "v1", frame: 30, format: "9:16", png: PNG_1PX })).status).toBe(400);
+    expect((await call("POST", "/api/grabs", { video: "hero", version: "v1", frame: 30, format: "../x", png: PNG_1PX })).status).toBe(400);
   });
 });
