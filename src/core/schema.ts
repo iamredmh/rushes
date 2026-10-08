@@ -312,6 +312,9 @@ export const LogFileSchema = z.object({
   rev: z.number().int().nonnegative(),
   // §22.6: set once the dated history has been read in, so it never happens twice.
   backfilled: z.boolean().default(false),
+  // M2: when the server that first wrote a line into a log not yet backfilled started. The backfill
+  // stops there, since everything after it was logged live (a cut is dated just before its line).
+  began: z.string().optional(),
   // R5: the variants and takes already there when the log began ("<lane>/<variant>", "<section>:<take>").
   undated: z.array(z.string().max(300)).max(LOG_MAX).default([]),
   // §22.9: how many lines the 5000 cap has dropped.

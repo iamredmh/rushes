@@ -32,6 +32,22 @@ export function logBookFor(store: Store): LogBook {
   return book;
 }
 
+/**
+ * M2: where the backfill stops. A backfill that failed may have let live lines in first, and a
+ * restart starts later, so: only what's older than this server's start, than the start of the
+ * server that wrote the first of those lines (`began`), and than the oldest line in the file. The
+ * oldest line alone isn't enough: a cut is dated a moment before the line that logs it.
+ */
+function backfillBefore(f: LogFile, since: number): number {
+  const began = f.began === undefined ? NaN : Date.parse(f.began);
+  let before = Number.isFinite(began) ? Math.min(since, began) : since;
+  for (const e of f.entries) {
+    const t = Date.parse(e.at);
+    if (t < before) before = t;
+  }
+  return before;
+}
+
 /** Thrown inside an update to leave the file exactly as it was: nothing is written and rev stays. */
 const UNCHANGED = Symbol("unchanged");
 
@@ -66,7 +82,7 @@ export class LogBook {
     await this.store
       .update("log", (f) => {
         if (f.backfilled) throw UNCHANGED;
-        backfillLog(f, { project, batches, script }, this.since);
+        backfillLog(f, { project, batches, script }, backfillBefore(f, this.since));
       })
       .catch((e: unknown) => {
         if (e !== UNCHANGED) throw e;
@@ -116,7 +132,12 @@ export class LogBook {
     try {
       const event = typeof make === "function" ? make() : make;
       await this.ready();
-      const { result } = await this.store.update("log", (f) => appendEvent(f, event, by, at));
+      const { result } = await this.store.update("log", (f) => {
+        // A line going into a log that isn't backfilled yet (its backfill failed): remember when
+        // this server started, so a later backfill never reads in what was logged live (M2).
+        if (!f.backfilled) f.began ??= new Date(this.since).toISOString();
+        return appendEvent(f, event, by, at);
+      });
       return result;
     } catch (e) {
       this.failures += 1;

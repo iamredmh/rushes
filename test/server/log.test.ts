@@ -242,6 +242,50 @@ describe("projects that already exist (§22.6)", () => {
     expect(file.rev).toBe(2);
   });
 
+  it("a backfill that failed, then live lines, then a restart: the history is read in once and nothing live twice (M2)", async () => {
+    const { root, store } = await tmpProject("restart");
+    await store.update("project", (p) => addVersion(p, { video: "Hero", file: "renders/hero_v1.mp4", note: "v1: first pass; rough" }, new Date(Date.now() - 3 * DAY)));
+    await writeFile(store.path("batches"), "{ nope", "utf8");
+    // A cut is dated inside its write and logged after it; a slow disk widens that gap, so make it
+    // a few milliseconds every time.
+    const real = store.update.bind(store);
+    store.update = (async (key: "project", fn: never, rev?: number) => {
+      const out = await real(key, fn, rev);
+      if (key === "project") await new Promise((r) => setTimeout(r, 5));
+      return out;
+    }) as Store["update"];
+    const first = createApp(store);
+    const post = (app: ReturnType<typeof createApp>, path: string, json: unknown) =>
+      app.request(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(json) });
+    expect((await post(first, "/api/versions", { video: "Hero", file: `${root}/renders/hero_v2.mp4`, note: "v2: tighter cut; more" })).status).toBe(201);
+    expect((await post(first, "/api/files", { kind: "doc", file: "brief.md", name: "Creative brief" })).status).toBe(201);
+    expect((await store.read("log")).backfilled).toBe(false);
+    // batches.json is fixed, and the server restarts later.
+    await writeFile(store.path("batches"), JSON.stringify({ schema: 1, rev: 0, batches: [] }), "utf8");
+    await new Promise((r) => setTimeout(r, 20));
+    const again = createApp(new Store(root));
+    const view = await (await again.request("/api/log?limit=50")).json();
+    expect(view.entries.map((e: { text: string; by: string }) => `${e.text} | ${e.by}`)).toEqual([
+      "File added: Creative brief (Scripts & docs) | agent",
+      "v2 added: tighter cut | agent",
+      "v1 added: first pass | rushes",
+    ]);
+    expect((await store.read("log")).backfilled).toBe(true);
+  });
+
+  it("a log not yet backfilled with no start recorded is backfilled only up to its oldest line (M2)", async () => {
+    const { store } = await tmpProject("older server");
+    const t = Date.now();
+    await store.update("project", (p) => {
+      addVersion(p, { video: "Hero", file: "renders/hero_v1.mp4", note: "v1: first pass; rough" }, new Date(t - 3 * DAY));
+      addVersion(p, { video: "Hero", file: "renders/hero_v2.mp4", note: "v2: tighter cut; more" }, new Date(t - DAY));
+    });
+    const live = { id: "l_aaaaaa", at: new Date(t - 2 * DAY).toISOString(), area: "project", kind: "entry", text: "Chose the wide", video: null, version: null, ref: null, by: "agent" };
+    await writeFile(store.path("log"), JSON.stringify({ schema: 1, rev: 3, backfilled: false, undated: [], dropped: 0, entries: [live] }));
+    const view = await (await createApp(store).request("/api/log?limit=50")).json();
+    expect(view.entries.map((e: { text: string; by: string }) => `${e.text} | ${e.by}`)).toEqual(["Chose the wide | agent", "v1 added: first pass | rushes"]);
+  });
+
   it("a cut registered on a new project is logged once, never also read in as history (R6)", async () => {
     const { root, call, texts } = await setup();
     await call("POST", "/api/versions", { video: "Hero", file: `${root}/renders/hero.mp4`, note: "v1: first pass; more" });
