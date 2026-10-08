@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { access, chmod, mkdir, readdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { encodeStarted } from "../helpers/encode.js";
 import { tmpProject } from "../helpers/tmp.js";
 import { addVersion } from "../../src/core/project.js";
 import { VIDEO_FORMATS, type Probe } from "../../src/core/media.js";
@@ -57,6 +58,8 @@ const fakeProbe = async (abs: string): Promise<Probe> => (abs.endsWith("_proxy.m
 interface Fake extends FfmpegRunner {
   calls: string[][];
   killed: boolean;
+  /** Resolves once an encode has begun, with its output file written (not for `-version`). */
+  started: Promise<void>;
 }
 
 /**
@@ -64,6 +67,7 @@ interface Fake extends FfmpegRunner {
  * then waits on `gate` (or an abort, which it answers like a killed ffmpeg) and exits `code`.
  */
 function fakeRunner(opts: { steps?: number[]; code?: number; stderr?: string; gate?: Promise<void>; version?: string } = {}): Fake {
+  let begun!: () => void;
   const fake = (async (args, o = {}) => {
     fake.calls.push(args);
     if (args[0] === "-version") {
@@ -71,6 +75,7 @@ function fakeRunner(opts: { steps?: number[]; code?: number; stderr?: string; ga
       return { code: 0, stderr: "" };
     }
     await writeFile(args[args.length - 1], "partial bytes");
+    begun();
     for (const us of opts.steps ?? []) o.onStdout?.(Buffer.from(`frame=1\nout_time_us=${us}\nprogress=continue\n`));
     const aborted = new Promise<"abort">((res) => {
       if (o.signal?.aborted) res("abort");
@@ -85,6 +90,7 @@ function fakeRunner(opts: { steps?: number[]; code?: number; stderr?: string; ga
   }) as Fake;
   fake.calls = [];
   fake.killed = false;
+  fake.started = new Promise<void>((res) => (begun = res));
   return fake;
 }
 
@@ -185,8 +191,9 @@ describe("ProxyJobs", () => {
     const run = fakeRunner({ steps: [500_000], gate: new Promise(() => undefined) });
     const jobs = new ProxyJobs(store, { run, probe: fakeProbe, available: async () => true });
     const job = jobs.start("hero", "v1");
-    // Wait until ffmpeg has started and written its partial file.
-    while (!(await exists(join(root, "proxies", "hero_v1_proxy.partial.mp4")))) await new Promise((r) => setTimeout(r, 5));
+    // Wait until ffmpeg has started and written its partial file; if the job ends first, this says why.
+    await encodeStarted(run.started, jobs.wait(job.id));
+    expect(await exists(join(root, "proxies", "hero_v1_proxy.partial.mp4"))).toBe(true);
     const end = await jobs.cancel(job.id);
     expect(end.state).toBe("cancelled");
     expect(run.killed).toBe(true);
@@ -359,7 +366,8 @@ describe("start-up clean-up (Review Focus 1)", () => {
     const s = await startServer(root, { port: 0, proxy: { run, probe: fakeProbe, available: async () => true } });
     const res = await fetch(`${s.url}/api/videos/hero/versions/v1/proxy`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
     expect(res.status).toBe(202);
-    while (!(await exists(join(root, "proxies", "hero_v1_proxy.partial.mp4")))) await new Promise((r) => setTimeout(r, 5));
+    await encodeStarted(run.started);
+    expect(await exists(join(root, "proxies", "hero_v1_proxy.partial.mp4"))).toBe(true);
     await s.close();
     expect(run.killed).toBe(true);
     expect(await readdir(join(root, "proxies"))).toEqual([]);

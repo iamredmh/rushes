@@ -12,6 +12,7 @@ import { existsSync } from "node:fs";
 import type { Probe } from "../../src/core/media.js";
 import { ProxyJobs, type FfmpegRunner } from "../../src/server/proxy.js";
 import { startServer } from "../../src/server/start.js";
+import { encodeStarted } from "../helpers/encode.js";
 import { sse } from "../helpers/sse.js";
 
 // The smallest valid PNG (1×1, transparent).
@@ -920,7 +921,7 @@ const H264_1080: Probe = { duration: 2, fps: 25, codec: "h264", width: 1920, hei
  * argument is the .mp4 it writes; a frame extraction's is `pipe:1`, so it answers with a PNG on
  * stdout instead, and never writes a file of that name into the working directory.
  */
-function holdingRunner(hold: Promise<void> = Promise.resolve()): FfmpegRunner {
+function holdingRunner(hold: Promise<void> = Promise.resolve(), started?: () => void): FfmpegRunner {
   return async (args, o = {}) => {
     if (args[0] === "-version") return { code: 0, stderr: "" };
     const out = args[args.length - 1];
@@ -929,6 +930,7 @@ function holdingRunner(hold: Promise<void> = Promise.resolve()): FfmpegRunner {
       return { code: 0, stderr: "" };
     }
     await writeFile(out, "proxy bytes");
+    started?.();
     o.onStdout?.(Buffer.from("out_time_us=1000000\n"));
     const killed = await Promise.race([
       hold.then(() => false),
@@ -938,10 +940,10 @@ function holdingRunner(hold: Promise<void> = Promise.resolve()): FfmpegRunner {
   };
 }
 
-async function proxySetup(opts: { hold?: Promise<void>; available?: boolean; probe?: (abs: string) => Promise<Probe> } = {}) {
+async function proxySetup(opts: { hold?: Promise<void>; started?: () => void; available?: boolean; probe?: (abs: string) => Promise<Probe> } = {}) {
   const { root, store } = await tmpProject("spring-launch");
   const jobs = new ProxyJobs(store, {
-    run: holdingRunner(opts.hold),
+    run: holdingRunner(opts.hold, opts.started),
     probe: opts.probe ?? (async (abs) => (abs.endsWith("_proxy.mp4") ? H264_1080 : PRORES_4K)),
     available: async () => opts.available ?? true,
   });
@@ -1007,10 +1009,13 @@ describe("proxies (§19.5)", () => {
   });
 
   it("DELETE /api/proxy-jobs/:job cancels it; an unknown job is 404", async () => {
-    const { call, root } = await proxySetup({ hold: new Promise(() => undefined) });
+    const started = gateOpen();
+    const { call, root, jobs } = await proxySetup({ hold: new Promise(() => undefined), started: started.open });
     await call("POST", "/api/versions", { video: "Hero", file: "renders/hero.mov" });
     const { json } = await call("POST", "/api/videos/hero/versions/v1/proxy", {});
-    while (!existsSync(join(root, "proxies", "hero_v1_proxy.partial.mp4"))) await new Promise((r) => setTimeout(r, 5));
+    // Until the fake ffmpeg has written its partial file; if the job ends first, this says why.
+    await encodeStarted(started.promise, jobs.wait(json.job.id));
+    expect(existsSync(join(root, "proxies", "hero_v1_proxy.partial.mp4"))).toBe(true);
     const r = await call("DELETE", `/api/proxy-jobs/${json.job.id}`, {});
     expect(r.status).toBe(200);
     expect(r.json.job).toMatchObject({ id: json.job.id, state: "cancelled" });
