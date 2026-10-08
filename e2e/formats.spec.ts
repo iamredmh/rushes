@@ -744,8 +744,12 @@ test("notes of other formats wait in a quiet row, read only, with a button that 
   await expect(ro.locator(".chk")).toHaveCount(0);
   await expect(ro.locator("button.t")).toHaveCount(0);
   await expect(ro.locator(".ftag")).toHaveText(["9:16", "9:16", "4:5"]);
-  const sizes = await page.locator(".otherrow, .otherfmts .ftag, .otherfmts .nx, .otherfmts .flink").evaluateAll((els) => els.map((el) => parseFloat(getComputedStyle(el).fontSize)));
+  const sizes = await page.locator(".otherrow, .otherfmts .t, .otherfmts .ftag, .otherfmts .nx, .otherfmts .flink").evaluateAll((els) => els.map((el) => parseFloat(getComputedStyle(el).fontSize)));
+  expect(sizes.length).toBeGreaterThanOrEqual(13);
   expect(Math.min(...sizes)).toBeGreaterThanOrEqual(15);
+  // Review I1: a read-only time doesn't look like the list's clickable one.
+  const colour = (sel: string) => page.locator(sel).first().evaluate((el) => getComputedStyle(el).color);
+  expect(await colour(".otherfmts .t")).toBe("rgb(163, 166, 173)");
   // Read only: the time doesn't seek, and nothing there selects.
   await ro.filter({ hasText: "Rows land late" }).locator(".t").click();
   await expect(page.getByLabel("Timecode")).toContainText("0:00.00");
@@ -913,4 +917,166 @@ test("a new cut starts its composer on This format again", async ({ page, rushes
   await rushes.addFormatsCut([WIDE, TALL]);
   await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v2");
   await expect(scope.getByRole("radio", { name: /^This format/ })).toHaveAttribute("aria-checked", "true");
+});
+
+// ---- Task 5 review, fix round 1 ----
+
+const filmProject = (rushes: { root: string }) => join(rushes.root, ".rushes", "project.json");
+
+// I2, R17: a note whose format has gone from its own cut can be restored to every format.
+test("a note whose format has gone from its cut offers Restore to all formats, and then shows as All", async ({ page, rushes }) => {
+  await rushes.addFormatsCut([WIDE, TALL, SQUARE]);
+  await rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 1, text: "Square crop is tight.", format: "1x1" });
+  // A hand edit takes 1:1 off the cut.
+  const file = filmProject(rushes);
+  const project = JSON.parse(await readFile(file, "utf8"));
+  project.videos[0].versions[0].formats = project.videos[0].versions[0].formats.filter((f: { id: string }) => f.id !== "1x1");
+  project.rev += 1;
+  await writeFile(file, JSON.stringify(project, null, 2));
+  await expect.poll(async () => (await rushes.api("GET", "/api/state")).project.videos[0].versions[0].formats.length, { timeout: 10_000 }).toBe(1);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await page.getByRole("button", { name: "Other formats (1)" }).click();
+  const row = page.locator(".otherfmts .note", { hasText: "Square crop is tight." });
+  await expect(row.getByRole("button")).toHaveText(["Restore to all formats"]);
+  await row.getByRole("button", { name: "Restore to all formats" }).click();
+  await expect.poll(async () => (await notesOf(rushes))[0].format).toBeNull();
+  const card = page.locator(".list > .note", { hasText: "Square crop is tight." });
+  await expect(card.locator(".ftag.all")).toHaveText("All");
+  await expect(page.locator(".otherrow")).toHaveCount(0);
+  // M3: focus lands on the note, not the page.
+  await expect(card.locator(".t")).toBeFocused();
+});
+
+// I2, R17: a v1 9:16 note on a v2 without 9:16 is read only: its format is still its own cut's.
+test("an older cut's note for a format the newer cut lacks is read only, with nothing to press", async ({ page, rushes }) => {
+  await rushes.addFormatsCut([WIDE, TALL]);
+  await rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 1, text: "Logo edge on the tall one.", format: "9x16" });
+  await rushes.addFormatsCut([WIDE, SQUARE]);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await expect(page.getByRole("combobox", { name: "Version" })).toHaveValue("v2");
+  await page.getByRole("button", { name: "Other formats (1)" }).click();
+  const row = page.locator(".otherfmts .note", { hasText: "Logo edge on the tall one." });
+  await expect(row.locator(".ftag")).toHaveText("9:16");
+  await expect(row.getByRole("button")).toHaveCount(0);
+  expect((await notesOf(rushes))[0].format).toBe("9x16");
+});
+
+// M2: a ring and a dot at the same moment can both be pointed at.
+test("an all-format note and a format note at the same moment are both reachable on the timeline", async ({ page, rushes }) => {
+  await rushes.addFormatsCut([WIDE, TALL]);
+  const add = (text: string, format: string | null) => rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 2, text, format });
+  await add("Everywhere at two.", null);
+  await add("Tall at two.", "9x16");
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await radio(page, "9:16").click();
+  await expect(page.locator(".track .mk")).toHaveCount(2);
+  const hits = await page.evaluate(() => {
+    const ring = document.querySelector(".track .mk.ring")!.getBoundingClientRect();
+    const dot = document.querySelector(".track .mk:not(.ring)")!.getBoundingClientRect();
+    const at = (x: number, y: number) => (document.elementFromPoint(x, y) as HTMLElement | null)?.title ?? null;
+    return { centre: at(dot.x + dot.width / 2, dot.y + dot.height / 2), band: at(ring.x + ring.width / 2 + 6, ring.y + ring.height / 2), ringSize: ring.width };
+  });
+  expect(hits.centre).toBe("9:16 · Tall at two.");
+  expect(hits.band).toBe("All · Everywhere at two.");
+  expect(hits.ringSize).toBe(14);
+});
+
+// M3: "Show on 9:16" and Alt+arrows from a card never drop focus to the page.
+test("after Show on 9:16, and after Alt+arrows from a card's switch, focus stays with the note", async ({ page, rushes }) => {
+  await rushes.addFormatsCut([WIDE, TALL]);
+  const add = (t: number, text: string, format: string | null) => rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t, text, format });
+  await add(0.5, "Tall only.", "9x16");
+  await add(1, "Everywhere.", null);
+  await add(2, "Wide only.", "16x9");
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await page.getByRole("button", { name: "Other formats (1)" }).click();
+  await page.getByRole("button", { name: "Show on 9:16" }).click();
+  await expect(radio(page, "9:16")).toHaveAttribute("aria-checked", "true");
+  await expect(page.locator(".list > .note", { hasText: "Tall only." }).locator(".t")).toBeFocused();
+  // A note that shows on both keeps its switch, and focus, across the switch, though its place in
+  // the list changes (second on 9:16, first on 16:9).
+  const everywhere = page.locator(".list > .note", { hasText: "Everywhere." });
+  await everywhere.locator(".t").click();
+  await everywhere.getByRole("radio", { name: "All formats" }).focus();
+  await page.keyboard.press("Alt+ArrowRight");
+  await expect(radio(page, "16:9")).toHaveAttribute("aria-checked", "true");
+  await expect(everywhere.getByRole("radio", { name: "All formats" })).toBeFocused();
+  // A note that doesn't show on the next format: focus goes to the row it now waits in.
+  const wide = page.locator(".list > .note", { hasText: "Wide only." });
+  await wide.locator(".t").click();
+  await wide.getByRole("radio", { name: /^This format/ }).focus();
+  await page.keyboard.press("Alt+ArrowLeft");
+  await expect(radio(page, "9:16")).toHaveAttribute("aria-checked", "true");
+  await expect(page.locator(".otherrow")).toBeFocused();
+});
+
+// M4: an agent narrowing the selected note away lets go of the selection.
+test("a selected note narrowed away by an agent is let go, and isn't selected on its new format", async ({ page, rushes }) => {
+  await rushes.addFormatsCut([WIDE, TALL]);
+  const { note } = await rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 1, text: "Move the logo.", format: null });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await page.locator(".list > .note", { hasText: "Move the logo." }).locator(".t").click();
+  await expect(page.locator('.note[aria-current="true"]')).toHaveCount(1);
+  await rushes.api("PATCH", `/api/notes/${note.id}`, { format: "9x16" });
+  await expect(page.locator(".list > .note", { hasText: "Move the logo." })).toHaveCount(0);
+  await radio(page, "9:16").click();
+  await expect(page.locator(".list > .note", { hasText: "Move the logo." })).toHaveCount(1);
+  await expect(page.locator('.note[aria-current="true"]')).toHaveCount(0);
+});
+
+// M5: the card's switch moves at once, so a second key press never repeats the request.
+test("two quick presses on the card's switch send one request", async ({ page, rushes }) => {
+  await rushes.addFormatsCut([WIDE, TALL]);
+  await rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 1, text: "Everywhere.", format: null });
+  const patches: string[] = [];
+  // The first request is held until the switch has been seen to move, so nothing here can race it.
+  let release: () => void = () => undefined;
+  const held = new Promise<void>((ok) => { release = ok; });
+  await page.route("**/api/notes/*", async (route) => {
+    if (route.request().method() !== "PATCH") return route.continue();
+    patches.push(route.request().postData() ?? "");
+    await held;
+    await route.continue();
+  });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  const card = page.locator(".list > .note", { hasText: "Everywhere." });
+  await card.locator(".t").click();
+  await card.getByRole("radio", { name: "All formats" }).focus();
+  await page.keyboard.press("ArrowLeft");
+  await page.keyboard.press("ArrowLeft");
+  // It moves at once, before the server has answered.
+  await expect(card.getByRole("radio", { name: /^This format/ })).toHaveAttribute("aria-checked", "true");
+  expect((await notesOf(rushes))[0].format).toBeNull();
+  release();
+  await expect.poll(async () => (await notesOf(rushes))[0].format).toBe("16x9");
+  await expect(card.locator(".ftag")).toHaveText("16:9");
+  expect(patches).toEqual([JSON.stringify({ format: "16x9" })]);
+});
+
+// M6: the row counts, and lists, what the active filter would.
+test("the Other formats row follows the To do and Done filter", async ({ page, rushes }) => {
+  await rushes.addFormatsCut([WIDE, TALL]);
+  const add = (t: number, text: string) => rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t, text, format: "9x16" });
+  await add(1, "Still to do.");
+  const { note } = await add(2, "Already done.");
+  await rushes.api("PATCH", `/api/notes/${note.id}`, { status: "done" });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  const filter = page.getByRole("group", { name: "Filter notes" });
+  await expect(page.locator(".otherrow")).toContainText("Other formats (2)");
+  await filter.getByRole("button", { name: /^To do/ }).click();
+  await expect(page.locator(".otherrow")).toContainText("Other formats (1)");
+  await page.locator(".otherrow").click();
+  await expect(page.locator(".otherfmts .note .nx")).toHaveText(["Still to do."]);
+  await filter.getByRole("button", { name: "Done" }).click();
+  await expect(page.locator(".otherrow")).toContainText("Other formats (1)");
+  await expect(page.locator(".otherfmts .note .nx")).toHaveText(["Already done."]);
+  await rushes.api("PATCH", `/api/notes/${note.id}`, { status: "todo" });
+  await expect(page.locator(".otherrow")).toHaveCount(0);
 });
