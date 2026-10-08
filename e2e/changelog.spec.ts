@@ -1,0 +1,334 @@
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import type { Page } from "@playwright/test";
+import { expect, test, versionButton, videoReady } from "./fixture.js";
+
+const logButton = (page: Page) => page.getByRole("button", { name: /^Change Log/ });
+const drawer = (page: Page) => page.getByRole("complementary", { name: "Change Log" });
+const rows = (page: Page) => drawer(page).locator(".lrow");
+/** Waits out the 160 ms slide, so a box is measured where it rests. */
+const settled = (page: Page) => drawer(page).evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
+
+/** A log.json written by hand: `n` lines a minute apart, all backfilled. The file keeps them oldest first, as appends do. */
+function bigLog(n: number, dropped = 0) {
+  const t0 = Date.now() - 60_000;
+  const entries = Array.from({ length: n }, (_, i) => ({
+    id: `l_${String(n - i).padStart(5, "0")}`, at: new Date(t0 - i * 60_000).toISOString(), area: "project", kind: "entry",
+    text: `Decision ${n - i}: kept the wide shot`, video: null, version: null, ref: null, by: "agent", tab: null, n: 1, subject: "",
+  })).reverse();
+  return JSON.stringify({ schema: 1, rev: n, backfilled: true, undated: [], dropped, entries });
+}
+
+test("Change Log opens a drawer under the header, newest first by day, and Esc gives focus back (§22.8)", async ({ page, rushes }) => {
+  await rushes.addCut("v1: first pass; rough timing");
+  await rushes.addVariant("music", "Night drive", { seconds: 2, freq: 220, lane: "night-drive" });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  const button = logButton(page);
+  await expect(button).toHaveAttribute("aria-expanded", "false");
+  await button.click();
+  await expect(button).toHaveAttribute("aria-expanded", "true");
+  const d = drawer(page);
+  await expect(d.getByRole("heading", { name: "Today" })).toBeVisible();
+  await expect(rows(page)).toHaveText([/Music: “Night drive” added to night-drive/, /v1 added: first pass/]);
+  await expect(rows(page).nth(0)).toContainText("agent");
+  await expect(rows(page).nth(0).locator(".ltag")).toHaveText("Music");
+  await expect(rows(page).nth(0)).toHaveAccessibleName(/^Music: “Night drive” added to night-drive \(Music, \d\d:\d\d, by the agent\)$/);
+  await settled(page);
+  const head = (await page.locator("header.head").boundingBox())!;
+  const box = (await d.boundingBox())!;
+  expect(box.y).toBeGreaterThanOrEqual(Math.floor(head.y + head.height) - 1);
+  expect(Math.round(box.width)).toBe(440);
+  expect(Math.round(box.x + box.width)).toBe(1440);
+  await expect(button).toBeInViewport(); // under the header, so the button stays to close it
+  await expect(d.getByLabel("Add a line to the log")).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(d).toHaveCount(0);
+  await expect(button).toBeFocused();
+  // The Close button does the same.
+  await button.click();
+  await d.getByRole("button", { name: "Close the change log" }).click();
+  await expect(d).toHaveCount(0);
+  await expect(button).toBeFocused();
+});
+
+test("from the keyboard: the button opens and closes it, and typing in the input fires no shortcut (§22.8)", async ({ page, rushes, browserName }) => {
+  await rushes.addCut("first cut");
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await logButton(page).focus();
+  await page.keyboard.press("Enter");
+  const input = drawer(page).getByLabel("Add a line to the log");
+  await expect(input).toBeFocused();
+  const t0 = await page.getByLabel("Timecode").textContent();
+  await input.pressSequentially("2 4 [ ] i o n ?");
+  await expect(input).toHaveValue("2 4 [ ] i o n ?");
+  await expect(page.getByRole("tab", { name: /Picture/ })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("dialog", { name: "Keyboard shortcuts" })).toHaveCount(0);
+  await expect(page.getByLabel("Timecode")).toHaveText(t0!);
+  // Esc from the input closes the drawer (R13) and focus returns to the button; Enter opens it again.
+  await page.keyboard.press("Escape");
+  await expect(drawer(page)).toHaveCount(0);
+  await expect(logButton(page)).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(drawer(page)).toBeVisible();
+  // Tab moves from the input to Add, then into the chips (one stop for the group). WebKit's Tab
+  // skips buttons unless Safari's "Press Tab to highlight each item" is on, so this part is Chromium's.
+  if (browserName === "webkit") return;
+  await page.keyboard.press("Tab");
+  await expect(drawer(page).getByRole("button", { name: "Add", exact: true })).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(drawer(page).getByRole("radio", { name: "All" })).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(drawer(page).getByRole("group", { name: "Entries" })).toBeFocused();
+});
+
+test("a line added in the drawer is by you, about the tab on screen; the filters are a radio group kept for the session (§22.8)", async ({ page, rushes }) => {
+  await rushes.addCut("first cut");
+  await rushes.addVariant("music", "Night drive", { seconds: 2, freq: 220 });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await logButton(page).click();
+  const input = drawer(page).getByLabel("Add a line to the log");
+  await input.fill("Decided to slow the zooms; the first cut felt rushed");
+  await input.press("Enter");
+  await expect(input).toHaveValue("");
+  await expect(input).toBeFocused();
+  await expect(rows(page).first()).toContainText("Decided to slow the zooms");
+  await expect(rows(page).first()).toContainText("added by you");
+  await expect(rows(page).first().locator(".ltag")).toHaveText("Picture");
+  expect(await rows(page).first().evaluate((el) => el.tagName)).toBe("DIV"); // nowhere to go (R14)
+  const { entries } = await rushes.api("GET", "/api/log");
+  expect(entries[0]).toMatchObject({ by: "user", area: "picture", kind: "entry" });
+
+  const chips = drawer(page).getByRole("radiogroup", { name: "Show" });
+  await expect(chips.getByRole("radio")).toHaveText(["All", "Picture", "Voice", "Music", "Sound effects", "Mix", "Notes", "Files"]);
+  await chips.getByRole("radio", { name: "All" }).focus();
+  const t0 = await page.getByLabel("Timecode").textContent();
+  for (let i = 0; i < 3; i++) await page.keyboard.press("ArrowRight");
+  await expect(chips.getByRole("radio", { name: "Music" })).toHaveAttribute("aria-checked", "true");
+  await expect(chips.getByRole("radio", { name: "Music" })).toBeFocused();
+  await expect(chips.getByRole("radio", { checked: true })).toHaveCount(1);
+  await expect(page.getByLabel("Timecode")).toHaveText(t0!); // the arrows moved the chips, not the playhead
+  await expect(rows(page)).toHaveCount(1);
+  await expect(rows(page).first()).toContainText("Music:");
+  await page.reload();
+  await videoReady(page);
+  await expect(drawer(page)).toBeVisible();
+  await expect(chips.getByRole("radio", { name: "Music" })).toHaveAttribute("aria-checked", "true");
+  await chips.getByRole("radio", { name: "Sound effects" }).click();
+  await expect(drawer(page).getByText("Nothing for this filter.")).toBeVisible();
+});
+
+test("ten variants registered at once make one line (§22.5, §22.11)", async ({ page, rushes }) => {
+  await rushes.addCut("first cut");
+  await Promise.all(Array.from({ length: 10 }, (_, i) => rushes.addVariant("music", `Bed ${i + 1}`, { seconds: 1, freq: 200 + i * 20 })));
+  await page.goto(rushes.url);
+  await logButton(page).click();
+  await expect(rows(page)).toHaveText([/Music: 10 variants added/, /v1 added: first cut/]);
+});
+
+test("while you read further down, new lines wait behind an 'N new' pill and the list doesn't jump (§22.8, §22.11)", async ({ page, rushes }) => {
+  await rushes.addCut("first cut");
+  for (let i = 1; i <= 40; i++) await rushes.api("POST", "/api/log", { text: `Decision ${i}: kept the wide shot` });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await logButton(page).click();
+  await expect(rows(page)).toHaveCount(41);
+  const list = drawer(page).locator(".dlist");
+  await list.evaluate((el) => { el.scrollTop = 600; });
+  const before = await list.evaluate((el) => el.scrollTop);
+  const firstVisible = () =>
+    list.evaluate((el) => {
+      const top = el.getBoundingClientRect().top;
+      return [...el.querySelectorAll(".lrow")].find((r) => r.getBoundingClientRect().bottom > top + 40)?.textContent ?? "";
+    });
+  const reading = await firstVisible();
+  await rushes.api("POST", "/api/log", { text: "Swapped the end card for line B" });
+  const pill = drawer(page).getByRole("button", { name: "1 new" });
+  await expect(pill).toBeVisible();
+  expect(await list.evaluate((el) => el.scrollTop)).toBe(before);
+  expect(await firstVisible()).toBe(reading);
+  await expect(rows(page)).toHaveCount(41); // the new line waits
+  await rushes.api("POST", "/api/log", { text: "And moved the logo up" });
+  await expect(drawer(page).getByRole("button", { name: "2 new" })).toBeVisible();
+  expect(await firstVisible()).toBe(reading);
+  await drawer(page).getByRole("button", { name: "2 new" }).click();
+  await expect(rows(page).first()).toContainText("And moved the logo up");
+  await expect(rows(page).nth(1)).toContainText("Swapped the end card for line B");
+  await expect(drawer(page).locator(".dpill")).toHaveCount(0);
+  await expect(drawer(page).getByRole("group", { name: "Entries" })).toBeFocused(); // the newest line goes nowhere, so the list
+  expect(await list.evaluate((el) => el.scrollTop)).toBe(0);
+});
+
+test("at the top of the list, new lines simply appear (§22.8)", async ({ page, rushes }) => {
+  await rushes.addCut("first cut");
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await logButton(page).click();
+  await expect(rows(page)).toHaveCount(1);
+  await rushes.api("POST", "/api/log", { text: "Swapped the end card for line B" });
+  await expect(rows(page).first()).toContainText("Swapped the end card for line B");
+  await expect(drawer(page).locator(".dpill")).toHaveCount(0);
+});
+
+test("a focused row keeps focus as lines arrive at the top (§22.11)", async ({ page, rushes }) => {
+  await rushes.addCut("first cut");
+  await rushes.api("POST", "/api/log", { text: "Look at the end card", video: "hero", version: "v1" });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await logButton(page).click();
+  const linked = drawer(page).getByRole("button", { name: /Look at the end card/ });
+  await linked.focus();
+  for (let i = 1; i <= 5; i++) await rushes.api("POST", "/api/log", { text: `Note to self ${i}` });
+  await expect(rows(page)).toHaveCount(7);
+  await expect(linked).toBeFocused();
+});
+
+test("the dot says lines arrived since the drawer was last open; opening it clears the dot (R19)", async ({ page, rushes }) => {
+  await rushes.addCut("first cut");
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await expect(logButton(page)).toHaveAccessibleName("Change Log (new entries)");
+  await logButton(page).click();
+  await logButton(page).click(); // closed again: seen
+  await expect(logButton(page)).toHaveAccessibleName("Change Log");
+  await rushes.api("POST", "/api/log", { text: "Moved the logo up" });
+  await expect(logButton(page).locator(".cdot")).toHaveCount(1);
+  await page.reload();
+  await expect(logButton(page).locator(".cdot")).toHaveCount(1); // kept in the browser
+  await logButton(page).click();
+  await expect(logButton(page).locator(".cdot")).toHaveCount(0);
+  // A line that arrives while it's open is seen.
+  await rushes.api("POST", "/api/log", { text: "Moved the logo down again" });
+  await expect(rows(page).first()).toContainText("Moved the logo down again");
+  await logButton(page).click();
+  await page.reload();
+  await expect(logButton(page)).toHaveAccessibleName("Change Log");
+});
+
+test("a row with somewhere to go opens it: a line on v1 opens Picture at v1, a variant opens its tab and row (R18)", async ({ page, rushes }) => {
+  await rushes.addCut("first cut");
+  await rushes.addCut("second cut");
+  await rushes.addVariant("music", "Night drive", { seconds: 2, freq: 220, lane: "night-drive" });
+  await rushes.api("POST", "/api/log", { text: "The end card on v1 read better", video: "hero", version: "v1" });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await expect(versionButton(page)).toHaveAttribute("data-version", "v2");
+  await logButton(page).click();
+  await expect(rows(page)).toHaveText([/The end card on v1/, /Music: “Night drive”/, /2 cuts added, the latest v2: second cut/]);
+  await expect(rows(page).locator(".lgo")).toHaveText(["›", "›", "›"]);
+  await drawer(page).getByRole("button", { name: /The end card on v1 read better/ }).click();
+  await expect(versionButton(page)).toHaveAttribute("data-version", "v1");
+  await expect(drawer(page)).toBeVisible();
+  await drawer(page).getByRole("button", { name: /Music: “Night drive” added/ }).click();
+  await expect(page.getByRole("tab", { name: /Music/ })).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator('.lane[data-row="night-drive/night-drive"] .nm')).toBeFocused();
+  // And back to the cut, from the Music tab.
+  await drawer(page).getByRole("button", { name: /2 cuts added/ }).click();
+  await expect(page.getByRole("tab", { name: /Picture/ })).toHaveAttribute("aria-selected", "true");
+});
+
+test("an empty log says so; audio from before the log is listed undated; Export as Markdown writes the file (§22.6–§22.8)", async ({ page, rushes }) => {
+  await page.goto(rushes.url);
+  await logButton(page).click();
+  await expect(drawer(page).getByText("Nothing yet. Rushes writes a line here whenever a cut, a take or a variant is added.")).toBeVisible();
+  await expect(drawer(page).locator(".dfoot")).toContainText("0 entries");
+  await rushes.addVariant("music", "Night drive", { seconds: 2, freq: 220, lane: "night-drive" });
+  // History made by hand: the variant was already there when the log began.
+  await writeFile(join(rushes.root, ".rushes", "log.json"), JSON.stringify({ schema: 1, rev: 99, backfilled: true, undated: ["night-drive/night-drive"], dropped: 0, entries: [] }));
+  const before = drawer(page).getByRole("region", { name: "Before the log" });
+  await expect(before).toContainText("Music: night-drive (1 variant)");
+  await expect(drawer(page).getByText(/^Nothing yet/)).toHaveCount(0);
+  await drawer(page).getByRole("button", { name: "Export as Markdown" }).click();
+  const status = page.getByRole("status");
+  await expect(status).toContainText(/Saved to exports\/change-log-\d{4}-\d{2}-\d{2}\.md/);
+  const name = (await status.textContent())!.match(/exports\/(change-log-[\d-]+\.md)/)![1];
+  const md = await readFile(join(rushes.root, "exports", name), "utf8");
+  expect(md).toContain("# My Film — change log");
+  expect(md).toContain("## Before the log\n- Music: night-drive (1 variant)");
+});
+
+test("a log that can't be read says so in plain words, never the raw error (§22.8)", async ({ page, rushes }) => {
+  await rushes.addCut("first cut");
+  // A folder where log.json should be: the server answers 500 with an errno in its message.
+  await rm(join(rushes.root, ".rushes", "log.json"), { force: true });
+  await mkdir(join(rushes.root, ".rushes", "log.json"));
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await logButton(page).click();
+  const alert = drawer(page).getByRole("alert");
+  await expect(alert).toHaveText("The Change Log couldn't be read. Run rushes doctor to see why.");
+  await expect(drawer(page)).not.toContainText(/EISDIR|illegal|internal/i);
+  // A line that can't be written, and an export that can't be made, say so too.
+  await drawer(page).getByLabel("Add a line to the log").fill("Kept the wide shot");
+  await drawer(page).getByLabel("Add a line to the log").press("Enter");
+  await expect(page.getByRole("status")).toHaveText(/^That line wasn't added: the Change Log couldn't be written\. Run rushes doctor to see why\.$/);
+  await drawer(page).getByRole("button", { name: "Export as Markdown" }).click();
+  await expect(page.getByRole("status")).toHaveText(/^The Markdown wasn't saved: the Change Log couldn't be read or written\. Run rushes doctor to see why\.$/);
+});
+
+test("a long line wraps inside the drawer; nothing scrolls sideways (§22.8)", async ({ page, rushes }) => {
+  await rushes.addCut("first cut");
+  await rushes.api("POST", "/api/log", { text: `${"Supercalifragilistic".repeat(5)} and then the zooms were slowed down by half across every shot of the hero film` });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await logButton(page).click();
+  await expect(rows(page)).toHaveCount(2);
+  await settled(page);
+  const sideways = await drawer(page).evaluate((el) => [el, ...el.querySelectorAll("*")].filter((x) => x.scrollWidth > x.clientWidth + 1 && getComputedStyle(x).overflowX !== "visible" && !x.classList.contains("ltag")).length);
+  expect(sideways).toBe(0);
+  const box = (await rows(page).first().locator(".ltext").boundingBox())!;
+  expect(box.height).toBeGreaterThan(60); // wrapped onto several lines
+  expect(box.x + box.width).toBeLessThanOrEqual(1440);
+});
+
+test("5,000 lines: the drawer shows the newest 1000 and says so, and stays quick (R16, §22.9)", async ({ page, rushes }) => {
+  await mkdir(join(rushes.root, ".rushes"), { recursive: true });
+  await writeFile(join(rushes.root, ".rushes", "log.json"), bigLog(5000, 12));
+  await page.goto(rushes.url);
+  const t0 = Date.now();
+  await logButton(page).click();
+  await expect(rows(page)).toHaveCount(1000);
+  const opened = Date.now() - t0;
+  await expect(drawer(page).locator(".dfoot")).toContainText("Showing the newest 1000 of 5000 · Earlier entries were removed");
+  await expect(rows(page).first()).toContainText("Decision 5000");
+  // A live line on a full log: drops the oldest, shows at the top.
+  const t1 = Date.now();
+  await rushes.api("POST", "/api/log", { text: "Swapped the end card for line B" });
+  await expect(rows(page).first()).toContainText("Swapped the end card for line B");
+  const live = Date.now() - t1;
+  console.log(`5000-line log: drawer open ${opened} ms, live line ${live} ms`);
+  expect(opened).toBeLessThan(5000);
+  expect(live).toBeLessThan(5000);
+});
+
+test("under 560 px the drawer is full width and a jump closes it; reduced motion drops the slide (§22.8, R18)", async ({ page, rushes }) => {
+  await rushes.addCut("first cut");
+  await page.goto(rushes.url);
+  await logButton(page).click();
+  expect(await drawer(page).evaluate((el) => getComputedStyle(el).animationName)).toBe("drawer-in");
+  await logButton(page).click();
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.setViewportSize({ width: 500, height: 800 });
+  await logButton(page).click();
+  expect(await drawer(page).evaluate((el) => getComputedStyle(el).animationName)).toBe("none");
+  expect(Math.round((await drawer(page).boundingBox())!.width)).toBe(500);
+  await expect(logButton(page)).toBeInViewport();
+  // Nothing in the drawer is wider than it (the page behind has its own, older overflow at this width).
+  expect(await drawer(page).evaluate((el) => el.scrollWidth <= el.clientWidth && el.getBoundingClientRect().right <= 500)).toBe(true);
+  await drawer(page).getByRole("button", { name: /v1 added/ }).click();
+  await expect(drawer(page)).toHaveCount(0);
+});
+
+test("the drawer isn't modal: tabs and keys still work with it open (§22.8)", async ({ page, rushes }) => {
+  await rushes.addCut("first cut");
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await logButton(page).click();
+  await page.getByRole("tab", { name: /Script/ }).click();
+  await expect(page.getByRole("tab", { name: /Script/ })).toHaveAttribute("aria-selected", "true");
+  await expect(drawer(page)).toBeVisible();
+  await page.keyboard.press("2");
+  await expect(page.getByRole("tab", { name: /Picture/ })).toHaveAttribute("aria-selected", "true");
+});

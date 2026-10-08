@@ -23,3 +23,14 @@ describe("changes.css (§22.8)", () => {
     }
   });
 });
+
+describe("changes.css: the drawer (§22.8)", () => {
+  it("is 440 px wide, full width under 560 px, and drops its slide under reduced motion", () => {
+    expect(css).toMatch(/\.drawer \{[^}]*width: 440px/);
+    expect(css).toMatch(/@media \(max-width: 559px\) \{ \.drawer \{ width: 100%; \} \}/);
+    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{[^}]*\.drawer \{ animation: none; \}/);
+  });
+  it("tags every area with its stage's colour", () => {
+    for (const area of ["picture", "voice", "music", "sfx", "mix", "notes", "assets", "script", "project"]) expect(css, area).toContain(`.ltag.${area}`);
+  });
+});

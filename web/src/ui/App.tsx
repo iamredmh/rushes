@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { api, ApiError } from "../api.js";
+import { api, ApiError, projectId } from "../api.js";
 import { LOCKED_TAB, testFlags, STAGE_NAMES, agentPrompt, copyShortcut, defaultVersion, firstTab, foundChip, foundSignature, latest, lockedFound, neighbourVideo, proxyKey, snap } from "../lib.js";
 import type { Batch, FoundCounts, FoundKind, Stage, Video } from "../types.js";
 import { useRushes } from "../useRushes.js";
@@ -12,6 +12,8 @@ import { Script } from "./Script.js";
 import { VariantTab } from "./VariantTab.js";
 import { Voice } from "./Voice.js";
 import { VersionMenu } from "./VersionMenu.js";
+import { ChangeLogButton, ChangeLogDrawer, focusRow, useChangeLog } from "./ChangeLog.js";
+import type { JumpTarget } from "../changelog.js";
 
 declare global {
   interface Window {
@@ -111,6 +113,9 @@ export function App() {
   // §20.5: a request to open Assets › Found (the header chip), and what the chip last said while Found was open.
   const [foundRequest, setFoundRequest] = useState<FoundRequest>({ n: 0, pending: false });
   const [foundSeen, setFoundSeen] = useState<string | null>(null);
+  // §22.8: the Change Log drawer, and whether lines arrived since it was last open.
+  const changeLog = useChangeLog(projectId() ?? "", state?.log);
+  const changeLogButton = useRef<HTMLButtonElement>(null);
 
   // §19.5: a proxy that fails says why, in whichever tab is open; the bar returns to the offer.
   useEffect(() => {
@@ -197,6 +202,21 @@ export function App() {
     } catch (e) {
       toast((e as Error).message);
     }
+  };
+
+  /** §22.8 (R18): a Change Log row opens what it's about: a cut on Picture at its version, a variant on its tab. */
+  const jump = (to: JumpTarget) => {
+    if (pending) return toast("Add or clear your note first");
+    if (to.tab === "assets") return showAssets();
+    if (to.video && to.video !== video?.id) switchFilm(to.video);
+    if (to.version) {
+      const film = state?.project.videos.find((v) => v.id === (to.video ?? video?.id));
+      setVersionId(to.version === defaultVersion(film)?.id ? null : to.version);
+      setHeld(false);
+    }
+    setStage(to.tab);
+    setSent(null);
+    if (to.row) focusRow(to.row);
   };
 
   const tabs = state?.tabs ?? [];
@@ -397,6 +417,7 @@ export function App() {
         <button class="btn ghost ib tip-below" data-tip="Shortcuts  ?" aria-label="Keyboard shortcuts" onClick={() => { setSent(null); setKeysOpen(!keysOpen); }}>
           <Icon name="kbd" />
         </button>
+        <ChangeLogButton log={changeLog} buttonRef={changeLogButton} />
         <button
           class="btn primary"
           aria-disabled={stage === "assets"}
@@ -407,6 +428,17 @@ export function App() {
           Send to agent{open > 0 && <span class="count">{open}</span>}
         </button>
       </header>
+      <ChangeLogDrawer
+        log={changeLog}
+        projectId={projectId() ?? ""}
+        head={state.log}
+        project={state.project}
+        stage={stage}
+        header={headRef}
+        buttonRef={changeLogButton}
+        toast={toast}
+        onJump={jump}
+      />
 
       {sent && (
         <div class="pop" role="dialog" aria-label="Sent to agent">

@@ -6,12 +6,16 @@ export type { Asset, AssetKind } from "../../src/server/assets.js";
 export type { ProxyEvent, ProxyJob } from "../../src/server/proxy.js";
 export type { FoundCounts, FoundSummary } from "../../src/server/found.js";
 export type { FoundKind } from "../../src/core/found.js";
+export type { LogLine, UndatedLine } from "../../src/core/logText.js";
+export type { LogView } from "../../src/core/log.js";
+export type { LogHead } from "../../src/server/logbook.js";
 
 import type { BatchesFile, NotesFile, Picks, Project as StoredProject, Script, Version as StoredVersion, Video as StoredVideo } from "../../src/core/schema.js";
 import type { TabState } from "../../src/core/tabs.js";
 import type { ProxyJob } from "../../src/server/proxy.js";
 import type { FoundKind } from "../../src/core/found.js";
 import type { FoundSummary } from "../../src/server/found.js";
+import type { LogHead } from "../../src/server/logbook.js";
 
 /** A cut as GET /api/state sends it: the stored version plus §19.5's `proxyNeed`, why it may play
  *  badly (e.g. "It's a 4K ProRes file (2.3 GB), which browsers struggle with"), or null. Optional
@@ -32,6 +36,8 @@ export interface State {
   proxies: { ffmpeg: boolean; jobs: ProxyJob[] };
   /** §20.6: what the last scan of the folder left, and what has been brought in this session. */
   found: FoundSummary;
+  /** §22.8: the Change Log's newest line and size, for the header button's dot (null if it couldn't be read). */
+  log?: LogHead | null;
 }
 
 /** One file in GET /api/found (§20.6): a candidate, or a hidden one (the server's `abs` stays on the server). */
