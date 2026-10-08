@@ -395,6 +395,10 @@ export function Picture({
     const at = now();
     const forVideo = video.id;
     const forVersion = version.id;
+    // §21.5: on a cut with formats every grab is named with the ratio on screen (the primary's too,
+    // which the server names itself); a one-format cut's name is unchanged. Only a non-primary format
+    // is sent: an older cut with formats but no stored size has no primary id (Task 2 review M4).
+    const forFormat = onPrimary ? null : format;
     const n = ++grabSeq.current;
     let extracting = false;
     try {
@@ -405,7 +409,7 @@ export function Picture({
         // playing: the server extracts that exact frame with ffmpeg.
         extracting = true;
         setGrabbing((g) => g + 1);
-        const still = await originalFrame(forVideo, forVersion, at);
+        const still = await originalFrame(forVideo, forVersion, at, forFormat);
         frame = still.frame ?? frame;
         png = still.png;
       } else {
@@ -416,7 +420,7 @@ export function Picture({
         canvas.getContext("2d")!.drawImage(v, 0, 0);
         png = canvas.toDataURL("image/png");
       }
-      const r = await api.post<{ grab: string }>("/api/grabs", { video: forVideo, version: forVersion, frame, png });
+      const r = await api.post<{ grab: string }>("/api/grabs", { video: forVideo, version: forVersion, frame, png, ...(forFormat ? { format: forFormat } : {}) });
       if (n !== grabSeq.current) {
         // Superseded by a later grab: its file is saved all the same, so Assets still hears of it.
         onChanged();

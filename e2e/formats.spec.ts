@@ -1080,3 +1080,47 @@ test("the Other formats row follows the To do and Done filter", async ({ page, r
   await rushes.api("PATCH", `/api/notes/${note.id}`, { status: "todo" });
   await expect(page.locator(".otherrow")).toHaveCount(0);
 });
+
+test("Assets › Cuts lists a cut's formats under it, each with download, reveal and open", async ({ page, rushes }) => {
+  await rushes.addFormatsCut([WIDE, TALL, SQUARE]);
+  await page.goto(rushes.url);
+  await page.getByRole("tab", { name: /Assets/ }).click();
+  await page.getByRole("navigation", { name: "Folders" }).getByRole("button", { name: /Cuts/ }).click();
+  await page.getByRole("button", { name: "List view" }).click();
+  const rows = page.locator(".arows .arow");
+  await expect(rows.locator(".atitle")).toHaveText(["Hero · v1 · 16:9", "Hero · v1 · 9:16", "Hero · v1 · 1:1"]);
+  await expect(rows.nth(0)).not.toHaveClass(/\bsub\b/);
+  const tall = rows.nth(1);
+  await expect(tall).toHaveClass(/\bsub\b/);
+  await expect(tall.getByRole("link", { name: "Download" })).toHaveAttribute("href", /renders%2Fhero_v1_180x320\.mp4.*download=1/);
+  const reveal = page.waitForResponse((r) => r.url().endsWith("/api/reveal") && r.status() === 200);
+  await tall.getByRole("button", { name: /Show in|Open folder/ }).click();
+  await reveal;
+  const open = page.waitForResponse((r) => r.url().endsWith("/api/open") && r.status() === 200);
+  await tall.getByRole("button", { name: "Open", exact: true }).click();
+  await open;
+  // The sub-row sits indented under its cut.
+  const [cutBox, subBox] = await Promise.all([rows.nth(0).boundingBox(), tall.boundingBox()]);
+  expect(subBox!.x - cutBox!.x).toBe(24);
+});
+
+test("Grab frame on a format saves that format's frame, named with its ratio", async ({ page, rushes }) => {
+  await rushes.addFormatsCut([WIDE, TALL]);
+  const seen = watchFormatRequests(page);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await radio(page, "9:16").click();
+  for (let i = 0; i < 30; i++) await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("g");
+  await expect(page.locator(".toast")).toHaveText("Saved to screenshots/hero_v1_9x16_00m01.00s_f30.png");
+  const png = await readFile(join(rushes.root, "screenshots", "hero_v1_9x16_00m01.00s_f30.png"));
+  expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([180, 320]);
+  await radio(page, "16:9").click();
+  await page.keyboard.press("g");
+  await expect(page.locator(".toast")).toHaveText("Saved to screenshots/hero_v1_16x9_00m01.00s_f30.png");
+  const wide = await readFile(join(rushes.root, "screenshots", "hero_v1_16x9_00m01.00s_f30.png"));
+  expect([wide.readUInt32BE(16), wide.readUInt32BE(20)]).toEqual([320, 180]);
+  // Carried ruling (Task 2 review M4): only the non-primary format is named in a request; the primary's is named by the server.
+  const grabs = seen.filter((s) => s.includes("/frame") || s.includes("/api/grabs"));
+  expect(grabs).toEqual([expect.stringMatching(/^GET \/api\/videos\/hero\/versions\/v1\/frame\?t=[\d.]+&format=9x16$/), "POST /api/grabs body.format"]);
+});

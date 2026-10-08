@@ -346,6 +346,8 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .arows { display: grid; gap: 8px; }
 .arow { display: flex; align-items: center; gap: 14px; background: var(--raised); border-radius: var(--r); padding: 14px 16px; }
 .arow.missing { opacity: 0.55; }
+/* §21.5: a cut's format, listed under its cut in Assets › Cuts. */
+.arow.sub { margin-left: 24px; }
 .arow.previewable.selected { background: var(--accent-soft); }
 .ainfo { display: grid; gap: 4px; min-width: 0; flex: 1; }
 .atitle { font-size: 15px; font-weight: 500; color: var(--text); display: flex; align-items: center; gap: 8px; overflow-wrap: anywhere; }

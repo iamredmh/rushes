@@ -315,7 +315,33 @@ export function folderItems(assets: Asset[], folder: Pick<FolderDef, "kinds">, o
   if (sort === "name") sorted.sort((a, b) => a.name.localeCompare(b.name));
   else if (sort === "oldest") sorted.sort((a, b) => modifiedMs(a) - modifiedMs(b));
   else sorted.sort((a, b) => modifiedMs(b) - modifiedMs(a)); // "newest", the default
-  return sorted;
+  return folder.kinds.includes("cut") ? withFormatRows(sorted) : sorted;
+}
+
+/** §21.5: each cut's format rows straight after it, in chip order; a row whose cut was filtered out stays where it fell. */
+export function withFormatRows(items: Asset[]): Asset[] {
+  const isSub = (a: Asset) => a.kind === "cut" && a.format !== undefined;
+  const subs = items.filter(isSub);
+  const placed = new Set<Asset>();
+  const out: Asset[] = [];
+  for (const a of items) {
+    if (isSub(a)) {
+      // A row whose cut isn't in the list (a search or film filter left it out) stays where it fell.
+      if (!items.some((c) => c.kind === "cut" && !isSub(c) && c.video === a.video && c.version === a.version)) {
+        out.push(a);
+        placed.add(a);
+      }
+      continue;
+    }
+    out.push(a);
+    if (a.kind !== "cut") continue;
+    const mine = subs.filter((s) => s.video === a.video && s.version === a.version && !placed.has(s));
+    for (const s of orderChips(mine.map((s) => ({ id: s.format!, width: s.width ?? 1, height: s.height ?? 1, s }))).map((x) => x.s)) {
+      out.push(s);
+      placed.add(s);
+    }
+  }
+  return out;
 }
 
 export interface FilmGroup {

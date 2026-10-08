@@ -25,6 +25,7 @@ import { join, relative } from "node:path";
 import {
   heardVoice, onOptionGroups, sectionLabel, voiceDefaultRead, voiceListening, voiceNoteRows, voiceOnLabel, voiceOnOptions, voiceRounds,
 } from "../../web/src/lib.js";
+import { withFormatRows } from "../../web/src/lib.js";
 
 /** A read with only an id: its name is the id, its file `media/<id>.wav`. */
 const v = (id: string) => ({ id, name: id, file: `media/${id}.wav`, meta: {}, cues: [] });
@@ -365,6 +366,24 @@ describe("folderItems", () => {
     expect(folderItems(assets, folder, { query: "renders/cutdown", videos }).map((a) => a.name)).toEqual(["cutdown_v1.mp4"]);
     expect(folderItems(assets, folder, { query: "first pass", videos }).map((a) => a.name)).toEqual(["hero_v1.mp4"]);
     expect(folderItems(assets, folder, { query: "Hero", videos }).map((a) => a.name)).toEqual(["hero_v1.mp4"]);
+  });
+
+  it("Cuts keeps each cut's format rows under it, whatever the sort; other folders are sorted as they were (§21.5)", () => {
+    const cuts = FOLDERS.find((f) => f.id === "cut")!;
+    const assets = [
+      asset({ kind: "cut", name: "hero_v1.mp4", path: "renders/hero_v1.mp4", video: "hero", version: "v1", modified: "2026-10-01T00:00:00Z" }),
+      // The format renders are newer than their cut, and would sort above it on their own.
+      asset({ kind: "cut", name: "hero_v1_1x1.mp4", path: "renders/hero_v1_1x1.mp4", video: "hero", version: "v1", format: "1x1", width: 1080, height: 1080, modified: "2026-10-05T00:00:00Z" }),
+      asset({ kind: "cut", name: "hero_v1_9x16.mp4", path: "renders/hero_v1_9x16.mp4", video: "hero", version: "v1", format: "9x16", width: 1080, height: 1920, modified: "2026-10-04T00:00:00Z" }),
+      asset({ kind: "cut", name: "cutdown_v1.mp4", path: "renders/cutdown_v1.mp4", video: "cutdown", version: "v1", modified: "2026-10-03T00:00:00Z" }),
+    ];
+    expect(folderItems(assets, cuts).map((a) => a.name)).toEqual(["cutdown_v1.mp4", "hero_v1.mp4", "hero_v1_9x16.mp4", "hero_v1_1x1.mp4"]);
+    expect(folderItems(assets, cuts, { sort: "name" }).map((a) => a.name)).toEqual(["cutdown_v1.mp4", "hero_v1.mp4", "hero_v1_9x16.mp4", "hero_v1_1x1.mp4"]);
+    // A search that finds only a format row still shows it.
+    expect(folderItems(assets, cuts, { query: "1x1" }).map((a) => a.name)).toEqual(["hero_v1_1x1.mp4"]);
+    const shots = FOLDERS.find((f) => f.id === "screenshot")!;
+    const grabs = [asset({ name: "a.png", modified: "2026-10-01T00:00:00Z" }), asset({ name: "b.png", format: "9x16", modified: "2026-10-02T00:00:00Z" })];
+    expect(folderItems(grabs, shots).map((a) => a.name)).toEqual(["b.png", "a.png"]);
   });
 
   it("searches a registered file's own note", () => {
@@ -1450,5 +1469,20 @@ describe("notes per format (§21.2, §21.5)", () => {
     expect(otherFormatAction(n("a", "4x5"), here, here)).toEqual({ kind: "restore" });
     expect(otherFormatAction(n("a", "4x5", box), here, here)).toBeNull();
     expect(otherFormatAction(n("a", null), here, here)).toBeNull();
+  });
+});
+
+describe("withFormatRows (§21.5 Assets › Cuts)", () => {
+  const a = (path: string, over: Partial<Asset> = {}): Asset => ({ kind: "cut", path, abs: `/p/${path}`, name: path, size: 1, modified: null, missing: false, video: "hero", version: "v1", ...over });
+  it("keeps each cut's formats straight after it, in chip order, whatever the sort", () => {
+    const items = [a("sq.mp4", { format: "1x1", width: 1080, height: 1080 }), a("v2.mp4", { version: "v2" }), a("main.mp4"), a("tall.mp4", { format: "9x16", width: 1080, height: 1920 })];
+    expect(withFormatRows(items).map((x) => x.path)).toEqual(["v2.mp4", "main.mp4", "tall.mp4", "sq.mp4"]);
+  });
+  it("a format row whose cut was filtered out still shows", () => {
+    expect(withFormatRows([a("tall.mp4", { format: "9x16", width: 1080, height: 1920 })]).map((x) => x.path)).toEqual(["tall.mp4"]);
+  });
+  it("a film's other cut never takes its formats", () => {
+    const items = [a("other.mp4", { video: "teaser" }), a("main.mp4"), a("tall.mp4", { format: "9x16", width: 1080, height: 1920 })];
+    expect(withFormatRows(items).map((x) => x.path)).toEqual(["other.mp4", "main.mp4", "tall.mp4"]);
   });
 });

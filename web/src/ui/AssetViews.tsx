@@ -158,8 +158,16 @@ export function cutLabel(asset: Asset, videos: Video[]): { title: string; subtit
   const version = video?.versions.find((v) => v.id === asset.version);
   // label ?? name (I2): a registered delivery with no video match still shows its own display
   // name rather than its bare file name.
-  const title = video && asset.version ? `${video.name} · ${asset.version}` : asset.label ?? asset.name;
-  return { title, subtitle: version?.note || null };
+  const base = video && asset.version ? `${video.name} · ${asset.version}` : asset.label ?? asset.name;
+  // §21.5: on a cut with formats each row says which shape it is ("Hero · v1 · 9:16").
+  const title = asset.formatLabel ? `${base} · ${asset.formatLabel}` : base;
+  // A format row sits under its cut, which already carries the version note.
+  return { title, subtitle: isFormatRow(asset) ? null : version?.note || null };
+}
+
+/** §21.5: a cut's format, listed as a sub-row under it in Assets › Cuts. */
+function isFormatRow(asset: Asset): boolean {
+  return asset.kind === "cut" && asset.format !== undefined;
 }
 
 /** A plain list row: name, folder path, size/date, actions. Used for anything without its own
@@ -169,7 +177,7 @@ export function AssetRow({ asset, videos, toast }: { asset: Asset; videos: Video
   // aria-disabled belongs on the controls inside (Actions), not here: a <div> isn't
   // interactive, so AT has nothing to disable at this level.
   return (
-    <div class={`arow${asset.missing ? " missing" : ""}`}>
+    <div class={`arow${asset.missing ? " missing" : ""}${isFormatRow(asset) ? " sub" : ""}`}>
       <div class="ainfo">
         <div class="atitle">
           {cut ? cut.title : asset.label ?? asset.name}
@@ -352,7 +360,7 @@ export function PosterTile({ asset, videos, toast }: { asset: Asset; videos: Vid
   const { title, subtitle } = cutLabel(asset, videos);
   const isVideo = VIDEO_EXT.has(extOf(asset.path));
   return (
-    <div class={`shot-tile${asset.missing ? " missing" : ""}`}>
+    <div class={`shot-tile${asset.missing ? " missing" : ""}${isFormatRow(asset) ? " sub" : ""}`}>
       <div class="shot-thumb poster">
         {!asset.missing && (isVideo ? <PosterVideo asset={asset} /> : (
           <div class="file-tile"><span class="file-ext mono">{extOf(asset.path) || "file"}</span></div>
