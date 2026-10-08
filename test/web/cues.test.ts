@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { baseName, cardPosition, cueCount, cueLabel, cueLayers, cueName, cuesInTime, rovingIndex, tickLeft } from "../../web/src/cues.js";
+import { baseName, cardPosition, cueCount, cueKeys, cueLabel, cueLayers, cueName, cuesInTime, rovingIndex, tickLeft, tickPlace } from "../../web/src/cues.js";
 
 const cue = (id: string, name: string, t: number, file?: string) => (file === undefined ? { id, name, t } : { id, name, t, file });
 
@@ -70,6 +70,21 @@ describe("tickLeft", () => {
     expect(tickLeft(45, 40)).toBe("100.000%");
     expect(tickLeft(-1, 40)).toBe("0.000%");
     expect(tickLeft(3, 0)).toBe("0.000%");
+  });
+});
+
+describe("tickPlace", () => {
+  it("keeps a layer tick 5 px inside the track, so the first, the last and an after-the-end tick show whole", () => {
+    expect(tickPlace(10, 40)).toBe("clamp(5px, 25.000%, calc(100% - 5px))");
+    expect(tickPlace(0, 40)).toBe("clamp(5px, 0.000%, calc(100% - 5px))");
+    expect(tickPlace(45, 40)).toBe("clamp(5px, 100.000%, calc(100% - 5px))");
+  });
+});
+
+describe("cueKeys", () => {
+  it("is each cue's id, with a suffix for a repeated id (Mix merges passes), so a replaced cue is a new element", () => {
+    expect(cueKeys([{ id: "thud" }, { id: "whoosh" }, { id: "thud" }, { id: "thud" }])).toEqual(["thud", "whoosh", "thud#2", "thud#3"]);
+    expect(cueKeys([{ id: "a" }, { id: "b" }])).not.toEqual(cueKeys([{ id: "a" }, { id: "c" }]));
   });
 });
 

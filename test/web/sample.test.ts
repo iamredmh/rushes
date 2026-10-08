@@ -3,7 +3,16 @@ import { claim, owner, release } from "../../web/src/audio/bus.js";
 import { SamplePlayer, type SampleElement, type SampleState } from "../../web/src/audio/sample.js";
 
 class FakeAudio implements SampleElement {
-  src = "";
+  /** How many times the source was set: setting it again is what clears a failed element's error. */
+  srcSets = 0;
+  private source = "";
+  get src(): string {
+    return this.source;
+  }
+  set src(v: string) {
+    this.srcSets++;
+    this.source = v;
+  }
   currentTime = 0;
   paused = true;
   fail = false;
@@ -101,6 +110,37 @@ describe("SamplePlayer: a cue's sample on the one-player bus (§23, ruling R9)",
     await expect(player.toggle(THUD)).rejects.toThrow(/NotSupportedError/);
     expect(player.state()).toEqual({ path: THUD, playing: false });
     expect(owner()).toBeNull();
+  });
+
+  it("a sample that failed can be tried again: its source is set afresh, so the element's error is gone", async () => {
+    const { el, player } = setup();
+    el.fail = true;
+    await expect(player.toggle(THUD)).rejects.toThrow();
+    expect(el.srcSets).toBe(1);
+    el.fail = false;
+    await player.toggle(THUD);
+    expect(el.srcSets).toBe(2);
+    expect(player.state()).toEqual({ path: THUD, playing: true });
+    // Once it plays, pressing the same sample again doesn't reload it.
+    await player.toggle(THUD);
+    await player.toggle(THUD);
+    expect(el.srcSets).toBe(2);
+  });
+
+  it("stopIf stops a sample only for whoever started it", async () => {
+    const { el, player } = setup();
+    await player.toggle(THUD, "layers-a");
+    player.stopIf("layers-b");
+    expect(player.state().playing).toBe(true);
+    expect(el.paused).toBe(false);
+    player.stopIf("layers-a");
+    expect(player.state().playing).toBe(false);
+    expect(el.paused).toBe(true);
+    expect(owner()).toBeNull();
+    // A press by someone else takes over the owner.
+    await player.toggle(THUD, "layers-b");
+    player.stopIf("layers-a");
+    expect(player.state().playing).toBe(true);
   });
 
   it("tells its subscribers about each change, until they unsubscribe", async () => {

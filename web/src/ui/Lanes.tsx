@@ -13,7 +13,7 @@ import type { LoadResult } from "../audio/engine.js";
 import { type Clip, mediaKey } from "../audio/timeline.js";
 import { cueRoom } from "../lib.js";
 import { Missing } from "./AssetViews.js";
-import { cueLabel, cueName, cuesInTime } from "../cues.js";
+import { cueKeys, cueLabel, cueName, cuesInTime } from "../cues.js";
 import { type CardCue, CUE_CARD_ID, CueCard, cardHover, useCueCard } from "./CueCard.js";
 import { CueLayers, rovingKeyDown } from "./CueLayers.js";
 import { Icon } from "./Icon.js";
@@ -258,10 +258,13 @@ export function Lanes({ rows, length, media, selected, marks, range, onSelect, o
         const flags = cut[row.key] ?? "";
         // §23: cues in time order, so the labels, ←/→ and "cue n of N" all follow time.
         const timed = cuesInTime(row.cues ?? []);
+        // Elements are keyed by cue id, time and name, so a cue that changes is a new element and its card closes
+        // (an index key would keep the element, and its card would go on showing the old cue).
+        const ckeys = cueKeys(timed);
         const rooms = cueRoom(timed, length);
         const tabCue = Math.min(focusCue[row.key] ?? 0, Math.max(0, timed.length - 1));
         const cardCue = (c: LaneCue, i: number): CardCue => ({
-          key: `m:${row.key}:${i}`, name: cueName(c), t: c.t, n: i + 1, of: timed.length, file: c.file ?? null, color: row.color,
+          key: `m:${row.key}:${ckeys[i]}`, name: cueName(c), t: c.t, n: i + 1, of: timed.length, file: c.file ?? null, color: row.color,
         });
         const results = row.clips.map((c) => media[mediaKey(c)]);
         const streamed = results.some((r) => r !== undefined && r !== "error" && r.streamed);
@@ -313,6 +316,7 @@ export function Lanes({ rows, length, media, selected, marks, range, onSelect, o
                   aria-expanded={row.layers.open}
                   aria-controls={row.layers.open && timed.length > 0 ? `cl-${row.key}` : undefined}
                   aria-label={`Layers for ${row.name}`}
+                  aria-description={timed.length === 0 ? "No cues in this pass" : undefined}
                   data-tip={timed.length === 0 ? "No cues in this pass" : row.layers.open ? "Hide the layers" : "Show the layers"}
                   disabled={timed.length === 0}
                   onClick={row.layers.onToggle}
@@ -334,9 +338,9 @@ export function Lanes({ rows, length, media, selected, marks, range, onSelect, o
               <Wave segments={segments} length={length} color={row.color} />
               {timed.map((c, i) => (
                 <i
-                  class={`cue-tick${card.shown === `m:${row.key}:${i}` ? " hot" : ""}`}
+                  class={`cue-tick${card.shown === `m:${row.key}:${ckeys[i]}` ? " hot" : ""}`}
                   aria-hidden="true"
-                  key={`t${i}`}
+                  key={`t${ckeys[i]}:${c.t}:${c.name}`}
                   style={{ left: pct(c.t), color: row.color }}
                   {...cardHover(card, cardCue(c, i))}
                   onClick={(e) => {
@@ -354,7 +358,7 @@ export function Lanes({ rows, length, media, selected, marks, range, onSelect, o
                     type="button"
                     class={`cue${shown ? " hot" : ""}`}
                     data-cue={c.id}
-                    key={`c${i}`}
+                    key={`c${ckeys[i]}:${c.t}:${c.name}`}
                     tabIndex={i === tabCue ? 0 : -1}
                     aria-label={cueLabel(c)}
                     aria-describedby={shown ? CUE_CARD_ID : undefined}

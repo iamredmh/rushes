@@ -30,6 +30,17 @@ describe("cues.css (§23)", () => {
     expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.chev svg\.ic \{ transition: none; \}/);
   });
 
+  it("styles the chevron only as a button, so Found's chevron icon (an svg with the same class) stays unboxed", () => {
+    expect(css).not.toMatch(/(^|\n)\s*\.chev(:[a-z-]+(\([^)]*\))?)*\s*\{/);
+    expect(css).toMatch(/(^|\n)button\.chev \{[^}]*border: 1px solid/);
+    expect(css).toMatch(/button\.chev:hover:not\(:disabled\) \{/);
+  });
+
+  it("sizes the card to its content, so measuring it doesn't depend on where it was last put", () => {
+    expect(css).toMatch(/\.cuecard \{[^}]*width: max-content;/);
+    expect(css).toMatch(/\.cuecard \{[^}]*max-width: min\(420px, calc\(100vw - 32px\)\);/);
+  });
+
   it("sits the card above the Change Log drawer, the version menu and the format pop", () => {
     expect(css).toMatch(/\.cuecard \{[^}]*z-index: 47;/);
   });

@@ -84,6 +84,28 @@ export function tickLeft(t: number, length: number): string {
   return `${(share * 100).toFixed(3)}%`;
 }
 
+/**
+ * A layer tick's `left`: tickLeft, but kept 5 px inside the track so the first and last ticks (and
+ * a cue after the end, R16) show whole, with their focus ring, instead of half under the track's edge.
+ */
+export function tickPlace(t: number, length: number): string {
+  return `clamp(5px, ${tickLeft(t, length)}, calc(100% - 5px))`;
+}
+
+/**
+ * A key for each cue of a lane, by the cue's id, so a cue that is replaced is a new element (and
+ * a card shown for the old one closes) rather than the same element with another cue's data. Cues
+ * sharing an id (Mix merges passes) get "#2", "#3" in time order.
+ */
+export function cueKeys(cues: readonly Pick<CueLike, "id">[]): string[] {
+  const seen = new Map<string, number>();
+  return cues.map((c) => {
+    const n = (seen.get(c.id) ?? 0) + 1;
+    seen.set(c.id, n);
+    return n === 1 ? c.id : `${c.id}#${n}`;
+  });
+}
+
 export interface Box {
   left: number;
   top: number;

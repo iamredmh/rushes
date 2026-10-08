@@ -124,6 +124,7 @@ test("the chevron opens one layer per sound, in order of first appearance, with 
   await expect(layers(page).locator('.clayer[data-layer="thud"] .ltick')).toHaveCount(3);
   // A pass with no cues has nothing to open.
   await expect(chevron(page, "Effects, levelled")).toBeDisabled();
+  await expect(chevron(page, "Effects, levelled")).toHaveAccessibleDescription("No cues in this pass");
   // Each layer's track lines up with the pass's own.
   const lt = (await layers(page).locator(".cltrack").first().boundingBox())!;
   const tr = (await lane(page).locator(".track").boundingBox())!;
@@ -155,7 +156,7 @@ test("in a layer, ←/→ move between its ticks without stepping frames, Enter 
   await page.keyboard.press("ArrowRight");
   await expect(tick("thud at 0:03.00")).toBeFocused();
   await expect(card(page).locator(".m")).toHaveText("0:03.00 · cue 4 of 5");
-  // A step right from 0 would show as a frame; ←  from 0 below can't, so check it here too.
+  // A step right from 0 would show as a frame; ← from 0 below can't, so check it here too.
   expect((await hook(page)).time).toBe(0);
   await page.keyboard.press("End");
   await expect(tick("thud at 0:04.50")).toBeFocused();
@@ -260,4 +261,60 @@ test("Mix's Sound effects lane shows the card and walks its cues; it has no laye
   await sfx.getByRole("button", { name: "whoosh at 0:00.50", exact: true }).focus();
   await page.keyboard.press("ArrowRight");
   await expect(sfx.getByRole("button", { name: "thud at 0:02.00", exact: true })).toBeFocused();
+});
+
+test("the card stays 16 px inside a narrow window when ← and → walk onto a cue with a long file path", async ({ page, rushes }) => {
+  await page.setViewportSize({ width: 1000, height: 800 });
+  const LONG = `audio/sfx/samples/${"impact_sub_heavy_".repeat(5)}01.wav`;
+  await rushes.addVariant("sfx", "Effects for Lumen", {
+    seconds: 6,
+    freq: 880,
+    cues: [{ name: "pop", t: 5.2 }, { name: "boom", t: 5.9, file: LONG }],
+  });
+  await openSfx(page, rushes, 1);
+  await lane(page).getByRole("button", { name: "pop at 0:05.20", exact: true }).focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(card(page).locator(".f")).toHaveText(LONG);
+  const box = (await card(page).boundingBox())!;
+  expect(box.x).toBeGreaterThanOrEqual(16);
+  expect(box.x + box.width).toBeLessThanOrEqual(1000 - 16);
+  // Its size is its content's, wherever it sits: it doesn't shrink to the room beside the window's edge.
+  expect(box.width).toBeGreaterThan(300);
+});
+
+test("the first, last and after-the-end ticks of a layer show whole, inside the track", async ({ page, rushes }) => {
+  await rushes.addVariant("sfx", "Effects for Lumen", {
+    seconds: 4,
+    freq: 880,
+    cues: [{ name: "hit", t: 0 }, { name: "hit", t: 2 }, { name: "hit", t: 4 }, { name: "late", t: 5 }],
+  });
+  await openSfx(page, rushes, 1);
+  await chevron(page).click();
+  const track = (await layers(page).locator(".cltrack").first().boundingBox())!;
+  const ticks = layers(page).locator(".ltick");
+  await expect(ticks).toHaveCount(4);
+  for (const b of await ticks.evaluateAll((els) => els.map((e) => e.getBoundingClientRect().toJSON() as { x: number; right: number }))) {
+    expect(b.x).toBeGreaterThanOrEqual(track.x);
+    expect(b.right).toBeLessThanOrEqual(track.x + track.width);
+  }
+});
+
+test("Assets › Found keeps its plain turning chevrons: the pass row's boxed chevron style doesn't reach them", async ({ page, rushes }) => {
+  await rushes.addCut();
+  await rushes.writeFiles([
+    { path: "vo/take-one.wav", seconds: 8, freq: 220 },
+    { path: "bed/loop-low.wav", seconds: 10, freq: 131 },
+  ]);
+  await rushes.scan();
+  await page.goto(rushes.url);
+  await page.getByRole("tab", { name: /Assets/ }).click();
+  await page.getByRole("navigation", { name: "Folders" }).getByRole("button", { name: /^Found/ }).click();
+  await expect(page.getByRole("heading", { name: "Found" })).toBeVisible();
+  const chev = page.locator(".fgroup > .gh svg.chev").first();
+  await expect(chev).toBeVisible();
+  const style = await chev.evaluate((e) => {
+    const c = getComputedStyle(e);
+    return { border: c.borderTopWidth, radius: c.borderTopLeftRadius, background: c.backgroundColor };
+  });
+  expect(style).toEqual({ border: "0px", radius: "0px", background: "rgba(0, 0, 0, 0)" });
 });

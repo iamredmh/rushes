@@ -4,9 +4,10 @@
 /* A pass's name cell: the chevron, then the name button (a button can't hold another, ruling R1). */
 .lane .nmc { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 8px; align-items: center; min-width: 0; }
 .lane .nmc > .nm { margin-left: 0; }
-.chev { width: 26px; height: 26px; display: grid; place-items: center; padding: 0; border: 1px solid var(--line-2); border-radius: 8px; background: transparent; color: var(--text-2); cursor: pointer; }
-.chev:hover:not(:disabled) { background: var(--hover); color: var(--text); }
-.chev:disabled { opacity: 0.4; cursor: default; }
+/* Scoped to the button: Found's turning chevron is an svg with this class, and must stay unboxed. */
+button.chev { width: 26px; height: 26px; display: grid; place-items: center; padding: 0; border: 1px solid var(--line-2); border-radius: 8px; background: transparent; color: var(--text-2); cursor: pointer; }
+button.chev:hover:not(:disabled) { background: var(--hover); color: var(--text); }
+button.chev:disabled { opacity: 0.4; cursor: default; }
 .chev svg.ic { width: 14px; height: 14px; transform: rotate(-90deg); transition: transform 0.16s; }
 .chev[aria-expanded="true"] svg.ic { transform: none; }
 
@@ -29,7 +30,7 @@
 .cltrack { position: relative; height: 30px; background: var(--raised); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .ltick { position: absolute; top: 4px; width: 6px; height: 20px; padding: 0; border: 0; border-radius: 3px; background: var(--lane); transform: translateX(-50%); cursor: pointer; z-index: 2; }
 .ltick:hover, .ltick.hot { background: var(--text); box-shadow: 0 0 0 2px var(--lane); }
-.ltick:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ltick:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
 .cltrack .playhead { top: 0; bottom: 0; }
 .cltrack .playhead::before { display: none; }
 .clfile { display: flex; align-items: center; gap: 6px; min-width: 0; }
@@ -41,7 +42,7 @@
 
 /* The hover card: a tooltip, so it never takes the pointer (ruling R6). It sits above the Change Log
    drawer (35), its header (36), the version menu (45) and the format pop (46). */
-.cuecard { position: fixed; z-index: 47; pointer-events: none; display: grid; gap: 2px; min-width: 200px; max-width: min(420px, calc(100vw - 32px)); padding: 8px 12px; background: #000; border: 1px solid var(--line-2); border-radius: 10px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5); color: var(--text); font-size: 15px; line-height: 1.4; }
+.cuecard { position: fixed; z-index: 47; pointer-events: none; display: grid; width: max-content; gap: 2px; min-width: 200px; max-width: min(420px, calc(100vw - 32px)); padding: 8px 12px; background: #000; border: 1px solid var(--line-2); border-radius: 10px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5); color: var(--text); font-size: 15px; line-height: 1.4; }
 .cuecard b { font-weight: 600; overflow-wrap: anywhere; }
 .cuecard .m { font: 15px var(--mono); color: var(--text-2); }
 .cuecard .f { font: 15px var(--mono); overflow-wrap: anywhere; }

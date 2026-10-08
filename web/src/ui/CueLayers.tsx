@@ -2,9 +2,9 @@
 // appearance. A layer has its count, a tick everywhere that sound comes in, its own playhead line
 // (moved by AudioStage with the lane's, never by state here) and, when the agent sent one, the
 // sample's file as a play button on the one-player bus.
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import { type SampleState, samples } from "../audio/sample.js";
-import { baseName, cueLabel, cueLayers, cuesInTime, rovingIndex, tickLeft } from "../cues.js";
+import { baseName, cueLabel, cueLayers, cuesInTime, rovingIndex, tickPlace } from "../cues.js";
 import type { Cue } from "../types.js";
 import { type CardApi, type CardCue, CUE_CARD_ID, cardHover } from "./CueCard.js";
 import { Icon } from "./Icon.js";
@@ -72,19 +72,12 @@ export function CueLayers({ id, name, cues, length, color, card, onSeek, toast }
   // Each layer's Tab stop: the tick last focused, else its first.
   const [active, setActive] = useState<Record<string, number>>({});
   const sample = useSample();
-  const ownFiles = useRef(new Set<string>());
-  ownFiles.current = new Set(cues.flatMap((c) => (c.file ? [c.file] : [])));
-  // Closing the layers (or leaving the tab) stops a sample they started.
-  useEffect(
-    () => () => {
-      const s = samples.state();
-      if (s.playing && s.path !== null && ownFiles.current.has(s.path)) samples.stop();
-    },
-    [],
-  );
+  // Closing the layers (or leaving the tab) stops a sample these layers started, and only that:
+  // another pass's layers may have started the same file.
+  useEffect(() => () => samples.stopIf(id), [id]);
   const audition = async (file: string) => {
     try {
-      await samples.toggle(file);
+      await samples.toggle(file, id);
     } catch {
       toast(`Couldn't play ${baseName(file)}`);
     }
@@ -112,7 +105,7 @@ export function CueLayers({ id, name, cues, length, color, card, onSeek, toast }
                     class={`ltick${shown ? " hot" : ""}`}
                     key={c.id}
                     tabIndex={j === at ? 0 : -1}
-                    style={{ left: tickLeft(c.t, length) }}
+                    style={{ left: tickPlace(c.t, length) }}
                     aria-label={cueLabel(c)}
                     aria-describedby={shown ? CUE_CARD_ID : undefined}
                     {...cardHover(card, cc)}

@@ -22,6 +22,10 @@ export interface SampleState {
 export class SamplePlayer {
   private el: SampleElement | null = null;
   private current: SampleState = { path: null, playing: false };
+  /** Who pressed play on what is playing (a layers' id), for stopIf. */
+  private by: unknown = null;
+  /** The last play() failed: the element holds an error until its source is set again. */
+  private failed = false;
   private readonly listeners = new Set<(s: SampleState) => void>();
   private readonly make: () => SampleElement;
   private readonly url: (path: string) => string;
@@ -43,11 +47,15 @@ export class SamplePlayer {
   }
 
   /** Plays `path` from the top, or stops it when it's the one playing. Rejects when it won't play. */
-  async toggle(path: string): Promise<void> {
+  async toggle(path: string, by?: unknown): Promise<void> {
     if (this.current.playing && this.current.path === path) return this.stop();
     const el = this.element();
     el.pause();
-    if (this.current.path !== path) el.src = this.url(path);
+    // After a failure the element keeps its error, and play() would reject again at once: set the
+    // source afresh, so a sample written later (or re-rendered) can be tried again.
+    if (this.current.path !== path || this.failed) el.src = this.url(path);
+    this.failed = false;
+    this.by = by ?? null;
     el.currentTime = 0;
     claim(this, () => this.stop());
     this.set({ path, playing: true });
@@ -57,10 +65,16 @@ export class SamplePlayer {
       // A later claim pausing this one interrupts play(): only a real failure is reported.
       if (this.current.path === path && this.current.playing) {
         release(this);
+        this.failed = true;
         this.set({ path, playing: false });
         throw err;
       }
     }
+  }
+
+  /** Stops the sample only when `by` is who started it (closing one pass's layers leaves another's alone). */
+  stopIf(by: unknown): void {
+    if (this.current.playing && this.by === by) this.stop();
   }
 
   stop(): void {
