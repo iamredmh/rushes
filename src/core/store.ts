@@ -144,8 +144,12 @@ export function serialise(data: unknown): string {
   return JSON.stringify(data, null, 2) + "\n";
 }
 
+// Counts every atomic write in this process. Two Store objects on one project don't see each other's
+// writes, so pid + millisecond alone can repeat and send both to the same temp file.
+let writes = 0;
+
 async function atomicWrite(path: string, text: string): Promise<void> {
-  const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
+  const tmp = `${path}.${process.pid}.${Date.now()}.${++writes}.tmp`;
   await writeFile(tmp, text, "utf8");
   await rename(tmp, path);
 }

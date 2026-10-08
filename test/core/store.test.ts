@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { access, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { describe, expect, it, vi } from "vitest";
+import { access, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
@@ -58,6 +58,26 @@ describe("Store", () => {
     const picks = await store.read("picks");
     expect(Object.keys(picks.lanes)).toHaveLength(25);
     expect(picks.rev).toBe(25);
+  });
+
+  it("two stores writing the same file in the same millisecond don't share a temp file", async () => {
+    // Each Store serialises its own writes, but two on one project (racing server starts, or a test
+    // beside a server) don't see each other. With a temp name of pid + millisecond they picked the
+    // same file, and the second rename then found nothing to rename (ENOENT).
+    const { root, store: a } = await tmpProject("shared");
+    const b = new Store(root);
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
+    try {
+      const results = await Promise.allSettled([
+        a.update("project", (p) => { p.fps = 24; }),
+        b.update("project", (p) => { p.fps = 25; }),
+      ]);
+      expect(results.map((r) => (r.status === "rejected" ? String((r.reason as Error).message).slice(0, 60) : r.status))).toEqual(["fulfilled", "fulfilled"]);
+    } finally {
+      now.mockRestore();
+    }
+    expect([24, 25]).toContain((await a.read("project")).fps);
+    expect((await readdir(a.dir)).filter((f) => f.endsWith(".tmp"))).toEqual([]);
   });
 
   it("refuses to touch a hand-edited file with invalid JSON", async () => {
