@@ -114,6 +114,26 @@ describe("the server writes the log as things happen (§22.5)", () => {
     await s.close();
   });
 
+  it("the current set's files leave Before the log even when the log is first read after they came in (R5)", async () => {
+    const { root, store } = await tmpProject("adopt first");
+    await store.update("project", (p) => addVersion(p, { video: "hero", file: "renders/hero v3.mov", duration: 60, fps: 25 }));
+    for (const f of ["renders/hero v3.mov", "bed/hero v3 theme.wav", "vo_jules/hero v3 read.wav"]) {
+      await mkdir(dirname(join(root, f)), { recursive: true });
+      await writeFile(join(root, f), "bytes");
+    }
+    const lengths: Record<string, number> = { "hero v3 theme.wav": 60, "hero v3 read.wav": 60.4 };
+    const scanner = new FoundScanner({ store, probe: async (abs) => lengths[abs.split("/").pop()!] ?? null, announce: () => undefined });
+    const app = createApp(store, { found: scanner });
+    await scanner.scan();
+    // Nothing has read the log yet: the adoption's line is its first write, so the backfill sees the
+    // two new variants already registered, and only the line's `clears` takes them back out.
+    expect((await scanner.adoptCurrentSet()).added).toHaveLength(2);
+    const view = await (await app.request("/api/log")).json();
+    expect(view.entries.map((e: { text: string; by: string }) => `${e.text} | ${e.by}`)).toEqual(["Brought in 2 files with v1 | rushes", "v1 added: hero v3 | rushes"]);
+    expect(view.undated).toEqual([]);
+    await scanner.settled();
+  });
+
   it("files brought in by hand, or included in a waiting scan, are one line by whoever asked (R9)", async () => {
     const { root, store } = await tmpProject("found");
     for (const f of ["bed/theme.wav", "bed/drive.wav", "vo/a.wav"]) {
