@@ -155,6 +155,8 @@ test("in a layer, ←/→ move between its ticks without stepping frames, Enter 
   await page.keyboard.press("ArrowRight");
   await expect(tick("thud at 0:03.00")).toBeFocused();
   await expect(card(page).locator(".m")).toHaveText("0:03.00 · cue 4 of 5");
+  // A step right from 0 would show as a frame; ←  from 0 below can't, so check it here too.
+  expect((await hook(page)).time).toBe(0);
   await page.keyboard.press("End");
   await expect(tick("thud at 0:04.50")).toBeFocused();
   await page.keyboard.press("Home");
