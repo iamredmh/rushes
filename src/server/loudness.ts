@@ -143,8 +143,12 @@ export function mixInputs(project: Project, picks: Picks, lanes: LaneStage[], ro
   return out;
 }
 
+/**
+ * Each input reads local files only, and only as an audio container (both are per-input options, so
+ * each `-i` gets its own): a playlist named .wav is refused, never mixed from the files it names.
+ */
 function inputArgs(inputs: MixInput[]): string[] {
-  return inputs.flatMap((i) => ["-i", i.file]);
+  return inputs.flatMap((i) => ["-protocol_whitelist", "file", "-format_whitelist", AUDIO_FORMATS, "-i", i.file]);
 }
 
 function filterComplex(inputs: MixInput[]): string {
