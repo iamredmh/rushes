@@ -750,19 +750,26 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   app.post("/api/versions", async (c) => {
     const b = await body(c, VersionBody);
     // §21.4 (R11): with formats, every file is read first and one refusal refuses the whole call.
-    // The first refusal stops the other reads (review M6): nothing waits on them any more.
+    // The refusal names the first refused file in the order given, never whichever read happened to
+    // finish first, so a call always gives the same message (CI run 37724786490). So a refusal stops
+    // only the reads after it (review M6): they can't change the answer. The ones before it run on,
+    // each bounded by its own give-up, since one of them may be the file to name.
     let shapes: Awaited<ReturnType<typeof readRender>>[] | null = null;
     if (b.formats?.length) {
-      const stop = new AbortController();
       const files = [b.file, ...b.formats.map((f) => f.file)];
-      shapes = await Promise.all(
+      const stops = files.map(() => new AbortController());
+      const settled = await Promise.allSettled(
         files.map((f, i) =>
-          readRender(f, { primary: i === 0, stop: stop.signal }).catch((e: unknown) => {
-            stop.abort();
+          readRender(f, { primary: i === 0, stop: stops[i].signal }).catch((e: unknown) => {
+            for (const later of stops.slice(i + 1)) later.abort();
             throw e;
           }),
         ),
       );
+      // The first rejection in order is always a refusal of its own: only an earlier one stops a read.
+      const refused = settled.find((s) => s.status === "rejected");
+      if (refused) throw refused.reason;
+      shapes = settled.map((s) => (s as PromiseFulfilledResult<Awaited<ReturnType<typeof readRender>>>).value);
       const own = shapes[0];
       if (!isPictureSize(own.width, own.height)) {
         throw new RushesError(

@@ -227,8 +227,29 @@ describe("POST /api/versions with formats (§21.4)", () => {
     expect((await store.read("project")).videos.map((v) => v.id)).toEqual(["hero"]);
   });
 
-  // Review M6.
-  it("stops reading the other files once one is refused", async () => {
+  // CI run 37724786490: the refusal names the first refused file in request order, never whichever
+  // read happened to finish first, so the same call always gives the same message.
+  it("names the first refused file in the order given, whatever finishes first", async () => {
+    // The cut's own read gives up (slowly); the 9:16 is refused at once. The cut is named.
+    const slowFirst = async (abs: string): Promise<VideoProbe> =>
+      abs.endsWith("hero_1920x1080.mp4") ? new Promise<VideoProbe>(() => undefined) : { ok: false, code: "not_video", reason: "it has no video stream" };
+    const a = await setup([WIDE, TALL], { formatProbe: slowFirst, formatProbeTimeoutMs: 100 });
+    const r1 = await a.call("POST", "/api/versions", { video: "Hero", file: WIDE, formats: [{ file: TALL }] });
+    expect(r1.json).toMatchObject({ error: "unreadable", message: "ffprobe couldn't read renders/hero_1920x1080.mp4: ffprobe took too long" });
+    // The cut reads; the 9:16 is refused after a moment and the 1:1 at once. The 9:16 comes first.
+    const middle = async (abs: string): Promise<VideoProbe> => {
+      if (abs.endsWith("hero_1080x1920.mp4")) return new Promise((res) => setTimeout(() => res({ ok: false, code: "not_video", reason: "it has no video stream" }), 80));
+      if (abs.endsWith("hero_1080x1080.mp4")) return { ok: false, code: "unreadable", reason: "Invalid data found when processing input" };
+      return sizedProbe(abs);
+    };
+    const b = await setup([WIDE, TALL, SQUARE], { formatProbe: middle, formatProbeTimeoutMs: 60_000 });
+    const r2 = await b.call("POST", "/api/versions", { video: "Hero", file: WIDE, formats: [{ file: TALL }, { file: SQUARE }] });
+    expect(r2.json).toMatchObject({ error: "not_video", message: "renders/hero_1080x1920.mp4 isn't a video: it has no video stream." });
+    expect((await b.store.read("project")).videos).toEqual([]);
+  });
+
+  // Review M6: the reads after a refused file can't change the answer, so they are stopped.
+  it("stops reading the files after one that is refused", async () => {
     const signals: AbortSignal[] = [];
     const waits = async (abs: string, signal?: AbortSignal): Promise<VideoProbe> => {
       // The voice file is refused a moment after the reads have started.
@@ -238,7 +259,7 @@ describe("POST /api/versions with formats (§21.4)", () => {
       return new Promise<VideoProbe>((res) => signal?.addEventListener("abort", () => res({ ok: false, code: "unreadable", reason: "stopped" })));
     };
     const { call } = await setup([WIDE, TALL, "renders/voice.mp4"], { formatProbe: waits, formatProbeTimeoutMs: 60_000 });
-    const r = await call("POST", "/api/versions", { video: "Hero", file: WIDE, formats: [{ file: TALL }, { file: "renders/voice.mp4" }] });
+    const r = await call("POST", "/api/versions", { video: "Hero", file: WIDE, formats: [{ file: "renders/voice.mp4" }, { file: TALL }] });
     expect(r.json.error).toBe("not_video");
     await vi.waitFor(() => expect(signals.length === 1 && signals[0].aborted).toBe(true));
   });
