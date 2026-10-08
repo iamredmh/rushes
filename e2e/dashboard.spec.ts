@@ -1146,8 +1146,10 @@ test("Open is offered for a doc and not for an unsafe file, and Export notes add
   await expect(page.locator(".arow")).toHaveCount(0);
   await page.getByRole("button", { name: "Export notes" }).click();
   await expect(page.getByRole("status")).toContainText("Saved to exports/");
-  await expect(page.locator(".arow")).toHaveCount(1);
-  await expect(page.locator(".arow")).toContainText("-notes-");
+  // Export notes writes the notes and, beside them, the Change Log (R17).
+  await expect(page.locator(".arow")).toHaveCount(2);
+  await expect(page.locator(".arow", { hasText: "-notes-" })).toHaveCount(1);
+  await expect(page.locator(".arow", { hasText: "change-log-" })).toHaveCount(1);
 });
 
 test("a file dropped into the project root appears once something refreshes Assets (I7)", async ({ page, rushes }) => {
