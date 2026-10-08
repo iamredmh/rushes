@@ -193,10 +193,16 @@ const FoundBringInBody = z.object({
 // §22.7: the Change Log's routes. A line is made one line and cut to 160 characters by the server (R21).
 // Ruling a: a query it can't use is a 400 that says what to send, never a quiet default.
 const LIMIT_WORDS = `limit must be a whole number from 1 to ${LOG_MAX}`;
+/** 2026-10-07, optionally with a time (minutes, seconds, fractions) and a zone (Z or ±hh[:]mm). */
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:?\d{2})?)?$/;
 const LogQuery = z.object({
   limit: z.string({ error: LIMIT_WORDS }).regex(/^\d+$/, LIMIT_WORDS).pipe(z.coerce.number<string>().int(LIMIT_WORDS).min(1, LIMIT_WORDS).max(LOG_MAX, LIMIT_WORDS)).optional(),
   area: z.enum(LOG_AREAS, { error: `area must be one of ${LOG_AREAS.join(", ")}` }).optional(),
-  since: z.string().refine((s) => Number.isFinite(Date.parse(s)), "since must be a date and time, e.g. 2026-10-07T09:00:00Z").optional(),
+  // ISO style only: Date.parse alone would read "0" or "1" as a year (M4).
+  since: z
+    .string()
+    .refine((s) => ISO_DATE.test(s) && Number.isFinite(Date.parse(s)), "since must be a date and time, e.g. 2026-10-07T09:00:00Z")
+    .optional(),
 });
 const LogLineBody = z.object({
   text: z.string().max(2000),

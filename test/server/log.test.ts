@@ -491,6 +491,12 @@ describe("the log's routes (§22.7)", () => {
       ["limit=%205", /limit must be a whole number from 1 to 5000/],
       ["since=yesterday", /since must be a date and time/],
       ["since=", /since must be a date and time/],
+      ["since=0", /since must be a date and time/],
+      ["since=1", /since must be a date and time/],
+      ["since=2026", /since must be a date and time/],
+      ["since=1791360000000", /since must be a date and time/],
+      ["since=Oct%207%202026", /since must be a date and time/],
+      ["since=2026-13-45", /since must be a date and time/],
       ["area=elsewhere", /area must be one of script, picture, voice, music, sfx, mix, notes, assets, project/],
     ];
     for (const [q, message] of cases) {
@@ -499,6 +505,9 @@ describe("the log's routes (§22.7)", () => {
       expect(r.json.message, q).toMatch(message);
     }
     expect((await call("GET", "/api/log?limit=5000&area=project&since=2000-01-01")).status).toBe(200);
+    for (const ok of ["2000-01-01T00:00:00Z", "2026-10-07T09:00", "2026-10-07T09:00:00.000+01:00", "2026-10-07T09:00:00-0500"]) {
+      expect((await call("GET", `/api/log?since=${encodeURIComponent(ok)}`)).status, ok).toBe(200);
+    }
   });
 
   it("Send to agent's prompt ends with the last five lines, newest first; an empty log adds nothing (R11)", async () => {
