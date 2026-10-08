@@ -1,4 +1,4 @@
-import { link, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { link, open, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join, resolve } from "node:path";
 import { RUSHES_DIR } from "../core/store.js";
@@ -104,6 +104,49 @@ async function claim(tmp: string, path: string, text: string, linkInto: typeof l
   }
 }
 
+/** How long a guard may stand before it is taken to be left behind by a claimant that died holding it. */
+const GUARD_STALE_MS = 3000;
+/** How long a claimant waits for another to finish removing a stale lock before it goes round again. */
+const GUARD_WAIT_MS = 5000;
+
+function sameLock(a: Lock, b: Lock): boolean {
+  return a.token === b.token && a.pid === b.pid && a.startedAt === b.startedAt;
+}
+
+/**
+ * Remove the lock we judged stale, and only that lock. Judging and removing are two steps, and
+ * another claimant can put a fresh lock there in between: a plain remove then deletes it, and two
+ * servers each believe they own the project. So removing takes an exclusive guard file and checks
+ * again inside it. Nobody can replace a lock without first removing it, and only the guard's
+ * holder may remove one, so what is checked is what is removed. `judged` is null when no readable
+ * lock was seen. Returns false when another claimant holds the guard: wait a moment and go round.
+ */
+async function removeStale(root: string, judged: Lock | null): Promise<boolean> {
+  const guard = `${lockPath(root)}.break.tmp`;
+  let handle;
+  try {
+    handle = await open(guard, "wx");
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+    // A guard left by a claimant that died holding it would otherwise block every later start.
+    try {
+      if (Date.now() - (await stat(guard)).mtimeMs > GUARD_STALE_MS) await rm(guard, { force: true });
+    } catch {
+      /* it went while we looked */
+    }
+    return false;
+  }
+  try {
+    const now = await readLockFile(root);
+    const unchanged = judged === null ? now === null : now !== null && sameLock(now, judged);
+    if (unchanged) await rm(lockPath(root), { force: true });
+  } finally {
+    await handle.close().catch(() => undefined);
+    await rm(guard, { force: true });
+  }
+  return true;
+}
+
 /**
  * Claim the project's lock. The lock is written to a temporary file and then
  * hard-linked into place, so it appears complete or not at all, and only one
@@ -126,11 +169,9 @@ export async function writeLock(root: string, port: number, opts: { link?: typeo
         if (existing && alive(existing.pid) && (await isRushesFor(existing.port, root))) {
           throw new AlreadyRunningError(`http://127.0.0.1:${existing.port}`);
         }
-        // Stale: remove it only if it's still the lock we just judged.
-        const again = await readLockFile(root);
-        if (!existing || (again && again.token === existing.token && again.pid === existing.pid && again.startedAt === existing.startedAt)) {
-          await rm(path, { force: true });
-        }
+        // Stale: remove it, and only it. Another claimant may be removing it too, so wait for the guard.
+        const until = Date.now() + GUARD_WAIT_MS;
+        while (!(await removeStale(root, existing)) && Date.now() < until) await new Promise((r) => setTimeout(r, 5));
         continue;
       }
       await new Promise((r) => setTimeout(r, 25));
