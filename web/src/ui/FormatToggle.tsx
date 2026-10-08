@@ -7,7 +7,8 @@ export interface FormatToggleProps {
   versionId: string;
   /** The one-format popover's ready-made request (§21.5). */
   prompt: string;
-  onSelect(id: string): void;
+  /** Returns false when the switch is refused. */
+  onSelect(id: string): boolean | void;
   toast(message: string): void;
 }
 
@@ -74,7 +75,9 @@ export function FormatToggle({ chips, versionId, prompt, onSelect, toast }: Form
     // Handled here, so Picture's ←/→ frame step never sees it.
     e.preventDefault();
     e.stopPropagation();
-    onSelect(enabled[to].id);
+    // Final review M3: a refused switch (a drawn box waits) leaves focus on the selected chip, the
+    // only one in the tab order.
+    if (onSelect(enabled[to].id) === false) return;
     group.current?.querySelector<HTMLButtonElement>(`[data-format="${enabled[to].id}"]`)?.focus();
   };
   const copy = async () => {

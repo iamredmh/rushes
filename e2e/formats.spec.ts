@@ -267,6 +267,14 @@ test("with a box drawn, switching format is refused; a half-typed note and an In
   await expect(radio(page, "16:9")).toHaveAttribute("aria-checked", "true");
   await page.keyboard.press("Alt+ArrowLeft");
   await expect(radio(page, "16:9")).toHaveAttribute("aria-checked", "true");
+  // Final review M3: an arrow key on the chips is refused the same way, and focus stays on the selected chip.
+  await radio(page, "16:9").focus();
+  for (const key of ["ArrowLeft", "Home", "ArrowRight"]) {
+    await page.keyboard.press(key);
+    await expect(page.locator(".toast")).toHaveText("Add or clear your box on 16:9 first");
+    await expect(radio(page, "16:9")).toHaveAttribute("aria-checked", "true");
+    await expect(radio(page, "16:9")).toBeFocused();
+  }
   await page.getByRole("button", { name: "Remove box" }).click();
   await page.keyboard.press("i");
   await page.keyboard.press("n");

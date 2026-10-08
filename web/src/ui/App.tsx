@@ -160,10 +160,15 @@ export function App() {
   const chips = version
     ? formatChips({ views, previous: before ? versionFormats(before) : [], current: format, versionDuration: version.duration, notes: filmNotes, missing: missingFiles })
     : [];
-  const switchFormat = (id: string) => {
-    if (!video || id === format) return;
-    if (boxPending) return toast(`Add or clear your box on ${format ? labelOfId(format) : "this format"} first`);
+  /** Switches the format on screen; false when it's refused (a drawn box waits), so focus can stay put. */
+  const switchFormat = (id: string): boolean => {
+    if (!video || id === format) return false;
+    if (boxPending) {
+      toast(`Add or clear your box on ${format ? labelOfId(format) : "this format"} first`);
+      return false;
+    }
     setFormatChoice((c) => ({ ...c, [video.id]: id }));
+    return true;
   };
 
   // A new cut arriving mid-review mustn't rewind the player or drop pending marks. So the
