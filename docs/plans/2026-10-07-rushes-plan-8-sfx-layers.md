@@ -51,18 +51,17 @@
 - **Commits:** use `git -c user.name=iamredmh -c user.email=17407420+iamredmh@users.noreply.github.com commit`. Every message ends with the trailer `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`. Never change git config.
 - **`rushes setup`:** never run it against the real home without `--dry-run`.
 - **Ports:** never use 4410, 4430–4434 or 8765. Tests use port 0.
-- **No version bump:** `package.json`, `VERSION` in `src/server/app.ts`, `.claude-plugin/plugin.json` and `package-lock.json` stay at 0.2.2.
+- **No version bump:** `package.json`, `VERSION` in `src/server/app.ts`, `.claude-plugin/plugin.json` and `package-lock.json` stay at 0.3.0 (Plans 6 and 7 shipped as 0.3.0; this work ships later).
 - **e2e:** runs in Chromium and WebKit. Run it locally only when the machine is quiet:
   - the load average is below `sysctl -n hw.ncpu`;
   - `pgrep -fl 'playwright|ffmpeg'` is empty apart from long-lived playwright-mcp servers;
   - no other e2e run is going.
   
   CI on the pushed branch is the final word.
-- **Setup:** the worktree (`~/Developer/rushes-sfx`, branch `sfx-layers`, based on main 94cfcd9 = 0.2.2) needs `npm ci` first.
-- **Parallel work:** Plan 6 (formats, `~/Developer/rushes-formats`) and Plan 7 (changelog, `~/Developer/rushes-changelog`) are mid-build.
-  - New logic goes in new files.
-  - Edits to shared files stay small and additive, at the regions listed under "Overlap with Plans 6 and 7".
-  - No new tool: tool counts change by zero.
+- **Setup:** the worktree (`~/Developer/rushes-sfx`, branch `sfx-layers`, rebased onto main bde16db = 0.3.0) has `node_modules` symlinked to `~/Developer/rushes/node_modules`; no install is needed.
+- **Plans 6 and 7 have landed** (0.3.0: formats, the Change Log, the version list menu, `rushes_add_format`, `rushes_log`, `rushes_get_log`). Line numbers below are main at 94cfcd9 (0.2.2) and have moved; find regions by name. New logic still goes in new files and edits to shared files stay small and additive.
+  - No new tool: the tool count stays at twenty-two.
+  - The Change Log drawer is z-index 35 with the header at 36, `.vmenu` 45 and `.fmtpop` 46. The cue card must sit above the drawer: give it a z-index of 47.
 - **The gate for every task:** `npm run build && npm run typecheck && npx vitest run`, then the e2e suite in both projects where the task touches the dashboard.
 
 ## Rulings (where the real code left the spec open)
@@ -147,7 +146,9 @@
 | Docs | `README.md`, `AGENTS.md`, `skills/rushes/SKILL.md` |
 | Tests | new `test/core/cues.test.ts`, `test/server/cue-files.test.ts`, `test/mcp/cue-files.test.ts`, `test/web/cues.test.ts`, `test/web/sample.test.ts`, `test/web/cues-css.test.ts`, `test/docs-cues.test.ts`, `e2e/cues.spec.ts`; `e2e/fixture.ts` (one type) |
 
-## Overlap with Plans 6 and 7
+## Overlap with Plans 6 and 7 (now merged into main as 0.3.0)
+
+The table was written before they landed. Treat it as a map of regions: the plans' edits are in main already, so keep them all and add ours beside them.
 
 Line numbers are main at 94cfcd9. Whichever plan lands second rebases on these regions.
 
