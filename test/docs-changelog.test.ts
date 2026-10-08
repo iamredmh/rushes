@@ -21,4 +21,19 @@ describe("shipped docs: the Change Log (§22.7)", () => {
     expect(text).toMatch(/rushes log/);
     expect(text).not.toMatch(/\/Users\//);
   });
+
+  it.each(["AGENTS.md", "skills/rushes/SKILL.md"])("%s lists what Rushes logs itself, in full, and says one line per decision (review M3, I2)", (file) => {
+    const text = read(file);
+    expect(text).toMatch(/picture lock/i);
+    expect(text).toMatch(/files added/i);
+    expect(text).toMatch(/bring-ins/i);
+    expect(text).toMatch(/one line per decision/i);
+    expect(text).toMatch(/never copy a note's or reply's text/i);
+  });
+
+  it("AGENTS.md names `dropped` among what rushes_get_log returns, and the -- form for text that starts with a dash (review M3, M4)", () => {
+    const text = read("AGENTS.md");
+    expect(text).toContain("`dropped`");
+    expect(text).toContain('rushes log add --area mix -- "-3 dB on the bed"');
+  });
 });

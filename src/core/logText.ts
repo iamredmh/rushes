@@ -26,6 +26,15 @@ export const AREA_LABELS: Record<LogArea, string> = {
 /** Who wrote a line, in the Markdown and the CLI. */
 export const BY_WORDS: Record<LogBy, string> = { user: "you", agent: "agent", rushes: "Rushes" };
 
+/** An area's words; one a newer Rushes wrote and this build doesn't know prints as it came. */
+export function areaWord(area: string): string {
+  return (AREA_LABELS as Record<string, string>)[area] ?? area;
+}
+/** A writer's words, with the same fallback. */
+export function byWord(by: string): string {
+  return (BY_WORDS as Record<string, string>)[by] ?? by;
+}
+
 /** A Change Log line as the API sends it (the stored entry, §22.3). */
 export interface LogLine {
   id: string;
@@ -115,14 +124,17 @@ export interface LogMarkdownInput {
   dropped: number;
   /** Lines left out of `entries` (a limited `rushes log --md`). */
   earlier?: number;
+  /** The one area `entries` was filtered to (`rushes log --md --area X`): named in the heading and in the empty line. */
+  area?: LogArea;
   now: Date;
 }
 
 /** §22.7: the log as Markdown. Newest first, one heading per day; what Export writes and `rushes log --md` prints. */
 export function logMarkdown(i: LogMarkdownInput): string {
   const project = oneLine(i.project, LOG_TEXT_MAX) || "Untitled project";
-  const lines = [`# ${project} — change log`, `Exported ${localStamp(i.now)}`];
-  if (i.entries.length === 0 && i.undated.length === 0) lines.push("", "Nothing yet.");
+  const only = i.area === undefined ? "" : areaWord(i.area);
+  const lines = [`# ${project} — change log${only ? `: ${only}` : ""}`, `Exported ${localStamp(i.now)}`];
+  if (i.entries.length === 0 && i.undated.length === 0) lines.push("", only ? `Nothing in ${only} yet.` : "Nothing yet.");
   let day = "";
   for (const e of i.entries) {
     const d = new Date(e.at);
@@ -131,7 +143,7 @@ export function logMarkdown(i: LogMarkdownInput): string {
       day = heading;
       lines.push("", `## ${heading}`);
     }
-    lines.push(`- ${clock(d)} · ${AREA_LABELS[e.area]} · ${e.text} (${BY_WORDS[e.by]})`);
+    lines.push(`- ${clock(d)} · ${areaWord(e.area)} · ${e.text} (${byWord(e.by)})`);
   }
   if (i.earlier) lines.push("", `${i.earlier} earlier entr${i.earlier === 1 ? "y" : "ies"} not shown.`);
   if (i.undated.length) {

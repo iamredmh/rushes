@@ -80,6 +80,13 @@ describe("shipped agent docs (final review I3)", () => {
     expect(text).toMatch(/both are in, unpicked/);
   });
 
+  it("numberWord says so, rather than printing 'undefined-one', when a count is past what it spells (review M7)", () => {
+    expect(numberWord(21)).toBe("twenty-one");
+    expect(numberWord(59)).toBe("fifty-nine");
+    expect(() => numberWord(60)).toThrow(/numberWord/);
+    expect(() => numberWord(-1)).toThrow(/numberWord/);
+  });
+
   it.each(["README.md", "AGENTS.md", "skills/rushes/SKILL.md"])("%s counts the registered tools, and names every one", async (file) => {
     const text = read(file);
     const names = await registeredToolNames();
@@ -89,6 +96,9 @@ describe("shipped agent docs (final review I3)", () => {
     // The list itself, not just a mention elsewhere: the line that gives the count names every tool.
     const list = text.split("\n").find((l) => l.includes(`${numberWord(names.length)} tools`))!;
     for (const tool of [...names, "rushes_log", "rushes_get_log"]) expect(list, `${file}'s tool list should name \`${tool}\``).toContain(`\`${tool}\``);
+    // And nothing else: a tool that isn't registered (a stale or invented name) is as wrong as one that's missing.
+    const named = [...new Set([...list.matchAll(/`(rushes_[a-z_]+)`/g)].map((m) => m[1]))].sort();
+    expect(named, `${file}'s tool list should name exactly the registered tools`).toEqual(names);
   });
 });
 

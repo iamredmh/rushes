@@ -400,14 +400,14 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     {
       title: "Add a line to the Change Log",
       description:
-        'Adds one line to the project\'s Change Log, as the agent: a decision or a change of direction, e.g. "Slowed the zooms: the first cut felt rushed". One line, 160 characters at most (longer is cut). Rushes already logs cuts, voice reads, music, sound effects, takes, the script, picks, notes sent and replies by itself, so don\'t repeat those. `area` defaults to project; `video`, `version` and `ref` ("<lane>/<variant>") let the line open that place in the dashboard. Returns the line.',
+        'Adds one line to the project\'s Change Log, as the agent: a decision or a change of direction, e.g. "Slowed the zooms: the first cut felt rushed". One line, 160 characters at most (longer is cut): one line per decision, not a running commentary. The log is exported and shared, so never copy a note\'s or reply\'s text into it. Rushes already logs cuts, voice reads, music, sound effects, takes, the script, picks, picture lock and unlock, notes sent, replies, files added and bring-ins by itself, so don\'t repeat those. `area` defaults to project; `video`, `version` and `ref` ("<lane>/<variant>" or "<section>:<take>") let the line open that place in the dashboard. Returns the line.',
       inputSchema: {
         project,
         text: z.string().min(1).max(2000).describe("What happened, in one line."),
         area: area.optional().describe("script, picture, voice, music, sfx, mix, notes, assets or project (the default)."),
-        video: z.string().optional().describe("Video id or name, to open its cut from the line."),
-        version: z.string().optional().describe("With video: the version to open."),
-        ref: z.string().optional().describe('"<lane>/<variant>" to open a voice read, bed or pass from the line.'),
+        video: z.string().min(1).max(200).optional().describe("Video id or name, to open its cut from the line."),
+        version: z.string().min(1).max(64).optional().describe("With video: the version to open."),
+        ref: z.string().min(1).max(300).optional().describe('"<lane>/<variant>" to open a voice read, bed or pass from the line, or "<section>:<take>" for a take.'),
       },
     },
     safe(async ({ project, ...b }) => (await ctx.client(project)).post("/api/log", b)),

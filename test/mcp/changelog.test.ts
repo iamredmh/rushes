@@ -6,6 +6,7 @@ import { tmpProject } from "../helpers/tmp.js";
 import { startServer } from "../../src/server/start.js";
 import { createMcpServer } from "../../src/mcp/tools.js";
 import { RushesClient } from "../../src/mcp/client.js";
+import { addVariant } from "../../src/core/project.js";
 
 /** An MCP client talking to the Rushes at `url`. */
 async function mcpOn(url: string) {
@@ -60,6 +61,46 @@ describe("the Change Log for agents (§22.7)", () => {
     expect(tools.find((x) => x.name === "rushes_log")!.description).toMatch(/already logs cuts/);
     expect(tools.find((x) => x.name === "rushes_get_log")!.description).toMatch(/start of a session/);
     expect(tools.find((x) => x.name === "rushes_export_notes")!.description).toMatch(/change-log-<date>\.md/);
+    await t.client.close();
+    await s.close();
+  });
+
+  it("a real ref round-trips onto the line, and one that isn't there is refused in words (I1, M5)", async () => {
+    const { root, store } = await tmpProject("Lumen launch film");
+    let variantId = "";
+    await store.update("project", (p) => {
+      variantId = addVariant(p, { stage: "music", lane: "night-drive", name: "Night drive", file: "audio/night.wav" }).variant.id;
+    });
+    const s = await startServer(root, { port: 0 });
+    const t = await mcpOn(s.url);
+    const ok = await t.call("rushes_log", { text: "Settled on the quiet bed", area: "music", ref: `night-drive/${variantId}` });
+    expect(ok.isError).toBe(false);
+    expect(JSON.parse(ok.text).entry.ref).toBe(`night-drive/${variantId}`);
+    const gone = await t.call("rushes_log", { text: "Opened a bed that isn't there", ref: "night-drive/nope" });
+    expect(gone.isError).toBe(true);
+    expect(gone.text).toMatch(/ref "night-drive\/nope" not found/);
+    const { tools } = await t.client.listTools();
+    const props = (tools.find((x) => x.name === "rushes_log")!.inputSchema as any).properties;
+    expect(props.ref.description).toContain("<section>:<take>");
+    expect(props.video).toMatchObject({ minLength: 1, maxLength: 200 });
+    expect(props.version).toMatchObject({ minLength: 1, maxLength: 64 });
+    expect(props.ref).toMatchObject({ minLength: 1, maxLength: 300 });
+    await t.client.close();
+    await s.close();
+  });
+
+  it("rushes_log says one line per decision and never to copy a note or reply into it, and lists what Rushes logs itself (I2, M3)", async () => {
+    const { root } = await tmpProject("Lumen launch film");
+    const s = await startServer(root, { port: 0 });
+    const t = await mcpOn(s.url);
+    const { tools } = await t.client.listTools();
+    const d = tools.find((x) => x.name === "rushes_log")!.description!;
+    expect(d).toMatch(/one line per decision, not a running commentary/);
+    expect(d).toMatch(/never copy a note's or reply's text into it/);
+    expect(d).toMatch(/picture lock/);
+    expect(d).toMatch(/files added/);
+    expect(d).toMatch(/bring-ins/);
+    expect(tools.find((x) => x.name === "rushes_get_log")!.description).toMatch(/`dropped`/);
     await t.client.close();
     await s.close();
   });

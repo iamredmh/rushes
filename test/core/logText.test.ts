@@ -78,6 +78,15 @@ describe("logMarkdown and recentChanges (§22.7)", () => {
     expect(logMarkdown({ project: "P", entries: entries.slice(0, 1), undated: [], dropped: 0, earlier: 4, now: local(7, 15, 0) })).toContain("\n\n4 earlier entries not shown.\n");
     expect(logMarkdown({ project: "P", entries: entries.slice(0, 1), undated: [], dropped: 0, earlier: 1, now: local(7, 15, 0) })).toContain("\n\n1 earlier entry not shown.\n");
   });
+  it("an area filter is named in the heading and in the empty line (review M3)", () => {
+    const base = { project: "Lumen launch film", undated: [], dropped: 0, now: local(7, 15, 0) };
+    expect(logMarkdown({ ...base, entries: [], area: "sfx" })).toBe("# Lumen launch film \u2014 change log: Sound effects\nExported 2026-10-07 15:00\n\nNothing in Sound effects yet.\n");
+    expect(logMarkdown({ ...base, entries: entries.slice(0, 1), area: "picture" }).split("\n")[0]).toBe("# Lumen launch film \u2014 change log: Picture");
+  });
+  it("an area or writer this build doesn't know prints as it came, never a TypeError (review M6)", () => {
+    const odd = [{ at: local(7, 14, 32).toISOString(), area: "formats", text: "Added a format", by: "plugin" }] as unknown as Parameters<typeof logMarkdown>[0]["entries"];
+    expect(logMarkdown({ project: "P", entries: odd, undated: [], dropped: 0, now: local(7, 15, 0) })).toContain("- 14:32 \u00b7 formats \u00b7 Added a format (plugin)");
+  });
   it("the project's name is one clean line in the heading (minor 6)", () => {
     const md = (project: string) => logMarkdown({ project, entries: [], undated: [], dropped: 0, now: local(7, 15, 0) });
     expect(md("Lumen\nlaunch\tfilm‮")).toBe("# Lumen launch film — change log\nExported 2026-10-07 15:00\n\nNothing yet.\n");

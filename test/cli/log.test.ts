@@ -6,6 +6,8 @@ import { createServer } from "node:http";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { lockPath } from "../../src/server/lock.js";
+import { addVariant } from "../../src/core/project.js";
+import { undatedRefs } from "../../src/core/log.js";
 
 function io(cwd: string) {
   const out: string[] = [];
@@ -173,5 +175,121 @@ describe("rushes log (§22.7)", () => {
     }
     old.closeAllConnections();
     old.close();
+  });
+});
+
+describe("rushes log, the parts that weren't pinned (review I1, M1-M4, M6)", () => {
+  it("prints 'Before the log' and 'Earlier entries were removed', and an empty log with audio from before is not 'nothing yet'", async () => {
+    const { root, store } = await tmpProject("Lumen launch film");
+    await store.update("project", (p) => {
+      for (const name of ["Night drive", "Held back"]) addVariant(p, { stage: "music", lane: "night-drive", name, file: `audio/${name}.wav` });
+    });
+    const [project, script] = await Promise.all([store.read("project"), store.read("script")]);
+    await store.update("log", (f) => {
+      f.backfilled = true;
+      f.undated = undatedRefs(project, script);
+      f.dropped = 1;
+    });
+    const s = await startServer(root, { port: 0 });
+    const a = io(root);
+    expect(await main(["log"], a.x)).toBe(0);
+    expect(a.out).toEqual(["Before the log:", "  Music: night-drive (2 variants)", "Earlier entries were removed."]);
+    const m = io(root);
+    expect(await main(["log", "--md"], m.x)).toBe(0);
+    expect(m.out[0]).toMatch(/## Before the log\n- Music: night-drive \(2 variants\)\n\nEarlier entries were removed\.$/);
+    await s.close();
+  });
+
+  it("echoes the line as the log kept it, cut at 160 characters with an ellipsis", async () => {
+    const { root } = await tmpProject("Lumen launch film");
+    const s = await startServer(root, { port: 0 });
+    const a = io(root);
+    expect(await main(["log", "add", "w".repeat(170)], a.x)).toBe(0);
+    const { entries } = await (await fetch(`${s.url}/api/log`)).json();
+    expect(entries[0].text).toHaveLength(160);
+    expect(entries[0].text.endsWith("\u2026")).toBe(true);
+    expect(a.out).toEqual([`Added to the Change Log: ${entries[0].text}`]);
+    await s.close();
+  });
+
+  it("--limit takes whole numbers written as digits only", async () => {
+    const { root } = await tmpProject("Lumen launch film");
+    const s = await startServer(root, { port: 0 });
+    for (const bad of ["1e2", "0x2", "2.0", "+2", " 2"]) {
+      const a = io(root);
+      expect(await main(["log", "--limit", bad], a.x), bad).toBe(2);
+      expect(a.out, bad).toEqual([]);
+      expect(a.err.join("\n"), bad).toMatch(/--limit must be a whole number from 1 to 5000/);
+    }
+    const ok = io(root);
+    expect(await main(["log", "--limit", "02"], ok.x)).toBe(0);
+    await s.close();
+  });
+
+  it("the 'earlier' hint keeps the area that was asked for", async () => {
+    const { root } = await tmpProject("Lumen launch film");
+    const s = await startServer(root, { port: 0 });
+    const a = io(root);
+    for (let i = 1; i <= 5; i++) expect(await main(["log", "add", `Line ${i}`, "--area", "music"], a.x)).toBe(0);
+    const b = io(root);
+    expect(await main(["log", "--limit", "2", "--area", "music"], b.x)).toBe(0);
+    expect(b.out.at(-1)).toBe("3 earlier (rushes log --limit 5 --area music shows them)");
+    const c = io(root);
+    expect(await main(["log", "--limit", "2"], c.x)).toBe(0);
+    expect(c.out.at(-1)).toBe("3 earlier (rushes log --limit 5 shows them)");
+    await s.close();
+  });
+
+  it("an area with nothing in it says so by name, in the terminal and in --md, instead of calling the whole log empty", async () => {
+    const { root } = await tmpProject("Lumen launch film");
+    const s = await startServer(root, { port: 0 });
+    const a = io(root);
+    expect(await main(["log", "add", "Kept the wide shot", "--area", "picture"], a.x)).toBe(0);
+    const b = io(root);
+    expect(await main(["log", "--area", "sfx"], b.x)).toBe(0);
+    expect(b.out).toEqual(["Nothing in Sound effects yet."]);
+    const c = io(root);
+    expect(await main(["log", "--md", "--area", "sfx"], c.x)).toBe(0);
+    expect(c.out[0]).toContain("# Lumen launch film \u2014 change log: Sound effects");
+    expect(c.out[0]).toContain("Nothing in Sound effects yet.");
+    expect(c.out[0]).not.toContain("Nothing yet.");
+    // A whole empty log keeps its own words.
+    const d = io(root);
+    expect(await main(["log", "--md", "--area", "picture"], d.x)).toBe(0);
+    expect(d.out[0]).toContain("Kept the wide shot");
+    await s.close();
+  });
+
+  it("text that starts with a dash goes after --, flags before it, and help says so", async () => {
+    const { root } = await tmpProject("Lumen launch film");
+    const s = await startServer(root, { port: 0 });
+    const a = io(root);
+    expect(await main(["log", "add", "--area", "mix", "--", "-3 dB on the bed"], a.x)).toBe(0);
+    expect(a.out).toEqual(["Added to the Change Log: -3 dB on the bed"]);
+    const { entries } = await (await fetch(`${s.url}/api/log`)).json();
+    expect(entries[0]).toMatchObject({ text: "-3 dB on the bed", area: "mix", by: "agent" });
+    const h = io(root);
+    await main([], h.x);
+    expect(h.out.join("\n")).toContain('rushes log add --area mix -- "-3 dB on the bed"');
+    await s.close();
+  });
+
+  it("prints a line from an area or writer it doesn't know as it came (a newer Rushes), not a TypeError", async () => {
+    const { root } = await tmpProject("Hero");
+    const newer = createServer((req, res) => {
+      res.setHeader("content-type", "application/json");
+      if (req.url === "/api/health") return void res.end(JSON.stringify({ app: "rushes", root, id: "abcdefgh", name: "Hero" }));
+      res.end(JSON.stringify({ entries: [{ id: "l_1", at: new Date().toISOString(), area: "formats", kind: "entry", text: "Added a format", by: "plugin" }], earlier: 0, undated: [], dropped: 0, total: 1 }));
+    });
+    await new Promise<void>((r) => newer.listen(0, "127.0.0.1", r));
+    await writeFile(lockPath(root), JSON.stringify({ port: (newer.address() as { port: number }).port, pid: process.pid, startedAt: "x" }), "utf8");
+    for (const argv of [["log"], ["log", "--md"]]) {
+      const a = io(root);
+      expect(await main(argv, a.x), argv.join(" ")).toBe(0);
+      expect(a.out.join("\n"), argv.join(" ")).toMatch(/formats.*Added a format.*\(plugin\)/);
+      expect(a.err, argv.join(" ")).toEqual([]);
+    }
+    newer.closeAllConnections();
+    newer.close();
   });
 });

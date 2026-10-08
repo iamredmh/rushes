@@ -11,7 +11,7 @@ import { openBrowser, runStdio } from "../mcp/stdio.js";
 import { VERSION } from "../server/app.js";
 import { BRING_IN_MAX } from "../server/found.js";
 import { LABEL_MAX, oneLineOf } from "../core/labels.js";
-import { AREA_LABELS, BY_WORDS, LOG_AREAS, LOG_MAX, localStamp, logMarkdown, type LogLine, type UndatedLine } from "../core/logText.js";
+import { LOG_AREAS, LOG_MAX, areaWord, byWord, localStamp, logMarkdown, type LogArea, type LogLine, type UndatedLine } from "../core/logText.js";
 import { markLabel, type Mark, type Note } from "../core/schema.js";
 import { onLabel, type OnContext } from "../core/notes.js";
 import { setup, type SetupEnv } from "../setup/setup.js";
@@ -65,6 +65,8 @@ Usage
   rushes export notes                               write notes to exports/<slug>-notes-<date>.md
   rushes log [--limit N] [--area A] [--md]          the Change Log, newest first (--md: as Markdown)
   rushes log add <text> [--area A]                  add a line to the Change Log
+                                                    flags first; text that starts with "-" goes after --:
+                                                    rushes log add --area mix -- "-3 dB on the bed"
 
 Options
   --dir DIR   project folder for commands that talk to the server (default: current folder)
@@ -503,7 +505,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
           return 0;
         }
         if (what !== undefined) return usage(io, logUsage);
-        const limit = o.limit === undefined ? (o.md ? LOG_MAX : 30) : Number(o.limit);
+        const limit = o.limit === undefined ? (o.md ? LOG_MAX : 30) : /^\d+$/.test(o.limit) ? Number(o.limit) : NaN;
         if (!(Number.isInteger(limit) && limit >= 1 && limit <= LOG_MAX)) {
           io.err(`--limit must be a whole number from 1 to ${LOG_MAX} (got "${o.limit}")`);
           return usage(io, logUsage);
@@ -514,12 +516,12 @@ export async function main(argv: string[], io: Io): Promise<number> {
         const view = await c.get<{ entries: LogLine[]; earlier: number; undated: UndatedLine[]; dropped: number }>(`/api/log?${q}`);
         if (o.md) {
           const { name } = await c.get<{ name: string }>("/api/health");
-          io.out(logMarkdown({ project: name, entries: view.entries, undated: view.undated, dropped: view.dropped, earlier: view.earlier, now: new Date() }).trimEnd());
+          io.out(logMarkdown({ project: name, entries: view.entries, undated: view.undated, dropped: view.dropped, earlier: view.earlier, ...(area ? { area: area as LogArea } : {}), now: new Date() }).trimEnd());
           return 0;
         }
-        if (!view.entries.length && !view.undated.length) return io.out("Nothing in the Change Log yet."), 0;
-        for (const e of view.entries) io.out(`${localStamp(new Date(e.at))}  ${AREA_LABELS[e.area].padEnd(13)} ${stripControl(e.text)}  (${BY_WORDS[e.by]})`);
-        if (view.earlier) io.out(`${view.earlier} earlier (rushes log --limit ${Math.min(LOG_MAX, limit + view.earlier)} shows them)`);
+        if (!view.entries.length && !view.undated.length) return io.out(area ? `Nothing in ${areaWord(area)} yet.` : "Nothing in the Change Log yet."), 0;
+        for (const e of view.entries) io.out(`${localStamp(new Date(e.at))}  ${stripControl(areaWord(e.area)).padEnd(13)} ${stripControl(e.text)}  (${stripControl(byWord(e.by))})`);
+        if (view.earlier) io.out(`${view.earlier} earlier (rushes log --limit ${Math.min(LOG_MAX, limit + view.earlier)}${area ? ` --area ${area}` : ""} shows them)`);
         if (view.undated.length) {
           io.out("Before the log:");
           for (const u of view.undated) io.out(`  ${stripControl(u.text)}`);

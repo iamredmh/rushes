@@ -18,6 +18,7 @@ const TENS = ["", "", "twenty", "thirty", "forty", "fifty"];
 
 /** 21 -> "twenty-one", as the docs write the tool count. Up to 59. */
 export function numberWord(n: number): string {
+  if (!Number.isInteger(n) || n < 0 || n > 59) throw new Error(`numberWord spells 0 to 59, not ${n}: extend it before the docs count that many tools`);
   if (n < 20) return ONES[n];
   return TENS[Math.floor(n / 10)] + (n % 10 ? `-${ONES[n % 10]}` : "");
 }
