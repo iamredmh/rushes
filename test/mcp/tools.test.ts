@@ -662,7 +662,9 @@ describe("MCP tools against a server that isn't the current one", () => {
       const tick = () => (f.opened.length ? resolve() : Date.now() - t0 > 3000 ? reject(new Error("never opened")) : setTimeout(tick, 10));
       tick();
     });
-    expect(f.log).toContain("POST /api/found/scan");
+    // rushes_open opens the browser first and posts the scan after, so the server hears the scan a
+    // moment later, and on a slow machine a good while later. The test is that it is in flight.
+    await expect.poll(() => f.log, { timeout: 3000 }).toContain("POST /api/found/scan");
     await f.close();
     await pending.catch(() => undefined);
   });
