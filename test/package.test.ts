@@ -149,6 +149,23 @@ describe("shipped docs on finding the project's other files (§20)", () => {
     }
   });
 
+  it("README has a Formats section: the toggle, This format | All formats, Alt+arrows and rushes_add_format", () => {
+    const text = read("README.md");
+    expect(text).toMatch(/^## Formats$/m);
+    for (const word of ["`rushes_add_format`", "This format", "All formats", "Alt+←/→", "Other formats"]) expect(text).toContain(word);
+  });
+
+  it("README says where Alt+←/→ can clash: never while typing, Back on Windows and Linux, word-jump on macOS (Task 4 review M8)", () => {
+    const text = read("README.md");
+    const at = text.indexOf("## Formats");
+    const section = text.slice(at, text.indexOf("\n## ", at + 5));
+    expect(section).toMatch(/never (fire|fires|step)[^.]*typing/i);
+    expect(section).toMatch(/Windows and Linux/);
+    expect(section).toMatch(/Back/);
+    expect(section).toMatch(/macOS/);
+    expect(text).toMatch(/\*\*Alt\+←\/→\*\* previous\/next format/);
+  });
+
   it("every CLI flag the scan and bring-in commands take is in the README", () => {
     const text = read("README.md");
     for (const flag of ["--film", "--kind", "--round", "--json"]) expect(text).toContain(flag);
