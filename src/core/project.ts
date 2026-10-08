@@ -2,7 +2,7 @@ import { basename } from "node:path";
 import type { Cue, FileEntry, FileKind, Format, Lane, LaneStage, Project, Shot, Variant, Version, Video } from "./schema.js";
 import { newProjectId, slugify, uniqueId } from "./ids.js";
 import { InvalidError, NotFoundError, RushesError } from "./errors.js";
-import { MAX_FORMATS, durationWarning, ratioId, settleLabel, versionFormats } from "./formats.js";
+import { MAX_FORMATS, durationWarning, ratioId, sameShape, settleLabel, versionFormats } from "./formats.js";
 import type { Store } from "./store.js";
 
 /** Sets `p.id` when missing. Returns whether it changed anything. */
@@ -311,8 +311,10 @@ export function addFormat(p: Project, input: AddFormatInput, now = new Date()): 
   const { label, note } = checkedLabel(input.width, input.height, input.label);
   const id = ratioId(label);
   const shapes = versionFormats({ ...version, width: primary.width, height: primary.height });
-  if (shapes.some((f) => f.id === id)) {
-    throw new RushesError(`${version.id} already has ${label}. Register a re-render as a new version.`, 409, "same_ratio", { version: version.id, id });
+  // The same id, or a ratio within 1% under another label (final review M1): either way, one shape.
+  const taken = shapes.find((f) => f.id === id) ?? shapes.find((f) => sameShape(f, input));
+  if (taken) {
+    throw new RushesError(`${version.id} already has ${taken.label}. Register a re-render as a new version.`, 409, "same_ratio", { version: version.id, id: taken.id, label: taken.label, file: taken.file });
   }
   if (shapes.length >= MAX_FORMATS) {
     throw new RushesError(`${version.id} already has ${MAX_FORMATS} formats, the most one cut can have.`, 400, "too_many_formats", { version: version.id });

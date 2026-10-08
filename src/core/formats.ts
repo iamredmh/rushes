@@ -112,6 +112,15 @@ export function settleLabel(width: number, height: number, hint?: string): { lab
   return { label: canonical, note: canonical === given ? null : `Rushes wrote the label "${given}" as ${canonical}.` };
 }
 
+/**
+ * Final review M1: two picture sizes are one shape when their ratios are within 1% of each other
+ * (|ln(a/b)|, so a landscape pair and its portrait twin compare alike), whatever labels they got:
+ * 1920×800 ("12:5") and 1920×804 ("2.39:1") are one shape.
+ */
+export function sameShape(a: { width: number; height: number }, b: { width: number; height: number }): boolean {
+  return Math.abs(Math.log((a.width / a.height) / (b.width / b.height))) <= SNAP;
+}
+
 /** §21.5: 9:16, 4:5, 1:1, 4:3, 16:9, then anything else from narrow to wide (width over height). */
 export function chipOrder<T extends { id: string; width: number; height: number }>(list: readonly T[]): T[] {
   const rank = (f: T): number => {

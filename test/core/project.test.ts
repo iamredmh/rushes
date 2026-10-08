@@ -461,6 +461,38 @@ describe("formats in the data (§21.3)", () => {
     expect(p.videos[0].versions[0].formats.map((f) => f.id)).toEqual(["2.4x1"]);
   });
 
+  it("refuses a shape within 1% of one the cut already has, however the labels came out (final review M1)", () => {
+    const again = "Register a re-render as a new version.";
+    // 1920×800 is the fraction 12:5; 1920×804 measures the decimal 2.39:1.
+    const a = withCut();
+    addFormat(a, shape("renders/a.mp4", 1920, 800));
+    expect(() => addFormat(a, shape("renders/b.mp4", 1920, 804))).toThrow(`v1 already has 12:5. ${again}`);
+    // 1000×700 is 10:7; 1001×700 measures 1.43:1.
+    const b = withCut();
+    addFormat(b, shape("renders/a.mp4", 1000, 700));
+    expect(() => addFormat(b, shape("renders/b.mp4", 1001, 700))).toThrow(`v1 already has 10:7. ${again}`);
+    // A hint of "12:5" is written 2.4:1: still the measured 12:5's shape, whichever came first.
+    const c = withCut();
+    addFormat(c, shape("renders/a.mp4", 1920, 800));
+    expect(() => addFormat(c, { ...shape("renders/b.mp4", 1920, 804), label: "12:5" })).toThrow(`v1 already has 12:5. ${again}`);
+    const d = withCut();
+    expect(addFormat(d, { ...shape("renders/a.mp4", 1920, 804), label: "12:5" }).format.label).toBe("2.4:1");
+    expect(() => addFormat(d, shape("renders/b.mp4", 1920, 800))).toThrow(`v1 already has 2.4:1. ${again}`);
+    for (const p of [a, b, c, d]) expect(p.videos[0].versions[0].formats).toHaveLength(1);
+    // Within 1% of the primary too, and the comparison is the same for a portrait twin.
+    const e = withCut({ width: 2000, height: 1000 });
+    expect(() => addFormat(e, shape("renders/b.mp4", 2010, 1000))).toThrow(`v1 already has 2:1. ${again}`);
+    // 1.5% off is another shape: the rule is 1%, no wider.
+    expect(addFormat(e, shape("renders/c.mp4", 2030, 1000)).format.label).toBe("2.03:1");
+    const f = withCut({ width: 1000, height: 2000 });
+    expect(() => addFormat(f, shape("renders/b.mp4", 1000, 2010))).toThrow(`v1 already has 1:2. ${again}`);
+    // More than 1% apart: two shapes. 2.39:1 against 21:9 (2.33:1) is 2.3% apart.
+    const g = withCut();
+    addFormat(g, shape("renders/a.mp4", 1920, 804));
+    expect(addFormat(g, shape("renders/b.mp4", 2100, 900)).format.label).toBe("21:9");
+    expect(addFormat(g, shape("renders/c.mp4", 2020, 1000)).format.label).toBe("2.02:1");
+  });
+
   it("uses the primary's size given for a cut from before formats, and refuses without one", () => {
     const p = withCut({ width: null, height: null });
     expect(() => addFormat(p, shape("renders/t.mp4", 1080, 1920))).toThrow(/can't read v1's own picture size/);
