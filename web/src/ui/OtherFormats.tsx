@@ -11,8 +11,8 @@ export interface OtherFormatsProps {
   viewsHere: FormatView[];
   /** The shapes of a note's own version. */
   ownViews(n: Note): FormatView[];
-  /** Switch to a format (refused, with a toast, while a box is drawn: R7). */
-  onShow(id: string): void;
+  /** Switch to a format, for note `n` (refused, with a toast, while a box is drawn: R7). */
+  onShow(id: string, n: Note): void;
   /** R17: widen a note whose format has gone from its own cut. */
   onRestore(n: Note): void;
 }
@@ -40,7 +40,7 @@ export function OtherFormats({ notes, version, viewsHere, ownViews, onShow, onRe
               {at.from && <span class="from">from {at.from}</span>}
             </div>
             <div class="nx">{n.text}</div>
-            {act?.kind === "show" && <div class="nact"><button type="button" class="flink" onClick={() => onShow(act.id)}>Show on {act.label}</button></div>}
+            {act?.kind === "show" && <div class="nact"><button type="button" class="flink" onClick={() => onShow(act.id, n)}>Show on {act.label}</button></div>}
             {act?.kind === "restore" && <div class="nact"><button type="button" class="flink" onClick={() => onRestore(n)}>Restore to all formats</button></div>}
           </div>
         );

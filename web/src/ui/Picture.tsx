@@ -192,18 +192,64 @@ export function Picture({
   const ownViews = (n: Note) => versionFormats(video.versions.find((v) => v.id === n.version) ?? version);
   // §21.5: widen a note to every format, or narrow it to the one on screen. The server checks it
   // (a box can't be widened, a format must be one of the note's cut), and says why in plain words.
+  // Review M5: a change asked for shows at once, until the server's copy of the note agrees, so a
+  // second key press works from it and never sends the same request again.
+  const [askedFormat, setAskedFormat] = useState<Record<string, string | null>>({});
+  const formatOf = (n: Note) => (n.id in askedFormat ? askedFormat[n.id] : n.format);
+  const forget = (id: string) => setAskedFormat((a) => {
+    if (!(id in a)) return a;
+    const { [id]: _, ...rest } = a;
+    return rest;
+  });
+  useEffect(() => {
+    setAskedFormat((a) => {
+      const keep = Object.keys(a).filter((id) => notes.some((n) => n.id === id && n.format !== a[id]));
+      return keep.length === Object.keys(a).length ? a : Object.fromEntries(keep.map((id) => [id, a[id]]));
+    });
+  }, [notes]);
   const setNoteFormat = async (n: Note, to: string | null) => {
+    if (formatOf(n) === to) return;
+    setAskedFormat((a) => ({ ...a, [n.id]: to }));
     try {
       await api.patch(`/api/notes/${n.id}`, { format: to });
     } catch (e) {
+      forget(n.id);
+      if (focusNote.current?.id === n.id) focusNote.current = null;
       toast(`Couldn't change that note: ${(e as Error).message}`);
     }
     onChanged();
   };
-  // R6: a selected note that doesn't show on the new format lets go of the selection.
+  // R6, review M4: a selected note that no longer shows (another format on screen, or the note
+  // narrowed away by an agent) lets go of the selection.
   useEffect(() => {
     if (selectedId && !visible.some((n) => n.id === selectedId)) setSelectedId(null);
-  }, [format]);
+  }, [format, notes]);
+
+  // Review M3: when a note moves between the list and the Other formats row, focus goes with it rather
+  // than dropping to the page: to its time in the list, or to the row it now waits in. `fallback`
+  // allows the row; it's set when a format switch starts from the note's own card (Alt+arrows).
+  const focusNote = useRef<{ id: string; fallback: boolean } | null>(null);
+  const formatShown = useRef(format);
+  if (formatShown.current !== format) {
+    formatShown.current = format;
+    const active = document.activeElement;
+    const card = active instanceof HTMLElement && active.closest(".nfmt") ? active.closest<HTMLElement>(".list > .note[data-note]") : null;
+    if (card && !focusNote.current) focusNote.current = { id: card.dataset.note!, fallback: true };
+  }
+  useLayoutEffect(() => {
+    const want = focusNote.current;
+    if (!want) return;
+    const active = document.activeElement;
+    const lost = !active || active === document.body || !active.isConnected;
+    const time = document.querySelector<HTMLElement>(`.list > .note[data-note="${CSS.escape(want.id)}"] .t`);
+    if (time) {
+      focusNote.current = null;
+      if (lost) time.focus();
+    } else if (want.fallback) {
+      focusNote.current = null;
+      if (lost) document.querySelector<HTMLElement>(".otherrow")?.focus();
+    }
+  }, [format, notes]);
 
   // §19.5: the proxy plays unless you've picked Original. The switch never changes the cut, so
   // notes, timecodes and frame numbers are the same on both.
@@ -739,7 +785,7 @@ export function Picture({
             label={view.label}
             width={view.width}
             height={view.height}
-            value={n.format === null ? "all" : "this"}
+            value={formatOf(n) === null ? "all" : "this"}
             lockedReason={n.box ? BOX_REASON : null}
             onChange={(to) => void setNoteFormat(n, to === "all" ? null : view.id)}
           />
@@ -748,9 +794,27 @@ export function Picture({
           label: view.label, width: view.width, height: view.height, value: scopeNow, onChange: setNoteScope,
           lockedReason: box ? BOX_REASON : null, hint: scopeHint(view.label, scopeNow, box !== null),
         } : undefined}
-        listFooter={others.length > 0 ? (
-          <OtherFormats notes={others} version={version.id} viewsHere={formats} ownViews={ownViews} onShow={(id) => onFormatChange?.(id)} onRestore={(n) => void setNoteFormat(n, null)} />
-        ) : undefined}
+        listFooter={(filter) => {
+          // Review M6: the row counts, and lists, what the filter in use would.
+          const shown = others.filter((n) => filter === "all" || n.status === filter);
+          return shown.length > 0 ? (
+            <OtherFormats
+              notes={shown}
+              version={version.id}
+              viewsHere={formats}
+              ownViews={ownViews}
+              onShow={(id, n) => {
+                // A drawn box refuses the switch (R7), and then there's nowhere to take focus.
+                if (!box) focusNote.current = { id: n.id, fallback: false };
+                onFormatChange?.(id);
+              }}
+              onRestore={(n) => {
+                focusNote.current = { id: n.id, fallback: false };
+                void setNoteFormat(n, null);
+              }}
+            />
+          ) : null;
+        }}
         onSeek={(to, n) => {
           ref.current?.pause();
           seek(to);

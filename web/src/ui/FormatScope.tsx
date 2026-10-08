@@ -24,13 +24,14 @@ export function FormatScope({ label, width, height, value, onChange, lockedReaso
     { v: "this" as const, text: "This format", disabled: false },
     { v: "all" as const, text: "All formats", disabled: lockedReason !== null },
   ];
-  // A radio group's keys: the arrows move between the two (no wrap to speak of with two), Home and
-  // End go to the ends. Kept here, so the frame step and Alt+arrows never see them.
+  // A radio group's keys: Left/Up and Home go to This format, Right/Down and End to All formats. They
+  // don't wrap (review M5), so pressing one twice asks for the same thing twice and sends nothing new.
+  // Kept here, so the frame step and Alt+arrows never see them.
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.altKey || e.metaKey || e.ctrlKey || !KEYS.includes(e.key)) return;
     e.preventDefault();
     e.stopPropagation();
-    const to = e.key === "Home" ? "this" : e.key === "End" ? "all" : value === "this" ? "all" : "this";
+    const to = e.key === "Home" || e.key === "ArrowLeft" || e.key === "ArrowUp" ? "this" : "all";
     if (to === "all" && lockedReason) return;
     if (to !== value) onChange(to);
     (e.currentTarget as HTMLElement).querySelector<HTMLButtonElement>(`[data-scope="${to}"]`)?.focus();

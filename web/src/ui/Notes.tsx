@@ -6,7 +6,8 @@ import type { Mark, Note } from "../types.js";
 import { FormatScope } from "./FormatScope.js";
 import { Icon } from "./Icon.js";
 
-type Filter = "all" | "todo" | "done";
+/** The list's All / To do / Done filter. */
+export type Filter = "all" | "todo" | "done";
 
 export interface NotesProps {
   /** This tab's notes (already narrowed to the video being watched, where that applies). */
@@ -46,8 +47,9 @@ export interface NotesProps {
   cardExtra?(n: Note): ComponentChildren;
   /** §21.2 (4): the composer's This format | All formats switch and its hint line. */
   formatScope?: ComposerFormat;
-  /** §21.5: at the bottom of the list (the "Other formats (N)" row). */
-  listFooter?: ComponentChildren;
+  /** §21.5: at the bottom of the list (the "Other formats (N)" row), for the filter in use (review M6);
+   *  null when there's nothing to show. */
+  listFooter?(filter: Filter): ComponentChildren;
 }
 
 /** §21.2 (4), §21.5: the composer's switch, for the format on screen. */
@@ -82,6 +84,7 @@ export function Notes({
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const todo = notes.filter((n) => n.status === "todo").length;
+  const footer = listFooter?.(filter) ?? null;
   const placed = notes
     .map((n) => ({ n, at: fixedTimes ? { t: n.t, tOut: n.tOut, from: null } : placeNote(n, version) }))
     .filter(({ n }) => filter === "all" || n.status === filter)
@@ -139,9 +142,10 @@ export function Notes({
         </div>
       </div>
       <div class="list">
-        {placed.length === 0 && <div class="none">{filter !== "all" ? "Nothing here." : listFooter ? "None on this format." : "No notes yet."}</div>}
+        {placed.length === 0 && <div class="none">{filter !== "all" ? "Nothing here." : footer ? "None on this format." : "No notes yet."}</div>}
         {placed.map(({ n, at }) => (
-          <div class={`note${n.status === "done" ? " done" : ""}`} data-note={n.id} aria-current={selectedId === n.id ? "true" : undefined}>
+          // Keyed (review M3): a card that shows on the next format keeps its node, and its focus.
+          <div key={n.id} class={`note${n.status === "done" ? " done" : ""}`} data-note={n.id} aria-current={selectedId === n.id ? "true" : undefined}>
             <button class="chk" aria-label={n.status === "done" ? "Reopen" : "Mark done"} title={n.status === "done" ? "Reopen" : "Mark done"} onClick={() => void toggle(n)}>
               <Icon name="check" />
             </button>
@@ -171,7 +175,7 @@ export function Notes({
             {selectedId === n.id && cardExtra && <div class="nfmt">{cardExtra(n)}</div>}
           </div>
         ))}
-        {listFooter}
+        {footer}
       </div>
       <div class="comp">
         {(on || scope) && (
