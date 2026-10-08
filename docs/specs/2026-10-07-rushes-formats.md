@@ -71,6 +71,7 @@ A segmented control in the Picture header, next to the version pill. One chip pe
 - Switching keeps the playhead time and whether it is playing, and keeps the selected note. The picture swaps in place; the frame box animates to the new shape in 160 ms (no animation under reduced motion).
 - Keys: `[` and `]` select the previous and next format (checked against the existing shortcuts before building; if either is taken, use `Alt+←` and `Alt+→`).
 - The choice is remembered per film for the session, and the primary shows first on a fresh load.
+- The header stays one row from 1101 px with the toggle beside the version control, even on a long project (two long film names, a found chip, a 48-character version label) with up to four formats: the toggle is never squeezed; as the window narrows the Change Log button becomes its icon (1560 px and under, two formats or more), the chips drop their shape marks and keep their ratio and count (1480 px and under), and the "Picture" label goes while the found chip's words truncate like the names (1280 px and under). The one-format popover sits above the Change Log drawer and the version list.
 
 ### The player
 
