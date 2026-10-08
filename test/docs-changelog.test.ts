@@ -11,3 +11,14 @@ describe("shipped docs: short labels (§22.4)", () => {
     expect(text).toMatch(/detail in `note`/);
   });
 });
+
+describe("shipped docs: the Change Log (§22.7)", () => {
+  it.each(["AGENTS.md", "skills/rushes/SKILL.md"])("%s says to read the log at the start of a session and add a line when changing direction", (file) => {
+    const text = read(file);
+    expect(text).toMatch(/at the start of a session, (call|read) `rushes_get_log`/i);
+    expect(text).toMatch(/(change direction|a decision)[^.]*`rushes_log`|`rushes_log`[^.]*(change direction|a decision)/i);
+    for (const tool of ["rushes_log", "rushes_get_log"]) expect(text).toContain(`\`${tool}\``);
+    expect(text).toMatch(/rushes log/);
+    expect(text).not.toMatch(/\/Users\//);
+  });
+});

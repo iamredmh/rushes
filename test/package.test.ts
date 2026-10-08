@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { VERSION } from "../src/server/app.js";
 import { SOURCE } from "../src/setup/harnesses.js";
+import { numberWord, registeredToolNames } from "./helpers/tools.js";
 
 // §19.7: what ships to npm. Keeping this list in a test, rather than just in package.json,
 // means a future change to "files" has to pass a reader who can say why each entry is there.
@@ -79,11 +80,15 @@ describe("shipped agent docs (final review I3)", () => {
     expect(text).toMatch(/both are in, unpicked/);
   });
 
-  it.each(["README.md", "AGENTS.md", "skills/rushes/SKILL.md"])("%s counts nineteen tools, and names every one", (file) => {
+  it.each(["README.md", "AGENTS.md", "skills/rushes/SKILL.md"])("%s counts the registered tools, and names every one", async (file) => {
     const text = read(file);
-    expect(text).toMatch(/nineteen tools/);
-    expect(text).not.toMatch(/seventeen/);
-    for (const tool of ["rushes_scan", "rushes_bring_in"]) expect(text).toContain(`\`${tool}\``);
+    const names = await registeredToolNames();
+    // Derived from what tools.ts registers, so the next tool added can't leave the docs one short.
+    expect(text, `${file} should say "${numberWord(names.length)} tools"`).toContain(`${numberWord(names.length)} tools`);
+    expect(text).not.toMatch(/seventeen|nineteen/);
+    // The list itself, not just a mention elsewhere: the line that gives the count names every tool.
+    const list = text.split("\n").find((l) => l.includes(`${numberWord(names.length)} tools`))!;
+    for (const tool of [...names, "rushes_log", "rushes_get_log"]) expect(list, `${file}'s tool list should name \`${tool}\``).toContain(`\`${tool}\``);
   });
 });
 

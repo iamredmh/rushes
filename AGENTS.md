@@ -89,9 +89,19 @@ Pass `include` for files you made for this cut: `include: [{ path, kind?, round?
 
 The user sees the rest in **Assets › Found**, the first folder in Assets: files grouped by folder with their reasons, a play button to audition each one, **Bring in N** (the ticked files, up to 12 of each kind per click), **Not these** (hides them for good, with a **Hidden** list and **Restore**), **Look again** (the same scan as `rushes_scan`) and a header chip, "3 brought in · 118 more found", while something is new. Files in Found are never an agent's to pick for the user; whatever comes in, by you or by Rushes, is unpicked.
 
+## The Change Log
+
+Rushes keeps a log of what happened in the project, newest first, written as it happens (`.rushes/log.json`): cuts, voice reads, music beds, sound-effects passes, takes, the script, picks, notes sent and your replies. A burst of registrations is one line. The user opens it from the **Change Log** button.
+
+- **At the start of a session, call `rushes_get_log`** to catch up on what changed since you last worked on the project. It takes `limit` (default 30, at most 200), `area` and `since` (a date and time). It returns `entries` newest first, `earlier` (how many it left out) and `undated` (audio from before the log).
+- **When you change direction or make a decision**, add one line with `rushes_log` (`text`, optional `area`, `video`, `version`, `ref`), e.g. "Slowed the zooms: the first cut felt rushed". One line, 160 characters at most. Don't log what Rushes logs itself.
+- **Give every cut a short `label`** (step 1 of the loop).
+- CLI: `rushes log [--limit N] [--area A] [--md]` and `rushes log add "text" [--area A]`. `rushes_export_notes` also writes `exports/change-log-<date>.md`.
+- Send to agent's prompt ends with the last five lines, under "Recent changes".
+
 ## Tools
 
-The MCP server has nineteen tools: `rushes_open`, `rushes_status`, `rushes_add_version`, `rushes_add_variant`, `rushes_set_script`, `rushes_get_script`, `rushes_add_take`, `rushes_list_notes`, `rushes_list_assets`, `rushes_get_batch`, `rushes_reply`, `rushes_get_picks`, `rushes_set_shots`, `rushes_lock_picture`, `rushes_add_file`, `rushes_export_notes`, `rushes_scan`, `rushes_bring_in` and `rushes_doctor`. Each takes an optional `project` folder, which defaults to the folder the harness started in.
+The MCP server has twenty-one tools: `rushes_open`, `rushes_status`, `rushes_add_version`, `rushes_add_variant`, `rushes_set_script`, `rushes_get_script`, `rushes_add_take`, `rushes_list_notes`, `rushes_list_assets`, `rushes_get_batch`, `rushes_reply`, `rushes_get_picks`, `rushes_set_shots`, `rushes_lock_picture`, `rushes_add_file`, `rushes_export_notes`, `rushes_log`, `rushes_get_log`, `rushes_scan`, `rushes_bring_in` and `rushes_doctor`. Each takes an optional `project` folder, which defaults to the folder the harness started in.
 
 ## Rules
 
@@ -116,6 +126,8 @@ npx -y rushes add variant voice gerald.wav --name Gerald --round "Round 1 · Voi
 npx -y rushes add shots shots.json --video "Hero 60s" --version v2
 npx -y rushes add file brief.pdf --kind doc
 npx -y rushes export notes
+npx -y rushes log --limit 20
+npx -y rushes log add "Slowed the zooms" --area picture
 npx -y rushes doctor --json
 npx -y rushes scan --json
 npx -y rushes bring-in audio/music/bed.wav --kind music

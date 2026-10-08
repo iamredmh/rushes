@@ -11,6 +11,7 @@ import { openBrowser, runStdio } from "../mcp/stdio.js";
 import { VERSION } from "../server/app.js";
 import { BRING_IN_MAX } from "../server/found.js";
 import { LABEL_MAX, oneLineOf } from "../core/labels.js";
+import { AREA_LABELS, BY_WORDS, LOG_AREAS, LOG_MAX, localStamp, logMarkdown, type LogLine, type UndatedLine } from "../core/logText.js";
 import { markLabel, type Mark, type Note } from "../core/schema.js";
 import { onLabel, type OnContext } from "../core/notes.js";
 import { setup, type SetupEnv } from "../setup/setup.js";
@@ -62,6 +63,8 @@ Usage
                                                     register files from inside the project folder (nothing is picked);
                                                     exits 1 if any file can't come in
   rushes export notes                               write notes to exports/<slug>-notes-<date>.md
+  rushes log [--limit N] [--area A] [--md]          the Change Log, newest first (--md: as Markdown)
+  rushes log add <text> [--area A]                  add a line to the Change Log
 
 Options
   --dir DIR   project folder for commands that talk to the server (default: current folder)
@@ -82,6 +85,9 @@ const OPTIONS = {
   batch: { type: "string" },
   kind: { type: "string" },
   film: { type: "string" },
+  limit: { type: "string" },
+  area: { type: "string" },
+  md: { type: "boolean" },
   json: { type: "boolean" },
   done: { type: "boolean" },
   "fix-t": { type: "string" },
@@ -479,6 +485,46 @@ export async function main(argv: string[], io: Io): Promise<number> {
         };
         await (await client()).post("/api/replies", { replies: [reply] });
         io.out(`Replied to ${id}`);
+        return 0;
+      }
+      case "log": {
+        const logUsage = "rushes log [--limit N] [--area A] [--md] | rushes log add <text> [--area A]";
+        const [what, ...words] = rest;
+        const area = o.area;
+        if (area !== undefined && !(LOG_AREAS as readonly string[]).includes(area)) {
+          io.err(`--area must be one of ${LOG_AREAS.join(", ")} (got "${area}")`);
+          return usage(io, logUsage);
+        }
+        if (what === "add") {
+          const text = words.join(" ").trim();
+          if (!text) return usage(io, 'rushes log add "text" [--area A]');
+          const r = await (await client()).post("/api/log", { text, ...(area ? { area } : {}) });
+          io.out(`Added to the Change Log: ${stripControl(r.entry.text)}`);
+          return 0;
+        }
+        if (what !== undefined) return usage(io, logUsage);
+        const limit = o.limit === undefined ? (o.md ? LOG_MAX : 30) : Number(o.limit);
+        if (!(Number.isInteger(limit) && limit >= 1 && limit <= LOG_MAX)) {
+          io.err(`--limit must be a whole number from 1 to ${LOG_MAX} (got "${o.limit}")`);
+          return usage(io, logUsage);
+        }
+        const c = await client();
+        const q = new URLSearchParams({ limit: String(limit) });
+        if (area) q.set("area", area);
+        const view = await c.get<{ entries: LogLine[]; earlier: number; undated: UndatedLine[]; dropped: number }>(`/api/log?${q}`);
+        if (o.md) {
+          const { name } = await c.get<{ name: string }>("/api/health");
+          io.out(logMarkdown({ project: name, entries: view.entries, undated: view.undated, dropped: view.dropped, earlier: view.earlier, now: new Date() }).trimEnd());
+          return 0;
+        }
+        if (!view.entries.length && !view.undated.length) return io.out("Nothing in the Change Log yet."), 0;
+        for (const e of view.entries) io.out(`${localStamp(new Date(e.at))}  ${AREA_LABELS[e.area].padEnd(13)} ${stripControl(e.text)}  (${BY_WORDS[e.by]})`);
+        if (view.earlier) io.out(`${view.earlier} earlier (rushes log --limit ${Math.min(LOG_MAX, limit + view.earlier)} shows them)`);
+        if (view.undated.length) {
+          io.out("Before the log:");
+          for (const u of view.undated) io.out(`  ${stripControl(u.text)}`);
+        }
+        if (view.dropped) io.out("Earlier entries were removed.");
         return 0;
       }
       default:

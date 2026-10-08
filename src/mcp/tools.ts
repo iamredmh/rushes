@@ -4,6 +4,7 @@ import { ApiError, dashboardUrlFor, type RushesClient } from "./client.js";
 import { VERSION } from "../server/app.js";
 import { BRING_IN_MAX } from "../server/found.js";
 import { LABEL_MAX } from "../core/labels.js";
+import { LOG_AREAS } from "../core/logText.js";
 import type { Check } from "../cli/doctor.js";
 
 export interface ToolContext {
@@ -386,10 +387,51 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     {
       title: "Export notes",
       description:
-        "Write every note to exports/<project-slug>-notes-<date>.md, grouped by stage and, for Picture, by film and version. Exporting again the same day overwrites it. Returns the path.",
+        "Write every note to exports/<project-slug>-notes-<date>.md, grouped by stage and, for Picture, by film and version, and the Change Log to exports/change-log-<date>.md, newest first. Exporting again the same day overwrites them. Returns both paths (path, changeLog).",
       inputSchema: { project },
     },
     safe(async ({ project }) => (await ctx.client(project)).post("/api/exports/notes", {})),
+  );
+
+  const area = z.enum(LOG_AREAS);
+
+  server.registerTool(
+    "rushes_log",
+    {
+      title: "Add a line to the Change Log",
+      description:
+        'Adds one line to the project\'s Change Log, as the agent: a decision or a change of direction, e.g. "Slowed the zooms: the first cut felt rushed". One line, 160 characters at most (longer is cut). Rushes already logs cuts, voice reads, music, sound effects, takes, the script, picks, notes sent and replies by itself, so don\'t repeat those. `area` defaults to project; `video`, `version` and `ref` ("<lane>/<variant>") let the line open that place in the dashboard. Returns the line.',
+      inputSchema: {
+        project,
+        text: z.string().min(1).max(2000).describe("What happened, in one line."),
+        area: area.optional().describe("script, picture, voice, music, sfx, mix, notes, assets or project (the default)."),
+        video: z.string().optional().describe("Video id or name, to open its cut from the line."),
+        version: z.string().optional().describe("With video: the version to open."),
+        ref: z.string().optional().describe('"<lane>/<variant>" to open a voice read, bed or pass from the line.'),
+      },
+    },
+    safe(async ({ project, ...b }) => (await ctx.client(project)).post("/api/log", b)),
+  );
+
+  server.registerTool(
+    "rushes_get_log",
+    {
+      title: "Read the Change Log",
+      description:
+        "Call this at the start of a session to catch up: what happened in the project, newest first. Cuts, reads, beds, passes and takes as they were added, the script, picks, notes sent, replies and lines people or agents wrote. Returns `entries` (each with `at`, `area`, `text`, `by`: user, agent or rushes), `earlier` (how many matching lines were left out), `undated` (audio from before the log) and `dropped` (lines removed past 5000).",
+      inputSchema: {
+        project,
+        limit: z.number().int().min(1).max(200).default(30).describe("How many lines, newest first. Default 30, at most 200."),
+        area: area.optional().describe("Only this area."),
+        since: z.string().optional().describe("Only lines after this date and time, e.g. 2026-10-07T09:00:00Z."),
+      },
+    },
+    safe(async ({ project, limit, area: a, since }) => {
+      const q = new URLSearchParams({ limit: String(limit ?? 30) });
+      if (a) q.set("area", a);
+      if (since) q.set("since", since);
+      return (await ctx.client(project)).get(`/api/log?${q}`);
+    }),
   );
 
   server.registerTool(

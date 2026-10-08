@@ -43,13 +43,13 @@ async function connect(opts: { files?: string[]; probe?: Probe } = {}) {
 }
 
 describe("MCP tools", () => {
-  it("lists the nineteen tools", async () => {
+  it("lists the twenty-one tools", async () => {
     const t = await connect();
     const { tools } = await t.client.listTools();
     expect(tools.map((x) => x.name).sort()).toEqual([
       "rushes_add_file", "rushes_add_take", "rushes_add_variant", "rushes_add_version", "rushes_bring_in", "rushes_doctor", "rushes_export_notes",
-      "rushes_get_batch", "rushes_get_picks", "rushes_get_script", "rushes_list_assets", "rushes_list_notes",
-      "rushes_lock_picture", "rushes_open", "rushes_reply", "rushes_scan", "rushes_set_script", "rushes_set_shots", "rushes_status",
+      "rushes_get_batch", "rushes_get_log", "rushes_get_picks", "rushes_get_script", "rushes_list_assets", "rushes_list_notes",
+      "rushes_lock_picture", "rushes_log", "rushes_open", "rushes_reply", "rushes_scan", "rushes_set_script", "rushes_set_shots", "rushes_status",
     ]);
     const set = tools.find((x) => x.name === "rushes_set_script")!;
     expect((set.inputSchema.properties as Record<string, { description?: string }>).replace.description).toMatch(/replace the whole script; default merges by id/);

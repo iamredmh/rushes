@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createServer, type Server } from "node:http";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { tmpProject } from "../helpers/tmp.js";
@@ -34,6 +35,80 @@ describe("labels for agents (§22.4)", () => {
     const add = tools.find((x) => x.name === "rushes_add_version")!;
     expect((add.inputSchema as any).properties.label).toMatchObject({ maxLength: 48 });
     expect(add.description).toMatch(/short `label`/);
+    await t.client.close();
+    await s.close();
+  });
+});
+
+describe("the Change Log for agents (§22.7)", () => {
+  it("rushes_log adds a line as the agent; rushes_get_log reads back newest first, with what it left out", async () => {
+    const { root } = await tmpProject("Lumen launch film");
+    const s = await startServer(root, { port: 0 });
+    const t = await mcpOn(s.url);
+    await t.call("rushes_add_version", { video: "Lumen launch film", file: "renders/lumen_v1.mp4", note: "v1: first pass; rough", label: "First pass" });
+    const added = await t.call("rushes_log", { text: "Decided to slow the zooms\nthe first cut felt rushed", area: "picture" });
+    expect(added.isError).toBe(false);
+    expect(JSON.parse(added.text).entry).toMatchObject({ text: "Decided to slow the zooms the first cut felt rushed", by: "agent", area: "picture" });
+    const one = JSON.parse((await t.call("rushes_get_log", { limit: 1 })).text);
+    expect(one.entries.map((e: { text: string }) => e.text)).toEqual(["Decided to slow the zooms the first cut felt rushed"]);
+    expect(one.earlier).toBe(1);
+    const picture = JSON.parse((await t.call("rushes_get_log", { area: "picture" })).text);
+    expect(picture.entries.map((e: { text: string }) => e.text)).toEqual(["Decided to slow the zooms the first cut felt rushed", "v1 added: First pass"]);
+    expect((await t.call("rushes_get_log", { limit: 201 })).isError).toBe(true);
+    expect((await t.call("rushes_log", { text: "" })).isError).toBe(true);
+    const { tools } = await t.client.listTools();
+    expect(tools.find((x) => x.name === "rushes_log")!.description).toMatch(/already logs cuts/);
+    expect(tools.find((x) => x.name === "rushes_get_log")!.description).toMatch(/start of a session/);
+    expect(tools.find((x) => x.name === "rushes_export_notes")!.description).toMatch(/change-log-<date>\.md/);
+    await t.client.close();
+    await s.close();
+  });
+
+  it("against an older Rushes, both tools say to restart it, in words (§22.9)", async () => {
+    const server: Server = createServer((req, res) => {
+      if (req.url === "/api/health") {
+        res.setHeader("content-type", "application/json");
+        return void res.end(JSON.stringify({ ok: true }));
+      }
+      res.statusCode = 404;
+      res.end("404 Not Found");
+    });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const t = await mcpOn(`http://127.0.0.1:${(server.address() as { port: number }).port}`);
+    for (const [name, args] of [["rushes_log", { text: "x" }], ["rushes_get_log", {}]] as const) {
+      const r = await t.call(name, args);
+      expect(r.isError, name).toBe(true);
+      expect(r.text, name).toMatch(/older than/);
+      expect(r.text, name).toMatch(/rushes stop/);
+    }
+    await t.client.close();
+    server.closeAllConnections();
+    await new Promise((r) => server.close(r));
+  });
+
+  it("passes since through, and says what the server refused instead of dropping it", async () => {
+    const { root } = await tmpProject("Lumen launch film");
+    const s = await startServer(root, { port: 0 });
+    const t = await mcpOn(s.url);
+    await t.call("rushes_log", { text: "Moved the logo hold earlier" });
+    const names = async (a: Record<string, unknown>) => JSON.parse((await t.call("rushes_get_log", a)).text).entries.map((e: { text: string }) => e.text);
+    expect(await names({ since: "2000-01-01T00:00:00Z" })).toEqual(["Moved the logo hold earlier"]);
+    expect(await names({ since: "2999-01-01T00:00:00Z" })).toEqual([]);
+    const bad = await t.call("rushes_get_log", { since: "yesterday" });
+    expect(bad.isError).toBe(true);
+    expect(bad.text).toMatch(/since/);
+    const nowhere = await t.call("rushes_log", { text: "Opened a cut that isn't there", video: "No such film" });
+    expect(nowhere.isError).toBe(true);
+    expect(nowhere.text).toMatch(/No such film/);
+    expect((await names({})).includes("Opened a cut that isn't there")).toBe(false);
+    const defaults = JSON.parse((await t.call("rushes_get_log")).text);
+    expect(defaults.entries[0]).toMatchObject({ area: "project", by: "agent" });
+    await t.call("rushes_log", { text: "Picked a calmer bed", area: "music" });
+    expect(await names({ area: "music" })).toEqual(["Picked a calmer bed"]);
+    for (let i = 0; i < 31; i++) await t.call("rushes_log", { text: `Tweak ${i}` });
+    const page = JSON.parse((await t.call("rushes_get_log")).text);
+    expect(page.entries).toHaveLength(30);
+    expect(page.earlier).toBeGreaterThan(0);
     await t.client.close();
     await s.close();
   });
