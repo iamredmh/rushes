@@ -59,7 +59,8 @@ const sameThing = (e: LogEntry, link: Link): boolean =>
   (link.version !== null || link.ref !== null) && e.video === link.video && e.version === link.version && e.ref === link.ref;
 
 function mergeInto(e: LogEntry, event: LogEvent, text: string, subject: string, count: number, link: Link): boolean {
-  if (event.merge === "once") return e.text === text;
+  // A repeat is the same words about the same place (minor 4).
+  if (event.merge === "once") return e.text === text && e.video === link.video && e.version === link.version && e.ref === link.ref && e.tab === link.tab;
   if (event.merge === "replace") {
     if (e.subject !== subject) return false;
     e.text = text;
@@ -71,7 +72,8 @@ function mergeInto(e: LogEntry, event: LogEvent, text: string, subject: string, 
   e.n += count;
   e.subject = e.subject === subject ? subject : "";
   e.text = logText(event.many ? event.many(e.n, e.subject) : text) || text;
-  Object.assign(e, link);
+  // A line opens a tab only when every event in it came from that one (minor 5).
+  Object.assign(e, link, { tab: e.tab === link.tab ? link.tab : null });
   return true;
 }
 

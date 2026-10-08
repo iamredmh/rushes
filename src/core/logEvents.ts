@@ -14,11 +14,26 @@ export const FILE_FOLDERS: Record<FileKind, string> = { doc: "Scripts & docs", i
 const PICK_WORDS: Record<LaneStage, string> = { voice: "voice", music: "music", sfx: "sound effects" };
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
-const quoted = (s: string) => `“${oneLineOf(s)}”`;
+
+// Minor 2: a name is cut to fit, so a long one can't push out what the line is about (its lane,
+// its folder, the closing quote). A name: a variant or a pick in quotes. A place: a lane or a film.
+const NAME_MAX = 48;
+const PLACE_MAX = 40;
+/** `s` on one line, cut to `max`; "" when nothing in it shows (minor 3). */
+function named(s: string, max: number): string {
+  const n = clip(oneLineOf(s), max);
+  return n === "…" ? "" : n;
+}
+/** `“Night drive”`, or `fallback` for a name that shows nothing. */
+const quoted = (s: string, fallback: string) => {
+  const n = named(s, NAME_MAX);
+  return n ? `“${n}”` : fallback;
+};
 
 /** "v6" on a one-film project; "Teaser v2" when there are more (R9). */
 export function cutName(films: number, video: Pick<Video, "name">, versionId: string): string {
-  return films > 1 ? `${oneLineOf(video.name)} ${versionId}` : versionId;
+  const film = named(video.name, PLACE_MAX);
+  return films > 1 && film ? `${film} ${versionId}` : versionId;
 }
 
 /** "v6 added: launch 1.45x slower". */
@@ -29,7 +44,10 @@ export function cutEvent(films: number, video: Pick<Video, "id" | "name">, versi
     area: "picture", kind: "cut", merge: "count", subject: video.id,
     text: `${name} added: ${label}`,
     video: video.id, version: version.id,
-    many: (n, subject) => `${n} cuts added${films > 1 && subject ? ` to ${oneLineOf(video.name)}` : ""}, the latest ${name}: ${label}`,
+    many: (n, subject) => {
+      const film = named(video.name, PLACE_MAX);
+      return `${n} cuts added${films > 1 && subject && film ? ` to ${film}` : ""}, the latest ${name}: ${label}`;
+    },
   };
 }
 
@@ -37,10 +55,13 @@ export function cutEvent(films: number, video: Pick<Video, "id" | "name">, versi
 export function variantEvent(lane: Pick<Lane, "id" | "stage" | "name">, variant: Pick<Variant, "id" | "name">): LogEvent {
   const word = STAGE_WORDS[lane.stage];
   const [one, many] = lane.stage === "voice" ? ["read", "reads"] : ["variant", "variants"];
-  const to = (name: string) => (name && name !== word ? ` to ${oneLineOf(name)}` : "");
+  const to = (name: string) => {
+    const place = named(name, PLACE_MAX);
+    return place && place !== word ? ` to ${place}` : "";
+  };
   return {
     area: lane.stage, kind: "variant", merge: "count", subject: lane.name,
-    text: `${word}: ${quoted(variant.name)} added${to(lane.name)}`,
+    text: `${word}: ${quoted(variant.name, `a ${one}`)} added${to(lane.name)}`,
     ref: `${lane.id}/${variant.id}`,
     many: (n, subject) => `${word}: ${plural(n, one, many)} added${to(subject)}`,
   };
@@ -52,7 +73,7 @@ export function takeEvent(section: Pick<Section, "id" | "current">, take: Pick<T
   const line = oneLineOf(section.current);
   return {
     area: "voice", kind: "take", merge: "count", subject: where,
-    text: `Voiceover: take ${number} added to ${where}${line ? ` ${quoted(clip(line, 32))}` : ""}`,
+    text: `Voiceover: take ${number} added to ${where}${line ? ` ${quoted(clip(line, 32), "")}` : ""}`,
     ref: `${section.id}:${take.id}`,
     many: (n, subject) => `Voiceover: ${plural(n, "take", "takes")} added${subject ? ` to ${subject}` : ""}`,
   };
@@ -68,14 +89,15 @@ export function picksEvent(project: Pick<Project, "lanes">, lanes: Picks["lanes"
   const parts: string[] = [];
   for (const lane of project.lanes) {
     const v = lane.variants.find((x) => x.id === lanes[lane.id]);
-    if (v) parts.push(`${PICK_WORDS[lane.stage]} ${quoted(v.name)}`);
+    if (v) parts.push(`${PICK_WORDS[lane.stage]} ${quoted(v.name, lane.stage === "voice" ? "a read" : "a variant")}`);
   }
   return { area: "mix", kind: "picks", merge: "replace", windowMs: PICKS_MERGE_MS, text: parts.length ? `Picks: ${parts.join(", ")}` : "Picks cleared" };
 }
 
 /** "Picture locked at v6", "Picture unlocked". */
 export function lockEvent(films: number, video: Pick<Video, "id" | "name" | "lockedVersion">): LogEvent {
-  const text = video.lockedVersion ? `Picture locked at ${cutName(films, video, video.lockedVersion)}` : `Picture unlocked${films > 1 ? ` for ${oneLineOf(video.name)}` : ""}`;
+  const film = named(video.name, PLACE_MAX);
+  const text = video.lockedVersion ? `Picture locked at ${cutName(films, video, video.lockedVersion)}` : `Picture unlocked${films > 1 && film ? ` for ${film}` : ""}`;
   return { area: "picture", kind: "lock", merge: "replace", subject: video.id, text, video: video.id, version: video.lockedVersion };
 }
 
@@ -107,9 +129,10 @@ export function repliesEvent(notes: Pick<Note, "status" | "stage">[]): LogEvent 
 /** "File added: Creative brief (Scripts & docs)"; merged, "2 files added: Scripts & docs". */
 export function fileEvent(entry: Pick<FileEntry, "kind" | "name">): LogEvent {
   const folder = FILE_FOLDERS[entry.kind];
+  const name = named(entry.name, 60);
   return {
     area: "assets", kind: "files", merge: "count", subject: folder,
-    text: `File added: ${oneLineOf(entry.name)} (${folder})`,
+    text: name ? `File added: ${name} (${folder})` : `A file added: ${folder}`,
     many: (n, subject) => `${plural(n, "file", "files")} added${subject ? `: ${subject}` : ""}`,
   };
 }

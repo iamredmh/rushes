@@ -78,6 +78,11 @@ describe("logMarkdown and recentChanges (§22.7)", () => {
     expect(logMarkdown({ project: "P", entries: entries.slice(0, 1), undated: [], dropped: 0, earlier: 4, now: local(7, 15, 0) })).toContain("\n\n4 earlier entries not shown.\n");
     expect(logMarkdown({ project: "P", entries: entries.slice(0, 1), undated: [], dropped: 0, earlier: 1, now: local(7, 15, 0) })).toContain("\n\n1 earlier entry not shown.\n");
   });
+  it("the project's name is one clean line in the heading (minor 6)", () => {
+    const md = (project: string) => logMarkdown({ project, entries: [], undated: [], dropped: 0, now: local(7, 15, 0) });
+    expect(md("Lumen\nlaunch\tfilm‮")).toBe("# Lumen launch film — change log\nExported 2026-10-07 15:00\n\nNothing yet.\n");
+    expect(md(" ​ ").split("\n")[0]).toBe("# Untitled project — change log");
+  });
   it("the Send-to-agent block is the last five lines, newest first, and nothing for an empty log", () => {
     const six = Array.from({ length: 6 }, (_, i) => ({ at: local(7, 10, 6 - i).toISOString(), text: `Line ${6 - i}` }));
     expect(recentChanges(six)).toBe(

@@ -81,6 +81,30 @@ describe("the words of each line (§22.5, R9)", () => {
     ];
     for (const e of ev) expect(JSON.stringify({ ...e, many: e.many?.(2, "x") })).not.toContain(secret);
   });
+  it("a long name is cut inside its quotes, and the line still says where it went (minor 2)", () => {
+    const long = "word ".repeat(60).trim();
+    const bed = variantEvent(music, { id: "a", name: long }).text;
+    expect(bed).toMatch(/^Music: “word( word)*…” added to night-drive$/);
+    expect(Array.from(bed).length).toBeLessThanOrEqual(80);
+    expect(variantEvent({ id: "l", stage: "music", name: long }, { id: "a", name: "Bed" }).text).toMatch(/^Music: “Bed” added to word( word)*…$/);
+    expect(variantEvent({ id: "l", stage: "music", name: long }, { id: "a", name: "Bed" }).many!(2, long)).toMatch(/^Music: 2 variants added to word( word)*…$/);
+    expect(fileEvent({ kind: "doc", name: long }).text).toMatch(/^File added: word( word)*… \(Scripts & docs\)$/);
+    expect(cutEvent(2, { id: "f", name: long }, { id: "v2", note: "v2: tighter", file: "f.mp4" }).text).toMatch(/^word( word)*… v2 added: tighter$/);
+    expect(lockEvent(2, { id: "f", name: long, lockedVersion: null }).text).toMatch(/^Picture unlocked for word( word)*…$/);
+    const lanes = [{ id: "music", stage: "music" as const, name: "Music", variants: [{ id: "a", name: long, file: "a.wav", meta: {}, cues: [] }] }];
+    expect(picksEvent({ lanes }, { music: "a" }).text).toMatch(/^Picks: music “word( word)*…”$/);
+  });
+  it("a name that shows nothing reads as a plain description (minor 3)", () => {
+    const blank = " ​ㅤ ";
+    expect(variantEvent(music, { id: "a", name: blank }).text).toBe("Music: a variant added to night-drive");
+    expect(variantEvent({ id: "r", stage: "voice", name: blank }, { id: "a", name: blank }).text).toBe("Voiceover: a read added");
+    expect(variantEvent({ id: "r", stage: "voice", name: blank }, { id: "a", name: "Jules" }).many!(2, blank)).toBe("Voiceover: 2 reads added");
+    expect(fileEvent({ kind: "doc", name: blank }).text).toBe("A file added: Scripts & docs");
+    expect(cutEvent(2, { id: "f", name: blank }, { id: "v2", note: "v2: tighter", file: "f.mp4" }).text).toBe("v2 added: tighter");
+    expect(lockEvent(2, { id: "f", name: blank, lockedVersion: null }).text).toBe("Picture unlocked");
+    const lanes = [{ id: "music", stage: "music" as const, name: "Music", variants: [{ id: "a", name: blank, file: "a.wav", meta: {}, cues: [] }] }];
+    expect(picksEvent({ lanes }, { music: "a" }).text).toBe("Picks: music a variant");
+  });
   it("names the Assets folders exactly as the dashboard does (§16.1)", () => {
     for (const [kind, title] of Object.entries(FILE_FOLDERS)) expect(FOLDERS.find((f) => f.id === kind)?.title, kind).toBe(title);
   });
@@ -143,6 +167,7 @@ describe("appendEvent (§22.5, R4, Review Focus 3)", () => {
     appendEvent(f, lockEvent(2, { id: "hero", name: "Hero", lockedVersion: null }), "user", at(1));
     appendEvent(f, lockEvent(2, { id: "teaser", name: "Teaser", lockedVersion: "v2" }), "user", at(1.5));
     expect(texts(f)).toEqual(["Picture locked at Teaser v2", "Picture unlocked for Hero"]);
+    expect(f.entries.map((e) => e.n)).toEqual([2, 1]);
     const lanes = [{ id: "music", stage: "music" as const, name: "Music", variants: [{ id: "a", name: "A", file: "a.wav", meta: {}, cues: [] }, { id: "b", name: "B", file: "b.wav", meta: {}, cues: [] }] }];
     const p = empty();
     appendEvent(p, picksEvent({ lanes }, { music: "a" }), "user", at(0));
@@ -157,6 +182,32 @@ describe("appendEvent (§22.5, R4, Review Focus 3)", () => {
     appendEvent(f, reply, "agent", at(0.2));
     appendEvent(f, repliesEvent([{ status: "todo", stage: "picture" }]), "agent", at(0.3));
     expect(texts(f)).toEqual(["Agent replied to 1 note", "Agent replied to 1 note (1 done)"]);
+  });
+  it("the same words about a different place aren't a repeat (minor 4)", () => {
+    const f = empty();
+    appendEvent(f, lineEvent("Kept the wide", "picture", { video: "hero", version: "v1" }), "agent", at(0));
+    appendEvent(f, lineEvent("Kept the wide", "picture", { video: "hero", version: "v2" }), "agent", at(0.1));
+    appendEvent(f, lineEvent("Kept the wide", "picture", { video: "hero", version: "v2" }), "agent", at(0.2));
+    expect(f.entries.map((e) => e.version)).toEqual(["v1", "v2"]);
+    appendEvent(f, repliesEvent([{ status: "todo", stage: "music" }]), "agent", at(0.3));
+    appendEvent(f, repliesEvent([{ status: "todo", stage: "sfx" }]), "agent", at(0.4));
+    expect(f.entries.map((e) => e.tab).slice(2)).toEqual(["music", "sfx"]);
+  });
+  it("a merged line opens a tab only when every event in it came from that tab (minor 5)", () => {
+    const f = empty();
+    appendEvent(f, notesSentEvent({ stage: "picture", noteIds: ["a"], sectionIds: [] }), "user", at(0));
+    appendEvent(f, notesSentEvent({ stage: "picture", noteIds: ["b"], sectionIds: [] }), "user", at(0.5));
+    expect(f.entries[0]).toMatchObject({ text: "2 notes sent from Picture", tab: "picture" });
+    appendEvent(f, notesSentEvent({ stage: "music", noteIds: ["c"], sectionIds: [] }), "user", at(1));
+    expect(f.entries[0]).toMatchObject({ text: "3 notes sent from several tabs", tab: null });
+    appendEvent(f, notesSentEvent({ stage: "music", noteIds: ["d"], sectionIds: [] }), "user", at(1.5));
+    expect(f.entries[0]).toMatchObject({ n: 4, tab: null });
+  });
+  it("two films' cuts with the same version id are two cuts, not a retry", () => {
+    const f = empty();
+    appendEvent(f, cutEvent(2, { id: "hero", name: "Hero" }, { id: "v4", note: "v4: slower", file: "h.mp4" }), "agent", at(0));
+    appendEvent(f, cutEvent(2, { id: "teaser", name: "Teaser" }, { id: "v4", note: "v4: shorter", file: "t.mp4" }), "agent", at(0.5));
+    expect(texts(f)).toEqual(["2 cuts added, the latest Teaser v4: shorter"]);
   });
   it("a retried cut, variant or take (the same version or ref again) isn't counted twice (§22.9)", () => {
     const f = empty();
@@ -271,6 +322,8 @@ describe("backfill and reading back (§22.6)", () => {
     expect(logView(f, { area: "picture" }, ctx).entries.map((e) => e.text)).toEqual(["Line 2", "Line 0"]);
     expect(logView(f, { area: "picture" }, ctx).undated).toEqual([]);
     expect(logView(f, { since: at(4).toISOString() }, ctx)).toMatchObject({ entries: [{ text: "Line 2" }, { text: "Line 1" }], undated: [] });
+    // `since` is "after": a line at exactly that time was already seen.
+    expect(logView(f, { since: at(5).toISOString() }, ctx).entries.map((e) => e.text)).toEqual(["Line 2"]);
   });
   it("logView: a limit that isn't a number reads as the default", () => {
     const f = empty();
@@ -305,7 +358,7 @@ describe("the log through the store (§22.9, Review Focus 1 and 5)", () => {
     await Promise.all(writes);
     const log = await store.read("log");
     expect(log.rev).toBe(40);
-    expect(log.entries).toHaveLength(40);
+    expect(log.entries.map((e) => e.text)).toEqual(Array.from({ length: 40 }, (_, i) => `From ${i % 2 ? "an agent" : "the dashboard"} ${i}`));
     expect(new Set(log.entries.map((e) => e.id)).size).toBe(40);
   });
 

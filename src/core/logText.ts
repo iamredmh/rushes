@@ -120,7 +120,8 @@ export interface LogMarkdownInput {
 
 /** §22.7: the log as Markdown. Newest first, one heading per day; what Export writes and `rushes log --md` prints. */
 export function logMarkdown(i: LogMarkdownInput): string {
-  const lines = [`# ${i.project} — change log`, `Exported ${localStamp(i.now)}`];
+  const project = oneLine(i.project, LOG_TEXT_MAX) || "Untitled project";
+  const lines = [`# ${project} — change log`, `Exported ${localStamp(i.now)}`];
   if (i.entries.length === 0 && i.undated.length === 0) lines.push("", "Nothing yet.");
   let day = "";
   for (const e of i.entries) {
