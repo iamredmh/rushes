@@ -318,3 +318,64 @@ test("Assets › Found keeps its plain turning chevrons: the pass row's boxed ch
   });
   expect(style).toEqual({ border: "0px", radius: "0px", background: "rgba(0, 0, 0, 0)" });
 });
+
+// ---- §23: a busy pass (Review Focus 2 and 4) ----
+// Twelve invented sounds, 200 cues, each sound's own generated sample. Never real project files.
+const SOUNDS = ["click", "whoosh", "thud", "shimmer", "tick", "chime", "pop", "sweep", "impact", "static", "swoosh · end line", "power-down · offline"];
+const sampleOf = (s: string) => `audio/sfx/samples/${s.replace(/[^a-z]+/g, "_")}.wav`;
+
+test("a busy pass: 200 cues over 12 sounds open as 12 layers quickly, scroll after eight, line up, and stay inside the window", async ({ page, rushes }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await rushes.writeFiles(SOUNDS.map((s, i) => ({ path: sampleOf(s), seconds: 0.3, freq: 200 + i * 40 })));
+  const cues = Array.from({ length: 200 }, (_, i) => {
+    const s = SOUNDS[(i * 7) % SOUNDS.length];
+    return { name: s, t: Math.round((0.1 + i * 0.19) * 100) / 100, file: sampleOf(s) };
+  });
+  await rushes.addVariant("sfx", "Effects for Lumen", { seconds: 40, freq: 880, cues });
+  await openSfx(page, rushes, 1);
+  await expect(lane(page).locator(".cue")).toHaveCount(200);
+  await expect(lane(page).locator('.cue[tabindex="0"]')).toHaveCount(1);
+
+  const started = Date.now();
+  await chevron(page).click();
+  await expect(layers(page).locator(".clayer")).toHaveCount(12);
+  const openMs = Date.now() - started;
+  test.info().annotations.push({ type: "layers open (ms)", description: String(openMs) });
+  console.log(`layers open: ${openMs} ms (${test.info().project.name})`);
+  expect(openMs).toBeLessThan(1500);
+
+  // First appearance in time: i·7 mod 12 for i = 0…11. Every cue is on exactly one layer.
+  await expect(layers(page).locator(".clname span")).toHaveText([0, 7, 2, 9, 4, 11, 6, 1, 8, 3, 10, 5].map((k) => SOUNDS[k]));
+  const counts = await layers(page).locator(".clname em").allTextContents();
+  expect(counts.reduce((sum, c) => sum + Number(c.replace("×", "")), 0)).toBe(200);
+  expect(counts[0]).toBe("×17");
+  await expect(layers(page).locator(".ltick")).toHaveCount(200);
+
+  // About eight layers show; the rest scroll inside the box, and the page never scrolls sideways.
+  const box = await layers(page).evaluate((e) => ({ client: e.clientHeight, scroll: e.scrollHeight }));
+  expect(box.client).toBeLessThanOrEqual(261);
+  expect(box.scroll).toBeGreaterThan(box.client);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+
+  // The last layer's last tick, scrolled to, still opens its card inside the window.
+  const last = layers(page).locator(".clayer").last().locator(".ltick").last();
+  await last.scrollIntoViewIfNeeded();
+  await last.hover();
+  const c = (await card(page).boundingBox())!;
+  expect(c.x).toBeGreaterThanOrEqual(16);
+  expect(c.x + c.width).toBeLessThanOrEqual(1440 - 16);
+  expect(c.y).toBeGreaterThanOrEqual(16);
+  expect(c.y + c.height).toBeLessThanOrEqual(900 - 16);
+
+  // Playing with every layer open: the playheads keep together and nothing re-renders per frame.
+  const before = (await hook(page)).renders;
+  await page.getByRole("button", { name: "Play", exact: true }).click();
+  await expect.poll(async () => (await hook(page)).time).toBeGreaterThan(0.5);
+  await page.waitForTimeout(600);
+  expect((await hook(page)).renders - before).toBeLessThan(10);
+  const lefts = await page.locator(".astage .playhead").evaluateAll((els) => els.map((e) => (e as HTMLElement).style.left));
+  expect(lefts).toHaveLength(13);
+  expect(new Set(lefts).size).toBe(1);
+
+  await page.screenshot({ path: process.env.RUSHES_SHOT ?? test.info().outputPath("sfx-layers-1440.png") });
+});

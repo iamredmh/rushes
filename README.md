@@ -111,6 +111,7 @@ In the Voiceover, Music, Sound effects and Mix tabs:
 - **←/→** step one frame (Shift: ten)
 - **I/O** set in and out
 - **N** new note
+- **←/→** with a cue or a layer's tick focused: the previous or next cue (**Home**/**End**: the first or last); **Enter** moves the playhead there; **Esc** hides the card
 
 Anywhere:
 
@@ -241,6 +242,7 @@ Voiceover works in rounds: the same script read by a few voices, then variations
 - On Music, Sound effects and Mix, a note can carry marks: toggle **Rise**, **Fall**, **Louder** or **Quieter** (with a dB amount, 3 by default) to say how a range should change — "Fall" or "Quieter 3 dB".
 - **Mix** shows a loudness readout — integrated LUFS, true peak, and the music's level under the VO — measured over exactly what Mix plays, using the newest round's picked voice read. It needs **ffmpeg** on your PATH; without it, the readout shows "—". After a timeout or an error, click the readout to measure again.
 - Each **Mix** lane (Voiceover, Music, Sound effects) has a level slider, −24 dB to +6 dB in 0.5 dB steps, shown as e.g. `−14.0 dB`. Double-click resets it to 0; arrow keys move it 0.5 dB at a time. Levels are saved with your picks, never change a file, and the loudness readout is measured with them applied.
+- On **Sound effects**, rest the pointer on a cue's label or tick (or Tab to it) for a card with its full name, its time, where it falls in the pass (`cue 5 of 80`) and, when your agent sent one, its source file. The arrow beside a pass's name opens its **layers by sound**: one row per sound, in the order it first comes in, with a count (`thud ×19`) and a tick everywhere it plays. Click a tick to move the playhead there; click a layer's file name to hear that sample on its own (it stops the tab, and Play stops it). The layers stay open while you work, until you reload. Mix's Sound effects lane has the card too.
 
 ## What gets saved
 
