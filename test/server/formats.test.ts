@@ -154,6 +154,20 @@ describe("POST /api/versions with formats (§21.4)", () => {
     expect((await call("POST", "/api/formats", { file: `${"a".repeat(1021)}.mp4` })).status).toBe(400);
     expect((await call("POST", "/api/formats", { file: TALL, label: "1".repeat(17) })).status).toBe(400);
   });
+  it("a second cut whose formats repeat a shape names the files, never the v2 it didn't create; the cut itself counts (final review M7)", async () => {
+    const { call, store } = await setup([WIDE, TALL, SQUARE, "renders/hero2_1920x1080.mp4", "renders/hero2_1280x720.mp4", "renders/hero2_1920x804.mp4", "renders/hero2_1920x800.mp4"]);
+    await call("POST", "/api/versions", { video: "Hero", file: WIDE, formats: [{ file: TALL }] });
+    const before = await store.read("project");
+    const same = await call("POST", "/api/versions", { video: "Hero", file: "renders/hero2_1920x1080.mp4", formats: [{ file: SQUARE }, { file: "renders/hero2_1280x720.mp4" }] });
+    expect(same.status).toBe(409);
+    expect(same.json.message).toBe("renders/hero2_1280x720.mp4 has the same shape as renders/hero2_1920x1080.mp4 (16:9). Register one render of each shape.");
+    expect(same.json.message).not.toMatch(/\bv\d/);
+    // Near-identical unusual ratios (M1) are the same shape here too.
+    const near = await call("POST", "/api/versions", { video: "Hero", file: "renders/hero2_1920x1080.mp4", formats: [{ file: "renders/hero2_1920x800.mp4" }, { file: "renders/hero2_1920x804.mp4" }] });
+    expect(near.json.message).toBe("renders/hero2_1920x804.mp4 has the same shape as renders/hero2_1920x800.mp4 (12:5). Register one render of each shape.");
+    expect(await store.read("project")).toEqual(before);
+  });
+
   it("refuses the whole call when one file is refused, and registers nothing (R11)", async () => {
     const { call, store } = await setup([WIDE, TALL]);
     const r = await call("POST", "/api/versions", { video: "Hero", file: WIDE, formats: [{ file: TALL }, { file: "renders/gone_1080x1080.mp4" }] });
@@ -173,7 +187,8 @@ describe("POST /api/versions with formats (§21.4)", () => {
     });
     const r = await call("POST", "/api/versions", { video: "Hero", file: WIDE, formats: [{ file: TALL }, { file: "renders/alt_720x1280.mp4" }] });
     expect(r.status).toBe(409);
-    expect(r.json).toMatchObject({ error: "same_ratio", message: "v1 already has 9:16. Register a re-render as a new version." });
+    // Final review M7: the refusal names the two files, never a version that was never created.
+    expect(r.json).toMatchObject({ error: "same_ratio", message: "renders/alt_720x1280.mp4 has the same shape as renders/hero_1080x1920.mp4 (9:16). Register one render of each shape." });
     expect((await store.read("project")).videos).toEqual([]);
     expect(jobs.list()).toEqual([]);
     expect(existsSync(join(root, "proxies"))).toBe(false);

@@ -796,7 +796,17 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
       });
       // Throwing here leaves project.json unwritten: the cut and its formats land together or not at all.
       for (const s of shapes?.slice(1) ?? []) {
-        const added = addFormat(p, { video: out.video.id, version: out.version.id, ...s });
+        let added;
+        try {
+          added = addFormat(p, { video: out.video.id, version: out.version.id, ...s });
+        } catch (e) {
+          // Final review M7: the version is new, so the shape it "already has" came from this same
+          // call. Name the two files; the version is never created, so never name it.
+          if (e instanceof RushesError && e.code === "same_ratio") {
+            throw new RushesError(`${s.file} has the same shape as ${e.detail.file} (${e.detail.label}). Register one render of each shape.`, 409, "same_ratio", { path: s.file, with: e.detail.file });
+          }
+          throw e;
+        }
         if (added.warning) formatWarnings.push(added.warning);
       }
       lockedVersion = out.video.lockedVersion;
