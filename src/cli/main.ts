@@ -62,7 +62,8 @@ Usage
   rushes bring-in <file>... [--kind voice|music|sfx|cut|doc] [--round NAME] [--film NAME]
                                                     register files from inside the project folder (nothing is picked);
                                                     exits 1 if any file can't come in
-  rushes export notes                               write notes to exports/<slug>-notes-<date>.md
+  rushes export notes                               write notes and the Change Log to exports/<slug>-notes-<date>.md
+                                                    and exports/change-log-<date>.md
   rushes log [--limit N] [--area A] [--md]          the Change Log, newest first (--md: as Markdown)
   rushes log add <text> [--area A]                  add a line to the Change Log
                                                     flags first; text that starts with "-" goes after --:
@@ -467,6 +468,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         if (what !== "notes") return usage(io, "rushes export notes");
         const r = await (await client()).post("/api/exports/notes", {});
         io.out(`Exported notes to ${r.path}`);
+        if (r.changeLog) io.out(`Exported the Change Log to ${r.changeLog}`);
         return 0;
       }
       case "reply": {
@@ -520,11 +522,11 @@ export async function main(argv: string[], io: Io): Promise<number> {
           return 0;
         }
         if (!view.entries.length && !view.undated.length) return io.out(area ? `Nothing in ${areaWord(area)} yet.` : "Nothing in the Change Log yet."), 0;
-        for (const e of view.entries) io.out(`${localStamp(new Date(e.at))}  ${stripControl(areaWord(e.area)).padEnd(13)} ${stripControl(e.text)}  (${stripControl(byWord(e.by))})`);
+        for (const e of view.entries) io.out(`${localStamp(new Date(e.at))}  ${stripControl(areaWord(e.area)).padEnd(13)} ${stripControl(oneLineOf(e.text))}  (${stripControl(byWord(e.by))})`);
         if (view.earlier) io.out(`${view.earlier} earlier (rushes log --limit ${Math.min(LOG_MAX, limit + view.earlier)}${area ? ` --area ${area}` : ""} shows them)`);
         if (view.undated.length) {
           io.out("Before the log:");
-          for (const u of view.undated) io.out(`  ${stripControl(u.text)}`);
+          for (const u of view.undated) io.out(`  ${stripControl(oneLineOf(u.text))}`);
         }
         if (view.dropped) io.out("Earlier entries were removed.");
         return 0;
@@ -595,13 +597,14 @@ function humanSize(bytes: number): string {
   return `${n.toFixed(1)} ${units[i]}`;
 }
 
-/** Drops C0 control characters (U+0000-U+001F) and DEL (U+007F) from a name or path before it
+/** Drops C0 control characters (U+0000-U+001F), DEL (U+007F) and the C1 ones (U+0080-U+009F, among them
+ *  the single-character CSI, U+009B) from a name or path before it
  *  reaches a terminal (M5): an odd hand-edit or agent mistake could otherwise move the cursor,
  *  clear the line, or ring the bell when `rushes assets` prints it. --json is untouched -- a
  *  consumer parsing JSON gets the real value, control characters and all. */
 function stripControl(s: string): string {
   // eslint-disable-next-line no-control-regex -- the whole point is to match control characters.
-  return s.replace(/[\x00-\x1f\x7f]/g, "");
+  return s.replace(/[\x00-\x1f\x7f-\x9f]/g, "");
 }
 
 function when(n: { scope: string; t: number | null; tOut: number | null }): string {

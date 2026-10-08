@@ -3,7 +3,7 @@ import { z } from "zod";
 import { ApiError, dashboardUrlFor, type RushesClient } from "./client.js";
 import { VERSION } from "../server/app.js";
 import { BRING_IN_MAX } from "../server/found.js";
-import { LABEL_MAX } from "../core/labels.js";
+import { LABEL_MAX, oneLineOf } from "../core/labels.js";
 import { LOG_AREAS } from "../core/logText.js";
 import type { Check } from "../cli/doctor.js";
 
@@ -203,8 +203,10 @@ export function createMcpServer(ctx: ToolContext): McpServer {
         note: z.string().optional().describe("What changed in this cut."),
         label: z
           .string()
-          .trim()
-          .max(LABEL_MAX, `label is ${LABEL_MAX} characters at most: put the detail in note`)
+          // Counted as the route counts it: on one clean line (padding and invisible characters don't count), in characters.
+          .refine((s) => Array.from(oneLineOf(s)).length <= LABEL_MAX, `label is ${LABEL_MAX} characters at most: put the detail in note`)
+          // Still advertised, so an agent sees the limit in the schema.
+          .meta({ maxLength: LABEL_MAX })
           .optional()
           .describe(`A short label for the version list, ${LABEL_MAX} characters at most, e.g. "launch 1.45x slower". The detail goes in note.`),
       },

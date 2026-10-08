@@ -478,12 +478,12 @@ describe("cli", () => {
     await s.close();
   });
 
-  it("strips C0 control characters and DEL from paths in human-readable `assets` output, but not --json (M5)", async () => {
+  it("strips C0 and C1 control characters and DEL from paths in human-readable `assets` output, but not --json (M5)", async () => {
     const { root } = await tmpProject();
     const s = await startServer(root, { port: 0 });
     // A bell and an ANSI escape, the kind of thing a hand-edited project.json could carry --
     // never something a terminal should be asked to act on.
-    const evilPath = "notes\u0007\u001b[31m.md";
+    const evilPath = "notes\u0007\u001b[31m\u009b2J.md"; // a C1 control too: U+009B is one-character CSI (final review I3)
     await fetch(`${s.url}/api/files`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -492,7 +492,7 @@ describe("cli", () => {
     const a = io(root);
     await main(["assets", "--kind", "doc"], a.x);
     // eslint-disable-next-line no-control-regex
-    expect(a.out[0]).not.toMatch(/[\x00-\x1f\x7f]/);
+    expect(a.out[0]).not.toMatch(/[\x00-\x1f\x7f-\x9f]/);
     expect(a.out[0]).toContain("notes");
     expect(a.out[0]).toContain(".md");
 
@@ -520,6 +520,12 @@ describe("cli", () => {
     expect(a.out[0]).toMatch(/^Exported notes to exports\/demo-notes-\d{4}-\d{2}-\d{2}\.md$/);
     const path = a.out[0].replace("Exported notes to ", "");
     await access(join(root, path));
+    // Final review minor: the Change Log goes out with it, so the command says so.
+    expect(a.out[1]).toMatch(/^Exported the Change Log to exports\/change-log-\d{4}-\d{2}-\d{2}\.md$/);
+    await access(join(root, a.out[1].replace("Exported the Change Log to ", "")));
+    const h = io(root);
+    await main([], h.x);
+    expect(h.out.join("\n")).toMatch(/rushes export notes +write notes and the Change Log to exports\//);
     await s.close();
   });
 

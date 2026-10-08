@@ -148,6 +148,44 @@ describe("rushes log (§22.7)", () => {
     await s.close();
   });
 
+  it("a hand-written line with an escape, bidi override, C1 control or hidden tag characters prints clean in `rushes log` and `--md`, from this server or an older one (final review I3)", async () => {
+    // eslint-disable-next-line no-control-regex -- the point of the test is to look for them.
+    const hostile = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u202a-\u202e\u{E0000}-\u{E007F}]/u;
+    const dirty = ["Wiped\u001b[2J screen", "Flipped \u202etxet", "C1 \u009b31mred", "Hidden \u{E0041}\u{E0042}tags"];
+    const at = (i: number) => new Date(Date.now() - (10 - i) * 1000).toISOString();
+    const entry = (i: number, text: string) => ({ id: `l_${i}`, at: at(i), area: "project", kind: "entry", text, video: null, version: null, ref: null, by: "agent" });
+    const { root, store } = await tmpProject("Lumen launch film");
+    await writeFile(store.path("log"), JSON.stringify({ schema: 1, rev: 1, backfilled: true, entries: dirty.map((t, i) => entry(i, t)) }), "utf8");
+    const s = await startServer(root, { port: 0 });
+    for (const argv of [["log"], ["log", "--md"]]) {
+      const a = io(root);
+      expect(await main(argv, a.x), argv.join(" ")).toBe(0);
+      const out = a.out.join("\n");
+      expect(out, argv.join(" ")).toContain("Hidden tags");
+      expect(out, argv.join(" ")).not.toMatch(hostile);
+    }
+    await s.close();
+
+    // An older Rushes sends the lines as they are on disk.
+    const { root: oldRoot } = await tmpProject("Hero");
+    const old = createServer((req, res) => {
+      res.setHeader("content-type", "application/json");
+      if (req.url === "/api/health") return void res.end(JSON.stringify({ app: "rushes", root: oldRoot, id: "abcdefgh", name: "Hero" }));
+      res.end(JSON.stringify({ entries: dirty.map((t, i) => entry(i, t)).reverse(), earlier: 0, undated: [{ area: "music", text: "Music: Bed\u001b[2J (1 variant)" }], dropped: 0, total: 4 }));
+    });
+    await new Promise<void>((r) => old.listen(0, "127.0.0.1", r));
+    await writeFile(lockPath(oldRoot), JSON.stringify({ port: (old.address() as { port: number }).port, pid: process.pid, startedAt: "x" }), "utf8");
+    for (const argv of [["log"], ["log", "--md"]]) {
+      const a = io(oldRoot);
+      expect(await main(argv, a.x), argv.join(" ")).toBe(0);
+      const out = a.out.join("\n");
+      expect(out, argv.join(" ")).toContain("Hidden");
+      expect(out, argv.join(" ")).not.toMatch(hostile);
+    }
+    old.closeAllConnections();
+    old.close();
+  });
+
   it("an empty log says so; against an older Rushes it says to restart, on stderr, with exit 1", async () => {
     const { root } = await tmpProject("Lumen launch film");
     const s = await startServer(root, { port: 0 });

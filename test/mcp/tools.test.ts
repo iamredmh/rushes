@@ -624,6 +624,24 @@ describe("MCP tools against a server that isn't the current one", () => {
     await f.close();
   });
 
+  it("rushes_add_version counts a label in characters, like the route: 48 emoji are accepted, 49 are refused (final review minor)", async () => {
+    const f = await fakeServer((_req, res) => {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ video: { id: "hero", name: "Hero" }, version: { id: "v1", file: "renders/hero.mp4", note: "", label: "x" } }));
+    });
+    const ok = await f.call("rushes_add_version", { video: "Hero", file: "renders/hero.mp4", label: "\u{1F3AC}".repeat(48) });
+    expect(ok.isError).toBe(false);
+    // What the route doesn't count (zero-width and bidi characters, line breaks, padding) the tool doesn't either.
+    const padded = await f.call("rushes_add_version", { video: "Hero", file: "renders/hero.mp4", label: `\n ${"\u{1F3AC}\u200b".repeat(48)}\u202e ` });
+    expect(padded.isError).toBe(false);
+    const overPadded = await f.call("rushes_add_version", { video: "Hero", file: "renders/hero.mp4", label: "\u{1F3AC}\u200b".repeat(49) });
+    expect(overPadded.isError).toBe(true);
+    const over = await f.call("rushes_add_version", { video: "Hero", file: "renders/hero.mp4", label: "\u{1F3AC}".repeat(49) });
+    expect(over.isError).toBe(true);
+    expect(over.text).toContain("label is 48 characters at most: put the detail in note");
+    await f.close();
+  });
+
   it("rushes_open opens the browser before it asks for the scan, so a slow or failing scan can't delay it", async () => {
     const f = await fakeServer((_req, res) => { res.statusCode = 500; res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ error: "boom", message: "scan blew up" })); });
     const r = await f.call("rushes_open");
