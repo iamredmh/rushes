@@ -108,6 +108,19 @@ describe("shortLabel (§22.4)", () => {
     expect(oneLineOf(england)).toBe(england);
   });
 
+  it("keeps a tag character only after the black flag it spells a region for; anywhere else it goes (final review I3)", () => {
+    const england = "\u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}";
+    expect(oneLineOf(`Shot in ${england} today`)).toBe(`Shot in ${england} today`);
+    // Tags with no flag before them are invisible text, so they're stripped (a hidden message is nothing to keep).
+    expect(oneLineOf("a\u{E0041}\u{E0042}b")).toBe("ab");
+    expect(oneLineOf("\u{1F3AC}\u{E0067}\u{E007F} clapper")).toBe("\u{1F3AC} clapper");
+    expect(oneLineOf("\u{E0067}\u{1F3F4}")).toBe("\u{1F3F4}");
+    expect(oneLineOf("\u{E0001}x\u{E007F}")).toBe("x");
+    // Only the tags straight after the flag stay, not a second run after other text.
+    expect(oneLineOf(`${england} then \u{E0041}`)).toBe(`${england} then`);
+    expect(oneLineOf("\u{E0041}\u{E0042}")).toBe("");
+  });
+
   it("replaces a lone surrogate with U+FFFD instead of passing it on", () => {
     expect(oneLineOf("a\uD83Db")).toBe("a\uFFFDb");
     expect(oneLineOf("a\uDC00b")).toBe("a\uFFFDb");
@@ -209,4 +222,8 @@ it("labels.ts has no import of any kind, so the dashboard bundles it without zod
   expect(text).not.toMatch(/\(\?<[=!]/);
   // Invisible characters are written as escapes, so nobody has to find them by eye.
   expect(text).not.toMatch(/[\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufe00-\ufe0f\ufeff]/);
+  // Every one of them: format, control and separator characters, and the ones that draw as a blank
+  // (the combining grapheme joiner, the Hangul fillers, the Khmer vowels, the braille blank).
+  const stray = Array.from(text).filter((ch) => /[\p{Cf}\p{Cc}\p{Zs}\p{Zl}\p{Zp}\u034f\u115f\u1160\u17b4\u17b5\u2800\u3164\uffa0]/u.test(ch) && ch !== " " && ch !== "\n");
+  expect(stray.map((ch) => ch.codePointAt(0)!.toString(16))).toEqual([]);
 });

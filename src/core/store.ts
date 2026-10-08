@@ -6,7 +6,7 @@ import { CorruptFileError, InvalidError, RevConflictError } from "./errors.js";
 
 export const RUSHES_DIR = ".rushes";
 
-const GITIGNORE = "proxies/\npeaks/\nserver.json\nserver.log\n*.tmp\n*.bak\n";
+const GITIGNORE = "proxies/\npeaks/\nserver.json\nserver.log\nlog.json.bad*\n*.tmp\n*.bak\n";
 
 function defaults(key: FileKey, name: string): FileData[FileKey] {
   switch (key) {

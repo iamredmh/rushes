@@ -17,6 +17,8 @@ describe("Store", () => {
     const ignore = await readFile(join(store.dir, ".gitignore"), "utf8");
     expect(ignore).toContain("server.json");
     expect(ignore).toContain("server.log");
+    // A log set aside as log.json.bad, .bad.2 and so on is local, so it stays out of git (final review minor).
+    expect(ignore.split("\n")).toContain("log.json.bad*");
   });
 
   it("init does not overwrite existing files", async () => {
@@ -188,12 +190,41 @@ describe("Store", () => {
       expect(log.entries.map((e) => e.id)).toEqual(["l_1", "l_1-2"]);
     });
 
-    it("still corrupt: not JSON, not an object, entries that aren't a list, or another schema", async () => {
+    it("still corrupt: not JSON, not an object, or entries that aren't a list", async () => {
       const { store } = await tmpProject();
-      for (const text of ["{ half a fil", "[]", "null", '"log"', JSON.stringify({ schema: 1, rev: 0, entries: "lots" }), JSON.stringify({ schema: 2, rev: 0, entries: [] })]) {
+      for (const text of ["{ half a fil", "[]", "null", '"log"', JSON.stringify({ schema: 1, rev: 0, entries: "lots" }), JSON.stringify({ schema: 2, rev: 0, entries: "lots" }), "{}"]) {
         await writeFile(store.path("log"), text, "utf8");
         await expect(store.read("log"), text).rejects.toBeInstanceOf(CorruptFileError);
       }
+    });
+
+    it("a newer schema reads its lines and is marked so nothing rewrites it; a missing or odd rev reads as 0 (final review I2)", async () => {
+      const { store } = await tmpProject();
+      await writeFile(store.path("log"), JSON.stringify({ schema: 2, rev: 4, backfilled: true, entries: [entry, { ...entry, id: "l_new", kind: "format" }] }), "utf8");
+      expect(await store.read("log")).toMatchObject({ schema: 1, rev: 4, newer: true, entries: [full], dropped: 1 });
+      for (const rev of [undefined, -1, 1.5, "7", null]) {
+        await writeFile(store.path("log"), JSON.stringify({ schema: 1, ...(rev === undefined ? {} : { rev }), backfilled: true, entries: [entry] }), "utf8");
+        const log = await store.read("log");
+        expect(log, String(rev)).toMatchObject({ rev: 0, entries: [full] });
+        expect(log.newer).toBeUndefined();
+      }
+      // No schema at all, or one that isn't a number, is this version's own.
+      await writeFile(store.path("log"), JSON.stringify({ rev: 3, entries: [entry] }), "utf8");
+      expect(await store.read("log")).toMatchObject({ schema: 1, rev: 3, entries: [full] });
+      await writeFile(store.path("log"), JSON.stringify({ schema: "one", rev: 3, entries: [entry] }), "utf8");
+      expect((await store.read("log")).newer).toBeUndefined();
+    });
+
+    it("a hand-written line is read as one clean line: control, bidi and tag characters out, a flag kept (final review I3)", async () => {
+      const { store } = await tmpProject();
+      const england = "\u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}";
+      const texts = ["Wiped\u001b[2J the screen", "Flipped \u202etxet", "C1 \u009b31mred", "Hidden \u{E0041}\u{E0042}tags", `Flag ${england} kept`, "Two\nlines\tand\u2028more", "\u200b\u202e", "   "];
+      await writeFile(store.path("log"), JSON.stringify({ schema: 1, rev: 1, backfilled: true, entries: texts.map((text, i) => ({ ...line(i), text, subject: "Sub\u001b[2Jject\u202e" })) }), "utf8");
+      const log = await store.read("log");
+      expect(log.entries.map((e) => e.text)).toEqual(["Wiped [2J the screen", "Flipped txet", "C1 31mred", "Hidden tags", `Flag ${england} kept`, "Two lines and more"]);
+      expect(log.entries.every((e) => e.subject === "Sub [2Jject")).toBe(true);
+      expect(log.dropped).toBe(2);
+      for (const e of log.entries) expect(e.text + e.subject).not.toMatch(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u202a-\u202e]/u);
     });
 
     it("writing stays strict: a line over 160 characters is refused and the file is left as it was", async () => {

@@ -30,9 +30,12 @@ const BREAKS = /[\p{Cc}\p{Zl}\p{Zp}]+/gu;
 // Format characters (bidi overrides, zero-width spaces, the word joiner, the byte-order mark) go,
 // except the two joiners (U+200C, U+200D) and the tag characters, which emoji sequences need.
 const INVISIBLE = /(?![\u200c\u200d\u{E0000}-\u{E007F}])\p{Cf}/gu;
+// Tag characters mean something only straight after the black flag (U+1F3F4), where they spell a
+// region ("England"). Anywhere else they're invisible text, so they go; a run after the flag stays.
+const TAGS = /(\u{1F3F4})([\u{E0000}-\u{E007F}]*)|[\u{E0000}-\u{E007F}]+/gu;
 // Text made only of these shows nothing: format characters, spaces, and the characters that draw as
 // a blank (the combining grapheme joiner, the Hangul fillers, the Khmer inherent vowels, the braille blank).
-const NOTHING_VISIBLE = /^[\p{Cf}\s͏ᅟᅠ឴឵⠀ㅤﾠ]*$/u;
+const NOTHING_VISIBLE = /^[\p{Cf}\s\u034f\u115f\u1160\u17b4\u17b5\u2800\u3164\uffa0]*$/u;
 
 /**
  * One clean line: a lone surrogate becomes U+FFFD, control characters and every run of whitespace
@@ -44,6 +47,7 @@ export function oneLineOf(text: string): string {
     .replace(LONE_SURROGATE, "\uFFFD")
     .replace(BREAKS, " ")
     .replace(INVISIBLE, "")
+    .replace(TAGS, (_all, flag?: string, tags?: string) => (flag ? flag + tags : ""))
     .replace(/\s+/g, " ")
     .trim();
   return NOTHING_VISIBLE.test(line) ? "" : line;

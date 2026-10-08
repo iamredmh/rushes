@@ -130,6 +130,16 @@ describe("the server writes the log as things happen (§22.5)", () => {
     expect((await texts()).filter((t: string) => t.startsWith("Agent replied"))).toEqual(["Agent replied to 1 note (1 done) | agent"]);
   });
 
+  it("four separate replies on four different notes are one line that counts four; a retry of one isn't a fifth (final review I1)", async () => {
+    const { root, call, texts } = await setup();
+    await call("POST", "/api/versions", { video: "Hero", file: `${root}/renders/hero.mp4` });
+    const ids: string[] = [];
+    for (let t = 1; t <= 4; t++) ids.push((await call("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t, text: `note ${t}` })).json.note.id);
+    for (const id of ids) await call("POST", "/api/replies", { replies: [{ id, reply: "Fixed", status: "done" }] });
+    await call("POST", "/api/replies", { replies: [{ id: ids[3], reply: "Fixed", status: "done" }] });
+    expect((await texts()).filter((t: string) => t.startsWith("Agent replied"))).toEqual(["Agent replied to 4 notes (4 done) | agent"]);
+  });
+
   it("the current set the scanner brings in is one line by Rushes, and never also Before the log (R5, R9)", async () => {
     const { root, store } = await tmpProject("adopt");
     // A minute old: a cut dated in the very millisecond the server starts isn't history to it (R6).
@@ -374,6 +384,90 @@ describe("a log that is missing, corrupt or huge (§22.9)", () => {
     expect(JSON.parse(await readFile(store.path("log"), "utf8"))).toMatchObject({ backfilled: true, entries: [] });
     await call("POST", "/api/log", { text: "Second decision" });
     expect((await call("GET", "/api/log")).json.entries.map((e: { text: string }) => e.text)).toEqual(["Second decision"]);
+  });
+
+  it("a second corrupt log never overwrites the first one set aside: both are kept (final review I2)", async () => {
+    const { store, call } = await setup();
+    await call("POST", "/api/log", { text: "First decision" });
+    await writeFile(store.path("log"), "{ first", "utf8");
+    expect((await call("GET", "/api/log")).status).toBe(200);
+    await call("POST", "/api/log", { text: "Second decision" });
+    await writeFile(store.path("log"), "{ second", "utf8");
+    expect((await call("GET", "/api/log")).json.entries).toEqual([]);
+    await writeFile(store.path("log"), "{ third", "utf8");
+    expect((await call("POST", "/api/log", { text: "Third decision" })).status).toBe(201);
+    expect(await readFile(`${store.path("log")}.bad`, "utf8")).toBe("{ first");
+    expect(await readFile(`${store.path("log")}.bad.2`, "utf8")).toBe("{ second");
+    expect(await readFile(`${store.path("log")}.bad.3`, "utf8")).toBe("{ third");
+  });
+
+  it("a log from a newer Rushes keeps its lines readable and is never rewritten or set aside; writes are counted as failed (final review I2)", async () => {
+    const { store, call } = await setup();
+    const line = (i: number) => ({ id: `l_${i}`, at: `2026-10-07T09:0${i}:00.000Z`, area: "picture", kind: "cut", text: `Line ${i}`, video: null, version: null, ref: null, by: "agent" });
+    const text = JSON.stringify({ schema: 2, rev: 9, backfilled: true, entries: [line(1), { ...line(2), kind: "format-next" }, line(3)], extra: { a: 1 } });
+    await writeFile(store.path("log"), text, "utf8");
+    const view = (await call("GET", "/api/log")).json;
+    expect(view.entries.map((e: { text: string }) => e.text)).toEqual(["Line 3", "Line 1"]);
+    expect(view.dropped).toBe(1);
+    // Every route that would log still does its own job; the line isn't written.
+    expect((await call("POST", "/api/files", { kind: "doc", file: "brief.md", name: "Creative brief" })).status).toBe(201);
+    expect((await call("POST", "/api/log", { text: "Mine" })).json).toMatchObject({ error: "log_unwritable" });
+    expect((await call("GET", "/api/state")).status).toBe(200);
+    expect(await readFile(store.path("log"), "utf8")).toBe(text);
+    await expect(access(`${store.path("log")}.bad`)).rejects.toMatchObject({ code: "ENOENT" });
+    expect((await call("GET", "/api/health")).json.logFailures).toBe(2);
+    expect((await call("GET", "/api/log")).json.entries).toHaveLength(2);
+  });
+
+  it("a newer log that was never backfilled is read as it is: no backfill, no write, nothing logged about it (final review I2)", async () => {
+    const { root, store, call } = await setup();
+    const line = { id: "l_1", at: "2026-10-07T09:01:00.000Z", area: "picture", kind: "cut", text: "Line 1", video: null, version: null, ref: null, by: "agent" };
+    const text = JSON.stringify({ schema: 2, rev: 3, entries: [line] });
+    await writeFile(store.path("log"), text, "utf8");
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      expect((await call("POST", "/api/versions", { video: "Hero", file: `${root}/renders/hero.mp4` })).status).toBe(201);
+      const view = (await call("GET", "/api/log")).json;
+      expect(view.entries.map((e: { text: string }) => e.text)).toEqual(["Line 1"]);
+      expect(view.undated).toEqual([]);
+      expect(await readFile(store.path("log"), "utf8")).toBe(text);
+      // The one thing said is that the line couldn't be written; nothing says the log "isn't ready".
+      expect(error.mock.calls.map((c) => String(c[0])).filter((m) => /isn't ready/.test(m))).toEqual([]);
+      expect(error.mock.calls.map((c) => String(c[0])).some((m) => /newer Rushes wrote this log/.test(m))).toBe(true);
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it("a log with no rev, or a rev that isn't a count, still reads and is not set aside; the next line repairs it (final review I2)", async () => {
+    const { store, call } = await setup();
+    const line = { id: "l_1", at: "2026-10-07T09:01:00.000Z", area: "picture", kind: "cut", text: "Line 1", video: null, version: null, ref: null, by: "agent" };
+    await writeFile(store.path("log"), JSON.stringify({ schema: 1, backfilled: true, entries: [line] }), "utf8");
+    expect((await call("GET", "/api/log")).json.entries.map((e: { text: string }) => e.text)).toEqual(["Line 1"]);
+    await expect(access(`${store.path("log")}.bad`)).rejects.toMatchObject({ code: "ENOENT" });
+    expect((await call("POST", "/api/log", { text: "Mine" })).status).toBe(201);
+    expect((await call("GET", "/api/log")).json.entries.map((e: { text: string }) => e.text)).toEqual(["Mine", "Line 1"]);
+    expect(JSON.parse(await readFile(store.path("log"), "utf8"))).toMatchObject({ schema: 1, rev: 1 });
+    await expect(access(`${store.path("log")}.bad`)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("a hand-written line with a terminal escape, bidi override, C1 control or hidden tag characters comes out clean in the API, the export and the prompt (final review I3)", async () => {
+    const { root, store, call, asUser } = await setup();
+    const england = "\u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}";
+    const dirty = ["Wiped\u001b[2J screen", "Flipped \u202etxet", "C1 \u009b31mred", "Hidden \u{E0041}\u{E0042}tags", `Flag ${england} kept`];
+    const line = (i: number, text: string) => ({ id: `l_${i}`, at: new Date(Date.now() - (10 - i) * 1000).toISOString(), area: "project", kind: "entry", text, video: null, version: null, ref: null, by: "agent" });
+    await writeFile(store.path("log"), JSON.stringify({ schema: 1, rev: 1, backfilled: true, entries: dirty.map((t, i) => line(i, t)) }), "utf8");
+    const clean = ["Wiped [2J screen", "Flipped txet", "C1 31mred", "Hidden tags", `Flag ${england} kept`];
+    expect((await call("GET", "/api/log")).json.entries.map((e: { text: string }) => e.text)).toEqual([...clean].reverse());
+    const r = (await call("POST", "/api/exports/change-log", {})).json;
+    const md = await readFile(join(root, r.path), "utf8");
+    for (const t of clean) expect(md).toContain(` · Project · ${t} (agent)\n`);
+    expect(md.replaceAll(england, "")).not.toMatch(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u202a-\u202e\u{E0000}-\u{E007F}]/u);
+    await call("POST", "/api/notes", { stage: "music", scope: "whole", text: "Warmer" }, asUser);
+    const { batch } = (await call("POST", "/api/batches", { stage: "music" }, asUser)).json;
+    const block = batch.prompt.split("\n\nRecent changes (newest first):\n")[1];
+    expect(block).toContain("Hidden tags");
+    expect(block.replaceAll(england, "")).not.toMatch(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u202a-\u202e\u{E0000}-\u{E007F}]/u);
   });
 
   it("many requests that meet a corrupt log at once set it aside once, and every one answers (R7)", async () => {

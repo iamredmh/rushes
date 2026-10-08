@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { oneLineOf } from "./labels.js";
 import { LOG_AREAS, LOG_BY, LOG_KINDS, LOG_MAX, LOG_TEXT_MAX } from "./logText.js";
 
 export const STAGES = ["script", "picture", "voice", "music", "sfx", "mix"] as const;
@@ -320,6 +321,9 @@ export const LogFileSchema = z.object({
   // §22.9: how many lines the 5000 cap has dropped.
   dropped: z.number().int().nonnegative().default(0),
   entries: z.array(LogEntrySchema).max(LOG_MAX).default([]),
+  // Set by the tolerant read, never written: a newer Rushes wrote this log (its `schema` is above 1).
+  // Its lines can be read, but this Rushes never rewrites the file (final review I2).
+  newer: z.literal(true).optional(),
 });
 export type LogFile = z.infer<typeof LogFileSchema>;
 
@@ -329,9 +333,13 @@ const isRecord = (x: unknown): x is Record<string, unknown> => typeof x === "obj
  * I3, in the spirit of R2: log.json is read tolerantly, so one bad line never loses the log. A line
  * that fails the schema (a hand edit over 160 characters, a kind or an area from a newer Rushes) is
  * left out and counted in `dropped`, as are lines past the newest LOG_MAX (two logs merged by git);
- * undated refs that aren't refs are left out; an id seen twice gets "-2", "-3". The next write keeps
- * the cleaned file. What isn't an object with a list of entries is still corrupt (R7). Writing is
- * checked against LogFileSchema as strictly as ever.
+ * undated refs that aren't refs are left out; an id seen twice gets "-2", "-3". The text of a line
+ * is read as one clean line (oneLineOf), so a hand edit can't carry a terminal escape, a bidi
+ * override or hidden tag characters to anything that prints it. A `rev` that isn't a count reads as
+ * 0. A `schema` above 1 is a newer Rushes' log: its lines are read, and `newer` is set so nothing
+ * writes the file back. The next write of an ordinary file keeps the cleaned lines. What isn't an
+ * object with a list of entries is still corrupt (R7). Writing is checked against LogFileSchema as
+ * strictly as ever.
  */
 function tolerantLog(raw: unknown): unknown {
   if (!isRecord(raw) || !Array.isArray(raw.entries)) return raw;
@@ -339,7 +347,7 @@ function tolerantLog(raw: unknown): unknown {
   const ids = new Set<string>();
   let bad = 0;
   for (const item of raw.entries) {
-    const line = LogEntrySchema.safeParse(item);
+    const line = LogEntrySchema.safeParse(isRecord(item) ? cleanLine(item) : item);
     if (!line.success) {
       bad += 1;
       continue;
@@ -352,7 +360,17 @@ function tolerantLog(raw: unknown): unknown {
   const over = Math.max(0, entries.length - LOG_MAX);
   const dropped = typeof raw.dropped === "number" && Number.isInteger(raw.dropped) && raw.dropped >= 0 ? raw.dropped : 0;
   const undated = Array.isArray(raw.undated) ? raw.undated.filter((r): r is string => typeof r === "string" && r.length <= 300).slice(0, LOG_MAX) : raw.undated;
-  return { ...raw, undated, dropped: dropped + bad + over, entries: entries.slice(over) };
+  const rev = typeof raw.rev === "number" && Number.isInteger(raw.rev) && raw.rev >= 0 ? raw.rev : 0;
+  const newer = typeof raw.schema === "number" && Number.isInteger(raw.schema) && raw.schema > 1;
+  return { ...raw, schema: 1, rev, newer: newer ? true : undefined, undated, dropped: dropped + bad + over, entries: entries.slice(over) };
+}
+
+/** A stored line with its words made one clean line. What isn't text is left for the schema to refuse. */
+function cleanLine(item: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...item };
+  if (typeof out.text === "string") out.text = oneLineOf(out.text);
+  if (typeof out.subject === "string") out.subject = oneLineOf(out.subject);
+  return out;
 }
 
 /** How log.json is read (see tolerantLog); the store writes it against LogFileSchema. */

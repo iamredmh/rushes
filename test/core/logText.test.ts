@@ -109,7 +109,7 @@ it("logText.ts imports only labels.ts, so the dashboard can bundle it without zo
   const js = ts.transpileModule(text, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022, removeComments: true } }).outputText;
   expect(modulesPulledIn(text)).toEqual(['"./labels.js"']);
   expect(modulesPulledIn(js)).toEqual(['"./labels.js"']);
-  expect(js).toContain('import { oneLine } from "./labels.js";');
+  expect(js).toContain('import { oneLine, oneLineOf } from "./labels.js";');
   // Safari before 16.4 can't parse a lookbehind, and this file runs in the dashboard.
   expect(text).not.toMatch(/\(\?<[=!]/);
 });

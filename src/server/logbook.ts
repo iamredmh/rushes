@@ -2,6 +2,7 @@
 // the state share its backfill and its cache. Every write goes through store.update, so writes
 // serialise with each other (§22.9).
 import { rename, stat } from "node:fs/promises";
+import { basename } from "node:path";
 import { CorruptFileError } from "../core/errors.js";
 import { appendEvent, backfillLog, logView, type LogEvent, type LogQuery, type LogView, type UndatedContext } from "../core/log.js";
 import { LOG_MAX, logMarkdown, type LogBy } from "../core/logText.js";
@@ -53,6 +54,11 @@ const UNCHANGED = Symbol("unchanged");
 /** Thrown inside an append that finds the log no longer backfilled: it was deleted or replaced while this server ran. */
 const STALE = Symbol("stale");
 
+/** A log a newer Rushes wrote is read, never written: this Rushes would lose what it doesn't know (final review I2). */
+function refuseNewer(f: LogFile): void {
+  if (f.newer) throw new Error("a newer Rushes wrote this log, so this one leaves it alone");
+}
+
 export class LogBook {
   /** When this log began, for this server: the backfill reads in only what's older (R6). */
   private readonly since = Date.now();
@@ -85,8 +91,8 @@ export class LogBook {
   private async prepare(): Promise<void> {
     if (this.known) return;
     const file = await this.read(true);
-    // Ruling b: once backfilled, reading never writes.
-    if (file.backfilled) {
+    // Ruling b: once backfilled, reading never writes. A newer Rushes' log is read as it is.
+    if (file.backfilled || file.newer) {
       this.known = true;
       return;
     }
@@ -95,6 +101,7 @@ export class LogBook {
     // and leaves the file untouched: the history is read in once and written once (Review Focus 1).
     await this.store
       .update("log", (f) => {
+        refuseNewer(f);
         if (f.backfilled) throw UNCHANGED;
         backfillLog(f, { project, batches, script }, backfillBefore(f, this.since));
       })
@@ -125,8 +132,11 @@ export class LogBook {
   }
 
   private async setAside(path: string): Promise<LogFile> {
-    // Another server on the folder may have moved it already; then there's nothing to move.
-    await rename(path, `${path}.bad`).catch((e: NodeJS.ErrnoException) => {
+    // Another server on the folder may have moved it already; then there's nothing to move. An
+    // earlier log.json.bad is kept: this one goes to .bad.2, .bad.3 and so on (final review I2).
+    let aside = `${path}.bad`;
+    for (let n = 2; await stat(aside).then(() => true, () => false); n++) aside = `${path}.bad.${n}`;
+    await rename(path, aside).catch((e: NodeJS.ErrnoException) => {
       if (e.code !== "ENOENT") throw e;
     });
     this.store.forget("log");
@@ -134,7 +144,7 @@ export class LogBook {
     const { data } = await this.store.update("log", (f) => {
       f.backfilled = true;
     });
-    console.error(`Rushes: ${path} couldn't be read, so it was set aside as log.json.bad and the Change Log started again.`);
+    console.error(`Rushes: ${path} couldn't be read, so it was set aside as ${basename(aside)} and the Change Log started again.`);
     return data;
   }
 
@@ -149,6 +159,7 @@ export class LogBook {
       await this.ready();
       const write = () =>
         this.store.update("log", (f) => {
+          refuseNewer(f);
           if (!f.backfilled && this.known) throw STALE;
           // A line going into a log that isn't backfilled yet (its backfill failed): remember when
           // this server started, so a later backfill never reads in what was logged live (M2).

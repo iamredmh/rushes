@@ -1,7 +1,7 @@
 // §22: the Change Log's shared words and dates, for the server, the CLI and the dashboard alike.
 // Pure; its only import is labels.ts, which has none, because the dashboard bundles this file
 // (test/core/logText.test.ts checks it).
-import { oneLine } from "./labels.js";
+import { oneLine, oneLineOf } from "./labels.js";
 
 export const LOG_AREAS = ["script", "picture", "voice", "music", "sfx", "mix", "notes", "assets", "project"] as const;
 export type LogArea = (typeof LOG_AREAS)[number];
@@ -28,11 +28,11 @@ export const BY_WORDS: Record<LogBy, string> = { user: "you", agent: "agent", ru
 
 /** An area's words; one a newer Rushes wrote and this build doesn't know prints as it came. */
 export function areaWord(area: string): string {
-  return (AREA_LABELS as Record<string, string>)[area] ?? area;
+  return (AREA_LABELS as Record<string, string>)[area] ?? oneLineOf(area);
 }
 /** A writer's words, with the same fallback. */
 export function byWord(by: string): string {
-  return (BY_WORDS as Record<string, string>)[by] ?? by;
+  return (BY_WORDS as Record<string, string>)[by] ?? oneLineOf(by);
 }
 
 /** A Change Log line as the API sends it (the stored entry, §22.3). */
@@ -143,12 +143,13 @@ export function logMarkdown(i: LogMarkdownInput): string {
       day = heading;
       lines.push("", `## ${heading}`);
     }
-    lines.push(`- ${clock(d)} · ${areaWord(e.area)} · ${e.text} (${byWord(e.by)})`);
+    // The words are made one clean line here too, whoever sent them (an older server doesn't clean what it reads).
+    lines.push(`- ${clock(d)} · ${areaWord(e.area)} · ${oneLineOf(e.text)} (${byWord(e.by)})`);
   }
   if (i.earlier) lines.push("", `${i.earlier} earlier entr${i.earlier === 1 ? "y" : "ies"} not shown.`);
   if (i.undated.length) {
     lines.push("", "## Before the log");
-    for (const u of i.undated) lines.push(`- ${u.text}`);
+    for (const u of i.undated) lines.push(`- ${oneLineOf(u.text)}`);
   }
   if (i.dropped > 0) lines.push("", "Earlier entries were removed.");
   return lines.join("\n") + "\n";
@@ -158,5 +159,5 @@ export function logMarkdown(i: LogMarkdownInput): string {
 export function recentChanges(entries: Pick<LogLine, "at" | "text">[], max = 5): string {
   const top = entries.slice(0, max);
   if (top.length === 0) return "";
-  return ["Recent changes (newest first):", ...top.map((e) => `- ${localStamp(new Date(e.at))} ${e.text}`)].join("\n");
+  return ["Recent changes (newest first):", ...top.map((e) => `- ${localStamp(new Date(e.at))} ${oneLineOf(e.text)}`)].join("\n");
 }
