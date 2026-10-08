@@ -84,3 +84,31 @@ button.lrow:hover { background: var(--hover); }
 .dfoot { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 16px; border-top: 1px solid var(--line); color: var(--text-3); }
 .dfoot .btn { height: auto; padding: 6px 14px; border: 1px solid var(--line-2); background: transparent; color: var(--text-2); }
 @media (prefers-reduced-motion: reduce) { .drawer { animation: none; } }
+
+/* The header with a long project (Task 7's realistic check: two long film names, a found chip, a long
+   version label). From 1001 px the project name, the films and the version button start from nothing
+   and grow to their own width (max-content), so the header breaks its line only when even their
+   shortest forms don't fit; until then they truncate with an ellipsis, and the buttons on the right
+   (and anything else, like a format toggle) keep their size. The spacer is an auto margin, so it takes
+   only what's left once they're full width. At 1000 px and under the header wraps as it always has. */
+@media (min-width: 1001px) {
+  .head > * { flex: none; }
+  .head > .crumb, .head > .pack, .head > .vwrap { flex: 1 1 0; max-width: max-content; }
+  .head > .crumb { min-width: 96px; }
+  /* Two film names share the films' slot, so it grows twice as fast. */
+  .head > .pack { min-width: 140px; flex-grow: 2; }
+  .head > .vwrap { min-width: 80px; }
+  .head > .sp { width: 0; margin-left: auto; }
+}
+.head > .crumb > span:first-child, .crumb .sel { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crumb .pid, .crumb .slash { flex: none; }
+.head .pack .pill { min-width: 0; }
+.pill .pname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.head .vbtn { max-width: 100%; }
+.head .vbtn .vlbl { max-width: 250px; }
+/* Under 1100 px the Change Log button is its icon; the label stays for screen readers and a tooltip names it. */
+@media (max-width: 1100px) {
+  .clog { padding: 0 9px; }
+  .clog .clabel { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+}
+@media (min-width: 1101px) { .clog[data-tip]::after { content: none; } }

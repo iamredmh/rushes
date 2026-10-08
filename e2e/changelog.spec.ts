@@ -529,3 +529,98 @@ test("a line that arrives while the drawer is open counts as seen, even when its
   await page.reload();
   await expect(logButton(page)).toHaveAccessibleName("Change Log");
 });
+
+// ---- the header with a long project (Task 7's realistic check) ----
+
+/** Two films with long names, a long project name, a locked cut with a long label, 59 found files and eight open notes. */
+async function longProject(rushes: any) {
+  await rushes.addCut("Opening titles: the logo lands on the first beat", "Lumen teaser");
+  await rushes.addCut("First pass; rough timing", "Lumen launch film");
+  await rushes.addCut("Tighter middle 35; trimmed the opening two seconds and moved the logo to land on the first beat", "Lumen launch film");
+  await rushes.api("PUT", "/api/videos/lumen-launch-film/lock", { version: "v2" });
+  for (let i = 1; i <= 8; i++) await rushes.api("POST", "/api/notes", { stage: "picture", video: "lumen-launch-film", version: "v2", scope: "point", t: i * 0.3, text: `Note ${i}: hold the end card longer` });
+  await rushes.writeFiles(Array.from({ length: 59 }, (_, i) => ({ path: `auditions/try-${String(i + 1).padStart(2, "0")}.wav`, seconds: 0.5 + (i % 5) * 0.25, freq: 200 + i * 5 })));
+  await rushes.scan();
+  const file = join(rushes.root, ".rushes", "project.json");
+  const p = JSON.parse(await readFile(file, "utf8"));
+  await writeFile(file, JSON.stringify({ ...p, name: "Lumen launch film" }, null, 2));
+}
+
+/** The header's visible children, as [name, top, bottom, left, right]. */
+const headerRow = (page: Page) =>
+  page.locator("header.head").evaluate((h) =>
+    [...h.children].filter((c) => (c as HTMLElement).offsetParent !== null && c.getBoundingClientRect().width > 0).map((c) => {
+      const r = c.getBoundingClientRect();
+      return { name: `${c.tagName.toLowerCase()}.${c.className}`.slice(0, 40), top: Math.round(r.top), bottom: Math.round(r.bottom), left: Math.round(r.left), right: Math.round(r.right), mid: Math.round((r.top + r.bottom) / 2) };
+    }));
+
+for (const width of [1440, 1280, 1100]) {
+  test(`at ${width} px a long project's header stays one row: Change Log and Send to agent share it (Task 7)`, async ({ page, rushes }) => {
+    await longProject(rushes);
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto(rushes.url);
+    await videoReady(page);
+    await expect(page.locator("header.head .crumb")).toContainText("Lumen launch film");
+    await expect(page.locator(".foundchip")).toContainText("59");
+    const films = page.getByRole("navigation", { name: "Films" }).getByRole("button");
+    await expect(films).toHaveCount(2);
+    await films.nth(1).click(); // the launch film, locked at its long-labelled cut
+    await videoReady(page);
+    await expect(versionButton(page)).toContainText("Tighter middle 35");
+    const send = page.getByRole("button", { name: /^Send to agent/ });
+    await expect(send).toContainText("8");
+    // The label shows above 1100 px; at 1100 the button is its icon.
+    const w = (await logButton(page).boundingBox())!.width;
+    if (width > 1100) expect(w).toBeGreaterThan(100);
+    else expect(w).toBeLessThan(48);
+    const row = await headerRow(page);
+    console.log(width, JSON.stringify(row));
+    const mids = row.map((c) => c.mid);
+    expect(Math.max(...mids) - Math.min(...mids), JSON.stringify(row)).toBeLessThanOrEqual(2);
+    const [s, l] = [(await send.boundingBox())!, (await logButton(page).boundingBox())!];
+    expect(Math.abs(s.y - l.y)).toBeLessThanOrEqual(1);
+    expect(s.x + s.width).toBeLessThanOrEqual(width - 19); // on the right, inside the padding
+    const head = (await page.locator("header.head").boundingBox())!;
+    expect(head.height).toBeLessThan(80);
+    // Nothing in the header spills out of it, and nothing in it spills out of its own box (a version
+    // button wider than its slot, a film's name past its pill).
+    expect(await page.locator("header.head").evaluate((h) => h.scrollWidth <= h.clientWidth)).toBe(true);
+    const spills = await page.locator("header.head").evaluate((h) =>
+      [...h.querySelectorAll(".vwrap > .vbtn, .vbtn > *, .pack > .pill, .pill > *, .crumb > *")]
+        .filter((c) => c.getBoundingClientRect().right > c.parentElement!.getBoundingClientRect().right + 1)
+        .map((c) => `${c.parentElement!.className} > ${c.className || c.tagName}`));
+    expect(spills).toEqual([]);
+    // Names that don't fit are cut short on one line, never wrapped onto a second.
+    const wrapped = await page.locator("header.head").evaluate((h) =>
+      [...h.querySelectorAll(".crumb > span, .pill .pname, .vbtn .vlbl")].filter((el) => el.getBoundingClientRect().height > 26).map((el) => el.textContent));
+    expect(wrapped).toEqual([]);
+    if (width === 1440) {
+      // At 1440 the films' names, what you switch between, are whole (the project's name gives up the few pixels).
+      expect(await page.locator("header.head .pill .pname").evaluateAll((els) => els.every((el) => el.scrollWidth <= el.clientWidth))).toBe(true);
+    }
+  });
+}
+
+test("the header's right-hand buttons sit at the right edge when there's room to spare (Task 7)", async ({ page, rushes }) => {
+  await rushes.addCut("first cut");
+  await page.goto(rushes.url);
+  await videoReady(page);
+  const send = (await page.getByRole("button", { name: /^Send to agent/ }).boundingBox())!;
+  expect(Math.round(send.x + send.width)).toBe(1420);
+  const log = (await logButton(page).boundingBox())!;
+  expect(Math.round(log.x + log.width)).toBe(Math.round(send.x) - 14);
+});
+
+test("under 1100 px the Change Log button is its icon, named for screen readers and by a tooltip (Task 7)", async ({ page, rushes }) => {
+  await rushes.addCut("first cut");
+  await page.setViewportSize({ width: 1050, height: 800 });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  const button = logButton(page);
+  await expect(button).toHaveAccessibleName("Change Log (new entries)"); // the cut's line is news
+  expect((await button.boundingBox())!.width).toBeLessThan(48);
+  expect(await button.evaluate((el) => getComputedStyle(el, "::after").content)).toBe('"Change Log"');
+  await page.setViewportSize({ width: 1280, height: 800 });
+  expect((await button.boundingBox())!.width).toBeGreaterThan(100);
+  expect(await button.evaluate((el) => getComputedStyle(el, "::after").content)).toBe("none");
+});

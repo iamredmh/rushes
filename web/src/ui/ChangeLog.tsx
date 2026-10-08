@@ -93,19 +93,18 @@ export function ChangeLogButton({ log, buttonRef }: { log: ChangeLogState; butto
     <button
       ref={buttonRef}
       type="button"
-      class="btn clog"
+      class="btn clog tip-below"
+      // The label hides under 1100 px (changes.css): the tooltip names the icon there. The name is
+      // given outright, since a tooltip's text would otherwise be read as part of it.
+      data-tip="Change Log"
+      aria-label={log.dot ? "Change Log (new entries)" : "Change Log"}
       aria-expanded={log.open}
       aria-controls={log.open ? "changelog" : undefined}
       onClick={() => log.setOpen(!log.open)}
     >
       <HistoryIcon />
-      Change Log
-      {log.dot && (
-        <>
-          <span class="cdot" aria-hidden="true" />
-          <span class="vh"> (new entries)</span>
-        </>
-      )}
+      <span class="clabel">Change Log</span>
+      {log.dot && <span class="cdot" aria-hidden="true" />}
     </button>
   );
 }

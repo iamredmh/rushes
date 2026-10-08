@@ -371,7 +371,7 @@ export function App() {
             {state.project.videos.map((v, i) => (
               <button class="pill" aria-pressed={v.id === video.id} onClick={() => switchFilm(v.id)}>
                 <span class="n">{i + 1}</span>
-                {v.name}
+                <span class="pname">{v.name}</span>
                 {hasTodo(v.id) && <span class="dot" />}
               </button>
             ))}
