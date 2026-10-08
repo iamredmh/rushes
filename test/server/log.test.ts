@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { access, lstat, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
@@ -82,6 +82,42 @@ describe("the server writes the log as things happen (§22.5)", () => {
       await call("POST", "/api/variants", { stage: "music", name: `Alt ${i + 1}`, file: `audio/alt-${i + 1}.wav` });
     }
     expect(await texts()).toEqual(["Music: 13 variants added | agent", "Sound effects: 3 variants added | agent"]);
+  });
+
+  it("on a project with two films, a cut and a lock name the film (R9)", async () => {
+    const { root, call, asUser, texts } = await setup();
+    await call("POST", "/api/versions", { video: "Hero", file: `${root}/renders/hero.mp4` }, asUser);
+    await call("POST", "/api/versions", { video: "Teaser", file: `${root}/renders/teaser.mp4` });
+    await call("PUT", "/api/videos/teaser/lock", { version: "v1" });
+    expect(await texts()).toEqual(["Picture locked at Teaser v1 | agent", "Teaser v1 added: teaser | agent", "v1 added: hero | user"]);
+  });
+
+  it("a second take, more than two minutes after the first, is its own line and says take 2 (R4, R9)", async () => {
+    const { call, texts } = await setup();
+    await call("PUT", "/api/script", { sections: [{ start: 0, end: 4, current: "Every launch starts with a single request." }] });
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(Date.now());
+      await call("POST", "/api/script/s1/takes", { file: "audio/s1-a.wav" });
+      vi.setSystemTime(Date.now() + 3 * 60_000);
+      await call("POST", "/api/script/s1/takes", { file: "audio/s1-b.wav" });
+    } finally {
+      vi.useRealTimers();
+    }
+    expect((await texts()).slice(0, 2)).toEqual([
+      "Voiceover: take 2 added to S1 “Every launch starts with a…” | agent",
+      "Voiceover: take 1 added to S1 “Every launch starts with a…” | agent",
+    ]);
+  });
+
+  it("a picks change on one of two picked lanes logs the whole set (§22.5)", async () => {
+    const { call, asUser, texts } = await setup();
+    for (const [stage, lane, name] of [["music", "night-drive", "Night drive"], ["music", "night-drive", "Held back"], ["sfx", "rain", "Rain pass"]]) {
+      await call("POST", "/api/variants", { stage, lane, name, file: `audio/${name}.wav` });
+    }
+    await call("PUT", "/api/picks", { lanes: { "night-drive": "night-drive", rain: "rain-pass" } }, asUser);
+    await call("PUT", "/api/picks", { lanes: { "night-drive": "held-back" } }, asUser);
+    expect((await texts())[0]).toBe("Picks: music “Held back”, sound effects “Rain pass” | user");
   });
 
   it("a retried reply isn't doubled (§22.9)", async () => {
