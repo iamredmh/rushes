@@ -72,6 +72,7 @@ test("from the keyboard: the button opens and closes it, and typing in the input
   await expect(logButton(page)).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(drawer(page)).toBeVisible();
+  await expect(input).toBeFocused();
   // Tab moves from the input to Add, then into the chips (one stop for the group). WebKit's Tab
   // skips buttons unless Safari's "Press Tab to highlight each item" is on, so this part is Chromium's.
   if (browserName === "webkit") return;
@@ -331,4 +332,200 @@ test("the drawer isn't modal: tabs and keys still work with it open (§22.8)", a
   await expect(drawer(page)).toBeVisible();
   await page.keyboard.press("2");
   await expect(page.getByRole("tab", { name: /Picture/ })).toHaveAttribute("aria-selected", "true");
+});
+
+// ---- fix round 1 ----
+
+test("a focused row from an older day keeps focus when today's first line arrives (I1, §22.11)", async ({ page, rushes }) => {
+  await rushes.addCut("first cut");
+  // Yesterday's history, by hand: a line that goes somewhere (the cut), so its row is a button.
+  const at = new Date(Date.now() - 86_400_000).toISOString();
+  await writeFile(join(rushes.root, ".rushes", "log.json"), JSON.stringify({
+    schema: 1, rev: 5, backfilled: true, undated: [], dropped: 0,
+    entries: [{ id: "l_old", at, area: "picture", kind: "entry", text: "Look at the end card", video: "hero", version: "v1", ref: null, by: "agent", tab: null, n: 1, subject: "" }],
+  }));
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await logButton(page).click();
+  await expect(drawer(page).getByRole("heading", { name: "Yesterday" })).toBeVisible();
+  await expect(drawer(page).getByRole("heading", { name: "Today" })).toHaveCount(0);
+  const linked = drawer(page).getByRole("button", { name: /Look at the end card/ });
+  await linked.focus();
+  await rushes.api("POST", "/api/log", { text: "Moved the logo up" });
+  await expect(drawer(page).getByRole("heading", { name: "Today" })).toBeVisible();
+  await expect(linked).toBeFocused();
+});
+
+test("with a filter on, live lines from other areas stay out (I3)", async ({ page, rushes }) => {
+  await rushes.addCut("first cut");
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await logButton(page).click();
+  await drawer(page).getByRole("radio", { name: "Music" }).click();
+  await expect(drawer(page).getByText("Nothing for this filter.")).toBeVisible();
+  await rushes.api("POST", "/api/log", { text: "Moved the logo up", area: "picture" });
+  await rushes.addVariant("music", "Night drive", { seconds: 1, freq: 220, lane: "night-drive" });
+  await expect(rows(page)).toHaveCount(1);
+  await expect(rows(page).first()).toContainText("Night drive");
+  await expect(drawer(page)).not.toContainText("Moved the logo up");
+});
+
+test("a slow answer for an older filter never replaces the newer one (I3)", async ({ page, rushes }) => {
+  await rushes.addCut("first cut");
+  await rushes.addVariant("music", "Night drive", { seconds: 1, freq: 220, lane: "night-drive" });
+  // The unfiltered list answers late; the Music one at once.
+  await page.route(/\/api\/log\?/, async (route) => {
+    if (!new URL(route.request().url()).searchParams.has("area")) await new Promise((r) => setTimeout(r, 800));
+    await route.continue();
+  });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await logButton(page).click();
+  await drawer(page).getByRole("radio", { name: "Music" }).click();
+  await expect(rows(page)).toHaveCount(1);
+  await page.waitForTimeout(1200); // the late answer for All has arrived by now
+  await expect(rows(page)).toHaveCount(1);
+  await expect(rows(page).first()).toContainText("Night drive");
+});
+
+test("Esc in the note box keeps its own meaning and leaves the drawer open (R13, I3)", async ({ page, rushes }) => {
+  await rushes.addCut("first cut");
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await logButton(page).click();
+  await expect(drawer(page).getByLabel("Add a line to the log")).toBeFocused(); // mounted, its Esc listener with it
+  const note = page.locator("textarea").first();
+  await note.focus();
+  await note.press("Escape");
+  await expect(note).not.toBeFocused(); // the note box's own Esc: it lets go of the keyboard
+  // Two frames: a close would have rendered by now, so the check below can't pass early.
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  await expect(drawer(page)).toBeVisible();
+  await expect(logButton(page)).toHaveAttribute("aria-expanded", "true");
+});
+
+test("a drawer that reopens with the page doesn't take focus (I3)", async ({ page, rushes }) => {
+  await rushes.addCut("first cut");
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await logButton(page).click();
+  await expect(drawer(page).getByLabel("Add a line to the log")).toBeFocused();
+  await page.reload();
+  await videoReady(page);
+  await expect(drawer(page)).toBeVisible();
+  await expect(rows(page)).toHaveCount(1);
+  await expect(drawer(page).getByLabel("Add a line to the log")).not.toBeFocused();
+  expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
+});
+
+test("a row about another film switches to that film (R18, I3)", async ({ page, rushes }) => {
+  await rushes.addCut("hero cut");
+  await rushes.addCut("cutdown first", "Cutdown");
+  await rushes.addCut("cutdown second", "Cutdown");
+  await rushes.api("POST", "/api/log", { text: "The cutdown's first ending was better", video: "cutdown", version: "v1" });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  const pack = page.getByRole("navigation", { name: "Films" });
+  await expect(pack.getByRole("button", { name: /Hero/ })).toHaveAttribute("aria-pressed", "true");
+  await logButton(page).click();
+  await drawer(page).getByRole("button", { name: /The cutdown's first ending was better/ }).click();
+  await expect(pack.getByRole("button", { name: /Cutdown/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(versionButton(page)).toHaveAttribute("data-version", "v1");
+});
+
+test("a line added under a filter that leaves it out says where it went (M1)", async ({ page, rushes }) => {
+  await rushes.addCut("first cut");
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await logButton(page).click();
+  await drawer(page).getByRole("radio", { name: "Music" }).click();
+  const input = drawer(page).getByLabel("Add a line to the log");
+  await input.fill("Kept the wide shot");
+  await input.press("Enter");
+  await expect(input).toHaveValue("");
+  await expect(page.getByRole("status")).toHaveText("Added under Picture. Choose All or Picture to see it.");
+  await drawer(page).getByRole("radio", { name: "Picture" }).click();
+  await expect(rows(page).first()).toContainText("Kept the wide shot");
+});
+
+test("under 560 px a jump that closes the drawer gives focus back to its button (M2)", async ({ page, rushes }) => {
+  await rushes.addCut("first cut");
+  await page.setViewportSize({ width: 500, height: 800 });
+  await page.goto(rushes.url);
+  await logButton(page).click();
+  await drawer(page).getByRole("button", { name: /v1 added/ }).click();
+  await expect(drawer(page)).toHaveCount(0);
+  await expect(logButton(page)).toBeFocused();
+});
+
+test("opening the drawer in one tab clears the dot in another (M3)", async ({ page, rushes, context }) => {
+  await rushes.addCut("first cut");
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await expect(logButton(page).locator(".cdot")).toHaveCount(1);
+  const other = await context.newPage();
+  await other.goto(rushes.url);
+  await logButton(other).click();
+  await expect(drawer(other)).toBeVisible();
+  await expect(logButton(page).locator(".cdot")).toHaveCount(0);
+  await other.close();
+});
+
+test("a line the drawer has shown is seen, even when the page hears of it after the drawer closes (R19)", async ({ page, rushes }) => {
+  await rushes.addCut("first cut");
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await logButton(page).click();
+  await logButton(page).click();
+  await expect(logButton(page).locator(".cdot")).toHaveCount(0);
+  // The page's state answers late; the drawer's own fetch of the log doesn't.
+  await page.route(/\/api\/state/, async (route) => {
+    await new Promise((r) => setTimeout(r, 1500));
+    await route.continue();
+  });
+  await rushes.api("POST", "/api/log", { text: "Moved the logo up" });
+  await logButton(page).click();
+  await expect(rows(page).first()).toContainText("Moved the logo up");
+  await logButton(page).click();
+  await page.waitForTimeout(2500); // the late state, with the new head, has arrived
+  await expect(logButton(page).locator(".cdot")).toHaveCount(0);
+});
+
+test("the drawer stays under the header as the page scrolls (I2)", async ({ page, rushes }) => {
+  await rushes.addCut("first cut");
+  await page.setViewportSize({ width: 1000, height: 420 });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await logButton(page).click();
+  await settled(page);
+  const under = () => page.evaluate(() => {
+    const head = document.querySelector("header.head")!.getBoundingClientRect().bottom;
+    return [Math.round(document.getElementById("changelog")!.getBoundingClientRect().top), Math.max(0, Math.round(head))];
+  });
+  const [top0, head0] = await under();
+  expect(top0).toBe(head0);
+  expect(await page.evaluate(() => document.documentElement.scrollHeight > window.innerHeight)).toBe(true);
+  await page.mouse.move(300, 300);
+  await page.mouse.wheel(0, 40);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+  // The scroll event comes a frame after the scroll (WebKit): the drawer follows it there.
+  await expect.poll(async () => { const [top, head] = await under(); return top - head; }).toBe(0);
+  const [, head1] = await under();
+  expect(head1).toBeLessThan(head0);
+});
+
+test("a line that arrives while the drawer is open counts as seen, even when its filter hides it (R19)", async ({ page, rushes }) => {
+  await rushes.addCut("first cut");
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await logButton(page).click();
+  await drawer(page).getByRole("radio", { name: "Music" }).click();
+  await expect(drawer(page).getByText("Nothing for this filter.")).toBeVisible();
+  await rushes.api("POST", "/api/log", { text: "Moved the logo up", area: "picture" });
+  // The filtered list shows nothing new, so there's nothing on the page to wait for: give the change
+  // event and the state's refetch time to land (both are local and take a few milliseconds).
+  await page.waitForTimeout(800);
+  await logButton(page).click();
+  await page.reload();
+  await expect(logButton(page)).toHaveAccessibleName("Change Log");
 });

@@ -4,7 +4,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { api } from "../api.js";
 import {
-  AREA_LABELS, BY_UI, FILTERS, clock, footText, groupByDay, isFilter, jumpOf, localDate, newCount, problemText, recall, remember, rowName, storageKey,
+  AREA_LABELS, BY_UI, FILTERS, clock, filterShows, footText, groupByDay, isFilter, isNews, jumpOf, localDate, newCount, ownKey, problemText, recall, remember, rowName, storageKey,
   type Filter, type JumpTarget, type KeyStore,
 } from "../changelog.js";
 import { moveActive } from "../versions.js";
@@ -14,8 +14,6 @@ import type { LogHead, LogLine, LogView, Project, Stage } from "../types.js";
 const LIMIT = 1000;
 /** Scrolled further than this counts as reading: new lines wait behind the pill (§22.8). */
 const READING_PX = 40;
-/** Keys the drawer uses itself (moving through the chips, scrolling the list, pressing a row): they stop here, so they never step the picture's frames or play it. */
-const OWN_KEYS = new Set([" ", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"]);
 
 const session = (): KeyStore | undefined => {
   try {
@@ -39,6 +37,8 @@ export interface ChangeLogState {
   /** Lines arrived since it was last open (R19). */
   dot: boolean;
   setOpen(open: boolean): void;
+  /** The drawer has shown the line `mark` (`id@at`) at the top of the whole log: it's seen. */
+  saw(mark: string): void;
 }
 
 export function useChangeLog(projectId: string, head: LogHead | null | undefined): ChangeLogState {
@@ -46,18 +46,35 @@ export function useChangeLog(projectId: string, head: LogHead | null | undefined
   const [focusOnOpen, setFocusOnOpen] = useState(false);
   const [seen, setSeen] = useState(() => recall(local(), storageKey(projectId, "log-seen")));
   const mark = head?.mark ?? null;
+  const seenRef = useRef(seen);
+  seenRef.current = seen;
+  const see = (m: string) => {
+    setSeen(m);
+    remember(local(), storageKey(projectId, "log-seen"), m);
+  };
   // Whatever arrives while it's open has been seen.
   useEffect(() => {
-    if (!open || !mark || mark === seen) return;
-    setSeen(mark);
-    remember(local(), storageKey(projectId, "log-seen"), mark);
+    if (open && mark && isNews(mark, seen)) see(mark);
   }, [open, mark]);
+  // Seen in another tab of this project is seen here too (fix round 1, M3).
+  useEffect(() => {
+    const key = storageKey(projectId, "log-seen");
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === key && e.newValue) setSeen(e.newValue);
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [projectId]);
   const setOpen = (o: boolean) => {
     setOpenState(o);
     setFocusOnOpen(o);
     remember(session(), storageKey(projectId, "log-open"), o ? "1" : "0");
   };
-  return { open, focusOnOpen, dot: !open && !!mark && mark !== seen, setOpen };
+  // What the drawer showed counts too: its own fetch can be ahead of the page's (fix round 1).
+  const saw = (m: string) => {
+    if (isNews(m, seenRef.current)) see(m);
+  };
+  return { open, focusOnOpen, dot: !open && isNews(mark, seen), setOpen, saw };
 }
 
 /** The mockup's clock-arrow. */
@@ -156,7 +173,6 @@ function Drawer({ log, projectId, head, project, stage, header, buttonRef, toast
     return isFilter(saved) ? saved : "all";
   });
   const [text, setText] = useState("");
-  const [top, setTop] = useState(0);
   const root = useRef<HTMLElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
@@ -168,6 +184,12 @@ function Drawer({ log, projectId, head, project, stage, header, buttonRef, toast
   const seq = useRef(0);
 
   const reading = () => (list.current?.scrollTop ?? 0) > READING_PX;
+  /** Puts `next` on show. When it's the whole log, its newest line is seen, whatever the page's head says yet. */
+  const apply = (next: LogView) => {
+    setView(next);
+    setWaiting(null);
+    if (filterRef.current === "all" && next.entries[0]) log.saw(`${next.entries[0].id}@${next.entries[0].at}`);
+  };
   /** Fetches the newest lines. While someone reads further down, they wait behind the pill instead (§22.8). */
   const load = async (force = false) => {
     const n = ++seq.current;
@@ -178,10 +200,7 @@ function Drawer({ log, projectId, head, project, stage, header, buttonRef, toast
       if (n !== seq.current) return;
       setProblem(null);
       if (!force && shown.current && reading()) setWaiting(next);
-      else {
-        setView(next);
-        setWaiting(null);
-      }
+      else apply(next);
     } catch (e) {
       if (n !== seq.current) return;
       // With nothing on show the list says why; with lines on show they stay, and a toast says so.
@@ -206,11 +225,14 @@ function Drawer({ log, projectId, head, project, stage, header, buttonRef, toast
     void load();
   }, [head?.rev, head?.mark]);
 
-  // Under the header, whatever its height.
+  // Under the header, whatever its height. Written straight to the element, not kept as state: the
+  // header scrolls with the page, and a render per scroll event would trail it by a frame (fix round 1, I2).
   useLayoutEffect(() => {
     const el = header.current;
     if (!el) return;
-    const place = () => setTop(Math.max(0, Math.round(el.getBoundingClientRect().bottom)));
+    const place = () => {
+      if (root.current) root.current.style.top = `${Math.max(0, Math.round(el.getBoundingClientRect().bottom))}px`;
+    };
     place();
     const ro = new ResizeObserver(place);
     ro.observe(el);
@@ -223,7 +245,8 @@ function Drawer({ log, projectId, head, project, stage, header, buttonRef, toast
     };
   }, []);
 
-  useEffect(() => {
+  // With the commit, so a key pressed straight after opening already lands in the input.
+  useLayoutEffect(() => {
     if (log.focusOnOpen) input.current?.focus();
   }, []);
 
@@ -232,7 +255,8 @@ function Drawer({ log, projectId, head, project, stage, header, buttonRef, toast
     buttonRef.current?.focus();
   };
   // R13: Esc closes it when the key comes from inside it, from its button or from the page itself.
-  useEffect(() => {
+  // Bound with the commit, so an Esc pressed straight after opening is never missed.
+  useLayoutEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || e.defaultPrevented) return;
       const t = e.target as Node | null;
@@ -251,6 +275,11 @@ function Drawer({ log, projectId, head, project, stage, header, buttonRef, toast
     try {
       await api.post("/api/log", { text: line, area: stage });
       setText("");
+      // A line the filter on show leaves out would just vanish: say where it went (fix round 1, M1).
+      if (!filterShows(filter, stage)) {
+        const label = AREA_LABELS[stage];
+        toast(`Added under ${label}. Choose All${FILTERS.some(([f]) => f === stage) ? ` or ${label}` : ""} to see it.`);
+      }
       if (list.current) list.current.scrollTop = 0;
       await load(true);
     } catch (e) {
@@ -272,8 +301,7 @@ function Drawer({ log, projectId, head, project, stage, header, buttonRef, toast
   };
   const showWaiting = () => {
     if (!waiting) return;
-    setView(waiting);
-    setWaiting(null);
+    apply(waiting);
     if (list.current) list.current.scrollTop = 0;
     // The pill goes; focus moves to the newest line (or, when that line goes nowhere, the list)
     // rather than being lost, and never scrolls the list away from the top.
@@ -283,14 +311,16 @@ function Drawer({ log, projectId, head, project, stage, header, buttonRef, toast
     });
   };
   const onScroll = () => {
-    if (waiting && !reading()) {
-      setView(waiting);
-      setWaiting(null);
-    }
+    if (waiting && !reading()) apply(waiting);
   };
   const go = (to: JumpTarget) => {
     onJump(to);
-    if (window.innerWidth < 560) log.setOpen(false); // R18: full width covers the page
+    // R18: full width covers the page, so it closes. Focus goes back to its button rather than
+    // falling to the page; a lane row the jump opens takes it a frame later (fix round 1, M2).
+    if (window.innerWidth < 560) {
+      log.setOpen(false);
+      buttonRef.current?.focus();
+    }
   };
   // The rows below are memoised, so they call the newest `go` (and the page's newest jump) through a ref.
   const goRef = useRef(go);
@@ -310,8 +340,8 @@ function Drawer({ log, projectId, head, project, stage, header, buttonRef, toast
   const today = localDate(new Date());
   const rows = useMemo(() => {
     if (!view) return null;
-    return groupByDay(view.entries, new Date()).map((g, i) => (
-      <div class="dgroup" key={`${g.key}#${i}`}>
+    return groupByDay(view.entries, new Date()).map((g) => (
+      <div class="dgroup" key={g.key}>
         <h3 class="dday">{g.heading}</h3>
         <ul>
           {g.entries.map((e) => (
@@ -333,9 +363,8 @@ function Drawer({ log, projectId, head, project, stage, header, buttonRef, toast
       class="drawer"
       ref={root}
       aria-label="Change Log"
-      style={{ top: `${top}px` }}
       onKeyDown={(e) => {
-        if (OWN_KEYS.has(e.key)) e.stopPropagation();
+        if (ownKey(e)) e.stopPropagation();
       }}
     >
       <div class="dhead">

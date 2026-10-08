@@ -25,17 +25,44 @@ export interface DayGroup {
   entries: LogLine[];
 }
 
-/** Newest-first lines under their local day's heading (§22.8). */
+/**
+ * Newest-first lines under their local day's heading (§22.8). `key` is the local date, so it stays
+ * the same as newer days arrive above it and the rows inside never remount (a focused row keeps its
+ * focus, fix round 1 I1). A day split in two by a line out of order (a hand edit, a clock change)
+ * gets "~2", "~3" on its older halves, counted from the oldest so a new line at the top moves nothing.
+ */
 export function groupByDay(entries: readonly LogLine[], now: Date): DayGroup[] {
-  const groups: DayGroup[] = [];
+  const groups: (DayGroup & { date: string })[] = [];
   for (const e of entries) {
     const d = new Date(e.at);
-    const key = localDate(d);
+    const date = localDate(d);
     const last = groups[groups.length - 1];
-    if (last && last.key === key) last.entries.push(e);
-    else groups.push({ key, heading: dayHeading(d, now, true), entries: [e] });
+    if (last && last.date === date) last.entries.push(e);
+    else groups.push({ key: date, date, heading: dayHeading(d, now, true), entries: [e] });
   }
-  return groups;
+  const seen = new Map<string, number>();
+  for (let i = groups.length - 1; i >= 0; i--) {
+    const n = (seen.get(groups[i].date) ?? 0) + 1;
+    seen.set(groups[i].date, n);
+    if (n > 1) groups[i].key = `${groups[i].date}~${n}`;
+  }
+  return groups.map(({ key, heading, entries: lines }) => ({ key, heading, entries: lines }));
+}
+
+/** Whether a filter shows a line about `area` (a line added under another filter would otherwise vanish, fix round 1 M1). */
+export function filterShows(filter: Filter, area: LogArea): boolean {
+  return filter === "all" || filter === area;
+}
+
+const OWN_KEYS = new Set([" ", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"]);
+
+/**
+ * Keys the drawer uses itself (moving through the chips, scrolling the list, pressing a row): they
+ * stop there, so they never step the picture's frames or play it. A combination with Alt, Ctrl or
+ * Cmd is the page's (a shortcut, not a movement), so it always goes through (fix round 1, M4).
+ */
+export function ownKey(e: { key: string; altKey: boolean; ctrlKey: boolean; metaKey: boolean }): boolean {
+  return OWN_KEYS.has(e.key) && !e.altKey && !e.ctrlKey && !e.metaKey;
 }
 
 export type JumpTarget = { tab: Stage | "assets"; video?: string; version?: string; row?: string };
@@ -93,6 +120,20 @@ export function problemText(action: "read" | "add" | "export", err: unknown): st
   if (action === "add") return status < 500 ? "That line wasn't added: it needs a few words of text." : `That line wasn't added: the Change Log couldn't be written. ${doctor}`;
   if (action === "export") return `The Markdown wasn't saved: the Change Log couldn't be read or written. ${doctor}`;
   return status < 500 ? "The Change Log couldn't show that filter. Choose All and try again." : `The Change Log couldn't be read. ${doctor}`;
+}
+
+/**
+ * R19: whether the log's head (`id@at` of its newest line) is news since `seen`. The drawer marks
+ * what it has shown as seen, which can be ahead of the head the page last fetched (the log answered
+ * before the state did, fix round 1): a head older than that isn't news.
+ */
+export function isNews(mark: string | null, seen: string | null): boolean {
+  if (!mark || mark === seen) return false;
+  if (!seen) return true;
+  const time = (m: string) => Date.parse(m.slice(m.lastIndexOf("@") + 1));
+  const a = time(mark);
+  const b = time(seen);
+  return !(Number.isFinite(a) && Number.isFinite(b) && a < b);
 }
 
 export interface KeyStore {
