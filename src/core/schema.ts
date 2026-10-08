@@ -320,6 +320,41 @@ export const LogFileSchema = z.object({
 });
 export type LogFile = z.infer<typeof LogFileSchema>;
 
+const isRecord = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null && !Array.isArray(x);
+
+/**
+ * I3, in the spirit of R2: log.json is read tolerantly, so one bad line never loses the log. A line
+ * that fails the schema (a hand edit over 160 characters, a kind or an area from a newer Rushes) is
+ * left out and counted in `dropped`, as are lines past the newest LOG_MAX (two logs merged by git);
+ * undated refs that aren't refs are left out; an id seen twice gets "-2", "-3". The next write keeps
+ * the cleaned file. What isn't an object with a list of entries is still corrupt (R7). Writing is
+ * checked against LogFileSchema as strictly as ever.
+ */
+function tolerantLog(raw: unknown): unknown {
+  if (!isRecord(raw) || !Array.isArray(raw.entries)) return raw;
+  const entries: LogEntry[] = [];
+  const ids = new Set<string>();
+  let bad = 0;
+  for (const item of raw.entries) {
+    const line = LogEntrySchema.safeParse(item);
+    if (!line.success) {
+      bad += 1;
+      continue;
+    }
+    let id = line.data.id;
+    for (let k = 2; ids.has(id); k++) id = `${line.data.id.slice(0, 58)}-${k}`;
+    ids.add(id);
+    entries.push({ ...line.data, id });
+  }
+  const over = Math.max(0, entries.length - LOG_MAX);
+  const dropped = typeof raw.dropped === "number" && Number.isInteger(raw.dropped) && raw.dropped >= 0 ? raw.dropped : 0;
+  const undated = Array.isArray(raw.undated) ? raw.undated.filter((r): r is string => typeof r === "string" && r.length <= 300).slice(0, LOG_MAX) : raw.undated;
+  return { ...raw, undated, dropped: dropped + bad + over, entries: entries.slice(over) };
+}
+
+/** How log.json is read (see tolerantLog); the store writes it against LogFileSchema. */
+export const LogFileReadSchema = z.preprocess(tolerantLog, LogFileSchema);
+
 export const FILES = {
   project: { name: "project.json", schema: ProjectSchema },
   script: { name: "script.json", schema: ScriptSchema },
@@ -327,7 +362,7 @@ export const FILES = {
   picks: { name: "picks.json", schema: PicksSchema },
   batches: { name: "batches.json", schema: BatchesFileSchema },
   found: { name: "found.json", schema: FoundFileSchema },
-  log: { name: "log.json", schema: LogFileSchema },
+  log: { name: "log.json", schema: LogFileSchema, read: LogFileReadSchema },
 } as const;
 export type FileKey = keyof typeof FILES;
 export type FileData = {

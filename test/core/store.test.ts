@@ -149,15 +149,59 @@ describe("Store", () => {
     }
   });
 
-  it("a log.json with only §22.3's fields reads with the rest defaulted; one that fails the schema is corrupt", async () => {
-    const { store } = await tmpProject();
-    const entry = { id: "l_1", at: "2026-10-07T09:00:00.000Z", area: "picture", kind: "cut", text: "v1 added: first pass", video: "hero", version: "v1", ref: null, by: "agent" };
-    await writeFile(store.path("log"), JSON.stringify({ schema: 1, rev: 2, entries: [entry] }), "utf8");
-    expect(await store.read("log")).toEqual({ schema: 1, rev: 2, backfilled: false, undated: [], dropped: 0, entries: [{ ...entry, tab: null, n: 1, subject: "" }] });
-    await writeFile(store.path("log"), JSON.stringify({ schema: 1, rev: 2, entries: [{ ...entry, text: "" }] }), "utf8");
-    await expect(store.read("log")).rejects.toThrow(/log\.json.*entries\.0\.text/);
-    await writeFile(store.path("log"), "{ half a fil", "utf8");
-    await expect(store.read("log")).rejects.toBeInstanceOf(CorruptFileError);
+  describe("log.json is read tolerantly: one bad line never loses the log (I3, as R2 does for labels)", () => {
+    const entry = { id: "l_1", at: "2026-10-07T09:00:00.000Z", area: "picture" as const, kind: "cut" as const, text: "v1 added: first pass", video: "hero", version: "v1", ref: null, by: "agent" as const };
+    const full = { ...entry, tab: null, n: 1, subject: "" };
+    const line = (i: number) => ({ ...entry, id: `l_${i}`, text: `Line ${i}` });
+
+    it("a log.json with only §22.3's fields reads with the rest defaulted", async () => {
+      const { store } = await tmpProject();
+      await writeFile(store.path("log"), JSON.stringify({ schema: 1, rev: 2, entries: [entry] }), "utf8");
+      expect(await store.read("log")).toEqual({ schema: 1, rev: 2, backfilled: false, undated: [], dropped: 0, entries: [full] });
+    });
+
+    it("a 161-character hand edit, a blank line and a kind or area from a newer Rushes are dropped and counted; the rest reads", async () => {
+      const { store } = await tmpProject();
+      const bad = [{ ...entry, id: "l_long", text: "x".repeat(161) }, { ...entry, id: "l_blank", text: "" }, { ...entry, id: "l_new", kind: "format" }, { ...entry, id: "l_area", area: "captions" }, "not a line"];
+      await writeFile(store.path("log"), JSON.stringify({ schema: 1, rev: 7, backfilled: true, dropped: 3, entries: [...bad, entry] }), "utf8");
+      const log = await store.read("log");
+      expect(log).toMatchObject({ rev: 7, backfilled: true, dropped: 8, entries: [full] });
+      // The next write keeps the clean file, so the bad lines are counted once.
+      await store.update("log", () => undefined);
+      expect(await store.read("log")).toMatchObject({ rev: 8, dropped: 8, entries: [full] });
+    });
+
+    it("5001 lines (two logs merged by git, say) keep the newest 5000 and count the one", async () => {
+      const { store } = await tmpProject();
+      await writeFile(store.path("log"), JSON.stringify({ schema: 1, rev: 1, backfilled: true, entries: Array.from({ length: 5001 }, (_, i) => line(i)) }), "utf8");
+      const log = await store.read("log");
+      expect(log.entries).toHaveLength(5000);
+      expect(log.entries[0].text).toBe("Line 1");
+      expect(log.dropped).toBe(1);
+    });
+
+    it("undated refs that aren't refs are left out, and a line id seen twice reads as two ids", async () => {
+      const { store } = await tmpProject();
+      await writeFile(store.path("log"), JSON.stringify({ schema: 1, rev: 1, backfilled: true, undated: ["music/bed", 7, "x".repeat(301)], entries: [line(1), { ...line(2), id: "l_1" }] }), "utf8");
+      const log = await store.read("log");
+      expect(log.undated).toEqual(["music/bed"]);
+      expect(log.entries.map((e) => e.id)).toEqual(["l_1", "l_1-2"]);
+    });
+
+    it("still corrupt: not JSON, not an object, entries that aren't a list, or another schema", async () => {
+      const { store } = await tmpProject();
+      for (const text of ["{ half a fil", "[]", "null", '"log"', JSON.stringify({ schema: 1, rev: 0, entries: "lots" }), JSON.stringify({ schema: 2, rev: 0, entries: [] })]) {
+        await writeFile(store.path("log"), text, "utf8");
+        await expect(store.read("log"), text).rejects.toBeInstanceOf(CorruptFileError);
+      }
+    });
+
+    it("writing stays strict: a line over 160 characters is refused and the file is left as it was", async () => {
+      const { store } = await tmpProject();
+      await store.update("log", (f) => { f.entries.push(full); });
+      await expect(store.update("log", (f) => { f.entries.push({ ...full, id: "l_2", text: "x".repeat(161) }); })).rejects.toBeInstanceOf(InvalidError);
+      expect(await store.read("log")).toMatchObject({ rev: 1, dropped: 0, entries: [full] });
+    });
   });
 
   it("a failed update does not block the next one", async () => {

@@ -85,7 +85,9 @@ export class Store extends EventEmitter {
     } catch (e) {
       throw new CorruptFileError(file, `invalid JSON (${(e as Error).message})`);
     }
-    const parsed = FILES[key].schema.safeParse(json);
+    // A file may be read more leniently than it's written (log.json, I3).
+    const def = FILES[key];
+    const parsed = ("read" in def ? def.read : def.schema).safeParse(json);
     if (!parsed.success) throw new CorruptFileError(file, parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
     return parsed.data as FileData[K];
   }
