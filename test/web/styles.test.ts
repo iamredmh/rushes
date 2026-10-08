@@ -34,6 +34,8 @@ describe("styles.css", () => {
   it("the format toggle and the note's format switch use explicit grid tracks (§21.8, Safari)", () => {
     expect(css).toMatch(/\.fmts \{[^}]*display: inline-grid/);
     expect(css).toMatch(/\.fscope \{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
+    // Task 5 review M1: the Other formats row's grid too.
+    expect(css).toMatch(/\.otherfmts \{[^}]*grid-template-columns: minmax\(0, 1fr\)/);
   });
   it("a selected chip's warning mark reads at 4.5:1 or more against the chip (review M7)", () => {
     const token = (name: string) => css.match(new RegExp(`--${name}: (#[0-9a-f]{6});`))![1];
