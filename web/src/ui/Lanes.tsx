@@ -2,6 +2,8 @@
 // track carrying the lane's note markers, spans and the playhead, and a control column (Use / In use,
 // or M / S on Mix). Shared by every audio tab through AudioStage. A row can carry a heading above it
 // (a Voiceover round's name) or be a fold: one full-width button standing for a folded round.
+// A Sound effects pass also carries a chevron that opens its layers by sound (§23, CueLayers), and
+// every cue opens the hover card (CueCard).
 //
 // Nothing here re-renders per frame. The playheads are plain elements AudioStage moves through a
 // ref, and a waveform canvas redraws only when its peaks, its size or the timeline length change.
@@ -11,6 +13,9 @@ import type { LoadResult } from "../audio/engine.js";
 import { type Clip, mediaKey } from "../audio/timeline.js";
 import { cueRoom } from "../lib.js";
 import { Missing } from "./AssetViews.js";
+import { cueLabel, cueName, cuesInTime } from "../cues.js";
+import { type CardCue, CUE_CARD_ID, CueCard, cardHover, useCueCard } from "./CueCard.js";
+import { CueLayers, rovingKeyDown } from "./CueLayers.js";
 import { Icon } from "./Icon.js";
 
 /** One lane on an audio tab. */
@@ -33,8 +38,10 @@ export interface StageRow {
   fold?: { label: ComponentChildren; text: string; open: boolean; dot: boolean; onToggle(): void };
   /** The clips drawn on this lane's waveform. */
   clips: Clip[];
-  /** SFX cues, labelled on the waveform at their times. */
-  cues?: { id: string; name: string; t: number }[];
+  /** SFX cues, labelled on the waveform at their times. `file` is the cue's sample, when the agent sent one (§23). */
+  cues?: { id: string; name: string; t: number; file?: string }[];
+  /** §23: the chevron that opens this pass's layers by sound. Only Sound effects passes have one. */
+  layers?: { open: boolean; onToggle(): void };
   /** Clicking the lane auditions this clip in this engine lane. */
   audition?: { lane: string; clip: string };
   /** This lane's clip is the pick: heard when no lane is selected. */
@@ -149,8 +156,14 @@ export interface LanesProps {
   marks: Record<string, LaneMark[]>;
   range: { in: number | null; out: number | null };
   onSelect(row: StageRow): void;
-  onSeek(t: number, row: StageRow): void;
+  /** A seek on a lane; `cue` when a cue's label or tick was pressed (§23). */
+  onSeek(t: number, row: StageRow, cue?: string): void;
+  /** For a cue's sample that won't play (§23). */
+  toast?(message: string): void;
 }
+
+/** A cue as a lane draws it. */
+type LaneCue = NonNullable<StageRow["cues"]>[number];
 
 /**
  * What's cut off by its column. By row key: which lanes have their name ("n") or meta ("m") cut;
@@ -179,7 +192,7 @@ const sameCut = (a: Cut, b: Cut) => {
   return ka.length === Object.keys(b).length && ka.every((k) => a[k] === b[k]);
 };
 
-export function Lanes({ rows, length, media, selected, marks, range, onSelect, onSeek }: LanesProps) {
+export function Lanes({ rows, length, media, selected, marks, range, onSelect, onSeek, toast }: LanesProps) {
   const pct = (s: number) => `${length > 0 ? (s / length) * 100 : 0}%`;
 
   // A name or meta line cut off by its column shows in full as a tooltip. Measured when the rows'
@@ -197,7 +210,8 @@ export function Lanes({ rows, length, media, selected, marks, range, onSelect, o
     const results = r.clips.map((c) => media[mediaKey(c)]);
     return (results.some((x) => x !== undefined && x !== "error" && x.streamed) ? "s" : "") + (results.some((x) => x === "error") ? "b" : "");
   });
-  const shape = JSON.stringify(rows.map((r, i) => [r.key, r.name, r.meta ?? "", r.heading ?? "", r.fold ? r.fold.text : null, r.missing ?? false, mediaMarks[i]]));
+  // §23: a chevron narrows the name column, so it's part of the shape too.
+  const shape = JSON.stringify(rows.map((r, i) => [r.key, r.name, r.meta ?? "", r.heading ?? "", r.fold ? r.fold.text : null, r.missing ?? false, mediaMarks[i], r.layers ? 1 : 0]));
   useLayoutEffect(measure, [shape]);
   useEffect(() => {
     window.addEventListener("resize", measure);
@@ -205,6 +219,10 @@ export function Lanes({ rows, length, media, selected, marks, range, onSelect, o
     void document.fonts?.ready.then(measure);
     return () => window.removeEventListener("resize", measure);
   }, []);
+
+  // §23: the one hover card, and which cue label is each lane's Tab stop. Neither changes per frame.
+  const { shown: shownCard, api: card } = useCueCard();
+  const [focusCue, setFocusCue] = useState<Record<string, number>>({});
 
   return (
     <div class="lanes" ref={root}>
@@ -238,7 +256,13 @@ export function Lanes({ rows, length, media, selected, marks, range, onSelect, o
         }
         const current = row.key === selected;
         const flags = cut[row.key] ?? "";
-        const rooms = cueRoom(row.cues ?? [], length);
+        // §23: cues in time order, so the labels, ←/→ and "cue n of N" all follow time.
+        const timed = cuesInTime(row.cues ?? []);
+        const rooms = cueRoom(timed, length);
+        const tabCue = Math.min(focusCue[row.key] ?? 0, Math.max(0, timed.length - 1));
+        const cardCue = (c: LaneCue, i: number): CardCue => ({
+          key: `m:${row.key}:${i}`, name: cueName(c), t: c.t, n: i + 1, of: timed.length, file: c.file ?? null, color: row.color,
+        });
         const results = row.clips.map((c) => media[mediaKey(c)]);
         const streamed = results.some((r) => r !== undefined && r !== "error" && r.streamed);
         const broken = results.some((r) => r === "error");
@@ -248,36 +272,58 @@ export function Lanes({ rows, length, media, selected, marks, range, onSelect, o
           return { offset: c.offset, duration: c.duration > 0 ? c.duration : (loaded?.duration ?? 0), peaks: loaded ? loaded.peaks : null };
         });
         const laneMarks = marks[row.key] ?? [];
+        const nameButton = (
+          <button
+            type="button"
+            class="nm"
+            // Part of the player: Space still plays with a lane focused (§19.8).
+            data-player
+            aria-current={current ? "true" : "false"}
+            aria-label={row.name}
+            aria-description={row.missing ? (typeof row.missing === "string" ? row.missing : "Missing") : undefined}
+            onClick={() => onSelect(row)}
+          >
+            {/* The tooltip sits on the unclipped line, not on the ellipsised text, which would clip it. */}
+            <b data-tip={flags.includes("n") ? row.name : undefined}>
+              <i style={{ background: row.color }} />
+              <span data-name>{row.name}</span>
+              {/* Beside the name, not in the meta line, which clips its tooltip. */}
+              {row.missing && <Missing tip={typeof row.missing === "string" ? row.missing : undefined} />}
+            </b>
+            <small data-meta data-tip={flags.includes("m") && row.meta ? row.meta : undefined}>
+              {broken ? (
+                <span class="smk bad" data-tip="This file won't play in a browser"><Icon name="alert" /></span>
+              ) : streamed ? (
+                <span class="smk" data-tip="Long file: switching isn't sample-exact"><Icon name="stream" /></span>
+              ) : null}
+              <span data-meta-text>{row.meta ?? ""}</span>
+            </small>
+          </button>
+        );
         return (
           <Fragment key={row.key}>
           {heading}
           <div class="lane" data-row={row.key} aria-current={current ? "true" : undefined}>
-            <button
-              type="button"
-              class="nm"
-              // Part of the player: Space still plays with a lane focused (§19.8).
-              data-player
-              aria-current={current ? "true" : "false"}
-              aria-label={row.name}
-              aria-description={row.missing ? (typeof row.missing === "string" ? row.missing : "Missing") : undefined}
-              onClick={() => onSelect(row)}
-            >
-              {/* The tooltip sits on the unclipped line, not on the ellipsised text, which would clip it. */}
-              <b data-tip={flags.includes("n") ? row.name : undefined}>
-                <i style={{ background: row.color }} />
-                <span data-name>{row.name}</span>
-                {/* Beside the name, not in the meta line, which clips its tooltip. */}
-                {row.missing && <Missing tip={typeof row.missing === "string" ? row.missing : undefined} />}
-              </b>
-              <small data-meta data-tip={flags.includes("m") && row.meta ? row.meta : undefined}>
-                {broken ? (
-                  <span class="smk bad" data-tip="This file won't play in a browser"><Icon name="alert" /></span>
-                ) : streamed ? (
-                  <span class="smk" data-tip="Long file: switching isn't sample-exact"><Icon name="stream" /></span>
-                ) : null}
-                <span data-meta-text>{row.meta ?? ""}</span>
-              </small>
-            </button>
+            {row.layers ? (
+              // §23: the chevron sits beside the name button, which can't hold another button (ruling R1).
+              <div class="nmc">
+                <button
+                  type="button"
+                  class="chev tip-start"
+                  aria-expanded={row.layers.open}
+                  aria-controls={row.layers.open && timed.length > 0 ? `cl-${row.key}` : undefined}
+                  aria-label={`Layers for ${row.name}`}
+                  data-tip={timed.length === 0 ? "No cues in this pass" : row.layers.open ? "Hide the layers" : "Show the layers"}
+                  disabled={timed.length === 0}
+                  onClick={row.layers.onToggle}
+                >
+                  <Icon name="chev" />
+                </button>
+                {nameButton}
+              </div>
+            ) : (
+              nameButton
+            )}
             <div
               class="track"
               onClick={(e) => {
@@ -286,13 +332,49 @@ export function Lanes({ rows, length, media, selected, marks, range, onSelect, o
               }}
             >
               <Wave segments={segments} length={length} color={row.color} />
-              {(row.cues ?? []).map((c, i) => <i class="cue-tick" style={{ left: pct(c.t), color: row.color }} key={`t${i}`} />)}
-              {(row.cues ?? []).map((c, i) => (
-                // Each label gets the gap to its nearest cue, so close cues are cut short rather than overlap.
-                <span class="cue" data-cue={c.id} key={`c${i}`} style={{ left: pct(c.t), color: row.color, maxWidth: `calc(${(rooms[i] * 100).toFixed(3)}% - 8px)` }}>
-                  {c.name}
-                </span>
+              {timed.map((c, i) => (
+                <i
+                  class={`cue-tick${card.shown === `m:${row.key}:${i}` ? " hot" : ""}`}
+                  aria-hidden="true"
+                  key={`t${i}`}
+                  style={{ left: pct(c.t), color: row.color }}
+                  {...cardHover(card, cardCue(c, i))}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSeek(c.t, row, c.id);
+                  }}
+                />
               ))}
+              {timed.map((c, i) => {
+                const cc = cardCue(c, i);
+                const shown = card.shown === cc.key;
+                return (
+                  // Each label gets the gap to its nearest cue, so close cues are cut short rather than overlap.
+                  <button
+                    type="button"
+                    class={`cue${shown ? " hot" : ""}`}
+                    data-cue={c.id}
+                    key={`c${i}`}
+                    tabIndex={i === tabCue ? 0 : -1}
+                    aria-label={cueLabel(c)}
+                    aria-describedby={shown ? CUE_CARD_ID : undefined}
+                    style={{ left: pct(c.t), color: row.color, maxWidth: `calc(${(rooms[i] * 100).toFixed(3)}% - 8px)` }}
+                    {...cardHover(card, cc)}
+                    onFocus={(e) => {
+                      setFocusCue((f) => (f[row.key] === i ? f : { ...f, [row.key]: i }));
+                      card.show(e.currentTarget, cc);
+                    }}
+                    onBlur={() => card.hide()}
+                    onKeyDown={(e) => rovingKeyDown(e, "button.cue", card)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSeek(c.t, row, c.id);
+                    }}
+                  >
+                    <span>{c.name}</span>
+                  </button>
+                );
+              })}
               {laneMarks.map((m) => m.tOut !== null && <div class={`span ${m.status}`} data-note={m.id} style={{ left: pct(m.t), width: pct(m.tOut - m.t) }} />)}
               {laneMarks.map((m) => <div class={`mk ${m.status}`} data-note={m.id} style={{ left: pct(m.t) }} title={m.text} />)}
               {range.in !== null && (
@@ -332,9 +414,22 @@ export function Lanes({ rows, length, media, selected, marks, range, onSelect, o
               {row.controls}
             </div>
           </div>
+          {row.layers?.open && timed.length > 0 && (
+            <CueLayers
+              id={`cl-${row.key}`}
+              name={row.name}
+              cues={timed}
+              length={length}
+              color={row.color}
+              card={card}
+              onSeek={(t, cue) => onSeek(t, row, cue)}
+              toast={toast ?? (() => undefined)}
+            />
+          )}
           </Fragment>
         );
       })}
+      <CueCard shown={shownCard} onHide={card.hide} />
     </div>
   );
 }

@@ -57,7 +57,7 @@ export interface VariantOptions {
   /** Tone frequency in Hz. */
   freq: number;
   meta?: Record<string, string | number>;
-  cues?: { name: string; t: number }[];
+  cues?: { name: string; t: number; file?: string }[];
   /** Lane id; defaults to the round, slugged, else the stage's own lane. */
   lane?: string;
   /** Voice only: the round's name, e.g. "Round 2 · Gerald, tone" (§18.2). */

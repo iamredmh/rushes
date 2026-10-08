@@ -17,6 +17,11 @@ const COLOR = { music: "#A78BFA", sfx: "#FB923C" } as const;
 const BLIND_SEED = Math.floor(Math.random() * 2 ** 31);
 let blindSession = false;
 
+// §23: which passes have their layers open, by row key, for the session (like Voiceover's open
+// rounds). Toggling re-renders this tab, so AudioStage re-renders and its layout effect hands the
+// layers' playheads to paint() with the lane's own.
+const openLayers = new Set<string>();
+
 export interface VariantTabProps {
   stage: "music" | "sfx";
   state: State;
@@ -34,6 +39,12 @@ export function VariantTab({ stage, state, assets, video, toast, onChanged, onPe
   const setBlind = (on: boolean) => {
     blindSession = on;
     setBlindState(on);
+  };
+  const [, rerender] = useState(0);
+  const toggleLayers = (key: string) => {
+    if (openLayers.has(key)) openLayers.delete(key);
+    else openLayers.add(key);
+    rerender((n) => n + 1);
   };
 
   const all = variantRows(state.project.lanes, stage);
@@ -63,6 +74,7 @@ export function VariantTab({ stage, state, assets, video, toast, onChanged, onPe
       color: COLOR[stage],
       clips: [clip],
       cues: stage === "sfx" ? r.cues : undefined,
+      layers: stage === "sfx" ? { open: openLayers.has(r.key), onToggle: () => toggleLayers(r.key) } : undefined,
       audition: { lane: r.lane, clip: r.key },
       picked,
       // Manifest order: with nothing picked or selected, the first bed plays, Blind or not.

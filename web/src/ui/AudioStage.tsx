@@ -8,6 +8,7 @@ import type { ComponentChildren } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, mediaUrl } from "../api.js";
 import { type AudioEngine, type EngineSnapshot, liveContexts } from "../audio/engine.js";
+import { type SampleState, samples } from "../audio/sample.js";
 import { type Clip, needsVideoSync, setStreamThreshold } from "../audio/timeline.js";
 import { useAudioStage } from "../audio/useAudioStage.js";
 import {
@@ -36,6 +37,8 @@ export interface AudioTestHook {
   /** The clips the mounted tab plays: every one, and those heard now (variant gain × lane gain > 0). */
   clips: Clip[];
   heard(): { id: string; lane: string; path: string; offset: number }[];
+  /** §23: the cue-sample player's state. */
+  sample(): SampleState;
 }
 declare global {
   interface Window {
@@ -51,6 +54,7 @@ const hook: AudioTestHook | null = FLAGS.test
       renders: 0,
       draws: waveDraws,
       liveContexts,
+      sample: () => samples.state(),
       clips: [],
       heard() {
         const s = this.engine?.inspect();
@@ -414,10 +418,17 @@ export function AudioStage(props: AudioStageProps) {
           marks={drawn}
           range={range}
           onSelect={select}
-          onSeek={(t, row) => {
+          onSeek={(t, row, cue) => {
             select(row);
+            // §23: a cue's label or tick also aims the note at that cue, so the next note lands on it at its time.
+            const aim = cue === undefined ? undefined : onOptions.find((o) => o.value === `c:${row.key}:${cue}`);
+            if (aim) {
+              selectedOn.current = aim.value;
+              setOnValue(aim.value);
+            }
             engine.seek(t);
           }}
+          toast={toast}
         />
         {belowLanes}
       </div>
