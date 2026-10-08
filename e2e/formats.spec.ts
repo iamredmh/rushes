@@ -494,10 +494,11 @@ test("leaving a render that won't play never shows its message on the next one, 
   await expect(page.locator(".frame .msg")).toHaveText("This file won't play in a browser. Ask your agent for an H.264 MP4 of this format.");
   // To v1's 9:16, which plays: the same shape, so nothing else re-renders the player first.
   // Sampled before each of the next frames is painted, starting with the first after the change.
+  // The version list (§22.4) is opened first; the pick itself happens inside the sampling, as the select's change did.
+  await versionButton(page).click();
+  await expect(page.getByRole("listbox", { name: "Versions" })).toBeVisible();
   const frames = await page.evaluate(async () => {
-    const select = document.querySelector<HTMLSelectElement>('select[aria-label="Version"]')!;
-    select.value = "v1";
-    select.dispatchEvent(new Event("change", { bubbles: true }));
+    document.querySelector<HTMLButtonElement>('[role="listbox"][aria-label="Versions"] [role="option"][data-version="v1"]')!.click();
     const seen: string[] = [];
     for (let i = 0; i < 12; i++) {
       await new Promise((r) => requestAnimationFrame(r));

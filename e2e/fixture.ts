@@ -107,7 +107,7 @@ export interface Rushes {
    * primary, the rest its formats. `audio` gives the primary a tone. Needs ffmpeg. Generated H.264
    * testsrc renders with invented names.
    */
-  addFormatsCut(sizes: FormatSize[], opts?: { video?: string; note?: string; audio?: boolean }): Promise<{ version: { id: string; formats: { id: string; label: string; file: string }[] } }>;
+  addFormatsCut(sizes: FormatSize[], opts?: { video?: string; note?: string; label?: string; audio?: boolean }): Promise<{ version: { id: string; formats: { id: string; label: string; file: string }[] } }>;
   /** Register one more shape of a cut (default: the newest of "Hero"). Needs ffmpeg. Generated H.264 testsrc renders with invented names. */
   addFormatFile(size: FormatSize, opts?: { video?: string; version?: string }): Promise<{ format: { id: string; label: string; file: string } }>;
   /** Write a generated sine WAV into the project and register it as a variant on `stage`. */
@@ -342,14 +342,14 @@ export const test = base.extend<{ rushes: Rushes; noFfmpeg: boolean }>({
       return file;
     };
     const slugOf = (video: string) => video.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
-    const addFormatsCut = async (sizes: FormatSize[], opts: { video?: string; note?: string; audio?: boolean } = {}) => {
+    const addFormatsCut = async (sizes: FormatSize[], opts: { video?: string; note?: string; label?: string; audio?: boolean } = {}) => {
       needsH264(browserName);
       const video = opts.video ?? "Hero";
       const slug = slugOf(video);
       const n = (cutsByVideo.get(slug) ?? 0) + 1;
       cutsByVideo.set(slug, n);
       const files = await Promise.all(sizes.map((s, i) => render(slug, n, s, "", opts.audio && i === 0)));
-      return api("POST", "/api/versions", { video, file: files[0], note: opts.note, formats: files.slice(1).map((file) => ({ file })) });
+      return api("POST", "/api/versions", { video, file: files[0], note: opts.note, label: opts.label, formats: files.slice(1).map((file) => ({ file })) });
     };
     const addFormatFile = async (size: FormatSize, opts: { video?: string; version?: string } = {}) => {
       needsH264(browserName);

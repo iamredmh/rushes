@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { existsSync } from "node:fs";
-import { mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { probeVideo, type VideoProbe } from "../../src/core/media.js";
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
@@ -574,6 +574,29 @@ describe("the Change Log line for a format (§21, §22.5)", () => {
     const same = await call("POST", "/api/versions", { video: "Hero", file: "renders/hero2_1920x1080.mp4", formats: [{ file: "renders/hero2_1280x720.mp4" }] });
     expect(same.status).toBe(409);
     expect(await lines(call)).toHaveLength(1);
+  });
+
+  it("Send to agent's prompt and Export notes carry both formats' notes and the Change Log together", async () => {
+    const { root, call } = await setup([WIDE, TALL]);
+    await call("POST", "/api/versions", { video: "Hero", file: WIDE, label: "logo hold", formats: [{ file: TALL }] });
+    const note = (over: Record<string, unknown>) => call("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 1, ...over });
+    expect((await note({ text: "Logo early everywhere" })).status).toBe(201);
+    expect((await note({ text: "Crop the tall title", format: "9x16" })).status).toBe(201);
+    const { batch } = (await call("POST", "/api/batches", { stage: "picture" })).json;
+    expect(batch.prompt).toContain("Hero v1 has 2 formats: 16:9 (main), 9:16. Notes: 1 for all formats, 1 for 9:16.");
+    expect(batch.prompt).toMatch(/Recent changes \(newest first\):\n- .* v1 and its 9:16 added: logo hold/);
+    // The Recent changes block is the prompt's end, after the notes.
+    expect(batch.prompt.indexOf("Crop the tall title")).toBeLessThan(batch.prompt.indexOf("Recent changes"));
+    const res = await call("POST", "/api/exports/notes", {});
+    expect(res.status, res.text).toBe(201);
+    const out = res.json;
+    const notes = await readFile(join(root, out.path), "utf8");
+    expect(notes).toContain("Crop the tall title");
+    expect(notes).toContain("9:16");
+    const log = await readFile(join(root, out.changeLog), "utf8");
+    expect(log).toContain("v1 and its 9:16 added: logo hold");
+    expect(log).toContain("2 notes sent from Picture");
+    expect(log).not.toContain("Crop the tall title");
   });
 
   it("never copies a note's text into the line", async () => {
