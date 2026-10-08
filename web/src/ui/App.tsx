@@ -400,7 +400,7 @@ export function App() {
         {chip !== null && foundSignature(state.found) !== foundSeen && (
           <button type="button" class="foundchip" data-tip="Open the other files found in this project" onClick={() => openFound()}>
             <span class="dot" />
-            {chip}
+            <span class="ftext">{chip}</span>
           </button>
         )}
         {video && state.project.videos.length > 1 && (

@@ -115,3 +115,34 @@ button.lrow:hover { background: var(--hover); }
 
 /* The header sits above the drawer (35), so its tooltips, which open downwards, aren't hidden by it. The version list (45) rides inside it. */
 .head { position: relative; z-index: 36; }
+
+/* The header with the format toggle (§21.5) beside the version control, on a long project (two long
+   film names, a found chip, a locked cut with a 48-character label): one row from 1101 px. The toggle
+   is never squeezed (flex: none, its own width); room is made around it in steps, as the window
+   narrows, and only when the header has a toggle:
+   - 1560 px and under, with two formats or more: the Change Log button is its icon (as under 1100 px);
+   - 1480 px and under: the toggle's compact form, each chip its ratio and count without the shape mark;
+   - 1280 px and under: the "Picture" label goes (the version button says what it is), the found chip's
+     words truncate like the names, and the gaps and the names' shortest forms tighten.
+   Up to four formats fit; more may wrap at the narrowest widths. */
+/* The films' names are what you switch between: with a toggle beside the version control they still
+   come whole first, at 1440 px, and the project's name and the version's label give up the pixels. */
+@media (min-width: 1001px) { .head:has(.fmtwrap) > .pack { flex-grow: 4; } }
+@media (min-width: 1101px) and (max-width: 1560px) {
+  .head:has(.fmts > :nth-child(2)) .clog { padding: 0 9px; }
+  .head:has(.fmts > :nth-child(2)) .clog .clabel { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+  .head:has(.fmts > :nth-child(2)) .clog[data-tip]::after { content: attr(data-tip); }
+}
+@media (max-width: 1480px) {
+  .head .fmts [role="radio"] { gap: 5px; padding: 4px 8px; }
+  .head .fmts .shape { display: none; }
+  .head .fmts .n { min-width: calc(2ch + 8px); padding: 0 4px; }
+}
+@media (min-width: 1001px) and (max-width: 1280px) {
+  .head:has(.fmtwrap) { gap: 10px; }
+  .head:has(.fmtwrap) > .plabel { display: none; }
+  .head:has(.fmtwrap) > .crumb { min-width: 72px; }
+  .head:has(.fmtwrap) > .pack { min-width: 112px; }
+  .head:has(.fmtwrap) > .foundchip { flex: 1 1 0; min-width: 64px; max-width: max-content; }
+  .head .foundchip .ftext { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+}
