@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { RushesError } from "../core/errors.js";
-import { probe } from "../core/media.js";
+import { AUDIO_FORMATS, probe } from "../core/media.js";
 import { fromManifestPath } from "../core/paths.js";
 import type { LaneStage, Picks, Project, Variant } from "../core/schema.js";
 
@@ -213,7 +213,7 @@ async function runWithTimeout(run: LoudnessRunner, args: string[], timeoutMs: nu
 /** A file's length in seconds, or null when it can't be told. Defaults to ffprobe; tests inject a fake. */
 export type DurationProbe = (absFile: string) => Promise<number | null>;
 
-const probeDuration: DurationProbe = async (file) => (await probe(file)).duration;
+const probeDuration: DurationProbe = async (file) => (await probe(file, { formats: AUDIO_FORMATS })).duration;
 
 /**
  * The VO's own span, from the same `voiceSource` the mix uses (§18.4): the picked round's own

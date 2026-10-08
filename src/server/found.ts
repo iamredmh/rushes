@@ -19,7 +19,7 @@ import {
 } from "../core/found.js";
 import { InvalidError, RevConflictError, RushesError } from "../core/errors.js";
 import { slugify } from "../core/ids.js";
-import { probe as ffprobe } from "../core/media.js";
+import { AUDIO_FORMATS, probe as ffprobe } from "../core/media.js";
 import { fromManifestPath, toManifestPath } from "../core/paths.js";
 import { addFile, addVariant, addVersion, resolveVideo } from "../core/project.js";
 import type { Project, Script, Version, Video } from "../core/schema.js";
@@ -338,7 +338,7 @@ const MAX_DISMISSED = 10000;
 const DURATION_CACHE_LIMIT = 10000;
 
 /** The default probe: ffprobe's duration, or null without ffprobe. */
-export const ffprobeDuration: FoundProbe = async (abs, signal) => (await ffprobe(abs, { signal })).duration;
+export const ffprobeDuration: FoundProbe = async (abs, signal) => (await ffprobe(abs, { signal, formats: AUDIO_FORMATS })).duration;
 
 /**
  * The scanner's `announce` for a server: a `change` event on the store, which the SSE route sends

@@ -11,7 +11,7 @@ import { createBatch, latestBatch } from "../core/batches.js";
 import { exportFileName, notesMarkdown } from "../core/exportNotes.js";
 import { tabStates } from "../core/tabs.js";
 import { fromManifestPath, toManifestPath } from "../core/paths.js";
-import { PROBE_TIMEOUT_MS, VIDEO_EXT, giveUpAfter, probe, probeVideo, videoGaveUp, type VideoProbe, type VideoProber } from "../core/media.js";
+import { AUDIO_FORMATS, PROBE_TIMEOUT_MS, VIDEO_EXT, giveUpAfter, probe, probeVideo, videoGaveUp, type VideoProbe, type VideoProber } from "../core/media.js";
 import { PROXY_PATH, ProxyJobs, type ProxyEvent } from "./proxy.js";
 import { PeakJobs } from "./peaks.js";
 import { lstat, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
@@ -1013,7 +1013,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   app.post("/api/script/:id/takes", async (c) => {
     const b = await body(c, TakeBody);
     const file = toManifestPath(store.root, b.file);
-    const info = await probe(fromManifestPath(store.root, file));
+    const info = await probe(fromManifestPath(store.root, file), { formats: AUDIO_FORMATS });
     const { result } = await store.update("script", (s) => addTake(s, c.req.param("id"), { file, duration: info.duration }));
     return c.json({ take: result }, 201);
   });

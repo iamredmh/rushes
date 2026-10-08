@@ -3,7 +3,8 @@ import { spawnSync } from "node:child_process";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { GIVE_UP_GRACE_MS, PROBE_TIMEOUT_MS, giveUpAfter, parseVideoProbe, probe as mediaProbe, probeVideo, proxyNeed, VIDEO_FORMATS, type Probe } from "../../src/core/media.js";
+import { GIVE_UP_GRACE_MS, PROBE_TIMEOUT_MS, giveUpAfter, parseVideoProbe, probe as mediaProbe, probeVideo, proxyNeed, AUDIO_FORMATS, VIDEO_FORMATS, type Probe } from "../../src/core/media.js";
+import { PEAKS_FORMATS } from "../../src/server/peaks.js";
 
 const probe = (p: Partial<Probe>): Probe => ({ duration: 10, fps: 25, codec: "h264", width: 1920, height: 1080, pixFmt: "yuv420p", ...p });
 
@@ -150,11 +151,45 @@ describe("probe: only local files (the scan runs it on every media file it finds
       expect(at).toBeGreaterThan(-1);
       expect(args[at + 1]).toBe("file");
       expect(at).toBeLessThan(args.indexOf("/some/where/a.wav"));
+      // Follow-up to final review I1: the containers it may read are the caller's; audio by default.
+      const fmt = args.indexOf("-format_whitelist");
+      expect(args[fmt + 1]).toBe(AUDIO_FORMATS);
+      expect(fmt).toBeLessThan(args.indexOf("/some/where/a.wav"));
+      await mediaProbe("/some/where/a.mp4", { formats: VIDEO_FORMATS });
+      const video = (await readFile(log, "utf8")).trim().split("\n");
+      expect(video[video.indexOf("-format_whitelist") + 1]).toBe(VIDEO_FORMATS);
     } finally {
       process.env.PATH = path;
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it("AUDIO_FORMATS is the waveform list: audio and video containers, never a playlist, an image or a GIF", () => {
+    expect(AUDIO_FORMATS).toBe(PEAKS_FORMATS);
+    const list = AUDIO_FORMATS.split(",");
+    for (const f of ["wav", "w64", "aiff", "mp3", "aac", "flac", "ogg", "caf", "mov", "matroska"]) expect(list).toContain(f);
+    for (const f of ["concat", "hls", "gif", "image2", "png_pipe", "tee", "lavfi"]) expect(list).not.toContain(f);
+  });
+
+  it.skipIf(!["ffmpeg", "ffprobe"].every((b) => spawnSync(b, ["-version"], { stdio: "ignore" }).status === 0))(
+    "with the real ffprobe, an ffconcat playlist named .mp4 gives nothing, as a cut or as audio; a render still reads",
+    async () => {
+      const dir = await mkdtemp(join(tmpdir(), "rushes probe "));
+      try {
+        const inner = join(dir, "inner.mp4");
+        const r = spawnSync("ffmpeg", ["-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=64x36:rate=30:duration=1", "-c:v", "libx264", "-pix_fmt", "yuv420p", inner]);
+        expect(r.status).toBe(0);
+        const cat = join(dir, "cat.mp4");
+        await writeFile(cat, "ffconcat version 1.0\nfile inner.mp4\n");
+        for (const formats of [VIDEO_FORMATS, AUDIO_FORMATS, undefined]) {
+          expect(await mediaProbe(cat, formats ? { formats } : {})).toMatchObject({ duration: null, codec: null, width: null });
+        }
+        expect(await mediaProbe(inner, { formats: VIDEO_FORMATS })).toMatchObject({ codec: "h264", width: 64, height: 36 });
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 describe("parseVideoProbe (§21.3)", () => {

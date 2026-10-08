@@ -70,21 +70,25 @@ export async function giveUpAfter<T>(
 /**
  * Read duration, frame rate, codec, size and pixel format with ffprobe. Returns nulls when ffprobe
  * is missing or fails, takes longer than `timeout` (default 20 s), or `signal` aborts.
+ * `formats` is the containers it may read the file as: VIDEO_FORMATS for a cut, AUDIO_FORMATS
+ * (the default) for audio. Any other container, a playlist named .mp4 say, reads as nothing.
  */
-export async function probe(file: string, opts: { timeout?: number; signal?: AbortSignal } = {}): Promise<Probe> {
+export async function probe(file: string, opts: { timeout?: number; signal?: AbortSignal; formats?: string } = {}): Promise<Probe> {
   if (opts.signal?.aborted || !(await hasFfprobe())) return { ...NO_PROBE };
   const timeout = opts.timeout ?? PROBE_TIMEOUT_MS;
-  return giveUpAfter(readProbe(file, timeout, opts.signal), { timeout, signal: opts.signal, gaveUp: () => ({ ...NO_PROBE }) });
+  return giveUpAfter(readProbe(file, timeout, opts.signal, opts.formats ?? AUDIO_FORMATS), { timeout, signal: opts.signal, gaveUp: () => ({ ...NO_PROBE }) });
 }
 
-async function readProbe(file: string, timeout: number, signal: AbortSignal | undefined): Promise<Probe> {
+async function readProbe(file: string, timeout: number, signal: AbortSignal | undefined, formats: string): Promise<Probe> {
   try {
     const { stdout } = await run(
       "ffprobe",
       [
         "-v", "error",
-        // Local files only: a playlist or container that names a URL is never followed.
+        // Local files only: a playlist or container that names a URL is never followed. And only
+        // the caller's containers: a playlist named .mp4 is never read through to the files it names.
         "-protocol_whitelist", "file",
+        "-format_whitelist", formats,
         "-show_entries", "format=duration:stream=codec_type,codec_name,width,height,pix_fmt,avg_frame_rate,r_frame_rate",
         "-of", "json",
         file,
@@ -137,9 +141,15 @@ export type VideoProbe =
  * demuxer by the file's content, not its name, so without this a playlist named cat.mp4 (ffconcat)
  * or a GIF would be read, and a playlist would open the files it names. The video demuxers the
  * dashboard's cuts can be: MP4/MOV, Matroska/WebM, AVI, MPEG-TS, MXF, ASF, MPEG-PS, FLV, DV and Ogg.
- * The audio-and-video list for waveforms is peaks.ts's PEAKS_FORMATS.
  */
 export const VIDEO_FORMATS = "mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mxf,asf,mpeg,flv,dv,ogg";
+
+/**
+ * The containers audio is read as: the audio ones, and the video ones a voice read, a bed or a
+ * cut's sound can come in (M4A is the MP4 demuxer). Never a playlist, an image or a GIF. It is the
+ * waveform list (peaks.ts's PEAKS_FORMATS) and the default for `probe`.
+ */
+export const AUDIO_FORMATS = "mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mxf,wav,w64,aiff,mp3,aac,flac,ogg,caf,asf,mpeg,flv,dv";
 
 /** ffprobe's "[concat @ 0x…] Format not on whitelist": the container it found, or null. */
 function refusedContainer(stderr: string): string | null {

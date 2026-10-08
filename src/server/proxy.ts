@@ -120,7 +120,9 @@ export function hasFpsMode(v: FfmpegVersion | null): boolean {
 export function encodeArgs(orig: string, out: string, version: FfmpegVersion | null = null): string[] {
   const passthrough = hasFpsMode(version) ? ["-fps_mode", "passthrough"] : ["-vsync", "passthrough"];
   return [
-    "-hide_banner", "-y", "-i", orig,
+    // Local files only, and only video containers (follow-up to final review I1): a cut that is
+    // really a playlist (ffconcat named .mp4) is refused, never encoded from the files it names.
+    "-hide_banner", "-y", "-protocol_whitelist", "file", "-format_whitelist", VIDEO_FORMATS, "-i", orig,
     "-vf", "scale='if(gt(iw,ih),min(1920,iw),-2)':'if(gt(iw,ih),-2,min(1920,ih))'",
     "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p", ...passthrough,
     "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart",
@@ -217,7 +219,8 @@ export class ProxyJobs {
     opts: ProxyJobsOptions = {},
   ) {
     this.run = opts.run ?? defaultFfmpeg;
-    this.probeFile = opts.probe ?? ((abs, signal) => ffprobe(abs, { signal }));
+    // Everything this probes is a cut (or a proxy of one), so it is read only as a video container.
+    this.probeFile = opts.probe ?? ((abs, signal) => ffprobe(abs, { signal, formats: VIDEO_FORMATS }));
     this.needCacheLimit = opts.needCacheLimit ?? NEED_CACHE_LIMIT;
     const injected = opts.available;
     this.isAvailable = () =>
