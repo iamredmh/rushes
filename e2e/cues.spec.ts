@@ -368,12 +368,31 @@ test("a busy pass: 200 cues over 12 sounds open as 12 layers quickly, scroll aft
   await expect(lane(page).locator(".cue")).toHaveCount(200);
   await expect(lane(page).locator('.cue[tabindex="0"]')).toHaveCount(1);
 
-  const started = Date.now();
+  // Timed inside the page, from the click event to the first frame with all twelve layers on show.
+  // Timed from here, the click's own checks and the assertion's polling back-off are in the figure
+  // too, and on a slow shared runner they alone have run past the budget (1531 ms measured for a
+  // render that takes about 130 ms).
+  await chevron(page).evaluate((el, id) => {
+    (window as unknown as { __layersOpened: Promise<number> }).__layersOpened = new Promise<number>((resolve) => {
+      el.addEventListener(
+        "click",
+        () => {
+          const t0 = performance.now();
+          const look = () => {
+            if (document.querySelectorAll(`.clayers[id="${id}"] .clayer`).length === 12) requestAnimationFrame(() => resolve(performance.now() - t0));
+            else requestAnimationFrame(look);
+          };
+          look();
+        },
+        { once: true, capture: true },
+      );
+    });
+  }, `cl-${PASS}`);
   await chevron(page).click();
   await expect(layers(page).locator(".clayer")).toHaveCount(12);
-  const openMs = Date.now() - started;
-  test.info().annotations.push({ type: "layers open (ms)", description: String(openMs) });
-  console.log(`layers open: ${openMs} ms (${test.info().project.name})`);
+  const openMs = Math.round(await page.evaluate(() => (window as unknown as { __layersOpened: Promise<number> }).__layersOpened));
+  test.info().annotations.push({ type: "layers open in the page (ms)", description: String(openMs) });
+  console.log(`layers open: ${openMs} ms in the page (${test.info().project.name})`);
   expect(openMs).toBeLessThan(1500);
 
   // First appearance in time: i·7 mod 12 for i = 0…11. Every cue is on exactly one layer.
