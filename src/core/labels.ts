@@ -30,7 +30,9 @@ const BREAKS = /[\p{Cc}\p{Zl}\p{Zp}]+/gu;
 // Format characters (bidi overrides, zero-width spaces, the word joiner, the byte-order mark) go,
 // except the two joiners (U+200C, U+200D) and the tag characters, which emoji sequences need.
 const INVISIBLE = /(?![\u200c\u200d\u{E0000}-\u{E007F}])\p{Cf}/gu;
-const NOTHING_VISIBLE = /^[\p{Cf}\s]*$/u;
+// Text made only of these shows nothing: format characters, spaces, and the characters that draw as
+// a blank (the combining grapheme joiner, the Hangul fillers, the Khmer inherent vowels, the braille blank).
+const NOTHING_VISIBLE = /^[\p{Cf}\s͏ᅟᅠ឴឵⠀ㅤﾠ]*$/u;
 
 /**
  * One clean line: a lone surrogate becomes U+FFFD, control characters and every run of whitespace
@@ -91,6 +93,10 @@ export function clip(text: string, max: number): string {
     head.push(c);
     used += n;
   }
+  // One character with no room for it (a base under hundreds of marks): keep its base. Marks with
+  // no base at all still come back as a bare ellipsis, which callers treat as nothing to show.
+  const base = chars.length > 0 ? Array.from(chars[0])[0] : "";
+  if (head.length === 0 && max > 1 && base && !EXTENDS.test(base)) return base + "…";
   let cut = head.length;
   const next = chars[head.length];
   if (next !== undefined && !SPACE.test(next)) {
@@ -143,8 +149,19 @@ function fileStem(file: string): string {
 
 // A leading "v6" is this cut's own id when it's followed by ":", ",", a dash, a full stop and a
 // space, the end, or a "(batch …)": "v6.5 slower" and "v60: x" are not.
+// Built once per version number: a backfill reads thousands of cuts (Task 3 review, minor 7).
+const LEADING_IDS = new Map<string, RegExp>();
 function leadingId(digits: string): RegExp {
   const n = digits.replace(/^0+/, "") || "0";
+  let re = LEADING_IDS.get(n);
+  if (!re) {
+    if (LEADING_IDS.size >= 2000) LEADING_IDS.clear();
+    re = buildLeadingId(n);
+    LEADING_IDS.set(n, re);
+  }
+  return re;
+}
+function buildLeadingId(n: string): RegExp {
   return new RegExp(`^v0*${n}(?![\\p{L}\\p{N}])(?:(?:\\s*[:,\\-–—]|\\.(?=\\s|$))[\\s:,.\\-–—]*|\\s*$|\\s+(?=\\(batch\\b))`, "iu");
 }
 

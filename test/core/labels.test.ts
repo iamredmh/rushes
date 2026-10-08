@@ -156,6 +156,19 @@ describe("clip and oneLine", () => {
     expect(oneLineOf("  a\n\tb\u0007 c  ")).toBe("a b c");
     expect(Array.from(oneLine("x ".repeat(200), 160)).length).toBeLessThanOrEqual(160);
   });
+
+  it("text made only of blank-looking characters (Hangul fillers, the braille blank) is blank; inside words they stay", () => {
+    for (const blank of ["ㅤ", "⠀", "ᅟᅠ", "ﾠ", " ㅤ ⠀ ", "͏", "ㅤ​⠀"]) expect(oneLineOf(blank), JSON.stringify(blank)).toBe("");
+    expect(oneLineOf("a⠀b")).toBe("a⠀b");
+    expect(shortLabel(v("v2", "ㅤㅤ", { file: "renders/hero_v2.mp4" }))).toBe("hero_v2");
+  });
+
+  it("a single character longer than the room (a base with hundreds of marks) is cut to its base, not to a bare ellipsis", () => {
+    const zalgo = `e${"́".repeat(200)}`;
+    expect(clip(zalgo, 48)).toBe("e…");
+    expect(oneLine(zalgo, 160)).toBe("e…");
+    expect(clip(`Kept ${zalgo}`, 48)).toBe("Kept…");
+  });
 });
 
 describe("Version.label (§22.3, R2)", () => {
