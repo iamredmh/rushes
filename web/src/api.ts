@@ -43,11 +43,12 @@ export const api = {
 
 /**
  * §19.5: the exact frame at `t` from a cut's original file, extracted by ffmpeg on the server, as a
- * PNG data URL ready for POST /api/grabs, with the frame number the server actually took.
+ * PNG data URL ready for POST /api/grabs, with the frame number the server actually took. With
+ * `format` (R12), the frame comes from that format's own file; without, from the primary.
  */
-export async function originalFrame(video: string, version: string, t: number): Promise<{ frame: number | null; png: string }> {
+export async function originalFrame(video: string, version: string, t: number, format: string | null = null): Promise<{ frame: number | null; png: string }> {
   const id = projectId();
-  const res = await fetch(`/api/videos/${encodeURIComponent(video)}/versions/${encodeURIComponent(version)}/frame?t=${t}`, {
+  const res = await fetch(`/api/videos/${encodeURIComponent(video)}/versions/${encodeURIComponent(version)}/frame?t=${t}${format ? `&format=${encodeURIComponent(format)}` : ""}`, {
     headers: id ? { "x-rushes-project": id } : {},
   });
   if (!res.ok) {

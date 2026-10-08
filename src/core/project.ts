@@ -1,7 +1,8 @@
 import { basename } from "node:path";
-import type { Cue, FileEntry, FileKind, Lane, LaneStage, Project, Shot, Variant, Version, Video } from "./schema.js";
+import type { Cue, FileEntry, FileKind, Format, Lane, LaneStage, Project, Shot, Variant, Version, Video } from "./schema.js";
 import { newProjectId, slugify, uniqueId } from "./ids.js";
-import { InvalidError, NotFoundError } from "./errors.js";
+import { InvalidError, NotFoundError, RushesError } from "./errors.js";
+import { MAX_FORMATS, durationWarning, ratioId, sameShape, settleLabel, versionFormats } from "./formats.js";
 import { oneLineOf } from "./labels.js";
 import type { Store } from "./store.js";
 
@@ -45,6 +46,9 @@ export interface AddVersionInput {
   label?: string;
   duration?: number | null;
   fps?: number | null;
+  /** §21.3: the primary render's picture size as shown, when known. */
+  width?: number | null;
+  height?: number | null;
 }
 
 export function addVersion(p: Project, input: AddVersionInput, now = new Date()): { video: Video; version: Version } {
@@ -71,6 +75,9 @@ export function addVersion(p: Project, input: AddVersionInput, now = new Date())
     label: oneLineOf(input.label ?? ""),
     shots: shots.map((s) => ({ ...s })),
     proxy: null,
+    width: input.width ?? null,
+    height: input.height ?? null,
+    formats: [],
   };
   video.versions.push(version);
   return { video, version };
@@ -238,6 +245,90 @@ export function lockPicture(p: Project, videoId: string, versionId: string | nul
   if (versionId !== null && !video.versions.some((v) => v.id === versionId)) throw new NotFoundError("version", versionId);
   video.lockedVersion = versionId;
   return video;
+}
+
+/** The cut `videoRef`/`versionId` names, defaulting to the newest cut of the only or newest film (§21.4, R16). */
+export function resolveCut(p: Project, videoRef?: string, versionId?: string): { video: Video; version: Version } {
+  let video: Video | undefined;
+  if (videoRef !== undefined) video = resolveVideo(p, videoRef);
+  else {
+    let newest: string | null = null;
+    for (const v of p.videos) {
+      const last = latestVersion(v);
+      if (last && (newest === null || last.addedAt >= newest)) {
+        newest = last.addedAt;
+        video = v;
+      }
+    }
+  }
+  if (!video) throw new RushesError("There's no cut to add a format to yet. Register one with rushes_add_version first.", 404, "no_cut");
+  return { video, version: resolveVersion(video, versionId) };
+}
+
+export interface AddFormatInput {
+  /** Video id or name. Defaults to the newest cut's film (R16). */
+  video?: string;
+  /** Defaults to that film's newest version. */
+  version?: string;
+  /** Manifest path (already passed through toManifestPath). */
+  file: string;
+  /** The render's picture size as shown (probeVideo applies rotation and pixel shape). */
+  width: number;
+  height: number;
+  duration: number | null;
+  fps: number | null;
+  /** §21.4: only a hint, for a ratio that isn't a standard one (R10). */
+  label?: string;
+  /** The primary's own size, read by the caller when the version has none yet (a cut from before formats). */
+  primarySize?: { width: number; height: number } | null;
+}
+
+export interface AddFormatResult { video: Video; version: Version; format: Format; warning: string | null; labelNote: string | null }
+
+/** A size the probe or the caller gave that isn't a picture size is a refusal, not a crash. */
+function checkedLabel(width: number, height: number, hint?: string): { label: string; note: string | null } {
+  try {
+    return settleLabel(width, height, hint);
+  } catch (e) {
+    if (e instanceof RangeError) throw new RushesError(`${width}×${height} isn't a picture size.`, 400, "bad_size", { width, height });
+    throw e;
+  }
+}
+
+/**
+ * §21.3: registers another shape of a cut. Refuses a ratio the cut already has, and a ninth shape.
+ * Atomic: every check runs on local values, and the version is written only once all of them pass.
+ */
+export function addFormat(p: Project, input: AddFormatInput, now = new Date()): AddFormatResult {
+  const { video, version } = resolveCut(p, input.video, input.version);
+  let primary: { width: number; height: number } | null = version.width !== null && version.height !== null ? { width: version.width, height: version.height } : null;
+  if (!primary) {
+    if (!input.primarySize) {
+      throw new RushesError(
+        `Rushes can't read ${version.id}'s own picture size, so it can't tell a new shape from it. Check that the cut's file is there and that ffprobe is installed.`,
+        422, "no_primary_size", { version: version.id },
+      );
+    }
+    primary = { width: input.primarySize.width, height: input.primarySize.height };
+    checkedLabel(primary.width, primary.height);
+  }
+  const { label, note } = checkedLabel(input.width, input.height, input.label);
+  const id = ratioId(label);
+  const shapes = versionFormats({ ...version, width: primary.width, height: primary.height });
+  // The same id, or a ratio within 1% under another label (final review M1): either way, one shape.
+  const taken = shapes.find((f) => f.id === id) ?? shapes.find((f) => sameShape(f, input));
+  if (taken) {
+    throw new RushesError(`${version.id} already has ${taken.label}. Register a re-render as a new version.`, 409, "same_ratio", { version: version.id, id: taken.id, label: taken.label, file: taken.file });
+  }
+  if (shapes.length >= MAX_FORMATS) {
+    throw new RushesError(`${version.id} already has ${MAX_FORMATS} formats, the most one cut can have.`, 400, "too_many_formats", { version: version.id });
+  }
+  const format: Format = { id, label, file: input.file, width: input.width, height: input.height, duration: input.duration, fps: input.fps, addedAt: now.toISOString() };
+  // Every check has passed: now, and only now, the version changes.
+  version.width = primary.width;
+  version.height = primary.height;
+  version.formats.push(format);
+  return { video, version, format, warning: durationWarning(label, input.duration, version.duration), labelNote: note };
 }
 
 /** The last shot whose start is at or before `t`, or null when `t` is before the first shot. */

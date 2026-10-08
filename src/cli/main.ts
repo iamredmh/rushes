@@ -12,7 +12,8 @@ import { VERSION } from "../server/app.js";
 import { BRING_IN_MAX } from "../server/found.js";
 import { LABEL_MAX, oneLineOf } from "../core/labels.js";
 import { LOG_AREAS, LOG_MAX, areaWord, byWord, localStamp, logMarkdown, type LogArea, type LogLine, type UndatedLine } from "../core/logText.js";
-import { markLabel, type Mark, type Note } from "../core/schema.js";
+import { markLabel, type Mark, type Note, type Project } from "../core/schema.js";
+import { formatTag } from "../core/formats.js";
 import { onLabel, type OnContext } from "../core/notes.js";
 import { setup, type SetupEnv } from "../setup/setup.js";
 import { realSetupEnv } from "../setup/env.js";
@@ -49,6 +50,10 @@ Usage
   rushes status [dir]                               tabs and open items
   rushes doctor [dir] [--json]                      check Node, ffmpeg, agent harnesses and this project
   rushes add version <file> --video NAME [--label TEXT] [--note TEXT]
+                                                    --label: the cut's short label in the version list (48 characters)
+  rushes add format <file> [--video NAME] [--version V] [--label RATIO]
+                                                    register another shape (aspect ratio) of a cut;
+                                                    --label here is only a ratio hint such as 2.39:1, not the cut's label
   rushes add variant <music|sfx|voice> <file> --name NAME [--lane ID] [--round NAME] [--description TEXT]
   rushes add shots <file.json> --video NAME [--version V]
   rushes add file <path> --kind K [--name NAME] [--note TEXT] [--video V]
@@ -79,6 +84,8 @@ const OPTIONS = {
   name: { type: "string" },
   video: { type: "string" },
   note: { type: "string" },
+  // Two meanings by command: `add version --label` is the cut's short label (§22.4);
+  // `add format --label` is a name for the ratio, such as 9:16 (§21.4). One option, read per command.
   label: { type: "string" },
   lane: { type: "string" },
   round: { type: "string" },
@@ -343,6 +350,14 @@ export async function main(argv: string[], io: Io): Promise<number> {
           if (r.proxySuggested) io.out(`Proxy suggested: ${r.proxyReason}.${r.proxyJob ? " Making one now (autoProxy is on)." : " Create one from Picture."}`);
           return 0;
         }
+        if (what === "format") {
+          if (!a) return usage(io, "rushes add format <file> [--video NAME] [--version V] [--label RATIO]");
+          const r = await (await client()).post("/api/formats", { file: resolve(io.cwd, a), video: o.video, version: addVersion, label: o.label });
+          io.out(`Added ${r.format.label} to ${r.video.name} ${r.version.id}`);
+          if (r.warning) io.out(`Warning: ${r.warning}`);
+          if (r.labelNote) io.out(`Label: ${r.labelNote}`);
+          return 0;
+        }
         if (what === "variant") {
           if (!a || !b || !o.name) return usage(io, "rushes add variant <music|sfx|voice> <file> --name NAME");
           const r = await (await client()).post("/api/variants", { stage: a, file: resolve(io.cwd, b), name: o.name, lane: o.lane, round: o.round, description: o.description });
@@ -381,7 +396,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
           io.out(`Added ${r.kind}: ${r.name}`);
           return 0;
         }
-        return usage(io, "rushes add version|variant|shots|file ...");
+        return usage(io, "rushes add version|format|variant|shots|file ...");
       }
       case "lock": {
         const [video, lockVersion] = rest;
@@ -403,14 +418,16 @@ export async function main(argv: string[], io: Io): Promise<number> {
         const c = await client();
         const { notes } = await c.get(`/api/notes${q.size ? `?${q}` : ""}`);
         if (o.json) return io.out(JSON.stringify(notes, null, 2)), 0;
-        // What an audio note is on (M4), resolved against the project, script and picks.
-        const ctx: OnContext | null = (notes as Note[]).some((n) => n.stage !== "picture" && n.stage !== "script") ? await c.get("/api/state") : null;
+        // What an audio note is on (M4) and a Picture note's format (§21.4, R4), from the state.
+        const state: (OnContext & { project: Project }) | null = (notes as Note[]).some((n) => n.stage !== "script") ? await c.get("/api/state") : null;
         for (const n of notes) {
-          const label = ctx ? onLabel(n, ctx) : null;
+          const label = state ? onLabel(n, state) : null;
           const on = label ? `${stripControl(label)}  ` : "";
+          const tag = state ? formatTag(n, state.project?.videos ?? []) : null;
+          const fmtCol = tag ? `${stripControl(tag)}  ` : "";
           const shot = n.shot ? `shot ${String(n.shot.n).padStart(2, "0")} ` : "";
           const marks = (n.marks as Mark[] | undefined)?.length ? `${(n.marks as Mark[]).map(markLabel).join(" · ")}  ` : "";
-          io.out(`${n.id}  ${n.status === "done" ? "done" : "todo"}  ${n.stage.padEnd(7)} ${when(n).padEnd(17)} ${on}${marks}${shot}${n.text}`);
+          io.out(`${n.id}  ${n.status === "done" ? "done" : "todo"}  ${n.stage.padEnd(7)} ${when(n).padEnd(17)} ${fmtCol}${on}${marks}${shot}${n.text}`);
         }
         if (!notes.length) io.out("No notes");
         return 0;

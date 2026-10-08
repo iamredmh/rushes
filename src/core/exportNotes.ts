@@ -1,3 +1,4 @@
+import { formatTag } from "./formats.js";
 import { slugify } from "./ids.js";
 import { onLabel, type OnContext } from "./notes.js";
 import { markLabel, type Note, type Picks, type Project, type Script, type Stage } from "./schema.js";
@@ -49,14 +50,17 @@ function continued(text: string, indent: string): string {
   return text.split("\n").join(`\n${indent}`);
 }
 
-function noteLines(n: Note, ctx: OnContext): string[] {
+function noteLines(n: Note, ctx: OnContext, videos: Project["videos"]): string[] {
   // What an audio note is on (M4): "Music · Warm keys", "S2 · Take 1", "Whole mix" ...
   const label = onLabel(n, ctx);
   const on = label ? ` · ${label}` : "";
+  // §21.4, R4: a Picture note's format, "All" beside it on a cut with formats; nothing on a one-format cut.
+  const tag = formatTag(n, videos);
+  const fmtPart = tag ? ` · ${tag}` : "";
   const marks = n.marks.length ? ` · ${n.marks.map(markLabel).join(" · ")}` : "";
   const shot = n.shot ? ` · shot ${pad(n.shot.n)}` : "";
   const status = n.status === "done" ? "done" : "to do";
-  const lines = [`- **${noteTime(n.t, n.tOut)}**${on}${marks}${shot} · ${status} — ${continued(n.text, "  ")}`];
+  const lines = [`- **${noteTime(n.t, n.tOut)}**${fmtPart}${on}${marks}${shot} · ${status} — ${continued(n.text, "  ")}`];
   if (n.reply) lines.push(`  - Reply: ${continued(n.reply, "    ")}`);
   if (n.grab) lines.push(`  - Screenshot: ${n.grab}`);
   return lines;
@@ -105,7 +109,7 @@ export function notesMarkdown(
           if (group.length === 0) continue;
           lines.push("", `### ${video.name} · ${version.id}`);
           for (const n of group) {
-            lines.push(...noteLines(n, ctx));
+            lines.push(...noteLines(n, ctx, project.videos));
             matched.add(n);
           }
         }
@@ -124,10 +128,10 @@ export function notesMarkdown(
       }
       for (const g of orphanGroups.values()) {
         lines.push("", `### ${g.label} (removed)`);
-        for (const n of [...g.notes].sort(byTimecode)) lines.push(...noteLines(n, ctx));
+        for (const n of [...g.notes].sort(byTimecode)) lines.push(...noteLines(n, ctx, project.videos));
       }
     } else {
-      for (const n of stageNotes) lines.push(...noteLines(n, ctx));
+      for (const n of stageNotes) lines.push(...noteLines(n, ctx, project.videos));
     }
   }
 

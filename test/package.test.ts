@@ -82,6 +82,7 @@ describe("shipped agent docs (final review I3)", () => {
 
   it("numberWord says so, rather than printing 'undefined-one', when a count is past what it spells (review M7)", () => {
     expect(numberWord(21)).toBe("twenty-one");
+    expect(numberWord(22)).toBe("twenty-two");
     expect(numberWord(59)).toBe("fifty-nine");
     expect(() => numberWord(60)).toThrow(/numberWord/);
     expect(() => numberWord(-1)).toThrow(/numberWord/);
@@ -92,13 +93,29 @@ describe("shipped agent docs (final review I3)", () => {
     const names = await registeredToolNames();
     // Derived from what tools.ts registers, so the next tool added can't leave the docs one short.
     expect(text, `${file} should say "${numberWord(names.length)} tools"`).toContain(`${numberWord(names.length)} tools`);
-    expect(text).not.toMatch(/seventeen|nineteen/);
+    expect(text).not.toMatch(/seventeen|nineteen|twenty tools|twenty-one tools/);
     // The list itself, not just a mention elsewhere: the line that gives the count names every tool.
     const list = text.split("\n").find((l) => l.includes(`${numberWord(names.length)} tools`))!;
-    for (const tool of [...names, "rushes_log", "rushes_get_log"]) expect(list, `${file}'s tool list should name \`${tool}\``).toContain(`\`${tool}\``);
+    for (const tool of [...names, "rushes_log", "rushes_get_log", "rushes_add_format"]) expect(list, `${file}'s tool list should name \`${tool}\``).toContain(`\`${tool}\``);
     // And nothing else: a tool that isn't registered (a stale or invented name) is as wrong as one that's missing.
     const named = [...new Set([...list.matchAll(/`(rushes_[a-z_]+)`/g)].map((m) => m[1]))].sort();
     expect(named, `${file}'s tool list should name exactly the registered tools`).toEqual(names);
+  });
+
+  it("AGENTS.md names the key each tool uses for a shape that is off the cut's length, and the format filter spellings (§21.3, §21.4)", () => {
+    const text = read("AGENTS.md");
+    expect(text).toMatch(/`rushes_add_format`[^.]*`warning`/);
+    expect(text).toMatch(/`rushes_add_version`[^.]*`formatWarnings`/);
+    expect(text).toMatch(/Picture is locked/);
+  });
+
+  it.each(["skills/rushes/SKILL.md", "AGENTS.md"])("%s tells the agent to register every shape, main one first, and fix only a note's own format (§21.4)", (file) => {
+    const text = read(file);
+    expect(text).toContain("`rushes_add_format`");
+    expect(text).toMatch(/register every shape you rendered/i);
+    expect(text).toMatch(/main one first/i);
+    expect(text).toMatch(/fix only that format/i);
+    expect(text).toMatch(/`format`/);
   });
 });
 
@@ -139,6 +156,23 @@ describe("shipped docs on finding the project's other files (§20)", () => {
       expect(text).toMatch(/14 music files found in this project/);
       expect(text).toMatch(/\*\*Review\*\*/);
     }
+  });
+
+  it("README has a Formats section: the toggle, This format | All formats, Alt+arrows and rushes_add_format", () => {
+    const text = read("README.md");
+    expect(text).toMatch(/^## Formats$/m);
+    for (const word of ["`rushes_add_format`", "This format", "All formats", "Alt+←/→", "Other formats"]) expect(text).toContain(word);
+  });
+
+  it("README says where Alt+←/→ can clash: never while typing, Back on Windows and Linux, word-jump on macOS (Task 4 review M8)", () => {
+    const text = read("README.md");
+    const at = text.indexOf("## Formats");
+    const section = text.slice(at, text.indexOf("\n## ", at + 5));
+    expect(section).toMatch(/never (fire|fires|step)[^.]*typing/i);
+    expect(section).toMatch(/Windows and Linux/);
+    expect(section).toMatch(/Back/);
+    expect(section).toMatch(/macOS/);
+    expect(text).toMatch(/\*\*Alt\+←\/→\*\* previous\/next format/);
   });
 
   it("every CLI flag the scan and bring-in commands take is in the README", () => {

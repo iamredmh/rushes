@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { tabStates } from "../../src/core/tabs.js";
-import { createBatch, latestBatch } from "../../src/core/batches.js";
-import { addVariant, addVersion } from "../../src/core/project.js";
+import { createBatch, formatLines, latestBatch } from "../../src/core/batches.js";
+import { addFormat, addVariant, addVersion } from "../../src/core/project.js";
 import { addTake, editSection, setSections } from "../../src/core/script.js";
 import { addNote } from "../../src/core/notes.js";
 import type { BatchesFile, NotesFile, Project, Script } from "../../src/core/schema.js";
@@ -85,6 +85,78 @@ describe("createBatch", () => {
     expect(() => createBatch(c, "picture")).toThrow(/Nothing open/);
     const n2 = addNote(c.notes, { stage: "picture", scope: "point", t: 2, text: "b" });
     expect(createBatch(c, "picture")).toMatchObject({ id: "b_2", noteIds: [n2.id] });
+  });
+
+  it("a Picture batch on a cut with formats lists them and the notes by format, and how to fix them (§21.5)", () => {
+    const c = ctx();
+    addVersion(c.project, { video: "Hero", file: "renders/hero_v1.mp4", duration: 8, width: 1920, height: 1080 });
+    addFormat(c.project, { video: "hero", file: "renders/hero_v1_9x16.mp4", width: 1080, height: 1920, duration: 8, fps: 30 });
+    addFormat(c.project, { video: "hero", file: "renders/hero_v1_1x1.mp4", width: 1080, height: 1080, duration: 8, fps: 30 });
+    addNote(c.notes, { stage: "picture", video: "hero", version: "v1", scope: "point", t: 1, text: "a" });
+    addNote(c.notes, { stage: "picture", video: "hero", version: "v1", scope: "point", t: 2, text: "b", format: "9x16" });
+    addNote(c.notes, { stage: "picture", video: "hero", version: "v1", scope: "point", t: 3, text: "c", format: "9x16" });
+    const b = createBatch(c, "picture");
+    expect(b.prompt).toContain("Hero v1 has 3 formats: 16:9 (main), 9:16, 1:1. Notes: 1 for all formats, 2 for 9:16.");
+    expect(b.prompt).toContain(
+      "A note with a format is for that format only: fix it there and leave the others. An all-format note is for every format: say in your reply which formats you fixed. Register every shape of the new cut (rushes_add_version with formats, or rushes_add_format).",
+    );
+  });
+
+  it("a one-format Picture batch's prompt says nothing about formats", () => {
+    const c = ctx();
+    addVersion(c.project, { video: "Hero", file: "renders/hero_v1.mp4", duration: 8, width: 1920, height: 1080 });
+    addNote(c.notes, { stage: "picture", video: "hero", version: "v1", scope: "point", t: 1, text: "a" });
+    expect(createBatch(c, "picture").prompt).not.toMatch(/format/i);
+  });
+
+  it("only a Picture batch speaks of formats, and a cut with formats but no notes in the batch is left out", () => {
+    const c = ctx();
+    addVersion(c.project, { video: "Hero", file: "renders/hero_v1.mp4", duration: 8, width: 1920, height: 1080 });
+    addFormat(c.project, { video: "hero", file: "renders/hero_v1_9x16.mp4", width: 1080, height: 1920, duration: 8, fps: 30 });
+    addVersion(c.project, { video: "Solo", file: "renders/solo_v1.mp4", duration: 8, width: 1920, height: 1080 });
+    addNote(c.notes, { stage: "music", scope: "whole", text: "m" });
+    expect(createBatch(c, "music").prompt).not.toMatch(/format/i);
+    addNote(c.notes, { stage: "picture", video: "solo", version: "v1", scope: "point", t: 1, text: "a" });
+    expect(createBatch(c, "picture").prompt).not.toMatch(/format/i);
+  });
+
+  it("formatLines puts the main shape first, the rest in chip order, and counts each cut's notes (§21.5)", () => {
+    const c = ctx();
+    addVersion(c.project, { video: "Hero", file: "renders/hero_v1.mp4", duration: 8, width: 1920, height: 1080 });
+    addFormat(c.project, { video: "hero", file: "renders/hero_v1_1x1.mp4", width: 1080, height: 1080, duration: 8, fps: 30 });
+    addFormat(c.project, { video: "hero", file: "renders/hero_v1_9x16.mp4", width: 1080, height: 1920, duration: 8, fps: 30 });
+    const note = (format: string | null) => ({ video: "hero", version: "v1", format });
+    const lines = formatLines(c.project, [note("1x1"), note("1x1"), note("16x9"), note(null)]);
+    expect(lines[0]).toBe("Hero v1 has 3 formats: 16:9 (main), 9:16, 1:1. Notes: 1 for all formats, 1 for 16:9, 2 for 1:1.");
+    expect(lines).toHaveLength(2);
+    expect(formatLines(c.project, [])).toEqual([]);
+  });
+
+  // Review M2: a hand-edited cut whose own size isn't stored still has its listed formats, and the count includes its own file.
+  it("formatLines on a cut whose own size is unknown counts its own file and names no main shape", () => {
+    const c = ctx();
+    addVersion(c.project, { video: "Hero", file: "renders/hero_v1.mp4", duration: 8, width: 1920, height: 1080 });
+    addFormat(c.project, { video: "hero", file: "renders/hero_v1_9x16.mp4", width: 1080, height: 1920, duration: 8, fps: 30 });
+    addFormat(c.project, { video: "hero", file: "renders/hero_v1_1x1.mp4", width: 1080, height: 1080, duration: 8, fps: 30 });
+    const v = c.project.videos[0].versions[0];
+    v.width = null;
+    v.height = null;
+    const note = (format: string | null) => ({ video: "hero", version: "v1", format });
+    expect(formatLines(c.project, [note(null), note("9x16"), note("1x1")])[0]).toBe(
+      "Hero v1 has 3 formats: 9:16, 1:1 and the cut's own file. Notes: 1 for all formats, 1 for 9:16, 1 for 1:1.",
+    );
+    // One listed format is two shapes, so the notes are tagged All and the prompt speaks of them.
+    c.project.videos[0].versions[0].formats = c.project.videos[0].versions[0].formats.slice(0, 1);
+    expect(formatLines(c.project, [note(null)])[0]).toBe("Hero v1 has 2 formats: 9:16 and the cut's own file. Notes: 1 for all formats.");
+  });
+
+  it("a one-format Picture batch's prompt is exactly what it was before formats", () => {
+    const c = ctx();
+    addVersion(c.project, { video: "Hero", file: "renders/hero_v1.mp4", duration: 8, width: 1920, height: 1080 });
+    addNote(c.notes, { stage: "picture", video: "hero", version: "v1", scope: "point", t: 1, text: "a" });
+    expect(createBatch(c, "picture").prompt).toBe(
+      "Work through picture batch b_1 on spring-launch: 1 note.\nUse rushes_get_batch, fix each note, then rushes_reply with a fixT for each and rushes_add_version for the new cut.",
+    );
   });
 
   it("puts changed and flagged sections in a script batch", () => {

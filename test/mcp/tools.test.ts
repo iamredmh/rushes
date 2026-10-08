@@ -15,16 +15,18 @@ import { lockPath } from "../../src/server/lock.js";
 import { SOURCE } from "../../src/setup/harnesses.js";
 import { runDoctor, realDoctorEnv } from "../../src/cli/doctor.js";
 import { addVariant, addVersion } from "../../src/core/project.js";
+import { sizedProbe } from "../helpers/probe.js";
+import type { VideoProber } from "../../src/core/media.js";
 
 type Probe = (abs: string) => Promise<number | null>;
 
-async function connect(opts: { files?: string[]; probe?: Probe } = {}) {
+async function connect(opts: { files?: string[]; probe?: Probe; formatProbe?: VideoProber } = {}) {
   const { root } = await tmpProject("spring-launch");
   for (const f of opts.files ?? []) {
     await mkdir(dirname(join(root, f)), { recursive: true });
     await writeFile(join(root, f), "bytes");
   }
-  const running = await startServer(root, { port: 0, found: opts.probe ? { probe: opts.probe } : undefined });
+  const running = await startServer(root, { port: 0, found: opts.probe ? { probe: opts.probe } : undefined, formats: opts.formatProbe ? { probe: opts.formatProbe } : undefined });
   const opened: string[] = [];
   const server = createMcpServer({
     client: async () => new RushesClient(running.url),
@@ -43,11 +45,11 @@ async function connect(opts: { files?: string[]; probe?: Probe } = {}) {
 }
 
 describe("MCP tools", () => {
-  it("lists the twenty-one tools", async () => {
+  it("lists the twenty-two tools", async () => {
     const t = await connect();
     const { tools } = await t.client.listTools();
     expect(tools.map((x) => x.name).sort()).toEqual([
-      "rushes_add_file", "rushes_add_take", "rushes_add_variant", "rushes_add_version", "rushes_bring_in", "rushes_doctor", "rushes_export_notes",
+      "rushes_add_file", "rushes_add_format", "rushes_add_take", "rushes_add_variant", "rushes_add_version", "rushes_bring_in", "rushes_doctor", "rushes_export_notes",
       "rushes_get_batch", "rushes_get_log", "rushes_get_picks", "rushes_get_script", "rushes_list_assets", "rushes_list_notes",
       "rushes_lock_picture", "rushes_log", "rushes_open", "rushes_reply", "rushes_scan", "rushes_set_script", "rushes_set_shots", "rushes_status",
     ]);
@@ -704,5 +706,166 @@ describe("MCP tools: input limits mirror the server's", () => {
     expect(items.items.properties.path).toMatchObject({ minLength: 1, maxLength: 1024 });
     expect(items.items.properties.round).toMatchObject({ minLength: 1, maxLength: 64 });
     await t.close();
+  });
+});
+
+describe("formats for agents (§21.4)", () => {
+  const FILES = ["renders/hero_1920x1080.mp4", "renders/hero_1080x1920.mp4", "renders/hero_1080x1080.mp4", "renders/hero_720x1280.mp4", "renders/hero_1080x1350@8.4.mp4"];
+
+  it("rushes_add_format registers a shape; a second of the same ratio is refused with the reason and its code", async () => {
+    const t = await connect({ files: FILES, formatProbe: sizedProbe });
+    await t.call("rushes_add_version", { video: "Hero", file: "renders/hero_1920x1080.mp4" });
+    expect((await t.call("rushes_add_format", { file: "renders/hero_1080x1920.mp4" })).json.format).toMatchObject({ id: "9x16", label: "9:16" });
+    const again = await t.call("rushes_add_format", { file: "renders/hero_720x1280.mp4" });
+    expect(again.isError).toBe(true);
+    expect(again.text).toContain("v1 already has 9:16. Register a re-render as a new version.");
+    expect(again.text).toContain("same_ratio");
+    expect((await t.call("rushes_add_format", { file: "renders/hero_1080x1350@8.4.mp4" })).json.warning).toBe("4:5 is 8.4 s; the cut is 8.0 s");
+    await t.close();
+  });
+
+  it("describes the tools' new inputs", async () => {
+    const t = await connect();
+    const { tools } = await t.client.listTools();
+    const props = (n: string) => Object.keys(tools.find((x) => x.name === n)!.inputSchema.properties as object).sort();
+    expect(props("rushes_add_format")).toEqual(["file", "label", "project", "version", "video"]);
+    expect(props("rushes_add_version")).toContain("formats");
+    expect(props("rushes_list_notes")).toEqual(expect.arrayContaining(["format", "onlyThisFormat"]));
+    expect(tools.find((x) => x.name === "rushes_add_format")!.description).toMatch(/Register a re-render as a new version|re-render is a new version/);
+    await t.close();
+  });
+
+  it("rushes_add_version takes formats and registers every shape in one call", async () => {
+    const t = await connect({ files: FILES, formatProbe: sizedProbe });
+    const r = await t.call("rushes_add_version", { video: "Hero", file: "renders/hero_1920x1080.mp4", formats: [{ file: "renders/hero_1080x1920.mp4" }, { file: "renders/hero_1080x1080.mp4" }] });
+    expect(r.json.version.formats.map((f: any) => f.id)).toEqual(["9x16", "1x1"]);
+    expect(r.json.note).toBeUndefined();
+    await t.close();
+  });
+
+  // §21.8 (6): an agent sees format, can filter, and a reply to a format note leaves the others alone.
+  it("rushes_list_notes returns format on every note and filters by it", async () => {
+    const t = await connect({ files: FILES, formatProbe: sizedProbe });
+    await t.call("rushes_add_version", { video: "Hero", file: "renders/hero_1920x1080.mp4", formats: [{ file: "renders/hero_1080x1920.mp4" }] });
+    const api = new RushesClient(t.running.url);
+    const add = (text: string, format: string | null, at: number) => api.post("/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: at, text, format });
+    await add("Drop the first sound.", null, 1);
+    await add("Logo too close to the top.", "9x16", 2);
+    await add("Rows land late on wide.", "16x9", 3);
+    expect((await t.call("rushes_list_notes", { stage: "picture" })).json.notes.every((n: any) => "format" in n)).toBe(true);
+    const withFormat = (await t.call("rushes_list_notes", { format: "9x16" })).json;
+    expect(withFormat.notes.map((n: any) => n.text).sort()).toEqual(["Drop the first sound.", "Logo too close to the top."]);
+    expect(withFormat.note).toBeUndefined();
+    // A ratio label such as "9:16" is the same format.
+    expect((await t.call("rushes_list_notes", { format: "9:16" })).json.notes).toEqual(withFormat.notes);
+    const onlyCall = (await t.call("rushes_list_notes", { format: "9x16", onlyThisFormat: true })).json;
+    expect(onlyCall.note).toBeUndefined();
+    const only = onlyCall.notes;
+    expect(only.map((n: any) => n.text)).toEqual(["Logo too close to the top."]);
+    await t.call("rushes_reply", { replies: [{ id: only[0].id, reply: "Moved the logo down on 9:16.", status: "done" }] });
+    const after = (await t.call("rushes_list_notes", { stage: "picture" })).json.notes;
+    expect(after.filter((n: any) => n.status === "done").map((n: any) => n.id)).toEqual([only[0].id]);
+    await t.close();
+  });
+
+  it("the new inputs carry the server's own limits (≤7 formats beside the cut, path ≤1024, id ≤16, label hint ≤16)", async () => {
+    const t = await connect();
+    const { tools } = await t.client.listTools();
+    const schema = (n: string) => tools.find((x) => x.name === n)!.inputSchema.properties as Record<string, any>;
+    expect(schema("rushes_add_format").file).toMatchObject({ type: "string", maxLength: 1024 });
+    expect(schema("rushes_add_format").label).toMatchObject({ type: "string", maxLength: 16 });
+    expect(schema("rushes_add_version").formats).toMatchObject({ type: "array", maxItems: 7 });
+    expect(schema("rushes_add_version").formats.items.properties.file).toMatchObject({ type: "string", maxLength: 1024 });
+    expect(schema("rushes_list_notes").format).toMatchObject({ type: "string", maxLength: 16 });
+    expect(schema("rushes_list_notes").format.pattern).toBeTruthy();
+    expect(schema("rushes_add_format").video).toMatchObject({ minLength: 1, maxLength: 200 });
+    expect(schema("rushes_add_format").version).toMatchObject({ minLength: 1, maxLength: 64 });
+    expect(schema("rushes_add_format").label).toMatchObject({ minLength: 1, maxLength: 16 });
+    await t.close();
+  });
+
+  it("refuses a malformed format id or a blank label before asking the server", async () => {
+    const f = await fakeServer((_req, res) => { res.statusCode = 500; res.end("never asked"); });
+    for (const format of ["tall", "9x", "x16", "9:16:1"]) {
+      const r = await f.call("rushes_list_notes", { format });
+      expect(r.isError, format).toBe(true);
+      expect(r.text, format).toMatch(/format/);
+    }
+    const blank = await f.call("rushes_add_format", { file: "renders/hero_1080x1920.mp4", label: "   " });
+    expect(blank.isError).toBe(true);
+    expect(blank.text).toMatch(/label/);
+    expect(f.log).toEqual([]);
+    await f.close();
+  });
+
+  it("describes every way a format is refused, and that the format filters are for Picture", async () => {
+    const t = await connect();
+    const { tools } = await t.client.listTools();
+    const add = tools.find((x) => x.name === "rushes_add_format")!.description!;
+    for (const part of [/same ratio|ratio the cut already has/, /isn't a video|not a video/, /ffprobe/, /8 shapes|eight shapes/i, /own file.*main shape|main shape/]) expect(add).toMatch(part);
+    const notes = (tools.find((x) => x.name === "rushes_list_notes")!.inputSchema.properties as Record<string, { description?: string }>);
+    expect(notes.format.description).toMatch(/Picture/);
+    const version = tools.find((x) => x.name === "rushes_add_version")!.description!;
+    expect(version).toMatch(/formatWarnings/);
+    expect(version).toMatch(/more than 0\.1 s/);
+    await t.close();
+  });
+
+  it("a format the server's validation refuses comes back as a tool error naming the field", async () => {
+    const t = await connect({ files: FILES, formatProbe: sizedProbe });
+    await t.call("rushes_add_version", { video: "Hero", file: "renders/hero_1920x1080.mp4" });
+    const r = await t.call("rushes_list_notes", { format: "tall" });
+    expect(r.isError).toBe(true);
+    expect(r.text).toMatch(/format/);
+    await t.close();
+  });
+
+  it("the server's own validation issues come through a format tool's error", async () => {
+    const f = await fakeServer((_req, res) => {
+      res.statusCode = 400;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ error: "invalid", message: "Request body is invalid", issues: [{ path: ["label"], message: "Too long" }] }));
+    });
+    const r = await f.call("rushes_add_format", { file: "a_1080x1920.mp4" });
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain("Request body is invalid (invalid): label: Too long");
+    await f.close();
+  });
+});
+
+describe("formats against a server that isn't the current one (§21.4)", () => {
+  it("rushes_add_format against an older Rushes says to restart it, in words", async () => {
+    const f = await fakeServer((_req, res) => { res.statusCode = 404; res.end("404 Not Found"); });
+    const r = await f.call("rushes_add_format", { file: "a_1080x1920.mp4" });
+    expect(r.isError).toBe(true);
+    expect(r.text).toMatch(/older than/);
+    expect(r.text).toMatch(/rushes stop/);
+    await f.close();
+  });
+
+  it("rushes_add_version with formats against an older Rushes, which drops them, says so", async () => {
+    const f = await fakeServer((_req, res) => {
+      res.setHeader("content-type", "application/json");
+      res.statusCode = 201;
+      res.end(JSON.stringify({ video: { id: "hero", name: "Hero" }, version: { id: "v1", file: "a.mp4" } }));
+    });
+    const r = await f.call("rushes_add_version", { video: "Hero", file: "a.mp4", formats: [{ file: "b.mp4" }] });
+    expect(r.isError).toBe(false);
+    expect(JSON.parse(r.text).note).toMatch(/older Rushes.*rushes stop/);
+    // No formats asked for, nothing to say.
+    expect(JSON.parse((await f.call("rushes_add_version", { video: "Hero", file: "a.mp4" })).text).note).toBeUndefined();
+    await f.close();
+  });
+
+  it("rushes_list_notes with a format against an older Rushes, which ignores it, says so", async () => {
+    const f = await fakeServer((_req, res) => {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ notes: [{ id: "n_1", stage: "picture", text: "a" }] }));
+    });
+    const r = await f.call("rushes_list_notes", { format: "9x16" });
+    expect(r.isError).toBe(false);
+    expect(JSON.parse(r.text).note).toMatch(/older Rushes.*rushes stop/);
+    expect(JSON.parse((await f.call("rushes_list_notes", {})).text).note).toBeUndefined();
+    await f.close();
   });
 });

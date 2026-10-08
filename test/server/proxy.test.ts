@@ -5,7 +5,7 @@ import { access, chmod, mkdir, readdir, stat, writeFile } from "node:fs/promises
 import { join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
 import { addVersion } from "../../src/core/project.js";
-import type { Probe } from "../../src/core/media.js";
+import { VIDEO_FORMATS, type Probe } from "../../src/core/media.js";
 import type { Store } from "../../src/core/store.js";
 import { EventEmitter } from "node:events";
 import { vi } from "vitest";
@@ -14,6 +14,8 @@ import {
   KILL_GRACE_MS,
   ProxyJobs,
   encodeArgs,
+  extractFrame,
+  frameArgs,
   hasFpsMode,
   makeFfmpegRunner,
   parseFfmpegVersion,
@@ -101,7 +103,8 @@ function listen(store: Store): ProxyEvent[] {
 describe("encodeArgs", () => {
   it("is §19.5's encode, as an args array", () => {
     expect(encodeArgs("/in/a.mov", "/out/b.partial.mp4")).toEqual([
-      "-hide_banner", "-y", "-i", "/in/a.mov",
+      // Follow-up to final review I1: local files only, and only video containers, ahead of the input.
+      "-hide_banner", "-y", "-protocol_whitelist", "file", "-format_whitelist", VIDEO_FORMATS, "-i", "/in/a.mov",
       "-vf", "scale='if(gt(iw,ih),min(1920,iw),-2)':'if(gt(iw,ih),-2,min(1920,ih))'",
       "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p", "-fps_mode", "passthrough",
       "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart",
@@ -400,6 +403,42 @@ describe.skipIf(!FFMPEG)("ProxyJobs with real ffmpeg", () => {
     expect(events.at(-1)?.state).toBe("done");
     expect(await readdir(join(root, "proxies"))).toEqual(["hero_v1_proxy.mp4"]);
   });
+
+  // Follow-up to final review I1: a cut registered before the fix that is really a playlist is
+  // neither probed nor proxied; every ordinary video container still is.
+  it("refuses to probe or proxy an ffconcat playlist named .mp4; avi, mpegts, mxf, mov, mkv and webm still proxy", async () => {
+    const { root, store } = await tmpProject();
+    await mkdir(join(root, "renders"));
+    const make = (name: string, args: string[], size = "64x36") =>
+      execFileSync("ffmpeg", ["-hide_banner", "-v", "error", "-y", "-f", "lavfi", "-i", `testsrc=size=${size}:rate=25:duration=1`, ...args, join(root, "renders", name)]);
+    make("inner.mp4", ["-c:v", "libx264", "-pix_fmt", "yuv420p"]);
+    await writeFile(join(root, "renders", "cat.mp4"), "ffconcat version 1.0\nfile inner.mp4\n");
+    const cuts: [string, string[], string?][] = [
+      ["a.avi", ["-c:v", "mpeg4"]],
+      ["a.ts", ["-c:v", "mpeg2video"]],
+      ["a.mxf", ["-c:v", "mpeg2video", "-pix_fmt", "yuv420p", "-b:v", "5M", "-f", "mxf"], "720x576"],
+      ["a.mov", ["-c:v", "libx264", "-pix_fmt", "yuv420p"]],
+      ["a.mkv", ["-c:v", "libx264", "-pix_fmt", "yuv420p"]],
+      ["a.webm", ["-c:v", "libvpx-vp9", "-b:v", "200k"]],
+    ];
+    for (const [name, args, size] of cuts) make(name, args, size);
+    await store.update("project", (p) => {
+      addVersion(p, { video: "cat", file: "renders/cat.mp4" });
+      for (const [name] of cuts) addVersion(p, { video: `film ${name.replace(".", " ")}`, file: `renders/${name}` });
+    });
+    const jobs = new ProxyJobs(store);
+    // The cut probe reads nothing of the playlist (without the list, it read inner.mp4's 1 s).
+    expect(await jobs.probe(join(root, "renders", "cat.mp4"))).toMatchObject({ duration: null, codec: null, width: null });
+    const refused = await jobs.wait(jobs.start("cat", "v1").id);
+    expect(refused.state).toBe("failed");
+    expect(existsSync(join(root, "proxies", "cat_v1_proxy.mp4"))).toBe(false);
+    for (const [name] of cuts) {
+      const video = `film-${name.replace(".", "-")}`;
+      expect((await jobs.probe(join(root, "renders", name))).codec, name).not.toBeNull();
+      expect((await jobs.wait(jobs.start(video, "v1").id)).state, name).toBe("done");
+      expect(existsSync(join(root, "proxies", `${video}_v1_proxy.mp4`)), name).toBe(true);
+    }
+  }, 60_000);
 });
 
 describe("ProxyJobs, risky paths (fix round 1)", () => {
@@ -695,5 +734,52 @@ describe("ProxyJobs.close stops frame extractions and probes in flight (Minor 12
     await jobs.close();
     expect(await jobs.frame(join(root, "renders", "hero.mov"), 1)).toBeNull();
     expect(ran).toBe(0);
+  });
+});
+
+describe("frame extraction reads local files only (review M3)", () => {
+  it("restricts ffmpeg's input protocols to file, ahead of the input", () => {
+    const args = frameArgs("/some/where/hero.mp4", 1.5);
+    const at = args.indexOf("-protocol_whitelist");
+    expect(at).toBeGreaterThan(-1);
+    expect(args[at + 1]).toBe("file");
+    expect(at).toBeLessThan(args.indexOf("-i"));
+  });
+
+  const hasFfmpeg = (() => {
+    try {
+      execFileSync("ffmpeg", ["-version"], { stdio: "ignore" });
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+
+  it.skipIf(!hasFfmpeg)("still reads a frame of a normal render, as before", async () => {
+    const { root } = await tmpProject("frames");
+    const file = join(root, "hero.mp4");
+    execFileSync("ffmpeg", ["-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=64x36:rate=30:duration=1", "-c:v", "libx264", "-pix_fmt", "yuv420p", file]);
+    const png = await extractFrame(makeFfmpegRunner(), file, 0.5);
+    expect(png?.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))).toBe(true);
+  });
+
+  // Final review I1: a "cut" that is really a playlist must never make ffmpeg read the files it names.
+  it("restricts the input to the video containers, ahead of the input", () => {
+    const args = frameArgs("/some/where/hero.mp4", 1.5);
+    const at = args.indexOf("-format_whitelist");
+    expect(at).toBeGreaterThan(-1);
+    expect(args[at + 1]).toBe(VIDEO_FORMATS);
+    expect(at).toBeLessThan(args.indexOf("-i"));
+  });
+
+  it.skipIf(!hasFfmpeg)("gives no frame from an ffconcat playlist or a GIF named .mp4, and still reads an AVI", async () => {
+    const { root } = await tmpProject("frames");
+    execFileSync("ffmpeg", ["-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=64x36:rate=30:duration=1", "-c:v", "libx264", "-pix_fmt", "yuv420p", join(root, "inner.mp4")]);
+    await writeFile(join(root, "cat.mp4"), "ffconcat version 1.0\nfile inner.mp4\n");
+    expect(await extractFrame(makeFfmpegRunner(), join(root, "cat.mp4"), 0.5)).toBeNull();
+    execFileSync("ffmpeg", ["-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=64x36:rate=10:duration=1", "-f", "gif", join(root, "gif.mp4")]);
+    expect(await extractFrame(makeFfmpegRunner(), join(root, "gif.mp4"), 0.5)).toBeNull();
+    execFileSync("ffmpeg", ["-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=64x36:rate=30:duration=1", "-c:v", "mpeg4", join(root, "a.avi")]);
+    expect((await extractFrame(makeFfmpegRunner(), join(root, "a.avi"), 0.5))?.subarray(1, 4).toString()).toBe("PNG");
   });
 });

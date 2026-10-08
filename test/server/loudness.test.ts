@@ -22,6 +22,9 @@ import {
   type MixInput,
 } from "../../src/server/loudness.js";
 import type { Picks, Project } from "../../src/core/schema.js";
+import { AUDIO_FORMATS } from "../../src/core/media.js";
+import { defaultRunner } from "../../src/server/loudness.js";
+import { spawnSync } from "node:child_process";
 
 // A real ffmpeg `ebur128=peak=true` summary block (ruling 6), captured by hand from:
 //   ffmpeg -hide_banner -nostats -f lavfi -i "sine=frequency=440:duration=2" \
@@ -105,12 +108,17 @@ describe("loudnessArgs", () => {
       { file: "/abs/music.wav", offset: 0, stage: "music", gainDb: 0 },
       { file: "/abs/sfx.wav", offset: 2.5, stage: "sfx", gainDb: 0 },
     ];
+    // Each input reads local files only, and only as an audio container (a playlist named .wav is refused).
+    const only = ["-protocol_whitelist", "file", "-format_whitelist", AUDIO_FORMATS];
     expect(loudnessArgs(inputs)).toEqual([
       "-nostats",
+      ...only,
       "-i",
       "/abs/vo.wav",
+      ...only,
       "-i",
       "/abs/music.wav",
+      ...only,
       "-i",
       "/abs/sfx.wav",
       "-filter_complex",
@@ -132,6 +140,42 @@ describe("loudnessArgs", () => {
     expect(filter).toContain("volume=-14dB[a1]");
     expect(filter).toContain("volume=-6.5dB[a2]");
   });
+});
+
+const hasFfmpeg = spawnSync("ffmpeg", ["-version"], { stdio: "ignore" }).status === 0;
+
+// Final review I1, last follow-up: the mix's inputs are read only as audio containers, so a
+// playlist named .wav can never make the mix read the files it names.
+describe.skipIf(!hasFfmpeg)("the mix with the real ffmpeg", () => {
+  it("mixes wav, mp3, m4a, aif, flac, ogg and opus, and refuses an ffconcat playlist named .wav", async () => {
+    const { root } = await tmpProject("mix");
+    const make = (name: string, args: string[] = []) =>
+      spawnSync("ffmpeg", ["-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=1", ...args, join(root, name)]).status === 0;
+    const input = (file: string): MixInput => ({ file: join(root, file), offset: 0, stage: "music", gainDb: 0 });
+    const kinds = ["a.wav", "a.mp3", "a.m4a", "a.aif", "a.flac", "a.ogg", "a.opus"];
+    const made = kinds.filter((k) => make(k));
+    // The ones ffmpeg encodes itself are always there; the others need its usual libraries.
+    for (const k of ["a.wav", "a.m4a", "a.aif", "a.flac"]) expect(made).toContain(k);
+    for (const k of made) {
+      const r = await defaultRunner(loudnessArgs([input(k)]));
+      expect(r.code, k).toBe(0);
+      expect(Number.isFinite(parseEbur128(r.stderr).integrated), k).toBe(true);
+    }
+    const all = await defaultRunner(loudnessArgs(made.map(input)));
+    expect(all.code).toBe(0);
+    expect(Number.isFinite(parseEbur128(all.stderr).integrated)).toBe(true);
+    // Without the whitelist, ffmpeg reads this "wav" by its content and mixes inner.wav through it.
+    make("inner.wav");
+    await writeFile(join(root, "list.wav"), "ffconcat version 1.0\nfile inner.wav\n");
+    const list = await defaultRunner(loudnessArgs([input("list.wav")]));
+    expect(list.code).not.toBe(0);
+    expect(list.stderr).toMatch(/not on whitelist/i);
+    expect(parseEbur128(list.stderr)).toEqual({ integrated: null, truePeak: null });
+    // One bad input refuses the whole mix: nothing is measured from the others either.
+    const mixed = await defaultRunner(loudnessArgs([input("a.wav"), input("list.wav")]));
+    expect(mixed.code).not.toBe(0);
+    expect(parseEbur128(mixed.stderr).integrated).toBeNull();
+  }, 30_000);
 });
 
 describe("ffmpegAvailable", () => {

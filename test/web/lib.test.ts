@@ -25,6 +25,7 @@ import { join, relative } from "node:path";
 import {
   heardVoice, onOptionGroups, sectionLabel, voiceDefaultRead, voiceListening, voiceNoteRows, voiceOnLabel, voiceOnOptions, voiceRounds,
 } from "../../web/src/lib.js";
+import { withFormatRows } from "../../web/src/lib.js";
 
 /** A read with only an id: its name is the id, its file `media/<id>.wav`. */
 const v = (id: string) => ({ id, name: id, file: `media/${id}.wav`, meta: {}, cues: [] });
@@ -32,7 +33,7 @@ const v = (id: string) => ({ id, name: id, file: `media/${id}.wav`, meta: {}, cu
 const note = (over: Partial<Note>): Note => ({
   id: "n_1", stage: "picture", video: "hero", version: "v3", on: null, scope: "point", t: 12.4, tOut: null, frame: null,
   text: "x", box: null, grab: null, shot: null, marks: [], status: "todo", reply: "", fixT: null, fixVersion: null, batch: null,
-  createdAt: "2026-10-02T00:00:00Z", by: "user", ...over,
+  format: null, createdAt: "2026-10-02T00:00:00Z", by: "user", ...over,
 });
 
 describe("timecode", () => {
@@ -171,7 +172,7 @@ describe("isChanged and latest", () => {
     expect(isChanged(sec("Line.", "New line."))).toBe(true);
   });
   it("picks a video's newest version", () => {
-    const v = (id: string) => ({ id, file: `${id}.mp4`, duration: null, fps: null, addedAt: "", note: "", label: "", shots: [], proxy: null });
+    const v = (id: string) => ({ id, file: `${id}.mp4`, duration: null, fps: null, addedAt: "", note: "", label: "", shots: [], proxy: null, width: null, height: null, formats: [] });
     expect(latest({ id: "hero", name: "Hero", versions: [v("v1"), v("v2")], lockedVersion: null })?.id).toBe("v2");
     expect(latest({ id: "hero", name: "Hero", versions: [], lockedVersion: null })).toBeUndefined();
     expect(latest(undefined)).toBeUndefined();
@@ -179,7 +180,7 @@ describe("isChanged and latest", () => {
 });
 
 describe("defaultVersion", () => {
-  const v = (id: string) => ({ id, file: `${id}.mp4`, duration: null, fps: null, addedAt: "", note: "", label: "", shots: [], proxy: null });
+  const v = (id: string) => ({ id, file: `${id}.mp4`, duration: null, fps: null, addedAt: "", note: "", label: "", shots: [], proxy: null, width: null, height: null, formats: [] });
   it("follows the newest version when nothing is locked", () => {
     const video: Video = { id: "hero", name: "Hero", versions: [v("v1"), v("v2")], lockedVersion: null };
     expect(defaultVersion(video)?.id).toBe("v2");
@@ -335,7 +336,7 @@ describe("folderItems", () => {
     ...over,
   });
   const videos: Video[] = [
-    { id: "hero", name: "Hero", versions: [{ id: "v1", file: "renders/hero_v1.mp4", duration: null, fps: null, addedAt: "2026-10-01T00:00:00Z", note: "First pass", label: "", shots: [], proxy: null }], lockedVersion: null },
+    { id: "hero", name: "Hero", versions: [{ id: "v1", file: "renders/hero_v1.mp4", duration: null, fps: null, addedAt: "2026-10-01T00:00:00Z", note: "First pass", label: "", shots: [], proxy: null, width: null, height: null, formats: [] }], lockedVersion: null },
     { id: "cutdown", name: "Cutdown", versions: [], lockedVersion: null },
   ];
 
@@ -365,6 +366,24 @@ describe("folderItems", () => {
     expect(folderItems(assets, folder, { query: "renders/cutdown", videos }).map((a) => a.name)).toEqual(["cutdown_v1.mp4"]);
     expect(folderItems(assets, folder, { query: "first pass", videos }).map((a) => a.name)).toEqual(["hero_v1.mp4"]);
     expect(folderItems(assets, folder, { query: "Hero", videos }).map((a) => a.name)).toEqual(["hero_v1.mp4"]);
+  });
+
+  it("Cuts keeps each cut's format rows under it, whatever the sort; other folders are sorted as they were (§21.5)", () => {
+    const cuts = FOLDERS.find((f) => f.id === "cut")!;
+    const assets = [
+      asset({ kind: "cut", name: "hero_v1.mp4", path: "renders/hero_v1.mp4", video: "hero", version: "v1", modified: "2026-10-01T00:00:00Z" }),
+      // The format renders are newer than their cut, and would sort above it on their own.
+      asset({ kind: "cut", name: "hero_v1_1x1.mp4", path: "renders/hero_v1_1x1.mp4", video: "hero", version: "v1", format: "1x1", width: 1080, height: 1080, modified: "2026-10-05T00:00:00Z" }),
+      asset({ kind: "cut", name: "hero_v1_9x16.mp4", path: "renders/hero_v1_9x16.mp4", video: "hero", version: "v1", format: "9x16", width: 1080, height: 1920, modified: "2026-10-04T00:00:00Z" }),
+      asset({ kind: "cut", name: "cutdown_v1.mp4", path: "renders/cutdown_v1.mp4", video: "cutdown", version: "v1", modified: "2026-10-03T00:00:00Z" }),
+    ];
+    expect(folderItems(assets, cuts).map((a) => a.name)).toEqual(["cutdown_v1.mp4", "hero_v1.mp4", "hero_v1_9x16.mp4", "hero_v1_1x1.mp4"]);
+    expect(folderItems(assets, cuts, { sort: "name" }).map((a) => a.name)).toEqual(["cutdown_v1.mp4", "hero_v1.mp4", "hero_v1_9x16.mp4", "hero_v1_1x1.mp4"]);
+    // A search that finds only a format row still shows it.
+    expect(folderItems(assets, cuts, { query: "1x1" }).map((a) => a.name)).toEqual(["hero_v1_1x1.mp4"]);
+    const shots = FOLDERS.find((f) => f.id === "screenshot")!;
+    const grabs = [asset({ name: "a.png", modified: "2026-10-01T00:00:00Z" }), asset({ name: "b.png", format: "9x16", modified: "2026-10-02T00:00:00Z" })];
+    expect(folderItems(grabs, shots).map((a) => a.name)).toEqual(["b.png", "a.png"]);
   });
 
   it("searches a registered file's own note", () => {
@@ -1332,5 +1351,138 @@ describe("foundRowChanged: a Found row draws again only when something it shows 
     expect(foundRowChanged(props, { ...props, ticked: true })).toBe(true);
     expect(foundRowChanged(props, { ...props, playing: true })).toBe(true);
     expect(foundRowChanged(props, { ...props, failure: "Already in the project." })).toBe(true);
+  });
+});
+
+import {
+  chipLabel, currentFormat, fmtColumns, formatChips, formatPrompt, neighbourFormat, previousVersion, RESHAPE_MS, reshapeKeyframes, shapeBox,
+  type FormatView,
+} from "../../web/src/lib.js";
+
+describe("format chips (§21.5)", () => {
+  const view = (id: string, w: number, h: number, primary = false, over: Partial<FormatView> = {}): FormatView =>
+    ({ id, label: id.replace("x", ":"), file: `renders/hero_${id}.mp4`, width: w, height: h, duration: 8, fps: 30, primary, ...over });
+  const FOUR = [view("16x9", 1920, 1080, true), view("9x16", 1080, 1920), view("1x1", 1080, 1080), view("4x5", 1080, 1350)];
+
+  it("are in the fixed order, with the current one selected and a count of the open notes you'd see", () => {
+    const notes = [note({ format: null }), note({ id: "n_2", format: "9x16" }), note({ id: "n_3", format: "9x16", status: "done" })];
+    const chips = formatChips({ views: FOUR, previous: [], current: "16x9", versionDuration: 8, notes, missing: new Set() });
+    expect(chips.map((c) => [c.id, c.selected, c.enabled, c.count])).toEqual([
+      ["9x16", false, true, 2], ["4x5", false, true, 1], ["1x1", false, true, 1], ["16x9", true, true, 1],
+    ]);
+  });
+  it("one format: one chip, greyed and selected, with no count", () => {
+    const [chip] = formatChips({ views: [FOUR[0]], previous: [], current: null, versionDuration: 8, notes: [note({})], missing: new Set() });
+    expect(chip).toMatchObject({ id: "16x9", enabled: false, selected: true, count: 0, reason: "single" });
+  });
+  it("a format the previous cut had and this one lacks stays, greyed: Not in v2", () => {
+    const chips = formatChips({ views: FOUR.filter((v) => v.id !== "4x5"), previous: FOUR, current: "16x9", versionDuration: 8, notes: [], missing: new Set() });
+    expect(chips.map((c) => c.id)).toEqual(["9x16", "4x5", "1x1", "16x9"]);
+    expect(chips[1]).toMatchObject({ enabled: false, selected: false, reason: "absent" });
+    expect(chipLabel(chips[1], "v2")).toBe("4:5, not in v2");
+  });
+  it("warns about a missing file and a length mismatch, never about the primary", () => {
+    const chips = formatChips({
+      views: [FOUR[0], view("9x16", 1080, 1920, false, { duration: 8.4 }), FOUR[2]],
+      previous: [], current: "16x9", versionDuration: 8, notes: [], missing: new Set(["renders/hero_1x1.mp4", "renders/hero_16x9.mp4"]),
+    });
+    expect(chips.map((c) => c.warn)).toEqual(["9:16 is 8.4 s; the cut is 8.0 s", "File not found", null]);
+  });
+  it("chipLabel names the ratio, its open notes and its warning", () => {
+    expect(chipLabel({ id: "9x16", label: "9:16", width: 1080, height: 1920, enabled: true, selected: false, count: 2, warn: null, reason: null }, "v1")).toBe("9:16, 2 open notes");
+    expect(chipLabel({ id: "1x1", label: "1:1", width: 1, height: 1, enabled: true, selected: false, count: 1, warn: "File not found", reason: null }, "v1")).toBe("1:1, 1 open note, File not found");
+  });
+  it("currentFormat is the film's choice when this cut has it, else the primary; null for one format", () => {
+    expect(currentFormat(FOUR, "9x16")).toBe("9x16");
+    expect(currentFormat(FOUR, "21x9")).toBe("16x9");
+    expect(currentFormat(FOUR, undefined)).toBe("16x9");
+    expect(currentFormat([FOUR[0]], "16x9")).toBeNull();
+  });
+  it("neighbourFormat steps through the enabled chips and stops at the ends (R1)", () => {
+    const chips = formatChips({ views: FOUR, previous: [], current: "1x1", versionDuration: 8, notes: [], missing: new Set() });
+    expect(neighbourFormat(chips, "1x1", -1)).toBe("4x5");
+    expect(neighbourFormat(chips, "1x1", 1)).toBe("16x9");
+    expect(neighbourFormat(chips, "16x9", 1)).toBeNull();
+    expect(neighbourFormat(chips, null, 1)).toBeNull();
+  });
+  it("previousVersion is the version before this one", () => {
+    const vid = { id: "hero", name: "Hero", lockedVersion: null, versions: [{ id: "v1" }, { id: "v2" }] } as unknown as Video;
+    expect(previousVersion(vid, "v2")?.id).toBe("v1");
+    expect(previousVersion(vid, "v1")).toBeUndefined();
+  });
+  it("the glyph keeps the shape inside 14 px, the grid has explicit tracks, and the prompt names the tool", () => {
+    expect(shapeBox(1080, 1920)).toEqual({ width: 8, height: 14 });
+    expect(shapeBox(1920, 1080)).toEqual({ width: 14, height: 8 });
+    expect(fmtColumns(4)).toBe("repeat(4, minmax(0, 1fr))");
+    expect(formatPrompt("Lumen", "Lumen launch film", "v1")).toBe(
+      'In Rushes project "Lumen", register the other shapes of "Lumen launch film" v1 (the same cut rendered at other aspect ratios, such as 9:16, 1:1 and 4:5) with rushes_add_format, one call per file.',
+    );
+  });
+  it("the reshape runs 160 ms between two sizes, and not under reduced motion", () => {
+    expect(RESHAPE_MS).toBe(160);
+    expect(reshapeKeyframes({ width: 800, height: 450 }, { width: 253, height: 450 }, false)).toEqual([{ width: "800px", height: "450px" }, { width: "253px", height: "450px" }]);
+    expect(reshapeKeyframes({ width: 800, height: 450 }, { width: 253, height: 450 }, true)).toBeNull();
+    expect(reshapeKeyframes({ width: 800, height: 450 }, { width: 800.4, height: 450 }, false)).toBeNull();
+  });
+});
+
+import {
+  BOX_REASON, boxShowsOn, noteFormatTag, otherFormatAction, otherFormatNotes, scopeHint, visibleNotes,
+} from "../../web/src/lib.js";
+
+describe("notes per format (§21.2, §21.5)", () => {
+  const n = (id: string, format: string | null, box: Note["box"] = null) => note({ id, format, box });
+  const box = { x: 0.1, y: 0.1, w: 0.2, h: 0.2 };
+  const v = (id: string, primary = false): FormatView => ({ id, label: id.replace("x", ":"), file: `${id}.mp4`, width: 1, height: 1, duration: 8, fps: 30, primary });
+
+  it("shows this format's notes and the all-format ones, and keeps the rest one row away", () => {
+    const notes = [n("a", null), n("b", "9x16"), n("c", "16x9")];
+    expect(visibleNotes(notes, "16x9").map((x) => x.id)).toEqual(["a", "c"]);
+    expect(otherFormatNotes(notes, "16x9").map((x) => x.id)).toEqual(["b"]);
+    expect(visibleNotes(notes, null)).toHaveLength(3);
+    expect(otherFormatNotes(notes, null)).toEqual([]);
+  });
+  it("a box shows on its own format, and an older boxed note's on the primary only (Review Focus 1)", () => {
+    expect(boxShowsOn(n("a", "9x16", box), "9x16", "16x9")).toBe(true);
+    expect(boxShowsOn(n("a", "9x16", box), "16x9", "16x9")).toBe(false);
+    expect(boxShowsOn(n("a", null, box), "16x9", "16x9")).toBe(true);
+    expect(boxShowsOn(n("a", null, box), "9x16", "16x9")).toBe(false);
+    expect(boxShowsOn(n("a", null, box), null, null)).toBe(true);
+    expect(boxShowsOn(n("a", null), "16x9", "16x9")).toBe(false);
+  });
+  it("the composer's hint says where a note will show (mockup)", () => {
+    expect(scopeHint("9:16", "this", false)).toBe("Shows only while you're viewing 9:16.");
+    expect(scopeHint("9:16", "all", false)).toBe("Shows on every format.");
+    expect(scopeHint("9:16", "this", true)).toBe("A drawn box fixes this note to 9:16.");
+    expect(BOX_REASON).toBe("A drawn box belongs to one frame, so this note stays on this format.");
+  });
+  it("a note's tag is its format, All on a cut with formats, and nothing on a one-format cut (R4)", () => {
+    expect(noteFormatTag({ format: "9x16" }, true)).toBe("9:16");
+    expect(noteFormatTag({ format: null }, true)).toBe("All");
+    expect(noteFormatTag({ format: null }, false)).toBeNull();
+    expect(noteFormatTag({ format: "9x16" }, false)).toBe("9:16");
+  });
+  it("the Other formats row offers Show on 9:16, or Restore when its format has gone from its own cut, never for a box (R17)", () => {
+    const here = [v("16x9", true), v("9x16")];
+    expect(otherFormatAction(n("a", "9x16"), here, here)).toEqual({ kind: "show", id: "9x16", label: "9:16" });
+    expect(otherFormatAction(n("a", "4x5"), here, [v("16x9", true), v("4x5")])).toBeNull();
+    expect(otherFormatAction(n("a", "4x5"), here, here)).toEqual({ kind: "restore" });
+    expect(otherFormatAction(n("a", "4x5", box), here, here)).toBeNull();
+    expect(otherFormatAction(n("a", null), here, here)).toBeNull();
+  });
+});
+
+describe("withFormatRows (§21.5 Assets › Cuts)", () => {
+  const a = (path: string, over: Partial<Asset> = {}): Asset => ({ kind: "cut", path, abs: `/p/${path}`, name: path, size: 1, modified: null, missing: false, video: "hero", version: "v1", ...over });
+  it("keeps each cut's formats straight after it, in chip order, whatever the sort", () => {
+    const items = [a("sq.mp4", { format: "1x1", width: 1080, height: 1080 }), a("v2.mp4", { version: "v2" }), a("main.mp4"), a("tall.mp4", { format: "9x16", width: 1080, height: 1920 })];
+    expect(withFormatRows(items).map((x) => x.path)).toEqual(["v2.mp4", "main.mp4", "tall.mp4", "sq.mp4"]);
+  });
+  it("a format row whose cut was filtered out still shows", () => {
+    expect(withFormatRows([a("tall.mp4", { format: "9x16", width: 1080, height: 1920 })]).map((x) => x.path)).toEqual(["tall.mp4"]);
+  });
+  it("a film's other cut never takes its formats", () => {
+    const items = [a("other.mp4", { video: "teaser" }), a("main.mp4"), a("tall.mp4", { format: "9x16", width: 1080, height: 1920 })];
+    expect(withFormatRows(items).map((x) => x.path)).toEqual(["other.mp4", "main.mp4", "tall.mp4"]);
   });
 });

@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { lstat, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { AUDIO_FORMATS } from "../core/media.js";
 import { fromManifestPath } from "../core/paths.js";
 import { RUSHES_DIR, type ChangeEvent, type Store } from "../core/store.js";
 import type { Project } from "../core/schema.js";
@@ -49,9 +50,9 @@ export type PeaksFile = { v: 1; buckets: number; duration: number; peaks: number
 /**
  * The containers a cut may be read as: the ordinary video and audio ones. Playlist and list
  * formats (HLS, concat, and the like) are left out, so a "cut" that is really a list can't make
- * ffmpeg open other files (fix round 3, M8).
+ * ffmpeg open other files (fix round 3, M8). One list with the probe's audio list (media.ts).
  */
-export const PEAKS_FORMATS = "mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mxf,wav,w64,aiff,mp3,aac,flac,ogg,caf,asf,mpeg,flv,dv";
+export const PEAKS_FORMATS = AUDIO_FORMATS;
 
 /**
  * ffmpeg's arguments. Only local files (`file`, and `pipe` for stdout) in ordinary containers are

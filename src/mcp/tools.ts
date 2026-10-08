@@ -29,6 +29,20 @@ const bringInItem = z.object({
   round: z.string().trim().min(1).max(64).optional().describe('Voice only: the round the read joins, e.g. "Round 2 · Gerald, tone". Defaults to its folder\'s name.'),
 });
 
+// §21.4: the server's own limits on formats (src/server/app.ts), so a request that can't land is refused here, in words.
+const FORMAT_PATH_MAX = 1024;
+const FORMAT_ID_MAX = 16;
+const FORMAT_LABEL_MAX = 16;
+// A format id ("9x16", "2.39x1"), or the label it is written from ("9:16"): the id has an x where the label has a colon.
+const FORMAT_ID_OR_LABEL = /^\d+(?:\.\d+)?[x:]\d+(?:\.\d+)?$/;
+const FORMATS_BESIDE_CUT_MAX = 7;
+// What an agent is told when a Rushes started by an older version quietly ignores the new fields.
+const OLDER_DROPPED = "An older Rushes is running and ignored `formats`: the cut is in, its other shapes are not. Run `rushes stop`, then add them with rushes_add_format.";
+const OLDER_DROPPED_LABEL = "An older Rushes is running and dropped the label: the cut was added without it. Run `rushes stop`, then open again.";
+// A 0.2.x Rushes drops both: one note that says both, so neither is lost.
+const OLDER_DROPPED_BOTH = "An older Rushes is running and dropped the label and ignored `formats`: the cut is in, without its label and without its other shapes. Run `rushes stop`, then open again and add the shapes with rushes_add_format.";
+const OLDER_UNFILTERED = "An older Rushes is running and ignores `format`: these are every note, not that format's. Run `rushes stop`, then ask again.";
+
 function ok(data: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
 }
@@ -195,7 +209,7 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     {
       title: "Add a cut",
       description:
-        "Register a new cut of a video. The first cut creates the video. Returns the new version id (v1, v2 ...). When the cut is likely to play badly in a browser (4K, over 1.5 GB, or a codec such as ProRes), it also returns proxySuggested: true and proxyReason; Picture offers the user a proxy. If the project has autoProxy on, proxyJob is the proxy already being made. Give every cut a short `label` (" + LABEL_MAX + " characters at most) saying what changed, e.g. \"launch 1.45x slower\", and put the detail in `note`: the version list shows the label.",
+        "Register a new cut of a video. The first cut creates the video. Returns the new version id (v1, v2 ...). When the cut is likely to play badly in a browser (4K, over 1.5 GB, or a codec such as ProRes), it also returns proxySuggested: true and proxyReason; Picture offers the user a proxy. If the project has autoProxy on, proxyJob is the proxy already being made. Give every cut a short `label` (" + LABEL_MAX + " characters at most) saying what changed, e.g. \"launch 1.45x slower\", and put the detail in `note`: the version list shows the label. Pass `formats` to register the other shapes of the same cut in one call; the reply then carries `formatWarnings` (a list, one entry for each shape more than 0.1 s off the cut's length; `warning` here means Picture is locked).",
       inputSchema: {
         project,
         video: z.string().describe("Video id or name, e.g. \"Hero 60s\"."),
@@ -209,16 +223,49 @@ export function createMcpServer(ctx: ToolContext): McpServer {
           .meta({ maxLength: LABEL_MAX })
           .optional()
           .describe(`A short label for the version list, ${LABEL_MAX} characters at most, e.g. "launch 1.45x slower". The detail goes in note.`),
+        formats: z
+          .array(z.object({ file: z.string().min(1).max(FORMAT_PATH_MAX) }))
+          .max(FORMATS_BESIDE_CUT_MAX)
+          .optional()
+          .describe(
+            "Other shapes of this same cut (the same edit at other aspect ratios, e.g. a 9:16 and a 1:1 of the 16:9), registered as its formats in one call. `file` is the main one.",
+          ),
       },
     },
     safe(async ({ project, ...b }) => {
       const r = await (await ctx.client(project)).post("/api/versions", b);
-      // A Rushes started by an older version ignores `label`, and its reply has none: say so, so the agent isn't left thinking it was kept.
-      if (b.label && r?.version && r.version.label === undefined) {
-        return { ...r, note: "An older Rushes is running and dropped the label: the cut was added without it. Run `rushes stop`, then open again." };
-      }
+      // A Rushes started by an older version ignores `label`, and its reply has none; one from before
+      // formats drops `formats` without a word. Say which, so the agent isn't left thinking either was kept.
+      const droppedLabel = Boolean(b.label && r?.version && r.version.label === undefined);
+      const droppedFormats = Boolean(b.formats?.length && r?.version && !Array.isArray(r.version.formats));
+      if (droppedLabel && droppedFormats) return { ...r, note: OLDER_DROPPED_BOTH };
+      if (droppedLabel) return { ...r, note: OLDER_DROPPED_LABEL };
+      if (droppedFormats) return { ...r, note: OLDER_DROPPED };
       return r;
     }),
+  );
+
+  server.registerTool(
+    "rushes_add_format",
+    {
+      title: "Add a format",
+      description:
+        "Register another shape of a cut: the same edit rendered at another aspect ratio, e.g. the 9:16 or 1:1 of a 16:9 cut. Rushes measures the ratio with ffprobe. Defaults to the newest cut of the only or newest film. Returns the format's id and label (e.g. \"9x16\", \"9:16\"), and `warning` when its length is more than 0.1 s off the cut's. Refused, with the reason: a second render with a ratio the cut already has (a re-render is a new version), a file that isn't a video, a cut that already has 8 shapes (the most one cut can have, its own file included), and a machine without ffprobe. The cut's own file stays its main shape: register only the other shapes.",
+      inputSchema: {
+        project,
+        video: z.string().min(1).max(200).optional().describe("Video id or name. Defaults to the newest cut's film."),
+        version: z.string().min(1).max(64).optional().describe("Defaults to that film's newest cut."),
+        file: z.string().min(1).max(FORMAT_PATH_MAX).describe("Path to the render, absolute or relative to the project."),
+        label: z
+          .string()
+          .trim()
+          .min(1)
+          .max(FORMAT_LABEL_MAX)
+          .optional()
+          .describe('A ratio hint only, e.g. "2.39:1", used when the measured ratio isn\'t a standard one. Not the cut\'s short label (that is `label` on rushes_add_version).'),
+      },
+    },
+    safe(async ({ project, ...b }) => (await ctx.client(project)).post("/api/formats", b)),
   );
 
   server.registerTool(
@@ -296,18 +343,30 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     {
       title: "List notes",
       description:
-        "Notes left in Rushes, filtered by tab, status, batch or version. A note's `on` says what it's about: null on Picture or for the whole mix, \"<lane>/<variant>\" for a music bed, SFX pass or voice variant, \"<lane>/<variant>:<cue>\" for an SFX cue, \"vo\" for the VO lane on Mix. Older notes may carry a bare variant id, \"vo\" for the assembled read, \"<section>:<take>\" for a take, or a section id.",
+        "Notes left in Rushes, filtered by tab, status, batch or version. A note's `on` says what it's about: null on Picture or for the whole mix, \"<lane>/<variant>\" for a music bed, SFX pass or voice variant, \"<lane>/<variant>:<cue>\" for an SFX cue, \"vo\" for the VO lane on Mix. Older notes may carry a bare variant id, \"vo\" for the assembled read, \"<section>:<take>\" for a take, or a section id. On Picture, a note's `format` is null when it's for every format, or a format id such as \"9x16\" when it's for that shape only.",
       inputSchema: {
         project,
         stage: stage.optional(),
         status: z.enum(["todo", "done"]).optional(),
         batch: z.string().optional(),
         version: z.string().optional(),
+        format: z
+          .string()
+          .max(FORMAT_ID_MAX)
+          .regex(FORMAT_ID_OR_LABEL)
+          .optional()
+          .describe('A format id such as "9x16" (or its label, "9:16"): that format\'s Picture notes plus the all-format Picture ones. Picture only: other tabs\' notes are left out.'),
+        onlyThisFormat: z.boolean().optional().describe("With format: only that format's notes, not the all-format ones."),
       },
     },
     safe(async ({ project, ...f }) => {
-      const q = new URLSearchParams(Object.entries(f).filter(([, v]) => v !== undefined) as [string, string][]);
-      return (await ctx.client(project)).get(`/api/notes${q.size ? `?${q}` : ""}`);
+      // The label "9:16" is the format "9x16".
+      const asked = { ...f, ...(f.format !== undefined ? { format: f.format.replace(":", "x") } : {}) };
+      const q = new URLSearchParams(Object.entries(asked).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)]));
+      const r = await (await ctx.client(project)).get(`/api/notes${q.size ? `?${q}` : ""}`);
+      // A Rushes from before formats ignores the filter and sends every note, none with a `format`.
+      if (f.format !== undefined && Array.isArray(r?.notes) && r.notes.some((n: object) => !("format" in n))) return { ...r, note: OLDER_UNFILTERED };
+      return r;
     }),
   );
 

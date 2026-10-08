@@ -18,7 +18,7 @@ import { tmpProject } from "../helpers/tmp.js";
 import { createApp } from "../../src/server/app.js";
 import { FoundScanner, roundName, type FoundEntry } from "../../src/server/found.js";
 import { startServer } from "../../src/server/start.js";
-import { addVariant, addVersion, ensureProjectIdOnce } from "../../src/core/project.js";
+import { addFormat, addVariant, addVersion, ensureProjectIdOnce } from "../../src/core/project.js";
 import type { Store } from "../../src/core/store.js";
 import type { ScanLimits } from "../../src/core/found.js";
 
@@ -29,6 +29,23 @@ const byName = (table: Record<string, number> = {}): ProbeFn => async (abs) => t
 
 /** A probe that never answers: nothing may wait on it. */
 const never: ProbeFn = () => new Promise<number | null>(() => undefined);
+
+/**
+ * `p`'s answer, or a failure if it hasn't answered in `ms`. With the `never` probe, anything that
+ * waited on a probe would never answer at all, so a generous bound tells the two apart without
+ * timing the request against a busy machine's clock (final review: a 500 ms bound flaked on CI).
+ */
+async function answersWithoutWaiting<T>(p: T | Promise<T>, ms = 5000): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const waited = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`still waiting after ${ms} ms: it waited on a probe or a scan`)), ms);
+  });
+  try {
+    return await Promise.race([p, waited]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 async function put(root: string, rel: string, text = "bytes") {
   const abs = join(root, ...rel.split("/"));
@@ -68,6 +85,22 @@ async function isCaseInsensitive(dir: string): Promise<boolean> {
 }
 
 describe("FoundScanner", () => {
+  it("never offers a file that is registered as another format of a cut (§21)", async () => {
+    const { store, scanner, post } = await setup({ files: ["renders/hero_1920x1080.mp4", "renders/hero_1080x1920.mp4", "renders/teaser.mov"] });
+    await store.update("project", (p) => {
+      addVersion(p, { video: "Hero", file: "renders/hero_1920x1080.mp4", width: 1920, height: 1080 });
+      addFormat(p, { file: "renders/hero_1080x1920.mp4", width: 1080, height: 1920, duration: 8, fps: 30 });
+    });
+    await scanner.scan();
+    expect(paths(await scanner.list())).toEqual(["renders/teaser.mov"]);
+    expect(scanner.has("renders/hero_1080x1920.mp4")).toBe(false);
+    // Bringing it in by hand says it's already in, rather than registering it again as a cut.
+    const r = (await (await post("/api/found/bring-in", { files: [{ path: "renders/hero_1080x1920.mp4", kind: "cut" }] })).json()) as { added: unknown[]; failed: { code: string }[] };
+    expect(r.added).toEqual([]);
+    expect(r.failed.map((f) => f.code)).toEqual(["already"]);
+    expect((await store.read("project")).videos[0].versions).toHaveLength(1);
+  });
+
   it("lists the folder's audio and cuts with their kinds, and leaves out a file once it's registered", async () => {
     const { store, scanner } = await setup({ files: ["vo_jules/line 1.wav", "bed/theme a.mp3", "sfx/whoosh.wav", "stems/drums.wav", "renders/alt cut.mov", "notes.txt"] });
     await scanner.scan();
@@ -357,17 +390,13 @@ describe("found routes", () => {
   it("GET /api/state never waits on a probe, and carries the found summary", async () => {
     const { scanner, call } = await setup({ files: ["vo/a.wav", "bed/b.wav", "renders/c.mov"], probe: never });
     await scanner.scan();
-    const started = Date.now();
-    const res = await call("/api/state");
-    expect(Date.now() - started).toBeLessThan(500);
+    const res = await answersWithoutWaiting(call("/api/state"));
     expect(res.status).toBe(200);
     const { found } = await res.json();
     expect(found).toMatchObject({ scanning: false, complete: true, counts: { voice: 1, music: 1, sfx: 0, cut: 1, other: 0 }, broughtIn: [] });
     expect(typeof found.scannedAt).toBe("string");
     // The list route doesn't wait on the probes either.
-    const t2 = Date.now();
-    const list = await (await call("/api/found")).json();
-    expect(Date.now() - t2).toBeLessThan(500);
+    const list = await (await answersWithoutWaiting(call("/api/found"))).json();
     expect(list.files).toHaveLength(3);
     expect(list.files[0]).not.toHaveProperty("abs");
     expect(Object.keys(list.files[0]).sort()).toEqual(["duration", "folder", "kind", "modified", "path", "reasons", "score", "size", "suggested"]);
@@ -382,9 +411,11 @@ describe("found routes", () => {
 
   it("POST /api/found/scan answers at once and scans in the background", async () => {
     const { scanner, post, call } = await setup({ files: ["vo/a.wav"], probe: never });
-    const started = Date.now();
-    const res = await post("/api/found/scan", {});
-    expect(Date.now() - started).toBeLessThan(500);
+    // A scan that never lands: the route answers anyway, because it never waits on it.
+    const hung = vi.spyOn(scanner, "scan").mockImplementation(() => new Promise(() => undefined));
+    const res = await answersWithoutWaiting(post("/api/found/scan", {}));
+    expect(hung).toHaveBeenCalled();
+    hung.mockRestore();
     expect(await res.json()).toEqual({ ok: true });
     await scanner.scan(); // joins the running scan, or finds it done
     expect(paths((await (await call("/api/found")).json()).files)).toEqual(["vo/a.wav"]);
@@ -557,21 +588,21 @@ describe("start-up scan", () => {
     const { root } = await tmpProject("startup");
     for (const f of ["vo/a.wav", "bed/b.wav"]) await put(root, f);
     let calls = 0;
-    const started = Date.now();
-    const s = await startServer(root, {
-      port: 0,
-      found: {
-        probe: () => {
-          calls++;
-          return never("");
+    // The probes never answer, so a start-up that waited on the scan's probes would never finish.
+    const s = await answersWithoutWaiting(
+      startServer(root, {
+        port: 0,
+        found: {
+          probe: () => {
+            calls++;
+            return never("");
+          },
         },
-      },
-    });
-    expect(Date.now() - started).toBeLessThan(2000);
+      }),
+      10_000,
+    );
     // The state answers while the probes hang.
-    const t = Date.now();
-    const state = await (await fetch(`${s.url}/api/state`)).json();
-    expect(Date.now() - t).toBeLessThan(500);
+    const state = await (await answersWithoutWaiting(fetch(`${s.url}/api/state`))).json();
     expect(state.found).toBeDefined();
     // The first scan lands in the background.
     for (let i = 0; i < 100 && (await (await fetch(`${s.url}/api/found`)).json()).files.length < 2; i++) await new Promise((r) => setTimeout(r, 20));
@@ -1114,9 +1145,8 @@ describe("adoption when lengths are slow (fix round 1)", () => {
   it("settled() never waits longer than its bound", async () => {
     const { scanner } = await setup({ files: ["vo/a.wav"], probe: never });
     await scanner.scan();
-    const started = Date.now();
-    await scanner.settled(50);
-    expect(Date.now() - started).toBeLessThan(1000);
+    // The probe never answers: without its bound, settled() would never return.
+    await answersWithoutWaiting(scanner.settled(50));
     scanner.close();
   });
 });

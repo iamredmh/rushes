@@ -15,7 +15,8 @@ export function usePlayerFloor(column: RefObject<HTMLElement>): void {
     const el = column.current;
     if (!el) return;
     const measure = () => {
-      const kids = [...el.children] as HTMLElement[];
+      // Only what's drawn: a hidden row (the proxy bar on another format) has no box, and its zero rect would count as the top.
+      const kids = ([...el.children] as HTMLElement[]).filter((k) => k.getClientRects().length > 0);
       if (kids.length === 0) return;
       const box = kids.find((k) => k.classList.contains("framebox"));
       const top = Math.min(...kids.map((k) => k.getBoundingClientRect().top));

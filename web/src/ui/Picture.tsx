@@ -1,13 +1,26 @@
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, mediaUrl, originalFrame } from "../api.js";
-import { boxFrom, contentRect, fmt, frameAt, noteTime, placeNote, shotAt, shotLabel, shotSeek, snap, spacePressesButton, stepFrame, type ProxyProgress } from "../lib.js";
+import {
+  BOX_REASON, boxFrom, boxShowsOn, contentRect, fmt, frameAt, noteFormatTag, noteTime, otherFormatNotes, placeNote, RESHAPE_MS, reshapeKeyframes, scopeHint, shotAt,
+  shotLabel, shotSeek, snap, spacePressesButton, stepFrame, testFlags, versionFormats, visibleNotes,
+  type FormatView, type ProxyProgress,
+} from "../lib.js";
 import type { Note, ProxyJob, Video, Version } from "../types.js";
+import { FormatScope } from "./FormatScope.js";
 import { Icon } from "./Icon.js";
 import { Notes } from "./Notes.js";
+import { OtherFormats } from "./OtherFormats.js";
 import { ProxyBar } from "./ProxyBar.js";
 import { PictureWave, usePictureWave } from "./PictureWave.js";
 import { usePlayerFloor } from "./playerFloor.js";
 import { VersionNote } from "./VersionMenu.js";
+
+declare global {
+  interface Window {
+    /** Test-only (`?test=1`): the last frame reshape (§21.5). */
+    __rushesLastReshape?: { animated: boolean; ms: number };
+  }
+}
 
 /** Which file the player shows when the cut has a proxy (§19.5). */
 export type Source = "proxy" | "original";
@@ -48,6 +61,18 @@ export interface PictureProps {
   fileSize?: number | null;
   /** The cut's file revision (its modified time), so a file re-rendered in place gets a fresh waveform. */
   fileRev?: string;
+  /** §21.5: this cut's shapes, the primary first (empty when its size isn't known yet). */
+  formats?: FormatView[];
+  /** §21.5: the format on screen; null on a one-format cut, which plays the version's own file. */
+  format?: string | null;
+  /** §21.6: the format on screen has gone from disk, so the frame says "File not found". */
+  formatMissing?: boolean;
+  /** R2: the primary's size as the player measured it, for a cut stored with no size. */
+  onPrimarySize?(file: string, width: number, height: number): void;
+  /** R7: whether a drawn box is waiting, so the caller can refuse a format switch meanwhile. */
+  onBoxPendingChange?(has: boolean): void;
+  /** §21.5: switch to a format ("Show on 9:16" in the Other formats row); the caller's switch, refused while a box waits. */
+  onFormatChange?(id: string): void;
 }
 
 const typing = (el: EventTarget | null) => el instanceof HTMLElement && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
@@ -56,8 +81,10 @@ const typing = (el: EventTarget | null) => el instanceof HTMLElement && (el.isCo
 export function Picture({
   video, version, fps, notes, toast, onChanged, onPendingChange, startAt, grab, onGrabChange, playerRef,
   ffmpeg = false, autoProxy = false, proxyJob, noteProxyJob, source = "proxy", onSourceChange, fileSize = null, fileRev,
+  formats = [], format = null, formatMissing = false, onPrimarySize, onBoxPendingChange, onFormatChange,
 }: PictureProps) {
   const ref = useRef<HTMLVideoElement>(null);
+  const frameRef = useRef<HTMLDivElement>(null);
   const overlay = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const [t, setT] = useState(0);
@@ -65,16 +92,36 @@ export function Picture({
   // Which cut `duration` was read from: until a new cut's metadata loads, it's still the last one's.
   const [durationOf, setDurationOf] = useState<string | null>(version.duration ? version.file : null);
   // The frame's shape: the video's own aspect ratio once metadata loads, 16:9 before then.
-  const [aspect, setAspect] = useState(16 / 9);
+  // §21.5: the format on screen. The primary is the version's own file; any other plays its own
+  // render. Proxies belong to the primary only (§21.3), so the switch and the offer go with it.
+  const view = format ? formats.find((f) => f.id === format) ?? null : null;
+  const onPrimary = !view || view.primary;
+  // The shape on screen as stored, when it's known (review M1): the frame takes it at once, even
+  // for a file that never loads (a missing one), and the player's own reading refines it.
+  const shape = view ?? formats.find((f) => f.primary) ?? null;
+  const shapeAspect = shape ? shape.width / shape.height : null;
+  // §21.2 (5): the notes for the format on screen; the others wait one row away. On a one-format
+  // cut `format` is null, so every note shows and nothing new appears (R4, R15).
+  const many = format !== null && formats.length >= 2;
+  const primaryId = formats.find((f) => f.primary)?.id ?? null;
+  const visible = visibleNotes(notes, format);
+  const others = otherFormatNotes(notes, format);
+  // §21.2 (4): a new note starts on This format, every time; a box fixes it there (§21.2 (6)).
+  const [noteScope, setNoteScope] = useState<"this" | "all">("this");
+  const [aspect, setAspect] = useState(shapeAspect ?? 16 / 9);
   const [playing, setPlaying] = useState(false);
-  const [broken, setBroken] = useState(false);
+  // The file found unplayable, if any (review M5): `broken` is true only while that same file is
+  // on screen, so leaving it never shows its message on the next file, not even for a frame.
+  const [brokenSrc, setBrokenSrc] = useState<string | null>(null);
   const [range, setRange] = useState<{ in: number | null; out: number | null }>({ in: null, out: null });
   const [boxMode, setBoxMode] = useState(false);
   const [drag, setDrag] = useState<{ x0: number; y0: number; x1: number; y1: number; w: number; h: number } | null>(null);
   // The overlay's size, kept only so the picture's rect (below) follows a resized window.
   const [overlaySize, setOverlaySize] = useState({ w: 0, h: 0 });
   const [box, setBox] = useState<Box | null>(null);
-  const [shown, setShown] = useState<Box | null>(null);
+  // R6: the note last clicked in the list. Its box shows on the frame, and it stays selected
+  // across a format switch (the frame shows its box only on the cut it was drawn on).
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [noteHasText, setNoteHasText] = useState(false);
   // Fix round 3 (M2): in a very short window the player column holds what's in it.
   const stackRef = useRef<HTMLDivElement>(null);
@@ -114,6 +161,13 @@ export function Picture({
     onPendingChange?.(pending);
     return () => onPendingChange?.(false);
   }, [range.in, box, noteHasText]);
+  // R7: tell the caller while a drawn box waits, so a format switch can wait for it.
+  useEffect(() => {
+    // As in the mockup, drawing a box puts the note back on This format, and it stays there.
+    if (box !== null) setNoteScope("this");
+    onBoxPendingChange?.(box !== null);
+    return () => onBoxPendingChange?.(false);
+  }, [box]);
 
   // A new cut: start again from the top, with nothing pending. A file the browser
   // can't decode can fail before any handler is attached, so check the element too.
@@ -123,20 +177,86 @@ export function Picture({
   // already-mounted film clears it.
   const mountedFile = useRef<string | undefined>(undefined);
   useEffect(() => {
-    setBroken(false);
+    setBrokenSrc(null);
     setT(0);
-    setAspect(16 / 9);
+    setAspect(shapeAspect ?? 16 / 9);
     setRange({ in: null, out: null });
     setBox(null);
     if (mountedFile.current !== undefined) onGrabChange(video.id, null);
     mountedFile.current = version.file;
-    setShown(null);
+    setSelectedId(null);
+    setNoteScope("this");
   }, [version.file]);
+
+  const scopeNow: "this" | "all" = box ? "this" : noteScope;
+  // A note's own cut's shapes (it may be from an older version), for the Other formats row (R17).
+  const ownViews = (n: Note) => versionFormats(video.versions.find((v) => v.id === n.version) ?? version);
+  // §21.5: widen a note to every format, or narrow it to the one on screen. The server checks it
+  // (a box can't be widened, a format must be one of the note's cut), and says why in plain words.
+  // Review M5: a change asked for shows at once, until the server's copy of the note agrees, so a
+  // second key press works from it and never sends the same request again.
+  const [askedFormat, setAskedFormat] = useState<Record<string, string | null>>({});
+  const formatOf = (n: Note) => (n.id in askedFormat ? askedFormat[n.id] : n.format);
+  const forget = (id: string) => setAskedFormat((a) => {
+    if (!(id in a)) return a;
+    const { [id]: _, ...rest } = a;
+    return rest;
+  });
+  useEffect(() => {
+    setAskedFormat((a) => {
+      const keep = Object.keys(a).filter((id) => notes.some((n) => n.id === id && n.format !== a[id]));
+      return keep.length === Object.keys(a).length ? a : Object.fromEntries(keep.map((id) => [id, a[id]]));
+    });
+  }, [notes]);
+  const setNoteFormat = async (n: Note, to: string | null) => {
+    if (formatOf(n) === to) return;
+    setAskedFormat((a) => ({ ...a, [n.id]: to }));
+    try {
+      await api.patch(`/api/notes/${n.id}`, { format: to });
+    } catch (e) {
+      forget(n.id);
+      if (focusNote.current?.id === n.id) focusNote.current = null;
+      toast(`Couldn't change that note: ${(e as Error).message}`);
+    }
+    onChanged();
+  };
+  // R6, review M4: a selected note that no longer shows (another format on screen, or the note
+  // narrowed away by an agent) lets go of the selection.
+  useEffect(() => {
+    if (selectedId && !visible.some((n) => n.id === selectedId)) setSelectedId(null);
+  }, [format, notes]);
+
+  // Review M3: when a note moves between the list and the Other formats row, focus goes with it rather
+  // than dropping to the page: to its time in the list, or to the row it now waits in. `fallback`
+  // allows the row; it's set when a format switch starts from the note's own card (Alt+arrows).
+  const focusNote = useRef<{ id: string; fallback: boolean } | null>(null);
+  const formatShown = useRef(format);
+  if (formatShown.current !== format) {
+    formatShown.current = format;
+    const active = document.activeElement;
+    const card = active instanceof HTMLElement && active.closest(".nfmt") ? active.closest<HTMLElement>(".list > .note[data-note]") : null;
+    if (card && !focusNote.current) focusNote.current = { id: card.dataset.note!, fallback: true };
+  }
+  useLayoutEffect(() => {
+    const want = focusNote.current;
+    if (!want) return;
+    const active = document.activeElement;
+    const lost = !active || active === document.body || !active.isConnected;
+    const time = document.querySelector<HTMLElement>(`.list > .note[data-note="${CSS.escape(want.id)}"] .t`);
+    if (time) {
+      focusNote.current = null;
+      if (lost) time.focus();
+    } else if (want.fallback) {
+      focusNote.current = null;
+      if (lost) document.querySelector<HTMLElement>(".otherrow")?.focus();
+    }
+  }, [format, notes]);
 
   // §19.5: the proxy plays unless you've picked Original. The switch never changes the cut, so
   // notes, timecodes and frame numbers are the same on both.
-  const playsProxy = !!version.proxy && source !== "original";
-  const src = mediaUrl(playsProxy ? version.proxy!.file : version.file);
+  const playsProxy = onPrimary && !!version.proxy && source !== "original";
+  const src = mediaUrl(playsProxy ? version.proxy!.file : onPrimary ? version.file : view!.file);
+  const broken = brokenSrc === src;
 
   // When the file changes under the same cut (the switch, or a proxy arriving), the new one picks
   // up where the old one was: its time, and whether it was playing. That's read off the element
@@ -152,23 +272,71 @@ export function Picture({
   }
   shownSrc.current = { cut: version.file, src };
 
+  // §21.5: the frame takes the new format's shape straight away (its size is known), animated over
+  // 160 ms from the old one -- not under reduced motion. The player's src swap does the rest.
+  const reshapeFrom = useRef<{ width: number; height: number } | null>(null);
+  // The reshape still running, if any: a quick second switch stops it, or it would hold the frame
+  // at the first switch's size until it ends.
+  const reshaping = useRef<Animation | null>(null);
+  const shapeKey = view?.id ?? "primary";
+  const firstShape = useRef(true);
+  useLayoutEffect(() => {
+    if (firstShape.current) {
+      firstShape.current = false;
+      return;
+    }
+    const el = frameRef.current;
+    if (!shape || !el) return;
+    const next = shape.width / shape.height;
+    if (next === aspect) return;
+    const r = el.getBoundingClientRect();
+    reshapeFrom.current = { width: r.width, height: r.height };
+    setAspect(next);
+  }, [shapeKey]);
+  useLayoutEffect(() => {
+    const from = reshapeFrom.current;
+    const el = frameRef.current;
+    reshapeFrom.current = null;
+    if (!from || !el) return;
+    // `from` was read mid-animation, so a new reshape starts where the frame visibly is.
+    reshaping.current?.cancel();
+    reshaping.current = null;
+    const r = el.getBoundingClientRect();
+    const reduced = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const frames = reshapeKeyframes(from, { width: r.width, height: r.height }, reduced);
+    if (testFlags(location.search).test) window.__rushesLastReshape = { animated: frames !== null, ms: frames ? RESHAPE_MS : 0 };
+    if (frames) reshaping.current = el.animate(frames, { duration: RESHAPE_MS, easing: "ease-out" });
+  }, [aspect]);
+
   // A file the browser can't decode can fail before any handler is attached, so check the element too.
   useEffect(() => {
-    setBroken(false);
     const v = ref.current;
     if (!v) return;
-    const fail = () => setBroken(true);
+    const fail = () => setBrokenSrc(src);
     if (v.error) fail();
     v.addEventListener("error", fail);
     return () => v.removeEventListener("error", fail);
   }, [src]);
 
   // Smooth playhead while playing.
+  // R9 and review M6: the timeline is the cut's, so a format that runs longer stops at the cut's
+  // end, as the cut itself would. Read through a ref, so a switch mid-play is seen at once.
+  const cutEnd = useRef<number | null>(null);
+  cutEnd.current = !onPrimary && duration > 0 ? duration : null;
+  const holdAtCutEnd = (v: HTMLVideoElement) => {
+    const end = cutEnd.current;
+    if (end === null || v.paused || v.currentTime < end) return;
+    v.pause();
+    v.currentTime = end;
+  };
   useEffect(() => {
     if (!playing) return;
     let id = 0;
     const loop = () => {
-      if (ref.current) setT(ref.current.currentTime);
+      if (ref.current) {
+        holdAtCutEnd(ref.current);
+        setT(ref.current.currentTime);
+      }
       id = requestAnimationFrame(loop);
     };
     id = requestAnimationFrame(loop);
@@ -197,7 +365,11 @@ export function Picture({
   const toggle = () => {
     const v = ref.current;
     if (!v) return;
-    if (v.paused) void v.play().catch(() => toast("Couldn't play this file"));
+    if (v.paused) {
+      // From the cut's end, play starts again from the top, as the cut does (review M6).
+      if (cutEnd.current !== null && v.currentTime >= cutEnd.current - 1e-3) v.currentTime = 0;
+      void v.play().catch(() => toast("Couldn't play this file"));
+    }
     else v.pause();
   };
   const step = (n: number) => {
@@ -224,6 +396,10 @@ export function Picture({
     const at = now();
     const forVideo = video.id;
     const forVersion = version.id;
+    // §21.5: on a cut with formats every grab is named with the ratio on screen (the primary's too,
+    // which the server names itself); a one-format cut's name is unchanged. Only a non-primary format
+    // is sent: an older cut with formats but no stored size has no primary id (Task 2 review M4).
+    const forFormat = onPrimary ? null : format;
     const n = ++grabSeq.current;
     let extracting = false;
     try {
@@ -234,7 +410,7 @@ export function Picture({
         // playing: the server extracts that exact frame with ffmpeg.
         extracting = true;
         setGrabbing((g) => g + 1);
-        const still = await originalFrame(forVideo, forVersion, at);
+        const still = await originalFrame(forVideo, forVersion, at, forFormat);
         frame = still.frame ?? frame;
         png = still.png;
       } else {
@@ -245,7 +421,7 @@ export function Picture({
         canvas.getContext("2d")!.drawImage(v, 0, 0);
         png = canvas.toDataURL("image/png");
       }
-      const r = await api.post<{ grab: string }>("/api/grabs", { video: forVideo, version: forVersion, frame, png });
+      const r = await api.post<{ grab: string }>("/api/grabs", { video: forVideo, version: forVersion, frame, png, ...(forFormat ? { format: forFormat } : {}) });
       if (n !== grabSeq.current) {
         // Superseded by a later grab: its file is saved all the same, so Assets still hears of it.
         onChanged();
@@ -282,8 +458,12 @@ export function Picture({
       text,
       box,
       grab,
+      // §21.2 (4): the format on screen, or every format. A one-format cut names none (R4; Task 2
+      // review M4: a format in a request on an older cut with no stored size is refused).
+      ...(many ? { format: scopeNow === "this" ? format : null } : {}),
     });
     clearRange();
+    setNoteScope("this");
     setBox(null);
     onGrabChange(video.id, null);
     onChanged();
@@ -366,7 +546,8 @@ export function Picture({
   const pic = picture(overlaySize.w, overlaySize.h);
   const style = (b: Box) => ({ left: `${b.x * 100}%`, top: `${b.y * 100}%`, width: `${b.w * 100}%`, height: `${b.h * 100}%` });
 
-  const pct = (s: number) => `${duration ? (s / duration) * 100 : 0}%`;
+  // Clamped to the timeline, whatever the file on screen reports (review M6).
+  const pct = (s: number) => `${duration ? Math.min(100, Math.max(0, (s / duration) * 100)) : 0}%`;
   // Belt-and-braces: an inherited shot that runs past a shorter cut's duration is hidden here
   // too, even though the server already trims these on addVersion.
   const shots = duration ? version.shots.filter((s) => s.start < duration) : version.shots;
@@ -380,7 +561,10 @@ export function Picture({
     shotRefs.current[current.n]?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [current?.n]);
 
-  const placed = notes.map((n) => ({ n, at: placeNote(n, version.id) })).filter(({ at }) => at.t !== null);
+  const placed = visible.map((n) => ({ n, at: placeNote(n, version.id) })).filter(({ at }) => at.t !== null);
+  // R6: the selected note's box, on the cut and the format it was drawn on (R7).
+  const selected = visible.find((n) => n.id === selectedId) ?? null;
+  const shownBox = selected?.box && (!selected.version || selected.version === version.id) && boxShowsOn(selected, format, primaryId) ? selected.box : null;
   const rangeLabel = range.in === null ? null : range.out === null ? `${fmt(range.in)} →` : noteTime(range.in, range.out);
   const placeholder = range.in !== null && range.out === null ? "Set an Out point" : `Note at ${rangeLabel && range.out !== null ? rangeLabel : fmt(t)}`;
 
@@ -391,8 +575,14 @@ export function Picture({
    *  under load -- loadedmetadata only ever fires once, so missing it would otherwise leave the
    *  frame letterboxed at the 16:9 default forever). */
   const applyMetadata = (v: HTMLVideoElement) => {
-    setDuration(v.duration || version.duration || 0);
+    // R9: the timeline is the cut's length, whatever format plays; nothing is rescaled.
+    setDuration(onPrimary ? v.duration || version.duration || 0 : version.duration ?? view?.duration ?? (v.duration || 0));
     setDurationOf(version.file);
+    // R2: a cut stored without its size learns it from the player, for the single chip.
+    // The proxy has the cut's shape (review M2), so a cut playing its proxy is measured too.
+    if (onPrimary && version.width === null && v.videoWidth && v.videoHeight) onPrimarySize?.(version.file, v.videoWidth, v.videoHeight);
+    // This file plays, so whatever was said about it before no longer holds.
+    setBrokenSrc((b) => (b === src ? null : b));
     if (v.videoWidth && v.videoHeight) setAspect(v.videoWidth / v.videoHeight);
     if (!startApplied.current) {
       startApplied.current = true;
@@ -421,13 +611,15 @@ export function Picture({
         {/* The box's height is written out in full rather than through a custom property: Chromium
             doesn't always redo a container-unit height when only the variable inside it changes. */}
         <div class="framebox" style={{ height: `min(640px, 70vh, calc(100cqw / ${aspect}))` }}>
-          <div class="frame" style={{ aspectRatio: String(aspect), "--ar": String(aspect) }}>
+          <div class="frame" ref={frameRef} style={{ aspectRatio: String(aspect), "--ar": String(aspect) }}>
             {/* One message, never two: with ffmpeg, the proxy offer under the player speaks for a
                 file that won't play. Only the original, with a proxy to switch back to, says so here. */}
-            {broken && !ffmpeg && <div class="msg">This file won't play in a browser. Ask your agent for an H.264 MP4 of this cut.</div>}
-            {broken && ffmpeg && version.proxy && !playsProxy && <div class="msg">This file won't play in a browser.</div>}
+            {formatMissing && !onPrimary && <div class="msg">File not found</div>}
+            {broken && !onPrimary && !formatMissing && <div class="msg">This file won't play in a browser. Ask your agent for an H.264 MP4 of this format.</div>}
+            {broken && onPrimary && !ffmpeg && <div class="msg">This file won't play in a browser. Ask your agent for an H.264 MP4 of this cut.</div>}
+            {broken && onPrimary && ffmpeg && version.proxy && !playsProxy && <div class="msg">This file won't play in a browser.</div>}
             <video
-              hidden={broken}
+              hidden={broken || (formatMissing && !onPrimary)}
               ref={(el) => {
                 ref.current = el;
                 if (playerRef) playerRef.current = el;
@@ -441,7 +633,12 @@ export function Picture({
               preload="auto"
               playsInline
               onLoadedMetadata={(e) => applyMetadata(e.target as HTMLVideoElement)}
-              onTimeUpdate={(e) => !playing && !resume.current && setT((e.target as HTMLVideoElement).currentTime)}
+              onTimeUpdate={(e) => {
+                const v = e.target as HTMLVideoElement;
+                // The playhead loop may not run (a background tab): the cut's end holds here too.
+                holdAtCutEnd(v);
+                if (!playing && !resume.current) setT(v.currentTime);
+              }}
               onSeeked={(e) => !resume.current && setT((e.target as HTMLVideoElement).currentTime)}
               onPlay={() => setPlaying(true)}
               onPause={() => setPlaying(false)}
@@ -459,13 +656,13 @@ export function Picture({
               }}
             >
               <div class="pic" style={{ left: `${pic.x}px`, top: `${pic.y}px`, width: `${pic.w}px`, height: `${pic.h}px` }}>
-                {shown && <div class="bx saved" style={style(shown)} />}
+                {shownBox && <div class="bx saved" style={style(shownBox)} />}
                 {box && <div class="bx" style={style(box)} />}
                 {live && <div class="bx" style={style(live)} />}
               </div>
             </div>
             <div class="tcover">f{frameAt(t, fps)}{current && ` · shot ${shotLabel(current.n)}`}</div>
-            {version.proxy && (
+            {version.proxy && onPrimary && (
               <div class="srcswitch" role="group" aria-label="Which file plays">
                 <button
                   type="button"
@@ -493,7 +690,10 @@ export function Picture({
         </div>
 
         {noteProxyJob && (
+          // Hidden, never unmounted, on another format (review M4): it keeps "✓ Proxy ready" and its
+          // place, so coming back to the primary neither loses it nor makes the column jump.
           <ProxyBar
+            hidden={!onPrimary}
             key={version.id}
             video={video}
             version={version}
@@ -543,7 +743,11 @@ export function Picture({
           {placed.map(({ n, at }) => at.tOut !== null && <div class={`span ${n.status}`} style={{ left: pct(at.t!), width: pct(at.tOut - at.t!) }} />)}
           {range.in !== null && <div class="span live" style={{ left: pct(range.in), width: pct((range.out ?? range.in + 0.2) - range.in) }} />}
           {shots.filter((s) => s.start > 0).map((s) => <div class="tick" style={{ left: pct(s.start) }} />)}
-          {placed.map(({ n, at }) => <div class={`mk ${n.status}`} style={{ left: pct(at.t!) }} title={n.text} />)}
+          {/* §21.5: an all-format note's marker is a ring, a format note's a dot. */}
+          {placed.map(({ n, at }) => {
+            const tag = noteFormatTag(n, many);
+            return <div class={`mk ${n.status}${many && n.format === null ? " ring" : ""}`} style={{ left: pct(at.t!) }} title={tag ? `${tag} · ${n.text}` : n.text} />;
+          })}
           <div class="playhead" style={{ left: pct(t) }} />
         </div>
         <div class="ends"><span>0:00</span><span>{fmt(duration)}</span></div>
@@ -571,18 +775,56 @@ export function Picture({
       )}
 
       <Notes
-        notes={notes}
+        notes={visible}
         version={version.id}
+        selectedId={selectedId}
         placeholder={placeholder}
         inputRef={input}
         toast={toast}
         onAdd={add}
         onChanged={onChanged}
         onTextChange={setNoteHasText}
+        formatTag={(n) => noteFormatTag(n, many)}
+        cardExtra={many && view ? (n) => (
+          <FormatScope
+            name="Note applies to"
+            label={view.label}
+            width={view.width}
+            height={view.height}
+            value={formatOf(n) === null ? "all" : "this"}
+            lockedReason={n.box ? BOX_REASON : null}
+            onChange={(to) => void setNoteFormat(n, to === "all" ? null : view.id)}
+          />
+        ) : undefined}
+        formatScope={many && view ? {
+          label: view.label, width: view.width, height: view.height, value: scopeNow, onChange: setNoteScope,
+          lockedReason: box ? BOX_REASON : null, hint: scopeHint(view.label, scopeNow, box !== null),
+        } : undefined}
+        listFooter={(filter) => {
+          // Review M6: the row counts, and lists, what the filter in use would.
+          const shown = others.filter((n) => filter === "all" || n.status === filter);
+          return shown.length > 0 ? (
+            <OtherFormats
+              notes={shown}
+              version={version.id}
+              viewsHere={formats}
+              ownViews={ownViews}
+              onShow={(id, n) => {
+                // A drawn box refuses the switch (R7), and then there's nowhere to take focus.
+                if (!box) focusNote.current = { id: n.id, fallback: false };
+                onFormatChange?.(id);
+              }}
+              onRestore={(n) => {
+                focusNote.current = { id: n.id, fallback: false };
+                void setNoteFormat(n, null);
+              }}
+            />
+          ) : null;
+        }}
         onSeek={(to, n) => {
           ref.current?.pause();
           seek(to);
-          setShown(n.box && (!n.version || n.version === version.id) ? n.box : null);
+          setSelectedId(n.id);
         }}
         attachments={(box || grab) && (
           <>

@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { access, constants, mkdir, readdir, rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { RushesError, NotFoundError } from "../core/errors.js";
-import { hasFfprobe, probe as ffprobe, proxyNeed, type Probe } from "../core/media.js";
+import { VIDEO_FORMATS, hasFfprobe, probe as ffprobe, proxyNeed, type Probe } from "../core/media.js";
 import { fromManifestPath } from "../core/paths.js";
 import type { Project, Version } from "../core/schema.js";
 import type { ChangeEvent, Store } from "../core/store.js";
@@ -120,7 +120,9 @@ export function hasFpsMode(v: FfmpegVersion | null): boolean {
 export function encodeArgs(orig: string, out: string, version: FfmpegVersion | null = null): string[] {
   const passthrough = hasFpsMode(version) ? ["-fps_mode", "passthrough"] : ["-vsync", "passthrough"];
   return [
-    "-hide_banner", "-y", "-i", orig,
+    // Local files only, and only video containers (follow-up to final review I1): a cut that is
+    // really a playlist (ffconcat named .mp4) is refused, never encoded from the files it names.
+    "-hide_banner", "-y", "-protocol_whitelist", "file", "-format_whitelist", VIDEO_FORMATS, "-i", orig,
     "-vf", "scale='if(gt(iw,ih),min(1920,iw),-2)':'if(gt(iw,ih),-2,min(1920,ih))'",
     "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p", ...passthrough,
     "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart",
@@ -217,7 +219,8 @@ export class ProxyJobs {
     opts: ProxyJobsOptions = {},
   ) {
     this.run = opts.run ?? defaultFfmpeg;
-    this.probeFile = opts.probe ?? ((abs, signal) => ffprobe(abs, { signal }));
+    // Everything this probes is a cut (or a proxy of one), so it is read only as a video container.
+    this.probeFile = opts.probe ?? ((abs, signal) => ffprobe(abs, { signal, formats: VIDEO_FORMATS }));
     this.needCacheLimit = opts.needCacheLimit ?? NEED_CACHE_LIMIT;
     const injected = opts.available;
     this.isAvailable = () =>
@@ -324,8 +327,11 @@ export class ProxyJobs {
     await Promise.all([...this.byId.keys()].map((id) => this.cancel(id).catch(() => undefined)));
   }
 
-  /** Runs `work` with a signal close() aborts. Once closing, the signal starts aborted. */
-  private async tracked<T>(work: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  /**
+   * Runs `work` with a signal close() aborts. Once closing, the signal starts aborted. The app
+   * reads formats' renders through this too (§21), so closing the server stops those reads.
+   */
+  async tracked<T>(work: (signal: AbortSignal) => Promise<T>): Promise<T> {
     const c = new AbortController();
     if (this.closing) c.abort();
     this.inflight.add(c);
@@ -620,6 +626,12 @@ export async function removePartials(root: string): Promise<string[]> {
 export function frameArgs(orig: string, seconds: number): string[] {
   return [
     "-hide_banner", "-v", "error",
+    // Local files only, as for ffprobe: a container that names a URL is never followed. An input
+    // option, so the PNG still goes out through pipe:1.
+    "-protocol_whitelist", "file",
+    // Only video containers (final review I1): a cut or format that is really a playlist (ffconcat
+    // named .mp4) or a GIF is refused, never read through to the files it names.
+    "-format_whitelist", VIDEO_FORMATS,
     // -ss before -i seeks fast to the keyframe before, then accurate_seek decodes forward to the exact frame.
     "-accurate_seek", "-ss", seconds.toFixed(6), "-i", orig,
     "-frames:v", "1", "-an", "-pix_fmt", "rgb24", "-c:v", "png", "-f", "image2pipe", "pipe:1",

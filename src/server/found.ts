@@ -19,7 +19,7 @@ import {
 } from "../core/found.js";
 import { InvalidError, RevConflictError, RushesError } from "../core/errors.js";
 import { slugify } from "../core/ids.js";
-import { probe as ffprobe } from "../core/media.js";
+import { AUDIO_FORMATS, probe as ffprobe } from "../core/media.js";
 import { fromManifestPath, toManifestPath } from "../core/paths.js";
 import { addFile, addVariant, addVersion, resolveVideo } from "../core/project.js";
 import type { Project, Script, Version, Video } from "../core/schema.js";
@@ -340,7 +340,7 @@ const MAX_DISMISSED = 10000;
 const DURATION_CACHE_LIMIT = 10000;
 
 /** The default probe: ffprobe's duration, or null without ffprobe. */
-export const ffprobeDuration: FoundProbe = async (abs, signal) => (await ffprobe(abs, { signal })).duration;
+export const ffprobeDuration: FoundProbe = async (abs, signal) => (await ffprobe(abs, { signal, formats: AUDIO_FORMATS })).duration;
 
 /**
  * The scanner's `announce` for a server: a `change` event on the store, which the SSE route sends
@@ -354,10 +354,16 @@ export function foundAnnouncer(store: Store): () => void {
   };
 }
 
-/** Every manifest path the project has registered: cuts, variants, library files and script takes. */
+/** Every manifest path the project has registered: cuts and their formats, variants, library files and script takes. */
 export function registeredPaths(project: Project, script: Script): string[] {
   const out: string[] = [];
-  for (const v of project.videos) for (const ver of v.versions) out.push(ver.file);
+  for (const v of project.videos) {
+    for (const ver of v.versions) {
+      out.push(ver.file);
+      // §21: a cut's other formats are in the project too, so the scan never offers them as new cuts.
+      for (const f of ver.formats) out.push(f.file);
+    }
+  }
   for (const l of project.lanes) for (const variant of l.variants) out.push(variant.file);
   for (const f of project.files) out.push(f.file);
   for (const s of script.sections) for (const t of s.takes) out.push(t.file);

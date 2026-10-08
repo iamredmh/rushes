@@ -194,6 +194,7 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 
 /* proxies (§19.5): the bar under the player -- one row, so the timeline and the note box stay on
    screen -- and the Proxy/Original switch on the frame */
+.proxybar[hidden] { display: none; }
 .proxybar { background: var(--raised); border-radius: var(--r-lg); padding: 8px 12px 8px 14px; font-size: 15px; min-width: 0; }
 .proxybar.quiet { background: transparent; padding: 0 2px; }
 /* The reason (or the path) gives way first: its basis is small, so the checkbox only wraps, after the
@@ -345,6 +346,8 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .arows { display: grid; gap: 8px; }
 .arow { display: flex; align-items: center; gap: 14px; background: var(--raised); border-radius: var(--r); padding: 14px 16px; }
 .arow.missing { opacity: 0.55; }
+/* §21.5: a cut's format, listed under its cut in Assets › Cuts. */
+.arow.sub { margin-left: 24px; }
 .arow.previewable.selected { background: var(--accent-soft); }
 .ainfo { display: grid; gap: 4px; min-width: 0; flex: 1; }
 .atitle { font-size: 15px; font-weight: 500; color: var(--text); display: flex; align-items: center; gap: 8px; overflow-wrap: anywhere; }
@@ -548,4 +551,54 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
   .frow { grid-template-columns: 22px 34px minmax(0, 1fr) 150px; }
   .frow .fdur, .frow .fsize { display: none; }
 }
+/* §21.5: the format toggle in Picture's header (mockup). Explicit grid tracks, for Safari (§21.8). */
+.fmtwrap { position: relative; display: inline-flex; }
+.fmts { display: inline-grid; gap: 2px; padding: 3px; background: var(--bg); border: 1px solid var(--line); border-radius: 999px; }
+.fmts [role="radio"] { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 30px; padding: 4px 12px; border: 0; border-radius: 999px; background: transparent; color: var(--text-2); font: 500 15px/1.2 var(--sans); white-space: nowrap; cursor: pointer; }
+.fmts [role="radio"]:hover { background: var(--hover); color: var(--text); }
+.fmts [role="radio"][aria-checked="true"] { background: var(--accent); color: var(--on-accent); font-weight: 600; }
+.fmts [role="radio"][aria-disabled="true"] { background: transparent; color: var(--text-3); cursor: not-allowed; }
+.fmts .shape, .fscope .shape { display: inline-block; border: 1.5px solid currentColor; border-radius: 2px; }
+/* Review I1: a chip never moves. The label holds the width of its bold self (the selected look),
+   and the count's slot is always there, two digits wide, hidden while there's nothing to count. */
+.fmts .lbl { display: inline-grid; }
+.fmts .lbl::after { content: attr(data-label); height: 0; overflow: hidden; font-weight: 600; visibility: hidden; }
+.fmts .n { min-width: calc(2ch + 14px); padding: 0 7px; border-radius: 999px; background: var(--todo-soft); color: var(--todo); font-size: 15px; font-weight: 500; line-height: 20px; text-align: center; font-variant-numeric: tabular-nums; }
+.fmts .n.none { visibility: hidden; }
+.fmts [aria-checked="true"] .n { background: rgba(11, 16, 38, 0.18); color: var(--on-accent); }
+.fmts .warn { color: var(--todo); font-weight: 700; }
+/* Review M7: on the selected chip's accent the to-do colour is 1.6:1; the ink reads at 6:1. */
+.fmts [aria-checked="true"] .warn { color: var(--on-accent); }
+.fmtpop { position: absolute; top: calc(100% + 8px); left: 0; z-index: 30; width: max-content; max-width: 340px; padding: 8px 12px; border: 1px solid var(--line-2); border-radius: 8px; background: #000; color: var(--text); font-size: 15px; opacity: 0; pointer-events: none; transition: opacity 0.12s; }
+.fmtpop::before { content: ""; position: absolute; left: 0; right: 0; top: -9px; height: 9px; }
+.fmtpop p { margin: 0 0 6px; }
+.fmtpop code { font-family: var(--mono); color: var(--accent-2); }
+.fmtpop.open { opacity: 1; pointer-events: auto; }
+/* §21.5: the composer's and the card's This format | All formats switch (Task 5 uses it). */
+.fscope { display: inline-grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px; padding: 3px; background: var(--bg); border: 1px solid var(--line); border-radius: 999px; }
+.note[aria-current="true"] { background: var(--hover); box-shadow: inset 2px 0 0 var(--accent); }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } .fspin, .ib[aria-busy="true"] { animation: none !important; } }
+/* §21.5 notes per format (mockup): the switch, its hint, ratio tags, ring markers and the Other formats row. */
+.fscope [role="radio"] { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 4px 14px; border: 0; border-radius: 999px; background: transparent; color: var(--text-2); font: 500 15px/1.4 var(--sans); white-space: nowrap; cursor: pointer; }
+.fscope [role="radio"]:hover { color: var(--text); }
+.fscope [role="radio"][aria-checked="true"] { background: var(--accent-soft); color: var(--accent-2); box-shadow: inset 0 0 0 1px var(--accent); }
+.fscope [role="radio"][aria-disabled="true"] { color: var(--text-3); cursor: not-allowed; }
+.fhint { margin: 0; color: var(--text-3); font-size: 15px; line-height: 1.4; }
+.ftag { display: inline-block; padding: 0 8px; border: 1px solid var(--line-2); border-radius: 999px; color: var(--text-2); font: 15px/22px var(--mono); }
+.ftag.all { border-color: var(--accent); color: var(--accent-2); background: var(--accent-soft); }
+.nfmt, .nact { grid-column: 2; margin-top: 6px; }
+/* Review M2: a ring is 14 px and hollow, over the 10 px dots, and lets the pointer through its middle,
+   so a dot at the same moment can still be pointed at (the ring answers on its band). */
+.mk.ring { width: 14px; height: 14px; background: transparent; border: 2px solid var(--accent-2); box-shadow: none; z-index: 4;
+  clip-path: path(evenodd, "M0,7 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0 Z M2.5,7 a4.5,4.5 0 1,0 9,0 a4.5,4.5 0 1,0 -9,0 Z"); }
+.mk.ring.done { border-color: var(--done); }
+.otherfmts { margin: 8px 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
+.otherrow { display: flex; width: 100%; align-items: center; gap: 8px; padding: 8px 12px; border: 1px dashed var(--line-2); border-radius: var(--r); background: transparent; color: var(--text-2); font: 500 15px/1.4 var(--sans); text-align: left; cursor: pointer; }
+.otherrow:hover { background: var(--hover); color: var(--text); }
+.otherrow .act { color: var(--accent-2); }
+.note.ro:hover { background: transparent; }
+/* Review I1: 15 px, and quiet, so a read-only time doesn't look like the list's clickable one. */
+.note.ro .t { font-size: 15px; color: var(--text-2); cursor: default; }
+.nact .flink { margin-left: -8px; }
+/* The reason fits inside the notes column, which clips anything wider. */
+.fscope .tip-wrap[data-tip]::after { max-width: 220px; }

@@ -374,7 +374,7 @@ describe("backfill and reading back (§22.6)", () => {
     // wall-clock bound here failed under a load average of 200, so this checks the result only.
     const iso = (i: number) => at(-(20_000 - i) * 3).toISOString();
     const p: Project = { schema: 1, rev: 0, name: "Lumen launch film", fps: 30, videos: [], lanes: [], files: [], autoProxy: false };
-    for (let f = 0; f < 3; f++) p.videos.push({ id: `film-${f}`, name: `Film ${f}`, lockedVersion: null, versions: Array.from({ length: 1000 }, (_, i) => ({ id: `v${i + 1}`, file: "r/a.mp4", duration: null, fps: null, addedAt: iso(f * 1000 + i), note: `v${i + 1}: a tighter cut`, label: "", shots: [], proxy: null })) });
+    for (let f = 0; f < 3; f++) p.videos.push({ id: `film-${f}`, name: `Film ${f}`, lockedVersion: null, versions: Array.from({ length: 1000 }, (_, i) => ({ id: `v${i + 1}`, file: "r/a.mp4", duration: null, fps: null, addedAt: iso(f * 1000 + i), note: `v${i + 1}: a tighter cut`, label: "", shots: [], proxy: null, width: null, height: null, formats: [] })) });
     p.files = Array.from({ length: 3000 }, (_, i) => ({ id: `f${i}`, kind: "doc" as const, file: "d.md", name: `Doc ${i}`, note: "", video: null, addedAt: iso(i + 3) }));
     const b: BatchesFile = { schema: 1, rev: 0, batches: Array.from({ length: 3000 }, (_, i) => ({ id: `b${i}`, stage: "picture" as const, noteIds: ["n_1"], sectionIds: [], sentAt: iso(i + 7), prompt: "" })) };
     const f: LogFile = { schema: 1, rev: 0, backfilled: false, undated: [], dropped: 0, entries: [] };

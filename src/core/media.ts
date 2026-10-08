@@ -38,38 +38,57 @@ export function parseRate(rate: string | undefined): number | null {
 /** How long one ffprobe may run before it's killed and treated as no probe (a stalled network volume, say). */
 export const PROBE_TIMEOUT_MS = 20_000;
 
+/** How long past its timeout a probe is waited for before Rushes stops waiting. */
+export const GIVE_UP_GRACE_MS = 1_000;
+
 /**
- * Read duration, frame rate, codec, size and pixel format with ffprobe. Returns nulls when ffprobe
- * is missing or fails, takes longer than `timeout` (default 20 s), or `signal` aborts.
+ * Waits for `work` (an ffprobe run), but not past `timeout` + GIVE_UP_GRACE_MS and not past
+ * `signal` aborting: then it answers `gaveUp(why)` instead. execFile kills ffprobe at its timeout
+ * or on abort, but only answers once ffprobe has exited, and a process stuck in an uninterruptible
+ * read (a stalled network drive) can outlive SIGKILL. Every ffprobe in Rushes waits through this.
  */
-export async function probe(file: string, opts: { timeout?: number; signal?: AbortSignal } = {}): Promise<Probe> {
-  if (opts.signal?.aborted || !(await hasFfprobe())) return { ...NO_PROBE };
-  const timeout = opts.timeout ?? PROBE_TIMEOUT_MS;
-  // execFile kills ffprobe at `timeout` or on abort, but only answers once it has exited. A
-  // process stuck in an uninterruptible read can outlive SIGKILL, so give up on waiting too.
+export async function giveUpAfter<T>(
+  work: Promise<T>,
+  opts: { timeout: number; signal?: AbortSignal; gaveUp: (why: "timeout" | "aborted") => T },
+): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   let onAbort: (() => void) | undefined;
-  const giveUp = new Promise<Probe>((res) => {
-    timer = setTimeout(() => res({ ...NO_PROBE }), timeout + 1_000);
-    onAbort = () => res({ ...NO_PROBE });
-    opts.signal?.addEventListener("abort", onAbort, { once: true });
+  const giveUp = new Promise<T>((res) => {
+    timer = setTimeout(() => res(opts.gaveUp("timeout")), opts.timeout + GIVE_UP_GRACE_MS);
+    onAbort = () => res(opts.gaveUp("aborted"));
+    if (opts.signal?.aborted) onAbort();
+    else opts.signal?.addEventListener("abort", onAbort, { once: true });
   });
   try {
-    return await Promise.race([readProbe(file, timeout, opts.signal), giveUp]);
+    return await Promise.race([work, giveUp]);
   } finally {
     clearTimeout(timer);
     if (onAbort) opts.signal?.removeEventListener("abort", onAbort);
   }
 }
 
-async function readProbe(file: string, timeout: number, signal: AbortSignal | undefined): Promise<Probe> {
+/**
+ * Read duration, frame rate, codec, size and pixel format with ffprobe. Returns nulls when ffprobe
+ * is missing or fails, takes longer than `timeout` (default 20 s), or `signal` aborts.
+ * `formats` is the containers it may read the file as: VIDEO_FORMATS for a cut, AUDIO_FORMATS
+ * (the default) for audio. Any other container, a playlist named .mp4 say, reads as nothing.
+ */
+export async function probe(file: string, opts: { timeout?: number; signal?: AbortSignal; formats?: string } = {}): Promise<Probe> {
+  if (opts.signal?.aborted || !(await hasFfprobe())) return { ...NO_PROBE };
+  const timeout = opts.timeout ?? PROBE_TIMEOUT_MS;
+  return giveUpAfter(readProbe(file, timeout, opts.signal, opts.formats ?? AUDIO_FORMATS), { timeout, signal: opts.signal, gaveUp: () => ({ ...NO_PROBE }) });
+}
+
+async function readProbe(file: string, timeout: number, signal: AbortSignal | undefined, formats: string): Promise<Probe> {
   try {
     const { stdout } = await run(
       "ffprobe",
       [
         "-v", "error",
-        // Local files only: a playlist or container that names a URL is never followed.
+        // Local files only: a playlist or container that names a URL is never followed. And only
+        // the caller's containers: a playlist named .mp4 is never read through to the files it names.
         "-protocol_whitelist", "file",
+        "-format_whitelist", formats,
         "-show_entries", "format=duration:stream=codec_type,codec_name,width,height,pix_fmt,avg_frame_rate,r_frame_rate",
         "-of", "json",
         file,
@@ -105,6 +124,117 @@ async function readProbe(file: string, timeout: number, signal: AbortSignal | un
 
 function positiveInt(n: unknown): number | null {
   return typeof n === "number" && Number.isInteger(n) && n > 0 ? n : null;
+}
+
+/** §21.6: the extensions a cut or a format may have. Anything else isn't video. */
+export const VIDEO_EXT: ReadonlySet<string> = new Set(["mp4", "mov", "m4v", "webm", "mkv"]);
+
+/** §21.3: a render's shape on screen, its length and rate, or why it can't be a format. */
+export type VideoProbe =
+  | { ok: true; width: number; height: number; duration: number | null; fps: number | null }
+  // `container`: ffprobe recognised the content as a container that isn't a video one (a concat
+  // playlist, a GIF), so the file is not a video whatever its name says (final review I1).
+  | { ok: false; code: "no_ffprobe" | "not_video" | "unreadable"; reason: string; container?: string };
+
+/**
+ * The only containers a render or a cut is read as (final review I1): ffprobe and ffmpeg pick a
+ * demuxer by the file's content, not its name, so without this a playlist named cat.mp4 (ffconcat)
+ * or a GIF would be read, and a playlist would open the files it names. The video demuxers the
+ * dashboard's cuts can be: MP4/MOV, Matroska/WebM, AVI, MPEG-TS, MXF, ASF, MPEG-PS, FLV, DV and Ogg.
+ */
+export const VIDEO_FORMATS = "mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mxf,asf,mpeg,flv,dv,ogg";
+
+/**
+ * The containers audio is read as: the audio ones, and the video ones a voice read, a bed or a
+ * cut's sound can come in (M4A is the MP4 demuxer). Never a playlist, an image or a GIF. It is the
+ * waveform list (peaks.ts's PEAKS_FORMATS) and the default for `probe`.
+ */
+export const AUDIO_FORMATS = "mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mxf,wav,w64,aiff,mp3,aac,flac,ogg,caf,asf,mpeg,flv,dv";
+
+/** ffprobe's "[concat @ 0x…] Format not on whitelist": the container it found, or null. */
+function refusedContainer(stderr: string): string | null {
+  return /\[([a-z0-9_]+) @ 0x[0-9a-f]+\] Format not on whitelist/i.exec(stderr)?.[1] ?? null;
+}
+/** Reads a render. `signal` aborts the read (the server closing, or a sibling file refused). */
+export type VideoProber = (abs: string, signal?: AbortSignal) => Promise<VideoProbe>;
+
+interface FfStream {
+  codec_type?: string;
+  width?: number;
+  height?: number;
+  sample_aspect_ratio?: string;
+  avg_frame_rate?: string;
+  r_frame_rate?: string;
+  tags?: { rotate?: string };
+  side_data_list?: { rotation?: number }[];
+  disposition?: { attached_pic?: number };
+}
+
+/**
+ * ffprobe's `-show_format -show_streams` JSON as a VideoProbe. The size is the one on screen (Review
+ * Focus 2): non-square pixels widen it, and a quarter turn of rotation metadata swaps its sides.
+ */
+export function parseVideoProbe(json: unknown): VideoProbe {
+  const j = (json ?? {}) as { format?: { duration?: string; format_name?: string }; streams?: FfStream[] };
+  if (/(^|,)image2(,|$)|_pipe(,|$)/.test(j.format?.format_name ?? "")) return { ok: false, code: "not_video", reason: "it's a still image" };
+  const s = j.streams?.find((x) => x.codec_type === "video" && x.disposition?.attached_pic !== 1);
+  if (!s) return { ok: false, code: "not_video", reason: "it has no video stream" };
+  const w = positiveInt(s.width);
+  const h = positiveInt(s.height);
+  if (w === null || h === null) return { ok: false, code: "unreadable", reason: "it has no picture size" };
+  const sar = /^(\d+):(\d+)$/.exec(s.sample_aspect_ratio ?? "");
+  const pixel = sar && Number(sar[1]) > 0 && Number(sar[2]) > 0 ? Number(sar[1]) / Number(sar[2]) : 1;
+  let width = Math.round(w * pixel);
+  let height = h;
+  const rotation = s.side_data_list?.find((d) => typeof d.rotation === "number")?.rotation ?? Number(s.tags?.rotate ?? 0);
+  if (Math.abs(Math.round(rotation)) % 180 === 90) [width, height] = [height, width];
+  const d = j.format?.duration ? Number(j.format.duration) : Number.NaN;
+  return { ok: true, width, height, duration: Number.isFinite(d) && d >= 0 ? d : null, fps: parseRate(s.avg_frame_rate) ?? parseRate(s.r_frame_rate) };
+}
+
+/** Why a render wasn't read, when the reading itself was cut short. */
+const TOO_LONG: VideoProbe = { ok: false, code: "unreadable", reason: "ffprobe took too long" };
+const STOPPED: VideoProbe = { ok: false, code: "unreadable", reason: "ffprobe was stopped" };
+
+/** giveUpAfter's answer for a render: it took too long, or it was stopped. */
+export function videoGaveUp(why: "timeout" | "aborted"): VideoProbe {
+  return { ...(why === "timeout" ? TOO_LONG : STOPPED) };
+}
+
+/**
+ * §21.3: reads a render with ffprobe, local files only. The reason never repeats the file's path.
+ * Like `probe`, it gives up `timeout` (default 20 s) plus a second on, or when `signal` aborts.
+ */
+export async function probeVideo(file: string, opts: { timeout?: number; signal?: AbortSignal } = {}): Promise<VideoProbe> {
+  if (opts.signal?.aborted) return videoGaveUp("aborted");
+  if (!(await hasFfprobe())) return { ok: false, code: "no_ffprobe", reason: "needs ffprobe to read the ratio" };
+  const timeout = opts.timeout ?? PROBE_TIMEOUT_MS;
+  return giveUpAfter(readVideoProbe(file, timeout, opts.signal), { timeout, signal: opts.signal, gaveUp: videoGaveUp });
+}
+
+async function readVideoProbe(file: string, timeout: number, signal: AbortSignal | undefined): Promise<VideoProbe> {
+  try {
+    const { stdout } = await run(
+      "ffprobe",
+      // Local files only: a playlist or container that names a URL is never followed. And only video
+      // containers: a playlist named .mp4 is refused, never read through to the files it names.
+      ["-v", "error", "-protocol_whitelist", "file", "-format_whitelist", VIDEO_FORMATS, "-show_format", "-show_streams", "-of", "json", file],
+      { timeout, killSignal: "SIGKILL", maxBuffer: 8 * 1024 * 1024, signal },
+    );
+    return parseVideoProbe(JSON.parse(stdout));
+  } catch (e) {
+    if (signal?.aborted) return videoGaveUp("aborted");
+    // Killed at its timeout (execFile sets `killed`), so there are no last words to report.
+    if ((e as { killed?: boolean }).killed) return videoGaveUp("timeout");
+    const stderr = String((e as { stderr?: unknown }).stderr ?? "");
+    const container = refusedContainer(stderr);
+    if (container) return { ok: false, code: "not_video", reason: `it's a ${container} file`, container };
+    const last = stderr.trim().split("\n").pop() ?? "";
+    const trimmed = last.startsWith(`${file}: `) ? last.slice(file.length + 2) : last;
+    // Belt and braces: the path never appears anywhere in what goes back to the caller.
+    const reason = trimmed.split(file).join("the file");
+    return { ok: false, code: "unreadable", reason: reason.slice(0, 200) || "ffprobe couldn't read it" };
+  }
 }
 
 // §19.5: when Rushes offers a proxy.

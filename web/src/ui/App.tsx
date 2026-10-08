@@ -1,10 +1,14 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, ApiError, projectId } from "../api.js";
-import { LOCKED_TAB, testFlags, STAGE_NAMES, agentPrompt, copyShortcut, defaultVersion, firstTab, foundChip, foundSignature, latest, lockedFound, neighbourVideo, proxyKey, snap } from "../lib.js";
+import {
+  LOCKED_TAB, testFlags, STAGE_NAMES, agentPrompt, copyShortcut, currentFormat, defaultVersion, firstTab, formatChips, formatPrompt, foundChip, foundSignature, labelOfId, latest,
+  lockedFound, neighbourFormat, neighbourVideo, previousVersion, proxyKey, snap, versionFormats,
+} from "../lib.js";
 import type { Batch, FoundCounts, FoundKind, Stage, Video } from "../types.js";
 import { useRushes } from "../useRushes.js";
 import { assetRev } from "../audio/timeline.js";
 import { Assets, type FoundRequest } from "./Assets.js";
+import { FormatToggle } from "./FormatToggle.js";
 import { Icon, STAGE_ICONS } from "./Icon.js";
 import { Mix } from "./Mix.js";
 import { Picture, type Source } from "./Picture.js";
@@ -101,6 +105,12 @@ export function App() {
   // §19.5: each film's Proxy/Original choice, in memory only. Proxy unless you've picked Original.
   const [sources, setSources] = useState<Record<string, Source>>({});
   const setSourceFor = (forVideo: string, source: Source) => setSources((s) => ({ ...s, [forVideo]: source }));
+  // §21.5: each film's chosen format, in memory only; a fresh load shows the primary.
+  const [formatChoice, setFormatChoice] = useState<Record<string, string>>({});
+  // R2: the primary's shape as the player measured it, for a cut stored with no size.
+  const [measured, setMeasured] = useState<Record<string, { width: number; height: number }>>({});
+  // R7: a drawn box belongs to the format on screen, so a switch waits for it.
+  const [boxPending, setBoxPending] = useState(false);
   // Proxy jobs whose failure has already been toasted, so each is said once.
   const toastedFailures = useRef(new Set<string>());
 
@@ -147,6 +157,25 @@ export function App() {
   const fps = version?.fps ?? state?.project.fps ?? 30;
   // §19.9: the cut's file as Assets lists it: its size and revision, for the Picture waveform.
   const cutAsset = version ? assets.find((a) => a.kind === "cut" && a.path === version.file) : undefined;
+  // §21: this cut's formats, the chips and the one on screen.
+  const filmNotes = state?.notes.notes.filter((n) => n.stage === "picture" && (!n.video || n.video === video?.id)) ?? [];
+  const views = version ? versionFormats(version, measured[version.file]) : [];
+  const before = video && version ? previousVersion(video, version.id) : undefined;
+  const format = currentFormat(views, video ? formatChoice[video.id] : undefined);
+  const missingFiles = new Set(assets.filter((a) => a.kind === "cut" && a.missing).map((a) => a.path));
+  const chips = version
+    ? formatChips({ views, previous: before ? versionFormats(before) : [], current: format, versionDuration: version.duration, notes: filmNotes, missing: missingFiles })
+    : [];
+  /** Switches the format on screen; false when it's refused (a drawn box waits), so focus can stay put. */
+  const switchFormat = (id: string): boolean => {
+    if (!video || id === format) return false;
+    if (boxPending) {
+      toast(`Add or clear your box on ${format ? labelOfId(format) : "this format"} first`);
+      return false;
+    }
+    setFormatChoice((c) => ({ ...c, [video.id]: id }));
+    return true;
+  };
 
   // A new cut arriving mid-review mustn't rewind the player or drop pending marks. So the
   // moment something's pending, hold the cut on screen; a newer one then waits behind a chip.
@@ -258,6 +287,14 @@ export function App() {
   // layout effect re-binds synchronously with the commit instead.
   useLayoutEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // §21.5 (R1): Alt+← and Alt+→ step through the formats; [ and ] stay with films (§14.2).
+      if (e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+        if (stage !== "picture" || typing(e.target)) return;
+        e.preventDefault();
+        const next = neighbourFormat(chips, format, e.key === "ArrowRight" ? 1 : -1);
+        if (next) switchFormat(next);
+        return;
+      }
       if (typing(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
       const n = Number(e.key);
       if (n >= 1 && n <= 6) show(ORDER[n - 1]);
@@ -411,6 +448,9 @@ export function App() {
                 {readyVersionId} ready
               </button>
             )}
+            {stage === "picture" && version && chips.length > 0 && (
+              <FormatToggle chips={chips} versionId={version.id} prompt={formatPrompt(state.project.name, video.name, version.id)} onSelect={switchFormat} toast={toast} />
+            )}
           </>
         )}
         <span class="sp" />
@@ -469,6 +509,7 @@ export function App() {
             <span><kbd>N</kbd></span><span>New note</span>
             <span><kbd>1</kbd>–<kbd>7</kbd></span><span>Switch tab</span>
             <span><kbd>[</kbd> <kbd>]</kbd></span><span>Previous or next film</span>
+            <span><kbd>Alt</kbd> <kbd>←</kbd> <kbd>→</kbd></span><span>Previous or next format</span>
             <span><kbd>?</kbd></span><span>Shortcuts</span>
             <span><kbd>Esc</kbd></span><span>Close</span>
           </div>
@@ -572,6 +613,12 @@ export function App() {
             onSourceChange={setSourceFor}
             fileSize={cutAsset?.size ?? null}
             fileRev={cutAsset ? assetRev(cutAsset) : undefined}
+            formats={views}
+            format={format}
+            formatMissing={!!format && missingFiles.has(views.find((f) => f.id === format)?.file ?? "")}
+            onPrimarySize={(file, width, height) => setMeasured((m) => (m[file] ? m : { ...m, [file]: { width, height } }))}
+            onBoxPendingChange={setBoxPending}
+            onFormatChange={switchFormat}
           />
         ) : stage === "script" ? (
           <Script script={state.script} toast={toast} onChanged={() => void refresh()} />

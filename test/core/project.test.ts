@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { join } from "node:path";
-import { addFile, addVariant, addVersion, ensureProjectId, ensureProjectIdOnce, latestVersion, lockPicture, resolveVideo, setShots, shotAt } from "../../src/core/project.js";
+import { readFile, writeFile } from "node:fs/promises";
+import { addFile, addFormat, addVariant, addVersion, ensureProjectId, ensureProjectIdOnce, latestVersion, lockPicture, resolveCut, resolveVideo, setShots, shotAt } from "../../src/core/project.js";
 import { fromManifestPath, toManifestPath } from "../../src/core/paths.js";
 import { newProjectId, PROJECT_ID_ALPHABET, slugify, uniqueId } from "../../src/core/ids.js";
 import { parseRate } from "../../src/core/media.js";
-import { ProjectSchema, type Project, type Shot } from "../../src/core/schema.js";
-import { InvalidError, NotFoundError } from "../../src/core/errors.js";
+import { NoteSchema, ProjectSchema, type Project, type Shot } from "../../src/core/schema.js";
+import { CorruptFileError, InvalidError, NotFoundError, RushesError } from "../../src/core/errors.js";
 import { tmpProject } from "../helpers/tmp.js";
 
 const empty = (): Project => ({ schema: 1, rev: 0, name: "demo", fps: 30, videos: [], lanes: [], files: [], autoProxy: false });
@@ -387,5 +388,198 @@ describe("parseRate", () => {
     expect(parseRate("60/1")).toBe(60);
     expect(parseRate("0/0")).toBeNull();
     expect(parseRate(undefined)).toBeNull();
+  });
+});
+
+describe("formats in the data (§21.3)", () => {
+  const T0 = new Date("2026-10-07T00:00:00Z");
+  const withCut = (size: { width: number | null; height: number | null } = { width: 1920, height: 1080 }) => {
+    const p = empty();
+    addVersion(p, { video: "Hero", file: "renders/hero_v1.mp4", duration: 8, fps: 30, ...size }, T0);
+    return p;
+  };
+  const shape = (file: string, width: number, height: number, duration: number | null = 8) => ({ file, width, height, duration, fps: 30 });
+
+  // Review Focus 1.
+  it("a project and notes from 0.2.x load unchanged: no size, no formats, notes for every format", () => {
+    const old = ProjectSchema.parse({
+      schema: 1, rev: 3, name: "demo", fps: 30, lanes: [], files: [], autoProxy: false,
+      videos: [{ id: "hero", name: "Hero", lockedVersion: null, versions: [{ id: "v1", file: "renders/hero_v1.mp4", duration: 8, fps: 30, addedAt: "2026-10-01T00:00:00Z", note: "", shots: [], proxy: null }] }],
+    });
+    expect(old.videos[0].versions[0]).toMatchObject({ width: null, height: null, formats: [] });
+    const note = NoteSchema.parse({ id: "n_1", stage: "picture", video: "hero", version: "v1", scope: "point", t: 1, text: "x", createdAt: "2026-10-01T00:00:00Z", box: { x: 0.1, y: 0.1, w: 0.2, h: 0.2 } });
+    expect(note.format).toBeNull();
+  });
+
+  it("addVersion records the primary's size and starts with no formats", () => {
+    expect(withCut().videos[0].versions[0]).toMatchObject({ width: 1920, height: 1080, formats: [] });
+  });
+
+  it("addFormat registers a shape on the newest cut, measured and labelled", () => {
+    const p = withCut();
+    const r = addFormat(p, shape("renders/hero_v1_9x16.mp4", 1080, 1920), new Date("2026-10-07T10:00:00Z"));
+    expect(r.format).toEqual({ id: "9x16", label: "9:16", file: "renders/hero_v1_9x16.mp4", width: 1080, height: 1920, duration: 8, fps: 30, addedAt: "2026-10-07T10:00:00.000Z" });
+    expect(r.warning).toBeNull();
+    expect(ProjectSchema.safeParse(p).success).toBe(true);
+  });
+
+  // Review Focus 4.
+  it("refuses a second render of a ratio the cut already has, the primary's own included", () => {
+    const p = withCut();
+    addFormat(p, shape("renders/a.mp4", 1080, 1920));
+    const again = () => addFormat(p, shape("renders/b.mp4", 720, 1280));
+    expect(again).toThrow(RushesError);
+    expect(again).toThrow("v1 already has 9:16. Register a re-render as a new version.");
+    expect(() => addFormat(p, shape("renders/hero_v1.mp4", 1920, 1080))).toThrow("v1 already has 16:9. Register a re-render as a new version.");
+  });
+
+  it("refuses a ninth shape: eight in all, the primary included (R3)", () => {
+    const p = withCut();
+    const sizes: [number, number][] = [[1080, 1920], [1080, 1080], [1080, 1350], [1440, 1080], [1620, 1080], [1080, 1620], [2520, 1080]];
+    sizes.forEach(([w, h], i) => addFormat(p, shape(`renders/f${i}.mp4`, w, h)));
+    expect(() => addFormat(p, shape("renders/f8.mp4", 1080, 2520))).toThrow("v1 already has 8 formats, the most one cut can have.");
+  });
+
+  it("warns when a format's length is more than 0.1 s off the cut's, and registers it anyway", () => {
+    const p = withCut();
+    expect(addFormat(p, shape("renders/t.mp4", 1080, 1920, 8.4)).warning).toBe("9:16 is 8.4 s; the cut is 8.0 s");
+    expect(p.videos[0].versions[0].formats).toHaveLength(1);
+  });
+
+  it("takes a label hint only for an unusual ratio close to it (R10)", () => {
+    const r = addFormat(withCut(), { ...shape("renders/scope.mp4", 1920, 804), label: "2.4:1" });
+    expect(r.format).toMatchObject({ id: "2.4x1", label: "2.4:1" });
+    expect(addFormat(withCut(), { ...shape("renders/t.mp4", 1080, 1920), label: "4:5" }).labelNote).toMatch(/standard ratio/);
+  });
+
+  it("two spellings of one unusual ratio can't make two shapes (I3)", () => {
+    const p = withCut();
+    addFormat(p, { ...shape("renders/a.mp4", 1920, 804), label: "2.4:1" });
+    for (const hint of ["12:5", "2.40:1", "2.4:1.0"]) {
+      expect(() => addFormat(p, { ...shape("renders/b.mp4", 1920, 806), label: hint })).toThrow("v1 already has 2.4:1.");
+    }
+    expect(p.videos[0].versions[0].formats.map((f) => f.id)).toEqual(["2.4x1"]);
+  });
+
+  it("refuses a shape within 1% of one the cut already has, however the labels came out (final review M1)", () => {
+    const again = "Register a re-render as a new version.";
+    // 1920×800 is the fraction 12:5; 1920×804 measures the decimal 2.39:1.
+    const a = withCut();
+    addFormat(a, shape("renders/a.mp4", 1920, 800));
+    expect(() => addFormat(a, shape("renders/b.mp4", 1920, 804))).toThrow(`v1 already has 12:5. ${again}`);
+    // 1000×700 is 10:7; 1001×700 measures 1.43:1.
+    const b = withCut();
+    addFormat(b, shape("renders/a.mp4", 1000, 700));
+    expect(() => addFormat(b, shape("renders/b.mp4", 1001, 700))).toThrow(`v1 already has 10:7. ${again}`);
+    // A hint of "12:5" is written 2.4:1: still the measured 12:5's shape, whichever came first.
+    const c = withCut();
+    addFormat(c, shape("renders/a.mp4", 1920, 800));
+    expect(() => addFormat(c, { ...shape("renders/b.mp4", 1920, 804), label: "12:5" })).toThrow(`v1 already has 12:5. ${again}`);
+    const d = withCut();
+    expect(addFormat(d, { ...shape("renders/a.mp4", 1920, 804), label: "12:5" }).format.label).toBe("2.4:1");
+    expect(() => addFormat(d, shape("renders/b.mp4", 1920, 800))).toThrow(`v1 already has 2.4:1. ${again}`);
+    for (const p of [a, b, c, d]) expect(p.videos[0].versions[0].formats).toHaveLength(1);
+    // Within 1% of the primary too, and the comparison is the same for a portrait twin.
+    const e = withCut({ width: 2000, height: 1000 });
+    expect(() => addFormat(e, shape("renders/b.mp4", 2010, 1000))).toThrow(`v1 already has 2:1. ${again}`);
+    // 1.5% off is another shape: the rule is 1%, no wider.
+    expect(addFormat(e, shape("renders/c.mp4", 2030, 1000)).format.label).toBe("2.03:1");
+    const f = withCut({ width: 1000, height: 2000 });
+    expect(() => addFormat(f, shape("renders/b.mp4", 1000, 2010))).toThrow(`v1 already has 1:2. ${again}`);
+    // More than 1% apart: two shapes. 2.39:1 against 21:9 (2.33:1) is 2.3% apart.
+    const g = withCut();
+    addFormat(g, shape("renders/a.mp4", 1920, 804));
+    expect(addFormat(g, shape("renders/b.mp4", 2100, 900)).format.label).toBe("21:9");
+    expect(addFormat(g, shape("renders/c.mp4", 2020, 1000)).format.label).toBe("2.02:1");
+  });
+
+  it("uses the primary's size given for a cut from before formats, and refuses without one", () => {
+    const p = withCut({ width: null, height: null });
+    expect(() => addFormat(p, shape("renders/t.mp4", 1080, 1920))).toThrow(/can't read v1's own picture size/);
+    addFormat(p, { ...shape("renders/t.mp4", 1080, 1920), primarySize: { width: 1920, height: 1080 } });
+    expect(p.videos[0].versions[0]).toMatchObject({ width: 1920, height: 1080 });
+  });
+
+  // Fix round 1, I1: a refusal leaves the project exactly as it was.
+  it("addFormat is atomic: after any refusal the project is unchanged, a primarySize included", () => {
+    const old = withCut({ width: null, height: null });
+    const before = structuredClone(old);
+    const primarySize = { width: 1920, height: 1080 };
+    // 16:9 against a primary that primarySize says is 16:9 (409).
+    expect(() => addFormat(old, { ...shape("renders/same.mp4", 1280, 720), primarySize })).toThrow("v1 already has 16:9.");
+    expect(old).toEqual(before);
+    // A bad size for the new render, and a bad primarySize: a RushesError, never a RangeError, and no change.
+    for (const bad of [{ ...shape("renders/z.mp4", 0, 1920), primarySize }, { ...shape("renders/z.mp4", 1080, 1920), primarySize: { width: 0, height: 1080 } }]) {
+      let err: unknown;
+      try { addFormat(old, bad); } catch (e) { err = e; }
+      expect(err).toBeInstanceOf(RushesError);
+      expect(err).not.toBeInstanceOf(RangeError);
+      expect(old).toEqual(before);
+    }
+    // The ninth shape (400) and no primary size (422) change nothing either.
+    const full = withCut();
+    [[1080, 1920], [1080, 1080], [1080, 1350], [1440, 1080], [1620, 1080], [1080, 1620], [2520, 1080]].forEach(([w, h], i) => addFormat(full, shape(`renders/f${i}.mp4`, w, h)));
+    const full0 = structuredClone(full);
+    expect(() => addFormat(full, shape("renders/f8.mp4", 1080, 2520))).toThrow(RushesError);
+    expect(full).toEqual(full0);
+    expect(() => addFormat(old, shape("renders/t.mp4", 1080, 1920))).toThrow(RushesError);
+    expect(old).toEqual(before);
+    // And a success does backfill the primary's size.
+    addFormat(old, { ...shape("renders/t.mp4", 1080, 1920), primarySize });
+    expect(old.videos[0].versions[0]).toMatchObject({ width: 1920, height: 1080 });
+  });
+
+  it("adds to a locked cut too (§21.6)", () => {
+    const p = withCut();
+    lockPicture(p, "hero", "v1");
+    expect(addFormat(p, shape("renders/t.mp4", 1080, 1920)).format.id).toBe("9x16");
+  });
+
+  it("defaults to the newest cut of the newest film, and takes a film and version by name (R16)", () => {
+    const p = withCut();
+    addVersion(p, { video: "Teaser", file: "renders/teaser_v1.mp4", width: 1920, height: 1080 }, new Date("2026-10-08T00:00:00Z"));
+    expect(resolveCut(p).video.id).toBe("teaser");
+    addVersion(p, { video: "Hero", file: "renders/hero_v2.mp4", width: 1920, height: 1080 }, new Date("2026-10-09T00:00:00Z"));
+    expect(resolveCut(p)).toMatchObject({ video: { id: "hero" }, version: { id: "v2" } });
+    expect(resolveCut(p, "Hero", "v1").version.id).toBe("v1");
+    expect(() => resolveCut(empty())).toThrow("There's no cut to add a format to yet. Register one with rushes_add_version first.");
+  });
+
+  it("project.json with a ratio twice, a format equal to the primary, a label off its id, or nine formats fails validation", () => {
+    const p = withCut();
+    addFormat(p, shape("renders/t.mp4", 1080, 1920));
+    const f0 = p.videos[0].versions[0].formats[0];
+    const variants: Project[] = [structuredClone(p), structuredClone(p), structuredClone(p), structuredClone(p)];
+    variants[0].videos[0].versions[0].formats.push({ ...f0, file: "renders/u.mp4" });
+    variants[1].videos[0].versions[0].formats[0] = { ...f0, id: "16x9", label: "16:9" };
+    variants[2].videos[0].versions[0].formats[0] = { ...f0, label: "4:5" };
+    variants[3].videos[0].versions[0].formats = Array.from({ length: 9 }, (_, i) => ({ ...f0, id: `${i + 1}x40`, label: `${i + 1}:40` }));
+    for (const v of variants) expect(ProjectSchema.safeParse(v).success).toBe(false);
+  });
+
+  // Fix round 1, I2: a bad size is a schema failure, never a crash inside the refinement.
+  it.each([0, -5, 1.5])("a primary width of %s is reported as a corrupt file, not thrown as a RangeError", async (bad) => {
+    const p = withCut();
+    addFormat(p, shape("renders/t.mp4", 1080, 1920));
+    const raw = structuredClone(p);
+    raw.videos[0].versions[0].width = bad;
+    expect(() => ProjectSchema.safeParse(raw)).not.toThrow();
+    expect(ProjectSchema.safeParse(raw).success).toBe(false);
+    const { store } = await tmpProject();
+    await writeFile(store.path("project"), JSON.stringify(raw));
+    await expect(store.read("project")).rejects.toBeInstanceOf(CorruptFileError);
+  });
+
+  it("the store refuses to write a duplicated format, and reports a hand edit that has one", async () => {
+    const { store } = await tmpProject();
+    await store.update("project", (d) => {
+      addVersion(d, { video: "Hero", file: "renders/hero_v1.mp4", width: 1920, height: 1080 });
+      addFormat(d, shape("renders/t.mp4", 1080, 1920));
+    });
+    await expect(store.update("project", (d) => { d.videos[0].versions[0].formats.push({ ...d.videos[0].versions[0].formats[0] }); })).rejects.toThrow(/project\.json is invalid/);
+    const raw = JSON.parse(await readFile(store.path("project"), "utf8"));
+    raw.videos[0].versions[0].formats.push(raw.videos[0].versions[0].formats[0]);
+    await writeFile(store.path("project"), JSON.stringify(raw));
+    await expect(store.read("project")).rejects.toThrow(/project\.json can't be read/);
   });
 });

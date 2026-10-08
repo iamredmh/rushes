@@ -1,5 +1,5 @@
 // The server's data types, re-exported for the dashboard. Type-only, so nothing from src/ is bundled.
-export type { Batch, Cue, Lane, LaneStage, Mark, Note, Picks, Proxy, Script, Section, Shot, Stage, Take, Variant } from "../../src/core/schema.js";
+export type { Batch, Cue, Format, Lane, LaneStage, Mark, Note, Picks, Proxy, Script, Section, Shot, Stage, Take, Variant } from "../../src/core/schema.js";
 export type { LoudnessResult } from "../../src/server/loudness.js";
 export type { TabState } from "../../src/core/tabs.js";
 export type { Asset, AssetKind } from "../../src/server/assets.js";
