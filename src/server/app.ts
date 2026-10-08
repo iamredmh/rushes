@@ -124,7 +124,9 @@ const VariantBody = z.object({
   file: z.string().min(1),
   meta: z.record(z.string(), z.union([z.string(), z.number()])).optional(),
   description: z.string().min(1).max(200).optional(),
-  cues: z.array(z.object({ name: z.string().min(1), t, file: z.string().min(1).max(1024).optional() })).optional(),
+  // §23.6: a cue's file has no length cap here. The 1024 limit applies to the stored (manifest) form,
+  // which checkCueFile enforces with a 400 naming the cue.
+  cues: z.array(z.object({ name: z.string().min(1), t, file: z.string().min(1).optional() })).optional(),
 });
 const ScriptBody = z.object({
   wordsPerSecond: z.number().positive().optional(),

@@ -60,7 +60,8 @@ describe("the stored field", () => {
 
   it("CueSchema takes an optional file of 1 to 1024 characters", () => {
     expect(CueSchema.parse({ id: "a", name: "a", t: 0, file: "sfx/a.wav" }).file).toBe("sfx/a.wav");
-    expect(CueSchema.parse({ id: "a", name: "a", t: 0 })).toEqual({ id: "a", name: "a", t: 0 });
+    // toEqual would pass with `file: undefined`; the key itself must be absent.
+    expect(Object.keys(CueSchema.parse({ id: "a", name: "a", t: 0 }))).toEqual(["id", "name", "t"]);
     expect(CueSchema.safeParse({ id: "a", name: "a", t: 0, file: "" }).success).toBe(false);
     expect(CueSchema.safeParse({ id: "a", name: "a", t: 0, file: `${"a".repeat(1021)}.wav` }).success).toBe(false);
   });

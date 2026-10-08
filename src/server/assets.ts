@@ -297,11 +297,12 @@ export async function listAssets(store: Store, project: Project, script: Script)
 }
 
 /**
- * Every path `/api/assets` would list, without stat'ing any of them: registered media (cuts,
- * takes, variants -- present whether or not the file is actually there) plus every *.png
- * directly inside screenshots/ and .rushes/grabs/ whose name the matching safe-name regex would
- * let /media serve. POST /api/reveal uses this to check a path cheaply, stat'ing only the one
- * file it actually needs instead of every asset in the project.
+ * Every path the project knows, without stat'ing any of them: registered media (cuts, takes,
+ * variants -- present whether or not the file is actually there), plus every *.png directly
+ * inside screenshots/ and .rushes/grabs/ whose name the matching safe-name regex would let /media
+ * serve. That is everything `/api/assets` lists and also cue samples (§23), which Assets doesn't
+ * list (§23.7). POST /api/reveal and /api/open use this to check a path cheaply, stat'ing only
+ * the one file they actually need instead of every asset in the project.
  */
 export async function candidatePaths(store: Store, project: Project, script: Script): Promise<Set<string>> {
   const paths = registeredMedia(project, script);
