@@ -33,19 +33,8 @@ export function placeNote(note: Note, version: string | null): { t: number | nul
   return { t: note.t, tOut: note.tOut, from };
 }
 
-export type FitState = "ok" | "tight" | "over";
-
-/** Words, reading time and whether a line fits its slot. Matches the server's fit(). */
-export function fit(text: string, slotSeconds: number, wordsPerSecond: number): { words: number; seconds: number; ratio: number; state: FitState } {
-  const words = (text.trim().match(/\S+/g) ?? []).length;
-  const seconds = words / wordsPerSecond;
-  const ratio = slotSeconds > 0 ? seconds / slotSeconds : Infinity;
-  return { words, seconds, ratio, state: ratio > 1 ? "over" : ratio > 0.8 ? "tight" : "ok" };
-}
-
-export function isChanged(s: Section): boolean {
-  return s.proposed !== null && s.proposed.trim() !== s.current.trim();
-}
+import { fit, isChanged, type FitState } from "../../src/core/scriptText.js";
+export { fit, isChanged, type FitState };
 
 export function latest(video: Video | undefined): Version | undefined {
   return video?.versions[video.versions.length - 1];

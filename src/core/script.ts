@@ -2,21 +2,7 @@ import type { Script, Section, Take } from "./schema.js";
 import { InvalidError, NotFoundError } from "./errors.js";
 import { uniqueId } from "./ids.js";
 
-export type FitState = "ok" | "tight" | "over";
-
-/** Does this line fit its slot at reading speed? "tight" means over 80% of the slot. */
-export function fit(text: string, slotSeconds: number, wordsPerSecond: number): { words: number; seconds: number; ratio: number; state: FitState } {
-  const words = (text.trim().match(/\S+/g) ?? []).length;
-  const seconds = words / wordsPerSecond;
-  const ratio = slotSeconds > 0 ? seconds / slotSeconds : Infinity;
-  const state: FitState = ratio > 1 ? "over" : ratio > 0.8 ? "tight" : "ok";
-  return { words, seconds, ratio, state };
-}
-
-/** A row counts as changed when the user's version differs from the agent's line. */
-export function isChanged(s: Section): boolean {
-  return s.proposed !== null && s.proposed.trim() !== s.current.trim();
-}
+export { fit, isChanged, type FitState } from "./scriptText.js";
 
 export interface SectionInput {
   id?: string;
