@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { FORMAT_ID_RE, isPictureSize, labelOfId, ratioId, ratioLabel } from "./formats.js";
+import { FORMAT_ID_MAX, FORMAT_ID_RE, FORMAT_LABEL_MAX, isPictureSize, labelOfId, ratioId, ratioLabel } from "./formats.js";
 import { oneLineOf } from "./labels.js";
 import { LOG_AREAS, LOG_BY, LOG_KINDS, LOG_MAX, LOG_TEXT_MAX } from "./logText.js";
 
@@ -46,8 +46,8 @@ export type Proxy = z.infer<typeof ProxySchema>;
 
 // §21.3: another render of the same cut at another aspect ratio. Its id is its label with ":" as "x".
 export const FormatSchema = fileObject({
-  id: z.string().max(16).regex(FORMAT_ID_RE),
-  label: z.string().min(3).max(16),
+  id: z.string().max(FORMAT_ID_MAX).regex(FORMAT_ID_RE),
+  label: z.string().min(3).max(FORMAT_LABEL_MAX),
   file: z.string().min(1),
   width: z.number().int().positive(),
   height: z.number().int().positive(),
@@ -243,7 +243,7 @@ export const NoteSchema = z
     marks: z.array(MarkSchema).max(4).default([]),
     // §21.3: the format this note belongs to (a Format id such as "9x16"), or null for every format:
     // the default, and every note from before formats. The server checks it against the note's version.
-    format: z.string().max(16).regex(FORMAT_ID_RE).nullable().default(null),
+    format: z.string().max(FORMAT_ID_MAX).regex(FORMAT_ID_RE).nullable().default(null),
     status: z.enum(["todo", "done"]).default("todo"),
     reply: z.string().default(""),
     fixT: seconds.nullable().default(null),

@@ -1,5 +1,8 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
+/** The longest path the API takes for a file. The MCP tools refuse longer ones in words before asking. */
+export const MAX_PATH = 1024;
+
 /**
  * Store a media path the way the manifest wants it: relative to the project
  * root with forward slashes when the file is inside the project, absolute

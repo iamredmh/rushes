@@ -14,6 +14,10 @@ export const FORMAT_ID_RE = /^\d+(?:\.\d+)?x\d+(?:\.\d+)?$/;
 /** The most shapes one cut can have, the primary included (ruling R3). */
 export const MAX_FORMATS = 8;
 
+/** The longest a format's id ("2.39x1") and its ratio label ("2.39:1") may be. */
+export const FORMAT_ID_MAX = 16;
+export const FORMAT_LABEL_MAX = 16;
+
 /** The order the chips always take (§21.5), so a chip never moves between projects. */
 export const CHIP_ORDER: readonly string[] = ["9x16", "4x5", "1x1", "4x3", "16x9"];
 
