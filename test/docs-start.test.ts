@@ -43,3 +43,31 @@ describe("starting a film: what the agent docs promise (§24)", () => {
     expect(read("AGENTS.md")).toContain("npx -y rushes new my-film --no-browser");
   });
 });
+
+describe("README: starting a film (§24)", () => {
+  const text = read("README.md");
+
+  it("Get started leads with starting a film, and still offers the review-tool line for a film that exists", () => {
+    const start = text.slice(text.indexOf("## Get started"), text.indexOf("## How it works"));
+    expect(start).toMatch(/Use github\.com\/iamredmh\/rushes to start a new film/);
+    expect(start).toMatch(/Already have a film\?/);
+    expect(start).toContain("Use github.com/iamredmh/rushes as my review tool for video, voiceover and music.");
+    // The first instruction is the new-film one.
+    expect(start.indexOf("to start a new film")).toBeLessThan(start.indexOf("as my review tool"));
+  });
+
+  it("has a 'Start a film' section with the command, the refusals and the flags", () => {
+    const section = text.slice(text.indexOf("### Start a film"), text.indexOf("### Try it first"));
+    expect(section).toContain("npx -y rushes new my-film");
+    expect(section).toContain("brief.md");
+    expect(section).toMatch(/already a Rushes project/);
+    expect(section).toMatch(/never overwritten/);
+    expect(section).toContain("--name");
+    expect(section).toContain("--no-browser");
+  });
+
+  it("the agent steps point at Starting a film in AGENTS.md", () => {
+    const agents = text.slice(text.indexOf("## For agents: set yourself up"), text.indexOf("## Manual setup"));
+    expect(agents).toContain("**Starting a film** in AGENTS.md");
+  });
+});
