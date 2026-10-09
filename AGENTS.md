@@ -76,7 +76,7 @@ Every tab is visible from the start, in workflow order, even before it has anyth
    - **Music or Sound effects:** make the new bed or pass the text and marks ask for, and register it as in step 1.
 
    Then reply as in step 6. Mix plays the newest round's picked voice read; takes are never mixed.
-8. **Script batches.** When a section's `proposed` differs from `current`, the user rewrote the line. Adopt it by calling `rushes_set_script` with just that section's `id`, `start`, `end` and the new `current`; the other sections stay as they are. The proposal then clears itself, and a flagged section goes back to draft. If voiceover already exists, re-record the picked voice with the corrected script and register it with `rushes_add_variant` as a new read in a new round.
+8. **Script batches.** When a section's `proposed` differs from `current`, the user rewrote the line. Adopt it by calling `rushes_set_script` with just that section's `id`, `start`, `end` and the new `current`; the other sections stay as they are. The proposal then clears itself, and the section goes back to draft, as any section does when you change its line: a flag has been acted on, and the user approved the old words, not the new ones, so they approve again. If voiceover already exists, re-record the picked voice with the corrected script and register it with `rushes_add_variant` as a new read in a new round.
 
 ## Opening a project, and the files that go with the cut
 

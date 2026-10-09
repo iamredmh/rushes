@@ -45,8 +45,10 @@ export interface SetSectionsOptions {
  *
  * Either way, a section that keeps its id keeps the user's proposed text,
  * direction, status and takes. A proposal the agent adopts as the current line
- * is cleared because it has landed, and a flagged section whose line the agent
- * changed goes back to draft because the agent has acted on the flag.
+ * is cleared because it has landed. A section whose line the agent changed goes
+ * back to draft, whatever its status: a flag has been acted on, and an approval
+ * was for the words the user read, not the new ones. Re-sending the same words
+ * (spacing aside) leaves the status alone.
  */
 export function setSections(script: Script, input: SectionInput[], { replace = false }: SetSectionsOptions = {}): Section[] {
   const seen = new Set<string>();
@@ -71,7 +73,7 @@ export function setSections(script: Script, input: SectionInput[], { replace = f
     const prev = s.id === undefined ? undefined : old.get(s.id);
     const landed = prev?.proposed != null && prev.proposed.trim() === s.current.trim();
     const reworked = prev !== undefined && prev.current.trim() !== s.current.trim();
-    const status = !prev || landed || (reworked && prev.status === "flagged") ? "draft" : prev.status;
+    const status = !prev || landed || reworked ? "draft" : prev.status;
     return {
       id: s.id ?? null,
       start: s.start,
