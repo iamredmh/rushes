@@ -184,6 +184,10 @@ export const ScriptSchema = fileObject({
   rev: z.number().int().nonnegative(),
   wordsPerSecond: z.number().positive().default(2.6),
   sections: z.array(SectionSchema).default([]),
+  // The highest s<n> number ever given to a section, so a removed section's id is never handed out
+  // again for new words. Absent on a script saved before this; setSections then works it out from
+  // the ids it can see.
+  sectionCounter: z.number().int().nonnegative().optional(),
 });
 export type Script = z.infer<typeof ScriptSchema>;
 
