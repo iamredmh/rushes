@@ -78,6 +78,40 @@ describe("setSections", () => {
     expect(s.sections.every((x) => /^s\d+$|^intro$/.test(x.id))).toBe(true);
   });
 
+  describe("an id that was handed out is never handed out again", () => {
+    // Notes and picks name a section by id. If a removed section's id came back for new words, an
+    // old note would quietly attach to a line it was never about.
+    it("a section dropped by a replace leaves its id unused", () => {
+      const s = empty();
+      setSections(s, [{ start: 0, end: 10, current: "A" }, { start: 10, end: 20, current: "B" }, { start: 20, end: 30, current: "C" }]);
+      setSections(s, [{ id: "s1", start: 0, end: 10, current: "A" }], { replace: true });
+      setSections(s, [{ start: 10, end: 20, current: "D" }]);
+      expect(s.sections.map((x) => [x.id, x.current])).toEqual([["s1", "A"], ["s4", "D"]]);
+    });
+
+    it("a replace with no ids at all starts after the old numbers, not back at s1", () => {
+      const s = empty();
+      setSections(s, [{ start: 0, end: 10, current: "A" }, { start: 10, end: 20, current: "B" }]);
+      setSections(s, [{ start: 0, end: 10, current: "A2" }, { start: 10, end: 20, current: "B2" }], { replace: true });
+      expect(s.sections.map((x) => x.id)).toEqual(["s3", "s4"]);
+    });
+
+    it("works out the numbers already used for a script saved before it kept a count", () => {
+      const s: Script = { schema: 1, rev: 3, wordsPerSecond: 2.6, sections: ["s1", "s2", "s3"].map((id, i) => ({ id, start: i * 10, end: i * 10 + 10, current: id, proposed: null, direction: "", status: "draft" as const, takes: [] })) };
+      setSections(s, [{ start: 0, end: 10, current: "New" }], { replace: true });
+      expect(s.sections.map((x) => x.id)).toEqual(["s4"]);
+    });
+
+    it("keeps the count when the script is written and read back", async () => {
+      const { ScriptSchema } = await import("../../src/core/schema.js");
+      const s = empty();
+      setSections(s, [{ start: 0, end: 10, current: "A" }, { start: 10, end: 20, current: "B" }]);
+      const back = ScriptSchema.parse(JSON.parse(JSON.stringify(s)));
+      setSections(back, [{ start: 0, end: 10, current: "A2" }], { replace: true });
+      expect(back.sections.map((x) => x.id)).toEqual(["s3"]);
+    });
+  });
+
   it("merge checks overlaps against the resulting list and keeps it sorted", () => {
     const s = empty();
     setSections(s, [{ start: 0, end: 10, current: "A" }, { start: 20, end: 30, current: "C" }]);

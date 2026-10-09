@@ -2,7 +2,7 @@ import { access, readFile, statfs as nodeStatfs } from "node:fs/promises";
 import { join } from "node:path";
 import { RUSHES_DIR, Store } from "../core/store.js";
 import { FILES, type FileKey } from "../core/schema.js";
-import { harnesses, LEGACY_DETAIL, legacyMcpLaunches, mcpLaunch, mentionsLegacySource, mergeJson, mergeToml, type Harness } from "../setup/harnesses.js";
+import { harnesses, LEGACY_DETAIL, legacyMcpLaunches, mcpLaunch, mentionsLegacySource, mergeJson, mergeToml, RegistrationFormError, type Harness } from "../setup/harnesses.js";
 import { realSetupEnv } from "../setup/env.js";
 import type { SetupEnv } from "../setup/setup.js";
 import { canonicalRoot } from "../server/lock.js";
@@ -217,7 +217,9 @@ async function harnessCheck(h: Harness, env: DoctorEnv): Promise<Check & { unkno
     const legacy = legacyMcpLaunches(env.platform).some((l) => !(h.kind === "toml" ? mergeToml(text, l) : mergeJson(text, l)).changed);
     if (legacy) return { ...base, ok: true, detail: LEGACY_DETAIL };
     return { ...base, ok: false, detail: "the Rushes MCP server isn't registered.", fix: `rushes setup --only ${h.id}` };
-  } catch {
+  } catch (e) {
+    // A valid file whose rushes entry is written in a form setup doesn't edit: it is registered.
+    if (e instanceof RegistrationFormError) return { ...base, ok: true, detail: "the Rushes MCP server is registered, in a form setup doesn't edit." };
     return { ...base, ok: false, detail: `${path} exists but isn't valid, so registration can't be checked.`, fix: `Fix ${path}, then run: rushes setup --only ${h.id}` };
   }
 }

@@ -1,6 +1,6 @@
 # Rushes audit, 9 October 2026
 
-Status: written against 0.4.0 (99857a9). The commits that carry this file fix findings 2, 3 and 4, fix 1 in part, and remove `docs/plans` (finding 11). Everything else is open. Line numbers are for 99857a9; `git log` shows what has landed since.
+Status: written against 0.4.0 (99857a9). Findings 2 to 9 are fixed, 1 in part, and `docs/plans` is removed (finding 11). Everything else is open. Line numbers are for 99857a9; `git log` shows what has landed since.
 
 ## How it was done
 
@@ -8,7 +8,7 @@ The audit prompt is `/ponytail-audit` from [DietrichGebert/ponytail](https://git
 
 The load assumed: one person on one machine, with one or two agent processes writing at the same time. Concurrent writers are in scope; many users are not.
 
-Checked by hand against the code: 1, 2, 3, 4, 6 (the `--dir` part), 7, 8, 11 and, in 14, `Store.backup`. The rest are as the audit reported them and have not been re-checked.
+Checked by hand against the code: 1, 2, 3, 4, 6 (the `--dir` part), 7, 8, 11 and, in 14, `Store.backup`. Findings 2 to 9 were each fixed test-first, the new test failing before the change. The rest are as the audit reported them and have not been re-checked.
 
 ## Done
 
@@ -18,15 +18,15 @@ Checked by hand against the code: 1, 2, 3, 4, 6 (the `--dir` part), 7, 8, 11 and
 | 2 | An approved script line stays approved after the agent rewrites it | Any section whose line the agent changes now goes back to draft (`src/core/script.ts`). This reverses what the doc comment said ("keeps ... status"), so it is its own commit: revert it if approval should survive a rewrite. |
 | 3 | `~/...` in `project` makes a folder called `~` | A leading `~` or `~/` now means the home folder (`src/mcp/stdio.ts`). Not done: refusing a project folder that doesn't exist. Creating one on open may be wanted, so that is a policy call. |
 | 4 | Two grabs of one frame at once: the second is a 500 | The temp file name carries `randomUUID()`, as the export routes already did (`src/server/app.ts`). |
+| 5 | `rushes setup` overwrites a hand-fixed registration, and can make Codex's TOML invalid | An entry that already launches the current package (`rushes`, or a pinned `rushes@x.y.z`, then `mcp`) is left as the user has it, in JSON and TOML, and `doctor` calls it registered (`src/setup/harnesses.ts`, `src/cli/doctor.ts`). A Codex entry written inline under `[mcp_servers]`, with a quoted table name, or as a dotted key is refused ("change it by hand", nothing changed) instead of getting a second table that makes the file invalid; `doctor` calls those registered too. Stale entries (`node old.js`, the old GitHub source) are still replaced, as the existing tests require; the audit's simpler rule, "rewrite only a legacy entry", would have broken them. The cost: re-running setup no longer repairs an entry whose args are right but whose command is broken. |
+| 6 | CLI flags ignored or unchecked | `open`, `serve`, `stop` and `init` read the folder as `status` and `doctor` already did: the argument, else `--dir`, else the current folder. `--port` must be a whole number from 0 to 65535 and `--only` must name known harnesses; both are usage errors (exit 2) raised before anything is created. `demo` still reads only its argument. |
+| 7 | Send to agent stamps the notes before it records the batch | The batch is worked out on copies, recorded first, and the notes marked second (`src/server/app.ts`). If marking fails the notes are still unsent and go out again in the next batch. |
+| 8 | Section ids are reused after a replace | The script file records the highest `s<n>` it has given out (`sectionCounter`, optional) and a new section starts past it; a script saved before the field is read for the numbers it can see (`src/core/script.ts`, `src/core/schema.ts`). Position-based numbering is otherwise unchanged. |
+| 9 | Note ids can repeat | `addNote` draws again while the file already has the id, as the log does (`src/core/notes.ts`). |
 | 11 | `docs/plans/` is 21,423 lines of finished plans | Removed. They are in git history, e.g. `git show 99857a9:docs/plans/2026-10-07-rushes-plan-8-sfx-layers.md`. |
 
 ## Open: should fix
 
-5. **`rushes setup` overwrites a hand-fixed registration, and can make Codex's TOML invalid.** `src/setup/harnesses.ts:91-92,99,112-121`, `setup.ts:94-98`, `src/cli/doctor.ts:213-219`. Any `rushes` entry that isn't the exact default is replaced in JSON and TOML configs, so a full `npx` path with an `env` PATH (a common Claude Desktop fix with nvm) is lost, and `doctor` then suggests `rushes setup`, which undoes it. An inline `rushes = { ... }` under `[mcp_servers]` gets a second `[mcp_servers.rushes]` appended, which is invalid TOML. The Claude Code branch (`setup.ts:78`) already leaves a non-legacy entry alone. Fix: rewrite only an entry that names a legacy source; fail with "edit by hand" on an inline definition.
-6. **CLI flags ignored or unchecked.** `src/cli/main.ts:217,224,276,284`. `--dir` is read at 217, but `open`, `serve` and `init` use `rest[0] ?? "."`. `--only curser` prints "No supported agent harness found" and exits 0. `--port abc` fails with "No free port from NaN" after creating `.rushes`. Fix: `rest[0] ?? o.dir ?? "."`; validate `--only` and `--port`; exit 2.
-7. **Send to agent stamps the notes before it records the batch.** `src/server/app.ts:1175` then `:1182`. If the second write fails, notes point at a batch that doesn't exist: the tab says "1 to do", Send answers 409, and the next batch reuses `b_1`. Fix: build the batch from a snapshot first, then stamp the notes.
-8. **Section ids are reused after a replace.** `src/core/script.ts:92-99`. A new section gets `s<position>`, skipping only ids still present, so a deleted `s2` is reissued and `picks.json` still maps `s2` to the old take. Fix: never-reused ids, or a counter in `script.json`.
-9. **Note ids can repeat.** `src/core/notes.ts:30`, `ids.ts:4-6`. 24 random bits is about a 3% chance of a repeat by 1,000 notes, and a reply then lands on the other note. `log.ts:50-55` already redraws on a repeat. Fix: the same, two lines.
 10. **Small helpers written two to four times, and the MCP tools hand-copy limits.** `fmt` exists four times (`web/src/lib.ts`, `src/cli/main.ts:596-602`, `src/core/exportNotes.ts:30-38`, `src/server/assets.ts:52-55`), with `shotAt`, `markLabel`, `LEVEL_*`, `OPEN_SAFE_EXT`, `VIDEO_EXT`, `fit` and `isChanged` copied between `src` and `web`. `src/mcp/tools.ts:20-21,32-38` repeats `StageSchema`, `FileKindSchema`, `FORMATS_BESIDE_CUT_MAX = 7` and a 1024-character path cap. The comment at `exportNotes.ts:32` says "src/ and web/ are separate TypeScript projects", but `web/src/versions.ts`, `changelog.ts` and `lib.ts:1330` already import from `src/core`. Pin tests exist only to keep the copies equal. Fix: move them into import-free modules like `labels.ts`, `logText.ts` and `formats.ts` (guarded by `test/helpers/imports.ts`). About 88 lines, plus the pin tests.
 12. **Test setup is copy-pasted 13 times** (about 216 lines): the HTTP `call/post/put` helper in eight server test files, the CLI `io()` in three, the MCP `connect()` in three. Fix: `test/helpers/{app,cli,mcp}.ts`, about 60 lines saved.
 13. **`src/server/reveal.ts:38-79` is never run in tests.** It runs `open -R`, `explorer.exe /select,` or `xdg-open`, and `vitest.config.ts:8` sets `RUSHES_NO_REVEAL=1` for every test. CI has no Windows job. Fix: one table test mocking `node:child_process`, about 25 lines.

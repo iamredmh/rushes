@@ -17,7 +17,7 @@ import { formatTag } from "../core/formats.js";
 import { onLabel, type OnContext } from "../core/notes.js";
 import { setup, type SetupEnv } from "../setup/setup.js";
 import { realSetupEnv } from "../setup/env.js";
-import type { HarnessId } from "../setup/harnesses.js";
+import { HARNESS_IDS, type HarnessId } from "../setup/harnesses.js";
 import { runDoctor, realDoctorEnv, type DoctorEnv } from "./doctor.js";
 
 export interface Io {
@@ -75,7 +75,7 @@ Usage
                                                     rushes log add --area mix -- "-3 dB on the bed"
 
 Options
-  --dir DIR   project folder for commands that talk to the server (default: current folder)
+  --dir DIR   project folder (default: current folder); where a command takes [dir], that wins
 `;
 
 const OPTIONS = {
@@ -221,7 +221,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
     switch (cmd) {
       case "open":
       case "serve": {
-        const root = await canonicalRoot(resolve(io.cwd, rest[0] ?? "."));
+        // The folder is the argument, or --dir, or the current folder: `status` and `doctor` already read it so.
+        const root = await canonicalRoot(rest[0] ? resolve(io.cwd, rest[0]) : dir);
         const show = (url: string) => {
           if (cmd === "open" && !o["no-browser"]) (io.openBrowser ?? openBrowser)(url);
         };
@@ -250,9 +251,11 @@ export async function main(argv: string[], io: Io): Promise<number> {
         if (running) return already(running);
         const idle = o["idle-minutes"] === undefined ? undefined : Number(o["idle-minutes"]);
         if (idle !== undefined && !(Number.isFinite(idle) && idle > 0)) return usage(io, "--idle-minutes must be a number of minutes above 0");
+        const port = o.port ? Number(o.port) : DEFAULT_PORT;
+        if (!Number.isInteger(port) || port < 0 || port > 65535) return usage(io, "--port must be a whole number from 0 to 65535");
         let s: Running;
         try {
-          s = await startServer(root, { port: o.port ? Number(o.port) : DEFAULT_PORT, idleMs: idle ? idle * 60_000 : undefined });
+          s = await startServer(root, { port, idleMs: idle ? idle * 60_000 : undefined });
         } catch (e) {
           // Another server won the race between the check above and our start.
           if (e instanceof AlreadyRunningError) return already(e.url);
@@ -273,7 +276,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         return 0;
       }
       case "stop": {
-        const root = await canonicalRoot(resolve(io.cwd, rest[0] ?? "."));
+        const root = await canonicalRoot(rest[0] ? resolve(io.cwd, rest[0]) : dir);
         const url = await findServer(root);
         if (!url) return io.out(`Rushes isn't running for ${root}`), 0;
         await new RushesClient(url).post("/api/shutdown", {});
@@ -281,7 +284,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         return 0;
       }
       case "init": {
-        const root = resolve(io.cwd, rest[0] ?? ".");
+        const root = rest[0] ? resolve(io.cwd, rest[0]) : dir;
         await new Store(root).init(o.name ?? basename(root));
         io.out(`Created ${root}/.rushes`);
         return 0;
@@ -297,7 +300,10 @@ export async function main(argv: string[], io: Io): Promise<number> {
         return main(["open", dir], io);
       }
       case "setup": {
-        const only = o.only ? (o.only.split(",").map((x) => x.trim()) as HarnessId[]) : undefined;
+        const named = o.only ? o.only.split(",").map((x) => x.trim()).filter(Boolean) : undefined;
+        const unknown = named?.filter((x) => !(HARNESS_IDS as readonly string[]).includes(x));
+        if (unknown?.length) return usage(io, `--only takes ${HARNESS_IDS.join(", ")}; ${unknown.join(", ")} ${unknown.length === 1 ? "is" : "are"} not one`);
+        const only = named as HarnessId[] | undefined;
         const results = await setup(io.setupEnv ?? realSetupEnv(), { only, dryRun: o["dry-run"] });
         const mark = { added: "+", "would-add": "~", already: "=", "not-found": "-", failed: "!" } as const;
         for (const r of results) {

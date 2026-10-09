@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
 import { main, longRunningCommand, type Io } from "../../src/cli/main.js";
+import { findServer } from "../../src/mcp/ensure.js";
 import { startServer, type Running } from "../../src/server/start.js";
 import { addVersion } from "../../src/core/project.js";
 import { lockPath } from "../../src/server/lock.js";
@@ -925,3 +927,62 @@ describe("formats on the CLI (§21.4)", () => {
   });
 });
 
+
+describe("the folder, port and harness a command is given", () => {
+  const exists = (p: string) => access(p).then(() => true, () => false);
+  // A scratch folder with a "film" folder inside it, so "the current folder" and "film" differ.
+  async function scratch() {
+    const dir = await realpath(await mkdtemp(join(tmpdir(), "rushes cli ")));
+    await mkdir(join(dir, "film"));
+    return dir;
+  }
+
+  it("--dir names the folder for init, as the folder argument does", async () => {
+    const dir = await scratch();
+    const a = io(dir);
+    expect(await main(["init", "--dir", "film"], a.x)).toBe(0);
+    expect(await exists(join(dir, "film", ".rushes"))).toBe(true);
+    expect(await exists(join(dir, ".rushes"))).toBe(false);
+  });
+
+  it.each(["open", "serve"])("--dir names the folder %s starts the server for, not the current folder", async (cmd) => {
+    const dir = await scratch();
+    const a = io(dir);
+    let server: Running | undefined;
+    a.x.onServer = (s) => { server = s; };
+    expect(await main([cmd, "--dir", "film", "--port", "0", "--no-browser"], a.x)).toBe(0);
+    expect((await (await fetch(`${server!.url}/api/health`)).json()).root).toBe(join(dir, "film"));
+    expect(await exists(join(dir, ".rushes"))).toBe(false);
+    await server!.close();
+  });
+
+  it("--dir names the server stop stops, and the current folder's server is left running", async () => {
+    const here = (await tmpProject()).root;
+    const there = (await tmpProject()).root;
+    const mine = await startServer(here, { port: 0 });
+    await startServer(there, { port: 0 });
+    expect(await main(["stop", "--dir", there], io(here).x)).toBe(0);
+    expect(await findServer(there)).toBeNull();
+    expect(await findServer(here)).toBe(mine.url);
+    await mine.close();
+  });
+
+  it.each(["abc", "-1", "65536", "80.5"])("--port=%s is refused before anything is created", async (bad) => {
+    const dir = await scratch();
+    for (const cmd of ["open", "serve"]) {
+      const a = io(dir);
+      expect(await main([cmd, `--port=${bad}`, "--no-browser"], a.x), cmd).toBe(2);
+      expect(a.err.join("\n"), cmd).toContain("--port must be a whole number from 0 to 65535");
+    }
+    expect(await exists(join(dir, ".rushes"))).toBe(false);
+  });
+
+  it("--only that names no harness is refused, listing the ones that exist", async () => {
+    // Refused before setup looks at this machine, so no harness env is needed.
+    for (const only of ["curser", "codex,curser", "claude-code, nope"]) {
+      const a = io("/tmp");
+      expect(await main(["setup", "--only", only, "--dry-run"], a.x), only).toBe(2);
+      expect(a.err.join("\n"), only).toContain("claude-code, codex, cursor, claude-desktop, gemini");
+    }
+  });
+});

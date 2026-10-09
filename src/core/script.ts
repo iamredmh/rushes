@@ -49,6 +49,10 @@ export interface SetSectionsOptions {
  * back to draft, whatever its status: a flag has been acted on, and an approval
  * was for the words the user read, not the new ones. Re-sending the same words
  * (spacing aside) leaves the status alone.
+ *
+ * A section sent without an id is given the next s<n> number that has never been
+ * used in this script, so a replace with no ids carries on from where the old
+ * numbers stopped instead of starting again at s1.
  */
 export function setSections(script: Script, input: SectionInput[], { replace = false }: SetSectionsOptions = {}): Section[] {
   const seen = new Set<string>();
@@ -91,16 +95,23 @@ export function setSections(script: Script, input: SectionInput[], { replace = f
     if (sorted[i].start < sorted[i - 1].end) throw new InvalidError(`Sections overlap at ${sorted[i].start}s`);
   }
 
-  // New sections without an id get s<n>, starting from their position, skipping ids already taken.
+  // New sections without an id get s<n>, starting from their position, skipping ids already taken
+  // and every number that was ever handed out: notes and picks name a section by id, so a removed
+  // section's id must not come back for new words. `top` is the highest number seen, whether it is
+  // in the script now, was in it before this call, or was recorded when it was given out.
   const taken = new Set(sorted.flatMap((s) => (s.id === null ? [] : [s.id])));
+  let top = script.sectionCounter ?? 0;
+  for (const id of [...taken, ...existing]) top = Math.max(top, Number(/^s(\d+)$/.exec(id)?.[1] ?? 0));
   const next: Section[] = sorted.map((s, i) => {
     if (s.id !== null) return s as Section;
-    let n = i + 1;
+    let n = Math.max(i + 1, top + 1);
     while (taken.has(`s${n}`)) n++;
     taken.add(`s${n}`);
+    top = n;
     return { ...s, id: `s${n}` };
   });
   script.sections = next;
+  script.sectionCounter = top;
   return next;
 }
 

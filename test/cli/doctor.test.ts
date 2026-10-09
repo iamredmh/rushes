@@ -204,6 +204,24 @@ describe("runDoctor", () => {
     expect(find(checks, "agent:cursor")).toMatchObject({ ok: true, required: false, detail: "registered with the older GitHub launch. Run rushes setup to switch to npm." });
   });
 
+  it("reports an entry the user adjusted (a full npx path and an env) as registered, since setup leaves it alone", async () => {
+    const home = await tmpHome();
+    await mkdir(join(home, ".cursor"), { recursive: true });
+    await writeFile(join(home, ".cursor", "mcp.json"), JSON.stringify({ mcpServers: { rushes: { command: "/opt/node/bin/npx", args: ["-y", "rushes", "mcp"], env: { PATH: "/opt/node/bin" } } } }), "utf8");
+    const checks = await runDoctor(fakeEnv(home, home));
+    expect(find(checks, "agent:cursor")).toMatchObject({ ok: true, required: false, detail: "the Rushes MCP server is registered." });
+  });
+
+  it("reports a Codex entry written inline as registered, not as an invalid file: setup can't edit it, but it is there", async () => {
+    const home = await tmpHome();
+    await mkdir(join(home, ".codex"), { recursive: true });
+    const configPath = join(home, ".codex", "config.toml");
+    await writeFile(configPath, '[mcp_servers]\nrushes = { command = "npx", args = ["-y", "rushes", "mcp"] }\n', "utf8");
+    const checks = await runDoctor(fakeEnv(home, home));
+    expect(find(checks, "agent:codex")).toMatchObject({ ok: true, required: false });
+    expect(find(checks, "agent:codex")!.detail).toContain("setup doesn't edit");
+  });
+
   it("reports a legacy Claude Code registration (via `claude mcp get`'s own output) as registered too", async () => {
     const home = await tmpHome();
     await mkdir(join(home, ".claude"), { recursive: true });
