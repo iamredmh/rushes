@@ -27,7 +27,11 @@ export interface NewNote {
 }
 
 export function addNote(file: NotesFile, input: NewNote, now = new Date()): Note {
-  const parsed = NoteSchema.safeParse({ ...input, id: newId("n"), createdAt: now.toISOString() });
+  // Ids are short and random (24 bits), so a long file can draw one a note already has, and a reply
+  // for one note would then land on the other. Draw again, as the log does.
+  let id = newId("n");
+  while (file.notes.some((n) => n.id === id)) id = newId("n");
+  const parsed = NoteSchema.safeParse({ ...input, id, createdAt: now.toISOString() });
   if (!parsed.success) throw new InvalidError("Note is invalid", parsed.error.issues);
   file.notes.push(parsed.data);
   return parsed.data;
