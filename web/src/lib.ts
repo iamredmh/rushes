@@ -1,15 +1,9 @@
 // Pure helpers for the dashboard. No DOM, so they're unit-tested in Node.
-import type { Asset, AssetKind, Cue, FoundCounts, FoundItem, FoundKind, FoundSummary, Lane, LaneStage, LoudnessResult, Mark, Note, Project, ProxyEvent, ProxyJob, Section, Shot, Stage, TabState, Video, Version } from "./types.js";
+import type { Asset, AssetKind, Cue, FoundCounts, FoundItem, FoundKind, FoundSummary, Lane, LaneStage, LoudnessResult, Mark, Note, Project, ProxyEvent, ProxyJob, Section, Stage, TabState, Video, Version } from "./types.js";
 export type { FoundItem } from "./types.js";
 
-/** 72.4 -> "1:12.40" (minutes, seconds, hundredths). */
-export function fmt(t: number): string {
-  // Round to hundredths first, so 59.999 becomes 1:00.00 rather than 0:60.00.
-  const cs = Math.round(Math.max(0, t) * 100);
-  const m = Math.floor(cs / 6000);
-  const s = ((cs - m * 6000) / 100).toFixed(2).padStart(5, "0");
-  return `${m}:${s}`;
-}
+import { fmt, noteTime, shotAt } from "../../src/core/timecode.js";
+export { fmt, noteTime, shotAt };
 
 /** The frame showing at time t. */
 export function frameAt(t: number, fps: number): number {
@@ -37,12 +31,6 @@ export function placeNote(note: Note, version: string | null): { t: number | nul
     return { t: note.fixT, tOut: len !== null ? note.fixT + len : null, from };
   }
   return { t: note.t, tOut: note.tOut, from };
-}
-
-/** "1:12.40", "0:31.05–0:33.10" or "Whole". */
-export function noteTime(t: number | null, tOut: number | null): string {
-  if (t === null) return "Whole";
-  return tOut !== null ? `${fmt(t)}–${fmt(tOut)}` : fmt(t);
 }
 
 export type FitState = "ok" | "tight" | "over";
@@ -156,19 +144,6 @@ export function agentPrompt(stage: Stage | "assets", projectName: string, filmNa
 export function firstTab(tabs: TabState[]): Stage {
   if (tabs.find((t) => t.stage === "picture")?.unlocked) return "picture";
   return tabs.find((t) => t.unlocked)?.stage ?? "picture";
-}
-
-/**
- * The last shot whose start is at or before `t`, or null when `t` is before the first shot.
- * Mirrors src/core/project.ts's shotAt exactly: copied rather than imported, because the web
- * bundle imports types only from src/.
- */
-export function shotAt(shots: Shot[], t: number): { n: number; name: string } | null {
-  let found: Shot | null = null;
-  for (const s of shots) {
-    if (s.start <= t && (!found || s.start > found.start)) found = s;
-  }
-  return found ? { n: found.n, name: found.name } : null;
 }
 
 /** "2" -> "02"; widens to 3 digits once n reaches 100. */

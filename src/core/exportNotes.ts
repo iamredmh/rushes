@@ -1,4 +1,6 @@
 import { formatTag } from "./formats.js";
+import { localDate, localStamp } from "./logText.js";
+import { noteTime } from "./timecode.js";
 import { slugify } from "./ids.js";
 import { onLabel, type OnContext } from "./notes.js";
 import { markLabel, type Note, type Picks, type Project, type Script, type Stage } from "./schema.js";
@@ -16,30 +18,6 @@ const STAGE_TITLES: Record<Exclude<Stage, "script">, string> = {
 
 function pad(n: number): string {
   return String(n).padStart(2, "0");
-}
-
-/** The server's local date, as YYYY-MM-DD. */
-function localDate(d: Date): string {
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-
-function localDateTime(d: Date): string {
-  return `${localDate(d)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-// A small local copy of web/src/lib.ts's fmt()/noteTime(): minutes:seconds.hundredths, rounded to
-// hundredths before splitting so 59.999s carries into the next minute rather than printing 60.00s.
-// Duplicated rather than imported -- src/ and web/ are separate TypeScript projects.
-function fmt(t: number): string {
-  const cs = Math.round(Math.max(0, t) * 100);
-  const m = Math.floor(cs / 6000);
-  const s = ((cs - m * 6000) / 100).toFixed(2).padStart(5, "0");
-  return `${m}:${s}`;
-}
-
-function noteTime(t: number | null, tOut: number | null): string {
-  if (t === null) return "Whole";
-  return tOut !== null ? `${fmt(t)}–${fmt(tOut)}` : fmt(t);
 }
 
 /** `text`, with every line after the first indented to `indent` (M2): a multi-line note or
@@ -92,7 +70,7 @@ export function notesMarkdown(
   picks?: Pick<Picks, "lanes">,
 ): string {
   const ctx: OnContext = { project, script, picks };
-  const lines: string[] = [`# ${project.name} — notes`, `Exported ${localDateTime(now)}`];
+  const lines: string[] = [`# ${project.name} — notes`, `Exported ${localStamp(now)}`];
 
   for (const stage of STAGE_ORDER) {
     const stageNotes = notes.filter((n) => n.stage === stage);
