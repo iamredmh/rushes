@@ -1,6 +1,6 @@
 # Rushes: start here (§24)
 
-Status: DRAFT, 9 October 2026. Red accepted the recommendations in 24.9 the same day and asked for a mockup (`2026-10-09-rushes-start-here-mockup.html`, six states to click through). The mockup is waiting for Red's OK; nothing is built. This file extends `2026-10-02-rushes-design.md` and follows §23 (sound-effects cue layers). The number is provisional.
+Status: DRAFT, 9 October 2026. Red accepted the recommendations in 24.9 the same day and asked for a mockup (`2026-10-09-rushes-start-here-mockup.html`, six states to click through). Step 1 of 24.10 is built (see there); the mockup is waiting for Red's OK before steps 2 and 3. This file extends `2026-10-02-rushes-design.md` and follows §23 (sound-effects cue layers). The number is provisional.
 
 ## 24.1 The problem
 

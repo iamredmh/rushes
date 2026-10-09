@@ -112,8 +112,8 @@ const OPTIONS = {
   version: { type: "boolean", short: "v" },
 } as const;
 
-// "demo" is here too: without --no-browser it ends by running "open" (a server that keeps
-// running), so index.ts must not process.exit() the moment main() first resolves. With
+// "demo" and "new" are here too: without --no-browser each ends by running "open" (a server that
+// keeps running), so index.ts must not process.exit() the moment main() first resolves. With
 // --no-browser nothing is left open, so the process still exits on its own once main() resolves.
 const LONG_RUNNING = ["open", "serve", "mcp", "demo", "new"];
 
@@ -295,12 +295,14 @@ export async function main(argv: string[], io: Io): Promise<number> {
         // §24.10 step 1. The folder is the argument or --dir; with neither there is nothing to make.
         const target = rest[0] ? resolve(io.cwd, rest[0]) : o.dir ? dir : undefined;
         if (!target) return usage(io, "rushes new <folder> [--name NAME] [--no-browser]");
+        // An unquoted "My Film" is two words: refuse rather than quietly make ./My and drop "Film".
+        if (rest.length > 1) return usage(io, "rushes new <folder> [--name NAME] [--no-browser]  (one folder only: quote a name with spaces)");
         const made = await makeProject(target, { name: o.name });
         io.out(`Created ${made.dir}`);
         io.out(made.briefWritten ? "Wrote brief.md for your agent to fill in with you." : "Kept the brief.md that was already there.");
         // Like `demo`: opens the desk unless told not to. "new" is in LONG_RUNNING for the same reason.
         if (o["no-browser"]) return 0;
-        return main(["open", made.dir], io);
+        return main(["open", made.dir, ...(o.port ? ["--port", o.port] : [])], io);
       }
       case "demo": {
         const target = resolve(io.cwd, rest[0] ?? "rushes-demo");

@@ -42,6 +42,13 @@ describe("starting a film: what the agent docs promise (§24)", () => {
   it("AGENTS.md lists `rushes new` in the commands for agents without MCP", () => {
     expect(read("AGENTS.md")).toContain("npx -y rushes new my-film --no-browser");
   });
+
+  // Final review: `open` with no folder starts a second project in whatever folder the shell is in.
+  it("AGENTS.md opens the new folder by name, not the current one", () => {
+    const text = read("AGENTS.md");
+    const block = text.slice(text.indexOf("## Without MCP"));
+    expect(block).toContain("npx -y rushes new my-film --no-browser\nnpx -y rushes open my-film\n");
+  });
 });
 
 describe("README: starting a film (§24)", () => {

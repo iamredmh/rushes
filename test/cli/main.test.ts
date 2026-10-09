@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
 import { main, longRunningCommand, type Io } from "../../src/cli/main.js";
 import { findServer } from "../../src/mcp/ensure.js";
-import { startServer, type Running } from "../../src/server/start.js";
+import { startServer, DEFAULT_PORT, type Running } from "../../src/server/start.js";
 import { addVersion } from "../../src/core/project.js";
 import { lockPath } from "../../src/server/lock.js";
 import { sizedProbe } from "../helpers/probe.js";
@@ -152,6 +152,32 @@ describe("cli", () => {
     expect(await main(["new", "film", "--no-browser"], a.x)).toBe(0);
     expect(await readFile(join(root, "film", "brief.md"), "utf8")).toBe("mine\n");
     expect(a.out.join("\n")).toMatch(/kept .*brief\.md/i);
+  });
+
+  // Final review: Review Focus 5 was only covered through longRunningCommand; deleting the open call passed.
+  it("new without --no-browser opens the desk on the new project, on the port asked for", async () => {
+    const { root } = await tmpProject();
+    const a = io(root);
+    let server: Running | undefined;
+    a.x.onServer = (s) => { server = s; };
+    expect(await main(["new", "Open Film", "--port", "0"], a.x)).toBe(0);
+    try {
+      expect(a.opened).toEqual([server!.dashboardUrl]);
+      expect((await (await fetch(`${server!.url}/api/health`)).json()).root).toBe(join(root, "Open Film"));
+      // --port 0 means "any free port", not the default 4580 range.
+      expect(Number(new URL(server!.url).port)).toBeGreaterThan(DEFAULT_PORT + 20);
+    } finally {
+      await server!.close();
+    }
+  });
+
+  // Final review: `rushes new My Film`, unquoted, used to make ./My and ignore "Film".
+  it("new refuses more than one folder name and creates nothing", async () => {
+    const { root } = await tmpProject();
+    const a = io(root);
+    expect(await main(["new", "Launch", "film", "--no-browser"], a.x)).toBe(2);
+    expect(a.err[0]).toContain("one folder only");
+    await expect(access(join(root, "Launch"))).rejects.toThrow();
   });
 
   it("new puts brief.md where the Assets tab finds it", async () => {
