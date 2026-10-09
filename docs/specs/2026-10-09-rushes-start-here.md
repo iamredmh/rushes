@@ -83,7 +83,7 @@ New or changed:
 | `rushes_status` | Gains `build: { ready, waitingOn }` |
 | `rushes_add_version` | Gains a `warning` when the plan is not approved |
 
-That is 24 tools. CLI: `rushes new [folder] [--name]` (does what `init` does, plus the recommended folders, then opens at Brief), `rushes plan [--json]`, `rushes set plan <file.json>`.
+That is 24 tools. CLI: `rushes new <folder> [--name]` (does what `init` does, plus the recommended folders and a `brief.md`, then opens the desk), `rushes plan [--json]`, `rushes set plan <file.json>`.
 
 The skill gains a "Starting a film" section: the interview rules (24.3 item 8), "do not build until `build.ready`", "register the cut with `rushes_add_version`; the planned shots come with it", and one naming convention worth stating once: **name each scene after its planned shot** (for HyperFrames, one sub-composition per shot). Then a Picture note's shot already points the agent at the file, with no adapter and no change to Rushes.
 
@@ -117,7 +117,7 @@ Red went with the recommendation on each.
 
 Each step is usable on its own and ends at Red's OK before the next.
 
-1. **Front door, no UI.** `rushes new`, the skill section, the README, and the brief saved as a Markdown file the Assets tab already finds. Smallest. Proves the interview and the gate by convention.
+1. **Front door, no UI.** Built: `rushes new <folder>` (folders, project, a `brief.md` template that Assets already finds), the "Starting a film" section in the skill and `AGENTS.md`, and a README that leads with starting a film. Approval is the user saying so in chat; the agent then changes the `Status:` line in `brief.md` or `storyboard.md`. The folder argument is required (a bare `rushes new` prints its usage), and a folder that is already a project is refused.
 2. **Brief tab.** The `brief` data, `rushes_set_plan` for the brief, approval in the dashboard, the header chip.
 3. **Storyboard tab.** The `plan` data, shot cards, notes on shots, approvals, `build.ready`, and shots carried into the first version.
 
