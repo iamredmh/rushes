@@ -278,3 +278,73 @@ describe("migrating a legacy (pre-npm) registration, §19.7", () => {
     expect(calls.some((c) => c[2] === "remove" || c[2] === "add")).toBe(false);
   });
 });
+
+describe("a registration the user wrote or adjusted themselves", () => {
+  // GUI apps don't see the shell's PATH, so a working Claude Desktop entry often names npx by its
+  // full path and sets PATH. Re-running setup must not undo that, and doctor must still call it
+  // registered (it asks the same mergers whether anything would change).
+  const adjusted = { command: "/opt/node/bin/npx", args: ["-y", SOURCE, "mcp"], env: { PATH: "/opt/node/bin:/usr/bin" } };
+
+  describe("mergeJson", () => {
+    it("leaves an entry that already launches the current package, whatever npx path, env or pinned version it adds", () => {
+      for (const rushes of [adjusted, { command: "npx", args: ["-y", `${SOURCE}@0.4.0`, "mcp"] }]) {
+        const before = JSON.stringify({ mcpServers: { rushes } }, null, 4);
+        expect(mergeJson(before)).toEqual({ text: before, changed: false });
+      }
+    });
+    it("still replaces an entry that doesn't launch it", () => {
+      for (const rushes of [{ command: "node", args: ["old.js"] }, { command: "rushes-mcp" }, { command: "npx", args: ["-y", SOURCE] }]) {
+        const { text, changed } = mergeJson(JSON.stringify({ mcpServers: { rushes } }));
+        expect(changed).toBe(true);
+        expect(JSON.parse(text).mcpServers.rushes).toEqual({ command: "npx", args: ["-y", SOURCE, "mcp"] });
+      }
+    });
+  });
+
+  describe("mergeToml", () => {
+    it("leaves a table that already launches the current package, with its env table and a multi-line args list", () => {
+      const before = `[mcp_servers.rushes]\ncommand = "/opt/node/bin/npx"\nargs = [\n  "-y",\n  "${SOURCE}@0.4.0",\n  "mcp",\n]\n\n[mcp_servers.rushes.env]\nPATH = "/opt/node/bin:/usr/bin"\n`;
+      expect(mergeToml(before)).toEqual({ text: before, changed: false });
+    });
+    it.each([
+      ["an inline entry under [mcp_servers]", `[mcp_servers]\nrushes = { command = "npx", args = ["-y", "${SOURCE}", "mcp"] }\n`],
+      ["a quoted table name", `[mcp_servers."rushes"]\ncommand = "npx"\nargs = ["-y", "${SOURCE}", "mcp"]\n`],
+      ["a dotted key at the top", `mcp_servers.rushes.command = "npx"\nmcp_servers.rushes.args = ["-y", "${SOURCE}", "mcp"]\n`],
+    ])("refuses %s rather than add a second definition, which would make the file invalid", (_name, before) => {
+      expect(() => mergeToml(before)).toThrow(/by hand/);
+    });
+    it("doesn't mistake a neighbouring key, or a rushes key in another table, for its own", () => {
+      for (const before of [`[mcp_servers]\nrushes_other = 1\nmyrushes = 2\n`, `[other]\nrushes = 1\n`]) {
+        const { text, changed } = mergeToml(before);
+        expect(changed).toBe(true);
+        expect(text).toContain("[mcp_servers.rushes]");
+      }
+    });
+  });
+
+  describe("setup", () => {
+    it("reports an adjusted Cursor entry as already registered, and leaves the file byte for byte", async () => {
+      const { env, home } = await fakeHome();
+      const path = join(home, ".cursor", "mcp.json");
+      await mkdir(join(home, ".cursor"));
+      const before = JSON.stringify({ mcpServers: { rushes: adjusted } }, null, 4);
+      await writeFile(path, before);
+      expect((await setup(env, { only: ["cursor"] }))[0].status).toBe("already");
+      expect(await readFile(path, "utf8")).toBe(before);
+      await expect(readFile(`${path}.rushes.bak`, "utf8")).rejects.toThrow();
+    });
+    it("fails, changing nothing, on a Codex entry written in a form it can't edit", async () => {
+      const { env, home } = await fakeHome();
+      const path = join(home, ".codex", "config.toml");
+      await mkdir(join(home, ".codex"));
+      const before = `model = "o4"\n\n[mcp_servers]\nrushes = { command = "npx", args = ["-y", "${SOURCE}", "mcp"] }\n`;
+      await writeFile(path, before);
+      const r = (await setup(env, { only: ["codex"] }))[0];
+      expect(r.status).toBe("failed");
+      expect(r.detail).toContain("by hand");
+      expect(r.detail).toContain("Nothing was changed");
+      expect(await readFile(path, "utf8")).toBe(before);
+      await expect(readFile(`${path}.rushes.bak`, "utf8")).rejects.toThrow();
+    });
+  });
+});
