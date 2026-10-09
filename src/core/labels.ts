@@ -196,3 +196,9 @@ export function shortLabel(v: Labelled): string {
   const id = clip(oneLineOf(v.id), LABEL_MAX);
   return usable(id) ? id : "Untitled";
 }
+
+/** "Rise" | "Fall" | "Louder 3 dB" | "Quieter 3 dB": a quick mark on a note on an audio tab. */
+export function markLabel(m: { kind: "rise" | "fall" | "louder" | "quieter"; db?: number }): string {
+  const label = m.kind === "rise" ? "Rise" : m.kind === "fall" ? "Fall" : m.kind === "louder" ? "Louder" : "Quieter";
+  return m.db === undefined ? label : `${label} ${m.db} dB`;
+}

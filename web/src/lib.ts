@@ -186,19 +186,10 @@ export function metaLine(laneName?: string, meta?: Record<string, string | numbe
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
-/**
- * §16.3: the only extensions Open will act on, lower-case and without the dot. A web-side copy of
- * src/server/reveal.ts's OPEN_SAFE_EXT (deliberately duplicated rather than imported, since the
- * web bundle never pulls in server code) -- a unit test asserts the two stay equal. svg is
- * deliberately excluded: on macOS an SVG often opens in a browser and can carry script.
- */
-export const OPEN_SAFE_EXT: ReadonlySet<string> = new Set([
-  "md", "txt", "pdf", "srt", "vtt",
-  "png", "jpg", "jpeg", "gif", "webp",
-  "mp4", "mov", "m4v", "webm", "mkv",
-  "wav", "mp3", "m4a", "aac", "flac", "ogg",
-  "prproj", "drp",
-]);
+// §16.3: the only extensions Open will act on. The Open button shows only for these and the server
+// refuses the rest, so it is one list.
+import { OPEN_SAFE_EXT } from "../../src/core/extensions.js";
+export { OPEN_SAFE_EXT };
 
 /** Extensions a Cut/Delivery grid tile will try to show a poster frame for (I5/I6); anything
  *  else gets a plain file tile instead of a black box with a video element that can't play it. */
@@ -410,14 +401,8 @@ const MARK_ORDER: MarkKind[] = ["rise", "fall", "louder", "quieter"];
 const OPPOSITE: Record<MarkKind, MarkKind> = { rise: "fall", fall: "rise", louder: "quieter", quieter: "louder" };
 const takesDb = (k: MarkKind) => k === "louder" || k === "quieter";
 
-/**
- * A web copy of src/core/schema.ts's markLabel (the web bundle imports types only from src/; a
- * unit test asserts the two agree): "Rise" | "Fall" | "Louder 3 dB" | "Quieter 3 dB".
- */
-export function markLabel(m: Mark): string {
-  const label = m.kind === "rise" ? "Rise" : m.kind === "fall" ? "Fall" : m.kind === "louder" ? "Louder" : "Quieter";
-  return m.db === undefined ? label : `${label} ${m.db} dB`;
-}
+import { markLabel } from "../../src/core/labels.js";
+export { markLabel };
 
 /** A note's marks as one line, "Fall · Quieter 3 dB", or null when it has none. */
 export function marksLabel(marks: Mark[] | undefined): string | null {
@@ -918,11 +903,9 @@ export function mixOnOptions(m: MixModel): OnOption[] {
   return out;
 }
 
-// §19.6: a Mix lane's level slider, mirroring src/core/schema.ts's LEVEL_MIN/MAX/STEP exactly (not
-// imported -- the web bundle imports types only from src/).
-export const LEVEL_MIN = -24;
-export const LEVEL_MAX = 6;
-export const LEVEL_STEP = 0.5;
+// §19.6: a Mix lane's level slider spans what the server accepts: the same range and step.
+import { LEVEL_MAX, LEVEL_MIN, LEVEL_STEP } from "../../src/core/levels.js";
+export { LEVEL_MAX, LEVEL_MIN, LEVEL_STEP };
 
 /** A level, clamped to the slider's range and snapped to its 0.5 dB step (§19.6) -- a guard before a
  *  value reaches the server, never a substitute for the server's own check. */

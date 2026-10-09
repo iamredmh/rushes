@@ -210,11 +210,7 @@ export type Mark = z.infer<typeof MarkSchema>;
 
 const MARK_STAGES: readonly Stage[] = ["voice", "music", "sfx", "mix"];
 
-/** "Rise" | "Fall" | "Louder 3 dB" | "Quieter 3 dB". */
-export function markLabel(m: Mark): string {
-  const label = m.kind === "rise" ? "Rise" : m.kind === "fall" ? "Fall" : m.kind === "louder" ? "Louder" : "Quieter";
-  return m.db === undefined ? label : `${label} ${m.db} dB`;
-}
+export { markLabel } from "./labels.js";
 
 export const NoteSchema = z
   .object({
@@ -288,11 +284,7 @@ export const NotesFileSchema = fileObject({
 });
 export type NotesFile = z.infer<typeof NotesFileSchema>;
 
-// §19.6: a Mix lane's level, in dB. −24..6 in 0.5 dB steps; PUT /api/picks enforces the range and
-// step (a value outside it, or off the step, is a 400), so the stored file is never checked again here.
-export const LEVEL_MIN = -24;
-export const LEVEL_MAX = 6;
-export const LEVEL_STEP = 0.5;
+export { LEVEL_MAX, LEVEL_MIN, LEVEL_STEP } from "./levels.js";
 
 export const LevelsSchema = fileObject({ voice: z.number(), music: z.number(), sfx: z.number() }).partial().default({});
 export type Levels = z.infer<typeof LevelsSchema>;

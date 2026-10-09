@@ -6,8 +6,8 @@ import { jsonPoster } from "../helpers/http.js";
 import { createApp } from "../../src/server/app.js";
 import { addFormat, addVariant, addVersion } from "../../src/core/project.js";
 import { parseRange, inside, contentDisposition, foundMediaFile, OUTSIDE_MEDIA_EXT, CONTENT_TYPES, isInlineSafeType, registeredMedia } from "../../src/server/files.js";
-import { OPEN_SAFE_EXT as SERVER_OPEN_SAFE_EXT } from "../../src/server/reveal.js";
-import { OPEN_SAFE_EXT as WEB_OPEN_SAFE_EXT, PREVIEWABLE_EXT, VIDEO_EXT as WEB_VIDEO_EXT } from "../../web/src/lib.js";
+import { OPEN_SAFE_EXT } from "../../src/core/extensions.js";
+import { PREVIEWABLE_EXT, VIDEO_EXT as WEB_VIDEO_EXT } from "../../web/src/lib.js";
 import { AUDIO_EXT, VIDEO_EXT } from "../../src/core/found.js";
 
 // The smallest valid PNG (1×1, transparent).
@@ -406,8 +406,7 @@ describe("the outside-the-project allow-list matches every list of media extensi
   const EDIT_FILES = new Set(["prproj", "drp"]);
   const bare = (exts: Iterable<string>) => [...exts].map((e) => e.replace(/^\./, ""));
   const sources: Record<string, string[]> = {
-    "the dashboard's open-safe list": bare(WEB_OPEN_SAFE_EXT),
-    "the server's open-safe list": bare(SERVER_OPEN_SAFE_EXT),
+    "the open-safe list": bare(OPEN_SAFE_EXT),
     "the dashboard's video list": bare(WEB_VIDEO_EXT),
     "the dashboard's previewable list": bare(PREVIEWABLE_EXT),
     "the scan's audio list": bare(AUDIO_EXT),
