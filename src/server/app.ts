@@ -1167,20 +1167,28 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   });
 
   // ---- batches ----
-  // A batch touches two files (notes and batches), so batch creation runs one at a time.
+  // A batch touches two files (notes and batches), so batch creation runs one at a time. The batch
+  // is recorded first and the notes are marked second: if the second write fails, the notes are
+  // still unsent and go out again in the next batch. The other way round, a failure stranded notes
+  // naming a batch that was never recorded, and the next batch reused its id.
   let batchQueue: Promise<unknown> = Promise.resolve();
   app.post("/api/batches", async (c) => {
     const { stage } = await body(c, BatchBody);
     const run = batchQueue.catch(() => undefined).then(async (): Promise<Batch> => {
-      const [project, script, batches] = await Promise.all([store.read("project"), store.read("script"), store.read("batches")]);
-      const { result } = await store.update("notes", (notes) => createBatch({ project, script, notes, batches }, stage));
+      const [project, script, notes, batches] = await Promise.all([store.read("project"), store.read("script"), store.read("notes"), store.read("batches")]);
+      // createBatch marks the notes it takes and files the batch in `batches`; on copies, it only
+      // tells us what goes in.
+      const result = createBatch({ project, script, notes: structuredClone(notes), batches: structuredClone(batches) }, stage);
       // R11: the prompt ends with the last five lines of the log, from before this send. A log that
-      // can't be read adds nothing: the notes are already marked as sent, so the batch must be kept.
+      // can't be read adds nothing: the batch must still be sent.
       const recent = await Promise.all([store.read("project"), store.read("script")])
         .then(async ([projectNow, scriptNow]) => recentChanges((await log.view({ limit: 5 }, { project: projectNow, script: scriptNow })).entries))
         .catch(() => "");
       if (recent) result.prompt = `${result.prompt}\n\n${recent}`;
       await store.update("batches", (f) => { f.batches.push(result); });
+      await store.update("notes", (f) => {
+        for (const n of f.notes) if (n.batch === null && result.noteIds.includes(n.id)) n.batch = result.id;
+      });
       await log.add(() => notesSentEvent(result), by(c));
       return result;
     });

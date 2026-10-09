@@ -403,6 +403,48 @@ describe("API", () => {
     expect(new Set([a.json.batch.id, b.json.batch.id]).size).toBe(2);
   });
 
+  describe("a send that fails part way", () => {
+    // A send writes two files (batches.json and notes.json). Whichever write fails, a note must
+    // never name a batch that doesn't exist: the tab would say "1 to do", Send would answer 409
+    // "nothing to send", and the next batch would reuse the id and list one note while two name it.
+    async function sendFailingOn(key: "batches" | "notes") {
+      const { call, store } = await setup();
+      const n = (await call("POST", "/api/notes", { stage: "picture", scope: "point", t: 1, text: "x" })).json.note;
+      const real = store.update.bind(store);
+      let failing = true;
+      Object.assign(store, { update: (k: string, fn: never, rev?: number) => (failing && k === key ? Promise.reject(new Error("disk full")) : real(k as "notes", fn, rev)) });
+      const failed = await call("POST", "/api/batches", { stage: "picture" });
+      failing = false;
+      const everyNoteNamesARealBatch = async () => {
+        const [notes, batches] = await Promise.all([store.read("notes"), store.read("batches")]);
+        return notes.notes.every((x) => x.batch === null || batches.batches.some((b) => b.id === x.batch));
+      };
+      return { call, store, n, failed, everyNoteNamesARealBatch };
+    }
+
+    it("fails to record the batch: the notes are still unsent, and the retry sends them", async () => {
+      const { call, store, n, failed, everyNoteNamesARealBatch } = await sendFailingOn("batches");
+      expect(failed.status).toBe(500);
+      expect(await everyNoteNamesARealBatch()).toBe(true);
+      expect((await store.read("notes")).notes[0].batch).toBeNull();
+      const retry = await call("POST", "/api/batches", { stage: "picture" });
+      expect(retry.status).toBe(201);
+      expect(retry.json.batch).toMatchObject({ id: "b_1", noteIds: [n.id] });
+      expect((await call("GET", "/api/batches/b_1")).json.notes.map((x: { id: string }) => x.id)).toEqual([n.id]);
+    });
+
+    it("fails to mark the notes: the retry sends them again in a new batch, and the note names that one", async () => {
+      const { call, store, n, failed, everyNoteNamesARealBatch } = await sendFailingOn("notes");
+      expect(failed.status).toBe(500);
+      expect(await everyNoteNamesARealBatch()).toBe(true);
+      const retry = await call("POST", "/api/batches", { stage: "picture" });
+      expect(retry.status).toBe(201);
+      expect(retry.json.batch.noteIds).toEqual([n.id]);
+      expect((await store.read("notes")).notes[0].batch).toBe(retry.json.batch.id);
+      expect(await everyNoteNamesARealBatch()).toBe(true);
+    });
+  });
+
   it("shots: sorts and renumbers", async () => {
     const { call, root } = await setup();
     await call("POST", "/api/versions", { video: "Hero", file: `${root}/renders/hero.mp4` });
