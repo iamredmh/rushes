@@ -3,7 +3,18 @@ import { FORMAT_ID_RE, isPictureSize, labelOfId, ratioId, ratioLabel } from "./f
 import { oneLineOf } from "./labels.js";
 import { LOG_AREAS, LOG_BY, LOG_KINDS, LOG_MAX, LOG_TEXT_MAX } from "./logText.js";
 
-export const STAGES = ["script", "picture", "voice", "music", "sfx", "mix"] as const;
+/**
+ * An object in one of the project's files. Every write parses the whole file through its schema,
+ * and a plain z.object drops the fields it doesn't know, so an older Rushes saving a file that a
+ * newer one wrote would quietly delete what the newer one added. This keeps them, at every depth.
+ * The type stays the plain shape on purpose: the code reads only the fields it declares, and an
+ * index signature on every type would ripple through the whole dashboard.
+ */
+function fileObject<T extends z.ZodRawShape>(shape: T): z.ZodObject<T> {
+  return z.looseObject(shape) as unknown as z.ZodObject<T>;
+}
+
+export const STAGES =["script", "picture", "voice", "music", "sfx", "mix"] as const;
 export const StageSchema = z.enum(STAGES);
 export type Stage = z.infer<typeof StageSchema>;
 
@@ -15,7 +26,7 @@ const seconds = z.number().nonnegative();
 
 export const ProjectIdSchema = z.string().regex(/^[abcdefghjkmnpqrstuvwxyz23456789]{8}$/);
 
-export const ShotSchema = z.object({
+export const ShotSchema = fileObject({
   n: z.number().int().positive(),
   name: z.string().trim().min(1).max(80),
   start: z.number().nonnegative(),
@@ -23,7 +34,7 @@ export const ShotSchema = z.object({
 });
 export type Shot = z.infer<typeof ShotSchema>;
 
-export const ProxySchema = z.object({
+export const ProxySchema = fileObject({
   /** Manifest path, always "proxies/<film-slug>_<version>_proxy.mp4". */
   file: z.string().min(1),
   width: z.number().int().positive(),
@@ -34,7 +45,7 @@ export const ProxySchema = z.object({
 export type Proxy = z.infer<typeof ProxySchema>;
 
 // §21.3: another render of the same cut at another aspect ratio. Its id is its label with ":" as "x".
-export const FormatSchema = z.object({
+export const FormatSchema = fileObject({
   id: z.string().max(16).regex(FORMAT_ID_RE),
   label: z.string().min(3).max(16),
   file: z.string().min(1),
@@ -82,7 +93,7 @@ export const VersionSchema = z
   });
 export type Version = z.infer<typeof VersionSchema>;
 
-export const VideoSchema = z.object({
+export const VideoSchema = fileObject({
   id,
   name: z.string().min(1),
   versions: z.array(VersionSchema).default([]),
@@ -90,7 +101,7 @@ export const VideoSchema = z.object({
 });
 export type Video = z.infer<typeof VideoSchema>;
 
-export const CueSchema = z.object({
+export const CueSchema = fileObject({
   id,
   name: z.string().min(1),
   t: seconds,
@@ -100,7 +111,7 @@ export const CueSchema = z.object({
 });
 export type Cue = z.infer<typeof CueSchema>;
 
-export const VariantSchema = z.object({
+export const VariantSchema = fileObject({
   id,
   name: z.string().min(1),
   file: z.string().min(1),
@@ -109,7 +120,7 @@ export const VariantSchema = z.object({
 });
 export type Variant = z.infer<typeof VariantSchema>;
 
-export const LaneSchema = z.object({
+export const LaneSchema = fileObject({
   id,
   stage: LaneStageSchema,
   name: z.string().min(1),
@@ -120,7 +131,7 @@ export type Lane = z.infer<typeof LaneSchema>;
 export const FileKindSchema = z.enum(["doc", "image", "caption", "export", "delivery", "edit"]);
 export type FileKind = z.infer<typeof FileKindSchema>;
 
-export const FileEntrySchema = z.object({
+export const FileEntrySchema = fileObject({
   id,
   kind: FileKindSchema,
   file: z.string().min(1),
@@ -131,7 +142,7 @@ export const FileEntrySchema = z.object({
 });
 export type FileEntry = z.infer<typeof FileEntrySchema>;
 
-export const ProjectSchema = z.object({
+export const ProjectSchema = fileObject({
   schema: z.literal(1),
   rev: z.number().int().nonnegative(),
   id: ProjectIdSchema.optional(),
@@ -145,7 +156,7 @@ export const ProjectSchema = z.object({
 });
 export type Project = z.infer<typeof ProjectSchema>;
 
-export const TakeSchema = z.object({
+export const TakeSchema = fileObject({
   id,
   file: z.string().min(1),
   duration: seconds.nullable().default(null),
@@ -168,7 +179,7 @@ export const SectionSchema = z
   .refine((s) => s.end > s.start, { message: "end must be after start", path: ["end"] });
 export type Section = z.infer<typeof SectionSchema>;
 
-export const ScriptSchema = z.object({
+export const ScriptSchema = fileObject({
   schema: z.literal(1),
   rev: z.number().int().nonnegative(),
   wordsPerSecond: z.number().positive().default(2.6),
@@ -176,7 +187,7 @@ export const ScriptSchema = z.object({
 });
 export type Script = z.infer<typeof ScriptSchema>;
 
-export const BoxSchema = z.object({
+export const BoxSchema = fileObject({
   x: z.number().min(0).max(1),
   y: z.number().min(0).max(1),
   w: z.number().min(0).max(1),
@@ -187,7 +198,7 @@ export const BoxSchema = z.object({
 // need a dB amount (chosen from 1, 2, 3, 6 or 9 in the UI, 3 the default); rise/fall never carry
 // one. Both rules, plus "no duplicate kinds" and "only on audio-ish stages", are enforced on the
 // note as a whole below, since they depend on more than one mark (or on the note's stage).
-export const MarkSchema = z.object({
+export const MarkSchema = fileObject({
   kind: z.enum(["rise", "fall", "louder", "quieter"]),
   db: z.number().min(0.5).max(24).optional(),
 });
@@ -224,7 +235,7 @@ export const NoteSchema = z
     text: z.string().trim().min(1).max(4000),
     box: BoxSchema.nullable().default(null),
     grab: z.string().nullable().default(null),
-    shot: z.object({ n: z.number().int().positive(), name: z.string() }).nullable().default(null),
+    shot: fileObject({ n: z.number().int().positive(), name: z.string() }).nullable().default(null),
     marks: z.array(MarkSchema).max(4).default([]),
     // §21.3: the format this note belongs to (a Format id such as "9x16"), or null for every format:
     // the default, and every note from before formats. The server checks it against the note's version.
@@ -266,7 +277,7 @@ export const NoteSchema = z
   });
 export type Note = z.infer<typeof NoteSchema>;
 
-export const NotesFileSchema = z.object({
+export const NotesFileSchema = fileObject({
   schema: z.literal(1),
   rev: z.number().int().nonnegative(),
   notes: z.array(NoteSchema).default([]),
@@ -279,10 +290,10 @@ export const LEVEL_MIN = -24;
 export const LEVEL_MAX = 6;
 export const LEVEL_STEP = 0.5;
 
-export const LevelsSchema = z.object({ voice: z.number(), music: z.number(), sfx: z.number() }).partial().default({});
+export const LevelsSchema = fileObject({ voice: z.number(), music: z.number(), sfx: z.number() }).partial().default({});
 export type Levels = z.infer<typeof LevelsSchema>;
 
-export const PicksSchema = z.object({
+export const PicksSchema = fileObject({
   schema: z.literal(1),
   rev: z.number().int().nonnegative(),
   lanes: z.record(z.string(), z.string()).default({}),
@@ -292,7 +303,7 @@ export const PicksSchema = z.object({
 });
 export type Picks = z.infer<typeof PicksSchema>;
 
-export const BatchSchema = z.object({
+export const BatchSchema = fileObject({
   id,
   stage: StageSchema,
   noteIds: z.array(z.string()).default([]),
@@ -302,7 +313,7 @@ export const BatchSchema = z.object({
 });
 export type Batch = z.infer<typeof BatchSchema>;
 
-export const BatchesFileSchema = z.object({
+export const BatchesFileSchema = fileObject({
   schema: z.literal(1),
   rev: z.number().int().nonnegative(),
   batches: z.array(BatchSchema).default([]),
@@ -311,7 +322,7 @@ export type BatchesFile = z.infer<typeof BatchesFileSchema>;
 
 // §20.6: the found files the user dismissed ("Not these"), as manifest paths. The candidates
 // themselves live in the server's memory; only this list is kept. Created on its first write.
-export const FoundFileSchema = z.object({
+export const FoundFileSchema = fileObject({
   schema: z.literal(1),
   rev: z.number().int().nonnegative(),
   dismissed: z.array(z.string().max(1024)).max(10000).default([]),
@@ -320,7 +331,7 @@ export const FoundFileSchema = z.object({
   // start-up or restart. Files from before this field read as empty.
   settled: z
     .array(
-      z.object({
+      fileObject({
         video: z.string().max(200),
         version: z.string().max(200),
         kinds: z.array(z.enum(["voice", "music", "sfx", "cut", "other"])).max(5),
@@ -333,7 +344,7 @@ export type FoundFileData = z.infer<typeof FoundFileSchema>;
 
 // §22.3: the Change Log, .rushes/log.json, oldest first on disk. Written by the server as things
 // happen, created on its first write. Every field is new, so nothing older reads differently.
-export const LogEntrySchema = z.object({
+export const LogEntrySchema = fileObject({
   id,
   at: z.string(),
   area: z.enum(LOG_AREAS),
@@ -351,7 +362,7 @@ export const LogEntrySchema = z.object({
 });
 export type LogEntry = z.infer<typeof LogEntrySchema>;
 
-export const LogFileSchema = z.object({
+export const LogFileSchema = fileObject({
   schema: z.literal(1),
   rev: z.number().int().nonnegative(),
   // §22.6: set once the dated history has been read in, so it never happens twice.
