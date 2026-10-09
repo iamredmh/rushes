@@ -133,7 +133,7 @@ The MCP server has twenty-two tools: `rushes_open`, `rushes_status`, `rushes_add
 
 ```bash
 npx -y rushes new my-film --no-browser
-npx -y rushes open
+npx -y rushes open my-film
 npx -y rushes add version renders/hero_v2.mp4 --video "Hero 60s" --label "logo hold" --note "held the logo 0.5 s longer"
 npx -y rushes add format renders/hero_v2_9x16.mp4 --video "Hero 60s"
 npx -y rushes notes --stage picture --status todo --json
