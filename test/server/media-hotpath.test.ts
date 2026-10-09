@@ -12,14 +12,14 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 import { readdir, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
+import { jsonPoster } from "../helpers/http.js";
 import { createApp } from "../../src/server/app.js";
 
 async function setup() {
   const { root, store } = await tmpProject("media-hotpath");
   const app = createApp(store);
   const call = (path: string, init: RequestInit = {}) => app.request(path, init);
-  const post = (path: string, json: unknown) =>
-    app.request(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(json) });
+  const post = jsonPoster(app);
   return { root, call, post };
 }
 

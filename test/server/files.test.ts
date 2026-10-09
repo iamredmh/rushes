@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mkdir, readdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
+import { jsonPoster } from "../helpers/http.js";
 import { createApp } from "../../src/server/app.js";
 import { addFormat, addVariant, addVersion } from "../../src/core/project.js";
 import { parseRange, inside, contentDisposition, foundMediaFile, OUTSIDE_MEDIA_EXT, CONTENT_TYPES, isInlineSafeType, registeredMedia } from "../../src/server/files.js";
@@ -20,8 +21,7 @@ async function setup() {
   await writeFile(join(webDir, "assets", "app-abc123.js"), "console.log('hi')");
   const app = createApp(store, { webDir });
   const call = (path: string, init: RequestInit = {}) => app.request(path, init);
-  const post = (path: string, json: unknown) =>
-    app.request(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(json) });
+  const post = jsonPoster(app);
   return { root, store, call, post };
 }
 

@@ -1,19 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { createServer, type Server } from "node:http";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { tmpProject } from "../helpers/tmp.js";
 import { startServer } from "../../src/server/start.js";
 import { createMcpServer } from "../../src/mcp/tools.js";
 import { RushesClient } from "../../src/mcp/client.js";
 import { addVariant } from "../../src/core/project.js";
+import { linkedClient } from "../helpers/mcp.js";
 
 /** An MCP client talking to the Rushes at `url`. */
 async function mcpOn(url: string) {
   const server = createMcpServer({ client: async () => new RushesClient(url), openBrowser: () => undefined, doctor: async () => [] });
-  const [a, b] = InMemoryTransport.createLinkedPair();
-  const client = new Client({ name: "test", version: "0" });
-  await Promise.all([server.connect(a), client.connect(b)]);
+  const client = await linkedClient(server);
   const call = async (name: string, args: Record<string, unknown> = {}) => {
     const r = (await client.callTool({ name, arguments: args })) as { content: { text: string }[]; isError?: boolean };
     return { isError: !!r.isError, text: r.content[0].text };

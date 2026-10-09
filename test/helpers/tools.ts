@@ -1,13 +1,10 @@
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createMcpServer } from "../../src/mcp/tools.js";
+import { linkedClient } from "./mcp.js";
 
 /** The names of the tools the MCP server actually registers, sorted. The docs tests check the shipped docs against these, not a number kept by hand. */
 export async function registeredToolNames(): Promise<string[]> {
   const server = createMcpServer({ client: async () => { throw new Error("not used"); }, openBrowser: () => undefined, doctor: async () => [] });
-  const [a, b] = InMemoryTransport.createLinkedPair();
-  const client = new Client({ name: "docs-test", version: "0" });
-  await Promise.all([server.connect(a), client.connect(b)]);
+  const client = await linkedClient(server, "docs-test");
   const { tools } = await client.listTools();
   await client.close();
   return tools.map((t) => t.name).sort();

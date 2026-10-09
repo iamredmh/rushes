@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { tmpProject } from "../helpers/tmp.js";
-import { main, type Io } from "../../src/cli/main.js";
+import { main } from "../../src/cli/main.js";
 import { startServer } from "../../src/server/start.js";
 import { createServer } from "node:http";
 import { readFile, writeFile } from "node:fs/promises";
@@ -8,19 +8,7 @@ import { join } from "node:path";
 import { lockPath } from "../../src/server/lock.js";
 import { addVariant } from "../../src/core/project.js";
 import { undatedRefs } from "../../src/core/log.js";
-
-function io(cwd: string) {
-  const out: string[] = [];
-  const err: string[] = [];
-  const x: Io = {
-    out: (l) => out.push(l),
-    err: (l) => err.push(l),
-    cwd,
-    openBrowser: () => undefined,
-    ensure: { spawnServer: () => { throw new Error("tests start the server themselves"); }, timeoutMs: 300 },
-  };
-  return { x, out, err };
-}
+import { io } from "../helpers/cli.js";
 
 describe("rushes add version --label (§22.4)", () => {
   it("sends the label, and help shows it", async () => {

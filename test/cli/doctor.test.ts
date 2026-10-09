@@ -3,8 +3,6 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 import { createServer, type Server } from "node:http";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { tmpProject } from "../helpers/tmp.js";
 import { runDoctor, realDoctorEnv, type DoctorEnv } from "../../src/cli/doctor.js";
 import { main, type Io } from "../../src/cli/main.js";
@@ -13,6 +11,7 @@ import { lockPath } from "../../src/server/lock.js";
 import { RUSHES_DIR } from "../../src/core/store.js";
 import { createMcpServer } from "../../src/mcp/tools.js";
 import { stdioContext } from "../../src/mcp/stdio.js";
+import { linkedClient } from "../helpers/mcp.js";
 
 const dirs: string[] = [];
 afterEach(async () => { while (dirs.length) await rm(dirs.pop()!, { recursive: true, force: true }); });
@@ -451,9 +450,7 @@ describe("rushes doctor (CLI)", () => {
 describe("rushes_doctor (MCP) launched at / or the home folder", () => {
   async function callDoctor(defaultRoot: string) {
     const server = createMcpServer(stdioContext(defaultRoot, { spawnServer: () => { throw new Error("doctor must never spawn a server"); }, timeoutMs: 300 }));
-    const [a, b] = InMemoryTransport.createLinkedPair();
-    const client = new Client({ name: "test", version: "0" });
-    await Promise.all([server.connect(a), client.connect(b)]);
+    const client = await linkedClient(server);
     const r = (await client.callTool({ name: "rushes_doctor", arguments: {} })) as { content: { text: string }[]; isError?: boolean };
     await client.close();
     return r;

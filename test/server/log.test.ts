@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { access, lstat, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
+import { jsonCaller } from "../helpers/http.js";
 import { sse } from "../helpers/sse.js";
 import { createApp } from "../../src/server/app.js";
 import { FoundScanner } from "../../src/server/found.js";
@@ -14,15 +15,7 @@ import { Store } from "../../src/core/store.js";
 async function setup(name = "Lumen launch film") {
   const { root, store } = await tmpProject(name);
   const app = createApp(store);
-  const call = async (method: string, path: string, json?: unknown, headers: Record<string, string> = {}) => {
-    const res = await app.request(path, {
-      method,
-      headers: json === undefined ? headers : { "content-type": "application/json", ...headers },
-      body: json === undefined ? undefined : JSON.stringify(json),
-    });
-    const text = await res.text();
-    return { status: res.status, json: text ? JSON.parse(text) : null };
-  };
+  const call = jsonCaller(app);
   const id = (await call("GET", "/api/health")).json.id as string;
   const asUser = { "x-rushes-project": id };
   const texts = async () => (await call("GET", "/api/log?limit=200")).json.entries.map((e: { text: string; by: string }) => `${e.text} | ${e.by}`);
@@ -743,7 +736,7 @@ describe("the log's routes (§22.7)", () => {
     await mkdir(join(root, "exports"), { recursive: true });
     await symlink(outside, join(root, "exports", name));
     const r = await call("POST", "/api/exports/change-log", {});
-    expect(r).toEqual({ status: 201, json: { path: `exports/${name}` } });
+    expect({ status: r.status, json: r.json }).toEqual({ status: 201, json: { path: `exports/${name}` } });
     expect(await readFile(outside, "utf8")).toBe("untouched");
     expect((await lstat(join(root, "exports", name))).isSymbolicLink()).toBe(false);
     expect(await readFile(join(root, "exports", name), "utf8")).toContain("Kept the wide");

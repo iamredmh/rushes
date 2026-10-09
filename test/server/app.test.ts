@@ -3,6 +3,7 @@ import { chmod, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { Store } from "../../src/core/store.js";
 import { tmpProject } from "../helpers/tmp.js";
+import { jsonCaller } from "../helpers/http.js";
 import { createApp, type AppOptions } from "../../src/server/app.js";
 import type { LoudnessRunner } from "../../src/server/loudness.js";
 import { ProjectIdSchema } from "../../src/core/schema.js";
@@ -21,21 +22,8 @@ const PNG_1PX = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPh
 async function setup(opts: AppOptions = {}) {
   const { root, store } = await tmpProject("spring-launch");
   const app = createApp(store, opts);
-  const call = async (method: string, path: string, json?: unknown, init: RequestInit = {}) => {
-    const res = await app.request(path, {
-      method,
-      headers: json === undefined ? init.headers : { "content-type": "application/json", ...init.headers },
-      body: json === undefined ? undefined : JSON.stringify(json),
-    });
-    let parsed: any = null;
-    const text = await res.text();
-    try {
-      parsed = text ? JSON.parse(text) : null;
-    } catch {
-      parsed = text;
-    }
-    return { status: res.status, json: parsed, headers: res.headers, res };
-  };
+  const request = jsonCaller(app);
+  const call = (method: string, path: string, json?: unknown, init: RequestInit = {}) => request(method, path, json, init.headers as Record<string, string> | undefined);
   return { root, store, call };
 }
 

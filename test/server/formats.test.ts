@@ -5,6 +5,7 @@ import { probeVideo, type VideoProbe } from "../../src/core/media.js";
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
+import { jsonCaller } from "../helpers/http.js";
 import { sizedProbe } from "../helpers/probe.js";
 import { createApp, type AppOptions } from "../../src/server/app.js";
 import { addVersion } from "../../src/core/project.js";
@@ -25,21 +26,7 @@ async function setup(files: string[] = [], opts: AppOptions | ((store: Store) =>
     await writeFile(abs, "bytes");
   }
   const app = createApp(store, { formatProbe: sizedProbe, ...(typeof opts === "function" ? opts(store) : opts) });
-  const call = async (method: string, path: string, json?: unknown) => {
-    const res = await app.request(path, {
-      method,
-      headers: json === undefined ? undefined : { "content-type": "application/json" },
-      body: json === undefined ? undefined : JSON.stringify(json),
-    });
-    const text = await res.text();
-    let parsed: any = text;
-    try {
-      parsed = text ? JSON.parse(text) : null;
-    } catch {
-      /* not JSON */
-    }
-    return { status: res.status, json: parsed, text };
-  };
+  const call = jsonCaller(app);
   return { root, store, app, call };
 }
 
