@@ -1,20 +1,48 @@
-# Rushes
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/lockup-dark.svg">
+    <img alt="Rushes" src="docs/brand/lockup.svg" height="56">
+  </picture>
+</p>
 
-A local review desk for video made with AI agents.
+<h3 align="center">Your agent shoots. You give notes.</h3>
 
-Your agent renders a cut, writes a voiceover script or generates music beds. Rushes shows that work stage by stage in your browser:
+<p align="center">
+  The review desk for video made with AI agents. Pin notes to the exact frame, edit the script,<br>
+  pick the voice and the music. Your agent reads every note and fixes it.
+</p>
 
-- **Script:** your edits sit beside the agent's lines.
-- **Picture:** timecoded notes, ranges, boxes on the frame and frame grabs.
-- **Picture waveform:** the cut's own audio, drawn quietly in the timeline, so you can see where the sound is.
-- **Voiceover, Music, Sound effects:** variants you can switch between with no gap.
-- **Mix:** everything playing together.
+<p align="center">
+  <a href="https://www.npmjs.com/package/rushes"><img alt="npm" src="https://img.shields.io/npm/v/rushes?style=flat-square&color=7C93FF&labelColor=1C1E22"></a>
+  <a href="LICENSE"><img alt="MIT licence" src="https://img.shields.io/badge/licence-MIT-7C93FF?style=flat-square&labelColor=1C1E22"></a>
+  <a href="https://nodejs.org"><img alt="Node.js 20.19 or newer" src="https://img.shields.io/badge/node-%E2%89%A5%2020.19-7C93FF?style=flat-square&labelColor=1C1E22"></a>
+  <img alt="Runs on your machine" src="https://img.shields.io/badge/runs-on%20your%20machine-4CC38A?style=flat-square&labelColor=1C1E22">
+  <img alt="Works through MCP" src="https://img.shields.io/badge/works%20through-MCP-A78BFA?style=flat-square&labelColor=1C1E22">
+</p>
 
-Your notes are saved as plain files in your project. The agent reads them, fixes things and replies on each one, and you see each reply arrive.
+<p align="center">
+  <a href="#get-started">Get started</a> &nbsp;·&nbsp;
+  <a href="#how-it-works">How it works</a> &nbsp;·&nbsp;
+  <a href="#every-stage-in-one-place">The tabs</a> &nbsp;·&nbsp;
+  <a href="#your-notes-are-plain-files">Plain files</a> &nbsp;·&nbsp;
+  <a href="#faq">FAQ</a> &nbsp;·&nbsp;
+  <a href="#for-agents-set-yourself-up">For agents</a>
+</p>
 
-It runs on your machine. There's no account, no API key and no server to sign up for. You need [Node.js](https://nodejs.org) 20.19 or newer (or 22.12+ on the 22 line).
+<!-- Hero film goes here once it is uploaded. GitHub plays an mp4 inline only from its own upload URL: drag the file into this editor and paste the link it returns. -->
+<p align="center">
+  <img src="docs/assets/hero.jpg" alt="Rushes' Picture tab. A launch film is paused on its headline, with a dashed box drawn round the last word and four open notes beside it." width="880">
+</p>
 
-> Status: early. The Script, Picture, Voiceover, Music, Sound effects and Mix tabs, the MCP tools and the CLI all work today.
+## Chat is a poor place to review a film
+
+More and more video is made by agents. Claude, Codex and the rest can write the script, render the cut, and generate the voiceover, the music and the sound effects. What they can't do is show you the work. You get a folder of files and a filename. Then you type "the logo bit at the end feels off" into a chat box, and the agent asks which logo, and where.
+
+Rushes is the desk that's missing. It shows each stage of the work in your browser, lets you mark it up the way an editor would, and hands every note back to your agent with the exact moment, box or line it's about.
+
+<p align="center">
+  <img src="docs/assets/chat-vs-rushes.jpg" alt="On the left, a chat where a vague note about a logo gets the reply 'Which logo, and where in the video?'. On the right, the same note in Rushes: a frame at 0:27.40 with a dashed box round the logo, the note, and the agent's reply that the hit moved from 27.9 s to 27.4 s." width="880">
+</p>
 
 ## Get started
 
@@ -22,7 +50,108 @@ Tell your agent:
 
 > Use github.com/iamredmh/rushes as my review tool for video, voiceover and music.
 
-That's all. Your agent reads the next section and sets itself up.
+That's all. Your agent reads [the setup steps for agents](#for-agents-set-yourself-up) and sets itself up. Then ask it to make something and open it in Rushes.
+
+It runs on your machine. There's no account, no API key and no server to sign up for. You need [Node.js](https://nodejs.org) 20.19 or newer (or 22.12+ on the 22 line).
+
+No project to hand? `npx -y rushes demo` builds an example on your machine and opens it.
+
+> Status: early. The Script, Picture, Voiceover, Music, Sound effects and Mix tabs, the MCP tools and the CLI all work today.
+
+## How it works
+
+<p align="center">
+  <img src="docs/assets/loop.png" alt="The loop in four steps. One, the agent registers a cut, a script or a mix. Two, you review it in the browser and pin notes. Three, you press Send to agent and your notes go as one batch. Four, the agent fixes each note and replies on it. The next version comes back to step two until picture is locked." width="880">
+</p>
+
+Your agent registers what it makes. You review it in the browser. When you press **Send to agent**, your notes go as one batch, saved as plain files in your project. The agent reads the batch, fixes each note and replies on it, and you see each reply arrive.
+
+## Every stage in one place
+
+Six tabs, in the order the work happens. A tab unlocks as soon as it has something in it, and a locked tab tells you what to ask your agent for.
+
+### Picture: point at the exact frame
+
+<img src="docs/assets/screens/picture-review.jpg" alt="The Picture tab on the first cut of a launch film, paused at 0:03.00. A dashed box is drawn round the word 'shot.' at the end of the headline. Four open notes are listed beside the video, two with frame grabs." width="880">
+
+Pin a note to a moment, to a range, or to a box drawn on the frame. Grab a frame to show what you mean. Every note records the shot it falls in.
+
+### The agent replies on every note
+
+<img src="docs/assets/screens/picture-fixed.jpg" alt="The Picture tab on version two of the film, paused at 0:14.40 on a count-up that now lands on '11 min'. In the notes, a green tick and the agent's reply sit under the note that asked for the change." width="880">
+
+When the agent delivers a new cut, each note shows where it landed in the new version and what the agent did about it. A green tick means it's done. Anything the agent didn't fix stays open, with a reason.
+
+### Script: your edits beside the agent's lines
+
+<img src="docs/assets/screens/script-review.jpg" alt="The Script tab. Each section shows the agent's current line on the left and the user's rewrite on the right. Two sections are outlined as changed, each with a short direction such as 'Two short sentences. Easier to say.'" width="880">
+
+Rewrite a line, add a direction, flag it or approve it. The bar on each row shows whether the line still fits its slot. When the agent adopts your edit, it records the next voice read from the corrected script.
+
+### Voiceover: compare reads, round by round
+
+<img src="docs/assets/screens/voiceover.jpg" alt="The Voiceover tab. The current round, 'George, slower', is picked and in use. The earlier round is open below it with two reads, George and Eliza, side by side. A note on the earlier round has the agent's reply: Round 2 is George at 93% pace." width="880">
+
+Reads of the same script sit side by side in rounds. Switch between them with no gap in playback, or turn on **Blind** to hide which is which. Leave a note on a whole read, or at a point in it.
+
+### Music: audition the beds
+
+<img src="docs/assets/screens/music.jpg" alt="The Music tab with three beds, each with its waveform. Bed B is in use. Two open notes are marked on the waveforms: a 'Fall' on bed A and a 'Rise' on bed B." width="880">
+
+Switch beds instantly while the picture plays. Mark a range as **Rise**, **Fall**, **Louder** or **Quieter**, and your agent gets it as a note it can act on.
+
+### Sound effects: layers by sound
+
+<img src="docs/assets/screens/sound-effects.jpg" alt="The Sound effects tab with one pass open into its layers. There is one row per sound (tick, thud, blip, chime, whoosh, counter, thump, snap), each with a count and a mark wherever it plays." width="880">
+
+Every cue is labelled on the waveform. Open the pass into **layers by sound**: one row per sound, with a count, and a tick wherever it plays. Click a layer's file to hear that sample on its own.
+
+### Mix: everything together
+
+<img src="docs/assets/screens/mix.jpg" alt="The Mix tab. Voiceover, music and sound effects each have a lane with mute and solo buttons and a level slider. Below them, integrated loudness, true peak and the level of the music under the voice are shown. A note asks for the music to be 2 dB quieter through the middle." width="880">
+
+Voiceover, music and effects play together against the picture. Set each lane's level, mute or solo it, and read the loudness and true peak (with ffmpeg installed).
+
+### The Change Log
+
+<img src="docs/assets/screens/change-log.jpg" alt="The Change Log drawer open over the Picture tab. It lists, newest first, the picks, the sound effects pass, the music beds, the picture lock, the agent's replies to five notes, the voiceover reads and the script, each marked as by the agent or by you." width="880">
+
+Rushes keeps a running log of what happened: each cut, read, bed and pass as it arrives, notes sent, and the agent's replies. Export it as Markdown for whoever needs to catch up.
+
+## Why Rushes
+
+- **Notes your agent can act on.** Each one carries its stage, a timecode or range, an optional box on the frame, a frame grab, and the shot it falls in.
+- **One batch at a time.** **Send to agent** covers the tab you're on, because you review one stage at a time.
+- **Versions keep their history.** Notes follow the work from cut to cut, and you can lock picture when it's done.
+- **Local, with no sign-up.** No account, no API key, nothing uploaded. It runs on your machine.
+- **Works with the agent you already use.** One MCP server for Claude Code, Codex, Cursor, Claude Desktop and Gemini CLI, a plugin and skill for Claude Code, and a command line for anything else.
+- **Plain files, so the work is yours.** Notes, script and picks live in your project folder. Commit them with the rest.
+
+## Your notes are plain files
+
+<p align="center">
+  <img src="docs/assets/files.png" alt="A project folder with renders, audio, screenshots and a hidden .rushes folder holding notes.json, script.json, picks.json, batches.json and project.json. Beside it, a note from notes.json: the stage, the time, the text, the box on the frame, the status 'done', and the agent's reply." width="880">
+</p>
+
+Rushes keeps your review in a `.rushes/` folder in the project. The agent reads those files, fixes the work and writes its reply back, and a single local server is the only thing that writes to them. Add `.rushes/` to git if you want your review history kept with the project. More in [What gets saved](#what-gets-saved).
+
+## FAQ
+
+**Does my video leave my machine?** No. Rushes serves the review desk from your own computer and reads your project folder from disk. There's no upload, no account and no key.
+
+**Which agents does it work with?** Any that can run a local MCP server: Claude Code, Codex, Cursor, Claude Desktop and Gemini CLI today. Agents with no MCP support can use the command line. See [Manual setup](#manual-setup).
+
+**Can I use it without an agent?** Yes. Review, leave notes, and run **Export notes** for a dated Markdown file you can send to a person. The agent loop is where it pays off most.
+
+**Does it need ffmpeg?** No, but it helps. With ffmpeg installed Rushes reads frame rates and durations, makes browser-playable proxies of heavy cuts, and measures loudness on Mix. Run `rushes doctor` to check.
+
+**Can it handle big files?** Cuts that play badly in a browser (4K and above, huge files, ProRes and similar) get an offer of a light 1080p proxy. Your original is never changed. See [Proxies](#proxies).
+
+**Where do I report a bug or ask for something?** [Open an issue](https://github.com/iamredmh/rushes/issues). Please say which agent and operating system you're using, and attach the output of `rushes doctor`.
+
+---
+
+The rest of this page is the reference: setup for agents, manual setup, the command line, shortcuts and every feature in detail.
 
 ## For agents: set yourself up
 
