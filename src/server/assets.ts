@@ -6,6 +6,7 @@ import { fromManifestPath } from "../core/paths.js";
 import { GRAB_PATH, SCREENSHOT_PATH, registeredMedia } from "./files.js";
 import { PROXY_PATH } from "./proxy.js";
 import { chipOrder, labelOfId, versionFormats } from "../core/formats.js";
+import { minutesAndSeconds } from "../core/timecode.js";
 
 export type AssetKind = "screenshot" | "cut" | "proxy" | "take" | "music" | "sfx" | "voice" | FileKind;
 
@@ -44,15 +45,12 @@ export interface Asset {
 }
 
 /**
- * "hero-60s_v3_00m12.10s_f726.png": the time is frame/fps, rounded to hundredths before
- * splitting into minutes and seconds -- the same rule fmt() uses, so 59.999s carries into the
- * next minute rather than printing 00m60.00s.
+ * "hero-60s_v3_00m12.10s_f726.png": the time is frame/fps, split into minutes and seconds by the
+ * rule fmt() uses (minutesAndSeconds), so 59.999s carries into the next minute rather than
+ * printing 00m60.00s.
  */
 export function screenshotName(video: string, version: string, frame: number, fps: number, format: string | null = null): string {
-  const t = frame / fps;
-  const cs = Math.round(Math.max(0, t) * 100);
-  const m = Math.floor(cs / 6000);
-  const s = ((cs - m * 6000) / 100).toFixed(2).padStart(5, "0");
+  const { m, s } = minutesAndSeconds(frame / fps);
   const mm = String(m).padStart(2, "0");
   // §21.5: a grab of a cut with formats carries the ratio it shows ("hero_v1_9x16_00m01.00s_f30.png").
   return `${video}_${version}${format ? `_${format}` : ""}_${mm}m${s}s_f${frame}.png`;
