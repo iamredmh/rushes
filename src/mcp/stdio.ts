@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createMcpServer, type ToolContext } from "./tools.js";
 import { ensureServer, type EnsureOptions } from "./ensure.js";
@@ -19,7 +19,7 @@ export function openBrowser(url: string): void {
  * project, so those throw and ask the agent to name one.
  */
 export function resolveProjectRoot(defaultRoot: string, project?: string): string {
-  const root = resolve(defaultRoot, project ?? ".");
+  const root = projectPath(defaultRoot, project);
   if (dirname(root) === root || root === resolve(homedir())) {
     throw new Error('Tell me which project folder to use: pass "project" (e.g. "/Users/you/Videos/launch-film").');
   }
@@ -33,7 +33,17 @@ export function resolveProjectRoot(defaultRoot: string, project?: string): strin
  * folder" there, same as any other folder with no .rushes.
  */
 export function resolveDoctorRoot(defaultRoot: string, project?: string): string {
-  return resolve(defaultRoot, project ?? ".");
+  return projectPath(defaultRoot, project);
+}
+
+/**
+ * `project` against the launch folder. A leading "~" or "~/" is the home folder, as a shell would
+ * read it: agents write paths that way, and resolve() alone would make a folder called "~" in the
+ * working directory.
+ */
+function projectPath(defaultRoot: string, project = "."): string {
+  const fromHome = project === "~" || /^~[\\/]/.test(project);
+  return resolve(defaultRoot, fromHome ? join(homedir(), project.slice(2)) : project);
 }
 
 /** The tool context runStdio uses. */

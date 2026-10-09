@@ -10,7 +10,7 @@ import { startServer } from "../../src/server/start.js";
 import { createMcpServer } from "../../src/mcp/tools.js";
 import { ApiError, RushesClient } from "../../src/mcp/client.js";
 import { ensureServer, findServer } from "../../src/mcp/ensure.js";
-import { resolveProjectRoot, stdioContext } from "../../src/mcp/stdio.js";
+import { resolveDoctorRoot, resolveProjectRoot, stdioContext } from "../../src/mcp/stdio.js";
 import { lockPath } from "../../src/server/lock.js";
 import { SOURCE } from "../../src/setup/harnesses.js";
 import { runDoctor, realDoctorEnv } from "../../src/cli/doctor.js";
@@ -321,6 +321,20 @@ describe("project root for stdio", () => {
     expect(resolveProjectRoot("/", "/Users/you/Videos/launch-film")).toBe("/Users/you/Videos/launch-film");
     expect(resolveProjectRoot("/work/film")).toBe("/work/film");
     expect(resolveProjectRoot("/work", "film")).toBe("/work/film");
+  });
+
+  it("reads a leading ~ as the home folder, not as a folder called ~ in the working directory", () => {
+    // An agent often writes "~/Videos/launch-film". Without this, the server would be started in
+    // <cwd>/~/Videos/launch-film and mkdir -p would create that folder, with a .rushes in it.
+    const home = homedir();
+    expect(resolveProjectRoot("/work", "~/Videos/launch-film")).toBe(join(home, "Videos", "launch-film"));
+    expect(resolveProjectRoot("/", "~/Videos")).toBe(join(home, "Videos"));
+    expect(() => resolveProjectRoot("/work", "~")).toThrow(ASK);
+    expect(resolveDoctorRoot("/work", "~/Videos/launch-film")).toBe(join(home, "Videos", "launch-film"));
+    // Only a leading "~" or "~/" means home. A folder that merely starts with a tilde, and another
+    // user's "~name", are ordinary relative names.
+    expect(resolveProjectRoot("/work", "~film")).toBe("/work/~film");
+    expect(resolveProjectRoot("/work", "film/~/x")).toBe("/work/film/~/x");
   });
 
   it("a tool started in / returns that error and never spawns a server", async () => {
