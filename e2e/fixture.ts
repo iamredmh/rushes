@@ -143,7 +143,11 @@ async function start(port = 0, noFfmpeg = false): Promise<Started> {
   await mkdir(join(root, "renders"), { recursive: true });
   // RUSHES_NO_REVEAL stops the dashboard's "Show in Finder" (added in Plan 2c) from ever
   // actually opening Finder/Explorer during a test run.
-  const child = spawn(process.execPath, [CLI, "serve", root, "--port", String(port)], {
+  // --idle-minutes: a server whose test run was killed (a cancelled CI job, a Ctrl-C, a crashed
+  // worker) never gets its SIGTERM and would run for ever, holding the project and its code open.
+  // Idle means no open connection and no request, so a live test, which has its page open, never is.
+  const idleMinutes = process.env.RUSHES_E2E_IDLE_MINUTES ?? "5";
+  const child = spawn(process.execPath, [CLI, "serve", root, "--port", String(port), "--idle-minutes", idleMinutes], {
     stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, RUSHES_NO_REVEAL: "1", ...(noFfmpeg ? { PATH: pathWithoutFfmpeg() } : {}) },
   });
