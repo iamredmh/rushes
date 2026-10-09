@@ -119,6 +119,21 @@ describe("setSections", () => {
     expect(s.sections[0].status).toBe("draft");
   });
 
+  it("an approved section goes back to draft when the agent changes its line, since the approval was for the old words", () => {
+    const s = empty();
+    setSections(s, [{ start: 0, end: 10, current: "A" }, { start: 10, end: 20, current: "B" }, { start: 20, end: 30, current: "C" }]);
+    for (const id of ["s1", "s2", "s3"]) editSection(s, id, { status: "approved" });
+    setSections(s, [
+      { id: "s1", start: 0, end: 10, current: "A, reworked" },
+      { id: "s2", start: 10, end: 20, current: "  B " }, // same words, different spacing: still the line the user approved
+      { id: "s3", start: 20, end: 30, current: "C" },
+    ]);
+    expect(s.sections.map((x) => x.status)).toEqual(["draft", "approved", "approved"]);
+    editSection(s, "s2", { status: "approved" });
+    setSections(s, [{ id: "s2", start: 10, end: 20, current: "B, again" }], { replace: true });
+    expect(s.sections[0].status).toBe("draft");
+  });
+
   it("clears the proposal once the agent adopts it as the current line", () => {
     const s = empty();
     setSections(s, [{ start: 0, end: 10, current: "Old line." }]);

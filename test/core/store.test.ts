@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
 import { CorruptFileError, InvalidError, RevConflictError } from "../../src/core/errors.js";
 import { backfillLog } from "../../src/core/log.js";
+import { addVariant } from "../../src/core/project.js";
 import { FILES, type FileKey } from "../../src/core/schema.js";
 import { Store, type ChangeEvent } from "../../src/core/store.js";
 
@@ -28,6 +29,29 @@ describe("Store", () => {
     const p = await store.read("project");
     expect(p.name).toBe("first");
     expect(p.fps).toBe(60);
+  });
+
+  it("keeps fields it doesn't know, at any depth, when it writes a file back", async () => {
+    // A file saved by a newer Rushes carries fields this one has never heard of. Every write goes
+    // through the schema, which used to drop them, so an older server running on a newer project
+    // quietly deleted what the newer one had saved.
+    const { store } = await tmpProject();
+    await store.update("project", (p) => {
+      p.videos.push({ id: "hero", name: "Hero", lockedVersion: null, versions: [] });
+      addVariant(p, { stage: "sfx", name: "Pass A", file: "s.wav", cues: [{ name: "Swipe", t: 1 }] });
+    });
+    const path = join(store.dir, "project.json");
+    const saved = JSON.parse(await readFile(path, "utf8"));
+    saved.fieldFromANewerRushes = { a: 1 };
+    saved.videos[0].alsoNew = "x";
+    saved.lanes[0].variants[0].cues[0].alsoNewOnACue = true; // three levels down, where a cue's file once was new
+    await writeFile(path, JSON.stringify(saved, null, 2), "utf8");
+    await store.update("project", (p) => { p.fps = 50; });
+    const after = JSON.parse(await readFile(path, "utf8"));
+    expect(after.fps).toBe(50);
+    expect(after.fieldFromANewerRushes).toEqual({ a: 1 });
+    expect(after.videos[0].alsoNew).toBe("x");
+    expect(after.lanes[0].variants[0].cues[0].alsoNewOnACue).toBe(true);
   });
 
   it("update bumps rev, writes pretty JSON and emits a change event", async () => {

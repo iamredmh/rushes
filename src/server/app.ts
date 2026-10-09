@@ -543,8 +543,9 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     // the symlink's target, so the write can never escape screenshots/ that way. It also means
     // nothing ever lists a half-written PNG. The temp name starts with "." and ends in ".tmp",
     // which SCREENSHOT_PATH (the safe-name filter) already excludes from both /media and the
-    // Assets listing.
-    const tmp = join(store.root, "screenshots", `.${name}.${process.pid}.tmp`);
+    // Assets listing. The random part keeps two grabs of the same frame in the same instant (a
+    // double-click on the camera) from sharing one temp file: the second rename would find it gone.
+    const tmp = join(store.root, "screenshots", `.${name}.${process.pid}.${randomUUID()}.tmp`);
     await writeFile(tmp, bytes);
     await rename(tmp, fromManifestPath(store.root, grab));
     return c.json({ grab }, 201);

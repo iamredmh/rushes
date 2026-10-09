@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
 import { createApp } from "../../src/server/app.js";
@@ -353,6 +353,15 @@ describe("frame grabs", () => {
     const back = await call(`/media?path=${encodeURIComponent(grab)}`);
     expect(back.status).toBe(200);
     expect(back.headers.get("content-type")).toBe("image/png");
+  });
+
+  it("answers 201 to every one of several grabs of the same frame sent at once, and leaves no temp file", async () => {
+    // A double-click on the camera button sends the same frame twice in the same instant.
+    const { post, root } = await setup();
+    const grab = { video: "hero-60s", version: "v3", frame: 744, png: `data:image/png;base64,${PNG_1PX}` };
+    const replies = await Promise.all(Array.from({ length: 5 }, () => post("/api/grabs", grab)));
+    expect(replies.map((r) => r.status)).toEqual([201, 201, 201, 201, 201]);
+    expect(await readdir(join(root, "screenshots"))).toEqual(["hero-60s_v3_00m24.80s_f744.png"]);
   });
 
   it("uses the version's own fps over the project default", async () => {
