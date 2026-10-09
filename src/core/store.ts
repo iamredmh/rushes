@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { mkdir, readFile, rename, writeFile, copyFile, access } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile, access } from "node:fs/promises";
 import { join } from "node:path";
 import { FILES, type FileData, type FileKey } from "./schema.js";
 import { CorruptFileError, InvalidError, RevConflictError } from "./errors.js";
@@ -131,12 +131,6 @@ export class Store extends EventEmitter {
   /** Record `rev` as already announced for `key`, without emitting. Used to seed a freshly attached watcher with a file's starting state, so it isn't mistaken for a hand edit. */
   seed(key: FileKey, rev: number): void {
     this.announced.set(key, rev);
-  }
-
-  async backup(key: FileKey): Promise<string> {
-    const to = this.path(key) + ".bak";
-    await copyFile(this.path(key), to);
-    return to;
   }
 }
 

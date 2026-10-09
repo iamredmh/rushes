@@ -197,12 +197,6 @@ export function addFile(p: Project, input: AddFileInput, now = new Date()): File
   return entry;
 }
 
-export function findVideo(p: Project, id: string): Video {
-  const v = p.videos.find((x) => x.id === id);
-  if (!v) throw new NotFoundError("video", id);
-  return v;
-}
-
 /**
  * Finds a video by id, slug or name, so routes, MCP tools and the CLI all accept either
  * "Hero 60s" or "hero-60s". Tried in order: exact id, then `slugify(ref)`, then a

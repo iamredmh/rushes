@@ -18,11 +18,6 @@ export function isChanged(s: Section): boolean {
   return s.proposed !== null && s.proposed.trim() !== s.current.trim();
 }
 
-/** A take is stale once the section's line no longer matches the text it was read from. */
-export function isTakeStale(take: Take, s: Section): boolean {
-  return take.forText.trim() !== s.current.trim();
-}
-
 export interface SectionInput {
   id?: string;
   start: number;

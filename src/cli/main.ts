@@ -149,12 +149,6 @@ function firstPositionalIndex(argv: string[]): number {
   return -1;
 }
 
-/** The command name (first positional), tolerant of leading global flags. */
-function firstPositional(argv: string[]): string | undefined {
-  const i = firstPositionalIndex(argv);
-  return i >= 0 ? argv[i] : undefined;
-}
-
 /**
  * `rushes add shots` has its own `--version <value>` / `--version=<value>`, which takes a value
  * and can appear in any position. That collides with the global `--version`/`-v` flag, which

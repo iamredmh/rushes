@@ -13,7 +13,7 @@ import {
 import { OPEN_SAFE_EXT as SERVER_OPEN_SAFE_EXT } from "../../src/server/reveal.js";
 import { markLabel as serverMarkLabel, type Mark } from "../../src/core/schema.js";
 import {
-  AUDIO_CHIPS, BUILT, blindOrder, laneSelection, markLabel, marksLabel, scopeOptions, noteFocus, setMarkDb, spacePressesButton, testFlags, toggleMark, watchFocusOrigin, variantMeta,
+  AUDIO_CHIPS, blindOrder, laneSelection, markLabel, marksLabel, scopeOptions, noteFocus, setMarkDb, spacePressesButton, testFlags, toggleMark, watchFocusOrigin, variantMeta,
   variantNoteRow, variantNoteTarget, variantOnLabel, variantOnOptions, variantRows,
 } from "../../web/src/lib.js";
 import type { Lane } from "../../web/src/types.js";
@@ -524,9 +524,7 @@ describe("audio tabs: lanes", () => {
       { id: "pass-b", name: "Pass B", file: "pb.wav", meta: {}, cues: [{ id: "swipe", name: "Swipe", t: 1.6 }] },
     ] },
   ];
-  it("turns on Music and Sound effects", () => {
-    expect(BUILT.music).toBe(true);
-    expect(BUILT.sfx).toBe(true);
+  it("has the chips for Music and Sound effects", () => {
     expect(AUDIO_CHIPS.music).toEqual(["Tempo", "Key", "Energy", "Ending"]);
     expect(AUDIO_CHIPS.sfx).toEqual(["Timing", "Level", "Swap sound", "Remove"]);
   });
@@ -670,9 +668,6 @@ describe("Space on a focused button (§19.8)", () => {
 });
 
 describe("Voiceover", () => {
-  it("turns on Voiceover", () => {
-    expect(BUILT.voice).toBe(true);
-  });
   it("keeps Voiceover's chips as the Whole chips Voice shows (§18.3), not the old §17.1 set", () => {
     expect(AUDIO_CHIPS.voice).toEqual(["Speaker", "Pacing", "Tone", "Overall"]);
   });
@@ -831,8 +826,7 @@ describe("Mix", () => {
     heard: { vo: true, music: [music[1]], sfx: [sfx[0]], ...heard },
   });
 
-  it("turns on Mix", () => {
-    expect(BUILT.mix).toBe(true);
+  it("has the chips for Mix", () => {
     expect(AUDIO_CHIPS.mix).toEqual(["Level", "Balance", "Loudness"]);
   });
 

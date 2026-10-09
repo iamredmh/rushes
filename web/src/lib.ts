@@ -80,9 +80,6 @@ export function neighbourVideo(videos: Video[], currentId: string | null, dir: -
   return j >= 0 && j < videos.length ? videos[j].id : null;
 }
 
-/** Is this stage built in this release of the dashboard? Later releases add the audio tabs. */
-export const BUILT: Record<Stage, boolean> = { script: true, picture: true, voice: true, music: true, sfx: true, mix: true };
-
 export const STAGE_NAMES: Record<Stage, string> = {
   script: "Script",
   picture: "Picture",
