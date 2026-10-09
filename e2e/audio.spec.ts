@@ -1588,7 +1588,12 @@ test("re-rendering the only clip mid-play keeps playing: its lane rejoins on the
   await expect.poll(async () => (await inspect(page)).time).toBeGreaterThan(0.5);
   const before = await inspect(page);
   const [id] = Object.keys(before.voices);
-  const clock = () => page.evaluate(() => ({ t: window.__rushesAudio!.engine!.time, wall: performance.now() / 1000 }));
+  // The engine's time and the audio context's own clock, read together, with the wall clock beside them.
+  const clock = () =>
+    page.evaluate(() => {
+      const engine = window.__rushesAudio!.engine as unknown as { time: number; ctx: { currentTime: number } };
+      return { t: engine.time, ctx: engine.ctx.currentTime, wall: performance.now() / 1000 };
+    });
   const t0 = await clock();
 
   // The agent renders the file again in place: a new sound and a newer modified time. The next
@@ -1606,8 +1611,14 @@ test("re-rendering the only clip mid-play keeps playing: its lane rejoins on the
   expect(after.voices[id]).toBeGreaterThan(before.voices[id]);
   expect(await page.evaluate(() => (window as unknown as { __stops: number }).__stops)).toBe(0);
   // The clock ran on through the swap, so the new file joined where the old one would have been.
+  // The engine's time is startOffset + (ctx.currentTime - startedAt), so across the swap it moves
+  // exactly with the context's own clock unless the swap reset its origin (a stop, then a restart
+  // from where it stood when the decode began). Held against the wall clock instead, this only
+  // measured how far the audio clock drifts from it on a busy runner: 0.173 s once, in WebKit on CI.
   const t1 = await clock();
-  expect(Math.abs(t1.t - t0.t - (t1.wall - t0.wall))).toBeLessThan(0.15);
+  expect(Math.abs(t1.t - t0.t - (t1.ctx - t0.ctx))).toBeLessThan(0.02);
+  // And it is running, not stalled: against the wall clock that only needs to be roughly in step.
+  expect(t1.t - t0.t).toBeGreaterThan(0.5 * (t1.wall - t0.wall));
 });
 
 test("Space on a focused button presses it instead of playing: Measure again on Mix (§19.8)", async ({ page, rushes }) => {
