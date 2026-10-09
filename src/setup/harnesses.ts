@@ -45,7 +45,9 @@ export function mentionsLegacySource(text: string): boolean {
 
 const DEFAULT_LAUNCH: McpLaunch = { command: MCP_COMMAND, args: MCP_ARGS };
 
-export type HarnessId = "claude-code" | "codex" | "cursor" | "claude-desktop" | "gemini";
+/** The harnesses setup knows, in the order it lists them. */
+export const HARNESS_IDS = ["claude-code", "codex", "cursor", "claude-desktop", "gemini"] as const;
+export type HarnessId = (typeof HARNESS_IDS)[number];
 
 export interface Harness {
   id: HarnessId;
