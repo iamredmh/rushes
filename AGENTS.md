@@ -47,6 +47,19 @@ The CLI equivalent is `rushes add file <path> --kind K [--name N] [--note T] [--
 
 When the user wants to share notes with someone else, call `rushes_export_notes` (CLI: `rushes export notes`). It writes every note, grouped by stage and, for Picture, by film and version, to a dated Markdown file in `exports/`, writes the Change Log beside it as `exports/change-log-<date>.md`, and returns both paths.
 
+## Starting a film
+
+When the user wants a new video ("start a new film", "make a launch video", "a new project in Rushes"), plan it with them in Rushes before you build anything. They approve the brief, the script and the storyboard first, so nothing gets built that they haven't seen.
+
+1. **Create the project** unless one exists: `npx -y rushes new <folder> --no-browser`, then `rushes_open` with `project: "<folder>"`. It makes the project, `renders/` and `audio/voiceover`, `audio/music` and `audio/sfx`, and a `brief.md` to fill in. It refuses a folder that is already a Rushes project and never overwrites a `brief.md` that is there. Always pass `--no-browser`: without it the command stays running as the server and never returns.
+2. **Interview, briefly.** Ask at most three questions, and only ones whose answer changes the film: length and formats, who it is for, tone. Give each a recommended answer with its trade-off ("30 seconds fits a feed; 60 leaves room for the demo"). Never send a list of ten.
+3. **Write `brief.md`.** Its sections, in order, are Title, Purpose, Audience, Length and formats, Tone, Include and avoid, Built with and References. Fill every one, keep the `Status: draft` line, and tell the user to read it in Assets › Scripts & docs. When they say in chat that it's approved, change the line to `Status: approved`. Never approve it yourself.
+4. **Script.** Add it with `rushes_set_script`. The user edits and approves each section in the Script tab. Read `rushes_get_script` and wait until every section is `approved`.
+5. **Storyboard.** Write `storyboard.md` in the project root: `Status: draft`, then a table with one row per shot (number, name, tag, length in seconds, what happens). Make a still for each shot if your tools can, save them in `storyboard/`, and register each with `rushes_add_file` (`kind: "image"`). The user approves in chat; then set `Status: approved`. Never approve it yourself.
+6. **Build only when all three are approved.** If the user says "just build it", do. Build in whatever tool suits the film, and name each scene after its planned shot. Then register the cut with `rushes_add_version` and the planned shots with `rushes_set_shots` (each `start` is the running total of the lengths before it), so Picture notes carry their shot.
+
+The brief and the storyboard are plain Markdown files in the project folder. The user reads them under Assets and approves them in chat. Use the same file names so the next session finds them.
+
 ## A demo project
 
 No project to show yet? Run `npx -y rushes demo <folder> --no-browser`, then `rushes_open` with `project: "<folder>"`. The demo makes a complete example on the user's machine — a cut in two versions, a script, voice reads in two rounds, two music beds, an SFX pass and example notes — all generated locally with ffmpeg. Always pass `--no-browser`: without it the command stays running as the server and never returns. It refuses a folder that isn't empty.
@@ -119,6 +132,7 @@ The MCP server has twenty-two tools: `rushes_open`, `rushes_status`, `rushes_add
 ## Without MCP
 
 ```bash
+npx -y rushes new my-film --no-browser
 npx -y rushes open
 npx -y rushes add version renders/hero_v2.mp4 --video "Hero 60s" --label "logo hold" --note "held the logo 0.5 s longer"
 npx -y rushes add format renders/hero_v2_9x16.mp4 --video "Hero 60s"

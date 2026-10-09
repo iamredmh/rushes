@@ -1,6 +1,6 @@
 ---
 name: rushes
-description: Review video work with the user in Rushes, a local review desk. Use when you've rendered a cut, written a VO script, recorded voice reads, music beds or SFX passes and the user should review them, or when the user says they left notes, pressed Send to agent, or pastes a Rushes batch prompt.
+description: Plan and review video work with the user in Rushes, a local review desk. Use when the user wants to start a new film or video (plan it with them first, then build), when you've rendered a cut, written a VO script, recorded voice reads, music beds or SFX passes and the user should review them, or when the user says they left notes, pressed Send to agent, or pastes a Rushes batch prompt.
 ---
 
 # Rushes
@@ -8,6 +8,21 @@ description: Review video work with the user in Rushes, a local review desk. Use
 Rushes shows your work to the user stage by stage (script, picture, voiceover, music, sound effects, mix). The user leaves timecoded notes that you act on.
 
 If the user pastes a prompt copied from a locked tab, act on it directly — it already names the project, the film and the tool to use.
+
+## Starting a film
+
+When the user wants a new video ("start a new film", "make a launch video", "a new project in Rushes"), plan it with them in Rushes before you build anything. They approve each step, so nothing gets built that they haven't seen.
+
+1. **Create the project** unless one exists: `npx -y rushes new <folder> --no-browser`, then `rushes_open` with `project: "<folder>"`. It makes the folders and a `brief.md` to fill in. Always pass `--no-browser`: without it the command stays running as the server and never returns.
+2. **Interview, briefly.** Ask at most three questions, and only ones whose answer changes the film: length and formats, who it is for, tone. Give each a recommended answer with its trade-off ("30 seconds fits a feed; 60 leaves room for the demo"). Never send a list of ten.
+3. **Write `brief.md`.** Fill every section and leave `Status: draft`. Tell the user to read it in Assets › Scripts & docs. When they say in chat that it's approved, change the line to `Status: approved`. Never approve it yourself.
+4. **Script.** Add it with `rushes_set_script`. The user edits and approves each section in the Script tab. Read `rushes_get_script` and wait until every section is `approved`.
+5. **Storyboard.** Write `storyboard.md` in the project root: `Status: draft`, then a table with one row per shot (number, name, tag, length in seconds, what happens). Make a still for each shot if your tools can, save them in `storyboard/`, and register each with `rushes_add_file` (`kind: "image"`). The user approves in chat; then set `Status: approved`. Never approve it yourself.
+6. **Build only when all three are approved.** If the user says "just build it", do. Build in whatever tool suits the film, and name each scene after its planned shot. Then register the cut with `rushes_add_version` and the planned shots with `rushes_set_shots` (each `start` is the running total of the lengths before it), so Picture notes carry their shot.
+
+The brief and the storyboard are plain Markdown files in the project folder. The user reads them under Assets and approves them in chat.
+
+## Reviewing and fixing
 
 1. Register what you made:
    - `rushes_add_version` for a render. Give every cut a short `label` (48 characters at most) saying what changed, and put the detail in `note`. If the cut is likely to play badly in a browser, the reply carries `proxySuggested: true` and `proxyReason`; Picture offers the user a proxy. Prefer H.264 MP4 to avoid this;
