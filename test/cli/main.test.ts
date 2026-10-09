@@ -33,6 +33,7 @@ describe("cli", () => {
     expect(a.out.join("\n")).toContain("add shots");
     expect(a.out.join("\n")).toContain("rushes lock");
     expect(a.out.join("\n")).toContain("rushes unlock");
+    expect(a.out.join("\n")).toContain("rushes new <folder>");
     // The description column lines up across every usage line, including "unlock".
     const lines = a.out.join("\n").split("\n");
     const lockLine = lines.find((l) => l.includes("rushes lock "))!;
@@ -100,6 +101,71 @@ describe("cli", () => {
     const a = io(root);
     expect(await main(["init", "Second Film"], a.x)).toBe(0);
     await access(join(target, ".rushes", "project.json"));
+  });
+
+  it("new makes the project, the folders and brief.md, and says what it did", async () => {
+    const { root } = await tmpProject();
+    const a = io(root);
+    expect(await main(["new", "Third Film", "--no-browser"], a.x)).toBe(0);
+    const target = join(root, "Third Film");
+    await access(join(target, ".rushes", "project.json"));
+    await access(join(target, "audio", "voiceover"));
+    expect((await readFile(join(target, "brief.md"), "utf8")).split("\n")[0]).toBe("# Brief: Third Film");
+    expect(a.out[0]).toBe(`Created ${target}`);
+    expect(a.out.join("\n")).toContain("brief.md");
+    expect(a.opened).toEqual([]);
+  });
+
+  it("new --name sets the project name", async () => {
+    const { root } = await tmpProject();
+    const a = io(root);
+    expect(await main(["new", "film", "--name", "Lumen launch film", "--no-browser"], a.x)).toBe(0);
+    expect((await readFile(join(root, "film", "brief.md"), "utf8")).split("\n")[0]).toBe("# Brief: Lumen launch film");
+  });
+
+  it("new takes --dir in place of the folder, and with neither it says how to use it", async () => {
+    const { root } = await tmpProject();
+    const a = io(root);
+    expect(await main(["new", "--dir", "via dir", "--no-browser"], a.x)).toBe(0);
+    await access(join(root, "via dir", ".rushes", "project.json"));
+    const b = io(root);
+    expect(await main(["new", "--no-browser"], b.x)).toBe(2);
+    expect(b.err[0]).toBe("Usage: rushes new <folder> [--name NAME] [--no-browser]");
+  });
+
+  it("new on a folder that is already a project exits 1 and leaves it alone", async () => {
+    const { root } = await tmpProject();
+    const a = io(root);
+    expect(await main(["new", "film", "--no-browser"], a.x)).toBe(0);
+    const before = await readFile(join(root, "film", ".rushes", "project.json"), "utf8");
+    const b = io(root);
+    expect(await main(["new", "film", "--no-browser"], b.x)).toBe(1);
+    expect(b.err.join("\n")).toContain("already a Rushes project");
+    expect(await readFile(join(root, "film", ".rushes", "project.json"), "utf8")).toBe(before);
+  });
+
+  it("new keeps a brief.md that was already there and says so", async () => {
+    const { root } = await tmpProject();
+    await mkdir(join(root, "film"));
+    await writeFile(join(root, "film", "brief.md"), "mine\n");
+    const a = io(root);
+    expect(await main(["new", "film", "--no-browser"], a.x)).toBe(0);
+    expect(await readFile(join(root, "film", "brief.md"), "utf8")).toBe("mine\n");
+    expect(a.out.join("\n")).toMatch(/kept .*brief\.md/i);
+  });
+
+  it("new puts brief.md where the Assets tab finds it", async () => {
+    const { root } = await tmpProject();
+    expect(await main(["new", "Fourth Film", "--no-browser"], io(root).x)).toBe(0);
+    const target = join(root, "Fourth Film");
+    const s = await startServer(target, { port: 0 });
+    try {
+      const a = io(target);
+      expect(await main(["assets", "--kind", "doc"], a.x)).toBe(0);
+      expect(a.out.join("\n")).toMatch(/^doc\s+brief\.md /m);
+    } finally {
+      await s.close();
+    }
   });
 
   it("add, notes and reply talk to the running server", async () => {
@@ -436,6 +502,8 @@ describe("cli", () => {
     expect(longRunningCommand(["--dir", "x", "mcp"])).toBe(true);
     expect(longRunningCommand(["--port", "4400", "open", "."])).toBe(true);
     expect(longRunningCommand(["serve"])).toBe(true);
+    expect(longRunningCommand(["new", "film"])).toBe(true);
+    expect(longRunningCommand(["--dir", "new", "status"])).toBe(false);
     expect(longRunningCommand(["--dir", "open", "status"])).toBe(false);
     expect(longRunningCommand(["notes", "--json"])).toBe(false);
     expect(longRunningCommand(["--bogus"])).toBe(false);

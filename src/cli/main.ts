@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import { Store } from "../core/store.js";
 import { ffmpegRunner, makeDemo, sayAvailable, sayRunner } from "./demo.js";
+import { makeProject } from "./new.js";
 import { startServer, DEFAULT_PORT, type Running } from "../server/start.js";
 import { ensureServer, findServer, type EnsureOptions } from "../mcp/ensure.js";
 import { AlreadyRunningError, canonicalRoot } from "../server/lock.js";
@@ -44,6 +45,7 @@ Usage
   rushes stop [dir]                                 stop the project's running server
   rushes init [dir] [--name NAME]                  create the .rushes folder
   rushes demo [dir] [--no-browser]                  create an example project with generated media (default ./rushes-demo), then open it
+  rushes new <folder> [--name NAME] [--no-browser]  start a film: the folders and a brief.md to fill in, then open it
   rushes setup [--only claude-code,codex,...] [--dry-run]
                                                     add Rushes to every agent harness on this machine
   rushes mcp                                        run the MCP server over stdio
@@ -113,9 +115,9 @@ const OPTIONS = {
 // "demo" is here too: without --no-browser it ends by running "open" (a server that keeps
 // running), so index.ts must not process.exit() the moment main() first resolves. With
 // --no-browser nothing is left open, so the process still exits on its own once main() resolves.
-const LONG_RUNNING = ["open", "serve", "mcp", "demo"];
+const LONG_RUNNING = ["open", "serve", "mcp", "demo", "new"];
 
-/** Does this command line start something that keeps running (open, serve, mcp, demo)? Flags before the command are skipped. */
+/** Does this command line start something that keeps running (open, serve, mcp, demo, new)? Flags before the command are skipped. */
 export function longRunningCommand(argv: string[]): boolean {
   try {
     const [cmd] = parseArgs({ args: argv, options: OPTIONS, allowPositionals: true }).positionals;
@@ -288,6 +290,17 @@ export async function main(argv: string[], io: Io): Promise<number> {
         await new Store(root).init(o.name ?? basename(root));
         io.out(`Created ${root}/.rushes`);
         return 0;
+      }
+      case "new": {
+        // §24.10 step 1. The folder is the argument or --dir; with neither there is nothing to make.
+        const target = rest[0] ? resolve(io.cwd, rest[0]) : o.dir ? dir : undefined;
+        if (!target) return usage(io, "rushes new <folder> [--name NAME] [--no-browser]");
+        const made = await makeProject(target, { name: o.name });
+        io.out(`Created ${made.dir}`);
+        io.out(made.briefWritten ? "Wrote brief.md for your agent to fill in with you." : "Kept the brief.md that was already there.");
+        // Like `demo`: opens the desk unless told not to. "new" is in LONG_RUNNING for the same reason.
+        if (o["no-browser"]) return 0;
+        return main(["open", made.dir], io);
       }
       case "demo": {
         const target = resolve(io.cwd, rest[0] ?? "rushes-demo");
