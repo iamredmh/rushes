@@ -29,10 +29,7 @@
   <a href="#for-agents-set-yourself-up">For agents</a>
 </p>
 
-<!-- Hero film goes here once it is uploaded. GitHub plays an mp4 inline only from its own upload URL: drag the file into this editor and paste the link it returns. -->
-<p align="center">
-  <img src="docs/assets/hero.jpg" alt="Rushes' Picture tab. A launch film is paused on its headline, with a dashed box drawn round the last word and four open notes beside it." width="880">
-</p>
+https://github.com/user-attachments/assets/b9b3d872-297a-4afc-8657-902d11d175a1
 
 ## Chat is a poor place to review a film
 
