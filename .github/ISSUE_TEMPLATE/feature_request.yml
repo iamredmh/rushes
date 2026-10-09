@@ -1,0 +1,31 @@
+name: Feature request
+description: Something Rushes should do, or do better
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: Describe the moment in your review where Rushes gets in the way or falls short. The problem matters more than the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like it to do?
+      description: A sketch, a screenshot of another tool, or a few sentences all work.
+  - type: dropdown
+    id: stage
+    attributes:
+      label: Which stage is it about?
+      multiple: true
+      options:
+        - Script
+        - Picture
+        - Voiceover
+        - Music
+        - Sound effects
+        - Mix
+        - Assets
+        - Setup or agents
+        - Something else

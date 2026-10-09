@@ -1,0 +1,58 @@
+name: Bug report
+description: Something in Rushes isn't working
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. The more exactly you can describe it, the faster it gets fixed.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what you saw instead. A screenshot or a short screen recording helps.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Rushes version
+      description: Shown at the top of `npx -y rushes --help`.
+      placeholder: "0.4.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: agent
+    attributes:
+      label: Which agent are you using?
+      options:
+        - Claude Code
+        - Codex
+        - Cursor
+        - Claude Desktop
+        - Gemini CLI
+        - Another agent
+        - None, I'm using the dashboard on its own
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Windows
+        - Linux
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `rushes doctor`
+      description: Run `npx -y rushes doctor` from inside the project folder and paste what it prints.
+      render: shell
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else?
+      description: The kind of file you were reviewing (resolution, codec, length) is often the missing piece.

@@ -2,6 +2,26 @@
   "name": "rushes",
   "version": "0.4.0",
   "description": "A local review desk for video made with AI agents: timecoded notes, script edits and audio picks your agent can read and act on.",
+  "keywords": [
+    "video",
+    "video-review",
+    "review",
+    "ai-agents",
+    "mcp",
+    "mcp-server",
+    "claude-code",
+    "codex",
+    "cursor",
+    "voiceover",
+    "music",
+    "sound-effects",
+    "notes",
+    "local-first"
+  ],
+  "homepage": "https://github.com/iamredmh/rushes#readme",
+  "bugs": {
+    "url": "https://github.com/iamredmh/rushes/issues"
+  },
   "type": "module",
   "license": "MIT",
   "author": "Red Morley Hewitt",
