@@ -45,9 +45,13 @@ Rushes is the desk that's missing. It shows each stage of the work in your brows
 
 Tell your agent:
 
-> Use github.com/iamredmh/rushes as my review tool for video, voiceover and music.
+> Use github.com/iamredmh/rushes to start a new film.
 
-That's all. Your agent reads [the setup steps for agents](#for-agents-set-yourself-up) and sets itself up. Then ask it to make something and open it in Rushes.
+That's all. Your agent reads [the setup steps for agents](#for-agents-set-yourself-up) and sets itself up. Then it asks you up to three questions, writes a brief and a script for you to approve, sketches the shots, and only builds once you've said yes.
+
+Already have a film? Tell your agent:
+
+> Use github.com/iamredmh/rushes as my review tool for video, voiceover and music.
 
 It runs on your machine. There's no account, no API key and no server to sign up for. You need [Node.js](https://nodejs.org) 20.19 or newer (or 22.12+ on the 22 line).
 
@@ -164,7 +168,7 @@ If your user asked you to use Rushes, do this:
 
    It prints one line per harness. Existing config is kept and a `.rushes.bak` backup is written first. Run it with `--dry-run` first if you want to show the user the changes before making them. A machine already set up through the GitHub form is recognised as Rushes too — setup switches it to the npm launch instead of adding a second registration.
 2. If it added anything, tell the user to restart the app (or start a new session) so the `rushes_*` tools load.
-3. From then on, follow [AGENTS.md](AGENTS.md). In short: register what you made, call `rushes_open`, wait for the user to press **Send to agent**, then `rushes_get_batch`, fix the notes, and `rushes_reply`.
+3. From then on, follow [AGENTS.md](AGENTS.md). If the user wants a new film, start with **Starting a film** in AGENTS.md: plan it with them first, then build. Otherwise, in short: register what you made, call `rushes_open`, wait for the user to press **Send to agent**, then `rushes_get_batch`, fix the notes, and `rushes_reply`.
 
 The MCP server has twenty-two tools: `rushes_open`, `rushes_status`, `rushes_add_version`, `rushes_add_format`, `rushes_add_variant`, `rushes_set_script`, `rushes_get_script`, `rushes_add_take`, `rushes_list_notes`, `rushes_list_assets`, `rushes_get_batch`, `rushes_reply`, `rushes_get_picks`, `rushes_set_shots`, `rushes_lock_picture`, `rushes_add_file`, `rushes_export_notes`, `rushes_log`, `rushes_get_log`, `rushes_scan`, `rushes_bring_in` and `rushes_doctor`.
 
@@ -200,6 +204,14 @@ npx -y rushes stop    # stops it
 Each project opens at its own address, `http://127.0.0.1:4580/p/<id>/` — safe to run several projects at once.
 
 A server your agent starts in the background stops by itself after two hours with nothing connected.
+
+### Start a film: `rushes new`
+
+```bash
+npx -y rushes new my-film    # creates ./my-film and opens it
+```
+
+It makes the project folder with `renders/` and `audio/` ready, and a `brief.md` for your agent to fill in with you. You say yes to the brief, the script and the storyboard before anything is built. A folder that's already a Rushes project is refused, and an existing `brief.md` is never overwritten. Pass `--name` to set the project's name and `--no-browser` to skip opening it.
 
 ### Try it first: `rushes demo`
 
