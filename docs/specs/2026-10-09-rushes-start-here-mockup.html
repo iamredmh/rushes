@@ -170,6 +170,29 @@ h1.pg small{font-size:15px;color:var(--text-3);font-weight:400}
 .tab.grp .chev{color:var(--text-3);margin-left:-4px}
 .tab.grp.open{background:var(--hover);border-radius:10px 10px 0 0}
 .tick-ok{width:18px;height:18px;border-radius:50%;background:var(--done);color:#07140d;display:grid;place-items:center}
+.rowc .cur{white-space:pre-wrap}
+.shot{background:var(--raised);border-radius:var(--r-lg);padding:16px 20px;margin-bottom:12px;border:1.5px solid transparent;display:grid;grid-template-columns:200px minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:start}
+.shot.changed{border-color:var(--todo)}
+.shot .sid{display:grid;gap:8px}
+.shot .still{display:block;width:100%;aspect-ratio:16/9;border-radius:8px;overflow:hidden;border:1px solid var(--line-2);padding:0;cursor:zoom-in;background:var(--bg)}
+.shot .still svg{width:100%;height:100%}
+.shot .sm{display:flex;gap:12px;align-items:baseline;font-family:var(--mono);color:var(--text-2)}
+.shot .sm b{color:var(--text)}
+.shot .sm .small{font-family:ui-sans-serif,system-ui,sans-serif;margin-left:auto}
+.shot .cur{color:var(--text-2);padding-top:2px;white-space:pre-wrap}
+.shot .cur .nm{display:block;color:var(--text);margin-bottom:4px}
+.shot textarea{width:100%;background:var(--app);border:1px solid transparent;border-radius:var(--r);padding:10px 14px;resize:none;min-height:72px}
+.shot textarea:focus{outline:none;border-color:var(--accent)}
+.shot .low{grid-column:1/-1;display:flex;gap:10px;align-items:center}
+.shot .dir{flex:1;background:var(--app);border:1px solid transparent;border-radius:var(--r);padding:8px 14px;color:var(--text)}
+.shot .dir::placeholder{color:var(--text-3)}
+.lightbox{position:fixed;inset:0;background:rgba(0,0,0,.92);backdrop-filter:blur(8px);display:grid;place-items:center;z-index:60;cursor:zoom-out}
+.lbx{width:min(900px,92vw);display:grid;gap:12px}
+.lbx .big{aspect-ratio:16/9;border-radius:12px;overflow:hidden;border:1px solid var(--line-2)}
+.lbx .big svg{width:100%;height:100%}
+.lbx .lcap{color:var(--text-2)}
+.lbx .lcap b{color:var(--text)}
+.lbx .lcap p{margin:6px 0 0;max-width:70ch}
 .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:#000;border:1px solid var(--line-2);border-radius:12px;padding:10px 18px;display:none;z-index:30}
 .toast.show{display:block}
 .tip{position:absolute;display:none;z-index:40;background:#000;border:1px solid var(--line-2);border-radius:8px;padding:6px 10px;pointer-events:none}
@@ -227,17 +250,18 @@ const ic = (n, s = 20, w = 1.75) => `<svg width="${s}" height="${s}" viewBox="0 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 /* ---------- data ---------- */
-const BRIEF_CUR = { title:'Lumen launch film', purpose:'Show that Lumen finds the best takes in a folder of clips, so a first cut takes minutes, not hours.', audience:'Solo editors and small studios who cut every week.', length:30, formats:['16:9','9:16'], tone:'Calm, exact, a little dry. Closer to a product page than an advert.', include:'The eleven-minute number. The Mac download line.', avoid:'Stock footage of people at desks. The word "revolutionary".', built:'HyperFrames' };
-const BRIEF_ROWS = [
-  { id:'title', label:'Title', keys:['title'], kind:'line' },
-  { id:'purpose', label:'Purpose', keys:['purpose'], kind:'text' },
-  { id:'audience', label:'Audience', keys:['audience'], kind:'text' },
-  { id:'lf', label:'Length and formats', keys:['length','formats'], kind:'lf' },
-  { id:'tone', label:'Tone', keys:['tone'], kind:'text' },
-  { id:'ia', label:'Include and avoid', keys:['include','avoid'], kind:'ia' },
-  { id:'built', label:'Built with', keys:['built'], kind:'line' },
-];
-const RATIOS = { '16:9':[16,9], '9:16':[9,16], '1:1':[1,1], '4:5':[4,5] };
+const BRIEF_CUR = {
+  'Title':'Lumen launch film',
+  'Purpose':'Show that Lumen finds the best takes in a folder of clips, so a first cut takes minutes, not hours.',
+  'Audience':'Solo editors and small studios who cut every week. (inferred)',
+  'Length and formats':'Length: 30 seconds\nFormats: 16:9, 9:16',
+  'Tone':'Calm, exact, a little dry. Closer to a product page than an advert.',
+  'Include and avoid':'Include: the eleven-minute number. The Mac download line.\nAvoid: stock footage of people at desks. The word "revolutionary".',
+  'Built with':'HyperFrames',
+  'Open questions':'Not discussed yet. Does the film need a voiceover, or just on-screen text?',
+  'References':'- brand/lumen-voice.md\n- refs/boat-in-mist.jpg',
+};
+const BRIEF_ROWS = Object.keys(BRIEF_CUR).map((h) => ({ id:h, label:h, keys:[h], kind:'text' }));
 const SCRIPT0 = [
   { id:'S1', t:'0:00–0:03', cur:'Your footage is already shot.', dir:'', fit:.8 },
   { id:'S2', t:'0:03–0:08', cur:'Drop in a folder of clips. Lumen finds the best takes on its own.', dir:'Two short sentences. Easier to say.', fit:1 },
@@ -265,9 +289,9 @@ const art = (n, cls = '') => `<svg class="${cls}" viewBox="0 0 160 90" preserveA
 const PRESETS = [
   { name:'Just started', what:'You said "start a new film in Rushes". The agent asked three questions, wrote the brief and opened it here. The Planning tab holds Brief, Script and Storyboard: click it for the menu. Only Brief has anything in it, so Script and Storyboard are locked and explain themselves. One row is already edited (it rings amber), so Send to agent shows 1.', tab:'brief' },
   { name:'Brief approved', what:'You approved the brief. The agent wrote the script from it, so Script is open in the Planning menu and Brief shows a green check. The three dots on the Planning tab trace the gate: brief, script, storyboard.', tab:'script' },
-  { name:'Storyboard in review', what:'Script approved. The agent drew six shots with stills. Three are approved, shots 04 and 02 have notes. Click a card to look at it large; click a tick to approve; add a note on the right. Open the Planning menu to move between the three.', tab:'story' },
-  { name:'Ready to build', what:'Everything approved. The Planning tab shows a green check. Open the menu for Ready to build and the prompt to copy. Rushes cannot stop an agent, so this is a nudge, not a lock. Once a cut exists the marks go away.', tab:'story' },
-  { name:'Cut registered', what:'The agent built the film in any tool and registered the cut. You land on Picture, with the planned shots already on its strip, so the first note says "Shot 02 · Drop a folder". Planning carries no status now.', tab:'picture' },
+  { name:'Storyboard in review', what:'Script approved. The agent wrote storyboard.md and made a still for each of six shots. Three are approved; shot 4 has your rewrite and shot 2 has a direction (both ring amber, so Send to agent shows 2). Click a still to enlarge it; the tick approves a shot, and editing an approved shot reopens it. There are no notes on this page: it works like Script, and the agent reads storyboard.md.', tab:'story' },
+  { name:'Ready to build', what:'Everything approved: brief, every script line and every shot. The Planning tab shows a green check and rushes_status reports build.ready. Open the menu for Ready to build and the prompt to copy. Rushes cannot stop an agent, so this is a nudge, not a lock. Once a cut exists the marks go away.', tab:'story' },
+  { name:'Cut registered', what:'The agent built the film in any tool and registered the cut; the approved shots came with it, so the strip is already there and the first note says "Shot 02 · Drop a folder". Had the plan not been approved, the reply to rushes_add_version would have carried a warning (a nudge, not a block). Planning carries no status now.', tab:'picture' },
   { name:'Existing project', what:'A project that began with a cut, opened as before: you land on Picture, and every tab is where it was. Planning holds Script (this project has one) and, locked and explained, Brief and Storyboard. No marks, no gate.', tab:'picture' },
 ];
 
@@ -278,20 +302,17 @@ function setPreset(i) {
     preset:p, tab:PRESETS[p].tab, existing:p === 5,
     hasScript:p >= 1, hasPlan:p >= 2 && p !== 5, hasCut:p >= 4,
     briefApproved:p >= 1 && p !== 5,
-    yours:JSON.parse(JSON.stringify(BRIEF_CUR)), refs:['brand/lumen-voice.md','refs/boat-in-mist.jpg','refs/competitor-reel.mp4'],
+    yours:JSON.parse(JSON.stringify(BRIEF_CUR)),
     script:SCRIPT0.map((s) => ({ ...s, yours:s.cur, status:p >= 2 ? 'approved' : 'draft' })),
-    shots:SHOTS0.map((s) => ({ ...s, status:p >= 3 ? 'approved' : (p === 2 && s.n <= 3 ? 'approved' : 'draft') })),
-    sel:p === 2 ? 4 : (p === 3 ? 4 : 2),
-    notes:[], pnotes:[],
+    shots:SHOTS0.map((s) => ({ ...s, yours:s.desc, dirCur:'', dir:'', status:p >= 3 ? 'approved' : (p === 2 && s.n <= 3 ? 'approved' : 'draft') })),
+    zoom:null, pnotes:[],
     sent:0, lastPlan:p === 0 ? 'brief' : (p === 2 || p === 3 ? 'story' : 'script')
   };
-  if (p === 0) S.yours.avoid = BRIEF_CUR.avoid + ' Any voiceover that says "imagine".';
-  if (p === 2) S.notes = [
-    { id:1, shot:4, t:'The number needs more room. Let it fill the frame.', done:false },
-    { id:2, shot:2, t:'Have the folder drop in from the right, not the top.', done:false } ];
-  if (p === 3) S.notes = [
-    { id:1, shot:4, t:'The number needs more room. Let it fill the frame.', done:true },
-    { id:2, shot:2, t:'Have the folder drop in from the right, not the top.', done:true } ];
+  if (p === 0) S.yours['Include and avoid'] += '\nAvoid: any voiceover that says "imagine".';
+  if (p === 2) {
+    S.shots[3].yours = 'The number fills the frame, bigger than the voice will say it. "6 hours" sits above it, struck through and dim.';
+    S.shots[1].dir = 'Drop in from the right, not the top.';
+  }
   if (p === 4) S.pnotes = [{ id:1, time:'0:03.40', shot:2, t:'The count should land before the voice says "folder".', done:false }];
   if (p === 5) { S.hasScript = true; S.hasPlan = false; }
   $$('#presets button').forEach((b, k) => b.setAttribute('aria-pressed', k === p));
@@ -303,6 +324,8 @@ function setPreset(i) {
 const rowChanged = (r) => r.keys.some((k) => JSON.stringify(S.yours[k]) !== JSON.stringify(BRIEF_CUR[k]));
 const briefChanged = () => BRIEF_ROWS.filter(rowChanged).length;
 const scriptChanged = (s) => s.yours !== s.cur;
+const BRIEF_CUR_LENGTH = 30;
+const shotChanged = (s) => s.yours !== s.desc || s.dir !== s.dirCur;
 const scrApproved = () => S.script.filter((s) => s.status === 'approved').length;
 const shotApproved = () => S.shots.filter((s) => s.status === 'approved').length;
 const scriptDone = () => S.hasScript && scrApproved() === S.script.length;
@@ -322,16 +345,16 @@ const dotOn = (id) => id === 'plan' ? PLAN_IDS.some(dotPage) : dotPage(id);
 function sendCount() {
   if (S.tab === 'brief' && isOpenPage('brief')) return briefChanged();
   if (S.tab === 'script') return S.script.filter(scriptChanged).length;
-  if (S.tab === 'story') return S.notes.filter((n) => !n.done).length;
+  if (S.tab === 'story') return S.shots.filter(shotChanged).length;
   if (S.tab === 'picture') return S.pnotes.filter((n) => !n.done).length;
   return 0;
 }
 
 /* ---------- chrome ---------- */
 const LOCKED = {
-  brief:{ s:'Write down what this film is for before anything is built.', u:'Your agent starts a plan for this film.', p:'In Rushes project "Lumen", start a plan for "Lumen launch film": ask me up to three questions, each with a recommended answer, then write the brief with rushes_set_plan.' },
+  brief:{ s:'Write down what this film is for before anything is built, and approve it.', u:'Your agent starts a brief for this film.', p:'In Rushes project "Lumen", start a brief for "Lumen launch film": ask me up to three questions, each with a recommended answer, then write brief.md.' },
   script:{ s:'Read each line, change it, and approve it before the film is built.', u:'Your agent writes the script once the brief is approved.', p:'In Rushes project "Lumen", write the script for "Lumen launch film" from the approved brief and add it with rushes_set_script.' },
-  story:{ s:'See each shot as a still and approve it before anything is built.', u:'Your agent sketches the shots once the script is approved.', p:'In Rushes project "Lumen", sketch the shots for "Lumen launch film" from the approved script, make a still for each, and add them with rushes_set_plan.' },
+  story:{ s:'See each shot as a still, rewrite what happens, and approve it before anything is built.', u:'Your agent sketches the shots once the script is approved.', p:'In Rushes project "Lumen", sketch the shots for "Lumen launch film" from the approved script: write storyboard.md with one "## Shot 01 · Name" section per shot (Tag, Length, Still and Status lines, then what happens), make a still for each, and register the stills as images.' },
   picture:{ s:'Watch the cut, leave timecoded notes, and lock picture.', u:'Your agent builds the film from the approved plan and adds the cut.', p:'In Rushes project "Lumen", build "Lumen launch film" from the approved plan, name each scene after its planned shot, and register the cut with rushes_add_version.' },
   voice:{ s:'Compare voice reads and pick one.', u:'Your agent adds voice reads to this project.', p:'In Rushes project "Lumen", record two or three reads of the script for "Lumen launch film" and add each with rushes_add_variant (stage "voice").' },
   music:{ s:'Compare music beds against the picture and pick one.', u:'Your agent adds music beds to this project.', p:'In Rushes project "Lumen", make two or three music beds for "Lumen launch film" and add each with rushes_add_variant (stage "music") with a one-line description.' },
@@ -407,31 +430,15 @@ function lockedView(id) {
   const [, name, icon] = TABS.find((t) => t[0] === id), L = LOCKED[id];
   return `<div class="lock"><div class="big">${ic(icon, 30)}<span class="lk">${ic('lock', 14)}</span></div><h2>${name}</h2><p>${L.s}</p><div class="un">${L.u}</div><button class="cp" data-copy="1">${ic('copy', 18)}Copy prompt for your agent</button></div>`;
 }
-const shape = (r) => { const [w, h] = RATIOS[r], k = 12 / Math.max(w, h); return `<span class="shape" style="width:${Math.round(w * k)}px;height:${Math.round(h * k)}px"></span>`; };
 
 function briefRow(r) {
-  const c = BRIEF_CUR, y = S.yours;
-  let cur = '', yo = '';
-  if (r.kind === 'line' || r.kind === 'text') {
-    cur = esc(c[r.keys[0]]);
-    yo = r.kind === 'line' ? `<input type="text" data-k="${r.keys[0]}" value="${esc(y[r.keys[0]])}" aria-label="${r.label}">` : `<textarea rows="2" data-k="${r.keys[0]}" aria-label="${r.label}">${esc(y[r.keys[0]])}</textarea>`;
-  }
-  if (r.kind === 'lf') {
-    cur = `${c.length} seconds<br>${c.formats.join(' · ')}`;
-    yo = `<div class="numline"><input type="number" min="5" max="600" data-k="length" value="${y.length}" aria-label="Length in seconds"><span style="color:var(--text-3)">seconds</span>${Object.keys(RATIOS).map((q) => `<button class="fm" data-f="${q}" aria-pressed="${y.formats.includes(q)}">${shape(q)}${q}</button>`).join('')}</div>`;
-  }
-  if (r.kind === 'ia') {
-    cur = `<div><span class="k">Include</span> ${esc(c.include)}</div><div><span class="k">Avoid</span> ${esc(c.avoid)}</div>`;
-    yo = `<div class="sub"><span>Include</span><textarea rows="2" data-k="include" aria-label="Include">${esc(y.include)}</textarea></div><div class="sub"><span>Avoid</span><textarea rows="2" data-k="avoid" aria-label="Avoid">${esc(y.avoid)}</textarea></div>`;
-  }
-  return `<div class="rowc ${rowChanged(r) ? 'changed' : ''}" data-r="${r.id}"><div class="lab">${r.label}</div><div class="cur">${cur}</div><div class="yours">${yo}</div><button class="rv" aria-label="Back to the agent's version" data-tip="Back to the agent's version" ${rowChanged(r) ? '' : 'hidden'}>${ic('undo', 18)}</button></div>`;
+  return `<div class="rowc ${rowChanged(r) ? 'changed' : ''}" data-r="${r.id}"><div class="lab">${r.label}</div><div class="cur">${esc(BRIEF_CUR[r.id])}</div><div class="yours"><textarea rows="2" data-k="${r.id}" aria-label="Your version of ${r.label}">${esc(S.yours[r.id])}</textarea></div><button class="rv" aria-label="Revert ${r.label}" data-tip="Revert to current" ${rowChanged(r) ? '' : 'hidden'}>${ic('undo', 18)}</button></div>`;
 }
 function briefView() {
-  return `<div class="col"><h1 class="pg">Brief <small>${BRIEF_ROWS.length} rows${briefChanged() ? ` · ${briefChanged()} changed` : ''}</small></h1>
+  return `<div class="col"><h1 class="pg">Brief <small>${BRIEF_ROWS.length} sections${briefChanged() ? ` · ${briefChanged()} changed` : ''}</small></h1>
   <div class="heads"><span></span><span>Current</span><span>Yours</span><span></span></div>
   ${BRIEF_ROWS.map(briefRow).join('')}
-  <div class="refs">${ic('clip', 18)}${S.refs.map((f, i) => `<span class="ref">${f}<button aria-label="Remove ${f}" data-rm="${i}">${ic('x', 14)}</button></span>`).join('')}</div>
-  <div class="foot">${S.briefApproved ? `<span class="mark">${ic('check', 22, 2.2)}Approved</span><button class="ibtn" id="unapprove" aria-label="Reopen the brief" data-tip="Reopen the brief">${ic('undo', 18)}</button>` : `<button class="approve" id="approve">${ic('check', 20, 2)}Approve brief</button>`}</div></div>`;
+  <div class="foot">${S.briefApproved ? `<button class="approve is" id="unapprove" aria-pressed="true">${ic('check', 20, 2.2)}Approved</button>` : `<button class="approve" id="approve" aria-pressed="false">${ic('check', 20, 2)}Approve brief</button>`}</div></div>`;
 }
 function scriptView() {
   return `<div class="col"><h1 class="pg">Script <small>${S.script.length} sections${S.script.filter(scriptChanged).length ? ` · ${S.script.filter(scriptChanged).length} changed` : ''}</small></h1>
@@ -439,23 +446,33 @@ function scriptView() {
   ${S.script.map((s, i) => `<div class="scr ${scriptChanged(s) ? 'changed' : ''}" data-i="${i}"><div class="id"><b>${s.id}</b><span>${s.t}</span></div><div class="cur">${esc(s.cur)}</div><textarea rows="2" aria-label="Your version of ${s.id}">${esc(s.yours)}</textarea>
   <div class="low"><span class="fit"><i style="width:${Math.round(s.fit * 100)}%;background:${s.fit >= 1 ? 'var(--flag)' : 'var(--todo)'}"></i></span><input class="dir" placeholder="Direction" value="${esc(s.dir)}" aria-label="Direction"><button class="tick flag ${s.status === 'flagged' ? 'on' : ''}" data-act="flag" aria-label="Flag" data-tip="Flag">${ic('flag', 18)}</button><button class="tick ${s.status === 'approved' ? 'on' : ''}" data-act="ok" aria-label="Approve" data-tip="Approve">${ic('check', 20, 2)}</button></div></div>`).join('')}</div>`;
 }
-function totalLen() { return S.shots.reduce((a, s) => a + s.len, 0); }
+function totalLen() { return S.shots.reduce((a, x) => a + x.len, 0); }
+const pad2 = (n) => String(n).padStart(2, '0');
+function shotRow(s, i) {
+  const ch = shotChanged(s);
+  return `<div class="shot ${ch ? 'changed' : ''}" data-i="${i}">
+    <div class="sid"><button class="still" data-zoom="${s.n}" aria-label="Enlarge the still for shot ${s.n}" data-tip="Enlarge">${art(s.art)}</button><div class="sm"><b>${pad2(s.n)}</b><span>${s.len.toFixed(1)} s</span><span class="small">${s.tag}</span></div></div>
+    <div class="cur"><b class="nm">${s.name}</b>${esc(s.desc)}</div>
+    <textarea rows="3" aria-label="Your version of shot ${s.n}">${esc(s.yours)}</textarea>
+    <div class="low"><input class="dir" placeholder="Direction" value="${esc(s.dir)}" aria-label="Direction for shot ${s.n}">
+      ${ch ? `<button class="tick" data-act="rv" aria-label="Revert shot ${s.n}" data-tip="Revert to current">${ic('undo', 18)}</button>` : ''}
+      <button class="tick ${s.status === 'approved' ? 'on' : ''}" data-act="ok" aria-label="Approve shot ${s.n}" aria-pressed="${s.status === 'approved'}" data-tip="${s.status === 'approved' ? 'Unapprove' : 'Approve'}">${ic('check', 20, 2)}</button></div></div>`;
+}
 function storyView() {
-  const sh = S.shots.find((s) => s.n === S.sel), nots = S.notes;
-  const ck = (s) => s.status === 'approved' ? 'on' : (s.status === 'flagged' ? 'flag' : '');
-  return `<div class="split"><section>
-    <div class="stage">${art(sh.art)}<span class="tagbr">${String(sh.n).padStart(2, '0')} · ${sh.len.toFixed(1)} s</span></div>
-    <div class="cap"><h2>${sh.name}<span class="small">${sh.tag}</span></h2><p>${sh.desc}</p></div>
-    <div class="strip">${S.shots.map((s) => `<div class="card ${s.n === S.sel ? 'sel' : ''}" data-n="${s.n}" tabindex="0" role="button" aria-label="Shot ${s.n}, ${s.name}"><span class="th">${art(s.art)}</span><span class="m"><span>${String(s.n).padStart(2, '0')}</span><span>${s.len.toFixed(1)}s</span></span><span class="nm">${s.name}</span><button class="ck ${ck(s)}" data-ck="${s.n}" aria-label="Approve shot ${s.n}" data-tip="${s.status === 'approved' ? 'Approved' : 'Approve'}">${ic('check', 14, 2.6)}</button></div>`).join('')}</div>
-    <div class="total"><span>${totalLen().toFixed(1)} / ${BRIEF_CUR.length} s</span><span class="bar"><i style="width:${Math.min(100, totalLen() / BRIEF_CUR.length * 100)}%"></i></span></div>
-  </section>
-  <aside class="side"><div class="hd">Notes<span class="seg"><span class="on">All</span><span>To do ${nots.filter((n) => !n.done).length || ''}</span><span>Done</span></span></div>
-    <div class="nlist" id="nlist">${noteList(nots, 'shot')}</div>
-    <div class="comp"><div class="box"><textarea id="ncomp" placeholder="Note on shot ${String(S.sel).padStart(2, '0')}" aria-label="Note"></textarea><button class="go" id="ngo" aria-label="Add note">${ic('send', 18, 2)}</button></div></div></aside></div>`;
+  const n = S.shots.filter(shotChanged).length, t = totalLen();
+  return `<div class="col"><h1 class="pg">Storyboard <small>${S.shots.length} shots${n ? ` · ${n} changed` : ''}</small></h1>
+  <div class="total"><span>${t.toFixed(1)} / ${BRIEF_CUR_LENGTH} s planned</span><span class="bar"><i style="width:${Math.min(100, t / BRIEF_CUR_LENGTH * 100)}%"></i></span></div>
+  <div class="heads" style="grid-template-columns:200px 1fr 1fr"><span></span><span>Current</span><span>Yours</span></div>
+  ${S.shots.map(shotRow).join('')}
+  ${S.zoom ? zoomView() : ''}</div>`;
+}
+function zoomView() {
+  const z = S.shots.find((x) => x.n === S.zoom);
+  return `<div class="lightbox" id="lightbox" role="dialog" aria-label="Shot ${z.n}"><div class="lbx"><div class="big">${art(z.art)}</div><div class="lcap"><b>${pad2(z.n)} \u00b7 ${z.name}</b> <span class="small">${z.tag}</span><p>${esc(z.yours)}</p></div></div></div>`;
 }
 function noteList(list, kind) {
   if (!list.length) return `<div style="padding:24px 12px;color:var(--text-3)">No notes yet.</div>`;
-  return list.map((n) => { const sh = S.shots.find((s) => s.n === n.shot); return `<div class="note ${n.shot === S.sel && kind === 'shot' ? 'sel' : ''}" data-id="${n.id}" data-shot="${n.shot}"><button class="c ${n.done ? 'on' : ''}" data-done="${n.id}" aria-label="Mark done">${n.done ? ic('check', 14, 3) : ''}</button><div>${kind === 'pic' ? `<div class="t">${n.time}</div>` : ''}<div class="s">Shot ${String(n.shot).padStart(2, '0')} · ${sh.name}</div><div class="tx">${esc(n.t)}</div></div></div>`; }).join('');
+  return list.map((n) => { const sh = S.shots.find((s) => s.n === n.shot); return `<div class="note ${''}" data-id="${n.id}" data-shot="${n.shot}"><button class="c ${n.done ? 'on' : ''}" data-done="${n.id}" aria-label="Mark done">${n.done ? ic('check', 14, 3) : ''}</button><div>${kind === 'pic' ? `<div class="t">${n.time}</div>` : ''}<div class="s">Shot ${String(n.shot).padStart(2, '0')} · ${sh.name}</div><div class="tx">${esc(n.t)}</div></div></div>`; }).join('');
 }
 function pictureView() {
   return `<div class="split"><section>
@@ -478,17 +495,15 @@ function render() {
 function autosize(t) { t.style.height = 'auto'; t.style.height = (t.scrollHeight + 2) + 'px'; }
 function wire() {
   const v = $('#view');
-  $$('.rowc textarea, .scr textarea', v).forEach(autosize);
+  $$('.rowc textarea, .scr textarea, .shot textarea', v).forEach(autosize);
   $$('[data-copy]', v).forEach((b) => b.onclick = () => toast('Copied. Paste it into your agent.'));
   if (S.tab === 'brief' && isOpen('brief')) {
     $$('.rowc', v).forEach((rowEl) => {
       const r = BRIEF_ROWS.find((x) => x.id === rowEl.dataset.r);
-      const touch = () => { if (S.briefApproved) { S.briefApproved = false; render(); return true; } rowEl.classList.toggle('changed', rowChanged(r)); $('.rv', rowEl).hidden = !rowChanged(r); $('h1.pg small', v).textContent = `${BRIEF_ROWS.length} rows${briefChanged() ? ` · ${briefChanged()} changed` : ''}`; chrome(); return false; };
-      $$('[data-k]', rowEl).forEach((el) => el.oninput = () => { S.yours[el.dataset.k] = el.type === 'number' ? Number(el.value) : el.value; if (el.tagName === 'TEXTAREA') autosize(el); touch(); });
-      $$('.fm', rowEl).forEach((b) => b.onclick = () => { const q = b.dataset.f, a = S.yours.formats; S.yours.formats = a.includes(q) ? a.filter((x) => x !== q) : Object.keys(RATIOS).filter((x) => a.includes(x) || x === q); if (S.briefApproved) S.briefApproved = false; render(); });
-      $('.rv', rowEl).onclick = () => { r.keys.forEach((k) => S.yours[k] = JSON.parse(JSON.stringify(BRIEF_CUR[k]))); render(); };
+      const touch = () => { if (S.briefApproved) { S.briefApproved = false; render(); return true; } rowEl.classList.toggle('changed', rowChanged(r)); $('.rv', rowEl).hidden = !rowChanged(r); $('h1.pg small', v).textContent = `${BRIEF_ROWS.length} sections${briefChanged() ? ` \u00b7 ${briefChanged()} changed` : ''}`; chrome(); return false; };
+      $('textarea', rowEl).oninput = (e) => { S.yours[r.id] = e.target.value; autosize(e.target); touch(); };
+      $('.rv', rowEl).onclick = () => { S.yours[r.id] = BRIEF_CUR[r.id]; render(); };
     });
-    $$('[data-rm]', v).forEach((b) => b.onclick = () => { S.refs.splice(Number(b.dataset.rm), 1); render(); });
     const ap = $('#approve'); if (ap) ap.onclick = () => { S.briefApproved = true; toast('Brief approved'); render(); };
     const un = $('#unapprove'); if (un) un.onclick = () => { S.briefApproved = false; render(); };
   }
@@ -501,23 +516,21 @@ function wire() {
     });
   }
   if (S.tab === 'story') {
-    $$('.card[data-n]', v).forEach((c) => {
-      c.onclick = (e) => { if (e.target.closest('[data-ck]')) return; S.sel = Number(c.dataset.n); render(); };
-      c.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); S.sel = Number(c.dataset.n); render(); } };
+    $$('.shot', v).forEach((el) => {
+      const s = S.shots[Number(el.dataset.i)];
+      $('textarea', el).oninput = (e) => { autosize(e.target); s.yours = e.target.value; if (s.status === 'approved') s.status = 'draft'; render(); };
+      $('.dir', el).oninput = (e) => { s.dir = e.target.value; if (s.status === 'approved') s.status = 'draft'; chrome(); };
+      $$('.tick', el).forEach((b) => b.onclick = () => { if (b.dataset.act === 'rv') { s.yours = s.desc; s.dir = s.dirCur; } else s.status = s.status === 'approved' ? 'draft' : 'approved'; render(); });
+      $('.still', el).onclick = () => { S.zoom = s.n; render(); };
     });
-    $$('[data-ck]', v).forEach((b) => b.onclick = (e) => { e.stopPropagation(); const s = S.shots.find((x) => x.n === Number(b.dataset.ck)); s.status = s.status === 'approved' ? 'draft' : 'approved'; render(); });
-    $$('[data-done]', v).forEach((b) => b.onclick = (e) => { e.stopPropagation(); const n = S.notes.find((x) => x.id === Number(b.dataset.done)); n.done = !n.done; render(); });
-    $$('.note', v).forEach((el) => el.onclick = () => { S.sel = Number(el.dataset.shot); render(); });
-    const go = () => { const t = $('#ncomp').value.trim(); if (!t) return; S.notes.push({ id:Date.now(), shot:S.sel, t, done:false }); render(); const nl = $('#nlist'); nl.scrollTop = nl.scrollHeight; };
-    $('#ngo').onclick = go;
-    $('#ncomp').onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); go(); } };
+    const lb = $('#lightbox'); if (lb) lb.onclick = () => { S.zoom = null; render(); };
   }
   if (S.tab === 'picture') {
     $$('[data-done]', v).forEach((b) => b.onclick = () => { const n = S.pnotes.find((x) => x.id === Number(b.dataset.done)); n.done = !n.done; render(); });
   }
 }
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') { hidePop(); return; }
+  if (e.key === 'Escape') { hidePop(); if (S.zoom) { S.zoom = null; render(); } return; }
   if ((e.target.closest && e.target.closest('input,textarea')) || e.metaKey || e.ctrlKey || e.altKey) return;
   const i = '123456789'.indexOf(e.key), top = TOP();
   if (i >= 0 && top[i]) {
