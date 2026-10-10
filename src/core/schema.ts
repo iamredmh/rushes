@@ -434,6 +434,17 @@ function cleanLine(item: Record<string, unknown>): Record<string, unknown> {
 /** How log.json is read (see tolerantLog); the store writes it against LogFileSchema. */
 export const LogFileReadSchema = z.preprocess(tolerantLog, LogFileSchema);
 
+// §24 step 2: what Rushes remembers about brief.md, which is itself the file of record. `baseline` is the
+// text the last time someone other than the dashboard wrote it (the agent's version: the "Current" column),
+// and `seen` is the hash of the text Rushes last looked at, so a change made behind its back is noticed.
+export const BriefStateSchema = fileObject({
+  schema: z.literal(1),
+  rev: z.number().int().nonnegative(),
+  baseline: z.string().max(1_000_000).default(""),
+  seen: z.string().max(64).default(""),
+});
+export type BriefState = z.infer<typeof BriefStateSchema>;
+
 export const FILES = {
   project: { name: "project.json", schema: ProjectSchema },
   script: { name: "script.json", schema: ScriptSchema },
@@ -442,6 +453,7 @@ export const FILES = {
   batches: { name: "batches.json", schema: BatchesFileSchema },
   found: { name: "found.json", schema: FoundFileSchema },
   log: { name: "log.json", schema: LogFileSchema, read: LogFileReadSchema },
+  brief: { name: "brief.json", schema: BriefStateSchema },
 } as const;
 export type FileKey = keyof typeof FILES;
 export type FileData = {
@@ -452,4 +464,5 @@ export type FileData = {
   batches: BatchesFile;
   found: FoundFileData;
   log: LogFile;
+  brief: BriefState;
 };
