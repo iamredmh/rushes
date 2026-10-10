@@ -454,6 +454,8 @@ export const FILES = {
   found: { name: "found.json", schema: FoundFileSchema },
   log: { name: "log.json", schema: LogFileSchema, read: LogFileReadSchema },
   brief: { name: "brief.json", schema: BriefStateSchema },
+  // §24.12: the storyboard is kept the same way as the brief: its file, plus the agent's last text and the hash last seen.
+  storyboard: { name: "storyboard.json", schema: BriefStateSchema },
 } as const;
 export type FileKey = keyof typeof FILES;
 export type FileData = {
@@ -465,4 +467,5 @@ export type FileData = {
   found: FoundFileData;
   log: LogFile;
   brief: BriefState;
+  storyboard: BriefState;
 };
