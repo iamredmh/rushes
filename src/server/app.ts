@@ -27,6 +27,7 @@ import type { CorruptEvent } from "./watch.js";
 import { LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, FileKindSchema, MarkSchema, ProjectIdSchema, ShotSchema, LEVEL_MIN, LEVEL_MAX, LEVEL_STEP, type Batch, type Note } from "../core/schema.js";
 import { LABEL_MAX, oneLineOf } from "../core/labels.js";
 import { byOf, logBookFor } from "./logbook.js";
+import { BriefService } from "./brief.js";
 import {
   broughtInEvent, cutEvent, fileEvent, formatEvent, lineEvent, lockEvent, notesSentEvent, picksEvent, repliesEvent, scriptEvent, takeEvent, variantEvent,
 } from "../core/logEvents.js";
@@ -139,6 +140,9 @@ const SectionEditBody = z.object({
   status: SectionStatusSchema.optional(),
 });
 const TakeBody = z.object({ file: z.string().min(1) });
+// §24 step 2: a save of one brief.md section, and the approval. `hash` proves the page saw the current file.
+const BriefSectionBody = z.object({ heading: z.string().min(1).max(200), text: z.string().max(100_000), hash: z.string().min(1).max(64) });
+const BriefStatusBody = z.object({ status: z.enum(["draft", "approved"]), hash: z.string().min(1).max(64) });
 // A pick is a variant or take id; null clears it. picks.json itself only ever holds strings.
 const PickMap = z.record(z.string(), z.string().nullable());
 // §19.6: a level is −24..6 dB in 0.5 dB steps; null resets it to 0 (removes the key).
@@ -251,6 +255,8 @@ export const DEFAULT_WEB_DIR = fileURLToPath(new URL("../../web-dist/", import.m
 export const FOUND_WAIT_MS = 20_000;
 
 export interface AppOptions {
+  /** §24 step 2: brief.md's service. startServer passes its own so it can poll the file and stop on close. */
+  brief?: BriefService;
   /** Overrides FOUND_WAIT_MS (tests). */
   foundWaitMs?: number;
   /** Folder with the built dashboard (index.html + assets/). */
@@ -308,6 +314,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   const jobs = opts.proxyJobs ?? new ProxyJobs(store);
   const peaks = opts.peakJobs ?? new PeakJobs(store, { run: jobs.run, available: () => jobs.available() });
   const found = opts.found ?? new FoundScanner({ store, probe: ffprobeDuration, announce: foundAnnouncer(store) });
+  const brief = opts.brief ?? new BriefService(store);
   // §22: the Change Log, shared with the found scanner (logBookFor keeps one per store).
   const log = logBookFor(store);
   const by = (c: Context) => byOf(c.req.header("x-rushes-project"));
@@ -672,8 +679,8 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   app.get("/api/state", async (c) => {
     // §20.6: found is what the last scan left in memory; it never waits on a scan or a probe.
     // §22.8: the log's head is read-only, so a state request never writes (R6).
-    const [project, script, notes, picks, batches, ffmpeg, foundSummary, logHead] = await Promise.all([
-      store.read("project"), store.read("script"), store.read("notes"), store.read("picks"), store.read("batches"), jobs.available(), found.summary(), log.head(),
+    const [project, script, notes, picks, batches, ffmpeg, foundSummary, logHead, briefView] = await Promise.all([
+      store.read("project"), store.read("script"), store.read("notes"), store.read("picks"), store.read("batches"), jobs.available(), found.summary(), log.head(), brief.view(),
     ]);
     const tabs = tabStates(project, script, notes);
     // §19.5: why each cut may play badly (or null). Never waits on a probe: an unprobed cut is
@@ -684,7 +691,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
         versions: await Promise.all(v.versions.map(async (ver) => ({ ...ver, proxyNeed: await jobs.needNow(fromManifestPath(store.root, ver.file)) }))),
       })),
     );
-    return c.json({ project: { ...project, videos }, script, notes, picks, batches, tabs, proxies: { ffmpeg, jobs: jobs.list() }, found: foundSummary, log: logHead });
+    return c.json({ project: { ...project, videos }, script, notes, picks, batches, tabs, proxies: { ffmpeg, jobs: jobs.list() }, found: foundSummary, log: logHead, brief: briefView });
   });
 
   // ---- found: the project's other files (§20) ----
@@ -772,7 +779,21 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
 
   app.get("/api/tabs", async (c) => {
     const [project, script, notes] = await Promise.all([store.read("project"), store.read("script"), store.read("notes")]);
-    return c.json({ tabs: tabStates(project, script, notes) });
+    const b = await brief.view();
+    return c.json({ tabs: tabStates(project, script, notes), brief: { exists: b.exists, status: b.status, changed: b.changed } });
+  });
+
+  // ---- brief: brief.md is the file of record (§24 step 2) ----
+  app.put("/api/brief/sections/:index", async (c) => {
+    const index = Number(c.req.param("index"));
+    if (!Number.isInteger(index) || index < 0) throw new InvalidError("Section index must be a whole number from 0");
+    const b = await body(c, BriefSectionBody);
+    return c.json({ brief: await brief.setSection(index, b.heading, b.text, b.hash) });
+  });
+
+  app.put("/api/brief/status", async (c) => {
+    const b = await body(c, BriefStatusBody);
+    return c.json({ brief: await brief.setStatus(b.status, b.hash) });
   });
 
   // ---- notes ----

@@ -335,10 +335,12 @@ export async function main(argv: string[], io: Io): Promise<number> {
         return 0;
       case "status": {
         const root = rest[0] ? resolve(io.cwd, rest[0]) : dir;
-        const { tabs } = await (await ensureServer(root, io.ensure)).get("/api/tabs");
+        const { tabs, brief } = await (await ensureServer(root, io.ensure)).get("/api/tabs");
         for (const t of tabs as { stage: string; unlocked: boolean; todo: number }[]) {
           io.out(`${t.stage.padEnd(8)} ${t.unlocked ? "open  " : "locked"} ${t.todo ? `${t.todo} to do` : ""}`.trimEnd());
         }
+        // §24 step 2: brief.md, when there is one: its status and how many sections the user has changed.
+        if (brief?.exists) io.out(`${"brief".padEnd(8)} ${String(brief.status ?? "draft").padEnd(6)} ${brief.changed ? `${brief.changed} changed` : ""}`.trimEnd());
         return 0;
       }
       case "doctor": {
