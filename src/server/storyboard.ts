@@ -1,3 +1,5 @@
+import { lstat } from "node:fs/promises";
+import { join } from "node:path";
 import { hashText } from "../core/brief.js";
 import { InvalidError, RushesError } from "../core/errors.js";
 import { STORYBOARD_FILE, cutShots, editShot, parseStoryboard, type Shot, type ShotEdit } from "../core/storyboard.js";
@@ -69,8 +71,28 @@ export class StoryboardService extends RecordFile {
     };
   }
 
+  /** Whether a still, or any folder on the way to it, is a link. The project's own files are never followed out of it. */
+  private async linked(still: string): Promise<boolean> {
+    let at = this.store.root;
+    for (const seg of still.split("/")) {
+      at = join(at, seg);
+      try {
+        if ((await lstat(at)).isSymbolicLink()) return true;
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  }
+
+  /** The view with every still that goes through a link taken out: it is no still. */
+  private async safe(v: StoryboardView): Promise<StoryboardView> {
+    const shots = await Promise.all(v.shots.map(async (s) => (s.still && (await this.linked(s.still)) ? { ...s, still: null } : s)));
+    return { ...v, shots };
+  }
+
   view(): Promise<StoryboardView> {
-    return this.run(async () => this.build(await this.readText(), await this.store.read("storyboard")));
+    return this.run(async () => this.safe(this.build(await this.readText(), await this.store.read("storyboard"))));
   }
 
   /**
@@ -90,7 +112,7 @@ export class StoryboardService extends RecordFile {
         throw new InvalidError((e as Error).message);
       }
       if (next !== prev) await this.write(prev, next);
-      return this.build(next, await this.store.read("storyboard"));
+      return this.safe(this.build(next, await this.store.read("storyboard")));
     });
   }
 
@@ -98,7 +120,10 @@ export class StoryboardService extends RecordFile {
   stills(): Promise<Set<string>> {
     return this.run(async () => {
       const text = await this.readText();
-      return new Set(text === null ? [] : parseStoryboard(text).shots.flatMap((s) => (s.still ? [s.still] : [])));
+      const named = text === null ? [] : parseStoryboard(text).shots.flatMap((s) => (s.still ? [s.still] : []));
+      const safe: string[] = [];
+      for (const still of named) if (!(await this.linked(still))) safe.push(still);
+      return new Set(safe);
     });
   }
 
