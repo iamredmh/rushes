@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { FORMAT_ID_RE, isPictureSize, labelOfId, ratioId, ratioLabel } from "./formats.js";
+import { FORMAT_ID_MAX, FORMAT_ID_RE, FORMAT_LABEL_MAX, isPictureSize, labelOfId, ratioId, ratioLabel } from "./formats.js";
 import { oneLineOf } from "./labels.js";
 import { LOG_AREAS, LOG_BY, LOG_KINDS, LOG_MAX, LOG_TEXT_MAX } from "./logText.js";
 
@@ -46,8 +46,8 @@ export type Proxy = z.infer<typeof ProxySchema>;
 
 // §21.3: another render of the same cut at another aspect ratio. Its id is its label with ":" as "x".
 export const FormatSchema = fileObject({
-  id: z.string().max(16).regex(FORMAT_ID_RE),
-  label: z.string().min(3).max(16),
+  id: z.string().max(FORMAT_ID_MAX).regex(FORMAT_ID_RE),
+  label: z.string().min(3).max(FORMAT_LABEL_MAX),
   file: z.string().min(1),
   width: z.number().int().positive(),
   height: z.number().int().positive(),
@@ -210,11 +210,7 @@ export type Mark = z.infer<typeof MarkSchema>;
 
 const MARK_STAGES: readonly Stage[] = ["voice", "music", "sfx", "mix"];
 
-/** "Rise" | "Fall" | "Louder 3 dB" | "Quieter 3 dB". */
-export function markLabel(m: Mark): string {
-  const label = m.kind === "rise" ? "Rise" : m.kind === "fall" ? "Fall" : m.kind === "louder" ? "Louder" : "Quieter";
-  return m.db === undefined ? label : `${label} ${m.db} dB`;
-}
+export { markLabel } from "./labels.js";
 
 export const NoteSchema = z
   .object({
@@ -243,7 +239,7 @@ export const NoteSchema = z
     marks: z.array(MarkSchema).max(4).default([]),
     // §21.3: the format this note belongs to (a Format id such as "9x16"), or null for every format:
     // the default, and every note from before formats. The server checks it against the note's version.
-    format: z.string().max(16).regex(FORMAT_ID_RE).nullable().default(null),
+    format: z.string().max(FORMAT_ID_MAX).regex(FORMAT_ID_RE).nullable().default(null),
     status: z.enum(["todo", "done"]).default("todo"),
     reply: z.string().default(""),
     fixT: seconds.nullable().default(null),
@@ -288,11 +284,7 @@ export const NotesFileSchema = fileObject({
 });
 export type NotesFile = z.infer<typeof NotesFileSchema>;
 
-// §19.6: a Mix lane's level, in dB. −24..6 in 0.5 dB steps; PUT /api/picks enforces the range and
-// step (a value outside it, or off the step, is a 400), so the stored file is never checked again here.
-export const LEVEL_MIN = -24;
-export const LEVEL_MAX = 6;
-export const LEVEL_STEP = 0.5;
+export { LEVEL_MAX, LEVEL_MIN, LEVEL_STEP } from "./levels.js";
 
 export const LevelsSchema = fileObject({ voice: z.number(), music: z.number(), sfx: z.number() }).partial().default({});
 export type Levels = z.infer<typeof LevelsSchema>;

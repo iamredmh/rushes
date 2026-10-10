@@ -6,11 +6,11 @@ import { RushesError, InvalidError, NotFoundError } from "../core/errors.js";
 import { addFile, addFormat, addVariant, addVersion, ensureProjectIdOnce, lockPicture, resolveCut, resolveVideo, setShots, shotAt } from "../core/project.js";
 import { addTake, editSection, setSections } from "../core/script.js";
 import { addNote, applyReply, applyUserEdit, checkNoteFormat, filterNotes } from "../core/notes.js";
-import { FORMAT_ID_RE, MAX_FORMATS, isPictureSize, versionFormats } from "../core/formats.js";
+import { FORMAT_ID_MAX, FORMAT_ID_RE, FORMAT_LABEL_MAX, MAX_FORMATS, isPictureSize, versionFormats } from "../core/formats.js";
 import { createBatch, latestBatch } from "../core/batches.js";
 import { exportFileName, notesMarkdown } from "../core/exportNotes.js";
 import { tabStates } from "../core/tabs.js";
-import { fromManifestPath, toManifestPath } from "../core/paths.js";
+import { fromManifestPath, MAX_PATH, toManifestPath } from "../core/paths.js";
 import { AUDIO_FORMATS, PROBE_TIMEOUT_MS, VIDEO_EXT, giveUpAfter, probe, probeVideo, videoGaveUp, type VideoProbe, type VideoProber } from "../core/media.js";
 import { PROXY_PATH, ProxyJobs, type ProxyEvent } from "./proxy.js";
 import { PeakJobs } from "./peaks.js";
@@ -49,9 +49,7 @@ async function body<T>(c: Context, schema: z.ZodType<T>): Promise<T> {
 
 const t = z.number().nonnegative();
 // §21.3: a format id, "9x16" or "2.39x1". Capped like the schema's own id.
-const formatId = z.string().max(16).regex(FORMAT_ID_RE);
-/** The longest path a format may be registered under (FoundItem and FoundPathsBody use the same). */
-const MAX_PATH = 1024;
+const formatId = z.string().max(FORMAT_ID_MAX).regex(FORMAT_ID_RE);
 
 const NewNoteBody = z.object({
   stage: StageSchema,
@@ -114,7 +112,7 @@ const FormatBody = z.object({
   video: z.string().min(1).max(200).optional(),
   version: z.string().min(1).max(64).optional(),
   file: z.string().min(1).max(MAX_PATH),
-  label: z.string().trim().min(1).max(16).optional(),
+  label: z.string().trim().min(1).max(FORMAT_LABEL_MAX).optional(),
 });
 const VariantBody = z.object({
   stage: LaneStageSchema,
@@ -198,7 +196,7 @@ const AddFileBody = z.object({
 
 // §20.6: the found routes. A scan may name the film whose newest cut anchors the scoring.
 const FoundItem = z.object({
-  path: z.string().min(1).max(1024),
+  path: z.string().min(1).max(MAX_PATH),
   kind: z.enum(["voice", "music", "sfx", "cut", "doc"]).optional(),
   round: z.string().trim().min(1).max(64).optional(),
 });
@@ -211,7 +209,7 @@ const FoundScanBody = z
     include: z.array(FoundItem).max(BRING_IN_MAX).optional(),
   })
   .refine((b) => b.include === undefined || b.wait === true, { message: "include needs wait: true", path: ["include"] });
-const FoundPathsBody = z.object({ paths: z.array(z.string().min(1).max(1024)).min(1).max(500) });
+const FoundPathsBody = z.object({ paths: z.array(z.string().min(1).max(MAX_PATH)).min(1).max(500) });
 const FoundBringInBody = z.object({
   files: z.array(FoundItem).min(1).max(BRING_IN_MAX),
   film: z.string().min(1).max(200).optional(),

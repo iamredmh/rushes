@@ -4,26 +4,13 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
-import { main, longRunningCommand, type Io } from "../../src/cli/main.js";
+import { main, longRunningCommand } from "../../src/cli/main.js";
 import { findServer } from "../../src/mcp/ensure.js";
 import { startServer, DEFAULT_PORT, type Running } from "../../src/server/start.js";
 import { addVersion } from "../../src/core/project.js";
 import { lockPath } from "../../src/server/lock.js";
 import { sizedProbe } from "../helpers/probe.js";
-
-function io(cwd: string) {
-  const out: string[] = [];
-  const err: string[] = [];
-  const opened: string[] = [];
-  const x: Io = {
-    out: (l) => out.push(l),
-    err: (l) => err.push(l),
-    cwd,
-    openBrowser: (u) => opened.push(u),
-    ensure: { spawnServer: () => { throw new Error("tests start the server themselves"); }, timeoutMs: 300 },
-  };
-  return { x, out, err, opened };
-}
+import { io } from "../helpers/cli.js";
 
 describe("cli", () => {
   it("prints help with no command, and exits 2 on an unknown one", async () => {

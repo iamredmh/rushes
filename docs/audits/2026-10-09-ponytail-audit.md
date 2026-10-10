@@ -1,6 +1,6 @@
 # Rushes audit, 9 October 2026
 
-Status: written against 0.4.0 (99857a9). Findings 2 to 9 are fixed, 1 in part, and `docs/plans` is removed (finding 11). Everything else is open. Line numbers are for 99857a9; `git log` shows what has landed since.
+Status: written against 0.4.0 (99857a9). Findings 2 to 14 are fixed, 1 and 10 in part, and `docs/plans` is removed (finding 11). Only the nice-to-haves, 15 to 21, are open. Line numbers are for 99857a9; `git log` shows what has landed since.
 
 ## How it was done
 
@@ -8,7 +8,7 @@ The audit prompt is `/ponytail-audit` from [DietrichGebert/ponytail](https://git
 
 The load assumed: one person on one machine, with one or two agent processes writing at the same time. Concurrent writers are in scope; many users are not.
 
-Checked by hand against the code: 1, 2, 3, 4, 6 (the `--dir` part), 7, 8, 11 and, in 14, `Store.backup`. Findings 2 to 9 were each fixed test-first, the new test failing before the change. The rest are as the audit reported them and have not been re-checked.
+Checked by hand against the code: 1, 2, 3, 4, 6 (the `--dir` part), 7, 8, 11 and, in 14, `Store.backup`. Findings 2 to 9 were each fixed test-first, the new test failing before the change; 10 to 14 are refactors or additions to tests, covered by the existing suite (1597 tests pass) and, for 13, by breaking the code under test five ways. The rest are as the audit reported them and have not been re-checked.
 
 ## Done
 
@@ -23,14 +23,11 @@ Checked by hand against the code: 1, 2, 3, 4, 6 (the `--dir` part), 7, 8, 11 and
 | 7 | Send to agent stamps the notes before it records the batch | The batch is worked out on copies, recorded first, and the notes marked second (`src/server/app.ts`). If marking fails the notes are still unsent and go out again in the next batch. |
 | 8 | Section ids are reused after a replace | The script file records the highest `s<n>` it has given out (`sectionCounter`, optional) and a new section starts past it; a script saved before the field is read for the numbers it can see (`src/core/script.ts`, `src/core/schema.ts`). Position-based numbering is otherwise unchanged. |
 | 9 | Note ids can repeat | `addNote` draws again while the file already has the id, as the log does (`src/core/notes.ts`). |
+| 10 | Small helpers written two to four times, and the MCP tools hand-copy limits | **In part.** Each is now one function or value, in a module with no import (so the dashboard bundles it without zod or Node; a build still gives 181 kB and none in it): `fmt`, `noteTime`, `shotAt` and the minutes-and-seconds split in `src/core/timecode.ts`; `fit` and `isChanged` in `scriptText.ts`; the level range in `levels.ts`; the extensions Open acts on in `extensions.ts`; `markLabel` in `labels.ts`. The old homes re-export, so no importer changed, and three parity checks that only kept copies equal are gone. The MCP tools import the stage and file-kind enums, `MAX_FORMATS - 1`, and new `MAX_PATH`, `FORMAT_ID_MAX` and `FORMAT_LABEL_MAX`. Not merged, on purpose: the two `VIDEO_EXT` sets (they answer different questions: what a cut may be, and what a grid tile can show a poster for) and the tools' `FORMAT_ID_OR_LABEL` regex (it also accepts a colon). The comment claiming `src/` and `web/` can't share code was wrong: the dashboard already bundled `labels.ts`, `logText.ts` and `formats.ts`. |
 | 11 | `docs/plans/` is 21,423 lines of finished plans | Removed. They are in git history, e.g. `git show 99857a9:docs/plans/2026-10-07-rushes-plan-8-sfx-layers.md`. |
-
-## Open: should fix
-
-10. **Small helpers written two to four times, and the MCP tools hand-copy limits.** `fmt` exists four times (`web/src/lib.ts`, `src/cli/main.ts:596-602`, `src/core/exportNotes.ts:30-38`, `src/server/assets.ts:52-55`), with `shotAt`, `markLabel`, `LEVEL_*`, `OPEN_SAFE_EXT`, `VIDEO_EXT`, `fit` and `isChanged` copied between `src` and `web`. `src/mcp/tools.ts:20-21,32-38` repeats `StageSchema`, `FileKindSchema`, `FORMATS_BESIDE_CUT_MAX = 7` and a 1024-character path cap. The comment at `exportNotes.ts:32` says "src/ and web/ are separate TypeScript projects", but `web/src/versions.ts`, `changelog.ts` and `lib.ts:1330` already import from `src/core`. Pin tests exist only to keep the copies equal. Fix: move them into import-free modules like `labels.ts`, `logText.ts` and `formats.ts` (guarded by `test/helpers/imports.ts`). About 88 lines, plus the pin tests.
-12. **Test setup is copy-pasted 13 times** (about 216 lines): the HTTP `call/post/put` helper in eight server test files, the CLI `io()` in three, the MCP `connect()` in three. Fix: `test/helpers/{app,cli,mcp}.ts`, about 60 lines saved.
-13. **`src/server/reveal.ts:38-79` is never run in tests.** It runs `open -R`, `explorer.exe /select,` or `xdg-open`, and `vitest.config.ts:8` sets `RUSHES_NO_REVEAL=1` for every test. CI has no Windows job. Fix: one table test mocking `node:child_process`, about 25 lines.
-14. **Code with no caller:** `Store.backup` (`src/core/store.ts:136-140`), `findVideo` (`project.ts:200-204`), the `renderMarkdown` alias (`web/src/markdown.ts:197-199`), `firstPositional` (`main.ts:152-156`), `BUILT` (`web/src/lib.ts:83-84`) and `isTakeStale` (`script.ts:21-24`). About 33 lines, plus 7 test lines that only touch them.
+| 12 | Test setup is copy-pasted 13 times | **In part.** `test/helpers/http.ts` (`jsonCaller`, `jsonPoster`) replaces copies in eight server test files, `mcp.ts` (`linkedClient`) the link repeated at seven sites, and `cli.ts` (`io`) the copy in two CLI test files. The copies were not identical, so the helper returns the superset of what they did. Not shared: the two MCP `connect()`s and `doctor.test.ts`'s `io`, which build different things. Net 20 lines, not 60: the three helpers are 69 lines. The gain is one place to change. |
+| 13 | `src/server/reveal.ts` is never run in tests | `test/server/reveal.test.ts` mocks `child_process` and `process.platform` and checks, for darwin, win32 and linux, the command and arguments for revealing a file, revealing a folder and opening a file, that each spawn is detached with no shell, and that failures are logged, not thrown. It passes on the existing code, so it was checked by breaking `reveal.ts` five ways; each was caught. No production change. |
+| 14 | Code with no caller | Removed `Store.backup`, `findVideo`, the `renderMarkdown` alias, `firstPositional`, `BUILT` and `isTakeStale` (named only in §17.5, which the spec marks superseded), and the test lines that touched them. About 40 lines. |
 
 ## Open: nice to have
 

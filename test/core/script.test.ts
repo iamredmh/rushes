@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addTake, editSection, fit, isChanged, isTakeStale, setSections } from "../../src/core/script.js";
+import { addTake, editSection, fit, isChanged, setSections } from "../../src/core/script.js";
 import type { Script } from "../../src/core/schema.js";
 
 const empty = (): Script => ({ schema: 1, rev: 0, wordsPerSecond: 2.6, sections: [] });
@@ -179,14 +179,12 @@ describe("setSections", () => {
 });
 
 describe("takes", () => {
-  it("marks a take stale when the line changes after it was read", () => {
+  it("adds a take that remembers the text it was read from", () => {
     const s = empty();
     setSections(s, [{ start: 0, end: 10, current: "Line one." }]);
     const take = addTake(s, "s1", { file: "a.wav", duration: 3.2 });
     expect(take).toMatchObject({ id: "t1", forText: "Line one.", duration: 3.2 });
-    expect(isTakeStale(take, s.sections[0])).toBe(false);
-    setSections(s, [{ id: "s1", start: 0, end: 10, current: "Line one, rewritten." }]);
-    expect(isTakeStale(s.sections[0].takes[0], s.sections[0])).toBe(true);
+    expect(s.sections[0].takes).toEqual([take]);
   });
   it("throws for an unknown section", () => {
     expect(() => addTake(empty(), "nope", { file: "a.wav" })).toThrow(/section "nope" not found/);

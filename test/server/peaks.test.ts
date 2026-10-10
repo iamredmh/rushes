@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { lstat, mkdir, readFile, readdir, stat, symlink, truncate, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
+import { jsonCaller } from "../helpers/http.js";
 import { createApp } from "../../src/server/app.js";
 import { addVersion } from "../../src/core/project.js";
 import type { Probe } from "../../src/core/media.js";
@@ -76,21 +77,7 @@ async function setup(run: FfmpegRunner, opts: { available?: boolean; cuts?: stri
   const proxyJobs = new ProxyJobs(store, { run, probe: async () => H264, available: async () => opts.available ?? true });
   const peaks = new PeakJobs(store, { run, available: async () => opts.available ?? true });
   const app = createApp(store, { proxyJobs, peakJobs: peaks });
-  const call = async (method: string, path: string, json?: unknown, headers: Record<string, string> = {}) => {
-    const res = await app.request(path, {
-      method,
-      headers: json === undefined ? headers : { "content-type": "application/json", ...headers },
-      body: json === undefined ? undefined : JSON.stringify(json),
-    });
-    const text = await res.text();
-    let parsed: any = text;
-    try {
-      parsed = text ? JSON.parse(text) : null;
-    } catch {
-      /* not JSON */
-    }
-    return { status: res.status, json: parsed };
-  };
+  const call = jsonCaller(app);
   /** Writes a cut's file and registers it straight in project.json (as `rushes demo` would): nothing is queued. */
   const register = async (file: string, bytes = "original bytes") => {
     await writeFile(join(root, file), bytes);
@@ -122,7 +109,7 @@ describe("GET …/peaks (§19.9)", () => {
     const seen = changes(store);
 
     const first = await call("GET", URL1);
-    expect(first).toEqual({ status: 202, json: { state: "computing" } });
+    expect({ status: first.status, json: first.json }).toEqual({ status: 202, json: { state: "computing" } });
     // Asking again while it's running joins the same decode.
     expect((await call("GET", URL1)).status).toBe(202);
     expect(run.calls).toHaveLength(1);

@@ -1,6 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -17,6 +15,7 @@ import { runDoctor, realDoctorEnv } from "../../src/cli/doctor.js";
 import { addVariant, addVersion } from "../../src/core/project.js";
 import { sizedProbe } from "../helpers/probe.js";
 import type { VideoProber } from "../../src/core/media.js";
+import { linkedClient } from "../helpers/mcp.js";
 
 type Probe = (abs: string) => Promise<number | null>;
 
@@ -33,9 +32,7 @@ async function connect(opts: { files?: string[]; probe?: Probe; formatProbe?: Vi
     openBrowser: (u) => opened.push(u),
     doctor: async () => runDoctor(realDoctorEnv(root)),
   });
-  const [a, b] = InMemoryTransport.createLinkedPair();
-  const client = new Client({ name: "test", version: "0" });
-  await Promise.all([server.connect(a), client.connect(b)]);
+  const client = await linkedClient(server);
   const call = async (name: string, args: Record<string, unknown> = {}) => {
     const r = (await client.callTool({ name, arguments: args })) as { content: { text: string }[]; isError?: boolean };
     const text = r.content[0].text;
@@ -340,9 +337,7 @@ describe("project root for stdio", () => {
   it("a tool started in / returns that error and never spawns a server", async () => {
     let spawns = 0;
     const server = createMcpServer(stdioContext("/", { spawnServer: () => { spawns++; }, timeoutMs: 300 }));
-    const [a, b] = InMemoryTransport.createLinkedPair();
-    const client = new Client({ name: "test", version: "0" });
-    await Promise.all([server.connect(a), client.connect(b)]);
+    const client = await linkedClient(server);
     for (const name of ["rushes_status", "rushes_open"]) {
       const r = (await client.callTool({ name, arguments: { browser: false } })) as { content: { text: string }[]; isError?: boolean };
       expect(r.isError).toBe(true);
@@ -582,9 +577,7 @@ async function fakeServer(handle: (req: IncomingMessage, res: ServerResponse, lo
     openBrowser: (u) => void (log.push("open"), opened.push(u)),
     doctor: async () => [],
   });
-  const [a, b] = InMemoryTransport.createLinkedPair();
-  const client = new Client({ name: "test", version: "0" });
-  await Promise.all([mcp.connect(a), client.connect(b)]);
+  const client = await linkedClient(mcp);
   const call = async (name: string, args: Record<string, unknown> = {}) => {
     const r = (await client.callTool({ name, arguments: args })) as { content: { text: string }[]; isError?: boolean };
     return { isError: !!r.isError, text: r.content[0].text };

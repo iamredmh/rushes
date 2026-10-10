@@ -3,7 +3,10 @@ import { z } from "zod";
 import { ApiError, dashboardUrlFor, type RushesClient } from "./client.js";
 import { VERSION } from "../server/app.js";
 import { BRING_IN_MAX } from "../server/found.js";
+import { FORMAT_ID_MAX, FORMAT_LABEL_MAX, MAX_FORMATS } from "../core/formats.js";
 import { LABEL_MAX, oneLineOf } from "../core/labels.js";
+import { MAX_PATH } from "../core/paths.js";
+import { FileKindSchema, StageSchema } from "../core/schema.js";
 import { LOG_AREAS } from "../core/logText.js";
 import type { Check } from "../cli/doctor.js";
 
@@ -17,25 +20,22 @@ export interface ToolContext {
 }
 
 const project = z.string().optional().describe("Project folder. Defaults to the current working directory.");
-const stage = z.enum(["script", "picture", "voice", "music", "sfx", "mix"]);
-const fileKind = z.enum(["doc", "image", "caption", "export", "delivery", "edit"]);
+const stage = StageSchema;
+const fileKind = FileKindSchema;
 const assetKind = z.enum(["screenshot", "cut", "proxy", "take", "music", "sfx", "voice", "doc", "image", "caption", "export", "delivery", "edit"]);
 
 // §20.7: a file to bring in. The server checks everything else (inside the project, the kind, the limits).
 const film = z.string().min(1).max(200);
 const bringInItem = z.object({
-  path: z.string().min(1).max(1024).describe("Absolute, or relative to the project folder."),
+  path: z.string().min(1).max(MAX_PATH).describe("Absolute, or relative to the project folder."),
   kind: z.enum(["voice", "music", "sfx", "cut", "doc"]).optional(),
   round: z.string().trim().min(1).max(64).optional().describe('Voice only: the round the read joins, e.g. "Round 2 · Gerald, tone". Defaults to its folder\'s name.'),
 });
 
 // §21.4: the server's own limits on formats (src/server/app.ts), so a request that can't land is refused here, in words.
-const FORMAT_PATH_MAX = 1024;
-const FORMAT_ID_MAX = 16;
-const FORMAT_LABEL_MAX = 16;
 // A format id ("9x16", "2.39x1"), or the label it is written from ("9:16"): the id has an x where the label has a colon.
 const FORMAT_ID_OR_LABEL = /^\d+(?:\.\d+)?[x:]\d+(?:\.\d+)?$/;
-const FORMATS_BESIDE_CUT_MAX = 7;
+const FORMATS_BESIDE_CUT_MAX = MAX_FORMATS - 1;
 // What an agent is told when a Rushes started by an older version quietly ignores the new fields.
 const OLDER_DROPPED = "An older Rushes is running and ignored `formats`: the cut is in, its other shapes are not. Run `rushes stop`, then add them with rushes_add_format.";
 const OLDER_DROPPED_LABEL = "An older Rushes is running and dropped the label: the cut was added without it. Run `rushes stop`, then open again.";
@@ -224,7 +224,7 @@ export function createMcpServer(ctx: ToolContext): McpServer {
           .optional()
           .describe(`A short label for the version list, ${LABEL_MAX} characters at most, e.g. "launch 1.45x slower". The detail goes in note.`),
         formats: z
-          .array(z.object({ file: z.string().min(1).max(FORMAT_PATH_MAX) }))
+          .array(z.object({ file: z.string().min(1).max(MAX_PATH) }))
           .max(FORMATS_BESIDE_CUT_MAX)
           .optional()
           .describe(
@@ -255,7 +255,7 @@ export function createMcpServer(ctx: ToolContext): McpServer {
         project,
         video: z.string().min(1).max(200).optional().describe("Video id or name. Defaults to the newest cut's film."),
         version: z.string().min(1).max(64).optional().describe("Defaults to that film's newest cut."),
-        file: z.string().min(1).max(FORMAT_PATH_MAX).describe("Path to the render, absolute or relative to the project."),
+        file: z.string().min(1).max(MAX_PATH).describe("Path to the render, absolute or relative to the project."),
         label: z
           .string()
           .trim()

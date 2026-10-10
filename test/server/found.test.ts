@@ -15,6 +15,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 });
 import { dirname, isAbsolute, join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
+import { jsonPoster } from "../helpers/http.js";
 import { createApp } from "../../src/server/app.js";
 import { FoundScanner, roundName, type FoundEntry } from "../../src/server/found.js";
 import { startServer } from "../../src/server/start.js";
@@ -61,8 +62,7 @@ async function setup(opts: { files?: string[]; probe?: ProbeFn; limits?: Partial
   const scanner = new FoundScanner({ store, probe: opts.probe ?? byName(), announce: () => void announced++, limits: opts.limits, adoptWaitMs: opts.adoptWaitMs });
   const app = createApp(store, { found: scanner, foundWaitMs: opts.waitMs });
   const call = (path: string, init: RequestInit = {}) => app.request(path, init);
-  const post = (path: string, json: unknown, headers: Record<string, string> = {}) =>
-    app.request(path, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(json) });
+  const post = jsonPoster(app);
   return { root, store, scanner, app, call, post, announced: () => announced };
 }
 

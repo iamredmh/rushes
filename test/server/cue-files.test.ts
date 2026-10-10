@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mkdir, readFile, symlink, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
+import { jsonPoster } from "../helpers/http.js";
 import { createApp } from "../../src/server/app.js";
 import { FoundScanner } from "../../src/server/found.js";
 
@@ -11,8 +12,7 @@ async function setup() {
   const found = new FoundScanner({ store, probe: async () => null, announce: () => undefined });
   const app = createApp(store, { found });
   const call = (path: string) => app.request(path);
-  const post = (path: string, json: unknown) =>
-    app.request(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(json) });
+  const post = jsonPoster(app);
   const put = async (rel: string, text = "sample") => {
     const abs = join(root, ...rel.split("/"));
     await mkdir(dirname(abs), { recursive: true });

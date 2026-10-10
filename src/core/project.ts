@@ -197,12 +197,6 @@ export function addFile(p: Project, input: AddFileInput, now = new Date()): File
   return entry;
 }
 
-export function findVideo(p: Project, id: string): Video {
-  const v = p.videos.find((x) => x.id === id);
-  if (!v) throw new NotFoundError("video", id);
-  return v;
-}
-
 /**
  * Finds a video by id, slug or name, so routes, MCP tools and the CLI all accept either
  * "Hero 60s" or "hero-60s". Tried in order: exact id, then `slugify(ref)`, then a
@@ -335,11 +329,4 @@ export function addFormat(p: Project, input: AddFormatInput, now = new Date()): 
   return { video, version, format, warning: durationWarning(label, input.duration, version.duration), labelNote: note };
 }
 
-/** The last shot whose start is at or before `t`, or null when `t` is before the first shot. */
-export function shotAt(shots: Shot[], t: number): { n: number; name: string } | null {
-  let found: Shot | null = null;
-  for (const s of shots) {
-    if (s.start <= t && (!found || s.start > found.start)) found = s;
-  }
-  return found ? { n: found.n, name: found.name } : null;
-}
+export { shotAt } from "./timecode.js";

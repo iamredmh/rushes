@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   agentPrompt, boxFrom, contentRect, copyShortcut, cueRoom, defaultVersion, extOf, firstTab, fit, FOLDERS, fmt, folderItems, formatBytes, frameAt, groupByFilm,
-  isChanged, isPreviewable, latest, LOCKED_TAB, metaLine, neighbourVideo, noteTime, OPEN_SAFE_EXT, placeNote, shotAt, shotLabel, shotSeek, snap, stepFrame,
+  isChanged, isPreviewable, latest, LOCKED_TAB, metaLine, neighbourVideo, noteTime, placeNote, shotAt, shotLabel, shotSeek, snap, stepFrame,
 } from "../../web/src/lib.js";
 import type { Asset, Note, Section, Shot, TabState, Video } from "../../web/src/types.js";
 import {
@@ -10,10 +10,9 @@ import {
 } from "../../web/src/lib.js";
 // Only this test imports the server's own list, so the web copy (ruling 1) is never pulled
 // into the web bundle -- this is purely to assert the two stay equal.
-import { OPEN_SAFE_EXT as SERVER_OPEN_SAFE_EXT } from "../../src/server/reveal.js";
-import { markLabel as serverMarkLabel, type Mark } from "../../src/core/schema.js";
+import type { Mark } from "../../src/core/schema.js";
 import {
-  AUDIO_CHIPS, BUILT, blindOrder, laneSelection, markLabel, marksLabel, scopeOptions, noteFocus, setMarkDb, spacePressesButton, testFlags, toggleMark, watchFocusOrigin, variantMeta,
+  AUDIO_CHIPS, blindOrder, laneSelection, markLabel, marksLabel, scopeOptions, noteFocus, setMarkDb, spacePressesButton, testFlags, toggleMark, watchFocusOrigin, variantMeta,
   variantNoteRow, variantNoteTarget, variantOnLabel, variantOnOptions, variantRows,
 } from "../../web/src/lib.js";
 import type { Lane } from "../../web/src/types.js";
@@ -299,13 +298,6 @@ describe("extOf / isPreviewable", () => {
   });
 });
 
-describe("OPEN_SAFE_EXT (web copy)", () => {
-  it("matches the server's OPEN_SAFE_EXT (src/server/reveal.ts) exactly, with no svg", () => {
-    expect([...OPEN_SAFE_EXT].sort()).toEqual([...SERVER_OPEN_SAFE_EXT].sort());
-    expect(OPEN_SAFE_EXT.has("svg")).toBe(false);
-  });
-});
-
 describe("FOLDERS", () => {
   it("lists the §16.1 folders in order, with Exports film-filter-free and Cuts/Delivery/Screenshots film-filtered", () => {
     expect(FOLDERS.map((f) => f.title)).toEqual([
@@ -479,9 +471,9 @@ describe("neighbourVideo", () => {
 });
 
 describe("audio tabs: marks", () => {
-  it("labels marks exactly as the server does", () => {
+  it("labels marks, and joins them with a dot", () => {
     const all: Mark[] = [{ kind: "rise" }, { kind: "fall" }, { kind: "louder", db: 3 }, { kind: "quieter", db: 6 }, { kind: "quieter", db: 1.5 }];
-    for (const m of all) expect(markLabel(m)).toBe(serverMarkLabel(m));
+    expect(all.map(markLabel)).toEqual(["Rise", "Fall", "Louder 3 dB", "Quieter 6 dB", "Quieter 1.5 dB"]);
     expect(marksLabel([{ kind: "fall" }, { kind: "quieter", db: 3 }])).toBe("Fall · Quieter 3 dB");
     expect(marksLabel([])).toBeNull();
     expect(marksLabel(undefined)).toBeNull();
@@ -524,9 +516,7 @@ describe("audio tabs: lanes", () => {
       { id: "pass-b", name: "Pass B", file: "pb.wav", meta: {}, cues: [{ id: "swipe", name: "Swipe", t: 1.6 }] },
     ] },
   ];
-  it("turns on Music and Sound effects", () => {
-    expect(BUILT.music).toBe(true);
-    expect(BUILT.sfx).toBe(true);
+  it("has the chips for Music and Sound effects", () => {
     expect(AUDIO_CHIPS.music).toEqual(["Tempo", "Key", "Energy", "Ending"]);
     expect(AUDIO_CHIPS.sfx).toEqual(["Timing", "Level", "Swap sound", "Remove"]);
   });
@@ -670,9 +660,6 @@ describe("Space on a focused button (§19.8)", () => {
 });
 
 describe("Voiceover", () => {
-  it("turns on Voiceover", () => {
-    expect(BUILT.voice).toBe(true);
-  });
   it("keeps Voiceover's chips as the Whole chips Voice shows (§18.3), not the old §17.1 set", () => {
     expect(AUDIO_CHIPS.voice).toEqual(["Speaker", "Pacing", "Tone", "Overall"]);
   });
@@ -831,8 +818,7 @@ describe("Mix", () => {
     heard: { vo: true, music: [music[1]], sfx: [sfx[0]], ...heard },
   });
 
-  it("turns on Mix", () => {
-    expect(BUILT.mix).toBe(true);
+  it("has the chips for Mix", () => {
     expect(AUDIO_CHIPS.mix).toEqual(["Level", "Balance", "Loudness"]);
   });
 

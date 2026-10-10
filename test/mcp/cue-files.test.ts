@@ -1,18 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { tmpProject } from "../helpers/tmp.js";
 import { startServer } from "../../src/server/start.js";
 import { createMcpServer } from "../../src/mcp/tools.js";
 import { RushesClient } from "../../src/mcp/client.js";
+import { linkedClient } from "../helpers/mcp.js";
 
 async function connect() {
   const { root } = await tmpProject("cue-files");
   const running = await startServer(root, { port: 0 });
   const server = createMcpServer({ client: async () => new RushesClient(running.url), openBrowser: () => undefined, doctor: async () => [] });
-  const [a, b] = InMemoryTransport.createLinkedPair();
-  const client = new Client({ name: "test", version: "0" });
-  await Promise.all([server.connect(a), client.connect(b)]);
+  const client = await linkedClient(server);
   const call = async (name: string, args: Record<string, unknown>) => {
     const r = (await client.callTool({ name, arguments: args })) as { content: { text: string }[]; isError?: boolean };
     return { isError: !!r.isError, text: r.content[0].text, json: r.isError ? null : JSON.parse(r.content[0].text) };

@@ -1,15 +1,9 @@
 // Pure helpers for the dashboard. No DOM, so they're unit-tested in Node.
-import type { Asset, AssetKind, Cue, FoundCounts, FoundItem, FoundKind, FoundSummary, Lane, LaneStage, LoudnessResult, Mark, Note, Project, ProxyEvent, ProxyJob, Section, Shot, Stage, TabState, Video, Version } from "./types.js";
+import type { Asset, AssetKind, Cue, FoundCounts, FoundItem, FoundKind, FoundSummary, Lane, LaneStage, LoudnessResult, Mark, Note, Project, ProxyEvent, ProxyJob, Section, Stage, TabState, Video, Version } from "./types.js";
 export type { FoundItem } from "./types.js";
 
-/** 72.4 -> "1:12.40" (minutes, seconds, hundredths). */
-export function fmt(t: number): string {
-  // Round to hundredths first, so 59.999 becomes 1:00.00 rather than 0:60.00.
-  const cs = Math.round(Math.max(0, t) * 100);
-  const m = Math.floor(cs / 6000);
-  const s = ((cs - m * 6000) / 100).toFixed(2).padStart(5, "0");
-  return `${m}:${s}`;
-}
+import { fmt, noteTime, shotAt } from "../../src/core/timecode.js";
+export { fmt, noteTime, shotAt };
 
 /** The frame showing at time t. */
 export function frameAt(t: number, fps: number): number {
@@ -39,25 +33,8 @@ export function placeNote(note: Note, version: string | null): { t: number | nul
   return { t: note.t, tOut: note.tOut, from };
 }
 
-/** "1:12.40", "0:31.05–0:33.10" or "Whole". */
-export function noteTime(t: number | null, tOut: number | null): string {
-  if (t === null) return "Whole";
-  return tOut !== null ? `${fmt(t)}–${fmt(tOut)}` : fmt(t);
-}
-
-export type FitState = "ok" | "tight" | "over";
-
-/** Words, reading time and whether a line fits its slot. Matches the server's fit(). */
-export function fit(text: string, slotSeconds: number, wordsPerSecond: number): { words: number; seconds: number; ratio: number; state: FitState } {
-  const words = (text.trim().match(/\S+/g) ?? []).length;
-  const seconds = words / wordsPerSecond;
-  const ratio = slotSeconds > 0 ? seconds / slotSeconds : Infinity;
-  return { words, seconds, ratio, state: ratio > 1 ? "over" : ratio > 0.8 ? "tight" : "ok" };
-}
-
-export function isChanged(s: Section): boolean {
-  return s.proposed !== null && s.proposed.trim() !== s.current.trim();
-}
+import { fit, isChanged, type FitState } from "../../src/core/scriptText.js";
+export { fit, isChanged, type FitState };
 
 export function latest(video: Video | undefined): Version | undefined {
   return video?.versions[video.versions.length - 1];
@@ -79,9 +56,6 @@ export function neighbourVideo(videos: Video[], currentId: string | null, dir: -
   const j = i + dir;
   return j >= 0 && j < videos.length ? videos[j].id : null;
 }
-
-/** Is this stage built in this release of the dashboard? Later releases add the audio tabs. */
-export const BUILT: Record<Stage, boolean> = { script: true, picture: true, voice: true, music: true, sfx: true, mix: true };
 
 export const STAGE_NAMES: Record<Stage, string> = {
   script: "Script",
@@ -161,19 +135,6 @@ export function firstTab(tabs: TabState[]): Stage {
   return tabs.find((t) => t.unlocked)?.stage ?? "picture";
 }
 
-/**
- * The last shot whose start is at or before `t`, or null when `t` is before the first shot.
- * Mirrors src/core/project.ts's shotAt exactly: copied rather than imported, because the web
- * bundle imports types only from src/.
- */
-export function shotAt(shots: Shot[], t: number): { n: number; name: string } | null {
-  let found: Shot | null = null;
-  for (const s of shots) {
-    if (s.start <= t && (!found || s.start > found.start)) found = s;
-  }
-  return found ? { n: found.n, name: found.name } : null;
-}
-
 /** "2" -> "02"; widens to 3 digits once n reaches 100. */
 export function shotLabel(n: number): string {
   return String(n).padStart(2, "0");
@@ -214,19 +175,10 @@ export function metaLine(laneName?: string, meta?: Record<string, string | numbe
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
-/**
- * §16.3: the only extensions Open will act on, lower-case and without the dot. A web-side copy of
- * src/server/reveal.ts's OPEN_SAFE_EXT (deliberately duplicated rather than imported, since the
- * web bundle never pulls in server code) -- a unit test asserts the two stay equal. svg is
- * deliberately excluded: on macOS an SVG often opens in a browser and can carry script.
- */
-export const OPEN_SAFE_EXT: ReadonlySet<string> = new Set([
-  "md", "txt", "pdf", "srt", "vtt",
-  "png", "jpg", "jpeg", "gif", "webp",
-  "mp4", "mov", "m4v", "webm", "mkv",
-  "wav", "mp3", "m4a", "aac", "flac", "ogg",
-  "prproj", "drp",
-]);
+// §16.3: the only extensions Open will act on. The Open button shows only for these and the server
+// refuses the rest, so it is one list.
+import { OPEN_SAFE_EXT } from "../../src/core/extensions.js";
+export { OPEN_SAFE_EXT };
 
 /** Extensions a Cut/Delivery grid tile will try to show a poster frame for (I5/I6); anything
  *  else gets a plain file tile instead of a black box with a video element that can't play it. */
@@ -438,14 +390,8 @@ const MARK_ORDER: MarkKind[] = ["rise", "fall", "louder", "quieter"];
 const OPPOSITE: Record<MarkKind, MarkKind> = { rise: "fall", fall: "rise", louder: "quieter", quieter: "louder" };
 const takesDb = (k: MarkKind) => k === "louder" || k === "quieter";
 
-/**
- * A web copy of src/core/schema.ts's markLabel (the web bundle imports types only from src/; a
- * unit test asserts the two agree): "Rise" | "Fall" | "Louder 3 dB" | "Quieter 3 dB".
- */
-export function markLabel(m: Mark): string {
-  const label = m.kind === "rise" ? "Rise" : m.kind === "fall" ? "Fall" : m.kind === "louder" ? "Louder" : "Quieter";
-  return m.db === undefined ? label : `${label} ${m.db} dB`;
-}
+import { markLabel } from "../../src/core/labels.js";
+export { markLabel };
 
 /** A note's marks as one line, "Fall · Quieter 3 dB", or null when it has none. */
 export function marksLabel(marks: Mark[] | undefined): string | null {
@@ -946,11 +892,9 @@ export function mixOnOptions(m: MixModel): OnOption[] {
   return out;
 }
 
-// §19.6: a Mix lane's level slider, mirroring src/core/schema.ts's LEVEL_MIN/MAX/STEP exactly (not
-// imported -- the web bundle imports types only from src/).
-export const LEVEL_MIN = -24;
-export const LEVEL_MAX = 6;
-export const LEVEL_STEP = 0.5;
+// §19.6: a Mix lane's level slider spans what the server accepts: the same range and step.
+import { LEVEL_MAX, LEVEL_MIN, LEVEL_STEP } from "../../src/core/levels.js";
+export { LEVEL_MAX, LEVEL_MIN, LEVEL_STEP };
 
 /** A level, clamped to the slider's range and snapped to its 0.5 dB step (§19.6) -- a guard before a
  *  value reaches the server, never a substitute for the server's own check. */

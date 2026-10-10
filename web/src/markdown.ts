@@ -193,7 +193,3 @@ export function safeMarkdownHtml(text: string): string {
   flushList();
   return html.join("\n");
 }
-
-/** Alias kept for readers who think of this as "rendering Markdown" rather than the safety it
- *  guarantees -- both names do exactly the same thing. */
-export const renderMarkdown = safeMarkdownHtml;

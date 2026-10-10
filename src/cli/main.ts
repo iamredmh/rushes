@@ -19,6 +19,7 @@ import { onLabel, type OnContext } from "../core/notes.js";
 import { setup, type SetupEnv } from "../setup/setup.js";
 import { realSetupEnv } from "../setup/env.js";
 import { HARNESS_IDS, type HarnessId } from "../setup/harnesses.js";
+import { fmt } from "../core/timecode.js";
 import { runDoctor, realDoctorEnv, type DoctorEnv } from "./doctor.js";
 
 export interface Io {
@@ -149,12 +150,6 @@ function firstPositionalIndex(argv: string[]): number {
     return i;
   }
   return -1;
-}
-
-/** The command name (first positional), tolerant of leading global flags. */
-function firstPositional(argv: string[]): string | undefined {
-  const i = firstPositionalIndex(argv);
-  return i >= 0 ? argv[i] : undefined;
 }
 
 /**
@@ -612,14 +607,6 @@ function broughtLine(added: { path: string; kind: string }[]): string {
 function usage(io: Io, line: string): number {
   io.err(`Usage: ${line}`);
   return 2;
-}
-
-function fmt(t: number): string {
-  // Round to hundredths first, so 59.999 becomes 1:00.00 rather than 0:60.00.
-  const cs = Math.round(Math.max(0, t) * 100);
-  const m = Math.floor(cs / 6000);
-  const s = ((cs - m * 6000) / 100).toFixed(2).padStart(5, "0");
-  return `${m}:${s}`;
 }
 
 /** 1536 -> "1.5 KB". Bytes under 1 KB print as a whole number of bytes. */
