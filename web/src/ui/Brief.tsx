@@ -102,27 +102,51 @@ function Row({ section, save }: { section: BriefSectionView; save: Saver }) {
   );
 }
 
-/** brief.md: the agent's current text beside yours, one row per section, and an Approve at the foot. */
-export function Brief({ brief, toast, onChanged }: { brief: BriefView; toast(message: string): void; onChanged(): void }) {
+/** A section is found again by its heading and which of that heading it is, not by its position: the agent may add one above it. */
+const occurrenceOf = (sections: BriefSectionView[], index: number): number => sections.slice(0, index).filter((x) => x.heading === sections[index].heading).length;
+
+/** What a save asks the server for, built from the brief as it is now (so it can be built again from a newer one); null when the section has gone. */
+type Request = (brief: BriefView) => { path: string; body: Record<string, unknown> } | null;
+
+/**
+ * brief.md: the agent's current text beside yours, one row per section, and an Approve at the foot.
+ * `settle` is how Send to agent waits for what you just typed: it resolves once every queued save has landed,
+ * with the brief as the server now has it.
+ */
+export function Brief({ brief, toast, onChanged, settle }: { brief: BriefView; toast(message: string): void; onChanged(): void; settle: { current: (() => Promise<BriefView>) | null } }) {
   // The hash of the file as this page last saw it. Every save goes through one queue and passes the newest one on,
   // so two edits in a row never fail against each other's result.
   const hash = useRef(brief.hash);
+  const latest = useRef(brief);
+  latest.current = brief;
   const queue = useRef<Promise<unknown>>(Promise.resolve());
   useEffect(() => {
     hash.current = brief.hash;
   }, [brief.hash]);
+  useEffect(() => {
+    settle.current = async () => {
+      await queue.current.catch(() => undefined);
+      return (await api.get<State>("/api/state")).brief;
+    };
+    return () => {
+      settle.current = null;
+    };
+  }, []);
 
-  const put = async (path: string, body: Record<string, unknown>): Promise<void> => {
+  const put = async (build: Request): Promise<void> => {
+    let from = latest.current;
     for (let attempt = 0; ; attempt++) {
+      const req = build(from);
+      if (!req) throw new Error("that section is no longer in brief.md");
       try {
-        const r = await api.put<{ brief: BriefView }>(path, { ...body, hash: hash.current });
+        const r = await api.put<{ brief: BriefView }>(req.path, { ...req.body, hash: hash.current });
         hash.current = r.brief.hash;
         return;
       } catch (e) {
-        // The agent rewrote brief.md while you were typing: take the file's new hash and try once more.
+        // The agent rewrote brief.md while you were typing: take the file as it is now, find the section again, and try once more.
         if (e instanceof ApiError && e.code === "brief_changed" && attempt === 0) {
-          const fresh = await api.get<State>("/api/state");
-          hash.current = fresh.brief.hash;
+          from = (await api.get<State>("/api/state")).brief;
+          hash.current = from.hash;
           continue;
         }
         throw e;
@@ -137,8 +161,16 @@ export function Brief({ brief, toast, onChanged }: { brief: BriefView; toast(mes
       .finally(onChanged);
   };
   const save: Saver = {
-    section: (s, text) => enqueue(s.heading, () => put(`/api/brief/sections/${s.index}`, { heading: s.heading, text })),
-    status: (status) => enqueue("the brief's status", () => put("/api/brief/status", { status })),
+    section: (s, text) => {
+      const nth = occurrenceOf(latest.current.sections, s.index);
+      enqueue(s.heading, () =>
+        put((b) => {
+          const at = b.sections.filter((x) => x.heading === s.heading)[nth];
+          return at ? { path: `/api/brief/sections/${at.index}`, body: { heading: s.heading, text } } : null;
+        }),
+      );
+    },
+    status: (status) => enqueue("the brief's status", () => put(() => ({ path: "/api/brief/status", body: { status } }))),
   };
 
   const approved = brief.status === "approved";
@@ -152,7 +184,7 @@ export function Brief({ brief, toast, onChanged }: { brief: BriefView; toast(mes
       </div>
       <div class="sgrid bgrid scols"><span /><span>Current</span><span>Yours</span></div>
       <div style={{ display: "grid", gap: "12px" }}>
-        {brief.sections.map((s) => <Row key={`${s.index}:${s.heading}`} section={s} save={save} />)}
+        {brief.sections.map((s) => <Row key={`${s.heading}#${occurrenceOf(brief.sections, s.index)}`} section={s} save={save} />)}
       </div>
       <div class="bfoot">
         <button class={`btn bapprove${approved ? " approved" : ""}`} aria-pressed={approved} onClick={() => save.status(approved ? "draft" : "approved")}>

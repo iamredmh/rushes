@@ -4,7 +4,7 @@ import {
   LOCKED_BRIEF, LOCKED_TAB, testFlags, STAGE_NAMES, agentPrompt, briefPrompt, briefSendPrompt, copyShortcut, currentFormat, defaultVersion, firstView, formatChips, formatPrompt, foundChip, foundSignature,
   isPlanPage, labelOfId, latest, lockedFound, neighbourFormat, neighbourVideo, planProgress, planTarget, previousVersion, proxyKey, snap, versionFormats, type PlanPage,
 } from "../lib.js";
-import type { Batch, FoundCounts, FoundKind, Stage, Video } from "../types.js";
+import type { Batch, BriefView, FoundCounts, FoundKind, Stage, Video } from "../types.js";
 import { useRushes } from "../useRushes.js";
 import { assetRev } from "../audio/timeline.js";
 import { Assets, type FoundRequest } from "./Assets.js";
@@ -87,6 +87,8 @@ export function App() {
   const [sent, setSent] = useState<Sent | null>(null);
   // §24: the planning page you were last on, which key 1 returns to (Script, the old key 1, until you open Brief).
   const [planLast, setPlanLast] = useState<PlanPage>("script");
+  // The Brief page registers how to wait for its saves here, for Send to agent.
+  const briefSettle = useRef<(() => Promise<BriefView>) | null>(null);
   const [keysOpen, setKeysOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [pending, setPending] = useState(false);
@@ -145,7 +147,12 @@ export function App() {
   // First load: pick a tab and a video.
   useEffect(() => {
     if (!state) return;
-    if (stage === null) setStage(firstView(state.tabs, state.brief));
+    if (stage === null) {
+      const first = firstView(state.tabs, state.brief);
+      setStage(first);
+      // Opened on a planning page, so key 1 comes back to it rather than to Script.
+      if (isPlanPage(first)) setPlanLast(first);
+    }
     if (videoId === null && state.project.videos[0]) setVideoId(state.project.videos[0].id);
   }, [state]);
 
@@ -365,10 +372,13 @@ export function App() {
   const send = async () => {
     if (!stage || stage === "assets") return;
     setKeysOpen(false);
-    // The Brief page has no batch: brief.md is the record, so this is only the message to paste.
+    // The Brief page has no batch: brief.md is the record, so this is only the message to paste. It waits for
+    // what you just typed to be saved, and is built from the brief as the server then has it.
     if (stage === "brief") {
       if (!state) return;
-      setSent({ id: "brief", title: "Message for your agent", prompt: briefSendPrompt(state.project.name, video?.name ?? null, state.brief) });
+      if (!state.brief.exists) return toast("There's no brief yet: copy the prompt on this page for your agent");
+      const fresh = (await briefSettle.current?.()) ?? state.brief;
+      setSent({ id: "brief", title: "Message for your agent", prompt: briefSendPrompt(state.project.name, video?.name ?? null, fresh) });
       setCopied(false);
       return;
     }
@@ -659,7 +669,7 @@ export function App() {
             onFormatChange={switchFormat}
           />
         ) : stage === "brief" ? (
-          <Brief brief={state.brief} toast={toast} onChanged={() => void refresh()} />
+          <Brief brief={state.brief} toast={toast} onChanged={() => void refresh()} settle={briefSettle} />
         ) : stage === "script" ? (
           <Script script={state.script} toast={toast} onChanged={() => void refresh()} />
         ) : stage === "voice" ? (
