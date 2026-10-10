@@ -1,9 +1,13 @@
 // §24.12: is the plan approved? The brief, every script section and every storyboard shot, in that order.
+// A film with no script (an instrumental one) is not waiting on one.
 
 export type PlanPart = "brief" | "script" | "storyboard";
 
 export interface BuildState {
-  /** Planning has begun: there is a brief or a storyboard. A project that never used the flow is not warned about anything. */
+  /**
+   * Planning has begun: there is a brief with a Status line, or a storyboard with shots. A project that never used the
+   * flow, or has a brief.md or storyboard.md in some other format, is not warned about anything.
+   */
   started: boolean;
   /** Planning has begun, and nothing is waiting. */
   ready: boolean;
@@ -19,9 +23,9 @@ export interface PlanInput {
 export function buildState(i: PlanInput): BuildState {
   const waitingOn: PlanPart[] = [];
   if (!(i.brief.exists && i.brief.status === "approved")) waitingOn.push("brief");
-  if (!(i.script.length > 0 && i.script.every((s) => s.status === "approved"))) waitingOn.push("script");
+  if (!i.script.every((s) => s.status === "approved")) waitingOn.push("script");
   if (!(i.storyboard.exists && i.storyboard.total > 0 && i.storyboard.approved === i.storyboard.total)) waitingOn.push("storyboard");
-  const started = i.brief.exists || i.storyboard.exists;
+  const started = (i.brief.exists && i.brief.status !== null) || (i.storyboard.exists && i.storyboard.total > 0);
   return { started, ready: started && waitingOn.length === 0, waitingOn };
 }
 

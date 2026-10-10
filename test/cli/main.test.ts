@@ -667,7 +667,7 @@ describe("cli", () => {
       const a = io(root);
       expect(await main(["status"], a.x)).toBe(0);
       expect(a.out.find((l) => l.startsWith("storyboard"))).toBe("storyboard 1 of 2 approved");
-      expect(a.out.find((l) => l.startsWith("build"))).toBe("build    waiting on brief, script, storyboard");
+      expect(a.out.find((l) => l.startsWith("build"))).toBe("build    waiting on brief, storyboard");
     } finally {
       await s.close();
     }
