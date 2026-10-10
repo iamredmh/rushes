@@ -131,6 +131,45 @@ test("text typed in a shot survives the agent adding a shot above it", async ({ 
   await expect(box).toHaveValue("Mine.");
 });
 
+test("text typed in a shot survives the agent renumbering the shots", async ({ page, rushes }) => {
+  await withBoard(rushes);
+  await page.goto(rushes.url);
+  await openStoryboard(page);
+  await page.route("**/api/storyboard/shots/*", async (route) => {
+    await new Promise((r) => setTimeout(r, 1200));
+    await route.continue();
+  });
+  const box = page.getByLabel("Your version of shot 2");
+  await box.fill("Mine.");
+  // A new first shot goes in and every shot is numbered again: "Shot 02 · Drop a folder" is now "Shot 03 · Drop a folder".
+  await rushes.writeFiles([
+    {
+      path: "storyboard.md",
+      text: BOARD.replace("## Shot 02 ·", "## Shot 03 ·").replace("## Shot 01 ·", "## Shot 02 ·").replace("## Shot 02 · Cold open", "## Shot 01 · Title card\nLength: 1\n\nA title.\n\n## Shot 02 · Cold open"),
+    },
+  ]);
+  await expect.poll(() => read(rushes.root), { timeout: 15000 }).toContain("Status: draft\nDirection:\n\nMine.\n");
+  expect(await read(rushes.root)).toContain("## Shot 03 · Drop a folder");
+  await expect(page.locator(".toast")).toHaveCount(0);
+});
+
+test("the page keeps working when the agent deletes the last shot while another is being typed in", async ({ page, rushes }) => {
+  await withBoard(rushes);
+  await page.goto(rushes.url);
+  await openStoryboard(page);
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.route("**/api/storyboard/shots/*", async (route) => {
+    await new Promise((r) => setTimeout(r, 1200));
+    await route.continue();
+  });
+  await page.getByLabel("Your version of shot 2").fill("Mine.");
+  await rushes.writeFiles([{ path: "storyboard.md", text: BOARD.slice(0, BOARD.indexOf("## Shot 02")) }]);
+  await expect(page.locator(".sbrow")).toHaveCount(1, { timeout: 15000 });
+  await expect(page.getByRole("heading", { name: "Storyboard" })).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
 test("Send to agent straight after typing names the shot just edited", async ({ page, rushes }) => {
   await withBoard(rushes);
   await page.goto(rushes.url);
@@ -180,7 +219,7 @@ test("a film's first cut starts with the storyboard's shots, and says what the p
   await withBoard(rushes);
   await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
   const r = await rushes.api("POST", "/api/versions", { video: "Hero", file: "renders/hero.mp4" });
-  expect(r.planWarning).toContain("still waiting on the brief, the script and the storyboard");
+  expect(r.planWarning).toContain("still waiting on the brief and the storyboard");
   expect(r.version.shots.map((s: { name: string; start: number }) => [s.name, s.start])).toEqual([["Cold open", 0], ["Drop a folder", 3]]);
 });
 

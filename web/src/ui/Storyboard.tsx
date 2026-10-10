@@ -227,8 +227,13 @@ export function Storyboard({
     shot: (s, edit) => {
       const nth = occurrenceOf(latest.current.shots, latest.current.shots.findIndex((x) => x.index === s.index));
       enqueue(`shot ${s.n}`, (b) => {
-        const at = b.shots.filter((x) => x.heading === s.heading)[nth];
-        return at ? { path: `/api/storyboard/shots/${at.index}`, body: { heading: s.heading, ...edit } } : null;
+        let at = b.shots.filter((x) => x.heading === s.heading)[nth];
+        // The agent numbered the shots again: "Shot 02 · Drop a folder" is now "Shot 03 · Drop a folder". The name finds it, when it is the only one.
+        if (!at) {
+          const named = b.shots.filter((x) => x.name === s.name);
+          if (named.length === 1) at = named[0];
+        }
+        return at ? { path: `/api/storyboard/shots/${at.index}`, body: { heading: at.heading, ...edit } } : null;
       });
     },
   };
