@@ -28,6 +28,8 @@ import { LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, FileKindS
 import { LABEL_MAX, oneLineOf } from "../core/labels.js";
 import { byOf, logBookFor } from "./logbook.js";
 import { BriefService } from "./brief.js";
+import { StoryboardService } from "./storyboard.js";
+import { buildState, planWarning } from "../core/plan.js";
 import {
   broughtInEvent, cutEvent, fileEvent, formatEvent, lineEvent, lockEvent, notesSentEvent, picksEvent, repliesEvent, scriptEvent, takeEvent, variantEvent,
 } from "../core/logEvents.js";
@@ -143,6 +145,16 @@ const TakeBody = z.object({ file: z.string().min(1) });
 // §24 step 2: a save of one brief.md section, and the approval. `hash` proves the page saw the current file.
 const BriefSectionBody = z.object({ heading: z.string().min(1).max(200), text: z.string().max(100_000), hash: z.string().min(1).max(64) });
 const BriefStatusBody = z.object({ status: z.enum(["draft", "approved"]), hash: z.string().min(1).max(64) });
+// §24.12: a change to one storyboard shot: its words, its direction, its status, in any combination.
+const StoryboardShotBody = z
+  .object({
+    heading: z.string().min(1).max(200),
+    description: z.string().max(100_000).optional(),
+    direction: z.string().max(1000).optional(),
+    status: z.enum(["draft", "approved"]).optional(),
+    hash: z.string().min(1).max(64),
+  })
+  .refine((b) => b.description !== undefined || b.direction !== undefined || b.status !== undefined, { message: "Nothing to change" });
 // A pick is a variant or take id; null clears it. picks.json itself only ever holds strings.
 const PickMap = z.record(z.string(), z.string().nullable());
 // §19.6: a level is −24..6 dB in 0.5 dB steps; null resets it to 0 (removes the key).
@@ -257,6 +269,8 @@ export const FOUND_WAIT_MS = 20_000;
 export interface AppOptions {
   /** §24 step 2: brief.md's service. startServer passes its own so it can poll the file and stop on close. */
   brief?: BriefService;
+  /** §24.12: storyboard.md's service, the same way. */
+  storyboard?: StoryboardService;
   /** Overrides FOUND_WAIT_MS (tests). */
   foundWaitMs?: number;
   /** Folder with the built dashboard (index.html + assets/). */
@@ -315,6 +329,12 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   const peaks = opts.peakJobs ?? new PeakJobs(store, { run: jobs.run, available: () => jobs.available() });
   const found = opts.found ?? new FoundScanner({ store, probe: ffprobeDuration, announce: foundAnnouncer(store) });
   const brief = opts.brief ?? new BriefService(store);
+  const storyboard = opts.storyboard ?? new StoryboardService(store);
+  /** §24.12: whether the plan (brief, script, storyboard) is approved, from the files as they are now. */
+  const planBuild = async () => {
+    const [b, script, sb] = await Promise.all([brief.view(), store.read("script"), storyboard.view()]);
+    return buildState({ brief: b, script: script.sections, storyboard: sb });
+  };
   // §22: the Change Log, shared with the found scanner (logBookFor keeps one per store).
   const log = logBookFor(store);
   const by = (c: Context) => byOf(c.req.header("x-rushes-project"));
@@ -479,7 +499,9 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     // and the one a byte-range video seek hits over and over. Only a path that misses all three
     // falls through to candidatePaths, which does the readdir-backed discovery (§16.2's
     // auto-discovered docs/captions/exports) that a registered path never needs.
-    const known = registeredMedia(project, script).has(path) || GRAB_PATH.test(path) || SCREENSHOT_PATH.test(path);
+    let known = registeredMedia(project, script).has(path) || GRAB_PATH.test(path) || SCREENSHOT_PATH.test(path);
+    // §24.12: a picture storyboard.md names (a safe, project-relative image path) is served too, registered or not.
+    if (!known && (await storyboard.stills()).has(path)) known = true;
     // The file on disk to send. For a found file it's exactly the path that was checked.
     let file = fromManifestPath(store.root, path);
     let viaFound = false;
@@ -679,8 +701,8 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   app.get("/api/state", async (c) => {
     // §20.6: found is what the last scan left in memory; it never waits on a scan or a probe.
     // §22.8: the log's head is read-only, so a state request never writes (R6).
-    const [project, script, notes, picks, batches, ffmpeg, foundSummary, logHead, briefView] = await Promise.all([
-      store.read("project"), store.read("script"), store.read("notes"), store.read("picks"), store.read("batches"), jobs.available(), found.summary(), log.head(), brief.view(),
+    const [project, script, notes, picks, batches, ffmpeg, foundSummary, logHead, briefView, storyboardView] = await Promise.all([
+      store.read("project"), store.read("script"), store.read("notes"), store.read("picks"), store.read("batches"), jobs.available(), found.summary(), log.head(), brief.view(), storyboard.view(),
     ]);
     const tabs = tabStates(project, script, notes);
     // §19.5: why each cut may play badly (or null). Never waits on a probe: an unprobed cut is
@@ -691,7 +713,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
         versions: await Promise.all(v.versions.map(async (ver) => ({ ...ver, proxyNeed: await jobs.needNow(fromManifestPath(store.root, ver.file)) }))),
       })),
     );
-    return c.json({ project: { ...project, videos }, script, notes, picks, batches, tabs, proxies: { ffmpeg, jobs: jobs.list() }, found: foundSummary, log: logHead, brief: briefView });
+    return c.json({ project: { ...project, videos }, script, notes, picks, batches, tabs, proxies: { ffmpeg, jobs: jobs.list() }, found: foundSummary, log: logHead, brief: briefView, storyboard: storyboardView, build: buildState({ brief: briefView, script: script.sections, storyboard: storyboardView }) });
   });
 
   // ---- found: the project's other files (§20) ----
@@ -779,8 +801,13 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
 
   app.get("/api/tabs", async (c) => {
     const [project, script, notes] = await Promise.all([store.read("project"), store.read("script"), store.read("notes")]);
-    const b = await brief.view();
-    return c.json({ tabs: tabStates(project, script, notes), brief: { exists: b.exists, status: b.status, changed: b.changed } });
+    const [b, sb] = await Promise.all([brief.view(), storyboard.view()]);
+    return c.json({
+      tabs: tabStates(project, script, notes),
+      brief: { exists: b.exists, status: b.status, changed: b.changed },
+      storyboard: { exists: sb.exists, shots: sb.total, approved: sb.approved, changed: sb.changed },
+      build: buildState({ brief: b, script: script.sections, storyboard: sb }),
+    });
   });
 
   // ---- brief: brief.md is the file of record (§24 step 2) ----
@@ -789,6 +816,14 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     if (!Number.isInteger(index) || index < 0) throw new InvalidError("Section index must be a whole number from 0");
     const b = await body(c, BriefSectionBody);
     return c.json({ brief: await brief.setSection(index, b.heading, b.text, b.hash) });
+  });
+
+  // ---- storyboard: storyboard.md is the file of record (§24.12) ----
+  app.put("/api/storyboard/shots/:index", async (c) => {
+    const index = Number(c.req.param("index"));
+    if (!Number.isInteger(index) || index < 0) throw new InvalidError("Shot index must be a whole number from 0");
+    const b = await body(c, StoryboardShotBody);
+    return c.json({ storyboard: await storyboard.setShot(index, b.heading, { description: b.description, direction: b.direction, status: b.status }, b.hash) });
   });
 
   app.put("/api/brief/status", async (c) => {
@@ -886,6 +921,8 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     // before formats (a formats call was refused above).
     const size = read && isPictureSize(read.width, read.height) ? read : null;
     const formatWarnings: string[] = [];
+    // §24.12: the storyboard's shots, read before the write so the write itself waits for nothing.
+    const planned = await storyboard.cutShots();
     let lockedVersion: string | null = null;
     let autoProxy = false;
     let films = 1;
@@ -909,6 +946,11 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
         }
         if (added.warning) formatWarnings.push(added.warning);
       }
+      // A film's first cut starts with the storyboard's shots, once (never recomputed). Those at or past the cut's end are left out.
+      if (planned.length && out.video.versions.length === 1 && out.version.shots.length === 0) {
+        const reachable = planned.filter((s) => out.version.duration === null || s.start < out.version.duration);
+        if (reachable.length) setShots(p, out.video.id, out.version.id, reachable);
+      }
       lockedVersion = out.video.lockedVersion;
       autoProxy = p.autoProxy;
       films = p.videos.length;
@@ -929,7 +971,9 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
       proxy.proxyReason = reason;
       if (autoProxy && !jobs.isClosing) proxy.proxyJob = jobs.start(result.video.id, result.version.id);
     }
-    const warnings = formatWarnings.length ? { formatWarnings } : {};
+    // §24.12: a soft nudge, never a refusal: the plan (brief, script, storyboard) is not all approved yet.
+    const planNote = planWarning(await planBuild());
+    const warnings = { ...(formatWarnings.length ? { formatWarnings } : {}), ...(planNote ? { planWarning: planNote } : {}) };
     if (lockedVersion) return c.json({ ...result, ...proxy, ...warnings, warning: `Picture is locked at ${lockedVersion}` }, 201);
     return c.json({ ...result, ...proxy, ...warnings }, 201);
   });
