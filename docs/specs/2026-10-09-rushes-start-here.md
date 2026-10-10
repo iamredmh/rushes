@@ -1,6 +1,6 @@
 # Rushes: start here (§24)
 
-Status: DRAFT, 9 October 2026. Red accepted the recommendations in 24.9 the same day and asked for a mockup (`2026-10-09-rushes-start-here-mockup.html`, six states to click through). Step 1 of 24.10 is built (see there); the mockup is waiting for Red's OK before steps 2 and 3. This file extends `2026-10-02-rushes-design.md` and follows §23 (sound-effects cue layers). The number is provisional.
+Status: DRAFT, 9 October 2026. Red accepted the recommendations in 24.9 the same day and asked for a mockup (`2026-10-09-rushes-start-here-mockup.html`, six states to click through). Step 1 of 24.10 is built (see there). On 10 October Red asked for Brief, Script and Storyboard to sit under one Planning tab with a dropdown, so the other tabs are not overshadowed; the mockup and this spec now show that, and the mockup is waiting for Red's OK before steps 2 and 3. This file extends `2026-10-02-rushes-design.md` and follows §23 (sound-effects cue layers). The number is provisional.
 
 ## 24.1 The problem
 
@@ -30,21 +30,21 @@ Nothing after the gate changes. A cut that arrives inherits the approved shots, 
 
 ## 24.3 Decisions (proposed)
 
-1. **Two new tabs at the front: Brief and Storyboard.** Order becomes Brief, Script, Storyboard, Picture, Voiceover, Music, Sound effects, Mix, Assets. Script sits between them because Red writes the script first and then draws it (pipeline order in `CLAUDE.md`).
+1. **One Planning tab holds Brief, Script and Storyboard** (changed 10 October 2026, at Red's request). Click it and a menu drops down with the three, in workflow order. Script moves into it from its own tab; Brief and Storyboard are new. Planning is not yet a habit for the people it is for and must not outweigh the stages they use every day, so the other tabs (Picture, Voiceover, Music, Sound effects, Mix, Assets) stay exactly as they are and the new work costs one tab. Planning sits first, where the work happens. The tab keys do not change: `1` opens Planning on the page last used (Script, the old `1`, by default) and `2` to `7` stay Picture to Assets.
 2. **The agent never approves.** The user approves the brief, each script section and each storyboard shot in the dashboard only, the same rule as picks and picture lock. No tool or CLI command sets an approval.
-3. **The gate is soft.** `rushes_status` reports `build: { ready, waitingOn }`, the header shows a "Ready to build" chip, and `rushes_add_version` replies with a `warning` when the plan is not approved. There is a precedent: a cut registered on a locked video already carries a warning. Rushes cannot stop an agent and should not pretend to. The user can say "just build it".
+3. **The gate is soft.** `rushes_status` reports `build: { ready, waitingOn }`, the Planning tab shows the gate (three dots for brief, script and storyboard, then a green check when all three are approved) and its menu holds Ready to build with a prompt to copy, and `rushes_add_version` replies with a `warning` when the plan is not approved. There is a precedent: a cut registered on a locked video already carries a warning. Rushes cannot stop an agent and should not pretend to. The user can say "just build it".
 4. **The brief is short.** Working title, what it is for in one sentence, audience, length target, formats wanted (ratios), tone and references, must include and must avoid, and what it will be built with (free text, may be blank). Seven short fields, not a form of thirty. The agent drafts it from the interview; the user edits it in the page.
 5. **A storyboard shot is a Shot with a description and a still.** Same `name`, `tag` and ordering as §14.4, plus `length` (planned seconds), `description`, optional `frame` (an image file registered as an asset) and a status: draft, approved or flagged, like script sections. The plan lives on the film, before any version exists.
 6. **Shots carry forward.** When the film's first version is registered it starts with the plan's shots, laid out by cumulative length. After that, `rushes_set_shots` moves them to real timings as today. Planned and actual are not compared in this section.
 7. **Rushes does not generate stills.** The agent makes frames with whatever tool it uses and registers them (`rushes_add_file`, kind `image`). §3's out-of-scope line stands.
 8. **Questions are few and always recommend.** The skill tells the agent to ask only what changes the film, to give a recommended answer with its trade-off ("30 seconds fits a feed, 60 leaves room for the demo"), and to end with the next step.
-9. **Existing projects are untouched.** A project that began with a cut keeps working. Its Brief and Storyboard tabs are locked and explain themselves like any other locked tab (§19.1), with a copy-prompt, never a nag.
+9. **Existing projects are untouched.** A project that began with a cut keeps working. Its Planning menu shows Script (when it has one), with Brief and Storyboard locked and explained like any other locked tab (§19.1), with a copy-prompt, never a nag. No marks on the tab, no gate.
 
 ## 24.4 What each new tab shows
 
 - **Brief.** One page. Each field is the agent's draft on the left and the user's version on the right, the way Script rows work, so an edit is visible to the agent. One **Approve** at the bottom. A short list of reference files (brand folder, screenshots, a competitor film) that the agent attached.
 - **Storyboard.** A row of shot cards: `01 · 3.0 s`, name, tag, the still, then the description. Click a card to open it large. Notes down the right as on other tabs; a note's `on` is `shot/<n>`. Each card has a tick to approve. A strip at the foot totals the planned length against the brief's target.
-- **Header chip.** Shows what is still open ("Brief, 2 script lines"), and becomes "Ready to build" with **Copy prompt for your agent** when nothing is.
+- **Planning tab and menu.** While a plan is in progress the tab carries three small dots (brief, script, storyboard), each empty, half or full, and a green check when all three are approved; otherwise a dot when a page has something open. The menu has one row per page, each with a green check, a half or empty dot, or a lock when there is nothing in it yet. Once all three are approved, a Ready to build line and **Copy prompt for your agent** sit under the rows. When a cut exists the marks and the line go away.
 
 Layout, labels and icons follow Red's rules: Rushes' own style, icon buttons with tooltips, very few labels. A mockup comes before any plan.
 
@@ -103,22 +103,22 @@ The README's first instruction becomes: "Tell your agent: start a new film in Ru
 - Comparing planned shots with the real cut.
 - A brief shared across several films in one project.
 
-## 24.9 Questions, and what Red chose (9 October 2026)
+## 24.9 Questions, and what Red chose (9 and 10 October 2026)
 
-Red went with the recommendation on each.
+On 9 October Red went with the recommendation on each. On 10 October he changed the first two (marked below): the three planning pages go under one Planning tab with a dropdown, because he does not often plan in Rushes yet and does not want it to overshadow Picture, Voiceover, Music and the other existing tabs.
 
-1. **Two tabs, Brief and Storyboard.** Not one "Plan" tab: the script sits between them.
-2. **The tab keys are renumbered 1 to 9** in workflow order. Assets moves from 7 to 9. README and the shortcut list change with it.
-3. **The gate is soft:** a chip, `build.ready` in `rushes_status`, and a warning from `rushes_add_version`.
+1. **One Planning tab with a dropdown: Brief, Script, Storyboard** (10 October; replaces two new tabs).
+2. **The tab keys do not change** (10 October; replaces renumbering to 1 to 9). `1` is Planning, on the page last used (Script by default), and `2` to `7` stay Picture to Assets. A mockup control also shows Planning next to Assets, where the keys would follow the displayed order; Red has not chosen it.
+3. **The gate is soft:** marks on the Planning tab, `build.ready` in `rushes_status`, and a warning from `rushes_add_version`.
 4. **The seven brief rows stay as drafted,** with brand and voice files as the `references` list.
-5. **Existing projects show Brief and Storyboard locked and explained,** with a copy-prompt, never a nag.
+5. **Existing projects show Brief and Storyboard locked and explained in the Planning menu,** with a copy-prompt, never a nag.
 
 ## 24.10 Build order
 
 Each step is usable on its own and ends at Red's OK before the next.
 
 1. **Front door, no UI.** Built: `rushes new <folder>` (folders, project, a `brief.md` template that Assets already finds), the "Starting a film" section in the skill and `AGENTS.md`, and a README that leads with starting a film. Approval is the user saying so in chat; the agent then changes the `Status:` line in `brief.md` or `storyboard.md`. The folder argument is required (a bare `rushes new` prints its usage), and a folder that is already a project is refused.
-2. **Brief tab.** The `brief` data, `rushes_set_plan` for the brief, approval in the dashboard, the header chip.
+2. **Brief tab.** The `brief` data, `rushes_set_plan` for the brief, approval in the dashboard, the Planning tab with its menu (Script moves into it).
 3. **Storyboard tab.** The `plan` data, shot cards, notes on shots, approvals, `build.ready`, and shots carried into the first version.
 
 Tests as elsewhere: unit for the schema, merge and approval rules (the agent cannot approve); Playwright for each tab in Chromium and WebKit; a check that an old project loads unchanged.
