@@ -1,6 +1,6 @@
 # Rushes: start here (§24)
 
-Status: DRAFT, 9 October 2026. Red accepted the recommendations in 24.9 the same day and asked for a mockup (`2026-10-09-rushes-start-here-mockup.html`, six states to click through). Step 1 of 24.10 is built (see there). On 10 October Red asked for Brief, Script and Storyboard to sit under one Planning tab with a dropdown, so the other tabs are not overshadowed; the mockup and this spec now show that, and the mockup is waiting for Red's OK before steps 2 and 3. This file extends `2026-10-02-rushes-design.md` and follows §23 (sound-effects cue layers). The number is provisional.
+Status: DRAFT, 9 October 2026. Red accepted the recommendations in 24.9 the same day and asked for a mockup (`2026-10-09-rushes-start-here-mockup.html`, six states to click through). Step 1 of 24.10 is built (see there). On 10 October Red asked for Brief, Script and Storyboard to sit under one Planning tab with a dropdown, so the other tabs are not overshadowed; the mockup and this spec now show that, and the mockup is waiting for Red's OK before step 3. Step 2 is built (24.11). This file extends `2026-10-02-rushes-design.md` and follows §23 (sound-effects cue layers). The number is provisional.
 
 ## 24.1 The problem
 
@@ -52,6 +52,8 @@ Layout, labels and icons follow Red's rules: Rushes' own style, icon buttons wit
 
 All additions are optional with defaults, so every existing project loads unchanged.
 
+**Step 2 changed this (24.11).** The brief is not stored in project data: `brief.md` in the project folder is the file of record, and Rushes keeps only `.rushes/brief.json` (the agent's last text and the hash it last saw). `BriefSchema` below is superseded. `PlanSchema`, the storyboard, is unchanged and is decided in step 3.
+
 ```ts
 // VideoSchema gains
 brief: BriefSchema | null  = null
@@ -78,7 +80,7 @@ New or changed:
 
 | Tool | Does |
 |---|---|
-| `rushes_set_plan` | Sets the brief fields and/or the storyboard shots for a film. Merges by field and by shot `n`. Cannot set an approval |
+| `rushes_set_plan` | Sets the storyboard shots for a film (step 3). The brief is `brief.md`, which the agent writes directly (24.11). Merges by shot `n`. Cannot set an approval |
 | `rushes_get_plan` | The brief, the shots, their statuses and the user's edits |
 | `rushes_status` | Gains `build: { ready, waitingOn }` |
 | `rushes_add_version` | Gains a `warning` when the plan is not approved |
@@ -118,9 +120,21 @@ On 9 October Red went with the recommendation on each. On 10 October he changed 
 Each step is usable on its own and ends at Red's OK before the next.
 
 1. **Front door, no UI.** Built: `rushes new <folder>` (folders, project, a `brief.md` template that Assets already finds), the "Starting a film" section in the skill and `AGENTS.md`, and a README that leads with starting a film. Approval is the user saying so in chat; the agent then changes the `Status:` line in `brief.md` or `storyboard.md`. The folder argument is required (a bare `rushes new` prints its usage), and a folder that is already a project is refused.
-2. **Brief tab.** The `brief` data, `rushes_set_plan` for the brief, approval in the dashboard, the Planning tab with its menu (Script moves into it).
+2. **Brief tab (built; see 24.11).** The Planning tab with its menu (Script moves into it), the Brief page over `brief.md`, approval in the dashboard.
 3. **Storyboard tab.** The `plan` data, shot cards, notes on shots, approvals, `build.ready`, and shots carried into the first version.
 
 Tests as elsewhere: unit for the schema, merge and approval rules (the agent cannot approve); Playwright for each tab in Chromium and WebKit; a check that an old project loads unchanged.
 
 **Step 1b: picking up a film that is already underway (10 October 2026, built).** Red often starts briefing in the chat, rambles into ideas, produces some stills or a script, and only then opens Rushes. Rushes cannot see the chat, so reading it is the agent's job. The skill and `AGENTS.md` gain "Picking up a film that's underway": the agent writes `brief.md` from the conversation (what the user said, `(inferred)` where it guessed, `Not discussed yet.` where the chat never went, ideas left open under a new **Open questions** section), registers the script and any renders or audio it made, copies stills into `storyboard/` and registers them as images (never moves them), says what it filled in and what it could not find, and says so plainly when the chat is one it cannot see. `brief.md` therefore has nine sections. Not built, and proposed for later steps: the folder scan looking for images (stills in folders such as `storyboard` or `frames`, offered under Assets › Found, never imported without the user's say-so; best with the Storyboard page in step 3), and making `brief.md` the file of record for the Brief page in step 2, so anything written before Rushes appears there and edits write back to the file. That second item would replace the brief-in-project-data design in 24.5, so it needs Red's decision.
+
+## 24.11 Step 2 as built (10 October 2026)
+
+- **`brief.md` is the file of record.** The Brief page reads it and writes it; the agent and any editor use the same file. Rushes keeps `.rushes/brief.json`: `baseline` (the file's text the last time someone other than the dashboard wrote it, which is the "Current" column) and `seen` (the hash of the text Rushes last looked at). A poll every half second notices an outside change, makes that text the new Current, and announces it, so the page follows without a reload. Before Rushes has looked, the file itself counts as the agent's version.
+- **Sections are free Markdown, one text box each.** The page splits the file on `## ` headings (not inside a code fence). A save replaces only that section's body and leaves every other byte alone, keeping the file's line endings. The mockup's number box and format chips are not built.
+- **A save carries the file's hash.** If the file changed since the page loaded, the server answers `409 brief_changed` and writes nothing; the page takes the new hash and tries once more, then says so.
+- **Approval is the file's `Status:` line.** Pressing **Approve brief** sets it to `approved`; editing any row afterwards sets it back to `draft`. Rushes cannot stop an agent writing the line itself, so the page shows what the file says.
+- **Not a review stage.** No notes, no batches. **Send to agent** on the Brief page builds a message (the status, and the sections the user changed) and records nothing.
+- **Planning is one tab with a menu** holding Brief and Script. Key `1` opens the page last used (Script until Brief is opened); `2` to `7` are unchanged. While a project has a brief and no cut, the tab carries a mark for the brief and one for the script; the Storyboard row and its mark arrive in step 3.
+- **State and tools.** `GET /api/state` carries `brief`; `GET /api/tabs`, and so `rushes_status`, carry `brief: { exists, status, changed }`; `rushes status` prints a brief line. No new tools (twenty-two).
+- **Limits.** A `brief.md` that is a folder, a link (never followed) or over 1,000,000 bytes counts as no brief.
+- **Not built:** structured editors for length and formats, a Change Log area for the brief, detecting an agent that approves for itself.

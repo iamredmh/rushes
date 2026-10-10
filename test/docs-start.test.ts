@@ -64,6 +64,32 @@ describe("starting a film: what the agent docs promise (§24)", () => {
     expect(description).toMatch(/started in the chat/i);
   });
 
+  it.each(["AGENTS.md", "skills/rushes/SKILL.md"])("%s says the user approves the brief on the Brief page, and the agent never touches the status line (§24 step 2)", (file) => {
+    const text = read(file);
+    expect(text).toContain("Planning › Brief");
+    expect(text).toContain("**Approve brief**");
+    expect(text).toContain("Rushes then sets `Status: approved` in the file itself");
+    expect(text).toMatch(/never approve it yourself or change that line/i);
+    expect(text).toContain("keep their wording");
+    expect(text).toContain("`rushes_status` reports the brief's status as `brief`");
+    expect(text).toContain("Planning › Script");
+    // The old instruction, to flip the line once the user says yes in chat, is gone for the brief.
+    expect(text).not.toContain("When they say in chat that it's approved, change the line to `Status: approved`");
+  });
+
+  it("README describes the Planning tab and its keys (§24 step 2)", () => {
+    const text = read("README.md");
+    expect(text).toContain("the first, Planning, is a menu that holds Brief and Script");
+    expect(text).toContain("### Planning: the brief, then your edits beside the agent's lines");
+    expect(text).toContain("Rushes writes it into the file");
+    expect(text).toContain("**1–7** switch tab (1: Planning, which opens the page you used last; 7: Assets)");
+  });
+
+  it("rushes_status says what it now reports about the brief", () => {
+    const src = read("src/mcp/tools.ts");
+    expect(src).toContain("Also `brief`: whether brief.md exists");
+  });
+
   it("AGENTS.md lists `rushes new` in the commands for agents without MCP", () => {
     expect(read("AGENTS.md")).toContain("npx -y rushes new my-film --no-browser");
   });
