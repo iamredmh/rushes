@@ -71,10 +71,38 @@ describe("starting a film: what the agent docs promise (§24)", () => {
     expect(text).toContain("Rushes then sets `Status: approved` in the file itself");
     expect(text).toMatch(/never approve it yourself or change that line/i);
     expect(text).toContain("keep their wording");
-    expect(text).toContain("`rushes_status` reports the brief's status as `brief`");
     expect(text).toContain("Planning › Script");
     // The old instruction, to flip the line once the user says yes in chat, is gone for the brief.
     expect(text).not.toContain("When they say in chat that it's approved, change the line to `Status: approved`");
+  });
+
+  it.each(["AGENTS.md", "skills/rushes/SKILL.md"])("%s tells the agent the storyboard's shot format, that Rushes sets each shot's status, and how the gate and the first cut behave (§24.12)", (file) => {
+    const text = read(file);
+    expect(text).toContain("## Shot 02 · Drop a folder");
+    for (const line of ["Tag: ACTION", "Length: 5", "Still: storyboard/shot-02.png", "Status: draft", "Direction:"]) expect(text).toContain(line);
+    expect(text).toContain("Planning › Storyboard");
+    expect(text).toContain("Rushes sets `Status: approved` itself: never set or change a shot's status yourself");
+    expect(text).toContain("`rushes_status` reports `build`");
+    expect(text).toContain("`planWarning`");
+    expect(text).toContain("a nudge, not a refusal");
+    expect(text).toContain("a film's first cut starts with the storyboard's shots by itself");
+    // The old instruction, a table approved in chat, is gone.
+    expect(text).not.toContain("then a table with one row per shot");
+    expect(text).not.toContain("The user approves in chat; then set `Status: approved`");
+  });
+
+  it("README describes the Storyboard page and the Ready to build line (§24.12)", () => {
+    const text = read("README.md");
+    expect(text).toContain("**Storyboard** works the same way over `storyboard.md`");
+    expect(text).toContain("**Ready to build**");
+  });
+
+  it("the MCP descriptions say what rushes_status now reports and what rushes_add_version warns (§24.12)", () => {
+    const src = read("src/mcp/tools.ts");
+    expect(src).toContain("`storyboard`: whether storyboard.md exists");
+    expect(src).toContain("`waitingOn`");
+    expect(src).toContain("`planWarning`");
+    expect(src).toContain("A film's first cut also starts with the storyboard's shots.");
   });
 
   it("README describes the Planning tab and its keys (§24 step 2)", () => {

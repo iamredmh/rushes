@@ -198,7 +198,7 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     "rushes_status",
     {
       title: "Rushes status",
-      description: "Which tabs are unlocked and how many open items each has. Also `brief`: whether brief.md exists, its status (draft or approved, set when the user presses Approve) and how many sections the user changed.",
+      description: "Which tabs are unlocked and how many open items each has. Also `brief`: whether brief.md exists, its status (draft or approved, set when the user presses Approve) and how many sections the user changed; `storyboard`: whether storyboard.md exists, how many shots there are, how many are approved and how many the user changed; and `build`: whether planning has begun (`started`), whether the brief, every script section and every shot are approved (`ready`), and what it is `waitingOn`.",
       inputSchema: { project },
     },
     safe(async ({ project }) => (await ctx.client(project)).get("/api/tabs")),
@@ -209,7 +209,7 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     {
       title: "Add a cut",
       description:
-        "Register a new cut of a video. The first cut creates the video. Returns the new version id (v1, v2 ...). When the cut is likely to play badly in a browser (4K, over 1.5 GB, or a codec such as ProRes), it also returns proxySuggested: true and proxyReason; Picture offers the user a proxy. If the project has autoProxy on, proxyJob is the proxy already being made. Give every cut a short `label` (" + LABEL_MAX + " characters at most) saying what changed, e.g. \"launch 1.45x slower\", and put the detail in `note`: the version list shows the label. Pass `formats` to register the other shapes of the same cut in one call; the reply then carries `formatWarnings` (a list, one entry for each shape more than 0.1 s off the cut's length; `warning` here means Picture is locked).",
+        "Register a new cut of a video. The first cut creates the video. Returns the new version id (v1, v2 ...). When the cut is likely to play badly in a browser (4K, over 1.5 GB, or a codec such as ProRes), it also returns proxySuggested: true and proxyReason; Picture offers the user a proxy. If the project has autoProxy on, proxyJob is the proxy already being made. Give every cut a short `label` (" + LABEL_MAX + " characters at most) saying what changed, e.g. \"launch 1.45x slower\", and put the detail in `note`: the version list shows the label. Pass `formats` to register the other shapes of the same cut in one call; the reply then carries `formatWarnings` (a list, one entry for each shape more than 0.1 s off the cut's length; `warning` here means Picture is locked). When the plan (brief, script, storyboard) has been started but is not all approved, it carries `planWarning` saying what is outstanding: a nudge, never a refusal. A film's first cut also starts with the storyboard's shots.",
       inputSchema: {
         project,
         video: z.string().describe("Video id or name, e.g. \"Hero 60s\"."),

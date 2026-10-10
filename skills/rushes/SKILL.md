@@ -17,10 +17,23 @@ When the user wants a new video ("start a new film", "make a launch video", "a n
 2. **Interview, briefly.** Ask at most three questions, and only ones whose answer changes the film: length and formats, who it is for, tone. Give each a recommended answer with its trade-off ("30 seconds fits a feed; 60 leaves room for the demo"). Never send a list of ten.
 3. **Write `brief.md`.** Fill every section and leave `Status: draft`. Tell the user to open Planning › Brief in Rushes, change any row and press **Approve brief**. Rushes then sets `Status: approved` in the file itself. Never approve it yourself or change that line, and if they say it's approved in chat while the file still says `draft`, ask them to press Approve. When they press **Send to agent** on the Brief page, read `brief.md` again and keep their wording: your last version is shown as Current, so read the file before you rewrite it.
 4. **Script.** Add it with `rushes_set_script`. The user edits and approves each section in Planning › Script. Read `rushes_get_script` and wait until every section is `approved`.
-5. **Storyboard.** Write `storyboard.md` in the project root: `Status: draft`, then a table with one row per shot (number, name, tag, length in seconds, what happens). Make a still for each shot if your tools can, save them in `storyboard/`, and register each with `rushes_add_file` (`kind: "image"`). The user approves in chat; then set `Status: approved`. Never approve it yourself.
-6. **Build only when all three are approved** (`rushes_status` reports the brief's status as `brief`). If the user says "just build it", do. Build in whatever tool suits the film, and name each scene after its planned shot. Then register the cut with `rushes_add_version` and the planned shots with `rushes_set_shots` (each `start` is the running total of the lengths before it), so Picture notes carry their shot.
+5. **Storyboard.** Write `storyboard.md` in the project root: a `# Storyboard: <film>` title, then one section per shot, in this shape:
 
-The brief is `brief.md`, read and approved on the Brief page; the storyboard is a plain Markdown file the user reads under Assets and approves in chat.
+   ```markdown
+   ## Shot 02 · Drop a folder
+   Tag: ACTION
+   Length: 5
+   Still: storyboard/shot-02.png
+   Status: draft
+   Direction:
+
+   A folder of clips lands in the window from the right.
+   ```
+
+   `Length` is planned seconds (they become the cut's shot starts), `Still` is a project-relative picture (png, jpg, webp, gif or avif), best saved under `storyboard/`, and `Direction` is the user's line. Make a still for each shot if your tools can; the Storyboard page shows any still the file names, registered or not. The user reads and approves each shot in Planning › Storyboard, and Rushes sets `Status: approved` itself: never set or change a shot's status yourself. When they press **Send to agent** there, read `storyboard.md` again, keep their wording, and update the still if what happens has changed.
+6. **Build only when all three are approved** (`rushes_status` reports `build`: `ready`, and what it is `waitingOn`). If the user says "just build it", do. Build in whatever tool suits the film, and name each scene after its planned shot. Then register the cut with `rushes_add_version`: a film's first cut starts with the storyboard's shots by itself (each `start` the running total of the lengths before it), so call `rushes_set_shots` only when the real timings differ. While the plan isn't all approved the reply carries `planWarning`: a nudge, not a refusal.
+
+The brief and the storyboard are Markdown files the user reads and approves on their own pages under Planning.
 
 ## Picking up a film that's underway
 
@@ -28,7 +41,7 @@ When the user asks to open or review a film they started in the chat, or the pro
 
 1. **Open the project**, or create it where the work is: `npx -y rushes new <folder> --no-browser` (it never overwrites a `brief.md` and leaves every other file alone), then `rushes_open`.
 2. **Write `brief.md` from the conversation.** Fill each section from what the user actually said. Mark anything you had to infer with `(inferred)` so they can check it. Where the chat never touched a section, write `Not discussed yet.` rather than inventing something. Put ideas they floated but didn't settle, and anything you couldn't answer, under Open questions. Keep `Status: draft`, and never approve it yourself.
-3. **Register what you already made.** A script from the chat goes in with `rushes_set_script` (the user approves it in Planning › Script). Copy storyboard stills and reference images into a `storyboard/` folder in the project, register each copy with `rushes_add_file` (`kind: "image"`), and list the shots in `storyboard.md` with `Status: draft`; copy them, never move them, so the originals stay where the user's other tools expect them. Renders, voice reads and music beds go in as usual (`rushes_add_version`, `rushes_add_variant`). Run `rushes_scan` for audio and cuts in the folder; it doesn't look for images, so the stills are yours to register: you know where you saved them.
+3. **Register what you already made.** A script from the chat goes in with `rushes_set_script` (the user approves it in Planning › Script). Copy storyboard stills into a `storyboard/` folder in the project: copy them, never move them, so the originals stay where the user's other tools expect them. Write the shots into `storyboard.md` in the shot format above, each with `Status: draft` and a `Still:` line naming its copy (the Storyboard page shows any still the file names). Register other reference images with `rushes_add_file` (`kind: "image"`). Renders, voice reads and music beds go in as usual (`rushes_add_version`, `rushes_add_variant`). Run `rushes_scan` for audio and cuts in the folder; it doesn't look for images, so naming the stills in `storyboard.md` (or registering other images) is yours to do: you know where you saved them.
 4. **Say what you filled in:** what came from the user's words, what you inferred, what you registered, and what you looked for and couldn't find ("I found four of the six stills"). Ask them to read `brief.md` under Assets › Scripts & docs.
 5. **If the chat is one you can't see** (another session, another tool), say so and ask the user to paste it or point you to it. Don't reconstruct a brief from memory of a conversation you didn't have.
 
