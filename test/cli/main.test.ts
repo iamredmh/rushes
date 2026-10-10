@@ -640,6 +640,36 @@ describe("cli", () => {
     expect(a.out.find((l) => l.startsWith("picture"))).toMatch(/open/);
     await s.close();
   });
+
+  it("status adds a brief line when brief.md exists: its status, and how many sections were changed", async () => {
+    const { root } = await tmpProject();
+    await writeFile(join(root, "brief.md"), "# Brief: X\n\nStatus: draft\n\n## Purpose\nA\n");
+    const s = await startServer(root, { port: 0 });
+    try {
+      const a = io(root);
+      expect(await main(["status"], a.x)).toBe(0);
+      expect(a.out.find((l) => l.startsWith("brief"))).toBe("brief    draft");
+      const { brief } = await (await fetch(`${s.url}/api/state`)).json();
+      await fetch(`${s.url}/api/brief/sections/0`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ heading: "Purpose", text: "B", hash: brief.hash }) });
+      const b = io(root);
+      expect(await main(["status"], b.x)).toBe(0);
+      expect(b.out.find((l) => l.startsWith("brief"))).toBe("brief    draft  1 changed");
+    } finally {
+      await s.close();
+    }
+  });
+
+  it("status has no brief line when there is no brief.md", async () => {
+    const { root } = await tmpProject();
+    const s = await startServer(root, { port: 0 });
+    try {
+      const a = io(root);
+      expect(await main(["status"], a.x)).toBe(0);
+      expect(a.out.some((l) => l.startsWith("brief"))).toBe(false);
+    } finally {
+      await s.close();
+    }
+  });
 });
 
 describe("cli setup", () => {

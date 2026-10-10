@@ -3,7 +3,9 @@ import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
 import { BriefService } from "../../src/server/brief.js";
+import { createApp } from "../../src/server/app.js";
 import { briefTemplate } from "../../src/cli/new.js";
+import { hashText } from "../../src/core/brief.js";
 
 const AGENT = `# Brief: Lumen launch film
 
@@ -142,5 +144,52 @@ describe("BriefService", () => {
     } finally {
       stop();
     }
+  });
+});
+
+describe("brief over HTTP", () => {
+  async function app(text: string | null = AGENT) {
+    const s = await setup(text);
+    const server = createApp(s.store, { brief: s.brief });
+    const call = async (method: string, path: string, json?: unknown) => {
+      const res = await server.request(path, { method, headers: json === undefined ? undefined : { "content-type": "application/json" }, body: json === undefined ? undefined : JSON.stringify(json) });
+      return { status: res.status, json: (await res.json()) as any };
+    };
+    return { ...s, call };
+  }
+
+  it("state carries the brief, and tabs carry its summary", async () => {
+    const { call } = await app();
+    const state = await call("GET", "/api/state");
+    expect(state.json.brief).toMatchObject({ exists: true, status: "draft", changed: 0 });
+    expect(state.json.brief.sections).toHaveLength(2);
+    const tabs = await call("GET", "/api/tabs");
+    expect(tabs.json.brief).toEqual({ exists: true, status: "draft", changed: 0 });
+  });
+
+  it("state says there is no brief when there is no file", async () => {
+    const { call } = await app(null);
+    expect((await call("GET", "/api/state")).json.brief).toMatchObject({ exists: false, sections: [] });
+    expect((await call("GET", "/api/tabs")).json.brief).toEqual({ exists: false, status: null, changed: 0 });
+  });
+
+  it("saves a section and sets the status", async () => {
+    const { call, file } = await app();
+    const hash = (await call("GET", "/api/state")).json.brief.hash;
+    const saved = await call("PUT", "/api/brief/sections/0", { heading: "Purpose", text: "Mine.", hash });
+    expect(saved.status).toBe(200);
+    expect(saved.json.brief.sections[0].yours).toBe("Mine.");
+    expect(await file()).toContain("## Purpose\nMine.\n");
+    const approved = await call("PUT", "/api/brief/status", { status: "approved", hash: saved.json.brief.hash });
+    expect(approved.json.brief.status).toBe("approved");
+  });
+
+  it("answers 409 brief_changed for a stale hash, 400 for a bad index or body, 404 with no file", async () => {
+    const { call } = await app();
+    expect((await call("PUT", "/api/brief/sections/0", { heading: "Purpose", text: "x", hash: "stale" })).json.error).toBe("brief_changed");
+    expect((await call("PUT", "/api/brief/sections/-1", { heading: "Purpose", text: "x", hash: "a" })).status).toBe(400);
+    expect((await call("PUT", "/api/brief/sections/0", { heading: "Purpose" })).status).toBe(400);
+    const none = await app(null);
+    expect((await none.call("PUT", "/api/brief/status", { status: "approved", hash: hashText("x") })).status).toBe(404);
   });
 });
