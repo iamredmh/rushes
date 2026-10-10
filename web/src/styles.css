@@ -293,6 +293,39 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .bfoot { display: flex; align-items: center; gap: 14px; margin-top: 6px; }
 .bapprove.approved { color: var(--done); box-shadow: inset 0 0 0 1px var(--done); }
 
+/* §24.12: the Storyboard page: the Script page's rows, with a still beside each. The classes are sb-prefixed: Picture's shot strip owns .shot. */
+.sbhead { display: grid; grid-template-columns: 200px minmax(0, 1fr) minmax(0, 1fr); gap: 16px; padding: 0 20px; color: var(--text-3); font-size: 15px; font-weight: 500; }
+.sbtotal { display: flex; gap: 14px; align-items: center; color: var(--text-2); font-size: 15px; }
+.sbtotal .bar { flex: 1; height: 6px; border-radius: 3px; background: var(--raised); overflow: hidden; }
+.sbtotal .bar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+.sbrow { background: var(--raised); border-radius: var(--r-lg); padding: 16px 20px; display: grid; grid-template-columns: 200px minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; box-shadow: inset 0 0 0 1px transparent; transition: box-shadow 0.12s; }
+.sbrow.changed { box-shadow: inset 0 0 0 1.5px var(--todo); }
+.sbid { display: grid; gap: 8px; }
+.sbstill { display: block; width: 100%; aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden; border: 1px solid var(--line-2); padding: 0; cursor: zoom-in; background: var(--bg); }
+.sbstill img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.nostill { display: grid; place-items: center; width: 100%; height: 100%; color: var(--text-3); font-size: 15px; padding: 8px; text-align: center; }
+.sbmeta { display: flex; gap: 12px; align-items: baseline; font-family: var(--mono); color: var(--text-2); font-size: 15px; }
+.sbmeta b { color: var(--text); }
+.sbtag { margin-left: auto; font-family: inherit; font-size: 15px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); font-weight: 600; }
+.sbrow .cur { padding-top: 2px; }
+.sbname { display: block; color: var(--text); margin-bottom: 4px; font-weight: 500; }
+.sbrow textarea { min-height: 84px; font-size: 16px; line-height: 1.6; overflow: hidden; }
+.sblow { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; }
+.sbdir { flex: 1; background: var(--app); border: 1px solid transparent; border-radius: var(--r); height: 36px; padding: 0 12px; font-size: 15px; color: var(--text); min-width: 0; }
+.sbdir:focus { border-color: var(--accent); outline: none; }
+.sbdir::placeholder { color: var(--text-3); }
+.sblight { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.92); backdrop-filter: blur(8px); display: grid; place-items: center; z-index: 60; cursor: zoom-out; padding: 24px; }
+.sblbx { width: min(900px, 100%); display: grid; gap: 12px; }
+.sbbig { aspect-ratio: 16 / 9; border-radius: 12px; overflow: hidden; border: 1px solid var(--line-2); background: var(--bg); }
+.sbbig img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.sblcap { color: var(--text-2); }
+.sblcap b { color: var(--text); }
+.sblcap p { margin: 6px 0 0; max-width: 70ch; white-space: pre-wrap; }
+.pmarks .pready { width: 18px; height: 18px; color: var(--done); }
+.planready { border-top: 1px solid var(--line); margin-top: 4px; padding: 10px 8px 4px; display: grid; gap: 8px; }
+.planready .rd { display: flex; gap: 8px; align-items: center; color: var(--done); font-weight: 600; font-size: 15px; }
+.planready .rd .ic { width: 18px; height: 18px; }
+
 /* §24: the Planning tab, its menu and its marks. The menu is fixed, not absolute: the tab bar scrolls sideways and would clip it. */
 .plan { display: inline-flex; }
 .tab .chev { width: 14px; height: 14px; margin-left: -2px; opacity: 0.6; }
@@ -514,7 +547,8 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 @media (max-width: 680px) {
   :root { --body-pad: 16px; }
   .head { padding: 12px 14px; }
-  .sgrid, .sfoot, .bgrid { grid-template-columns: minmax(0, 1fr); }
+  .sgrid, .sfoot, .bgrid, .sbrow { grid-template-columns: minmax(0, 1fr); }
+  .sbhead { display: none; }
   .scols { display: none; }
   .when { grid-auto-flow: column; justify-content: start; align-items: center; gap: 12px; }
 }

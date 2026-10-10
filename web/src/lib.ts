@@ -1,5 +1,5 @@
 // Pure helpers for the dashboard. No DOM, so they're unit-tested in Node.
-import type { Asset, AssetKind, BriefSectionView, BriefView, Cue, FoundCounts, FoundItem, FoundKind, FoundSummary, Lane, LaneStage, LoudnessResult, Mark, Note, Project, ProxyEvent, ProxyJob, Section, Shot, Stage, TabState, Video, Version } from "./types.js";
+import type { Asset, AssetKind, BriefSectionView, BriefView, Cue, FoundCounts, FoundItem, FoundKind, FoundSummary, Lane, LaneStage, LoudnessResult, Mark, Note, Project, ProxyEvent, ProxyJob, Section, Shot, Stage, StoryboardView, TabState, Video, Version } from "./types.js";
 export type { FoundItem } from "./types.js";
 
 /** 72.4 -> "1:12.40" (minutes, seconds, hundredths). */
@@ -155,20 +155,25 @@ export function agentPrompt(stage: Stage | "assets", projectName: string, filmNa
   return PROMPT_TEMPLATE[stage](projectName, filmName);
 }
 
-/** §24: Brief and Script share one Planning tab. Brief is a dashboard page (brief.md), not a review stage. */
-export type PlanPage = "brief" | "script";
-export const PLAN_PAGES: readonly PlanPage[] = ["brief", "script"];
-export const isPlanPage = (view: string | null): view is PlanPage => view === "brief" || view === "script";
+/** §24: Brief, Script and Storyboard share one Planning tab. Brief and Storyboard are dashboard pages over files, not review stages. */
+export type PlanPage = "brief" | "script" | "storyboard";
+export const PLAN_PAGES: readonly PlanPage[] = ["brief", "script", "storyboard"];
+export const isPlanPage = (view: string | null): view is PlanPage => view === "brief" || view === "script" || view === "storyboard";
 
 /** How far one planning step has got, for the marks on the Planning tab. */
 export type Progress = "none" | "part" | "ok";
 
-/** The brief is `ok` once approved; the script is `ok` when every section is, `part` when some are. */
-export function planProgress(brief: Pick<BriefView, "exists" | "status">, sections: Pick<Section, "status">[]): { brief: Progress; script: Progress } {
+/** The brief is `ok` once approved; the script and the storyboard are `ok` when every part is, `part` when some are. */
+export function planProgress(
+  brief: Pick<BriefView, "exists" | "status">,
+  sections: Pick<Section, "status">[],
+  storyboard: Pick<StoryboardView, "total" | "approved">,
+): { brief: Progress; script: Progress; storyboard: Progress } {
   const approved = sections.filter((s) => s.status === "approved").length;
   return {
     brief: brief.exists && brief.status === "approved" ? "ok" : "none",
     script: sections.length > 0 && approved === sections.length ? "ok" : approved > 0 ? "part" : "none",
+    storyboard: storyboard.total > 0 && storyboard.approved === storyboard.total ? "ok" : storyboard.approved > 0 ? "part" : "none",
   };
 }
 
@@ -179,9 +184,26 @@ export const LOCKED_BRIEF = {
   ask: "a brief",
 };
 
+/** The locked Storyboard page's copy. */
+export const LOCKED_STORYBOARD = {
+  what: "See each shot as a still, rewrite what happens, and approve it before anything is built.",
+  unlocks: "Your agent sketches the shots once the script is approved.",
+  ask: "a storyboard",
+};
+
 /** The locked Brief page's "Copy prompt for your agent". */
 export function briefPrompt(projectName: string, filmName: string | null): string {
   return `In Rushes project "${projectName}", start a brief${filmClause("for", filmName)}: ask me up to three questions, each with a recommended answer, then write brief.md (see "Starting a film" in AGENTS.md).`;
+}
+
+/** The locked Storyboard page's "Copy prompt for your agent". */
+export function storyboardPrompt(projectName: string, filmName: string | null): string {
+  return `In Rushes project "${projectName}", sketch the shots${filmClause("for", filmName)} from the approved script: write storyboard.md with one "## Shot 01 · Name" section per shot (Tag, Length, Still and Status: draft lines, then what happens), make a still for each, and save them under storyboard/ (see "Starting a film" in AGENTS.md).`;
+}
+
+/** What the Planning menu's "Ready to build" copies once the plan is approved. */
+export function readyPrompt(projectName: string, filmName: string | null): string {
+  return `The plan is approved in Rushes project "${projectName}"${filmClause("for", filmName)}. Build the film from brief.md and storyboard.md, name each scene after its planned shot, and register the cut with rushes_add_version.`;
 }
 
 /** What Send to agent says from the Brief page. Nothing is recorded: the file itself is the record. */
@@ -192,6 +214,23 @@ export function briefSendPrompt(projectName: string, filmName: string | null, br
   if (edited.length) parts.push(`I changed ${edited.length === 1 ? "this section" : "these sections"} in brief.md: ${edited.join(", ")}. Read the file again before you go on, and keep my wording.`);
   parts.push(approved ? "Next: write the script with rushes_set_script." : "Don't build anything until I approve it.");
   return parts.join(" ");
+}
+
+/** What Send to agent says from the Storyboard page: how many shots are approved, and which ones I changed. */
+export function storySendPrompt(projectName: string, filmName: string | null, board: Pick<StoryboardView, "approved" | "total"> & { shots: { n: number; name: string; changed: boolean }[] }): string {
+  const edited = board.shots.filter((s) => s.changed).map((s) => `Shot ${String(s.n).padStart(2, "0")} · ${s.name}`);
+  const parts = [`In Rushes project "${projectName}"${filmClause("for", filmName)}, ${board.approved} of ${board.total} shots in storyboard.md are approved.`];
+  if (edited.length) parts.push(`I changed ${edited.length === 1 ? "this shot" : "these shots"}: ${edited.join(", ")}. Read storyboard.md again before you go on, keep my wording, and update the still${edited.length === 1 ? "" : "s"} if what happens has changed.`);
+  parts.push(board.approved === board.total && board.total > 0 ? "Next: build the film." : "Don't build anything until I approve them all.");
+  return parts.join(" ");
+}
+
+/** The film's length in seconds as the brief states it ("Length: 30 seconds" in its Length section), or null when it does not. */
+export function briefTargetSeconds(brief: Pick<BriefView, "sections">): number | null {
+  const section = brief.sections.find((s) => /^length/i.test(s.heading));
+  const m = section ? /Length:\s*(\d+(?:\.\d+)?)/i.exec(section.yours) : null;
+  const n = m ? Number(m[1]) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 /** The tab to open first: Picture when there is a cut, else the brief when there is one, else the first unlocked tab. */
