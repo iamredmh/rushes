@@ -53,6 +53,8 @@ Already have a film? Tell your agent:
 
 > Use github.com/iamredmh/rushes as my review tool for video, voiceover and music.
 
+If you started it in the chat, your agent writes the brief from the conversation and registers the script, stills and files you've already made, and says what it had to guess.
+
 It runs on your machine. There's no account, no API key and no server to sign up for. You need [Node.js](https://nodejs.org) 20.19 or newer (or 22.12+ on the 22 line).
 
 No project to hand? `npx -y rushes demo` builds an example on your machine and opens it.

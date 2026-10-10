@@ -10,7 +10,7 @@ import { Store } from "../core/store.js";
 export const BRIEF_FILE = "brief.md";
 
 /** The sections of brief.md, in order. AGENTS.md names every one; test/docs-start.test.ts keeps the two in step. */
-export const BRIEF_SECTIONS = ["Title", "Purpose", "Audience", "Length and formats", "Tone", "Include and avoid", "Built with", "References"] as const;
+export const BRIEF_SECTIONS = ["Title", "Purpose", "Audience", "Length and formats", "Tone", "Include and avoid", "Built with", "Open questions", "References"] as const;
 
 export function briefTemplate(name: string): string {
   return `# Brief: ${name}
@@ -41,6 +41,9 @@ Avoid: _what must not be._
 
 ## Built with
 _The tool your agent will build it in, or leave this blank._
+
+## Open questions
+_Ideas floated but not settled, and anything the agent had to guess._
 
 ## References
 - _Brand files, screenshots, a film you like._

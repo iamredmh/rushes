@@ -1,6 +1,6 @@
 ---
 name: rushes
-description: Plan and review video work with the user in Rushes, a local review desk. Use when the user wants to start a new film or video (plan it with them first, then build), when you've rendered a cut, written a VO script, recorded voice reads, music beds or SFX passes and the user should review them, or when the user says they left notes, pressed Send to agent, or pastes a Rushes batch prompt.
+description: Plan and review video work with the user in Rushes, a local review desk. Use when the user wants to start a new film or video (plan it with them first, then build), when they want to bring a film they started in the chat into Rushes (rebuild the plan from the conversation), when you've rendered a cut, written a VO script, recorded voice reads, music beds or SFX passes and the user should review them, or when the user says they left notes, pressed Send to agent, or pastes a Rushes batch prompt.
 ---
 
 # Rushes
@@ -21,6 +21,18 @@ When the user wants a new video ("start a new film", "make a launch video", "a n
 6. **Build only when all three are approved.** If the user says "just build it", do. Build in whatever tool suits the film, and name each scene after its planned shot. Then register the cut with `rushes_add_version` and the planned shots with `rushes_set_shots` (each `start` is the running total of the lengths before it), so Picture notes carry their shot.
 
 The brief and the storyboard are plain Markdown files in the project folder. The user reads them under Assets and approves them in chat.
+
+## Picking up a film that's underway
+
+When the user asks to open or review a film they started in the chat, or the project already has files but no `brief.md`, don't make them start again. Rebuild the plan from what you have, then say what you did.
+
+1. **Open the project**, or create it where the work is: `npx -y rushes new <folder> --no-browser` (it never overwrites a `brief.md` and leaves every other file alone), then `rushes_open`.
+2. **Write `brief.md` from the conversation.** Fill each section from what the user actually said. Mark anything you had to infer with `(inferred)` so they can check it. Where the chat never touched a section, write `Not discussed yet.` rather than inventing something. Put ideas they floated but didn't settle, and anything you couldn't answer, under Open questions. Keep `Status: draft`, and never approve it yourself.
+3. **Register what you already made.** A script from the chat goes in with `rushes_set_script` (the user approves it in the Script tab). Copy storyboard stills and reference images into a `storyboard/` folder in the project, register each copy with `rushes_add_file` (`kind: "image"`), and list the shots in `storyboard.md` with `Status: draft`; copy them, never move them, so the originals stay where the user's other tools expect them. Renders, voice reads and music beds go in as usual (`rushes_add_version`, `rushes_add_variant`). Run `rushes_scan` for audio and cuts in the folder; it doesn't look for images, so the stills are yours to register: you know where you saved them.
+4. **Say what you filled in:** what came from the user's words, what you inferred, what you registered, and what you looked for and couldn't find ("I found four of the six stills"). Ask them to read `brief.md` under Assets › Scripts & docs.
+5. **If the chat is one you can't see** (another session, another tool), say so and ask the user to paste it or point you to it. Don't reconstruct a brief from memory of a conversation you didn't have.
+
+When a user starts briefing in the chat, offer to keep `brief.md` up to date as you go: run `rushes new` first, so the next session, or another tool, can pick it up.
 
 ## Reviewing and fixing
 

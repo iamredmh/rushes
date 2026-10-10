@@ -23,7 +23,7 @@ describe("starting a film: what the agent docs promise (§24)", () => {
 
   it("AGENTS.md names every section of the brief template, in order, inside Starting a film", () => {
     const whole = read("AGENTS.md");
-    const text = whole.slice(whole.indexOf("## Starting a film"), whole.indexOf("## A demo project"));
+    const text = whole.slice(whole.indexOf("## Starting a film"), whole.indexOf("## Picking up a film"));
     expect(text.length).toBeGreaterThan(0);
     let at = -1;
     for (const section of BRIEF_SECTIONS) {
@@ -37,6 +37,31 @@ describe("starting a film: what the agent docs promise (§24)", () => {
     const description = /^description: (.+)$/m.exec(read("skills/rushes/SKILL.md"))![1];
     expect(description).toMatch(/start(ing)? a new (film|video)/i);
     expect(description).toContain("review");
+  });
+
+  it.each(["AGENTS.md", "skills/rushes/SKILL.md"])("%s tells the agent how to pick up a film that is already underway, without guessing and without losing the user's work", (file) => {
+    const text = read(file);
+    const start = text.indexOf("## Picking up a film that's underway");
+    expect(start).toBeGreaterThan(-1);
+    const section = text.slice(start);
+    expect(section).toContain("(inferred)");
+    expect(section).toContain("Not discussed yet.");
+    expect(section).toContain("Open questions");
+    expect(section).toContain("Status: draft");
+    expect(section).toMatch(/never approve it yourself/i);
+    expect(section).toContain("rushes_set_script");
+    expect(section).toContain("rushes_add_file");
+    expect(section).toContain("rushes_scan");
+    expect(section).toContain("storyboard/");
+    // Copy, never move: the originals stay where the user's other tools expect them.
+    expect(section).toMatch(/copy (them|each)[^.]*never move/i);
+    // A chat it cannot see is said out loud, not reconstructed.
+    expect(section).toMatch(/can't see/);
+  });
+
+  it("the skill's description also covers bringing a film started in the chat into Rushes", () => {
+    const description = /^description: (.+)$/m.exec(read("skills/rushes/SKILL.md"))![1];
+    expect(description).toMatch(/started in the chat/i);
   });
 
   it("AGENTS.md lists `rushes new` in the commands for agents without MCP", () => {
@@ -58,6 +83,7 @@ describe("README: starting a film (§24)", () => {
     const start = text.slice(text.indexOf("## Get started"), text.indexOf("## How it works"));
     expect(start).toMatch(/Use github\.com\/iamredmh\/rushes to start a new film/);
     expect(start).toMatch(/Already have a film\?/);
+    expect(start).toMatch(/started it in the chat/i);
     expect(start).toContain("Use github.com/iamredmh/rushes as my review tool for video, voiceover and music.");
     // The first instruction is the new-film one.
     expect(start.indexOf("to start a new film")).toBeLessThan(start.indexOf("as my review tool"));
