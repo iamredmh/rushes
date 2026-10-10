@@ -100,6 +100,21 @@ describe("StoryboardService", () => {
     expect(await board.cutShots()).toEqual([{ name: "Cold open", start: 0, tag: "ESTABLISH" }, { name: "Drop a folder", start: 3, tag: "ACTION" }]);
   });
 
+  it("does not name a still that is a link, or one inside a linked folder", async () => {
+    const text = AGENT.replace("storyboard/shot-01.png", "storyboard/linked.png").replace("../outside.png", "folder/shot-02.png");
+    const { root, board } = await setup(text);
+    const outside = join(root, "..", `${Date.now()}-outside`);
+    await mkdir(outside, { recursive: true });
+    await writeFile(join(outside, "secret.png"), "secret");
+    await mkdir(join(root, "storyboard"), { recursive: true });
+    await symlink(join(outside, "secret.png"), join(root, "storyboard", "linked.png"));
+    await symlink(outside, join(root, "folder"));
+    await writeFile(join(outside, "shot-02.png"), "also secret");
+    expect([...(await board.stills())]).toEqual([]);
+    const view = await board.view();
+    expect(view.shots.map((x) => x.still)).toEqual([null, null]);
+  });
+
   it("does not follow a link, treat a folder as a storyboard, or read a file that is too big", async () => {
     const a = await setup(null);
     await writeFile(join(a.root, "elsewhere.md"), AGENT);
@@ -186,6 +201,18 @@ describe("storyboard over HTTP", () => {
     expect((await call("GET", "/media?path=storyboard/other.png")).status).toBe(404);
     // A still outside the project is never named by the page, and is never served.
     expect((await call("GET", "/media?path=../outside.png")).status).toBe(404);
+  });
+
+  it("does not serve a still that is a link out of the project", async () => {
+    const text = AGENT.replace("../outside.png", "storyboard/linked.png");
+    const { call, root } = await app({ board: text });
+    const outside = join(root, "..", `${Date.now()}-outside-http`);
+    await mkdir(outside, { recursive: true });
+    await writeFile(join(outside, "secret.png"), "SECRET");
+    await mkdir(join(root, "storyboard"), { recursive: true });
+    await symlink(join(outside, "secret.png"), join(root, "storyboard", "linked.png"));
+    expect((await call("GET", "/media?path=storyboard/linked.png")).status).toBe(404);
+    expect((await call("GET", "/api/state")).json.storyboard.shots[1].still).toBe(null);
   });
 
   describe("a film's first cut", () => {
