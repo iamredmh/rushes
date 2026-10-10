@@ -186,3 +186,48 @@ test("with the Planning menu open, a digit stays in the menu instead of switchin
   await expect(page.getByRole("tab", { name: /Voiceover/ })).toHaveAttribute("aria-selected", "false");
   await expect(page.getByRole("menu", { name: "Planning" })).toBeVisible();
 });
+
+// Final review: the first two lost the person's work, and the 409 tests above fake the server's answer.
+test("text typed in a row survives the agent adding a section above it", async ({ page, rushes }) => {
+  await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
+  await page.goto(rushes.url);
+  // Hold the save back so the agent's rewrite lands first: the save is then really made against a file that has changed.
+  await page.route("**/api/brief/sections/*", async (route) => {
+    await new Promise((r) => setTimeout(r, 1200));
+    await route.continue();
+  });
+  const tone = page.getByLabel("Your version of Tone");
+  await tone.fill("Warm.");
+  await rushes.writeFiles([{ path: "brief.md", text: BRIEF.replace("## Purpose", "## Hook\nOpen on the number.\n\n## Purpose") }]);
+  await expect.poll(() => read(rushes.root), { timeout: 15000 }).toContain("## Tone\nWarm.\n");
+  expect(await read(rushes.root)).toContain("## Hook\nOpen on the number.");
+  await expect(tone).toHaveValue("Warm.");
+});
+
+test("Send to agent straight after typing names the section just edited", async ({ page, rushes }) => {
+  await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
+  await page.goto(rushes.url);
+  await page.getByLabel("Your version of Purpose").fill("Mine.");
+  await page.getByRole("button", { name: /Send to agent/ }).click();
+  await expect(page.getByRole("dialog", { name: "Sent to agent" })).toContainText("this section in brief.md: Purpose");
+});
+
+test("key 1 on the Brief page the dashboard opened on stays on Brief", async ({ page, rushes }) => {
+  await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
+  await rushes.api("PUT", "/api/script", SCRIPT);
+  await page.goto(rushes.url);
+  await expect(page.getByRole("heading", { name: "Brief" })).toBeVisible();
+  await page.keyboard.press("1");
+  await expect(page.getByRole("heading", { name: "Brief" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Script" })).toHaveCount(0);
+});
+
+test("Send to agent on the locked Brief page says there is no brief, not that it is a draft", async ({ page, rushes }) => {
+  await rushes.api("PUT", "/api/script", SCRIPT);
+  await page.goto(rushes.url);
+  await page.getByRole("tab", { name: /Planning/ }).click();
+  await page.getByRole("menuitem", { name: /Brief/ }).click();
+  await page.getByRole("button", { name: /Send to agent/ }).click();
+  await expect(page.getByRole("dialog", { name: "Sent to agent" })).toHaveCount(0);
+  await expect(page.locator(".toast")).toContainText("no brief yet");
+});
