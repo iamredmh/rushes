@@ -71,7 +71,7 @@ Your agent registers what it makes. You review it in the browser. When you press
 
 ## Every stage in one place
 
-Six tabs, in the order the work happens. A tab unlocks as soon as it has something in it, and a locked tab tells you what to ask your agent for.
+Six tabs, in the order the work happens; the first, Planning, is a menu that holds Brief and Script. A tab unlocks as soon as it has something in it, and a locked tab tells you what to ask your agent for.
 
 ### Picture: point at the exact frame
 
@@ -85,11 +85,13 @@ Pin a note to a moment, to a range, or to a box drawn on the frame. Grab a frame
 
 When the agent delivers a new cut, each note shows where it landed in the new version and what the agent did about it. A green tick means it's done. Anything the agent didn't fix stays open, with a reason.
 
-### Script: your edits beside the agent's lines
+### Planning: the brief, then your edits beside the agent's lines
 
 <img src="docs/assets/screens/script-review.jpg" alt="The Script tab. Each section shows the agent's current line on the left and the user's rewrite on the right. Two sections are outlined as changed, each with a short direction such as 'Two short sentences. Easier to say.'" width="880">
 
 Rewrite a line, add a direction, flag it or approve it. The bar on each row shows whether the line still fits its slot. When the agent adopts your edit, it records the next voice read from the corrected script.
+
+Planning is one tab with a menu, so planning never crowds the review stages. **Brief** shows `brief.md` in your project folder: the agent's version of each section beside yours. Edit a row and Rushes writes it into the file; press **Approve brief** and it sets the file's status line. If your agent rewrites `brief.md`, the page follows without a reload.
 
 ### Voiceover: compare reads, round by round
 
@@ -255,7 +257,7 @@ In the Voiceover, Music, Sound effects and Mix tabs:
 
 Anywhere:
 
-- **1–7** switch tab (7: Assets)
+- **1–7** switch tab (1: Planning, which opens the page you used last; 7: Assets)
 - **[ / ]** previous/next film
 - **Alt+←/→** previous/next format (Picture)
 - **?** shortcuts

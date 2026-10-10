@@ -198,7 +198,7 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     "rushes_status",
     {
       title: "Rushes status",
-      description: "Which tabs are unlocked and how many open items each has.",
+      description: "Which tabs are unlocked and how many open items each has. Also `brief`: whether brief.md exists, its status (draft or approved, set when the user presses Approve) and how many sections the user changed.",
       inputSchema: { project },
     },
     safe(async ({ project }) => (await ctx.client(project)).get("/api/tabs")),
