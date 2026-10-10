@@ -10,6 +10,8 @@ export type { LogLine, UndatedLine } from "../../src/core/logText.js";
 export type { LogView } from "../../src/core/log.js";
 export type { LogHead } from "../../src/server/logbook.js";
 export type { BriefSectionView, BriefView } from "../../src/server/brief.js";
+export type { StoryboardShotView, StoryboardView } from "../../src/server/storyboard.js";
+export type { BuildState } from "../../src/core/plan.js";
 
 import type { BatchesFile, NotesFile, Picks, Project as StoredProject, Script, Version as StoredVersion, Video as StoredVideo } from "../../src/core/schema.js";
 import type { TabState } from "../../src/core/tabs.js";
@@ -18,6 +20,8 @@ import type { FoundKind } from "../../src/core/found.js";
 import type { FoundSummary } from "../../src/server/found.js";
 import type { LogHead } from "../../src/server/logbook.js";
 import type { BriefView } from "../../src/server/brief.js";
+import type { StoryboardView } from "../../src/server/storyboard.js";
+import type { BuildState } from "../../src/core/plan.js";
 
 /** A cut as GET /api/state sends it: the stored version plus §19.5's `proxyNeed`, why it may play
  *  badly (e.g. "It's a 4K ProRes file (2.3 GB), which browsers struggle with"), or null. Optional
@@ -40,6 +44,10 @@ export interface State {
   found: FoundSummary;
   /** §24 step 2: brief.md as the dashboard shows it (`exists: false` when there is none). */
   brief: BriefView;
+  /** §24.12: storyboard.md as the dashboard shows it (`exists: false` when there is none). */
+  storyboard: StoryboardView;
+  /** §24.12: whether the plan (brief, script, storyboard) is approved. */
+  build: BuildState;
   /** §22.8: the Change Log's newest line and size, for the header button's dot (null if it couldn't be read). */
   log?: LogHead | null;
 }

@@ -20,14 +20,17 @@ export interface PlanningTabProps {
   selected: PlanPage | null;
   rows: PlanRow[];
   /** While a plan is in progress the tab carries one mark per page; otherwise just a dot when something is open. */
-  marks: { brief: Progress; script: Progress } | null;
+  marks: { brief: Progress; script: Progress; storyboard: Progress } | null;
   open: number;
   /** Neither page has anything in it yet. */
   locked: boolean;
+  /** Brief, script and storyboard are all approved: the menu then says so, with the prompt to build. */
+  ready: boolean;
+  onCopyReady(): void;
   onPick(page: PlanPage): void;
 }
 
-export function PlanningTab({ selected, rows, marks, open, locked, onPick }: PlanningTabProps) {
+export function PlanningTab({ selected, rows, marks, open, locked, ready, onCopyReady, onPick }: PlanningTabProps) {
   const [shown, setShown] = useState(false);
   const [active, setActive] = useState(0);
   const [at, setAt] = useState({ left: 0, top: 0 });
@@ -103,9 +106,8 @@ export function PlanningTab({ selected, rows, marks, open, locked, onPick }: Pla
         <Icon name="list" />
         Planning
         {marks ? (
-          <span class="pmarks" title="Brief and script">
-            {dot(marks.brief)}
-            {dot(marks.script)}
+          <span class="pmarks" title={ready ? "Ready to build" : "Brief, script and storyboard"}>
+            {ready ? <Icon name="check" class="pready" /> : <>{dot(marks.brief)}{dot(marks.script)}{dot(marks.storyboard)}</>}
           </span>
         ) : locked ? (
           <Icon name="lock" class="lk" />
@@ -137,6 +139,26 @@ export function PlanningTab({ selected, rows, marks, open, locked, onPick }: Pla
               {r.unlocked ? r.progress === null ? null : r.progress === "ok" ? <Icon name="check" class="pi" /> : <i class={`pm ${r.progress}`} /> : <Icon name="lock" class="lk" />}
             </button>
           ))}
+          {ready && (
+            <div class="planready">
+              <div class="rd">
+                <Icon name="check" />
+                Ready to build
+              </div>
+              <button
+                role="menuitem"
+                class="btn"
+                tabIndex={-1}
+                onClick={() => {
+                  close(false);
+                  onCopyReady();
+                }}
+              >
+                <Icon name="copy" />
+                Copy prompt for your agent
+              </button>
+            </div>
+          )}
         </div>
       )}
     </span>

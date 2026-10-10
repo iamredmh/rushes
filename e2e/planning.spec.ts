@@ -28,7 +28,7 @@ test("Planning is one tab with a menu holding Brief and Script", async ({ page, 
   await expect(page.getByRole("tab", { name: /Script/ })).toHaveCount(0);
   await planning.click();
   const menu = page.getByRole("menu", { name: "Planning" });
-  await expect(menu.getByRole("menuitem")).toHaveText([/Brief/, /Script/]);
+  await expect(menu.getByRole("menuitem")).toHaveText([/Brief/, /Script/, /Storyboard/]);
   await menu.getByRole("menuitem", { name: /Script/ }).click();
   await expect(page.getByRole("heading", { name: "Script" })).toBeVisible();
   await expect(menu).toHaveCount(0);
@@ -144,7 +144,7 @@ test("while a plan is in progress the Planning tab carries a mark for the brief 
   await rushes.api("PUT", "/api/script", SCRIPT);
   await page.goto(rushes.url);
   await expect(page.locator(".pmarks .pm.ok")).toHaveCount(1);
-  await expect(page.locator(".pmarks .pm.none")).toHaveCount(1);
+  await expect(page.locator(".pmarks .pm.none")).toHaveCount(2);
   await rushes.addCut();
   await expect(page.locator(".pmarks")).toHaveCount(0);
 });
