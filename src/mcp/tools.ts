@@ -198,7 +198,7 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     "rushes_status",
     {
       title: "Rushes status",
-      description: "Which tabs are unlocked and how many open items each has. Also `brief`: whether brief.md exists, its status (draft or approved, set when the user presses Approve) and how many sections the user changed; `storyboard`: whether storyboard.md exists, how many shots there are, how many are approved and how many the user changed; and `build`: whether planning has begun (`started`), whether the brief, every script section and every shot are approved (`ready`), and what it is `waitingOn`.",
+      description: "Which tabs are unlocked and how many open items each has. Also `brief`: whether brief.md exists, its status (draft or approved, set when the user presses Approve) and how many sections the user changed; `storyboard`: whether storyboard.md exists, how many shots there are, how many are approved and how many the user changed; and `build`: whether planning has begun (`started`), whether the brief, every script section (when there is a script) and every shot are approved (`ready`), and what it is `waitingOn`.",
       inputSchema: { project },
     },
     safe(async ({ project }) => (await ctx.client(project)).get("/api/tabs")),

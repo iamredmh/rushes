@@ -86,6 +86,8 @@ describe("starting a film: what the agent docs promise (§24)", () => {
     expect(text).toContain("`planWarning`");
     expect(text).toContain("a nudge, not a refusal");
     expect(text).toContain("a film's first cut starts with the storyboard's shots by itself");
+    expect(text).toContain("a cut brought in with `rushes_scan` or `rushes_bring_in` does not");
+    expect(text).toContain("the script is only waited on when the film has one");
     // The old instruction, a table approved in chat, is gone.
     expect(text).not.toContain("then a table with one row per shot");
     expect(text).not.toContain("The user approves in chat; then set `Status: approved`");
