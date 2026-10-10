@@ -19,11 +19,13 @@ async function scratch(): Promise<string> {
 const exists = (p: string) => access(p).then(() => true, () => false);
 
 describe("briefTemplate", () => {
-  it("has the title, a draft status line and the eight sections, in order", () => {
+  it("has the title, a draft status line and the nine sections, in order, with Open questions before References", () => {
     const text = briefTemplate("Lumen launch film");
     expect(text.split("\n")[0]).toBe("# Brief: Lumen launch film");
     expect(text).toContain("\nStatus: draft\n");
     expect([...text.matchAll(/^## (.+)$/gm)].map((m) => m[1])).toEqual([...BRIEF_SECTIONS]);
+    expect(BRIEF_SECTIONS).toHaveLength(9);
+    expect(BRIEF_SECTIONS.indexOf("Open questions")).toBe(BRIEF_SECTIONS.indexOf("References") - 1);
   });
 });
 
