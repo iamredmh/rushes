@@ -7,7 +7,8 @@ import { Store } from "../core/store.js";
 // README and AGENTS recommend, and a brief.md for the agent to fill in with the user. The Assets tab
 // already finds a Markdown file in the project root, so nothing here needs the dashboard to change.
 
-export const BRIEF_FILE = "brief.md";
+import { BRIEF_FILE } from "../core/brief.js";
+export { BRIEF_FILE };
 
 /** The sections of brief.md, in order. AGENTS.md names every one; test/docs-start.test.ts keeps the two in step. */
 export const BRIEF_SECTIONS = ["Title", "Purpose", "Audience", "Length and formats", "Tone", "Include and avoid", "Built with", "Open questions", "References"] as const;
