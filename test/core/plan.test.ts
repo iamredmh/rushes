@@ -17,7 +17,16 @@ describe("buildState", () => {
   it("lists what it is waiting on, in order", () => {
     const draft = { exists: true, status: "draft" } as const;
     expect(buildState({ brief: draft, script: [sec("approved"), sec("draft")], storyboard: { exists: true, total: 3, approved: 2 } }).waitingOn).toEqual(["brief", "script", "storyboard"]);
-    expect(buildState({ brief: { exists: true, status: "approved" }, script: [], storyboard: noBoard }).waitingOn).toEqual(["script", "storyboard"]);
+    expect(buildState({ brief: { exists: true, status: "approved" }, script: [], storyboard: noBoard }).waitingOn).toEqual(["storyboard"]);
+  });
+  it("does not wait on a script a film does not have: an instrumental film can be ready", () => {
+    expect(buildState({ brief: { exists: true, status: "approved" }, script: [], storyboard: { exists: true, total: 2, approved: 2 } })).toEqual({ started: true, ready: true, waitingOn: [] });
+  });
+  it("has not started for a brief.md with no Status line, or a storyboard.md with no shots: those are someone else's files", () => {
+    const own = { exists: true, status: null } as const;
+    expect(buildState({ brief: own, script: [], storyboard: { exists: true, total: 0, approved: 0 } }).started).toBe(false);
+    expect(buildState({ brief: none, script: [], storyboard: { exists: true, total: 1, approved: 0 } }).started).toBe(true);
+    expect(buildState({ brief: { exists: true, status: "draft" }, script: [], storyboard: noBoard }).started).toBe(true);
   });
   it("does not count a storyboard with no shots as approved", () => {
     expect(buildState({ brief: { exists: true, status: "approved" }, script: [sec("approved")], storyboard: { exists: true, total: 0, approved: 0 } }).waitingOn).toEqual(["storyboard"]);

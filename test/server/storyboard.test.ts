@@ -165,10 +165,10 @@ describe("storyboard over HTTP", () => {
     const { call } = await app({ brief: BRIEF });
     const state = await call("GET", "/api/state");
     expect(state.json.storyboard).toMatchObject({ exists: true, total: 2, approved: 0, changed: 0 });
-    expect(state.json.build).toEqual({ started: true, ready: false, waitingOn: ["script", "storyboard"] });
+    expect(state.json.build).toEqual({ started: true, ready: false, waitingOn: ["storyboard"] });
     const tabs = await call("GET", "/api/tabs");
     expect(tabs.json.storyboard).toEqual({ exists: true, shots: 2, approved: 0, changed: 0 });
-    expect(tabs.json.build.waitingOn).toEqual(["script", "storyboard"]);
+    expect(tabs.json.build.waitingOn).toEqual(["storyboard"]);
   });
 
   it("with no storyboard and no brief the build is not started, and nothing breaks", async () => {
@@ -223,7 +223,7 @@ describe("storyboard over HTTP", () => {
       const r = await post(call);
       expect(r.status).toBe(201);
       expect(r.json.version.shots).toEqual([{ n: 1, name: "Cold open", start: 0, tag: "ESTABLISH" }, { n: 2, name: "Drop a folder", start: 3, tag: "ACTION" }]);
-      expect(r.json.planWarning).toBe("The plan isn't approved yet: still waiting on the script and the storyboard.");
+      expect(r.json.planWarning).toBe("The plan isn't approved yet: still waiting on the storyboard.");
     });
 
     it("carries no warning once the brief, the script and every shot are approved", async () => {
