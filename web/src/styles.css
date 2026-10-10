@@ -284,6 +284,30 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .dirin { background: var(--app); border: 1px solid transparent; border-radius: var(--r); height: 36px; padding: 0 12px; font-size: 15px; width: 100%; }
 .dirin:focus { border-color: var(--accent); outline: none; }
 .dirin::placeholder { color: var(--text-3); }
+
+/* §24: the Brief page reuses the Script page's rows; its first column is the section's heading. */
+.bgrid { grid-template-columns: 150px minmax(0, 1fr) minmax(0, 1fr); }
+.blabel { font-weight: 600; font-size: 15px; padding-top: 9px; }
+.byours { display: grid; gap: 8px; justify-items: start; }
+.byours textarea { width: 100%; }
+.bfoot { display: flex; align-items: center; gap: 14px; margin-top: 6px; }
+.bapprove.approved { color: var(--done); box-shadow: inset 0 0 0 1px var(--done); }
+
+/* §24: the Planning tab, its menu and its marks. The menu is fixed, not absolute: the tab bar scrolls sideways and would clip it. */
+.plan { display: inline-flex; }
+.tab .chev { width: 14px; height: 14px; margin-left: -2px; opacity: 0.6; }
+.tab[aria-expanded="true"] { background: rgba(255, 255, 255, 0.04); }
+.pmarks { display: inline-flex; gap: 5px; }
+.pm { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--text-3); display: block; box-sizing: border-box; }
+.pm.part { border-color: var(--todo); background: linear-gradient(90deg, var(--todo) 50%, transparent 50%); }
+.pm.ok { border-color: var(--done); background: var(--done); }
+.planmenu { position: fixed; z-index: 45; min-width: 220px; background: var(--raised); border-radius: var(--r-lg); padding: 6px; box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55); display: grid; gap: 2px; }
+.planitem { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 12px; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 15px; border-radius: 10px; cursor: pointer; text-align: left; }
+.planitem:hover, .planitem:focus-visible { background: var(--hover); }
+.planitem.cur { color: var(--accent-2); }
+.planitem[data-locked="true"] { color: var(--text-3); }
+.planitem .pm, .planitem .pi, .planitem .lk { margin-left: auto; }
+.planitem .pi { width: 18px; height: 18px; color: var(--done); }
 .ib.okd[aria-pressed="true"] { background: var(--done-soft); color: var(--done); }
 .ib.flagd[aria-pressed="true"] { background: var(--todo-soft); color: var(--todo); }
 /* A native `disabled` button never matches :hover in any browser (regardless of
@@ -490,7 +514,7 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 @media (max-width: 680px) {
   :root { --body-pad: 16px; }
   .head { padding: 12px 14px; }
-  .sgrid, .sfoot { grid-template-columns: minmax(0, 1fr); }
+  .sgrid, .sfoot, .bgrid { grid-template-columns: minmax(0, 1fr); }
   .scols { display: none; }
   .when { grid-auto-flow: column; justify-content: start; align-items: center; gap: 12px; }
 }

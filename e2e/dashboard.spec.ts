@@ -254,7 +254,7 @@ test("a note fixed in the newer cut shows where it landed and where it came from
 test("script edits are saved, marked as changed, and can be reverted", async ({ page, rushes }) => {
   await rushes.api("PUT", "/api/script", { sections: [{ start: 0, end: 13, current: "Your work lives on one laptop." }] });
   await page.goto(rushes.url);
-  await expect(page.getByRole("tab", { name: /Script/ })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tab", { name: /Planning/ })).toHaveAttribute("aria-selected", "true");
   const box = page.getByLabel("Your version of s1");
   await box.fill("Your work lives on one machine.");
   await expect(page.locator(".srow")).toHaveClass(/changed/);

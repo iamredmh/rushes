@@ -793,7 +793,9 @@ test("a locked tab says how many files of its kind were found, with a Review but
   await tab(page, /^Mix/).click();
   await expect(page.locator(".locked")).toBeVisible();
   await expect(foundLine(page)).toHaveCount(0);
-  await tab(page, /^Script/).click();
+  // Script lives in the Planning menu now.
+  await tab(page, /^Planning/).click();
+  await page.getByRole("menuitem", { name: /^Script/ }).click();
   await expect(foundLine(page)).toHaveCount(0);
 
   // Review opens Assets > Found, filtered to the kind the tab is for.

@@ -1,0 +1,188 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { test, expect } from "./fixture.js";
+
+// §24 step 2: Planning is one tab with a menu (Brief, Script); brief.md is the file of record for the Brief page.
+
+const BRIEF = `# Brief: Lumen launch film
+
+Status: draft
+
+## Purpose
+Show that Lumen finds the best takes.
+
+## Tone
+Calm and dry.
+`;
+
+const SCRIPT = { sections: [{ start: 0, end: 13, current: "Your work lives on one laptop." }] };
+const read = (root: string) => readFile(join(root, "brief.md"), "utf8");
+
+test("Planning is one tab with a menu holding Brief and Script", async ({ page, rushes }) => {
+  await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
+  await rushes.api("PUT", "/api/script", SCRIPT);
+  await page.goto(rushes.url);
+  const planning = page.getByRole("tab", { name: /Planning/ });
+  await expect(planning).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("heading", { name: "Brief" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: /Script/ })).toHaveCount(0);
+  await planning.click();
+  const menu = page.getByRole("menu", { name: "Planning" });
+  await expect(menu.getByRole("menuitem")).toHaveText([/Brief/, /Script/]);
+  await menu.getByRole("menuitem", { name: /Script/ }).click();
+  await expect(page.getByRole("heading", { name: "Script" })).toBeVisible();
+  await expect(menu).toHaveCount(0);
+  await expect(planning).toHaveAttribute("aria-selected", "true");
+});
+
+test("the menu is keyboard-driven: ArrowDown opens it, arrows move, Enter picks, Escape closes", async ({ page, rushes }) => {
+  await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
+  await rushes.api("PUT", "/api/script", SCRIPT);
+  await page.goto(rushes.url);
+  const planning = page.getByRole("tab", { name: /Planning/ });
+  await planning.focus();
+  await page.keyboard.press("ArrowDown");
+  await expect(page.getByRole("menuitem", { name: /Brief/ })).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(page.getByRole("menuitem", { name: /Script/ })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: "Script" })).toBeVisible();
+  await planning.focus();
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  await expect(planning).toBeFocused();
+});
+
+test("Brief edits are saved to brief.md, marked as changed, and can be reverted", async ({ page, rushes }) => {
+  await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
+  await page.goto(rushes.url);
+  const box = page.getByLabel("Your version of Purpose");
+  await box.fill("Show how fast Lumen is.");
+  await expect(page.locator('.srow[data-section="Purpose"]')).toHaveClass(/changed/);
+  await expect.poll(() => read(rushes.root)).toContain("## Purpose\nShow how fast Lumen is.\n");
+  await expect(page.locator('.srow[data-section="Purpose"] .cur')).toHaveText("Show that Lumen finds the best takes.");
+  await page.getByRole("button", { name: "Revert Purpose" }).click();
+  await expect(box).toHaveValue("Show that Lumen finds the best takes.");
+  await expect.poll(() => read(rushes.root)).toBe(BRIEF);
+});
+
+test("two edits in a row both land, and the tab count follows", async ({ page, rushes }) => {
+  await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
+  await page.goto(rushes.url);
+  await page.getByLabel("Your version of Purpose").fill("One.");
+  await page.getByLabel("Your version of Tone").fill("Two.");
+  await expect.poll(() => read(rushes.root)).toContain("## Purpose\nOne.\n\n## Tone\nTwo.\n");
+  await expect(page.getByRole("button", { name: /Send to agent/ })).toContainText("2");
+});
+
+test("approving sets the status line, and editing an approved brief reopens it", async ({ page, rushes }) => {
+  await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
+  await page.goto(rushes.url);
+  await page.getByRole("button", { name: "Approve brief" }).click();
+  await expect.poll(() => read(rushes.root)).toContain("Status: approved");
+  await expect(page.getByRole("button", { name: "Approved" })).toHaveAttribute("aria-pressed", "true");
+  await page.getByLabel("Your version of Tone").fill("Warm.");
+  await expect.poll(() => read(rushes.root)).toContain("Status: draft");
+  await expect(page.getByRole("button", { name: "Approve brief" })).toBeVisible();
+});
+
+test("a change the agent makes to brief.md shows up without a reload, and becomes Current", async ({ page, rushes }) => {
+  await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
+  await page.goto(rushes.url);
+  await expect(page.locator('.srow[data-section="Tone"] .cur')).toHaveText("Calm and dry.");
+  await rushes.writeFiles([{ path: "brief.md", text: BRIEF.replace("Calm and dry.", "Warm and quick.") }]);
+  await expect(page.locator('.srow[data-section="Tone"] .cur')).toHaveText("Warm and quick.", { timeout: 8000 });
+  await expect(page.getByLabel("Your version of Tone")).toHaveValue("Warm and quick.");
+  await expect(page.locator('.srow[data-section="Tone"]')).not.toHaveClass(/changed/);
+});
+
+test("with no brief.md, Brief is a locked page that says what to ask the agent", async ({ page, rushes }) => {
+  await rushes.api("PUT", "/api/script", SCRIPT);
+  await page.goto(rushes.url);
+  await page.getByRole("tab", { name: /Planning/ }).click();
+  const brief = page.getByRole("menuitem", { name: /Brief/ });
+  await expect(brief).toHaveAttribute("data-locked", "true");
+  await brief.click();
+  await expect(page.getByRole("heading", { name: "Brief" })).toBeVisible();
+  await expect(page.getByLabel("Prompt for your agent")).toHaveValue(/start a brief/);
+  await expect(page.getByRole("button", { name: "Copy prompt for your agent" })).toBeVisible();
+});
+
+test("key 1 opens Planning on the page last used, and 2 to 7 stay where they were", async ({ page, rushes }) => {
+  await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
+  await rushes.api("PUT", "/api/script", SCRIPT);
+  await rushes.addCut();
+  await page.goto(rushes.url);
+  await expect(page.getByRole("tab", { name: /Picture/ })).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("1");
+  await expect(page.getByRole("heading", { name: "Script" })).toBeVisible();
+  await page.getByRole("tab", { name: /Planning/ }).click();
+  await page.getByRole("menuitem", { name: /Brief/ }).click();
+  await page.keyboard.press("2");
+  await expect(page.getByRole("tab", { name: /Picture/ })).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("1");
+  await expect(page.getByRole("heading", { name: "Brief" })).toBeVisible();
+  await page.keyboard.press("7");
+  await expect(page.getByRole("tab", { name: /Assets/ })).toHaveAttribute("aria-selected", "true");
+});
+
+test("Send to agent on Brief gives a message that names what changed, and records nothing", async ({ page, rushes }) => {
+  await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
+  await page.goto(rushes.url);
+  await page.getByLabel("Your version of Purpose").fill("Mine.");
+  await expect(page.getByRole("button", { name: /Send to agent/ })).toContainText("1");
+  await page.getByRole("button", { name: /Send to agent/ }).click();
+  const dialog = page.getByRole("dialog", { name: "Sent to agent" });
+  await expect(dialog).toContainText("Message for your agent");
+  await expect(dialog).toContainText("this section in brief.md: Purpose");
+  expect((await rushes.api("GET", "/api/state")).batches.batches).toHaveLength(0);
+});
+
+test("while a plan is in progress the Planning tab carries a mark for the brief and one for the script", async ({ page, rushes }) => {
+  await rushes.writeFiles([{ path: "brief.md", text: BRIEF.replace("Status: draft", "Status: approved") }]);
+  await rushes.api("PUT", "/api/script", SCRIPT);
+  await page.goto(rushes.url);
+  await expect(page.locator(".pmarks .pm.ok")).toHaveCount(1);
+  await expect(page.locator(".pmarks .pm.none")).toHaveCount(1);
+  await rushes.addCut();
+  await expect(page.locator(".pmarks")).toHaveCount(0);
+});
+
+test("a save refused because the agent rewrote the file is tried again against the file's new hash", async ({ page, rushes }) => {
+  await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
+  await page.goto(rushes.url);
+  let puts = 0;
+  await page.route("**/api/brief/sections/*", (route) => {
+    puts++;
+    if (puts === 1) return route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ error: "brief_changed", message: "brief.md changed since you loaded it." }) });
+    return route.continue();
+  });
+  await page.getByLabel("Your version of Tone").fill("Warm.");
+  await expect.poll(() => read(rushes.root)).toContain("## Tone\nWarm.\n");
+  expect(puts).toBe(2);
+});
+
+test("a save refused twice says so and leaves the file alone", async ({ page, rushes }) => {
+  await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
+  await page.goto(rushes.url);
+  await page.route("**/api/brief/sections/*", (route) =>
+    route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ error: "brief_changed", message: "brief.md changed since you loaded it." }) }),
+  );
+  await page.getByLabel("Your version of Tone").fill("Warm.");
+  await expect(page.locator(".toast")).toContainText("Couldn't save Tone");
+  expect(await read(rushes.root)).toBe(BRIEF);
+});
+
+test("with the Planning menu open, a digit stays in the menu instead of switching tabs", async ({ page, rushes }) => {
+  await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
+  await rushes.addCut();
+  await page.goto(rushes.url);
+  await page.getByRole("tab", { name: /Planning/ }).click();
+  await expect(page.getByRole("menu", { name: "Planning" })).toBeVisible();
+  // Outside the menu, 3 is Voiceover. Inside it, the key stays put.
+  await page.keyboard.press("3");
+  await expect(page.getByRole("tab", { name: /Picture/ })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tab", { name: /Voiceover/ })).toHaveAttribute("aria-selected", "false");
+  await expect(page.getByRole("menu", { name: "Planning" })).toBeVisible();
+});
