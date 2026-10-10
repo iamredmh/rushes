@@ -1,5 +1,5 @@
 // Pure helpers for the dashboard. No DOM, so they're unit-tested in Node.
-import type { Asset, AssetKind, Cue, FoundCounts, FoundItem, FoundKind, FoundSummary, Lane, LaneStage, LoudnessResult, Mark, Note, Project, ProxyEvent, ProxyJob, Section, Shot, Stage, TabState, Video, Version } from "./types.js";
+import type { Asset, AssetKind, BriefSectionView, BriefView, Cue, FoundCounts, FoundItem, FoundKind, FoundSummary, Lane, LaneStage, LoudnessResult, Mark, Note, Project, ProxyEvent, ProxyJob, Section, Shot, Stage, TabState, Video, Version } from "./types.js";
 export type { FoundItem } from "./types.js";
 
 /** 72.4 -> "1:12.40" (minutes, seconds, hundredths). */
@@ -153,6 +153,58 @@ const PROMPT_TEMPLATE: Record<Stage | "assets", (p: string, f: string | null) =>
 /** The ready-to-paste request a locked tab's "Copy prompt for your agent" button copies (§19.1). */
 export function agentPrompt(stage: Stage | "assets", projectName: string, filmName: string | null): string {
   return PROMPT_TEMPLATE[stage](projectName, filmName);
+}
+
+/** §24: Brief and Script share one Planning tab. Brief is a dashboard page (brief.md), not a review stage. */
+export type PlanPage = "brief" | "script";
+export const PLAN_PAGES: readonly PlanPage[] = ["brief", "script"];
+export const isPlanPage = (view: string | null): view is PlanPage => view === "brief" || view === "script";
+
+/** How far one planning step has got, for the marks on the Planning tab. */
+export type Progress = "none" | "part" | "ok";
+
+/** The brief is `ok` once approved; the script is `ok` when every section is, `part` when some are. */
+export function planProgress(brief: Pick<BriefView, "exists" | "status">, sections: Pick<Section, "status">[]): { brief: Progress; script: Progress } {
+  const approved = sections.filter((s) => s.status === "approved").length;
+  return {
+    brief: brief.exists && brief.status === "approved" ? "ok" : "none",
+    script: sections.length > 0 && approved === sections.length ? "ok" : approved > 0 ? "part" : "none",
+  };
+}
+
+/** The locked Brief page's copy (§19.1): what it's for, what unlocks it, and the noun its tooltip asks for. */
+export const LOCKED_BRIEF = {
+  what: "Write down what this film is for before anything is built, and approve it.",
+  unlocks: "Your agent starts a brief for this film.",
+  ask: "a brief",
+};
+
+/** The locked Brief page's "Copy prompt for your agent". */
+export function briefPrompt(projectName: string, filmName: string | null): string {
+  return `In Rushes project "${projectName}", start a brief${filmClause("for", filmName)}: ask me up to three questions, each with a recommended answer, then write brief.md (see "Starting a film" in AGENTS.md).`;
+}
+
+/** What Send to agent says from the Brief page. Nothing is recorded: the file itself is the record. */
+export function briefSendPrompt(projectName: string, filmName: string | null, brief: { status: BriefView["status"]; sections: Pick<BriefSectionView, "heading" | "changed">[] }): string {
+  const approved = brief.status === "approved";
+  const edited = brief.sections.filter((s) => s.changed).map((s) => s.heading);
+  const parts = [`In Rushes project "${projectName}"${filmClause("for", filmName)}, the brief is ${approved ? "approved" : "still a draft"}.`];
+  if (edited.length) parts.push(`I changed ${edited.length === 1 ? "this section" : "these sections"} in brief.md: ${edited.join(", ")}. Read the file again before you go on, and keep my wording.`);
+  parts.push(approved ? "Next: write the script with rushes_set_script." : "Don't build anything until I approve it.");
+  return parts.join(" ");
+}
+
+/** The tab to open first: Picture when there is a cut, else the brief when there is one, else the first unlocked tab. */
+export function firstView(tabs: TabState[], brief: Pick<BriefView, "exists">): Stage | "brief" {
+  if (tabs.find((t) => t.stage === "picture")?.unlocked) return "picture";
+  if (brief.exists) return "brief";
+  return firstTab(tabs);
+}
+
+/** Which planning page Key 1 opens: the one last used if it has something in it, else the first that does. */
+export function planTarget(last: PlanPage, open: Record<PlanPage, boolean>): PlanPage {
+  if (open[last]) return last;
+  return PLAN_PAGES.find((p) => open[p]) ?? last;
 }
 
 /** Which tab to show first: the first unlocked one in workflow order, preferring Picture when it's there. */
