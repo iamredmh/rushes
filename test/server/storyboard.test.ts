@@ -3,6 +3,8 @@ import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
 import { StoryboardService } from "../../src/server/storyboard.js";
+import { BriefService } from "../../src/server/brief.js";
+import { createApp } from "../../src/server/app.js";
 
 const AGENT = `# Storyboard: Lumen launch film
 
@@ -124,5 +126,103 @@ describe("StoryboardService", () => {
     } finally {
       stop();
     }
+  });
+});
+
+const BRIEF = "# Brief: Lumen\n\nStatus: approved\n\n## Purpose\nA.\n";
+const APPROVED = AGENT.replaceAll("Status: draft", "Status: approved");
+
+describe("storyboard over HTTP", () => {
+  async function app(opts: { board?: string | null; brief?: string | null; script?: boolean } = {}) {
+    const s = await setup(opts.board === undefined ? AGENT : opts.board);
+    if (opts.brief) await writeFile(join(s.root, "brief.md"), opts.brief);
+    if (opts.script) await s.store.update("script", (d) => { d.sections = [{ id: "s1", start: 0, end: 3, current: "x", proposed: null, direction: "", status: "approved", takes: [] }]; });
+    const server = createApp(s.store, { storyboard: s.board, brief: new BriefService(s.store) });
+    const call = async (method: string, path: string, json?: unknown) => {
+      const res = await server.request(path, { method, headers: json === undefined ? undefined : { "content-type": "application/json" }, body: json === undefined ? undefined : JSON.stringify(json) });
+      const type = res.headers.get("content-type") ?? "";
+      return { status: res.status, json: type.includes("json") ? ((await res.json()) as any) : null, res };
+    };
+    return { ...s, call };
+  }
+
+  it("state carries the storyboard and the build, and tabs carry their summaries", async () => {
+    const { call } = await app({ brief: BRIEF });
+    const state = await call("GET", "/api/state");
+    expect(state.json.storyboard).toMatchObject({ exists: true, total: 2, approved: 0, changed: 0 });
+    expect(state.json.build).toEqual({ started: true, ready: false, waitingOn: ["script", "storyboard"] });
+    const tabs = await call("GET", "/api/tabs");
+    expect(tabs.json.storyboard).toEqual({ exists: true, shots: 2, approved: 0, changed: 0 });
+    expect(tabs.json.build.waitingOn).toEqual(["script", "storyboard"]);
+  });
+
+  it("with no storyboard and no brief the build is not started, and nothing breaks", async () => {
+    const { call } = await app({ board: null });
+    expect((await call("GET", "/api/state")).json.storyboard).toMatchObject({ exists: false, shots: [] });
+    expect((await call("GET", "/api/tabs")).json.build).toMatchObject({ started: false, ready: false });
+  });
+
+  it("saves a shot's words, direction and status, and answers the errors", async () => {
+    const { call, file } = await app();
+    const hash = (await call("GET", "/api/state")).json.storyboard.hash;
+    const saved = await call("PUT", "/api/storyboard/shots/0", { heading: "Shot 01 · Cold open", description: "Mine.", direction: "Slower.", status: "approved", hash });
+    expect(saved.status).toBe(200);
+    expect(saved.json.storyboard.shots[0]).toMatchObject({ description: "Mine.", direction: "Slower.", status: "approved", changed: true });
+    expect(await file()).toContain("Direction: Slower.\n\nMine.");
+    expect((await call("PUT", "/api/storyboard/shots/0", { heading: "Shot 01 · Cold open", status: "draft", hash: "stale" })).json.error).toBe("storyboard_changed");
+    expect((await call("PUT", "/api/storyboard/shots/-1", { heading: "x", status: "draft", hash: "a" })).status).toBe(400);
+    expect((await call("PUT", "/api/storyboard/shots/0", { heading: "Shot 01 · Cold open", hash: "a" })).status).toBe(400);
+    expect((await call("PUT", "/api/storyboard/shots/0", { heading: "Shot 02 · Drop a folder", status: "draft", hash: saved.json.storyboard.hash })).status).toBe(400);
+  });
+
+  it("serves a still the storyboard names without it being registered, and nothing else", async () => {
+    const { call, root } = await app();
+    await mkdir(join(root, "storyboard"), { recursive: true });
+    await writeFile(join(root, "storyboard", "shot-01.png"), "png-bytes");
+    await writeFile(join(root, "storyboard", "other.png"), "other");
+    const ok = await call("GET", "/media?path=storyboard/shot-01.png");
+    expect(ok.status).toBe(200);
+    expect(await ok.res.text()).toBe("png-bytes");
+    expect((await call("GET", "/media?path=storyboard/other.png")).status).toBe(404);
+    // A still outside the project is never named by the page, and is never served.
+    expect((await call("GET", "/media?path=../outside.png")).status).toBe(404);
+  });
+
+  describe("a film's first cut", () => {
+    const post = (call: (m: string, p: string, j?: unknown) => Promise<any>, video = "Hero") => call("POST", "/api/versions", { video, file: "renders/hero.mp4" });
+
+    it("starts with the storyboard's shots, and says what the plan is waiting on, without refusing", async () => {
+      const { call } = await app({ brief: BRIEF });
+      const r = await post(call);
+      expect(r.status).toBe(201);
+      expect(r.json.version.shots).toEqual([{ n: 1, name: "Cold open", start: 0, tag: "ESTABLISH" }, { n: 2, name: "Drop a folder", start: 3, tag: "ACTION" }]);
+      expect(r.json.planWarning).toBe("The plan isn't approved yet: still waiting on the script and the storyboard.");
+    });
+
+    it("carries no warning once the brief, the script and every shot are approved", async () => {
+      const { call } = await app({ board: APPROVED, brief: BRIEF, script: true });
+      const r = await post(call);
+      expect(r.json.planWarning).toBeUndefined();
+      expect(r.json.version.shots).toHaveLength(2);
+    });
+
+    it("leaves a project that never used the planning flow alone", async () => {
+      const { call } = await app({ board: null });
+      const r = await post(call);
+      expect(r.status).toBe(201);
+      expect(r.json.planWarning).toBeUndefined();
+      expect(r.json.version.shots).toEqual([]);
+    });
+
+    it("copies the shots once: a second cut inherits the first's list, and a second film gets none from a changed plan", async () => {
+      const { call, root, board } = await app({ board: APPROVED });
+      await post(call);
+      await writeFile(join(root, "storyboard.md"), APPROVED.replace("Length: 3", "Length: 9"));
+      await board.sync();
+      const second = await post(call);
+      expect(second.json.version.shots.map((s: { start: number }) => s.start)).toEqual([0, 3]);
+      const otherFilm = await post(call, "Teaser");
+      expect(otherFilm.json.version.shots.map((s: { start: number }) => s.start)).toEqual([0, 9]);
+    });
   });
 });

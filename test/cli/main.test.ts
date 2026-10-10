@@ -659,6 +659,32 @@ describe("cli", () => {
     }
   });
 
+  it("status adds a storyboard line and a build line once planning has begun", async () => {
+    const { root } = await tmpProject();
+    await writeFile(join(root, "storyboard.md"), "# Storyboard: X\n\n## Shot 01 · A\nLength: 2\nStatus: approved\n\nWords\n\n## Shot 02 · B\nLength: 2\n\nWords\n");
+    const s = await startServer(root, { port: 0 });
+    try {
+      const a = io(root);
+      expect(await main(["status"], a.x)).toBe(0);
+      expect(a.out.find((l) => l.startsWith("storyboard"))).toBe("storyboard 1 of 2 approved");
+      expect(a.out.find((l) => l.startsWith("build"))).toBe("build    waiting on brief, script, storyboard");
+    } finally {
+      await s.close();
+    }
+  });
+
+  it("status has no storyboard or build line when planning never began", async () => {
+    const { root } = await tmpProject();
+    const s = await startServer(root, { port: 0 });
+    try {
+      const a = io(root);
+      expect(await main(["status"], a.x)).toBe(0);
+      expect(a.out.some((l) => l.startsWith("storyboard") || l.startsWith("build"))).toBe(false);
+    } finally {
+      await s.close();
+    }
+  });
+
   it("status has no brief line when there is no brief.md", async () => {
     const { root } = await tmpProject();
     const s = await startServer(root, { port: 0 });

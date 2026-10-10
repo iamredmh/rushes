@@ -8,6 +8,7 @@ import { createApp, type AppOptions } from "./app.js";
 import { removeLock, writeLock } from "./lock.js";
 import { watchStore } from "./watch.js";
 import { BriefService } from "./brief.js";
+import { StoryboardService } from "./storyboard.js";
 import type { Revealer } from "./reveal.js";
 import { ProxyJobs, removePartials, type ProxyJobsOptions } from "./proxy.js";
 import { PeakJobs, removeOrphanPeaks, removePeakTemps, type PeakJobsOptions } from "./peaks.js";
@@ -92,7 +93,8 @@ export async function startServer(rootDir: string, opts: StartOptions = {}): Pro
   // §20: the project's other files. Its first scan starts once this server owns the project (below).
   const found = new FoundScanner({ store, probe: opts.found?.probe ?? ffprobeDuration, announce: foundAnnouncer(store), limits: opts.found?.limits });
   const brief = new BriefService(store);
-  const appOpts: AppOptions = { brief, webDir: opts.webDir, onShutdown: () => void close(), reveal: opts.reveal, proxyJobs, peakJobs, found, formatProbe: opts.formats?.probe };
+  const storyboard = new StoryboardService(store);
+  const appOpts: AppOptions = { brief, storyboard, webDir: opts.webDir, onShutdown: () => void close(), reveal: opts.reveal, proxyJobs, peakJobs, found, formatProbe: opts.formats?.probe };
   const app = createApp(store, appOpts);
   const listener = getRequestListener(app.fetch);
   let lastRequest = Date.now();
@@ -144,6 +146,7 @@ export async function startServer(rootDir: string, opts: StartOptions = {}): Pro
   const url = `http://${host}:${port}`;
   const stopWatching = await watchStore(store);
   const stopBrief = brief.start();
+  const stopStoryboard = storyboard.start();
   // §20.1: a first look through the folder on open. Never awaited, so it never delays start-up;
   // the tabs hear a change when it lands.
   // Then §20.4's current set comes in (a no-op without a cut, or when it's already in).
@@ -160,6 +163,7 @@ export async function startServer(rootDir: string, opts: StartOptions = {}): Pro
       clearTimeout(idleTimer);
       stopWatching();
       stopBrief();
+      stopStoryboard();
       // No probe starts after this, and those in flight are stopped.
       found.close();
       // A running proxy's ffmpeg must not outlive the server; its partial file is deleted too.
