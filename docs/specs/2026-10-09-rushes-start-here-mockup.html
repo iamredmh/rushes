@@ -35,9 +35,6 @@ header{display:flex;align-items:center;gap:14px;padding:12px 20px;border-bottom:
 .send .n{background:rgba(11,16,38,.22);border-radius:999px;min-width:24px;height:24px;display:grid;place-items:center;font-variant-numeric:tabular-nums}
 .send[disabled]{background:var(--raised);color:var(--text-3);cursor:default}
 /* the new header mark */
-.chip{height:36px;padding:0 14px;border:1px solid var(--line-2);border-radius:999px;display:inline-flex;gap:10px;align-items:center;color:var(--text-2)}
-.chip:hover{background:var(--hover)}
-.chip.ready{border-color:var(--done);color:var(--done);background:var(--done-soft);font-weight:600}
 .trio{display:inline-flex;gap:6px}
 .trio i{width:12px;height:12px;border-radius:50%;border:2px solid var(--text-3);display:block;position:relative}
 .trio i.ok{background:var(--done);border-color:var(--done)}
@@ -157,12 +154,22 @@ h1.pg small{font-size:15px;color:var(--text-3);font-weight:400}
 .cp{height:40px;padding:0 18px;border-radius:12px;background:var(--raised);border:1px solid var(--line-2);display:inline-flex;gap:10px;align-items:center;font-weight:600;margin-top:6px}
 .cp:hover{background:var(--hover)}
 .plain{padding:120px 20px;text-align:center;color:var(--text-3)}
-.pop{position:absolute;z-index:20;top:62px;right:300px;width:380px;background:#0a0b0d;border:1px solid var(--line-2);border-radius:14px;padding:14px;display:none;box-shadow:0 14px 40px rgba(0,0,0,.5)}
+.pop{position:absolute;z-index:20;width:330px;background:#0a0b0d;border:1px solid var(--line-2);border-radius:0 14px 14px 14px;padding:8px;display:none;box-shadow:0 14px 40px rgba(0,0,0,.5)}
 .pop.show{display:block}
-.pop .li{display:flex;align-items:center;gap:12px;padding:8px 6px;border-radius:8px;cursor:pointer}
+.pop .li{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:10px;width:100%;text-align:left;color:var(--text)}
 .pop .li:hover{background:var(--hover)}
-.pop .li .g{margin-left:auto;color:var(--text-3);font-family:var(--mono)}
-.pop .pr{margin:10px 0 8px;background:var(--app);border-radius:10px;padding:10px 12px;color:var(--text-2);font-family:var(--mono);font-size:15px;line-height:1.45}
+.pop .li.cur{background:var(--accent-soft);color:var(--accent-2)}
+.pop .li.dim{color:var(--text-3)}
+.pop .li .mk{margin-left:auto;display:grid;place-items:center;min-width:20px}
+.pop .li .mk i{display:block;width:12px;height:12px;border-radius:50%;border:2px solid var(--text-3)}
+.pop .li .mk i.half{border-color:var(--todo);background:linear-gradient(90deg,var(--todo) 50%,transparent 50%)}
+.pop .sep{height:1px;background:var(--line);margin:8px 4px}
+.pop .rd{display:flex;gap:10px;align-items:center;color:var(--done);font-weight:600;padding:2px 12px}
+.pop .pr{margin:8px 4px;background:var(--app);border-radius:10px;padding:10px 12px;color:var(--text-2);font-family:var(--mono);font-size:15px;line-height:1.45}
+.pop .cp{margin:0 4px 4px}
+.tab.grp .chev{color:var(--text-3);margin-left:-4px}
+.tab.grp.open{background:var(--hover);border-radius:10px 10px 0 0}
+.tick-ok{width:18px;height:18px;border-radius:50%;background:var(--done);color:#07140d;display:grid;place-items:center}
 .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:#000;border:1px solid var(--line-2);border-radius:12px;padding:10px 18px;display:none;z-index:30}
 .toast.show{display:block}
 .tip{position:absolute;display:none;z-index:40;background:#000;border:1px solid var(--line-2);border-radius:8px;padding:6px 10px;pointer-events:none}
@@ -172,6 +179,7 @@ h1.pg small{font-size:15px;color:var(--text-3);font-weight:400}
 <body>
 <div class="demo" role="group" aria-label="Mockup controls">
   <div class="row"><b>Mockup:</b><span>jump to</span><span id="presets" class="row" style="gap:6px"></span></div>
+  <div class="row"><b>Planning tab:</b><button data-pos="first" aria-pressed="true">First, keys 1 to 7 as today</button><button data-pos="last" aria-pressed="false">Next to Assets</button></div>
   <div class="what" id="what"></div>
 </div>
 
@@ -180,7 +188,6 @@ h1.pg small{font-size:15px;color:var(--text-3);font-weight:400}
     <div class="logo" aria-hidden="true">▶</div>
     <span class="crumb"><b>Lumen</b> <span class="id">qcha9rmj</span> / Lumen launch film</span>
     <span class="pill" id="stagepill">Brief</span>
-    <span id="chipwrap"></span>
     <span class="sp"></span>
     <button class="ibtn" aria-label="Keyboard shortcuts" data-tip="Shortcuts · ?" id="kbd"></button>
     <button class="obtn" id="clog"></button>
@@ -188,7 +195,7 @@ h1.pg small{font-size:15px;color:var(--text-3);font-weight:400}
   </header>
   <nav class="tabs" id="tabs" aria-label="Stages"></nav>
   <div id="view"></div>
-  <div class="pop" id="pop" role="dialog" aria-label="Ready to build"></div>
+  <div class="pop" id="pop" role="dialog" aria-label="Planning"></div>
 </div>
 <div class="toast" id="toast">Copied. Paste it into your agent.</div>
 <div class="tip" id="tip"></div>
@@ -207,6 +214,7 @@ const P = {
   mix:'M6 4v16 M12 4v16 M18 4v16 M4 9h4 M10 15h4 M16 8h4',
   grid:'M4 4h6v6H4z M14 4h6v6h-6z M4 14h6v6H4z M14 14h6v6h-6z',
   lock:'M7 11V8a5 5 0 0 1 10 0v3 M6 11h12v9H6z',
+  plan:'M4 6h16 M4 12h10 M4 18h7', chev:'M6 9l6 6 6-6',
   check:'M5 12l5 5 9-10', flag:'M6 21V4 M6 5h11l-2 4 2 4H6',
   undo:'M9 14L4 9l5-5 M4 9h10a6 6 0 0 1 0 12h-3',
   copy:'M9 9h10v11H9z M5 15V4h10', x:'M6 6l12 12 M18 6L6 18', send:'M5 12h14 M13 6l6 6-6 6',
@@ -255,12 +263,12 @@ const ART = {
 const art = (n, cls = '') => `<svg class="${cls}" viewBox="0 0 160 90" preserveAspectRatio="xMidYMid slice" aria-hidden="true">${ART[n]}</svg>`;
 
 const PRESETS = [
-  { name:'Just started', what:'You said "start a new film in Rushes". The agent asked three questions, wrote the brief and opened it here. Only Brief is open: the other tabs explain what unlocks them. You have already edited one row (it rings amber), so Send to agent shows 1.', tab:'brief' },
-  { name:'Brief approved', what:'You approved the brief. The agent wrote the script from it, so Script is open and Brief is a green mark. The three dots by the header trace the gate: brief, script, storyboard.', tab:'script' },
-  { name:'Storyboard in review', what:'Script approved. The agent drew six shots with stills. Three are approved, shot 04 and shot 02 have notes. Click a card to look at it large; click a tick to approve; add a note on the right.', tab:'story' },
-  { name:'Ready to build', what:'Everything approved. The dots fill and the chip says Ready to build. Click it for the prompt to copy. Rushes cannot stop an agent, so this is a nudge, not a lock. Once a cut exists the chip goes away.', tab:'story' },
-  { name:'Cut registered', what:'The agent built the film in any tool and registered the cut. Picture opens, with the planned shots already on its strip, so the first note says "Shot 02 · Drop a folder".', tab:'picture' },
-  { name:'Existing project', what:'A project that began with a cut, opened as before. Brief and Storyboard are locked pages that explain themselves, with a copy-prompt, and no chip in the header.', tab:'brief' },
+  { name:'Just started', what:'You said "start a new film in Rushes". The agent asked three questions, wrote the brief and opened it here. The Planning tab holds Brief, Script and Storyboard: click it for the menu. Only Brief has anything in it, so Script and Storyboard are locked and explain themselves. One row is already edited (it rings amber), so Send to agent shows 1.', tab:'brief' },
+  { name:'Brief approved', what:'You approved the brief. The agent wrote the script from it, so Script is open in the Planning menu and Brief shows a green check. The three dots on the Planning tab trace the gate: brief, script, storyboard.', tab:'script' },
+  { name:'Storyboard in review', what:'Script approved. The agent drew six shots with stills. Three are approved, shots 04 and 02 have notes. Click a card to look at it large; click a tick to approve; add a note on the right. Open the Planning menu to move between the three.', tab:'story' },
+  { name:'Ready to build', what:'Everything approved. The Planning tab shows a green check. Open the menu for Ready to build and the prompt to copy. Rushes cannot stop an agent, so this is a nudge, not a lock. Once a cut exists the marks go away.', tab:'story' },
+  { name:'Cut registered', what:'The agent built the film in any tool and registered the cut. You land on Picture, with the planned shots already on its strip, so the first note says "Shot 02 · Drop a folder". Planning carries no status now.', tab:'picture' },
+  { name:'Existing project', what:'A project that began with a cut, opened as before: you land on Picture, and every tab is where it was. Planning holds Script (this project has one) and, locked and explained, Brief and Storyboard. No marks, no gate.', tab:'picture' },
 ];
 
 let S = {};
@@ -275,7 +283,7 @@ function setPreset(i) {
     shots:SHOTS0.map((s) => ({ ...s, status:p >= 3 ? 'approved' : (p === 2 && s.n <= 3 ? 'approved' : 'draft') })),
     sel:p === 2 ? 4 : (p === 3 ? 4 : 2),
     notes:[], pnotes:[],
-    sent:0
+    sent:0, lastPlan:p === 0 ? 'brief' : (p === 2 || p === 3 ? 'story' : 'script')
   };
   if (p === 0) S.yours.avoid = BRIEF_CUR.avoid + ' Any voiceover that says "imagine".';
   if (p === 2) S.notes = [
@@ -300,11 +308,19 @@ const shotApproved = () => S.shots.filter((s) => s.status === 'approved').length
 const scriptDone = () => S.hasScript && scrApproved() === S.script.length;
 const storyDone = () => S.hasPlan && shotApproved() === S.shots.length;
 const ready = () => S.briefApproved && scriptDone() && storyDone();
-const isOpen = (id) => ({ brief:!S.existing, script:S.hasScript, story:S.hasPlan, picture:S.hasCut, voice:S.hasCut && S.existing, music:false, sfx:false, mix:S.hasCut && S.existing, assets:true }[id]);
-const TABS = [['brief','Brief','brief'],['script','Script','script'],['story','Storyboard','story'],['picture','Picture','picture'],['voice','Voiceover','mic'],['music','Music','music'],['sfx','Sound effects','bolt'],['mix','Mix','mix'],['assets','Assets','grid']];
-const dotOn = (id) => ({ brief:!S.existing && !S.briefApproved, script:S.hasScript && !scriptDone() && !S.existing, story:S.hasPlan && !storyDone(), picture:S.hasCut && S.pnotes.some((n) => !n.done), voice:S.existing && S.hasCut }[id]);
+const isOpenPage = (id) => ({ brief:!S.existing, script:S.hasScript, story:S.hasPlan, picture:S.hasCut, voice:S.hasCut && S.existing, music:false, sfx:false, mix:S.hasCut && S.existing, assets:true }[id]);
+// Brief, Script and Storyboard live under one Planning tab with a menu; every other tab is as it is today.
+const PLAN_KIDS = [['brief','Brief','brief'],['script','Script','script'],['story','Storyboard','story']];
+const PLAN_IDS = PLAN_KIDS.map((k) => k[0]);
+const PICK = [['picture','Picture','picture'],['voice','Voiceover','mic'],['music','Music','music'],['sfx','Sound effects','bolt'],['mix','Mix','mix']];
+let PLAN_POS = 'first';
+const TOP = () => PLAN_POS === 'first' ? [['plan','Planning','plan'], ...PICK, ['assets','Assets','grid']] : [...PICK, ['plan','Planning','plan'], ['assets','Assets','grid']];
+const TABS = [...PLAN_KIDS, ...PICK, ['assets','Assets','grid']];
+const isOpen = (id) => id === 'plan' ? PLAN_IDS.some(isOpenPage) : isOpenPage(id);
+const dotPage = (id) => ({ brief:!S.existing && !S.briefApproved, script:S.hasScript && !scriptDone() && !S.existing, story:S.hasPlan && !storyDone(), picture:S.hasCut && S.pnotes.some((n) => !n.done), voice:S.existing && S.hasCut }[id]);
+const dotOn = (id) => id === 'plan' ? PLAN_IDS.some(dotPage) : dotPage(id);
 function sendCount() {
-  if (S.tab === 'brief' && isOpen('brief')) return briefChanged();
+  if (S.tab === 'brief' && isOpenPage('brief')) return briefChanged();
   if (S.tab === 'script') return S.script.filter(scriptChanged).length;
   if (S.tab === 'story') return S.notes.filter((n) => !n.done).length;
   if (S.tab === 'picture') return S.pnotes.filter((n) => !n.done).length;
@@ -323,24 +339,28 @@ const LOCKED = {
   mix:{ s:'Hear voice, music and effects together.', u:'Your agent adds audio and you unlock picture.', p:'In Rushes project "Lumen", add voice, music and effects for "Lumen launch film".' },
 };
 const TIPS = { brief:'to start a plan', script:'to write the script', story:'to sketch the shots', picture:'to build the film', voice:'for voice reads', music:'for music beds', sfx:'for a sound-effects pass', mix:'for audio' };
+function planMark() {
+  const gate = !S.existing && !S.hasCut;
+  if (!gate) return dotOn('plan') ? '<i class="od"></i>' : '';
+  if (ready()) return `<span class="tick-ok" data-tip="Ready to build">${ic('check', 12, 3)}</span>`;
+  const dB = S.briefApproved ? 'ok' : '';
+  const dS = !S.hasScript ? '' : (scriptDone() ? 'ok' : (scrApproved() ? 'part' : ''));
+  const dT = !S.hasPlan ? '' : (storyDone() ? 'ok' : (shotApproved() ? 'part' : ''));
+  return `<span class="trio" data-tip="Brief, script, storyboard"><i class="${dB}"></i><i class="${dS}"></i><i class="${dT}"></i></span>`;
+}
 function chrome() {
-  $('#tabs').innerHTML = TABS.map(([id, name, icon], i) => {
+  const menuOpen = $('#pop').classList.contains('show');
+  $('#tabs').innerHTML = TOP().map(([id, name, icon], i) => {
+    if (id === 'plan') {
+      return `<button class="tab grp ${PLAN_IDS.includes(S.tab) ? 'on' : ''} ${menuOpen ? 'open' : ''}" id="plantab" aria-haspopup="menu" aria-expanded="${menuOpen}" data-tip="Planning · ${i + 1}">${ic(icon, 20)}<span>Planning</span>${planMark()}<span class="chev">${ic('chev', 16)}</span></button>`;
+    }
     const o = isOpen(id);
     return `<button class="tab ${S.tab === id ? 'on' : ''} ${o ? '' : 'locked'}" data-t="${id}" data-tip="${o ? `${name} · ${i + 1}` : `Locked: ask your agent ${TIPS[id]}`}">${ic(icon, 20)}<span>${name}</span>${o ? (dotOn(id) ? '<i class="od"></i>' : '') : ic('lock', 15)}</button>`;
   }).join('');
-  $$('#tabs .tab').forEach((b) => b.onclick = () => { S.tab = b.dataset.t; render(); });
+  $$('#tabs .tab[data-t]').forEach((b) => b.onclick = () => { S.tab = b.dataset.t; hidePop(); render(); });
+  $('#plantab').onclick = (e) => { e.stopPropagation(); togglePop(); };
   const t = TABS.find((x) => x[0] === S.tab);
-  $('#stagepill').innerHTML = t[1] + (S.tab === 'picture' && S.hasCut ? ` <span class="v">v1</span> ${ic('lock', 15)}` : '');
-  // gate chip
-  const showChip = !S.existing && !S.hasCut;
-  if (!showChip) $('#chipwrap').innerHTML = '';
-  else {
-    const dB = S.briefApproved ? 'ok' : '';
-    const dS = !S.hasScript ? '' : (scriptDone() ? 'ok' : (scrApproved() ? 'part' : ''));
-    const dT = !S.hasPlan ? '' : (storyDone() ? 'ok' : (shotApproved() ? 'part' : ''));
-    $('#chipwrap').innerHTML = `<button class="chip ${ready() ? 'ready' : ''}" id="chip" aria-haspopup="dialog" data-tip="${ready() ? 'Ready to build' : 'Brief, script, storyboard'}"><span class="trio"><i class="${dB}"></i><i class="${dS}"></i><i class="${dT}"></i></span>${ready() ? '<span>Ready to build</span>' : ''}</button>`;
-    $('#chip').onclick = (e) => { e.stopPropagation(); togglePop(); };
-  }
+  $('#stagepill').innerHTML = (PLAN_IDS.includes(S.tab) ? 'Planning \u00b7 ' : '') + t[1] + (S.tab === 'picture' && S.hasCut ? ` <span class="v">v1</span> ${ic('lock', 15)}` : '');
   const n = sendCount();
   $('#send').disabled = n === 0;
   $('#send').innerHTML = `Send to agent${n ? `<span class="n">${n}</span>` : ''}`;
@@ -352,19 +372,25 @@ function chrome() {
 
 /* ---------- pop and toast ---------- */
 function fillPop() {
-  const r = ready();
-  const li = (label, g, ok, go) => `<div class="li" data-go="${go}"><span style="color:${ok ? 'var(--done)' : 'var(--text-3)'}">${ic(ok ? 'check' : 'back', 18)}</span><span>${label}</span><span class="g">${g}</span></div>`;
-  $('#pop').innerHTML = `
-    ${li('Brief', S.briefApproved ? 'approved' : 'open', S.briefApproved, 'brief')}
-    ${li('Script', S.hasScript ? `${scrApproved()} of ${S.script.length}` : 'not written', scriptDone(), 'script')}
-    ${li('Storyboard', S.hasPlan ? `${shotApproved()} of ${S.shots.length}` : 'not drawn', storyDone(), 'story')}
-    ${r ? `<div class="pr">Plan approved in Rushes project "Lumen", film "Lumen launch film". Build the film from the plan, name each scene after its planned shot, and register the cut with rushes_add_version.</div><button class="cp" id="cpbuild">${ic('copy', 18)}Copy prompt for your agent</button>` : ''}`;
+  const gate = !S.existing && !S.hasCut, r = gate && ready();
+  const mark = (id) => {
+    if (!gate || !isOpenPage(id)) return isOpenPage(id) ? '' : `<span class="mk">${ic('lock', 16)}</span>`;
+    const ok = id === 'brief' ? S.briefApproved : id === 'script' ? scriptDone() : storyDone();
+    const part = id === 'script' ? scrApproved() > 0 : id === 'story' ? shotApproved() > 0 : false;
+    return ok ? `<span class="mk" style="color:var(--done)">${ic('check', 18, 2.2)}</span>` : `<span class="mk"><i class="${part ? 'half' : ''}"></i></span>`;
+  };
+  $('#pop').innerHTML = PLAN_KIDS.map(([id, name, icon]) => `<button class="li ${isOpenPage(id) ? '' : 'dim'} ${S.tab === id ? 'cur' : ''}" role="menuitem" data-go="${id}"${isOpenPage(id) ? '' : ` data-tip="Locked: ask your agent ${TIPS[id]}"`}>${ic(icon, 20)}<span>${name}</span>${mark(id)}</button>`).join('') +
+    (r ? `<div class="sep"></div><div class="rd">${ic('check', 18, 2.2)}Ready to build</div><div class="pr">Plan approved in Rushes project "Lumen", film "Lumen launch film". Build the film from the plan, name each scene after its planned shot, and register the cut with rushes_add_version.</div><button class="cp" id="cpbuild">${ic('copy', 18)}Copy prompt for your agent</button>` : '');
   $$('#pop .li').forEach((el) => el.onclick = () => { S.tab = el.dataset.go; hidePop(); render(); });
   const c = $('#cpbuild'); if (c) c.onclick = () => toast('Copied. Paste it into your agent.');
 }
-function togglePop() { $('#pop').classList.toggle('show'); if ($('#pop').classList.contains('show')) fillPop(); }
-function hidePop() { $('#pop').classList.remove('show'); }
-document.addEventListener('click', (e) => { if (!e.target.closest('#pop') && !e.target.closest('#chip')) hidePop(); });
+function placePop() {
+  const t = $('#plantab').getBoundingClientRect(), a = $('.app').getBoundingClientRect(), p = $('#pop');
+  p.style.left = Math.max(8, t.left - a.left) + 'px'; p.style.top = (t.bottom - a.top) + 'px';
+}
+function togglePop() { const p = $('#pop'); p.classList.toggle('show'); chrome(); if (p.classList.contains('show')) placePop(); }
+function hidePop() { const p = $('#pop'); if (!p.classList.contains('show')) return; p.classList.remove('show'); chrome(); }
+document.addEventListener('click', (e) => { if (!e.target.closest('#pop') && !e.target.closest('#plantab')) hidePop(); });
 let toastT;
 function toast(t) { const el = $('#toast'); el.textContent = t; el.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => el.classList.remove('show'), 1800); }
 
@@ -445,6 +471,7 @@ function pictureView() {
 
 /* ---------- wiring ---------- */
 function render() {
+  if (PLAN_IDS.includes(S.tab)) S.lastPlan = S.tab;
   $('#view').innerHTML = view();
   wire(); chrome();
 }
@@ -490,8 +517,15 @@ function wire() {
   }
 }
 document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { hidePop(); return; }
   if ((e.target.closest && e.target.closest('input,textarea')) || e.metaKey || e.ctrlKey || e.altKey) return;
-  const i = '123456789'.indexOf(e.key); if (i >= 0) { S.tab = TABS[i][0]; render(); }
+  const i = '123456789'.indexOf(e.key), top = TOP();
+  if (i >= 0 && top[i]) {
+    const id = top[i][0];
+    // Key 1 is Planning: it goes to the planning page you were last on (Script today), so the key keeps its old meaning.
+    S.tab = id === 'plan' ? (isOpenPage(S.lastPlan) ? S.lastPlan : (PLAN_IDS.find(isOpenPage) || 'brief')) : id;
+    hidePop(); render();
+  }
 });
 
 /* tooltips */
@@ -506,6 +540,7 @@ document.addEventListener('mouseover', (e) => {
 
 $('#presets').innerHTML = PRESETS.map((p, i) => `<button data-p="${i}" aria-pressed="false">${i + 1} · ${p.name}</button>`).join('');
 $$('#presets button').forEach((b) => b.onclick = () => setPreset(Number(b.dataset.p)));
+$$('[data-pos]').forEach((b) => b.onclick = () => { PLAN_POS = b.dataset.pos; $$('[data-pos]').forEach((x) => x.setAttribute('aria-pressed', x === b)); hidePop(); render(); });
 setPreset(0);
 </script>
 </body>
