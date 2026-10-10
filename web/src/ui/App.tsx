@@ -1,17 +1,19 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, ApiError, projectId } from "../api.js";
 import {
-  LOCKED_TAB, testFlags, STAGE_NAMES, agentPrompt, copyShortcut, currentFormat, defaultVersion, firstTab, formatChips, formatPrompt, foundChip, foundSignature, labelOfId, latest,
-  lockedFound, neighbourFormat, neighbourVideo, previousVersion, proxyKey, snap, versionFormats,
+  LOCKED_BRIEF, LOCKED_TAB, testFlags, STAGE_NAMES, agentPrompt, briefPrompt, briefSendPrompt, copyShortcut, currentFormat, defaultVersion, firstView, formatChips, formatPrompt, foundChip, foundSignature,
+  isPlanPage, labelOfId, latest, lockedFound, neighbourFormat, neighbourVideo, planProgress, planTarget, previousVersion, proxyKey, snap, versionFormats, type PlanPage,
 } from "../lib.js";
 import type { Batch, FoundCounts, FoundKind, Stage, Video } from "../types.js";
 import { useRushes } from "../useRushes.js";
 import { assetRev } from "../audio/timeline.js";
 import { Assets, type FoundRequest } from "./Assets.js";
+import { Brief } from "./Brief.js";
 import { FormatToggle } from "./FormatToggle.js";
 import { Icon, STAGE_ICONS } from "./Icon.js";
 import { Mix } from "./Mix.js";
 import { Picture, type Source } from "./Picture.js";
+import { PlanningTab, type PlanRow } from "./Planning.js";
 import { Script } from "./Script.js";
 import { VariantTab } from "./VariantTab.js";
 import { Voice } from "./Voice.js";
@@ -29,17 +31,19 @@ declare global {
 const ORDER: Stage[] = ["script", "picture", "voice", "music", "sfx", "mix"];
 // Assets isn't a review stage (§15.3): it's a dashboard-only tab after the six stages, so it's
 // kept out of Stage and ORDER entirely and handled as its own case throughout this file.
-type View = Stage | "assets";
+type View = Stage | "assets" | "brief";
+/** What Send to agent shows: a batch, or (from the Brief page) a message that is not recorded anywhere. */
+type Sent = Pick<Batch, "id" | "prompt"> & { title?: string };
 const typing = (el: EventTarget | null) => el instanceof HTMLElement && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
 
 /** §19.1: a locked tab's own page -- what it's for, what unlocks it, and a prompt to copy for your agent. */
-function Locked({ tab, projectName, filmName, found, onReview, toast }: { tab: Stage | "assets"; projectName: string; filmName: string | null; found: FoundCounts | undefined; onReview: (kind: FoundKind) => void; toast: (m: string) => void }) {
-  const { what, unlocks } = LOCKED_TAB[tab];
-  const name = tab === "assets" ? "Assets" : STAGE_NAMES[tab];
-  const icon = tab === "assets" ? "grid" : STAGE_ICONS[tab];
-  const prompt = agentPrompt(tab, projectName, filmName);
+function Locked({ tab, projectName, filmName, found, onReview, toast }: { tab: Stage | "assets" | "brief"; projectName: string; filmName: string | null; found: FoundCounts | undefined; onReview: (kind: FoundKind) => void; toast: (m: string) => void }) {
+  const { what, unlocks } = tab === "brief" ? LOCKED_BRIEF : LOCKED_TAB[tab];
+  const name = tab === "assets" ? "Assets" : tab === "brief" ? "Brief" : STAGE_NAMES[tab];
+  const icon = tab === "assets" ? "grid" : tab === "brief" ? "brief" : STAGE_ICONS[tab];
+  const prompt = tab === "brief" ? briefPrompt(projectName, filmName) : agentPrompt(tab, projectName, filmName);
   // §20.5: when the folder holds files of this tab's kind, say so, and offer to look at them.
-  const files = lockedFound(tab, found);
+  const files = tab === "brief" ? null : lockedFound(tab, found);
   const boxRef = useRef<HTMLTextAreaElement>(null);
   const copyPrompt = async () => {
     try {
@@ -80,7 +84,9 @@ export function App() {
   const [videoId, setVideoId] = useState<string | null>(null);
   const [versionId, setVersionId] = useState<string | null>(null);
   const [toastText, setToastText] = useState<string | null>(null);
-  const [sent, setSent] = useState<Batch | null>(null);
+  const [sent, setSent] = useState<Sent | null>(null);
+  // §24: the planning page you were last on, which key 1 returns to (Script, the old key 1, until you open Brief).
+  const [planLast, setPlanLast] = useState<PlanPage>("script");
   const [keysOpen, setKeysOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [pending, setPending] = useState(false);
@@ -139,7 +145,7 @@ export function App() {
   // First load: pick a tab and a video.
   useEffect(() => {
     if (!state) return;
-    if (stage === null) setStage(firstTab(state.tabs));
+    if (stage === null) setStage(firstView(state.tabs, state.brief));
     if (videoId === null && state.project.videos[0]) setVideoId(state.project.videos[0].id);
   }, [state]);
 
@@ -256,10 +262,16 @@ export function App() {
   // Leaving a tab unmounts it, so a note in the making there (the same `pending` that holds the
   // film and New take) would be lost: refuse the switch instead, by click or by 1–7. A locked
   // tab always opens (§19.1): it shows its own page rather than a toast.
-  const show = (s: Stage) => {
+  const show = (s: Stage | "brief") => {
     if (pending && s !== stage) return toast("Add or clear your note first");
     setStage(s);
     setSent(null);
+    if (isPlanPage(s)) setPlanLast(s);
+  };
+  /** Key 1: the planning page last used if it has something in it, else the first that does. */
+  const planKey = () => {
+    const open = { brief: !!state?.brief.exists, script: !!tab("script")?.unlocked };
+    show(planTarget(planLast, open));
   };
   const showAssets = () => {
     if (pending && stage !== "assets") return toast("Add or clear your note first");
@@ -297,7 +309,9 @@ export function App() {
       }
       if (typing(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
       const n = Number(e.key);
-      if (n >= 1 && n <= 6) show(ORDER[n - 1]);
+      // 1 is Planning (Brief and Script); 2 to 6 are Picture to Mix, and 7 is Assets, as they always were.
+      if (n === 1) planKey();
+      else if (n >= 2 && n <= 6) show(ORDER[n - 1]);
       else if (n === 7) showAssets();
       if ((e.key === "[" || e.key === "]") && state) {
         const nxt = neighbourVideo(state.project.videos, videoId, e.key === "]" ? 1 : -1);
@@ -351,6 +365,13 @@ export function App() {
   const send = async () => {
     if (!stage || stage === "assets") return;
     setKeysOpen(false);
+    // The Brief page has no batch: brief.md is the record, so this is only the message to paste.
+    if (stage === "brief") {
+      if (!state) return;
+      setSent({ id: "brief", title: "Message for your agent", prompt: briefSendPrompt(state.project.name, video?.name ?? null, state.brief) });
+      setCopied(false);
+      return;
+    }
     try {
       const { batch } = await api.post<{ batch: Batch }>("/api/batches", { stage });
       setSent(batch);
@@ -380,8 +401,16 @@ export function App() {
 
   const pictureNotes = state.notes.notes.filter((n) => n.stage === "picture" && (!n.video || n.video === video?.id));
   const hasTodo = (vid: string) => state.notes.notes.some((n) => n.stage === "picture" && n.status === "todo" && (!n.video || n.video === vid));
-  const unlocked = stage === "assets" ? assetsUnlocked : (tab(stage)?.unlocked ?? false);
-  const open = stage === "assets" ? 0 : (tab(stage)?.todo ?? 0);
+  const unlocked = stage === "assets" ? assetsUnlocked : stage === "brief" ? state.brief.exists : (tab(stage)?.unlocked ?? false);
+  const open = stage === "assets" ? 0 : stage === "brief" ? state.brief.changed : (tab(stage)?.todo ?? 0);
+  // §24: the Planning tab's menu, its marks while a plan is in progress (a brief and no cut yet), and its open count.
+  const hasCut = !!tab("picture")?.unlocked;
+  const progress = planProgress(state.brief, state.script.sections);
+  const planRows: PlanRow[] = [
+    { page: "brief", name: "Brief", icon: "brief", unlocked: state.brief.exists, progress: state.brief.exists && !hasCut ? progress.brief : null, ask: LOCKED_BRIEF.ask },
+    { page: "script", name: "Script", icon: STAGE_ICONS.script, unlocked: !!tab("script")?.unlocked, progress: state.brief.exists && !hasCut && tab("script")?.unlocked ? progress.script : null, ask: LOCKED_TAB.script.ask },
+  ];
+  const planOpen = state.brief.changed + (tab("script")?.todo ?? 0);
 
   return (
     <div class="shell">
@@ -473,7 +502,8 @@ export function App() {
         projectId={projectId() ?? ""}
         head={state.log}
         project={state.project}
-        stage={stage}
+        // The Change Log has no Brief area: a line added from the Brief page goes under Script, its neighbour in Planning.
+        stage={stage === "brief" ? "script" : stage}
         header={headRef}
         buttonRef={changeLogButton}
         toast={toast}
@@ -483,7 +513,7 @@ export function App() {
       {sent && (
         <div class="pop" role="dialog" aria-label="Sent to agent">
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <h3>Batch {sent.id} is ready</h3>
+            <h3>{sent.title ?? `Batch ${sent.id} is ready`}</h3>
             <span class="sp" />
             <button class="btn ghost ib sm" aria-label="Close" onClick={() => setSent(null)}><Icon name="x" /></button>
           </div>
@@ -525,7 +555,15 @@ export function App() {
       )}
 
       <nav class="tabs" ref={tabsRef} role="tablist" aria-label="Stages">
-        {ORDER.map((s) => {
+        <PlanningTab
+          selected={isPlanPage(stage) ? stage : null}
+          rows={planRows}
+          marks={state.brief.exists && !hasCut ? progress : null}
+          open={planOpen}
+          locked={planRows.every((r) => !r.unlocked)}
+          onPick={(p) => show(p)}
+        />
+        {ORDER.filter((s) => s !== "script").map((s) => {
           const t = tab(s);
           return (
             <button
@@ -620,6 +658,8 @@ export function App() {
             onBoxPendingChange={setBoxPending}
             onFormatChange={switchFormat}
           />
+        ) : stage === "brief" ? (
+          <Brief brief={state.brief} toast={toast} onChanged={() => void refresh()} />
         ) : stage === "script" ? (
           <Script script={state.script} toast={toast} onChanged={() => void refresh()} />
         ) : stage === "voice" ? (

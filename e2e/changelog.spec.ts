@@ -339,8 +339,9 @@ test("the drawer isn't modal: tabs and keys still work with it open (§22.8)", a
   await page.goto(rushes.url);
   await videoReady(page);
   await logButton(page).click();
-  await page.getByRole("tab", { name: /Script/ }).click();
-  await expect(page.getByRole("tab", { name: /Script/ })).toHaveAttribute("aria-selected", "true");
+  await page.getByRole("tab", { name: /Planning/ }).click();
+  await page.getByRole("menuitem", { name: /Script/ }).click();
+  await expect(page.getByRole("tab", { name: /Planning/ })).toHaveAttribute("aria-selected", "true");
   await expect(drawer(page)).toBeVisible();
   await page.keyboard.press("2");
   await expect(page.getByRole("tab", { name: /Picture/ })).toHaveAttribute("aria-selected", "true");
