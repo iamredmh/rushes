@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
 import { StoryboardService } from "../../src/server/storyboard.js";
 import { contentType } from "../../src/server/files.js";
+import { stillPath } from "../../src/core/storyboard.js";
 import { BriefService } from "../../src/server/brief.js";
 import { createApp } from "../../src/server/app.js";
 
@@ -101,10 +102,12 @@ describe("StoryboardService", () => {
     expect(await board.cutShots()).toEqual([{ name: "Cold open", start: 0, tag: "ESTABLISH" }, { name: "Drop a folder", start: 3, tag: "ACTION" }]);
   });
 
-  it("serves every picture type a still may be as that picture, avif included", () => {
-    for (const [ext, type] of [["png", "image/png"], ["jpg", "image/jpeg"], ["jpeg", "image/jpeg"], ["webp", "image/webp"], ["gif", "image/gif"], ["avif", "image/avif"]]) {
+  it("only accepts picture types the server serves as pictures: avif is not one", () => {
+    for (const [ext, type] of [["png", "image/png"], ["jpg", "image/jpeg"], ["jpeg", "image/jpeg"], ["webp", "image/webp"], ["gif", "image/gif"]]) {
+      expect(stillPath(`storyboard/a.${ext}`), ext).toBe(`storyboard/a.${ext}`);
       expect(contentType(`storyboard/a.${ext}`), ext).toBe(type);
     }
+    expect(stillPath("storyboard/a.avif")).toBeNull();
   });
 
   it("does not name a still that is a link, or one inside a linked folder", async () => {

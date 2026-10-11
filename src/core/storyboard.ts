@@ -37,7 +37,7 @@ export interface ParsedStoryboard {
 const HEADING = /^Shot\s+(\d+)\s*[·:–—-]\s*(.+?)\s*$/i;
 const META = /^(Tag|Length|Still|Status|Direction):[ \t]*(.*?)[ \t]*$/i;
 /** What a still may be: pictures a browser shows inline. */
-const IMAGE = /\.(png|jpe?g|webp|gif|avif)$/i;
+const IMAGE = /\.(png|jpe?g|webp|gif)$/i;
 
 /** A still's path as the page may use it: relative, inside the project, a picture. Anything else is no still. */
 export function stillPath(raw: string): string | null {

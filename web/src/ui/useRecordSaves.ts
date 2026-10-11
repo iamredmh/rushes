@@ -8,7 +8,7 @@ import type { State } from "../types.js";
 type Key = "brief" | "storyboard";
 
 /** What a save asks the server for, built from the record as it is now (so it can be built again from a newer one); null when the item has gone. */
-export type Request<V> = (view: V) => { path: string; body: Record<string, unknown> } | null;
+export type Request<V> = (view: V) => { path: string; body: Record<string, unknown> } | { refuse: string } | null;
 
 export interface SaveOptions {
   toast(message: string): void;
@@ -17,11 +17,16 @@ export interface SaveOptions {
   settle: { current: (() => Promise<unknown>) | null };
 }
 
+/** A save Rushes will not make because what it would change is not what the person saw. */
+class RefusedError extends Error {}
+
 export function useRecordSaves<K extends Key>(key: K, view: State[K], o: SaveOptions) {
   const hash = useRef(view.hash);
   const latest = useRef(view);
   latest.current = view;
   const queue = useRef<Promise<unknown>>(Promise.resolve());
+  // A save the agent's rewrites refused twice. It is tried once more when the file next changes, then let go.
+  const stuck = useRef<{ what: string; build: Request<State[K]> } | null>(null);
   useEffect(() => {
     hash.current = view.hash;
   }, [view.hash]);
@@ -40,6 +45,7 @@ export function useRecordSaves<K extends Key>(key: K, view: State[K], o: SaveOpt
     for (let attempt = 0; ; attempt++) {
       const req = build(from);
       if (!req) throw new Error(`that part is no longer in ${key}.md`);
+      if ("refuse" in req) throw new RefusedError(req.refuse);
       try {
         const r = await api.put<Record<K, State[K]>>(req.path, { ...req.body, hash: hash.current });
         hash.current = r[key].hash;
@@ -57,12 +63,25 @@ export function useRecordSaves<K extends Key>(key: K, view: State[K], o: SaveOpt
   };
 
   const enqueue = (what: string, build: Request<State[K]>) => {
+    // A newer edit of the same thing replaces one that was stuck.
+    if (stuck.current?.what === what) stuck.current = null;
     queue.current = queue.current
       .catch(() => undefined)
       .then(() => put(build))
-      .catch((e) => o.toast(`Couldn't save ${what}: ${(e as Error).message}`))
+      .catch((e) => {
+        if (e instanceof ApiError && e.code === `${key}_changed`) stuck.current = { what, build };
+        o.toast(`Couldn't save ${what}: ${(e as Error).message}`);
+      })
       .finally(o.onChanged);
   };
+
+  // The file changed again: the next moment a refused save can land.
+  useEffect(() => {
+    const s = stuck.current;
+    if (!s) return;
+    stuck.current = null;
+    enqueue(s.what, s.build);
+  }, [view.hash]);
 
   return { latest, enqueue };
 }

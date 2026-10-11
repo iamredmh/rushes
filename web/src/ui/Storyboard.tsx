@@ -225,13 +225,19 @@ export function Storyboard({
   const opener = useRef<HTMLElement | null>(null);
   const save: Saver = {
     shot: (s, edit) => {
-      const nth = occurrenceOf(latest.current.shots, latest.current.shots.findIndex((x) => x.index === s.index));
+      const was = latest.current.shots.findIndex((x) => x.index === s.index);
+      const nth = was < 0 ? 0 : occurrenceOf(latest.current.shots, was);
+      // Approving is only for the words you saw: if the agent has rewritten the shot since, the tick is not carried over to the new words.
+      const approving = edit.status === "approved" && edit.description === undefined && edit.direction === undefined;
       enqueue(`shot ${s.n}`, (b) => {
         let at = b.shots.filter((x) => x.heading === s.heading)[nth];
         // The agent numbered the shots again: "Shot 02 · Drop a folder" is now "Shot 03 · Drop a folder". The name finds it, when it is the only one.
         if (!at) {
           const named = b.shots.filter((x) => x.name === s.name);
           if (named.length === 1) at = named[0];
+        }
+        if (at && approving && (at.description !== s.description || at.direction !== s.direction)) {
+          return { refuse: "the agent changed this shot while you were looking at it. Read it again, then approve." };
         }
         return at ? { path: `/api/storyboard/shots/${at.index}`, body: { heading: at.heading, ...edit } } : null;
       });
@@ -245,7 +251,7 @@ export function Storyboard({
       <div class="shead">
         <h2>Storyboard</h2>
         <span class="meta">
-          {board.total} shot{board.total === 1 ? "" : "s"} · {board.changed} changed
+          {board.total > 0 && `${board.total} shot${board.total === 1 ? "" : "s"} · ${board.changed} changed`}
         </span>
       </div>
       <div class="sbtotal mono" aria-label="Planned length">
@@ -256,6 +262,7 @@ export function Storyboard({
           </span>
         )}
       </div>
+      {board.total === 0 && <p class="sbnone">storyboard.md has no shots yet. Your agent adds them as `## Shot 01 · Name` sections.</p>}
       <div class="sbhead"><span /><span>Current</span><span>Yours</span></div>
       <div style={{ display: "grid", gap: "12px" }}>
         {board.shots.map((s, i) => (

@@ -233,3 +233,27 @@ test("key 1 comes back to the Storyboard when it was the page last used", async 
   await page.keyboard.press("1");
   await expect(page.getByRole("heading", { name: "Storyboard" })).toBeVisible();
 });
+
+// Deferred minors from the step 3 review.
+test("the tick is not tried again against a shot the agent has rewritten since you looked", async ({ page, rushes }) => {
+  await withBoard(rushes);
+  await page.goto(rushes.url);
+  await openStoryboard(page);
+  await page.route("**/api/storyboard/shots/*", async (route) => {
+    await new Promise((r) => setTimeout(r, 1200));
+    await route.continue();
+  });
+  await page.getByRole("button", { name: "Approve shot 1" }).click();
+  await rushes.writeFiles([{ path: "storyboard.md", text: BOARD.replace("The headline sits on a pale card.", "The headline is now huge.") }]);
+  await expect(page.locator(".toast")).toContainText("Couldn't save shot 1", { timeout: 15000 });
+  expect(await read(rushes.root)).toContain("Status: draft");
+  expect(await read(rushes.root)).not.toContain("Status: approved");
+});
+
+test("a storyboard.md with no shots yet says so instead of '0 shots'", async ({ page, rushes }) => {
+  await rushes.writeFiles([{ path: "storyboard.md", text: "# Storyboard: Lumen\n\nNotes only, no shots.\n" }]);
+  await page.goto(rushes.url);
+  await page.getByRole("tab", { name: /Planning/ }).click();
+  await page.getByRole("menuitem", { name: /Storyboard/ }).click();
+  await expect(page.getByText("storyboard.md has no shots yet")).toBeVisible();
+});

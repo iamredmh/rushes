@@ -231,3 +231,81 @@ test("Send to agent on the locked Brief page says there is no brief, not that it
   await expect(page.getByRole("dialog", { name: "Sent to agent" })).toHaveCount(0);
   await expect(page.locator(".toast")).toContainText("no brief yet");
 });
+
+// Deferred minors from the step 2 review.
+test("with the Planning menu open over Picture, left and right do not step the frame", async ({ page, rushes }) => {
+  await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
+  await rushes.addCut();
+  await page.goto(rushes.url);
+  await page.getByRole("tab", { name: /Picture/ }).click();
+  const tc = page.getByLabel("Timecode");
+  await expect(tc).toBeVisible();
+  // Outside the menu, the arrow steps a frame (this is what the menu must not let through).
+  const before = await tc.textContent();
+  await page.getByRole("button", { name: "Forward one frame" }).focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(tc).not.toHaveText(before!);
+  const stepped = await tc.textContent();
+  await page.getByRole("tab", { name: /Planning/ }).click();
+  await expect(page.getByRole("menu", { name: "Planning" })).toBeVisible();
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("ArrowRight");
+  await expect(tc).toHaveText(stepped!);
+});
+
+test("picking a Planning menu item with the keyboard leaves focus on the Planning tab, not nowhere", async ({ page, rushes }) => {
+  await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
+  await rushes.api("PUT", "/api/script", SCRIPT);
+  await page.goto(rushes.url);
+  const planning = page.getByRole("tab", { name: /Planning/ });
+  await planning.focus();
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: "Script" })).toBeVisible();
+  await expect(planning).toBeFocused();
+});
+
+test("text refused twice is tried again when the file next changes, not left until the next edit", async ({ page, rushes }) => {
+  await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
+  await page.goto(rushes.url);
+  await expect(page.getByLabel("Your version of Tone")).toHaveValue("Calm and dry.");
+  let refused = 0;
+  await page.route("**/api/brief/sections/*", (route) => {
+    if (refused < 2) {
+      refused++;
+      return route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ error: "brief_changed", message: "brief.md changed since you loaded it." }) });
+    }
+    return route.continue();
+  });
+  await page.getByLabel("Your version of Tone").fill("Warm.");
+  await expect(page.locator(".toast")).toContainText("Couldn't save Tone");
+  expect(await read(rushes.root)).toBe(BRIEF);
+  // The agent touches another part of the file: that is the next moment the text can be saved, and it is.
+  await rushes.writeFiles([{ path: "brief.md", text: BRIEF.replace("Show that Lumen finds the best takes.", "Show that Lumen finds the best takes, fast.") }]);
+  await expect.poll(() => read(rushes.root), { timeout: 15000 }).toContain("## Tone\nWarm.\n");
+  expect(await read(rushes.root)).toContain("best takes, fast.");
+});
+
+test("Approve brief is not tried again against a brief the agent has rewritten since you looked", async ({ page, rushes }) => {
+  await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
+  await page.goto(rushes.url);
+  await expect(page.getByLabel("Your version of Tone")).toHaveValue("Calm and dry.");
+  await page.route("**/api/brief/status", async (route) => {
+    await new Promise((r) => setTimeout(r, 1200));
+    await route.continue();
+  });
+  await page.getByRole("button", { name: "Approve brief" }).click();
+  await rushes.writeFiles([{ path: "brief.md", text: BRIEF.replace("Calm and dry.", "Loud and fast.") }]);
+  await expect(page.locator(".toast")).toContainText("Couldn't save the brief's status", { timeout: 15000 });
+  expect(await read(rushes.root)).toContain("Status: draft");
+});
+
+test("the Brief page shows the film's title, and says so when brief.md has no sections yet", async ({ page, rushes }) => {
+  await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
+  await page.goto(rushes.url);
+  await expect(page.locator(".shead")).toContainText("Lumen launch film");
+  await rushes.writeFiles([{ path: "brief.md", text: "# Brief: Lumen launch film\n\nStatus: draft\n\nJust some notes, no headings.\n" }]);
+  await expect(page.getByText("brief.md has no ## sections yet")).toBeVisible({ timeout: 8000 });
+  await expect(page.locator(".shead")).not.toContainText("0 sections");
+});

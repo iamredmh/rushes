@@ -120,7 +120,16 @@ export function Brief({ brief, toast, onChanged, settle }: { brief: BriefView; t
         return at ? { path: `/api/brief/sections/${at.index}`, body: { heading: s.heading, text } } : null;
       });
     },
-    status: (status) => enqueue("the brief's status", () => ({ path: "/api/brief/status", body: { status } })),
+    status: (status) => {
+      // Approving is only for the text you saw: if the agent has rewritten the brief since, the tick is not carried over to the new words.
+      const seen = brief.sections.map((x) => `${x.heading}\n${x.yours}`).join("\n\n");
+      enqueue("the brief's status", (b) => {
+        if (status === "approved" && b.sections.map((x) => `${x.heading}\n${x.yours}`).join("\n\n") !== seen) {
+          return { refuse: "the agent changed the brief while you were looking at it. Read it again, then approve." };
+        }
+        return { path: "/api/brief/status", body: { status } };
+      });
+    },
   };
 
   const approved = brief.status === "approved";
@@ -129,9 +138,12 @@ export function Brief({ brief, toast, onChanged, settle }: { brief: BriefView; t
       <div class="shead">
         <h2>Brief</h2>
         <span class="meta">
-          {brief.sections.length} section{brief.sections.length === 1 ? "" : "s"} · {brief.changed} changed
+          {brief.title}
+          {brief.title && brief.sections.length > 0 ? " · " : ""}
+          {brief.sections.length > 0 && `${brief.sections.length} section${brief.sections.length === 1 ? "" : "s"} · ${brief.changed} changed`}
         </span>
       </div>
+      {brief.sections.length === 0 && <p class="sbnone">brief.md has no ## sections yet. Your agent adds them as `## Purpose`, `## Audience` and so on.</p>}
       <div class="sgrid bgrid scols"><span /><span>Current</span><span>Yours</span></div>
       <div style={{ display: "grid", gap: "12px" }}>
         {brief.sections.map((s) => <Row key={`${s.heading}#${occurrenceOf(brief.sections, s.index)}`} section={s} save={save} />)}
