@@ -69,6 +69,12 @@ export function PlanningTab({ selected, rows, marks, open, locked, ready, onCopy
   const onMenuKey = (e: KeyboardEvent) => {
     if (e.key === "Tab") return close(false);
     if (e.metaKey || e.ctrlKey || e.altKey) return;
+    // The menu is a column: left and right do nothing here, and must not reach Picture and step a frame behind it.
+    if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     const move = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : e.key === "Home" ? -rows.length : e.key === "End" ? rows.length : 0;
     if (move !== 0) {
       e.preventDefault();
@@ -130,7 +136,8 @@ export function PlanningTab({ selected, rows, marks, open, locked, ready, onCopy
               tabIndex={i === active ? 0 : -1}
               data-tip={r.unlocked ? undefined : `Locked: ask your agent for ${r.ask}`}
               onClick={() => {
-                close(false);
+                // Focus goes back to the Planning tab, not to nowhere, so the keyboard carries on from where it was.
+                close(true);
                 onPick(r.page);
               }}
             >

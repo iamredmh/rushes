@@ -39,7 +39,6 @@ export const CONTENT_TYPES: Record<string, string> = {
   ".pdf": "application/pdf",
   ".gif": "image/gif",
   ".webp": "image/webp",
-  ".avif": "image/avif",
   ".prproj": "application/octet-stream",
   ".drp": "application/octet-stream",
 };
