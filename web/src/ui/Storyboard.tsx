@@ -229,14 +229,14 @@ export function Storyboard({
       const nth = was < 0 ? 0 : occurrenceOf(latest.current.shots, was);
       // Approving is only for the words you saw: if the agent has rewritten the shot since, the tick is not carried over to the new words.
       const approving = edit.status === "approved" && edit.description === undefined && edit.direction === undefined;
-      enqueue(`shot ${s.n}`, (b) => {
+      enqueue(`shot ${s.n}`, (b, fresh) => {
         let at = b.shots.filter((x) => x.heading === s.heading)[nth];
         // The agent numbered the shots again: "Shot 02 · Drop a folder" is now "Shot 03 · Drop a folder". The name finds it, when it is the only one.
         if (!at) {
           const named = b.shots.filter((x) => x.name === s.name);
           if (named.length === 1) at = named[0];
         }
-        if (at && approving && (at.description !== s.description || at.direction !== s.direction)) {
+        if (at && fresh && approving && (at.description !== s.description || at.direction !== s.direction)) {
           return { refuse: "the agent changed this shot while you were looking at it. Read it again, then approve." };
         }
         return at ? { path: `/api/storyboard/shots/${at.index}`, body: { heading: at.heading, ...edit } } : null;

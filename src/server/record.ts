@@ -124,11 +124,12 @@ export abstract class RecordFile {
           const hadFile = last !== null && last !== "";
           last = sig;
           await this.sync();
-          // A file that is deleted, or becomes a folder or a link, changes nothing in `.rushes/`: say so anyway.
+          // A file that is deleted, or becomes a folder or a link, changes nothing in `.rushes/` by itself. Forget what was
+          // seen, which announces it, and which makes the same text coming back (git stash pop, say) a change to announce too.
           if (hadFile && (await this.run(() => this.readText())) === null) {
-            const rev = (await this.store.read(this.key)).rev;
-            this.store.forget(this.key);
-            this.store.announce(this.key, rev);
+            await this.store.update(this.key, (d) => {
+              d.seen = "";
+            });
           }
         }
       } catch {

@@ -320,3 +320,69 @@ test("a brief.md that is deleted while the page is open is dropped without a rel
   await rm(join(rushes.root, "brief.md"));
   await expect(page.getByLabel("Your version of Tone")).toHaveCount(0, { timeout: 8000 });
 });
+
+// Review of the follow-ups: the retry of a refused save must never write over what the person did after it.
+test("a refused save is not written over text typed after it", async ({ page, rushes }) => {
+  await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
+  await page.goto(rushes.url);
+  const tone = page.getByLabel("Your version of Tone");
+  await expect(tone).toHaveValue("Calm and dry.");
+  let calls = 0;
+  await page.route("**/api/brief/sections/*", async (route) => {
+    calls++;
+    if (calls === 1) return route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ error: "brief_changed", message: "brief.md changed since you loaded it." }) });
+    if (calls === 2) {
+      // The second try is slow, and the person keeps typing while it is in flight.
+      await new Promise((r) => setTimeout(r, 1200));
+      return route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ error: "brief_changed", message: "brief.md changed since you loaded it." }) });
+    }
+    return route.continue();
+  });
+  await tone.fill("Warm.");
+  await page.waitForTimeout(700);
+  await tone.fill("Warm and dry.");
+  await expect.poll(() => read(rushes.root), { timeout: 15000 }).toContain("## Tone\nWarm and dry.\n");
+  await page.waitForTimeout(2500);
+  expect(await read(rushes.root)).toContain("## Tone\nWarm and dry.\n");
+});
+
+test("a refused save is not tried again over an approval made after it", async ({ page, rushes }) => {
+  await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
+  await page.goto(rushes.url);
+  const tone = page.getByLabel("Your version of Tone");
+  await expect(tone).toHaveValue("Calm and dry.");
+  let refused = 0;
+  await page.route("**/api/brief/sections/*", (route) => {
+    if (refused < 2) {
+      refused++;
+      return route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ error: "brief_changed", message: "brief.md changed since you loaded it." }) });
+    }
+    return route.continue();
+  });
+  await tone.fill("Warm.");
+  await expect(page.locator(".toast")).toContainText("Couldn't save Tone");
+  await page.getByRole("button", { name: "Approve brief" }).click();
+  await expect.poll(() => read(rushes.root), { timeout: 8000 }).toContain("Status: approved");
+  await page.waitForTimeout(2500);
+  const text = await read(rushes.root);
+  expect(text).toContain("Status: approved");
+  expect(text).toContain("## Tone\nCalm and dry.\n");
+});
+
+test("typing in a section and pressing Approve straight away saves the text and approves, with no complaint", async ({ page, rushes }) => {
+  await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
+  await page.goto(rushes.url);
+  const tone = page.getByLabel("Your version of Tone");
+  await expect(tone).toHaveValue("Calm and dry.");
+  // The server has written the file, and the page has already heard about it, when the answer to the save arrives.
+  await page.route("**/api/brief/sections/*", async (route) => {
+    const res = await route.fetch();
+    await new Promise((r) => setTimeout(r, 900));
+    await route.fulfill({ response: res });
+  });
+  await tone.fill("Warm.");
+  await page.getByRole("button", { name: "Approve brief" }).click();
+  await expect.poll(() => read(rushes.root), { timeout: 8000 }).toContain("Status: approved");
+  expect(await read(rushes.root)).toContain("## Tone\nWarm.\n");
+  await expect(page.locator(".toast")).toHaveCount(0);
+});

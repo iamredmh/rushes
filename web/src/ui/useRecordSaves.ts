@@ -7,8 +7,12 @@ import type { State } from "../types.js";
 
 type Key = "brief" | "storyboard";
 
-/** What a save asks the server for, built from the record as it is now (so it can be built again from a newer one); null when the item has gone. */
-export type Request<V> = (view: V) => { path: string; body: Record<string, unknown> } | { refuse: string } | null;
+/**
+ * What a save asks the server for, built from the record as it is now (so it can be built again from a newer one); null when the item has gone.
+ * `fresh` is true when the record was fetched because the file changed under the save (or the save is a retry of one that was refused):
+ * the only time what the person saw may differ from what is in the file for a reason that is not their own earlier saves.
+ */
+export type Request<V> = (view: V, fresh: boolean) => { path: string; body: Record<string, unknown> } | { refuse: string } | null;
 
 export interface SaveOptions {
   toast(message: string): void;
@@ -25,8 +29,10 @@ export function useRecordSaves<K extends Key>(key: K, view: State[K], o: SaveOpt
   const latest = useRef(view);
   latest.current = view;
   const queue = useRef<Promise<unknown>>(Promise.resolve());
-  // A save the agent's rewrites refused twice. It is tried once more when the file next changes, then let go.
+  // A save the agent's rewrites refused twice. It is tried once more when the file next changes, then let go: and not at all
+  // if the person has done anything else since, because what they did later is what they want.
   const stuck = useRef<{ what: string; build: Request<State[K]> } | null>(null);
+  const sequence = useRef(0);
   useEffect(() => {
     hash.current = view.hash;
   }, [view.hash]);
@@ -40,10 +46,10 @@ export function useRecordSaves<K extends Key>(key: K, view: State[K], o: SaveOpt
     };
   }, []);
 
-  const put = async (build: Request<State[K]>): Promise<void> => {
+  const put = async (build: Request<State[K]>, retry: boolean): Promise<void> => {
     let from = latest.current;
     for (let attempt = 0; ; attempt++) {
-      const req = build(from);
+      const req = build(from, retry || attempt > 0);
       if (!req) throw new Error(`that part is no longer in ${key}.md`);
       if ("refuse" in req) throw new RefusedError(req.refuse);
       try {
@@ -62,14 +68,15 @@ export function useRecordSaves<K extends Key>(key: K, view: State[K], o: SaveOpt
     }
   };
 
-  const enqueue = (what: string, build: Request<State[K]>) => {
-    // A newer edit of the same thing replaces one that was stuck.
-    if (stuck.current?.what === what) stuck.current = null;
+  const enqueue = (what: string, build: Request<State[K]>, retry = false) => {
+    const mine = ++sequence.current;
+    stuck.current = null;
     queue.current = queue.current
       .catch(() => undefined)
-      .then(() => put(build))
+      .then(() => put(build, retry))
       .catch((e) => {
-        if (e instanceof ApiError && e.code === `${key}_changed`) stuck.current = { what, build };
+        // Kept for one more try only if nothing newer was done, and never for a retry itself.
+        if (!retry && mine === sequence.current && e instanceof ApiError && e.code === `${key}_changed`) stuck.current = { what, build };
         o.toast(`Couldn't save ${what}: ${(e as Error).message}`);
       })
       .finally(o.onChanged);
@@ -80,7 +87,7 @@ export function useRecordSaves<K extends Key>(key: K, view: State[K], o: SaveOpt
     const s = stuck.current;
     if (!s) return;
     stuck.current = null;
-    enqueue(s.what, s.build);
+    enqueue(s.what, s.build, true);
   }, [view.hash]);
 
   return { latest, enqueue };
