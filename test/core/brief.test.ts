@@ -82,6 +82,15 @@ describe("setStatus", () => {
     expect(setStatus("# Brief: X\n\n## A\nx\n", "approved")).toBe("# Brief: X\n\nStatus: approved\n\n## A\nx\n");
     expect(parseBrief(setStatus("## A\nx\n", "draft")).status).toBe("draft");
   });
+  it("reads a Status line the agent wrote in bold, and replaces it rather than adding a second", () => {
+    for (const line of ["**Status:** approved", "**Status**: approved", "_Status:_ approved"]) {
+      const text = `# T\n\n${line}\n\n## A\nx\n`;
+      expect(parseBrief(text).status).toBe("approved");
+      const reopened = setStatus(text, "draft");
+      expect(reopened).toBe("# T\n\nStatus: draft\n\n## A\nx\n");
+      expect(parseBrief(reopened).status).toBe("draft");
+    }
+  });
   it("only looks above the first section", () => {
     const text = "# T\n\n## Notes\nStatus: draft\n";
     expect(parseBrief(setStatus(text, "approved")).status).toBe("approved");
