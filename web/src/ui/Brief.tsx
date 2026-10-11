@@ -123,8 +123,8 @@ export function Brief({ brief, toast, onChanged, settle }: { brief: BriefView; t
     status: (status) => {
       // Approving is only for the text you saw: if the agent has rewritten the brief since, the tick is not carried over to the new words.
       const seen = brief.sections.map((x) => `${x.heading}\n${x.yours}`).join("\n\n");
-      enqueue("the brief's status", (b) => {
-        if (status === "approved" && b.sections.map((x) => `${x.heading}\n${x.yours}`).join("\n\n") !== seen) {
+      enqueue("the brief's status", (b, fresh) => {
+        if (fresh && status === "approved" && b.sections.map((x) => `${x.heading}\n${x.yours}`).join("\n\n") !== seen) {
           return { refuse: "the agent changed the brief while you were looking at it. Read it again, then approve." };
         }
         return { path: "/api/brief/status", body: { status } };

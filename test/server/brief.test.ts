@@ -164,6 +164,23 @@ describe("BriefService: files that are not what it expects", () => {
     }
   });
 
+  it("announces a deleted brief.md that comes back with the very same text", async () => {
+    const { brief, store, root } = await setup();
+    const heard: string[] = [];
+    store.on("change", (e: { file: string }) => heard.push(e.file));
+    const stop = brief.start(50);
+    try {
+      await expect.poll(() => heard.includes("brief"), { timeout: 3000 }).toBe(true);
+      await rm(join(root, "brief.md"));
+      await expect.poll(async () => (await brief.view()).exists === false && heard.length > 1, { timeout: 3000 }).toBe(true);
+      heard.length = 0;
+      await writeFile(join(root, "brief.md"), AGENT);
+      await expect.poll(() => heard.includes("brief"), { timeout: 3000 }).toBe(true);
+    } finally {
+      stop();
+    }
+  });
+
   it("refuses to save over a file that is not UTF-8 text, and leaves its bytes alone", async () => {
     const { brief, root } = await setup(null);
     const bytes = Buffer.concat([Buffer.from("# Brief: Lumen\n\n## Purpose\nCaf"), Buffer.from([0xe9, 0xff]), Buffer.from("\n")]);
