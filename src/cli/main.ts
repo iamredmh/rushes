@@ -336,14 +336,16 @@ export async function main(argv: string[], io: Io): Promise<number> {
       case "status": {
         const root = rest[0] ? resolve(io.cwd, rest[0]) : dir;
         const { tabs, brief, storyboard, build } = await (await ensureServer(root, io.ensure)).get("/api/tabs");
+        // The second column starts in the same place on every line: as wide as the longest label shown.
+        const w = storyboard?.exists ? "storyboard".length : 8;
         for (const t of tabs as { stage: string; unlocked: boolean; todo: number }[]) {
-          io.out(`${t.stage.padEnd(8)} ${t.unlocked ? "open  " : "locked"} ${t.todo ? `${t.todo} to do` : ""}`.trimEnd());
+          io.out(`${t.stage.padEnd(w)} ${t.unlocked ? "open  " : "locked"} ${t.todo ? `${t.todo} to do` : ""}`.trimEnd());
         }
         // §24 step 2: brief.md, when there is one: its status and how many sections the user has changed.
-        if (brief?.exists) io.out(`${"brief".padEnd(8)} ${String(brief.status ?? "draft").padEnd(6)} ${brief.changed ? `${brief.changed} changed` : ""}`.trimEnd());
+        if (brief?.exists) io.out(`${"brief".padEnd(w)} ${String(brief.status ?? "draft").padEnd(6)} ${brief.changed ? `${brief.changed} changed` : ""}`.trimEnd());
         // §24.12: storyboard.md, and whether the plan is approved, once planning has begun.
-        if (storyboard?.exists) io.out(`storyboard ${storyboard.approved} of ${storyboard.shots} approved${storyboard.changed ? `, ${storyboard.changed} changed` : ""}`);
-        if (build?.started) io.out(`${"build".padEnd(8)} ${build.ready ? "ready" : `waiting on ${(build.waitingOn as string[]).join(", ")}`}`);
+        if (storyboard?.exists) io.out(`${"storyboard".padEnd(w)} ${storyboard.approved} of ${storyboard.shots} approved${storyboard.changed ? `, ${storyboard.changed} changed` : ""}`);
+        if (build?.started) io.out(`${"build".padEnd(w)} ${build.ready ? "ready" : `waiting on ${(build.waitingOn as string[]).join(", ")}`}`);
         return 0;
       }
       case "doctor": {

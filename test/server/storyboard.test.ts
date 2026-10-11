@@ -3,6 +3,7 @@ import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
 import { StoryboardService } from "../../src/server/storyboard.js";
+import { contentType } from "../../src/server/files.js";
 import { BriefService } from "../../src/server/brief.js";
 import { createApp } from "../../src/server/app.js";
 
@@ -98,6 +99,12 @@ describe("StoryboardService", () => {
     const { board } = await setup();
     expect([...(await board.stills())]).toEqual(["storyboard/shot-01.png"]);
     expect(await board.cutShots()).toEqual([{ name: "Cold open", start: 0, tag: "ESTABLISH" }, { name: "Drop a folder", start: 3, tag: "ACTION" }]);
+  });
+
+  it("serves every picture type a still may be as that picture, avif included", () => {
+    for (const [ext, type] of [["png", "image/png"], ["jpg", "image/jpeg"], ["jpeg", "image/jpeg"], ["webp", "image/webp"], ["gif", "image/gif"], ["avif", "image/avif"]]) {
+      expect(contentType(`storyboard/a.${ext}`), ext).toBe(type);
+    }
   });
 
   it("does not name a still that is a link, or one inside a linked folder", async () => {
@@ -241,7 +248,7 @@ describe("storyboard over HTTP", () => {
       expect(r.json.version.shots).toEqual([]);
     });
 
-    it("copies the shots once: a second cut inherits the first's list, and a second film gets none from a changed plan", async () => {
+    it("copies the shots once: a second cut inherits the first's list, and another film's first cut takes the plan as it is then", async () => {
       const { call, root, board } = await app({ board: APPROVED });
       await post(call);
       await writeFile(join(root, "storyboard.md"), APPROVED.replace("Length: 3", "Length: 9"));
