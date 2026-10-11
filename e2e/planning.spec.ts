@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { test, expect } from "./fixture.js";
 
@@ -308,4 +308,15 @@ test("the Brief page shows the film's title, and says so when brief.md has no se
   await rushes.writeFiles([{ path: "brief.md", text: "# Brief: Lumen launch film\n\nStatus: draft\n\nJust some notes, no headings.\n" }]);
   await expect(page.getByText("brief.md has no ## sections yet")).toBeVisible({ timeout: 8000 });
   await expect(page.locator(".shead")).not.toContainText("0 sections");
+});
+
+test("a brief.md that is deleted while the page is open is dropped without a reload", async ({ page, rushes }) => {
+  await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
+  await rushes.api("PUT", "/api/script", SCRIPT);
+  await page.goto(rushes.url);
+  await expect(page.getByLabel("Your version of Tone")).toBeVisible();
+  // The server looks for outside changes every half second: let it see the file once before it is taken away.
+  await page.waitForTimeout(1200);
+  await rm(join(rushes.root, "brief.md"));
+  await expect(page.getByLabel("Your version of Tone")).toHaveCount(0, { timeout: 8000 });
 });
