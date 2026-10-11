@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
 import { BriefService } from "../../src/server/brief.js";
@@ -144,6 +144,53 @@ describe("BriefService", () => {
     } finally {
       stop();
     }
+  });
+});
+
+describe("BriefService: files that are not what it expects", () => {
+  it("announces a brief.md that is deleted or replaced by a folder, not only one that is edited", async () => {
+    const { brief, store, root } = await setup();
+    const heard: string[] = [];
+    store.on("change", (e: { file: string }) => heard.push(e.file));
+    const stop = brief.start(50);
+    try {
+      await expect.poll(() => heard.includes("brief"), { timeout: 3000 }).toBe(true);
+      heard.length = 0;
+      await rm(join(root, "brief.md"));
+      await expect.poll(() => heard.includes("brief"), { timeout: 3000 }).toBe(true);
+      expect((await brief.view()).exists).toBe(false);
+    } finally {
+      stop();
+    }
+  });
+
+  it("refuses to save over a file that is not UTF-8 text, and leaves its bytes alone", async () => {
+    const { brief, root } = await setup(null);
+    const bytes = Buffer.concat([Buffer.from("# Brief: Lumen\n\n## Purpose\nCaf"), Buffer.from([0xe9, 0xff]), Buffer.from("\n")]);
+    await writeFile(join(root, "brief.md"), bytes);
+    const v = await brief.view();
+    expect(v.exists).toBe(true);
+    await expect(brief.setSection(0, "Purpose", "New.", v.hash)).rejects.toThrow(/UTF-8/);
+    await expect(brief.setStatus("approved", v.hash)).rejects.toThrow(/UTF-8/);
+    expect((await readFile(join(root, "brief.md"))).equals(bytes)).toBe(true);
+  });
+
+  it("refuses a save when the file changes between the check and the write", async () => {
+    const { store, root } = await setup();
+    // The agent writes in the moment after the check: the second look at the file sees something else.
+    class Racy extends BriefService {
+      looks = 0;
+      protected override async readText(): Promise<string | null> {
+        const text = await super.readText();
+        this.looks++;
+        return this.looks >= 2 && text !== null ? text + "\nThe agent added a line.\n" : text;
+      }
+    }
+    const brief = new Racy(store);
+    const v = await new BriefService(store).view();
+    brief.looks = 0;
+    await expect(brief.setSection(1, "Tone", "Mine.", v.hash)).rejects.toMatchObject({ code: "brief_changed" });
+    expect(await readFile(join(root, "brief.md"), "utf8")).toBe(AGENT);
   });
 });
 

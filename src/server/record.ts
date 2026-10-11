@@ -1,7 +1,8 @@
-import { lstat, readFile, rename, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { lstat, open, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { hashText } from "../core/brief.js";
-import { NotFoundError, RushesError } from "../core/errors.js";
+import { InvalidError, NotFoundError, RushesError } from "../core/errors.js";
 import type { Store } from "../core/store.js";
 
 // §24 steps 2 and 3: brief.md and storyboard.md are files of record. The agent writes them with its own tools; the
@@ -31,15 +32,43 @@ export abstract class RecordFile {
     return next;
   }
 
-  /** The file's text, or null when there is none: missing, a folder, a link (never followed), or too big to be one. */
-  protected async readText(): Promise<string | null> {
+  /**
+   * The file's bytes, or null when there is none: missing, a folder, a link (never followed), or too big to be one.
+   * The file is opened without following a link and read through that handle, so a link swapped in after the check
+   * is refused too, not read.
+   */
+  private async readBytes(): Promise<Buffer | null> {
     try {
-      const st = await lstat(this.path);
-      if (!st.isFile() || st.size > MAX_RECORD_BYTES) return null;
-      return await readFile(this.path, "utf8");
+      if (!(await lstat(this.path)).isFile()) return null;
+      const fh = await open(this.path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+      try {
+        const st = await fh.stat();
+        if (!st.isFile() || st.size > MAX_RECORD_BYTES) return null;
+        return await fh.readFile();
+      } finally {
+        await fh.close();
+      }
     } catch (e) {
-      if (["ENOENT", "ENOTDIR", "EISDIR", "ELOOP"].includes((e as NodeJS.ErrnoException).code ?? "")) return null;
+      if (["ENOENT", "ENOTDIR", "EISDIR", "ELOOP", "EMLINK"].includes((e as NodeJS.ErrnoException).code ?? "")) return null;
       throw e;
+    }
+  }
+
+  /** The file's text, or null when there is none (see readBytes). Bytes that are not UTF-8 are shown as replacement characters. */
+  protected async readText(): Promise<string | null> {
+    const bytes = await this.readBytes();
+    return bytes === null ? null : bytes.toString("utf8");
+  }
+
+  /** Whether the file is valid UTF-8, so that a save cannot change bytes the user never touched. */
+  private async isUtf8(): Promise<boolean> {
+    const bytes = await this.readBytes();
+    if (bytes === null) return true;
+    try {
+      new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      return true;
+    } catch {
+      return false;
     }
   }
 
@@ -58,6 +87,9 @@ export abstract class RecordFile {
   }
 
   protected async write(prev: string, next: string): Promise<void> {
+    // One more look just before the file is replaced, so a write that landed since the check is refused, not overwritten.
+    const again = await this.readText();
+    if (again === null || hashText(again) !== hashText(prev)) throw this.changed();
     const tmp = join(this.store.root, `.${this.file}.${process.pid}.${Date.now()}.tmp`);
     await writeFile(tmp, next, "utf8");
     await rename(tmp, this.path);
@@ -75,6 +107,7 @@ export abstract class RecordFile {
     const text = await this.readText();
     if (text === null) throw new NotFoundError(this.file === "brief.md" ? "Brief" : "Storyboard", this.file);
     if (hashText(text) !== expectHash) throw this.changed();
+    if (!(await this.isUtf8())) throw new InvalidError(`${this.file} isn't UTF-8 text, so Rushes won't save over it. Edit it in your editor.`);
     return text;
   }
 
@@ -88,8 +121,15 @@ export abstract class RecordFile {
         const st = await lstat(this.path).catch(() => null);
         const sig = st ? `${st.mtimeMs}:${st.size}:${st.ino}` : "";
         if (sig !== last) {
+          const hadFile = last !== null && last !== "";
           last = sig;
           await this.sync();
+          // A file that is deleted, or becomes a folder or a link, changes nothing in `.rushes/`: say so anyway.
+          if (hadFile && (await this.run(() => this.readText())) === null) {
+            const rev = (await this.store.read(this.key)).rev;
+            this.store.forget(this.key);
+            this.store.announce(this.key, rev);
+          }
         }
       } catch {
         // A file that cannot be read now is looked at again on the next change.

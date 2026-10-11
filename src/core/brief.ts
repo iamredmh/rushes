@@ -24,7 +24,8 @@ export interface ParsedBrief {
   sections: BriefSection[];
 }
 
-const STATUS_LINE = /^Status:[ \t]*(draft|approved)[ \t]*$/i;
+/** `Status: approved`, and the same in bold or italics (`**Status:** approved`): an agent often writes the line that way. */
+const STATUS_LINE = /^[*_]{0,2}Status[*_]{0,2}:[*_]{0,2}[ \t]*(draft|approved)[ \t]*$/i;
 
 /** A short fingerprint of the file's text: what a page sends back to prove it saw the current file. */
 export function hashText(text: string): string {
