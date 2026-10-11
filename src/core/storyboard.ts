@@ -138,8 +138,12 @@ export function editShot(text: string, index: number, heading: string, edit: Sho
  */
 export function cutShots(shots: Pick<Shot, "name" | "tag" | "length">[]): { name: string; start: number; tag: string }[] {
   let start = 0;
-  return shots.map((s) => {
-    const out = { name: s.name.slice(0, 80), start: Math.round(start * 1000) / 1000, tag: s.tag.slice(0, 24) };
+  let last = -1;
+  // A shot list holds at most 200 shots, and no two may start together: lengths too small to tell apart still step by a millisecond.
+  return shots.slice(0, 200).map((s) => {
+    const at = Math.max(Math.round(start * 1000) / 1000, last + 0.001);
+    const out = { name: s.name.slice(0, 80), start: Math.round(at * 1000) / 1000, tag: s.tag.slice(0, 24) };
+    last = out.start;
     start += s.length ?? 1;
     return out;
   });

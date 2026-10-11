@@ -667,7 +667,10 @@ describe("cli", () => {
       const a = io(root);
       expect(await main(["status"], a.x)).toBe(0);
       expect(a.out.find((l) => l.startsWith("storyboard"))).toBe("storyboard 1 of 2 approved");
-      expect(a.out.find((l) => l.startsWith("build"))).toBe("build    waiting on brief, storyboard");
+      expect(a.out.find((l) => l.startsWith("build"))).toBe("build      waiting on brief, storyboard");
+      // The second column starts in the same place on every line.
+      const starts = new Set(a.out.filter((l) => /^\S+ +\S/.test(l)).map((l) => /^\S+ +/.exec(l)![0].length));
+      expect([...starts]).toHaveLength(1);
     } finally {
       await s.close();
     }

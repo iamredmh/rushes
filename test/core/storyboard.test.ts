@@ -81,6 +81,15 @@ describe("editShot", () => {
 });
 
 describe("cutShots", () => {
+  it("never gives two shots the same start, even when their lengths are too small to tell apart", () => {
+    const starts = cutShots(Array.from({ length: 5 }, (_, i) => ({ name: `S${i}`, tag: "", length: 0.0001 }))).map((x) => x.start);
+    expect(new Set(starts).size).toBe(5);
+    expect([...starts].sort((a, b) => a - b)).toEqual(starts);
+  });
+  it("holds at most 200 shots, the most a shot list can hold", () => {
+    expect(cutShots(Array.from({ length: 250 }, (_, i) => ({ name: `S${i}`, tag: "", length: 1 })))).toHaveLength(200);
+  });
+
   it("starts each shot where the lengths before it end, and counts a missing length as a second", () => {
     expect(cutShots([{ name: "A", tag: "T", length: 3 }, { name: "B", tag: "", length: null }, { name: "C", tag: "", length: 2.5 }])).toEqual([
       { name: "A", start: 0, tag: "T" },
