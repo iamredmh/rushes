@@ -3,6 +3,7 @@ import { mkdir, readFile, stat, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
 import { createApp } from "../../src/server/app.js";
+import { addVersion } from "../../src/core/project.js";
 
 // §25.5 and §25.7: registering visuals over HTTP, the notes on them, and what the agent and the media route see.
 const be32 = (n: number) => [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255];
@@ -97,6 +98,19 @@ describe("a registered visual's pictures", () => {
     expect(ok.status).toBe(200);
     expect(ok.res.headers.get("content-type")).toBe("image/png");
     expect((await call("GET", "/media?path=visuals/other.png")).status).toBe(404);
+  });
+
+  // Review (whole branch): a cut's byte-range seeks hit /media over and over; they must not read, or depend on, visuals.json.
+  it("does not stand between a registered cut and /media: a damaged visuals.json leaves the cut playing", async () => {
+    const { root, store, call } = await setup();
+    await mkdir(join(root, "renders"), { recursive: true });
+    await writeFile(join(root, "renders/hero.mp4"), Buffer.from("not really a video"));
+    await store.update("project", (p) => {
+      addVersion(p, { video: "Hero", file: "renders/hero.mp4" });
+    });
+    await writeFile(join(root, ".rushes", "visuals.json"), "{ damaged");
+    const r = await call("GET", "/media?path=renders/hero.mp4");
+    expect(r.status).toBe(200);
   });
 });
 

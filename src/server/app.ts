@@ -520,7 +520,9 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     // and the one a byte-range video seek hits over and over. Only a path that misses all three
     // falls through to candidatePaths, which does the readdir-backed discovery (§16.2's
     // auto-discovered docs/captions/exports) that a registered path never needs.
-    let known = registeredMedia(project, script, await store.read("visuals")).has(path) || GRAB_PATH.test(path) || SCREENSHOT_PATH.test(path);
+    let known = registeredMedia(project, script).has(path) || GRAB_PATH.test(path) || SCREENSHOT_PATH.test(path);
+    // §25.7: a registered visual's pictures. Read visuals.json only when the above missed, so a cut's seeks never touch it.
+    if (!known && registeredMedia(project, script, await store.read("visuals")).has(path)) known = true;
     // §24.12: a picture storyboard.md names (a safe, project-relative image path) is served too, registered or not.
     if (!known && (await storyboard.stills()).has(path)) known = true;
     // The file on disk to send. For a found file it's exactly the path that was checked.
