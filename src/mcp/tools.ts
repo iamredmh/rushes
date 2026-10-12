@@ -17,7 +17,7 @@ export interface ToolContext {
 }
 
 const project = z.string().optional().describe("Project folder. Defaults to the current working directory.");
-const stage = z.enum(["script", "picture", "voice", "music", "sfx", "mix"]);
+const stage = z.enum(["script", "picture", "voice", "music", "sfx", "mix", "visuals"]);
 const fileKind = z.enum(["doc", "image", "caption", "export", "delivery", "edit"]);
 const assetKind = z.enum(["screenshot", "cut", "proxy", "take", "music", "sfx", "voice", "doc", "image", "caption", "export", "delivery", "edit"]);
 
@@ -243,6 +243,37 @@ export function createMcpServer(ctx: ToolContext): McpServer {
       if (droppedFormats) return { ...r, note: OLDER_DROPPED };
       return r;
     }),
+  );
+
+  server.registerTool(
+    "rushes_add_visual",
+    {
+      title: "Add a visual",
+      description:
+        "Register a still, a standalone image or a carousel so the user can mark it up in the Visuals tab: one visual per post. A new visual (`name`) lists every page in order, each page with its pictures, one per aspect ratio (a png, jpg, webp or gif inside the project; Rushes reads each ratio from the picture's own size). A new version of a visual you already registered (`visual`: its id or name) lists only the pages that changed or are new, each with its page number `n`; every other page, and every ratio of a listed page you leave out, carries over from the version before. Pages can be added at the end and never removed; a new aspect ratio needs a picture on every page. After feedback, fix the marked pictures, register them as a new version, then rushes_reply to each note with fixVersion set to that version (you never mark a note done: the user does). Returns the visual, the version (v1, v2 ...), the page count and the ratios. A notes batch for Visuals (rushes_get_batch) names each note's visual, version, page, ratio and where on the picture it is, with the file to open. Refused, with the reason and nothing changed: a picture outside the project or that is a link, one that is not an image or cannot be read, two pictures of one ratio on a page, pages that disagree about their ratios, a name already used, and a page that is missing for a ratio.",
+      inputSchema: {
+        project,
+        name: z.string().trim().min(1).max(80).optional().describe("A new visual's name, e.g. \"Launch carousel\". Give this or `visual`, not both."),
+        visual: z.string().trim().min(1).max(80).optional().describe("The id or name of an existing visual, to register a new version of it."),
+        kind: z.enum(["still", "carousel"]).optional().describe("A new visual only. Defaults to a carousel when there is more than one page, else a still."),
+        label: z
+          .string()
+          .refine((s) => Array.from(oneLineOf(s)).length <= LABEL_MAX, `label is ${LABEL_MAX} characters at most`)
+          .meta({ maxLength: LABEL_MAX })
+          .optional()
+          .describe(`A short label saying what changed in this version, ${LABEL_MAX} characters at most.`),
+        pages: z
+          .array(
+            z.object({
+              n: z.number().int().positive().optional().describe("The page number. Required for a new version; optional for a new visual (pages are 1, 2, 3 in order)."),
+              files: z.array(z.string().min(1).max(1024)).min(1).max(8).describe("The page's pictures, one per aspect ratio, paths relative to the project."),
+            }),
+          )
+          .min(1)
+          .max(100),
+      },
+    },
+    safe(async ({ project, ...b }) => (await ctx.client(project)).post("/api/visuals", b)),
   );
 
   server.registerTool(

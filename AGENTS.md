@@ -95,6 +95,14 @@ Every tab is visible from the start, in workflow order, even before it has anyth
 
 > In Rushes project "Launch", make two or three music beds for "Hero" and add each with rushes_add_variant (stage "music") with a one-line description.
 
+## Visuals: stills and carousels
+
+When the user makes stills, standalone images or carousels (posts), register them so they can mark them up in the **Visuals** tab, the way they mark a cut in Picture. Call `rushes_add_visual` with one visual per post: a `name` and `pages`, each page with its pictures, one per aspect ratio it comes in (a png, jpg, webp or gif inside the project; Rushes reads each ratio from the picture's own size, so never name one). A still is a visual with one page; a carousel has many. Every page must come in the same ratios, and every page needs a picture in every aspect ratio.
+
+The user drags to mark a region on the picture, clicks for a point, or adds a note for the whole image, and sends a batch. `rushes_get_batch` and `rushes_list_notes` return each Visuals note with a `visual` object: the visual's id and name, its `version`, the `page`, the `ratio` as a label (null when the note is for every ratio), the `shape` (`region`, `pin` or `image`), the `region` or `pin` as fractions of the picture, `words` saying where it is ("left third, top third"), and the `file` to open. A note with no ratio is for every ratio: say in your reply which ratios you fixed.
+
+To answer feedback, change the marked pictures and register the result as a new version of the same visual: call `rushes_add_visual` with `visual` (its id or name) and `pages` listing only the pages that changed or are new, each with its `n`; every other page, and any ratio of a listed page you leave out, carries over from the version before. Pages can be added at the end and never removed. Then `rushes_reply` to each note with `fixVersion` set to that version. You never mark a note done: the user does, with the tick. Rushes keeps each note on the version it was made on, and shows it as "from v1" beside the newer one.
+
 ## The loop
 
 1. **Register what you made.**
@@ -140,7 +148,7 @@ Rushes keeps a log of what happened in the project, written as it happens (`.rus
 
 ## Tools
 
-The MCP server has twenty-two tools: `rushes_open`, `rushes_status`, `rushes_add_version`, `rushes_add_format`, `rushes_add_variant`, `rushes_set_script`, `rushes_get_script`, `rushes_add_take`, `rushes_list_notes`, `rushes_list_assets`, `rushes_get_batch`, `rushes_reply`, `rushes_get_picks`, `rushes_set_shots`, `rushes_lock_picture`, `rushes_add_file`, `rushes_export_notes`, `rushes_log`, `rushes_get_log`, `rushes_scan`, `rushes_bring_in` and `rushes_doctor`. Each takes an optional `project` folder, which defaults to the folder the harness started in.
+The MCP server has twenty-three tools: `rushes_open`, `rushes_status`, `rushes_add_version`, `rushes_add_format`, `rushes_add_visual`, `rushes_add_variant`, `rushes_set_script`, `rushes_get_script`, `rushes_add_take`, `rushes_list_notes`, `rushes_list_assets`, `rushes_get_batch`, `rushes_reply`, `rushes_get_picks`, `rushes_set_shots`, `rushes_lock_picture`, `rushes_add_file`, `rushes_export_notes`, `rushes_log`, `rushes_get_log`, `rushes_scan`, `rushes_bring_in` and `rushes_doctor`. Each takes an optional `project` folder, which defaults to the folder the harness started in.
 
 ## Rules
 

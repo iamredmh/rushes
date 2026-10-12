@@ -59,7 +59,7 @@ It runs on your machine. There's no account, no API key and no server to sign up
 
 No project to hand? `npx -y rushes demo` builds an example on your machine and opens it.
 
-> Status: early. The Script, Picture, Voiceover, Music, Sound effects and Mix tabs, the MCP tools and the CLI all work today.
+> Status: early. The Script, Picture, Voiceover, Music, Sound effects, Mix and Visuals tabs, the MCP tools and the CLI all work today.
 
 ## How it works
 
@@ -104,6 +104,12 @@ Reads of the same script sit side by side in rounds. Switch between them with no
 <img src="docs/assets/screens/music.jpg" alt="The Music tab with three beds, each with its waveform. Bed B is in use. Two open notes are marked on the waveforms: a 'Fall' on bed A and a 'Rise' on bed B." width="880">
 
 Switch beds instantly while the picture plays. Mark a range as **Rise**, **Fall**, **Louder** or **Quieter**, and your agent gets it as a note it can act on.
+
+### Visuals: mark up stills and carousels
+
+The **Visuals** tab (key `7`) is for the stills, standalone images and carousels your agent makes next to a video. Each is a visual: one post, in the aspect ratios it comes in, shown one page at a time in a large frame. The tab scrolls from one visual to the next, and whichever visual crosses the middle of the view is the current one: it gets the outline, and it is the only one you can add a note to. A carousel has Previous and Next, a count, **Full screen** (for looking closely; you mark in the tab) and a strip of its pages with the open notes on each.
+
+**Drag** on the picture to mark a region, click to drop a point, or press **Whole image** for a note about all of it. The composer always says where the note will go ("Adding to: Launch carousel · page 3 · 4:5 · v2"), and a draft stays with the visual you began it on. Notes belong to a page, a ratio and a version, never to where you have scrolled, so every mark is still there when you come back. The notes column lists the whole tab, grouped by visual and page, with the visual you are looking at highlighted and the rest faded; click a note to jump to it. When your agent registers a new version, your old notes stay with the version they were made on ("from v1"), marked until you tick them done.
 
 ### Sound effects: layers by sound
 
@@ -174,7 +180,7 @@ If your user asked you to use Rushes, do this:
 2. If it added anything, tell the user to restart the app (or start a new session) so the `rushes_*` tools load.
 3. From then on, follow [AGENTS.md](AGENTS.md). If the user wants a new film, start with **Starting a film** in AGENTS.md: plan it with them first, then build. Otherwise, in short: register what you made, call `rushes_open`, wait for the user to press **Send to agent**, then `rushes_get_batch`, fix the notes, and `rushes_reply`.
 
-The MCP server has twenty-two tools: `rushes_open`, `rushes_status`, `rushes_add_version`, `rushes_add_format`, `rushes_add_variant`, `rushes_set_script`, `rushes_get_script`, `rushes_add_take`, `rushes_list_notes`, `rushes_list_assets`, `rushes_get_batch`, `rushes_reply`, `rushes_get_picks`, `rushes_set_shots`, `rushes_lock_picture`, `rushes_add_file`, `rushes_export_notes`, `rushes_log`, `rushes_get_log`, `rushes_scan`, `rushes_bring_in` and `rushes_doctor`.
+The MCP server has twenty-three tools: `rushes_open`, `rushes_status`, `rushes_add_version`, `rushes_add_format`, `rushes_add_visual`, `rushes_add_variant`, `rushes_set_script`, `rushes_get_script`, `rushes_add_take`, `rushes_list_notes`, `rushes_list_assets`, `rushes_get_batch`, `rushes_reply`, `rushes_get_picks`, `rushes_set_shots`, `rushes_lock_picture`, `rushes_add_file`, `rushes_export_notes`, `rushes_log`, `rushes_get_log`, `rushes_scan`, `rushes_bring_in` and `rushes_doctor`.
 
 If you can't run commands, give the user the matching line from **Manual setup** below.
 
@@ -257,7 +263,7 @@ In the Voiceover, Music, Sound effects and Mix tabs:
 
 Anywhere:
 
-- **1–7** switch tab (1: Planning, which opens the page you used last; 7: Assets)
+- **1–8** switch tab (1: Planning, which opens the page you used last; 7: Visuals; 8: Assets)
 - **[ / ]** previous/next film
 - **Alt+←/→** previous/next format (Picture)
 - **?** shortcuts
@@ -332,7 +338,7 @@ npx -y rushes bring-in <file>... [--kind voice|music|sfx|cut|doc] [--round NAME]
 
 Press **G**, or the camera button, to grab the current frame. It's saved as a PNG to `screenshots/`, named for the film, version and timecode (and, on a cut with several formats, the ratio on screen) — grabbing the same frame twice overwrites the same file.
 
-The **Assets** tab (key `7`) is a library with a folder sidebar: Screenshots, Cuts, Voiceover, Music, Sound effects, Scripts & docs, Images, Captions, Exports, Delivery, Edit files and Proxies. Each folder has search and a sort order; Screenshots, Images, Cuts and Delivery also get a grid/list toggle, and Screenshots, Cuts and Delivery get a film filter — every other folder is list-only. Audio plays inline, one at a time, and Markdown or text files get a read-only preview. Every item has five actions: Download, Save as (Chrome and Edge only — other browsers just get Download), Open, Show in Finder and Copy path. A file your agent registered from outside the project folder (or reached through a link out of it) plays and downloads only if it is a media or document type (audio, video, images, PDF, Markdown, text, captions), and a cut or a format only if it is video or audio; for anything else, such as an editor project file on another drive, use Show in Finder or Copy path. **Open** appears, and is accepted, only for a fixed list of safe, non-executable types — never scripts, apps or archives. Top-level `.md`, `.txt`, `.pdf`, `.srt` and `.vtt` files, plus anything in `exports/`, are picked up automatically; everything else your agent registers with `rushes_add_file`. The Exports folder also has an **Export notes** button, which writes every note to a dated Markdown file there.
+The **Assets** tab (key `8`) is a library with a folder sidebar: Screenshots, Cuts, Voiceover, Music, Sound effects, Scripts & docs, Images, Captions, Exports, Delivery, Edit files and Proxies. Each folder has search and a sort order; Screenshots, Images, Cuts and Delivery also get a grid/list toggle, and Screenshots, Cuts and Delivery get a film filter — every other folder is list-only. Audio plays inline, one at a time, and Markdown or text files get a read-only preview. Every item has five actions: Download, Save as (Chrome and Edge only — other browsers just get Download), Open, Show in Finder and Copy path. A file your agent registered from outside the project folder (or reached through a link out of it) plays and downloads only if it is a media or document type (audio, video, images, PDF, Markdown, text, captions), and a cut or a format only if it is video or audio; for anything else, such as an editor project file on another drive, use Show in Finder or Copy path. **Open** appears, and is accepted, only for a fixed list of safe, non-executable types — never scripts, apps or archives. Top-level `.md`, `.txt`, `.pdf`, `.srt` and `.vtt` files, plus anything in `exports/`, are picked up automatically; everything else your agent registers with `rushes_add_file`. The Exports folder also has an **Export notes** button, which writes every note to a dated Markdown file there.
 
 Rushes recommends this layout for a project folder:
 

@@ -47,6 +47,10 @@ When the user asks to open or review a film they started in the chat, or the pro
 
 When a user starts briefing in the chat, offer to keep `brief.md` up to date as you go: run `rushes new` first, so the next session, or another tool, can pick it up.
 
+## Visuals
+
+For stills, standalone images and carousels, register one visual per post with `rushes_add_visual`: a `name` and `pages`, each page with its pictures, one per aspect ratio, in every aspect ratio the post comes in (Rushes reads each ratio from the picture). The user marks a region, a point or the whole image in the Visuals tab and sends a batch; each note names its visual, version, page, ratio, where on the picture it is (`words`) and the `file` to open. A note with no ratio is for every ratio. Fix the pictures, register a new version with `rushes_add_visual` (`visual` and only the pages that changed, each with `n`), then `rushes_reply` to each note with `fixVersion` set to it. You never mark a note done. The full contract is in `AGENTS.md`.
+
 ## Reviewing and fixing
 
 1. Register what you made:
@@ -72,4 +76,4 @@ When asked to open or review work in Rushes, call `rushes_open`, then tell the u
 
 No project to show yet? Run `npx -y rushes demo <folder> --no-browser`, then `rushes_open` with `project: "<folder>"`. The demo builds a complete working example on the user's machine, with a cut, script, voice reads, music and notes already in place. Always pass `--no-browser`: without it the command stays running as the server and never returns.
 
-Rushes has twenty-two tools: `rushes_open`, `rushes_status`, `rushes_add_version`, `rushes_add_format`, `rushes_add_variant`, `rushes_set_script`, `rushes_get_script`, `rushes_add_take`, `rushes_list_notes`, `rushes_list_assets`, `rushes_get_batch`, `rushes_reply`, `rushes_get_picks`, `rushes_set_shots`, `rushes_lock_picture`, `rushes_add_file`, `rushes_export_notes`, `rushes_log`, `rushes_get_log`, `rushes_scan`, `rushes_bring_in` and `rushes_doctor` (environment and project health check) — `rushes_add_take` stays only for compatibility and isn't used for voiceover. The full contract is in `AGENTS.md` at the package root.
+Rushes has twenty-three tools: `rushes_open`, `rushes_status`, `rushes_add_version`, `rushes_add_format`, `rushes_add_visual`, `rushes_add_variant`, `rushes_set_script`, `rushes_get_script`, `rushes_add_take`, `rushes_list_notes`, `rushes_list_assets`, `rushes_get_batch`, `rushes_reply`, `rushes_get_picks`, `rushes_set_shots`, `rushes_lock_picture`, `rushes_add_file`, `rushes_export_notes`, `rushes_log`, `rushes_get_log`, `rushes_scan`, `rushes_bring_in` and `rushes_doctor` (environment and project health check) — `rushes_add_take` stays only for compatibility and isn't used for voiceover. The full contract is in `AGENTS.md` at the package root.
