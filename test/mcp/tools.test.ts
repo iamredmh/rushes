@@ -45,11 +45,11 @@ async function connect(opts: { files?: string[]; probe?: Probe; formatProbe?: Vi
 }
 
 describe("MCP tools", () => {
-  it("lists the twenty-two tools", async () => {
+  it("lists the twenty-three tools", async () => {
     const t = await connect();
     const { tools } = await t.client.listTools();
     expect(tools.map((x) => x.name).sort()).toEqual([
-      "rushes_add_file", "rushes_add_format", "rushes_add_take", "rushes_add_variant", "rushes_add_version", "rushes_bring_in", "rushes_doctor", "rushes_export_notes",
+      "rushes_add_file", "rushes_add_format", "rushes_add_take", "rushes_add_variant", "rushes_add_version", "rushes_add_visual", "rushes_bring_in", "rushes_doctor", "rushes_export_notes",
       "rushes_get_batch", "rushes_get_log", "rushes_get_picks", "rushes_get_script", "rushes_list_assets", "rushes_list_notes",
       "rushes_lock_picture", "rushes_log", "rushes_open", "rushes_reply", "rushes_scan", "rushes_set_script", "rushes_set_shots", "rushes_status",
     ]);
@@ -923,5 +923,46 @@ describe("formats against a server that isn't the current one (§21.4)", () => {
     expect(JSON.parse(r.text).note).toMatch(/older Rushes.*rushes stop/);
     expect(JSON.parse((await f.call("rushes_list_notes", {})).text).note).toBeUndefined();
     await f.close();
+  });
+});
+
+describe("rushes_add_visual (§25.5)", () => {
+  const be32 = (n: number) => [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255];
+  const png = (w: number, h: number) => Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, ...be32(13), 73, 72, 68, 82, ...be32(w), ...be32(h), 8, 6, 0, 0, 0, 0, 0, 0, 0]);
+
+  it("registers a visual, then a new version that sends only the changed page, and refuses a missing picture in words", async () => {
+    const t = await connect();
+    for (const f of ["visuals/p1.png", "visuals/p2.png", "visuals/p2-v2.png"]) {
+      await mkdir(dirname(join(t.root, f)), { recursive: true });
+      await writeFile(join(t.root, f), png(1080, 1350));
+    }
+    const first = await t.call("rushes_add_visual", { name: "Launch carousel", label: "First pass", pages: [{ files: ["visuals/p1.png"] }, { files: ["visuals/p2.png"] }] });
+    expect(first.isError).toBe(false);
+    expect(first.json).toMatchObject({ visual: { id: "launch-carousel", kind: "carousel" }, version: { id: "v1" }, pages: 2, ratios: ["4:5"] });
+    const second = await t.call("rushes_add_visual", { visual: "launch-carousel", pages: [{ n: 2, files: ["visuals/p2-v2.png"] }] });
+    expect(second.json).toMatchObject({ version: { id: "v2" }, pages: 2 });
+    const missing = await t.call("rushes_add_visual", { name: "Gone", pages: [{ files: ["visuals/nope.png"] }] });
+    expect(missing.isError).toBe(true);
+    expect(missing.text).toMatch(/could not be read/);
+    await t.close();
+  });
+
+  it("lets the agent list and batch notes for the Visuals stage", async () => {
+    const t = await connect();
+    const listed = await t.call("rushes_list_notes", { stage: "visuals" });
+    expect(listed.isError).toBe(false);
+    expect(listed.json.notes).toEqual([]);
+    await t.close();
+  });
+
+  it("says in its description what to send for a new visual and for a new version, and that the agent never marks a note done", async () => {
+    const t = await connect();
+    const { tools } = await t.client.listTools();
+    const tool = tools.find((x) => x.name === "rushes_add_visual")!;
+    expect(tool.description).toMatch(/one visual per post/);
+    expect(tool.description).toMatch(/only the pages that changed/);
+    expect(tool.description).toMatch(/aspect ratio/);
+    expect(tool.description).toMatch(/rushes_reply/);
+    await t.close();
   });
 });

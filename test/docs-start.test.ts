@@ -112,7 +112,7 @@ describe("starting a film: what the agent docs promise (§24)", () => {
     expect(text).toContain("the first, Planning, is a menu that holds Brief and Script");
     expect(text).toContain("### Planning: the brief, then your edits beside the agent's lines");
     expect(text).toContain("Rushes writes it into the file");
-    expect(text).toContain("**1–7** switch tab (1: Planning, which opens the page you used last; 7: Assets)");
+    expect(text).toContain("**1–8** switch tab (1: Planning, which opens the page you used last; 7: Visuals; 8: Assets)");
   });
 
   it("rushes_status says what it now reports about the brief", () => {
