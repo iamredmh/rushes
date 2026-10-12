@@ -271,3 +271,40 @@ test("a page that cannot load says so, and a whole-image note still works", asyn
   await page.getByRole("button", { name: "Add note" }).click();
   await expect.poll(async () => (await notesJson(rushes)).length).toBe(1);
 });
+
+// Review (whole branch): the target line names where the note will go, on this visual or any other page of it.
+test("a whole-image draft started on one page says so after you turn to another page, and saves there", async ({ page, rushes }) => {
+  await withVisuals(rushes);
+  await openVisuals(page, rushes);
+  await page.getByLabel("Note text").fill("About the first page");
+  await page.getByRole("button", { name: "Page 3" }).click();
+  await expect(frame(page, "launch-carousel").locator("img")).toHaveAttribute("src", /p3-v2\.png/);
+  await expect(page.locator(".vztarget")).toContainText("Draft for");
+  await expect(page.locator(".vztarget")).toContainText("page 1");
+  await page.getByRole("button", { name: "Add note" }).click();
+  await expect.poll(async () => (await notesJson(rushes)).map((n) => n.on)).toEqual(["launch-carousel/1"]);
+});
+
+test("a note cannot be added while looking at an older version, whichever way it was started", async ({ page, rushes }) => {
+  await withVisuals(rushes);
+  await openVisuals(page, rushes);
+  await section(page, "launch-carousel").getByRole("button", { name: /^v2/ }).click();
+  await page.getByRole("menuitem", { name: /v1/ }).click();
+  await page.getByLabel("Note text").fill("Typed while looking at v1");
+  await page.getByRole("button", { name: "Add note" }).click();
+  await expect(page.locator(".toast")).toContainText("This note is for v1, an older version");
+  expect(await notesJson(rushes)).toHaveLength(0);
+});
+
+test("a version registered while you are looking at the newest is the one you are looking at next, even after paging", async ({ page, rushes }) => {
+  await withVisuals(rushes);
+  await openVisuals(page, rushes);
+  await page.getByRole("button", { name: "Page 3" }).click();
+  await pic(rushes, "visuals/launch/p3-v3.png", 108, 135, [200, 40, 40]);
+  await rushes.api("POST", "/api/visuals", { visual: "launch-carousel", label: "Redder", pages: [{ n: 3, files: ["visuals/launch/p3-v3.png"] }] });
+  await expect(section(page, "launch-carousel").getByRole("button", { name: /^v3/ })).toBeVisible();
+  await expect(frame(page, "launch-carousel").locator("img")).toHaveAttribute("src", /p3-v3\.png/);
+  await expect(section(page, "launch-carousel").locator(".vzbanner")).toHaveCount(0);
+  await drag(page, "launch-carousel", [0.1, 0.2], [0.5, 0.4]);
+  await expect(page.locator(".vzbox.draft")).toHaveCount(1);
+});

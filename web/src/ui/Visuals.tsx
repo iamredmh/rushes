@@ -232,7 +232,8 @@ export function Visuals({ state, toast, onChanged, onPendingChange }: { state: S
   const visuals = state.visuals.visuals;
   const all = state.notes.notes;
   const [cur, setCur] = useState(visuals[0]?.id ?? "");
-  const [views, setViews] = useState<Record<string, View>>({});
+  // A visual's remembered view. `ver` is kept only when the person chose an older version; otherwise the view follows the newest.
+  const [views, setViews] = useState<Record<string, Partial<View>>>({});
   const [draft, setDraft] = useState<Draft | null>(null);
   const [sel, setSel] = useState<string | null>(null);
   const [fs, setFs] = useState<string | null>(null);
@@ -240,16 +241,16 @@ export function Visuals({ state, toast, onChanged, onPendingChange }: { state: S
   const scroller = useRef<HTMLDivElement>(null);
   const text = useRef<HTMLTextAreaElement>(null);
 
-  const viewOf = (v: Visual): View => views[v.id] ?? defaultView(v);
+  const viewOf = (v: Visual): View => ({ ...defaultView(v), ...views[v.id] });
   const visual = visuals.find((v) => v.id === cur) ?? visuals[0];
   const setView = (v: Visual, patch: Partial<View>) => {
     setViews((m) => {
-      const next = { ...viewOf(v), ...m[v.id], ...patch };
+      const next = { ...viewOf(v), ...patch };
       // A page or version that does not exist (a version with fewer pages, a ratio it lacks) falls back to one that does.
       const ver = v.versions.find((x) => x.id === next.ver) ?? newest(v);
       const pg = Math.max(1, Math.min(ver.pages.length, next.page));
       const ratio = ver.pages[0]?.images.some((i) => i.ratio === next.ratio) ? next.ratio : (ver.pages[0]?.images[0]?.ratio ?? next.ratio);
-      return { ...m, [v.id]: { page: pg, ratio, ver: ver.id } };
+      return { ...m, [v.id]: { page: pg, ratio, ...(ver.id === newest(v).id ? {} : { ver: ver.id }) } };
     });
   };
 
@@ -314,7 +315,8 @@ export function Visuals({ state, toast, onChanged, onPendingChange }: { state: S
 
   const target = draft ? visuals.find((v) => v.id === draft.vis) : null;
   const here = visual ? { vis: visual.id, ...viewOf(visual) } : null;
-  const away = !!(draft && here && draft.vis !== here.vis);
+  // Where the draft will go differs from what is in view: another visual, another page, another version, or (for a mark) another ratio.
+  const away = !!(draft && here && (draft.vis !== here.vis || draft.page !== here.page || draft.ver !== here.ver || ((draft.shape || draft.justThis) && draft.ratio !== here.ratio)));
   const justThisOffered = !!target && target.versions.find((v) => v.id === draft?.ver)?.pages[0]?.images.length! > 1;
 
   const startWhole = () => {
@@ -336,6 +338,7 @@ export function Visuals({ state, toast, onChanged, onPendingChange }: { state: S
       return text.current?.focus();
     }
     const v = visuals.find((x) => x.id === d.vis)!;
+    if (!canMark(v, d)) return toast(`This note is for ${d.ver}, an older version. Switch to the newest version to add notes.`);
     const shaped = !!d.shape;
     const format = shaped || d.justThis ? d.ratio : null;
     try {
