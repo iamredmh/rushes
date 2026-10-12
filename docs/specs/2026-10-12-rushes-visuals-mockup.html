@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rushes Visuals mockup</title>
+<style>
+:root{color-scheme:dark;--bg:#0c0d0f;--app:#141518;--raised:#1c1e22;--hover:#25282d;--press:#2d3036;--line:#26282d;--line-2:#34373d;--text:#eeeef0;--text-2:#a3a6ad;--text-3:#70737a;--accent:#7c93ff;--accent-2:#9eaeff;--on-accent:#0b1026;--accent-soft:rgba(124,147,255,.14);--todo:#f5b740;--todo-soft:rgba(245,183,64,.14);--done:#4cc38a;--done-soft:rgba(76,195,138,.14);--flag:#f0716b;--r:10px;--r-lg:14px;--mono:ui-monospace,"SF Mono",Menlo,monospace}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg)}
+body{color:var(--text);font:15px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;padding:0}
+textarea,input{font:inherit;color:var(--text)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+svg{display:block;flex:none}
+.demo{padding:10px 20px;border-bottom:1px solid var(--line);background:#0a0b0d;color:var(--text-2);display:grid;gap:8px}
+.demo .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.demo b{color:var(--text)}
+.demo button{padding:5px 12px;border:1px solid var(--line-2);border-radius:999px;color:var(--text-2)}
+.demo button[aria-pressed=true]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-2)}
+.demo .what{color:var(--text);border-left:2px solid var(--todo);padding-left:10px;max-width:1100px}
+.demo kbd{font-family:var(--mono);border:1px solid var(--line-2);border-radius:6px;padding:0 6px;color:var(--text)}
+.app{max-width:1360px;margin:0 auto;background:var(--app);position:relative;display:flex;flex-direction:column;height:calc(100vh - var(--demo-h,110px));min-height:640px}
+header{display:flex;align-items:center;gap:14px;padding:12px 20px;border-bottom:1px solid var(--line);flex:none}
+.logo{width:28px;height:28px;border-radius:8px;background:var(--accent-soft);display:grid;place-items:center;color:var(--accent)}
+.crumb{color:var(--text-2)} .crumb b{color:var(--text);font-weight:600} .crumb .id{font-family:var(--mono);color:var(--text-3)}
+.sp{flex:1}
+.send{height:36px;background:var(--accent);color:var(--on-accent);padding:0 16px;border-radius:12px;font-weight:600;display:inline-flex;align-items:center;gap:10px}
+.send .n{background:rgba(11,16,38,.22);border-radius:999px;min-width:24px;height:24px;display:grid;place-items:center;font-variant-numeric:tabular-nums}
+nav.tabs{display:flex;gap:2px;padding:0 12px;border-bottom:1px solid var(--line);overflow:auto;flex:none}
+.tab{display:inline-flex;gap:8px;align-items:center;padding:14px 14px;color:var(--text-2);border-bottom:2px solid transparent;white-space:nowrap}
+.tab.on{color:var(--text);border-bottom-color:var(--accent)}
+.tab.locked{color:var(--text-3)}
+.tab .od{width:8px;height:8px;border-radius:50%;background:var(--todo)}
+.tab .k{font-family:var(--mono);color:var(--text-3);font-size:12px}
+.trio{display:inline-flex;gap:5px}
+.trio i{width:10px;height:10px;border-radius:50%;border:2px solid var(--text-3);display:block}
+.trio i.ok{background:var(--done);border-color:var(--done)}
+
+/* the Visuals stage */
+.vsplit{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 380px}
+.vscroll{overflow-y:auto;scroll-snap-type:y proximity;scroll-behavior:smooth;position:relative;min-height:0}
+.visual{height:100%;scroll-snap-align:start;scroll-snap-stop:always;display:grid;grid-template-rows:auto minmax(0,1fr) auto;gap:10px;padding:14px 22px 12px;border-bottom:1px solid var(--line);transition:opacity .25s}
+.visual:not(.cur){opacity:.5}
+.visual:not(.cur):hover{opacity:.75}
+.vhead{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.vhead h2{margin:0;font-size:17px;font-weight:600}
+.kind{font-family:var(--mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-3)}
+.chip{padding:3px 12px;border:1px solid var(--line-2);border-radius:999px;color:var(--text-2);display:inline-flex;gap:6px;align-items:center;min-height:30px}
+.chip:hover{background:var(--hover);color:var(--text)}
+.chip[aria-pressed=true]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-2)}
+.chip .shape{display:inline-block;border:1.5px solid currentColor;border-radius:2px}
+.ver{position:relative}
+.vermenu{position:absolute;top:34px;left:0;z-index:5;background:var(--raised);border:1px solid var(--line-2);border-radius:var(--r);padding:4px;min-width:150px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.vermenu button{display:flex;width:100%;justify-content:space-between;padding:6px 10px;border-radius:7px;color:var(--text-2)}
+.vermenu button:hover{background:var(--hover);color:var(--text)}
+.vermenu button[aria-current=true]{color:var(--accent-2)}
+.banner{background:var(--todo-soft);border:1px solid var(--todo);color:var(--todo);border-radius:var(--r);padding:2px 12px;font-size:14px}
+.fwrap{min-height:0;display:grid;place-items:center;position:relative}
+.frame{position:relative;background:#000;border-radius:6px;overflow:hidden;box-shadow:0 0 0 1px var(--line-2);touch-action:none;user-select:none}
+.visual.cur .frame{box-shadow:0 0 0 2px var(--accent),0 10px 40px rgba(0,0,0,.45);cursor:crosshair}
+.visual:not(.cur) .frame{cursor:pointer}
+.frame img{width:100%;height:100%;display:block;pointer-events:none;-webkit-user-drag:none}
+.mbox{position:absolute;border:2px solid var(--todo);background:rgba(245,183,64,.12);border-radius:3px;pointer-events:none}
+.mbox.done{border-color:var(--done);background:rgba(76,195,138,.1)}
+.mbox.sel{border-width:3px;background:rgba(245,183,64,.22);box-shadow:0 0 0 3px rgba(245,183,64,.3)}
+.mbox.draft{border-style:dashed;border-color:var(--accent-2);background:rgba(124,147,255,.16)}
+.mbox .no,.mpin .no{position:absolute;left:-2px;top:-24px;min-width:22px;height:22px;border-radius:11px;background:var(--todo);color:#201500;font-weight:700;font-size:13px;display:grid;place-items:center;padding:0 6px}
+.mbox.done .no,.mpin.done .no{background:var(--done);color:#07140d}
+.mbox.draft .no{background:var(--accent-2);color:var(--on-accent)}
+.mpin{position:absolute;width:20px;height:20px;margin:-10px 0 0 -10px;border-radius:50%;border:3px solid var(--todo);background:rgba(245,183,64,.25);pointer-events:none}
+.mpin.sel{box-shadow:0 0 0 4px rgba(245,183,64,.35)}
+.mpin.draft{border-color:var(--accent-2);background:rgba(124,147,255,.3)}
+.mpin .no{left:12px;top:-14px}
+.flash{animation:flash .9s ease 2}
+@keyframes flash{50%{box-shadow:0 0 0 8px rgba(245,183,64,.6)}}
+.cantload{position:absolute;inset:0;display:grid;place-items:center;color:var(--text-3);background:#0a0a0a}
+.vfoot{display:grid;gap:8px;justify-items:center}
+.vnav{display:flex;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap}
+.vnav .btn.pill{border-radius:999px;height:36px;padding:0 20px;font-weight:500}
+.vnav .btn.pill.next{background:var(--accent);border-color:var(--accent);color:var(--on-accent);font-weight:600}
+.vnav .btn.pill[disabled]{opacity:.35;cursor:default}
+.vnav .count{font-family:var(--mono);color:var(--text-2);letter-spacing:.08em;min-width:84px;text-align:center}
+.thumbs{display:flex;gap:8px;overflow-x:auto;overflow-y:hidden;padding:4px 2px;scrollbar-width:none;max-width:100%}
+.thumbs::-webkit-scrollbar{display:none}
+.th{position:relative;flex:none;height:62px;border-radius:5px;overflow:hidden;box-shadow:0 0 0 1px var(--line-2);opacity:.7}
+.th:hover{opacity:1}
+.th[aria-current=true]{box-shadow:0 0 0 2px var(--accent);opacity:1}
+.th img{height:100%;width:auto;display:block}
+.th .badge{position:absolute;right:3px;top:3px;min-width:18px;height:18px;border-radius:9px;background:var(--todo);color:#201500;font-size:12px;font-weight:700;display:grid;place-items:center;padding:0 5px}
+.th .pn{position:absolute;left:4px;bottom:3px;font-family:var(--mono);font-size:11px;color:#fff;text-shadow:0 1px 2px #000}
+.fs{position:fixed;inset:0;z-index:30;background:#0a0a0c;display:none;grid-template-rows:minmax(0,1fr) auto}
+.fs[data-open="true"]{display:grid}
+.fs .stg{display:grid;place-items:center;min-height:0;padding:16px}
+.fs .frame{box-shadow:none}
+.fs .bar{display:flex;align-items:center;justify-content:center;gap:14px;padding:12px 16px 16px}
+.hint{color:var(--text-3);font-size:14px}
+
+/* notes column */
+.vnotes{border-left:1px solid var(--line);display:grid;grid-template-rows:auto minmax(0,1fr) auto;min-height:0;background:var(--app)}
+.nhead{padding:14px 18px 10px;display:flex;align-items:baseline;gap:10px}
+.nhead h3{margin:0;font-size:16px;font-weight:600}
+.nhead span{color:var(--text-3)}
+.nlist{overflow-y:auto;padding:0 12px 12px;min-height:0}
+.grp{border-radius:var(--r);margin-bottom:10px;border:1.5px solid transparent;transition:opacity .25s}
+.grp:not(.cur){opacity:.45}
+.grp:not(.cur):hover{opacity:.8}
+.grp.cur{border-color:var(--accent);background:var(--accent-soft)}
+.ghead{display:flex;align-items:center;gap:8px;padding:8px 12px;font-weight:600;cursor:pointer}
+.ghead .cnt{margin-left:auto;font-weight:400;color:var(--text-2)}
+.ghead .here{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent-2);font-weight:600}
+.pg{padding:0 10px 4px}
+.pgh{font-family:var(--mono);font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);padding:6px 4px 2px}
+.note{display:grid;grid-template-columns:28px 1fr 30px;gap:8px;padding:8px 6px;border-radius:8px;cursor:pointer;align-items:start}
+.note:hover{background:var(--hover)}
+.note.sel{background:var(--press)}
+.no2{width:24px;height:24px;border-radius:12px;background:var(--todo);color:#201500;font-weight:700;font-size:13px;display:grid;place-items:center;margin-top:1px}
+.note.done .no2{background:var(--done);color:#07140d}
+.note .txt{display:grid;gap:4px}
+.note.done .txt .t{color:var(--text-3);text-decoration:line-through}
+.tags{display:flex;gap:6px;flex-wrap:wrap}
+.tag{font-family:var(--mono);font-size:11.5px;border:1px solid var(--line-2);border-radius:999px;padding:0 8px;color:var(--text-2)}
+.tag.old{border-color:var(--todo);color:var(--todo)}
+.reply{margin-top:2px;padding:6px 10px;border-left:2px solid var(--accent);background:var(--raised);border-radius:0 8px 8px 0;color:var(--text-2);font-size:14px}
+.reply b{color:var(--accent-2);font-weight:600}
+.tick{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;color:var(--text-3)}
+.tick:hover{background:var(--hover);color:var(--text)}
+.note.done .tick{color:var(--done);background:var(--done-soft)}
+.empty{color:var(--text-3);padding:12px}
+.composer{border-top:1px solid var(--line);padding:12px 14px 14px;display:grid;gap:8px;background:var(--app)}
+.target{display:flex;gap:8px;align-items:center;background:var(--accent-soft);border:1px solid var(--accent);border-radius:var(--r);padding:6px 10px;color:var(--accent-2)}
+.target b{color:var(--text);font-weight:600}
+.target.away{background:var(--todo-soft);border-color:var(--todo);color:var(--todo)}
+.target .lbl{font-size:12px;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap}
+.composer textarea{width:100%;min-height:70px;resize:none;background:var(--raised);border:1px solid transparent;border-radius:var(--r);padding:10px 12px;line-height:1.5}
+.composer textarea:focus{outline:none;border-color:var(--accent)}
+.crow{display:flex;gap:8px;align-items:center}
+.btn{height:34px;padding:0 14px;border-radius:10px;border:1px solid var(--line-2);color:var(--text-2);display:inline-flex;align-items:center;gap:8px}
+.btn:hover{background:var(--hover);color:var(--text)}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:var(--on-accent);font-weight:600}
+.btn[disabled]{opacity:.4;cursor:default}
+.toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:var(--raised);border:1px solid var(--todo);color:var(--text);border-radius:12px;padding:10px 16px;z-index:20;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+.toast[hidden]{display:none}
+.locked-pane{max-width:520px;margin:12vh auto 0;display:grid;gap:12px;justify-items:center;text-align:center;color:var(--text-2)}
+.locked-pane h2{margin:0;color:var(--text);font-size:18px}
+.locked-pane textarea{width:100%;min-height:96px;resize:vertical;background:var(--bg);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;color:var(--text);text-align:left}
+@media (max-width:900px){.vsplit{grid-template-columns:1fr;grid-template-rows:minmax(0,1fr) 340px}.vnotes{border-left:0;border-top:1px solid var(--line)}}
+</style>
+</head>
+<body>
+<div class="demo" id="demo">
+  <div class="row"><b>Mockup: the Visuals tab</b>
+    <button id="mPop" aria-pressed="true">Populated</button>
+    <button id="mLock" aria-pressed="false">Locked (nothing registered)</button>
+    <button id="mBroken" aria-pressed="false">A page that can't load</button>
+  </div>
+  <div class="what">Fictional project "Lumen". Scroll the left side: each visual fills the view and the one in the middle becomes current (outline, composer target, notes column all follow). <b>Drag</b> on the current image to mark a region, <b>click</b> for a point pin. Click a faded note to jump to it. Keys for the current visual: <kbd>←</kbd> <kbd>→</kbd> pages · <kbd>R</kbd> ratio · <kbd>↑</kbd> <kbd>↓</kbd> visual · <kbd>N</kbd> note · <kbd>Esc</kbd> cancel. The strip shows about eight pages with the active one first; <b>Full screen</b> opens the page large. Image content here is generated placeholder art.</div>
+</div>
+
+<div class="app" id="app">
+  <header>
+    <div class="logo"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M4 2.5v11l9-5.5z"/></svg></div>
+    <div class="crumb"><b>lumen</b> <span class="id">5uuqfyzz</span></div>
+    <div class="sp"></div>
+    <button class="send" id="send">Send to agent <span class="n" id="sendN">0</span></button>
+  </header>
+  <nav class="tabs" id="tabs"></nav>
+  <div id="stage" class="vsplit"></div>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+"use strict";
+/* ---------- data (what the project would hold) ---------- */
+const RATIOS={"4x5":{label:"4:5",w:1080,h:1350},"16x9":{label:"16:9",w:1600,h:900},"1x1":{label:"1:1",w:1080,h:1080}};
+const VISUALS=[
+  {id:"v-launch",name:"Launch carousel",kind:"carousel",ratios:["4x5"],versions:["v1","v2"],pages:12,changedIn:{"v2":[3]}},
+  {id:"v-quote",name:"Quote still",kind:"still",ratios:["4x5","16x9"],versions:["v1"],pages:1,changedIn:{}},
+  {id:"v-cover",name:"Teaser cover",kind:"carousel",ratios:["1x1"],versions:["v1"],pages:3,changedIn:{}}
+];
+const HEADS={"v-launch":["Lumen finds your best take.","Drop the footage in.","It listens for the good part.","Pick, don't hunt.","Notes go straight to the cut.","Every take, ranked.","Compare two reads.","Mark the exact frame.","Send it to your agent.","See the new cut.","Approve and ship.","Try Lumen today."],"v-quote":["“I stopped scrubbing.”"],"v-cover":["Teaser","What changed","Join the list"]};
+const PAL=[["#1b2a49","#3d5a99"],["#2a1b49","#6b3d99"],["#0f3b3a","#2c8c85"],["#49271b","#99593d"],["#1b3a2a","#3d995a"],["#3a1b2f","#99436f"]];
+function art(v,page,ratio,ver,broken){
+  const r=RATIOS[ratio],p=PAL[(page-1+v.id.length)%PAL.length];
+  const changed=(v.changedIn[ver]||[]).includes(page)&&ver!=="v1";
+  const c=changed?["#0d3d1c","#2faa5a"]:p;
+  const t=(HEADS[v.id][page-1]||"").replace(/&/g,"&amp;");
+  const fs=Math.round(r.w/(ratio==="16x9"?13:11));
+  const svg=`<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 ${r.w} ${r.h}'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='${c[0]}'/><stop offset='1' stop-color='${c[1]}'/></linearGradient></defs><rect width='100%' height='100%' fill='url(#g)'/><circle cx='${r.w*.8}' cy='${r.h*.24}' r='${r.h*.13}' fill='rgba(255,255,255,.12)'/><rect x='${r.w*.08}' y='${r.h*.72}' width='${r.w*.5}' height='${r.h*.06}' rx='${r.h*.03}' fill='rgba(255,255,255,.2)'/><text x='${r.w*.08}' y='${r.h*.4}' font-family='Helvetica,Arial,sans-serif' font-weight='700' font-size='${fs}' fill='#fff'>${wrap(t,ratio==="16x9"?26:17).map((l,i)=>`<tspan x='${r.w*.08}' dy='${i?fs*1.15:0}'>${l}</tspan>`).join("")}</text><text x='${r.w*.08}' y='${r.h*.93}' font-family='Helvetica,Arial,sans-serif' font-size='${fs*.4}' fill='rgba(255,255,255,.7)'>${v.name} · page ${page}${changed?" · v2":""}</text></svg>`;
+  return broken?"":"data:image/svg+xml;utf8,"+encodeURIComponent(svg);
+}
+function wrap(s,n){const out=[];let l="";s.split(" ").forEach(w=>{if((l+" "+w).trim().length>n){out.push(l.trim());l=w}else l+=" "+w});out.push(l.trim());return out}
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+/* ---------- state ---------- */
+let S;
+function fresh(){
+  S={
+    mode:"pop",broken:false,
+    cur:"v-launch",
+    view:{ // what each visual is showing right now
+      "v-launch":{page:3,ratio:"4x5",ver:"v2"},
+      "v-quote":{page:1,ratio:"4x5",ver:"v1"},
+      "v-cover":{page:1,ratio:"1x1",ver:"v1"}
+    },
+    notes:[
+      {id:1,vis:"v-launch",ver:"v1",page:3,ratio:"4x5",shape:{x:.08,y:.28,w:.62,h:.2},text:"Headline is too long, cut it to four words.",done:false,reply:{t:"Shortened in v2: “Listens for the good part.”",fix:"v2"}},
+      {id:2,vis:"v-launch",ver:"v2",page:3,ratio:"4x5",shape:{x:.05,y:.7,w:.55,h:.1},text:"Button label still wraps on a small phone.",done:false},
+      {id:3,vis:"v-launch",ver:"v2",page:1,ratio:"4x5",shape:{x:.78,y:.1,w:.18,h:.14},text:"Move the logo mark down, it touches the edge.",done:true},
+      {id:4,vis:"v-launch",ver:"v2",page:5,ratio:"4x5",shape:null,text:"Whole slide feels flat next to slide 4. Try the warmer background.",done:false},
+      {id:5,vis:"v-quote",ver:"v1",page:1,ratio:"16x9",shape:{x:.06,y:.3,w:.5,h:.22},text:"Quote marks are too small on the wide version.",done:false},
+      {id:6,vis:"v-quote",ver:"v1",page:1,ratio:"4x5",shape:{pin:true,x:.82,y:.22},text:"What is this circle? Remove or make it a logo.",done:false}
+    ],
+    nextId:7,sel:null,draft:null,verMenu:null
+  };
+}
+fresh();
+const $=s=>document.querySelector(s);
+const vis=id=>VISUALS.find(v=>v.id===id);
+function noteNo(n){return S.notes.filter(m=>m.vis===n.vis&&m.id<=n.id).length}
+function openCount(){return S.notes.filter(n=>!n.done).length}
+
+/* ---------- tabs ---------- */
+function drawTabs(){
+  const open=S.mode==="lock"?0:openCount();
+  const T=[["Planning","1"],["Picture","2"],["Voiceover","3"],["Music","4"],["Sound effects","5"],["Mix","6"],["Visuals","7"],["Assets","8"]];
+  $("#tabs").innerHTML=T.map(([n,k])=>{
+    const on=n==="Visuals",lock=(n==="Voiceover"||n==="Music"||n==="Sound effects"||n==="Mix")||(n==="Visuals"&&S.mode==="lock");
+    const mark=n==="Planning"?`<span class="trio"><i class="ok"></i><i class="ok"></i><i></i></span>`:"";
+    return `<span class="tab${on?" on":""}${lock&&!on?" locked":""}">${n}${mark}${n==="Visuals"&&S.mode!=="lock"&&open?`<i class="od" title="${open} open"></i>`:""}${on&&S.mode==="lock"?"":""}<span class="k">${k}</span></span>`}).join("");
+  $("#sendN").textContent=S.mode==="lock"?0:open;
+}
+
+/* ---------- main render ---------- */
+function render(keepScroll){
+  drawTabs();
+  const stage=$("#stage");
+  if(S.mode==="lock"){
+    stage.className="";stage.style.cssText="flex:1;overflow:auto";
+    stage.innerHTML=`<div class="locked-pane"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg><h2>Visuals</h2><p>Nothing to look at yet. Ask your agent to register your stills and carousels in Rushes, then mark them up here.</p><textarea readonly>Register my stills and carousels in Rushes with rushes_add_visual: one visual per post (a still, or a carousel), with each page's image in every aspect ratio. Then tell me, and I'll mark them up in the Visuals tab.</textarea><button class="btn pri">Copy prompt for your agent</button></div>`;
+    return;
+  }
+  stage.className="vsplit";stage.style.cssText="";
+  const top=keepScroll?($(".vscroll")?.scrollTop||0):0;
+  const ntop=keepScroll?($("#nlist")?.scrollTop||0):0;
+  stage.innerHTML=`<div class="vscroll" id="vscroll">${VISUALS.map(visualHTML).join("")}</div><aside class="vnotes">${notesHTML()}</aside>`;
+  if(top) $(".vscroll").scrollTo({top:top,behavior:"instant"});
+  if(keepScroll){$("#nlist")?.scrollTo({top:ntop,behavior:"instant"})}else{const g=$(".grp.cur");if(g)$("#nlist")?.scrollTo({top:Math.max(0,g.offsetTop-8),behavior:"instant"})}
+  bindStage();fit();windowStrips(false);observe();
+  if(!keepScroll){const el=$(`#${S.cur}`);if(el)$(".vscroll").scrollTo({top:el.offsetTop,behavior:"instant"})}
+}
+function visualHTML(v){
+  const st=S.view[v.id],r=RATIOS[st.ratio],cur=v.id===S.cur;
+  const verBanner=st.ver!==v.versions[v.versions.length-1]?`<span class="banner">Viewing ${st.ver}, an older version</span>`:"";
+  const notesHere=S.notes.filter(n=>n.vis===v.id&&n.page===st.page&&n.ratio===st.ratio&&n.ver===st.ver);
+  const boxes=notesHere.map(n=>{const no=noteNo(n);
+    if(!n.shape)return "";
+    if(n.shape.pin)return `<div class="mpin${n.done?" done":""}${S.sel===n.id?" sel":""}" data-note="${n.id}" style="left:${n.shape.x*100}%;top:${n.shape.y*100}%"><span class="no">${no}</span></div>`;
+    return `<div class="mbox${n.done?" done":""}${S.sel===n.id?" sel":""}" data-note="${n.id}" style="left:${n.shape.x*100}%;top:${n.shape.y*100}%;width:${n.shape.w*100}%;height:${n.shape.h*100}%"><span class="no">${no}</span></div>`}).join("");
+  const d=S.draft&&S.draft.vis===v.id&&S.draft.page===st.page&&S.draft.ratio===st.ratio&&S.draft.ver===st.ver&&S.draft.shape?draftHTML(S.draft.shape,S.notes.filter(m=>m.vis===v.id).length+1):"";
+  const broken=S.broken&&v.id==="v-launch"&&st.page===3;
+  const thumbs=v.kind==="carousel"?Array.from({length:v.pages},(_,i)=>{const p=i+1,c=S.notes.filter(n=>n.vis===v.id&&n.page===p&&!n.done).length;
+    return `<button class="th" style="width:${(62*(RATIOS[v.ratios.includes(st.ratio)?st.ratio:v.ratios[0]].w/RATIOS[v.ratios.includes(st.ratio)?st.ratio:v.ratios[0]].h)).toFixed(1)}px" data-page="${p}" aria-label="Page ${p}"${p===st.page?' aria-current="true"':""}><img alt="" src="${art(v,p,v.ratios.includes(st.ratio)?st.ratio:v.ratios[0],st.ver,S.broken&&v.id==="v-launch"&&p===3)}"><span class="pn">${p}</span>${c?`<span class="badge">${c}</span>`:""}</button>`}).join(""):"";
+  const verChip=v.versions.length>1?`<span class="ver"><button class="chip" data-verbtn="${v.id}" aria-haspopup="menu">${st.ver} <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2 3.5l3 3 3-3"/></svg></button>${S.verMenu===v.id?`<div class="vermenu" role="menu">${v.versions.slice().reverse().map(x=>`<button role="menuitem" data-ver="${x}"${x===st.ver?' aria-current="true"':""}>${x}<span>${x===v.versions[v.versions.length-1]?"newest":"older"}</span></button>`).join("")}</div>`:""}</span>`:`<span class="chip" style="cursor:default">${st.ver}</span>`;
+  const ratioChips=v.ratios.length>1?v.ratios.map(k=>{const q=RATIOS[k];return `<button class="chip" data-ratio="${k}" aria-pressed="${k===st.ratio}"><i class="shape" style="width:${q.w>q.h?16:q.w===q.h?12:10}px;height:${q.w>q.h?9:q.w===q.h?12:13}px"></i>${q.label}</button>`}).join(""):`<span class="chip" style="cursor:default"><i class="shape" style="width:10px;height:13px"></i>${r.w}×${r.h}</span>`;
+  return `<section class="visual${cur?" cur":""}" id="${v.id}" data-vis="${v.id}">
+    <div class="vhead"><h2>${esc(v.name)}</h2><span class="kind">${v.kind}${v.kind==="carousel"?` · ${v.pages} pages`:""}</span>${verChip}${ratioChips}${verBanner}</div>
+    <div class="fwrap"><div class="frame" data-ar="${r.w}/${r.h}" data-frame="${v.id}">${broken?`<div class="cantload">Can't load page 3: visuals/launch/page-03@4x5.png</div>`:`<img alt="${esc(v.name)}, page ${st.page}, ${RATIOS[st.ratio].label}" src="${art(v,st.page,st.ratio,st.ver,false)}">`}${boxes}${d}</div></div>
+    <div class="vfoot">${v.kind==="carousel"?`<div class="vnav"><button class="btn pill" data-pg="-1"${st.page===1?" disabled":""}>Previous</button><span class="count">${String(st.page).padStart(2,"0")} / ${String(v.pages).padStart(2,"0")}</span><button class="btn pill" data-fs="${v.id}">Full screen</button><button class="btn pill next" data-pg="1"${st.page===v.pages?" disabled":""}>Next</button></div><div class="thumbs" data-thumbs="${v.id}">${thumbs}</div>`:`<div class="vnav"><button class="btn pill" data-fs="${v.id}">Full screen</button><span class="hint">One page${v.ratios.length>1?` · ${v.ratios.length} ratios`:""}</span></div>`}</div>
+  </section>`;
+}
+function draftHTML(sh,no){
+  if(sh.pin)return `<div class="mpin draft" style="left:${sh.x*100}%;top:${sh.y*100}%"><span class="no">${no}</span></div>`;
+  return `<div class="mbox draft" style="left:${sh.x*100}%;top:${sh.y*100}%;width:${sh.w*100}%;height:${sh.h*100}%"><span class="no">${no}</span></div>`;
+}
+function label(d){const v=vis(d.vis);return `${v.name}${v.kind==="carousel"?` · page ${d.page}`:""} · ${RATIOS[d.ratio].label} · ${d.ver}`}
+function notesHTML(){
+  const groups=VISUALS.map(v=>{
+    const ns=S.notes.filter(n=>n.vis===v.id);if(!ns.length)return "";
+    const pages=[...new Set(ns.map(n=>n.page))].sort((a,b)=>a-b);
+    const open=ns.filter(n=>!n.done).length;
+    return `<div class="grp${v.id===S.cur?" cur":""}" data-grp="${v.id}"><div class="ghead" data-gov="${v.id}">${esc(v.name)}${v.id===S.cur?`<span class="here">looking at</span>`:""}<span class="cnt">${open} open</span></div><div class="pg">${pages.map(p=>`<div class="pgh">${v.kind==="carousel"?`Page ${p}`:"Page 1"}</div>`+ns.filter(n=>n.page===p).map(n=>`<div class="note${n.done?" done":""}${S.sel===n.id?" sel":""}" data-open="${n.id}"><span class="no2">${noteNo(n)}</span><div class="txt"><span class="t">${esc(n.text)}</span><span class="tags"><span class="tag">${RATIOS[n.ratio].label}</span>${n.ver!==v.versions[v.versions.length-1]?`<span class="tag old">from ${n.ver}</span>`:`<span class="tag">${n.ver}</span>`}<span class="tag">${n.shape?(n.shape.pin?"point":"region"):"whole image"}</span></span>${n.reply?`<div class="reply"><b>Agent</b> ${esc(n.reply.t)}</div>`:""}</div><button class="tick" data-tick="${n.id}" aria-label="${n.done?"Reopen":"Mark done"}"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="9" r="7"/>${n.done?'<path d="M5.5 9.2l2.4 2.3 4.6-4.8"/>':""}</svg></button></div>`).join("")).join("")}</div></div>`}).join("");
+  const d=S.draft,v=vis(S.cur),st=S.view[S.cur];
+  const here={vis:S.cur,page:st.page,ratio:st.ratio,ver:st.ver};
+  const away=d&&(d.vis!==S.cur);
+  const target=d?(away?`<div class="target away"><span class="lbl">Draft for</span><b>${esc(label(d))}</b><button class="btn" data-gotodraft style="margin-left:auto;height:28px">Go to it</button></div>`:`<div class="target"><span class="lbl">Adding to</span><b>${esc(label(d))}</b></div>`):`<div class="target"><span class="lbl">Adding to</span><b>${esc(label(here))}</b></div>`;
+  const hint=d?(d.shape?(d.shape.pin?"A point pin":"A region")+" is marked."+" Write what to change.":"No region: this note is for the whole image."):"Drag on the image to mark a region, click for a pin, or add a whole-image note.";
+  return `<div class="nhead"><h3>Notes</h3><span>${openCount()} open across ${new Set(S.notes.filter(n=>!n.done).map(n=>n.vis)).size} visuals</span></div>
+  <div class="nlist" id="nlist">${groups||`<div class="empty">No notes yet.</div>`}</div>
+  <div class="composer">${target}<textarea id="ctext" placeholder="${esc(hint)}" aria-label="Note text">${d?esc(d.text||""):""}</textarea><div class="crow"><button class="btn pri" id="cadd">Add note</button><button class="btn" id="cwhole">Whole image</button><button class="btn" id="ccancel"${d?"":" disabled"}>${d&&d.text?"Discard draft":"Cancel"}</button></div></div>`;
+}
+
+/* ---------- the thumbnail strip: about eight in view, the active page first ---------- */
+const STRIP=8;
+function windowStrips(smooth){
+  document.querySelectorAll("[data-thumbs]").forEach(el=>{
+    const ths=[...el.children];if(!ths.length)return;
+    const w=parseFloat(ths[0].style.width)||50,gap=8,vw=STRIP*w+(STRIP-1)*gap;
+    el.style.width=Math.min(vw+4,el.parentElement.getBoundingClientRect().width)+"px";
+    const i=ths.findIndex(t=>t.getAttribute("aria-current")==="true");
+    const max=el.scrollWidth-el.clientWidth;
+    el.scrollTo({left:Math.min(Math.max(0,i*(w+gap)),max),behavior:smooth?"smooth":"instant"});
+  });
+}
+/* ---------- full screen ---------- */
+function openFS(id){
+  const v=vis(id),st=S.view[id],r=RATIOS[st.ratio];
+  let el=$("#fs");if(!el){el=document.createElement("div");el.id="fs";el.className="fs";el.setAttribute("role","dialog");el.setAttribute("aria-label","Full screen");document.body.appendChild(el)}
+  const paint=()=>{
+    const q=S.view[id],rr=RATIOS[q.ratio];
+    const boxes=S.notes.filter(n=>n.vis===id&&n.page===q.page&&n.ratio===q.ratio&&n.ver===q.ver&&n.shape).map(n=>n.shape.pin?`<div class="mpin${n.done?" done":""}" style="left:${n.shape.x*100}%;top:${n.shape.y*100}%"><span class="no">${noteNo(n)}</span></div>`:`<div class="mbox${n.done?" done":""}" style="left:${n.shape.x*100}%;top:${n.shape.y*100}%;width:${n.shape.w*100}%;height:${n.shape.h*100}%"><span class="no">${noteNo(n)}</span></div>`).join("");
+    el.innerHTML=`<div class="stg"><div class="frame" data-ar="${rr.w}/${rr.h}"><img alt="" src="${art(v,q.page,q.ratio,q.ver,false)}">${boxes}</div></div><div class="bar">${v.kind==="carousel"?`<button class="btn pill" data-fsp="-1"${q.page===1?" disabled":""}>Previous</button><span class="count" style="font-family:var(--mono);color:var(--text-2)">${String(q.page).padStart(2,"0")} / ${String(v.pages).padStart(2,"0")}</span><button class="btn pill next" data-fsp="1"${q.page===v.pages?" disabled":""}>Next</button>`:""}<button class="btn pill" data-fsx>Close</button></div>`;
+    el.querySelectorAll("[data-fsp]").forEach(b=>b.onclick=()=>{S.view[id].page=Math.max(1,Math.min(v.pages,S.view[id].page+(+b.dataset.fsp)));paint()});
+    el.querySelector("[data-fsx]").onclick=closeFS;
+    const f=el.querySelector(".frame"),stg=el.querySelector(".stg"),box=stg.getBoundingClientRect(),[w,h]=f.dataset.ar.split("/").map(Number),k=Math.min((box.width-32)/w,(box.height-32)/h);f.style.width=Math.floor(w*k)+"px";f.style.height=Math.floor(h*k)+"px";
+  };
+  el.dataset.open="true";el.dataset.vis=id;paint();el._paint=paint;
+}
+function closeFS(){const el=$("#fs");if(el){el.dataset.open="false";const id=el.dataset.vis;render(true)}}
+
+/* ---------- fitting the frames to their section ---------- */
+function fit(){
+  document.querySelectorAll(".frame").forEach(f=>{
+    const [w,h]=f.dataset.ar.split("/").map(Number),box=f.parentElement.getBoundingClientRect();
+    const s=Math.min(box.width/w,box.height/h);f.style.width=Math.floor(w*s)+"px";f.style.height=Math.floor(h*s)+"px";
+  });
+}
+addEventListener("resize",()=>{demoH();fit();windowStrips(false)});
+function demoH(){document.documentElement.style.setProperty("--demo-h",$("#demo").offsetHeight+"px")}
+
+/* ---------- which visual is current: whichever crosses the middle of the view ---------- */
+let io;
+function observe(){
+  io&&io.disconnect();
+  const root=$(".vscroll");if(!root)return;
+  io=new IntersectionObserver(es=>{
+    es.forEach(e=>{if(e.isIntersecting&&e.target.dataset.vis!==S.cur)setCurrent(e.target.dataset.vis)});
+  },{root,rootMargin:"-50% 0px -50% 0px",threshold:0});
+  root.querySelectorAll(".visual").forEach(el=>io.observe(el));
+}
+function setCurrent(id){
+  S.cur=id;
+  document.querySelectorAll(".visual").forEach(el=>el.classList.toggle("cur",el.dataset.vis===id));
+  const a=$(".vnotes");if(a){const keep=$("#ctext")?.value;const d=S.draft;if(d&&keep!==undefined)d.text=keep;const nt=$("#nlist")?.scrollTop||0;a.innerHTML=notesHTML();bindNotes();$("#nlist")?.scrollTo({top:nt,behavior:"instant"});const g=$(".grp.cur");if(g)$("#nlist")?.scrollTo({top:Math.max(0,g.offsetTop-8),behavior:"smooth"})}
+}
+function scrollToVisual(id,smooth=true){const el=$(`#${id}`);$(".vscroll").scrollTo({top:el.offsetTop,behavior:smooth?"smooth":"instant"})}
+
+/* ---------- interactions ---------- */
+function toast(m){const t=$("#toast");t.textContent=m;t.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>t.hidden=true,2600)}
+function bindStage(){
+  const root=$("#vscroll");
+  root.querySelectorAll("[data-fs]").forEach(b=>b.onclick=()=>{const id=b.dataset.fs;if(id!==S.cur)scrollToVisual(id);openFS(id)});
+  root.querySelectorAll("[data-pg]").forEach(b=>b.onclick=()=>{const id=b.closest(".visual").dataset.vis;if(id!==S.cur)return scrollToVisual(id);go(id,+b.dataset.pg,true)});
+  root.querySelectorAll(".th").forEach(b=>b.onclick=()=>{const id=b.closest(".visual").dataset.vis;if(id!==S.cur)scrollToVisual(id);setPage(id,+b.dataset.page)});
+  root.querySelectorAll("[data-ratio]").forEach(b=>b.onclick=()=>{const id=b.closest(".visual").dataset.vis;setRatio(id,b.dataset.ratio)});
+  root.querySelectorAll("[data-verbtn]").forEach(b=>b.onclick=e=>{e.stopPropagation();S.verMenu=S.verMenu===b.dataset.verbtn?null:b.dataset.verbtn;render(true)});
+  root.querySelectorAll("[data-ver]").forEach(b=>b.onclick=()=>{const id=b.closest(".visual").dataset.vis;S.view[id].ver=b.dataset.ver;S.verMenu=null;render(true)});
+  root.querySelectorAll(".frame").forEach(fr=>bindDraw(fr));
+  bindNotes();
+}
+function setPage(id,p){S.view[id].page=p;render(true);windowStrips(false);}
+function go(id,d){const v=vis(id);const p=Math.max(1,Math.min(v.pages,S.view[id].page+d));if(p!==S.view[id].page)setPage(id,p)}
+function setRatio(id,r){S.view[id].ratio=r;render(true)}
+function bindNotes(){
+  const a=$(".vnotes");if(!a)return;
+  a.querySelectorAll("[data-open]").forEach(el=>el.onclick=e=>{if(e.target.closest("[data-tick]"))return;openNote(+el.dataset.open)});
+  a.querySelectorAll("[data-gov]").forEach(el=>el.onclick=()=>scrollToVisual(el.dataset.gov));
+  a.querySelectorAll("[data-tick]").forEach(el=>el.onclick=e=>{e.stopPropagation();const n=S.notes.find(m=>m.id===+el.dataset.tick);n.done=!n.done;render(true);drawTabs()});
+  const t=$("#ctext");if(t){t.oninput=()=>{if(S.draft)S.draft.text=t.value};t.onkeydown=e=>{if(e.key==="Enter"&&(e.metaKey||e.ctrlKey))add();if(e.key==="Escape"){cancel()}}}
+  $("#cadd")?.addEventListener("click",add);$("#cwhole")?.addEventListener("click",startWhole);$("#ccancel")?.addEventListener("click",cancel);
+  $("[data-gotodraft]")?.addEventListener("click",()=>scrollToVisual(S.draft.vis));
+}
+function openNote(id){
+  const n=S.notes.find(m=>m.id===id);S.sel=id;
+  const st=S.view[n.vis];st.page=n.page;st.ratio=n.ratio;st.ver=n.ver;
+  const was=S.cur;render(true);
+  if(n.vis!==was||true)scrollToVisual(n.vis);
+  setTimeout(()=>{const b=document.querySelector(`[data-note="${id}"]`);if(b){b.classList.remove("flash");void b.offsetWidth;b.classList.add("flash")}},350);
+}
+function bindDraw(fr){
+  fr.addEventListener("pointerdown",e=>{
+    const id=fr.dataset.frame;
+    if(id!==S.cur){scrollToVisual(id);return}
+    const st=S.view[id],v=vis(id);
+    if(st.ver!==v.versions[v.versions.length-1]){toast(`You're looking at ${st.ver}. Switch to the newest version to add notes.`);return}
+    if(S.draft&&S.draft.text&&(S.draft.vis!==id||S.draft.page!==st.page||S.draft.ratio!==st.ratio)){toast(`Finish or discard your draft on ${vis(S.draft.vis).name} first.`);return}
+    e.preventDefault();fr.setPointerCapture(e.pointerId);
+    const r=fr.getBoundingClientRect(),x0=(e.clientX-r.left)/r.width,y0=(e.clientY-r.top)/r.height,px0=e.clientX,py0=e.clientY;
+    const ghost=document.createElement("div");ghost.className="mbox draft";ghost.style.cssText=`left:${x0*100}%;top:${y0*100}%;width:0;height:0`;fr.appendChild(ghost);
+    const clamp=v=>Math.max(0,Math.min(1,v));
+    const mv=ev=>{const x1=clamp((ev.clientX-r.left)/r.width),y1=clamp((ev.clientY-r.top)/r.height);const x=Math.min(x0,x1),y=Math.min(y0,y1);ghost.style.left=x*100+"%";ghost.style.top=y*100+"%";ghost.style.width=Math.abs(x1-x0)*100+"%";ghost.style.height=Math.abs(y1-y0)*100+"%"};
+    const up=ev=>{
+      fr.removeEventListener("pointermove",mv);fr.removeEventListener("pointerup",up);ghost.remove();
+      const moved=Math.hypot(ev.clientX-px0,ev.clientY-py0)>5;
+      const x1=clamp((ev.clientX-r.left)/r.width),y1=clamp((ev.clientY-r.top)/r.height);
+      const shape=moved?{x:Math.min(x0,x1),y:Math.min(y0,y1),w:Math.abs(x1-x0),h:Math.abs(y1-y0)}:{pin:true,x:clamp(x0),y:clamp(y0)};
+      if(moved&&(shape.w<.02||shape.h<.02)){return}
+      S.draft={vis:id,page:st.page,ratio:st.ratio,ver:st.ver,shape,text:S.draft&&S.draft.vis===id?S.draft.text||"":""};
+      render(true);$("#ctext")?.focus();
+    };
+    fr.addEventListener("pointermove",mv);fr.addEventListener("pointerup",up);
+  });
+}
+function startWhole(){
+  const st=S.view[S.cur],v=vis(S.cur);
+  if(st.ver!==v.versions[v.versions.length-1]){toast(`You're looking at ${st.ver}. Switch to the newest version to add notes.`);return}
+  if(S.draft&&S.draft.text&&S.draft.vis!==S.cur){toast(`Finish or discard your draft on ${vis(S.draft.vis).name} first.`);return}
+  S.draft={vis:S.cur,page:st.page,ratio:st.ratio,ver:st.ver,shape:null,text:S.draft?.text||""};render(true);$("#ctext")?.focus();
+}
+function add(){
+  const t=$("#ctext");const text=(t?.value||"").trim();
+  if(!text){toast("Write the note first.");t?.focus();return}
+  let d=S.draft;
+  if(!d){const st=S.view[S.cur];d={vis:S.cur,page:st.page,ratio:st.ratio,ver:st.ver,shape:null}}
+  S.notes.push({id:S.nextId++,vis:d.vis,ver:d.ver,page:d.page,ratio:d.ratio,shape:d.shape,text,done:false});
+  S.sel=S.nextId-1;S.draft=null;render(true);drawTabs();
+  document.querySelector(`[data-open="${S.sel}"]`)?.scrollIntoView({block:"nearest"});
+}
+function cancel(){S.draft=null;render(true)}
+
+/* ---------- keys ---------- */
+addEventListener("keydown",e=>{
+  if(S.mode==="lock"||e.metaKey||e.ctrlKey||e.altKey)return;
+  const fsEl=$("#fs");
+  if(fsEl&&fsEl.dataset.open==="true"){
+    const id=fsEl.dataset.vis,v=vis(id);
+    if(e.key==="Escape"){closeFS()}
+    else if(v.kind==="carousel"&&(e.key==="ArrowRight"||e.key==="ArrowLeft")){e.preventDefault();S.view[id].page=Math.max(1,Math.min(v.pages,S.view[id].page+(e.key==="ArrowRight"?1:-1)));fsEl._paint()}
+    return;
+  }
+  const typing=/^(TEXTAREA|INPUT)$/.test(e.target.tagName);
+  if(typing){if(e.key==="Escape"){e.target.blur();cancel()}return}
+  const idx=VISUALS.findIndex(v=>v.id===S.cur);
+  if(e.key==="ArrowRight"){e.preventDefault();go(S.cur,1)}
+  else if(e.key==="ArrowLeft"){e.preventDefault();go(S.cur,-1)}
+  else if(e.key==="ArrowDown"){e.preventDefault();if(idx<VISUALS.length-1)scrollToVisual(VISUALS[idx+1].id)}
+  else if(e.key==="ArrowUp"){e.preventDefault();if(idx>0)scrollToVisual(VISUALS[idx-1].id)}
+  else if(e.key==="r"||e.key==="R"){const v=vis(S.cur);if(v.ratios.length>1){const i=v.ratios.indexOf(S.view[S.cur].ratio);setRatio(S.cur,v.ratios[(i+1)%v.ratios.length])}}
+  else if(e.key==="n"||e.key==="N"){e.preventDefault();$("#ctext")?.focus()}
+  else if(e.key==="Escape"){cancel()}
+});
+document.addEventListener("click",e=>{if(S.verMenu&&!e.target.closest(".ver")){S.verMenu=null;render(true)}});
+
+/* ---------- demo switches ---------- */
+function setMode(m){S.mode=m;["mPop","mLock"].forEach(i=>$("#"+i).setAttribute("aria-pressed",String((i==="mPop")===(m==="pop"))));render(false)}
+$("#mPop").onclick=()=>{fresh();S.broken=false;$("#mBroken").setAttribute("aria-pressed","false");setMode("pop")};
+$("#mLock").onclick=()=>setMode("lock");
+$("#mBroken").onclick=()=>{S.broken=!S.broken;$("#mBroken").setAttribute("aria-pressed",String(S.broken));if(S.mode==="lock")setMode("pop");else render(true)};
+demoH();render(false);
+</script>
+</body>
+</html>
