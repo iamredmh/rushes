@@ -1,5 +1,6 @@
 // Outline icons, drawn on a 24px grid. One set for the whole dashboard.
 const PATHS: Record<string, string> = {
+  circle: '<circle cx="12" cy="12" r="8"/>',
   chev: '<path d="M6 9l6 6 6-6"/>',
   story: '<rect x="3" y="4" width="11" height="8" rx="1.5"/><rect x="16" y="4" width="5" height="8" rx="1.5"/><rect x="3" y="14" width="5" height="6" rx="1.5"/><rect x="10" y="14" width="11" height="6" rx="1.5"/>',
   brief: '<path d="M9 4h6v3H9z"/><path d="M7 5.5H6a1 1 0 0 0-1 1V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V6.5a1 1 0 0 0-1-1h-1"/><path d="M9 12h6M9 16h4"/>',
@@ -55,4 +56,4 @@ export function Icon({ name, class: cls }: { name: keyof typeof PATHS | string; 
   );
 }
 
-export const STAGE_ICONS = { script: "script", picture: "film", voice: "mic", music: "music", sfx: "zap", mix: "sliders" } as const;
+export const STAGE_ICONS = { script: "script", picture: "film", voice: "mic", music: "music", sfx: "zap", mix: "sliders", visuals: "image" } as const;

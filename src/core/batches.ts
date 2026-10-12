@@ -10,6 +10,7 @@ const STAGE_NAMES: Record<Stage, string> = {
   music: "music",
   sfx: "sound effects",
   mix: "mix",
+  visuals: "visuals",
 };
 
 /**
@@ -87,7 +88,10 @@ export function buildPrompt(project: string, stage: Stage, batchId: string, note
         : stage === "mix"
           ? // §19.6: rushes_get_picks also carries each lane's level -- where the user wants it sitting.
             'Use rushes_get_batch and rushes_get_picks, fix each note (marks such as "Fall" or "Quieter 3 dB" are part of the note), register the new variant, then rushes_reply. The picks\' levels say where the user wants each lane to sit.'
-          : AUDIO_STAGES.includes(stage)
+          : stage === "visuals"
+            ? // §25.5: the note's picture is named in the batch; the new picture goes in as a new version of the visual.
+              "Use rushes_get_batch: each note names its visual, version, page and aspect ratio, where on the picture it is (a region or a point, as fractions and in words) and the file to open. Change each marked picture, register the result as a new version with rushes_add_visual (send only the pages that changed), then rushes_reply to each note with fixVersion set to that version. A note with no ratio is for every ratio: say in your reply which ratios you fixed."
+            : AUDIO_STAGES.includes(stage)
             ? 'Use rushes_get_batch and rushes_get_picks, fix each note (marks such as "Fall" or "Quieter 3 dB" are part of the note), register the new variant, then rushes_reply.'
             : "Use rushes_get_batch, fix each note, then rushes_reply with a fixT for each and rushes_add_version for the new cut.";
   return `Work through ${STAGE_NAMES[stage]} batch ${batchId} on ${project}: ${parts.join(" and ")}.\n${[...extra, steps].join("\n")}`;

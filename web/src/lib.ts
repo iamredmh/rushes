@@ -81,7 +81,7 @@ export function neighbourVideo(videos: Video[], currentId: string | null, dir: -
 }
 
 /** Is this stage built in this release of the dashboard? Later releases add the audio tabs. */
-export const BUILT: Record<Stage, boolean> = { script: true, picture: true, voice: true, music: true, sfx: true, mix: true };
+export const BUILT: Record<Stage, boolean> = { script: true, picture: true, voice: true, music: true, sfx: true, mix: true, visuals: true };
 
 export const STAGE_NAMES: Record<Stage, string> = {
   script: "Script",
@@ -90,6 +90,7 @@ export const STAGE_NAMES: Record<Stage, string> = {
   music: "Music",
   sfx: "Sound effects",
   mix: "Mix",
+  visuals: "Visuals",
 };
 
 /** §19.1: a locked tab's copy -- what it's for, what unlocks it, and the noun its tooltip asks for. */
@@ -124,6 +125,11 @@ export const LOCKED_TAB: Record<Stage | "assets", { what: string; unlocks: strin
     unlocks: "Unlocks with a cut and any audio.",
     ask: "a cut and some audio",
   },
+  visuals: {
+    what: "Mark up stills and carousels, region by region.",
+    unlocks: "Your agent registers a still or a carousel.",
+    ask: "a still or a carousel",
+  },
   assets: {
     what: "Every file in the project in one place.",
     unlocks: "Unlocks with the first cut, take, track or screenshot.",
@@ -147,6 +153,8 @@ const PROMPT_TEMPLATE: Record<Stage | "assets", (p: string, f: string | null) =>
     `In Rushes project "${p}", make a sound-effects pass${filmClause("for", f)} and add it with rushes_add_variant (stage "sfx") with its cues.`,
   mix: (p, f) =>
     `In Rushes project "${p}", add a cut and at least one voice read, music bed or SFX pass${filmClause("for", f)}.`,
+  visuals: (p) =>
+    `In Rushes project "${p}", register my stills and carousels with rushes_add_visual: one visual per post (a still, or a carousel), with each page's picture in every aspect ratio it comes in. Then tell me, and I'll mark them up in the Visuals tab.`,
   assets: (p, f) => `In Rushes project "${p}", add the first cut${filmClause("of", f)} with rushes_add_version.`,
 };
 

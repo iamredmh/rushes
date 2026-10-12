@@ -100,7 +100,7 @@ describe("logMarkdown and recentChanges (§22.7)", () => {
     expect(recentChanges([])).toBe("");
   });
   it("the area words match the mockup's chips", () => {
-    expect(AREA_LABELS).toEqual({ script: "Script", picture: "Picture", voice: "Voice", music: "Music", sfx: "Sound effects", mix: "Mix", notes: "Notes", assets: "Files", project: "Project" });
+    expect(AREA_LABELS).toEqual({ script: "Script", picture: "Picture", voice: "Voice", music: "Music", sfx: "Sound effects", mix: "Mix", visuals: "Visuals", notes: "Notes", assets: "Files", project: "Project" });
   });
 });
 

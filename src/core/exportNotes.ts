@@ -1,17 +1,20 @@
 import { formatTag } from "./formats.js";
 import { slugify } from "./ids.js";
 import { onLabel, type OnContext } from "./notes.js";
-import { markLabel, type Note, type Picks, type Project, type Script, type Stage } from "./schema.js";
+import { markLabel, type Note, type Picks, type Project, type Script, type Stage, type VisualsFile } from "./schema.js";
+import { labelOfId } from "./formats.js";
+import { pinWords, regionWords } from "./visuals.js";
 
 // Picture notes are grouped by film and version; the other stages list straight through.
 // Script isn't included here -- script edits live in script.json, not notes.json.
-const STAGE_ORDER: Exclude<Stage, "script">[] = ["picture", "voice", "music", "sfx", "mix"];
+const STAGE_ORDER: Exclude<Stage, "script">[] = ["picture", "voice", "music", "sfx", "mix", "visuals"];
 const STAGE_TITLES: Record<Exclude<Stage, "script">, string> = {
   picture: "Picture",
   voice: "Voiceover",
   music: "Music",
   sfx: "Sound effects",
   mix: "Mix",
+  visuals: "Visuals",
 };
 
 function pad(n: number): string {
@@ -66,6 +69,18 @@ function noteLines(n: Note, ctx: OnContext, videos: Project["videos"]): string[]
   return lines;
 }
 
+/** §25.5: "**Page 2** · 4:5 · region (left third, top third) · to do — text". An image has no time; the page leads. */
+function visualNoteLines(n: Note): string[] {
+  const page = n.on?.slice(n.on.lastIndexOf("/") + 1) ?? "?";
+  const ratio = n.format === null ? "all ratios" : labelOfId(n.format);
+  const shape = n.box ? `region (${regionWords(n.box)})` : n.pin ? `point (${pinWords(n.pin)})` : "whole image";
+  const lines = [`- **Page ${page}** · ${ratio} · ${shape} · ${n.status === "done" ? "done" : "to do"} — ${continued(n.text, "  ")}`];
+  if (n.reply) lines.push(`  - Reply: ${continued(n.reply, "    ")}`);
+  return lines;
+}
+
+const pageOf = (n: Note): number => Number(n.on?.slice(n.on.lastIndexOf("/") + 1)) || 0;
+
 // By timecode within a film and version, a whole-track note (t === null) last -- notes were
 // otherwise listed in whatever order they happened to be created in, which usually isn't where
 // they land on the timeline.
@@ -90,6 +105,7 @@ export function notesMarkdown(
   now: Date,
   script: Pick<Script, "sections"> = { sections: [] },
   picks?: Pick<Picks, "lanes">,
+  visuals?: Pick<VisualsFile, "visuals">,
 ): string {
   const ctx: OnContext = { project, script, picks };
   const lines: string[] = [`# ${project.name} — notes`, `Exported ${localDateTime(now)}`];
@@ -129,6 +145,23 @@ export function notesMarkdown(
       for (const g of orphanGroups.values()) {
         lines.push("", `### ${g.label} (removed)`);
         for (const n of [...g.notes].sort(byTimecode)) lines.push(...noteLines(n, ctx, project.videos));
+      }
+    } else if (stage === "visuals") {
+      // §25.5: grouped by visual and version, in page order; a visual that is gone keeps its notes, under (removed).
+      const groups = new Map<string, { label: string; notes: Note[] }>();
+      const visualOf = (n: Note) => n.on?.slice(0, n.on.lastIndexOf("/")) ?? "";
+      for (const n of stageNotes) {
+        const id = visualOf(n);
+        const found = visuals?.visuals.find((v) => v.id === id);
+        const exists = found?.versions.some((v) => v.id === n.version) ?? false;
+        const label = `${found?.name ?? id} · ${n.version ?? "no version"}${exists ? "" : " (removed)"}`;
+        const g = groups.get(label) ?? { label, notes: [] };
+        g.notes.push(n);
+        groups.set(label, g);
+      }
+      for (const g of groups.values()) {
+        lines.push("", `### ${g.label}`);
+        for (const n of [...g.notes].sort((a, b) => pageOf(a) - pageOf(b))) lines.push(...visualNoteLines(n));
       }
     } else {
       for (const n of stageNotes) lines.push(...noteLines(n, ctx, project.videos));

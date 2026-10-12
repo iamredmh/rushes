@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { appendEvent, backfillLog, logView, undatedLines, undatedRefs } from "../../src/core/log.js";
 import {
-  FILE_FOLDERS, broughtInEvent, cutEvent, fileEvent, formatEvent, lineEvent, lockEvent, notesSentEvent, picksEvent, repliesEvent, scriptEvent, takeEvent, variantEvent,
+  FILE_FOLDERS, broughtInEvent, cutEvent, fileEvent, formatEvent, lineEvent, lockEvent, notesSentEvent, picksEvent, repliesEvent, scriptEvent, takeEvent, variantEvent, visualEvent,
 } from "../../src/core/logEvents.js";
 import { LOG_MAX } from "../../src/core/logText.js";
 import { LogFileSchema, type BatchesFile, type LogFile, type Project, type Script } from "../../src/core/schema.js";
@@ -467,5 +467,16 @@ describe("the log through the store (§22.9, Review Focus 1 and 5)", () => {
     expect(log.entries.at(-1)?.text).toBe("One more");
     // A read, an append, a validation and an atomic write of the whole file; measured at tens of milliseconds.
     expect(ms).toBeLessThan(1500);
+  });
+});
+
+describe("visualEvent (§25.5)", () => {
+  it("names the visual and the version, as a cut's line does, and never a note", () => {
+    const e = visualEvent({ id: "launch-carousel", name: "Launch carousel" }, { id: "v2", note: "", file: "", label: "Shorter headline" } as never);
+    expect(e).toMatchObject({ area: "visuals", kind: "visual", text: "“Launch carousel” v2 added: Shorter headline", ref: "launch-carousel", version: "v2" });
+    expect(e.many?.(3, "launch-carousel")).toBe("3 versions added to “Launch carousel”, the latest v2: Shorter headline");
+  });
+  it("says only that a version was added when it has no label of its own", () => {
+    expect(visualEvent({ id: "quote", name: "Quote" }, { id: "v1", note: "", file: "", label: "" }).text).toBe("“Quote” v1 added");
   });
 });

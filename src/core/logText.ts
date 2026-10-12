@@ -3,9 +3,9 @@
 // (test/core/logText.test.ts checks it).
 import { oneLine, oneLineOf } from "./labels.js";
 
-export const LOG_AREAS = ["script", "picture", "voice", "music", "sfx", "mix", "notes", "assets", "project"] as const;
+export const LOG_AREAS = ["script", "picture", "voice", "music", "sfx", "mix", "visuals", "notes", "assets", "project"] as const;
 export type LogArea = (typeof LOG_AREAS)[number];
-export const LOG_KINDS = ["cut", "variant", "take", "script", "picks", "notes-sent", "replies", "lock", "files", "entry", "format"] as const;
+export const LOG_KINDS = ["cut", "variant", "take", "script", "picks", "notes-sent", "replies", "lock", "files", "entry", "format", "visual"] as const;
 export type LogKind = (typeof LOG_KINDS)[number];
 export const LOG_BY = ["user", "agent", "rushes"] as const;
 export type LogBy = (typeof LOG_BY)[number];
@@ -21,7 +21,7 @@ export const PICKS_MERGE_MS = 10 * 60_000;
 
 /** The words for an area: the filter chips, the row tags, the Markdown and the CLI (the mockup's labels). */
 export const AREA_LABELS: Record<LogArea, string> = {
-  script: "Script", picture: "Picture", voice: "Voice", music: "Music", sfx: "Sound effects", mix: "Mix", notes: "Notes", assets: "Files", project: "Project",
+  script: "Script", picture: "Picture", voice: "Voice", music: "Music", sfx: "Sound effects", mix: "Mix", visuals: "Visuals", notes: "Notes", assets: "Files", project: "Project",
 };
 /** Who wrote a line, in the Markdown and the CLI. */
 export const BY_WORDS: Record<LogBy, string> = { user: "you", agent: "agent", rushes: "Rushes" };
