@@ -1,6 +1,6 @@
 # Rushes: the Visuals tab (§25)
 
-Status: DRAFT, 12 October 2026. Designed with Red in a question-by-question session the same day; every decision in 25.2 is his. The mockup (`2026-10-12-rushes-visuals-mockup.html`) shows the tab with a 12-page carousel, a still in two ratios, a three-page cover, the locked state and a page that cannot load. Nothing is built yet.
+Status: DRAFT, 12 October 2026. Designed with Red in a question-by-question session the same day; every decision in 25.2 is his. The mockup (`2026-10-12-rushes-visuals-mockup.html`) shows the tab with a 12-page carousel, a still in two ratios, a three-page cover, the locked state and a page that cannot load. It is built (25.12).
 
 ## 25.1 The problem
 
@@ -88,7 +88,7 @@ One new MCP tool, so there are twenty-three. There is no CLI command for it (the
 - Errors name the file and say why: `not_in_project`, `not_an_image`, `unreadable`, `same_ratio` (two files of one page share a ratio), `ratio_set` (a new visual's pages disagree on ratios), `no_such_visual`, `grid_incomplete`. A rejected call changes nothing.
 - It returns `{ visual, version, pages, ratios }`. A visual's tab count in `rushes_status` includes it; the tab's `todo` is its open notes.
 - **Replying.** `rushes_reply` works as for any note. The agent sets `fixVersion` to the version that fixes it; the dashboard then jumps from the note to that page in that version.
-- **`rushes_get_batch` and `rushes_list_notes`** return visual notes with their visual's name and id, page, version, ratio, shape (`region`, `pin` or `image`), the region or pin as fractions **and** in words ("left third, upper middle"), and the exact file path of that page's image in that ratio, so the agent can open the right file.
+- **`rushes_get_batch` and `rushes_list_notes`** return visual notes with their visual's name and id, page, version, ratio, shape (`region`, `pin` or `image`), the region or pin as fractions **and** in words ("left third, top third"), and the exact file path of that page's image in that ratio, so the agent can open the right file.
 - **The batch prompt** for a Visuals batch tells the agent to read the batch, change each marked image, register a new version with `rushes_add_visual` (only the changed pages), and `rushes_reply` to each note with the version that fixes it. A note with no ratio is for every ratio: say which you fixed.
 - **Export notes** gains a Visuals section grouped like the column. The **Change Log** gets a `visuals` area, so "Version 2 of the launch carousel" lines read like cuts do.
 - **Skill and `AGENTS.md`** gain a short section, "Visuals", saying when to register one, the one-call shape, that inherited pages need not be sent, and that the user marks regions and the agent never sets a note done.
@@ -149,3 +149,13 @@ A folder scan or Assets › Found offering images; per-page revisions; comparing
 ## 25.11 Files touched (for the plan)
 
 `src/core/schema.ts` (STAGES, `pin`, visuals schema, FILES), `src/core/store.ts`, `src/core/visuals.ts` (new: resolve and checks), `src/core/imageSize.ts` (new), `src/core/notes.ts`, `src/core/tabs.ts`, `src/core/batches.ts`, `src/core/exportNotes.ts`, `src/core/log.ts` and `logEvents.ts`, `src/server/app.ts` (routes, state, tabs), `src/server/files.ts` (`registeredMedia`), `src/server/start.ts`, `src/mcp/tools.ts`, `web/src/types.ts`, `web/src/lib.ts`, `web/src/ui/Visuals.tsx` (new), `web/src/ui/App.tsx`, `web/src/ui/Icon.tsx`, `web/src/styles.css`, e2e and unit tests, `AGENTS.md`, `skills/rushes/SKILL.md`, `README.md`.
+
+## 25.12 As built (12 October 2026)
+
+- **Pictures.** The agent lists a page's files; Rushes reads each file's size from its first 256 KB (`src/core/imageSize.ts`: png, jpeg, gif, webp) and names the ratio with the helpers video formats use. Two pictures of one shape on a page are `same_ratio`. A path outside the project, or with a link anywhere in it, is `not_in_project`; a non-picture or a picture whose size cannot be read is `not_an_image`; a file that cannot be opened is `unreadable`. `viaLink` lives in `src/server/links.ts`, shared with the storyboard's stills. A rejected call writes nothing, not even `visuals.json`.
+- **Registering.** Core codes: `bad_name`, `bad_pages`, `too_many_pages`, `duplicate_name` (the same name or the same slug), `no_such_visual`, `ratio_set`, `grid_incomplete`. A new version may add pages at the end with no gap and a new ratio only if every page gets it; a still stays one page.
+- **Notes.** A Visuals note has `scope: "whole"`, `on: "<visual id>/<page>"`, `format` the ratio id (required with a region or a point, `null` for every ratio), and a `box`, a new `pin` (`{ x, y }`), or neither. The server checks the visual, version, page and ratio (`no_such_visual`, `no_such_version`, `no_such_page`, `unknown_format`, `shape_needs_format`).
+- **What the agent reads.** `GET /api/notes` and `GET /api/batches/:id` return each Visuals note with a `visual` object: `visual` (id, name), `version`, `page`, `ratio` (a label, or null), `shape` (`region`, `pin`, `image`), `region`, `pin`, `words` and `file`. The words come from the thirds a region covers (at least 40% of a third): "left third, top third", "right two thirds, bottom third", "the centre", "the whole picture"; a point is "left, bottom" or "the centre".
+- **The tab.** The strip shows eight pages with the active one first (clamped at the end); the current visual is chosen by an `IntersectionObserver` on the middle of the scroll area; a draft is tied to its visual; a new mark elsewhere is refused while a draft has words; full screen is view-only. The keys are read through a ref, so a key pressed straight after a click never meets the previous render's handler. Fractions are kept to four places.
+- **Change Log.** Area `visuals`, kind `visual`: "“Launch carousel” v2 added: Shorter headline"; an unlabelled version says only "added".
+- **Not built:** as 25.10.
