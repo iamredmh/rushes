@@ -1,5 +1,5 @@
 // The server's data types, re-exported for the dashboard. Type-only, so nothing from src/ is bundled.
-export type { Batch, Cue, Format, Lane, LaneStage, Mark, Note, Picks, Proxy, Script, Section, Shot, Stage, Take, Variant } from "../../src/core/schema.js";
+export type { Batch, Cue, Format, Lane, LaneStage, Mark, Note, Picks, Proxy, Script, Section, Shot, Stage, Take, Variant, Visual, VisualImage, VisualPage, VisualVersion, VisualsFile } from "../../src/core/schema.js";
 export type { LoudnessResult } from "../../src/server/loudness.js";
 export type { TabState } from "../../src/core/tabs.js";
 export type { Asset, AssetKind } from "../../src/server/assets.js";
@@ -13,7 +13,7 @@ export type { BriefSectionView, BriefView } from "../../src/server/brief.js";
 export type { StoryboardShotView, StoryboardView } from "../../src/server/storyboard.js";
 export type { BuildState } from "../../src/core/plan.js";
 
-import type { BatchesFile, NotesFile, Picks, Project as StoredProject, Script, Version as StoredVersion, Video as StoredVideo } from "../../src/core/schema.js";
+import type { BatchesFile, NotesFile, Picks, Project as StoredProject, Script, Version as StoredVersion, Video as StoredVideo, VisualsFile } from "../../src/core/schema.js";
 import type { TabState } from "../../src/core/tabs.js";
 import type { ProxyJob } from "../../src/server/proxy.js";
 import type { FoundKind } from "../../src/core/found.js";
@@ -48,6 +48,8 @@ export interface State {
   storyboard: StoryboardView;
   /** §24.12: whether the plan (brief, script, storyboard) is approved. */
   build: BuildState;
+  /** §25.3: the stills and carousels the agent registered. */
+  visuals: VisualsFile;
   /** §22.8: the Change Log's newest line and size, for the header button's dot (null if it couldn't be read). */
   log?: LogHead | null;
 }

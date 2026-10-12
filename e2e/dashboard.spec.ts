@@ -622,7 +622,7 @@ test("a grabbed frame is saved as a screenshot and shows up in Assets with its a
   await expect(page.getByRole("status")).toHaveText("Saved to screenshots/hero_v1_00m01.00s_f30.png");
 
   await expect(page.getByRole("tab", { name: /Assets/ })).not.toHaveAttribute("data-locked");
-  await page.keyboard.press("7");
+  await page.keyboard.press("8");
   const tile = page.locator(".shot-tile");
   await expect(tile).toHaveCount(1);
   await expect(tile.locator("img")).toBeVisible();
@@ -653,7 +653,7 @@ test("the lightbox moves focus to Close, traps Tab inside itself, and returns fo
   await videoReady(page);
   await page.keyboard.press("g");
   await expect(page.getByRole("status")).toContainText("Saved to screenshots/");
-  await page.keyboard.press("7");
+  await page.keyboard.press("8");
   const thumb = page.getByRole("button", { name: /full size/ });
   await thumb.click();
 
@@ -719,7 +719,7 @@ test("the disabled Send to agent button on Assets still shows its tooltip", asyn
   await rushes.addCut();
   await page.goto(rushes.url);
   await videoReady(page);
-  await page.keyboard.press("7");
+  await page.keyboard.press("8");
   const button = page.getByRole("button", { name: "Send to agent" });
   await expect(button).toBeDisabled();
   // A disabled control must still show its tooltip on hover: `pointer-events: none` on the
@@ -839,7 +839,7 @@ test("a grab survives leaving the Picture tab and coming back", async ({ page, r
   await page.keyboard.press("g");
   await expect(page.getByRole("status")).toContainText("Saved to screenshots/");
 
-  await page.keyboard.press("7");
+  await page.keyboard.press("8");
   await expect(page.getByRole("tab", { name: /Assets/ })).toHaveAttribute("aria-selected", "true");
   await page.keyboard.press("2");
   await videoReady(page);
@@ -851,7 +851,7 @@ test("a grab survives leaving the Picture tab and coming back", async ({ page, r
   await expect(page.locator(".note")).toHaveCount(1);
   await page.keyboard.press("Escape");
 
-  await page.keyboard.press("7");
+  await page.keyboard.press("8");
   await page.keyboard.press("2");
   await videoReady(page);
   await expect(chip).toHaveCount(0);
@@ -889,7 +889,7 @@ test("the library has a folder sidebar with counts, and ↑/↓ moves between fo
 
   await page.goto(rushes.url);
   await expect(page.getByRole("tab", { name: /Assets/ })).not.toHaveAttribute("data-locked");
-  await page.keyboard.press("7");
+  await page.keyboard.press("8");
 
   const sidebar = page.getByRole("navigation", { name: "Folders" });
   const screenshots = sidebar.getByRole("button", { name: /Screenshots/ });
@@ -973,7 +973,7 @@ test("search and the film filter narrow the screenshots", async ({ page, rushes 
   await page.keyboard.press("g");
   await expect(page.getByRole("status")).toContainText("Saved to screenshots/");
 
-  await page.keyboard.press("7");
+  await page.keyboard.press("8");
   await expect(page.locator(".shot-tile")).toHaveCount(2);
 
   const search = page.getByRole("searchbox", { name: "Search" });
@@ -993,7 +993,7 @@ test("a script previews as Markdown, safely", async ({ page, rushes }) => {
   await writeFile(join(rushes.root, "script.md"), "# Title\n\nSome text with <script>alert(1)</script> in it.\n");
   await page.goto(rushes.url);
   await expect(page.getByRole("tab", { name: /Assets/ })).not.toHaveAttribute("data-locked");
-  await page.keyboard.press("7");
+  await page.keyboard.press("8");
 
   // The title itself is the select control (I3), not the whole row.
   await page.locator(".arow.previewable", { hasText: "script.md" }).getByRole("button", { name: "script.md" }).click();
@@ -1012,7 +1012,7 @@ test("keyboard users can trigger a preview row's actions and select it (I3)", as
 
   await page.goto(rushes.url);
   await expect(page.getByRole("tab", { name: /Assets/ })).not.toHaveAttribute("data-locked");
-  await page.keyboard.press("7");
+  await page.keyboard.press("8");
   await expect(page.locator(".aheader h2")).toContainText("Scripts & docs");
 
   // "brief.md" sorts first and previews by default; its Copy-path button must fire on a keyboard
@@ -1039,7 +1039,7 @@ test("audio plays inline, one at a time, and stops when you leave the folder", a
 
   await page.goto(rushes.url);
   await expect(page.getByRole("tab", { name: /Assets/ })).not.toHaveAttribute("data-locked");
-  await page.keyboard.press("7");
+  await page.keyboard.press("8");
   await expect(page.locator(".aheader h2")).toContainText("Music");
   // A list-only folder never offers the grid/list toggle (I5) -- Music's tiles would be
   // non-images under an <img>, and the Play button would vanish into the broken grid.
@@ -1077,7 +1077,7 @@ test("audio stops when you switch tabs (Assets → Picture and back)", async ({ 
 
   await page.goto(rushes.url);
   await videoReady(page);
-  await page.keyboard.press("7");
+  await page.keyboard.press("8");
   // A cut also exists (to unlock Picture), so Cuts -- not Music -- is the default folder.
   await page.getByRole("navigation", { name: "Folders" }).getByRole("button", { name: /^Music/ }).click();
   await expect(page.locator(".aheader h2")).toContainText("Music");
@@ -1092,7 +1092,7 @@ test("audio stops when you switch tabs (Assets → Picture and back)", async ({ 
 
   // Back on Assets, Music gets a fresh player that never auto-resumes. (Cuts is the default
   // folder again -- the selection isn't remembered across a tab round trip -- so select Music.)
-  await page.keyboard.press("7");
+  await page.keyboard.press("8");
   await page.getByRole("navigation", { name: "Folders" }).getByRole("button", { name: /^Music/ }).click();
   await expect(page.locator(".aheader h2")).toContainText("Music");
   await expect(page.locator("audio")).toHaveCount(1);
@@ -1112,7 +1112,7 @@ test("a rejected play() resets the row and shows a toast, instead of claiming to
 
   await page.goto(rushes.url);
   await expect(page.getByRole("tab", { name: /Assets/ })).not.toHaveAttribute("data-locked");
-  await page.keyboard.press("7");
+  await page.keyboard.press("8");
   await expect(page.locator(".aheader h2")).toContainText("Music");
 
   const playBed = page.getByRole("button", { name: "Play Bed" });
@@ -1128,7 +1128,7 @@ test("Open is offered for a doc and not for an unsafe file, and Export notes add
 
   await page.goto(rushes.url);
   await expect(page.getByRole("tab", { name: /Assets/ })).not.toHaveAttribute("data-locked");
-  await page.keyboard.press("7");
+  await page.keyboard.press("8");
 
   // Scripts & docs sorts before Edit files, so it's already selected.
   await expect(page.locator(".aheader h2")).toContainText("Scripts & docs");
@@ -1156,7 +1156,7 @@ test("a file dropped into the project root appears once something refreshes Asse
   await writeFile(join(rushes.root, "existing.md"), "# Existing\n");
   await page.goto(rushes.url);
   await expect(page.getByRole("tab", { name: /Assets/ })).not.toHaveAttribute("data-locked");
-  await page.keyboard.press("7");
+  await page.keyboard.press("8");
   await expect(page.locator(".aheader h2")).toContainText("Scripts & docs");
   await expect(page.locator(".arow")).toHaveCount(1);
 
@@ -1185,7 +1185,7 @@ test("a screenshot card holds its thumbnail and its actions, at any window width
     await expect(page.getByRole("status")).toContainText("Saved to screenshots/");
     for (let k = 0; k < 10; k++) await page.keyboard.press("ArrowRight");
   }
-  await page.keyboard.press("7");
+  await page.keyboard.press("8");
   await expect(page.locator(".shot-tile")).toHaveCount(3);
   for (const width of [1440, 1180, 1000, 760]) {
     await page.setViewportSize({ width, height: 900 });
@@ -1209,7 +1209,7 @@ test("200 screenshots stay usable", async ({ page, rushes }) => {
   );
   await page.goto(rushes.url);
   await expect(page.getByRole("tab", { name: /Assets/ })).not.toHaveAttribute("data-locked");
-  await page.keyboard.press("7");
+  await page.keyboard.press("8");
   await expect(page.locator(".shot-tile")).toHaveCount(200);
 
   const search = page.getByRole("searchbox", { name: "Search" });
@@ -1226,7 +1226,7 @@ test("Cuts posters are lazy: not every tile loads a video before you scroll (I6)
   }
   await page.goto(rushes.url);
   await expect(page.getByRole("tab", { name: /Assets/ })).not.toHaveAttribute("data-locked");
-  await page.keyboard.press("7");
+  await page.keyboard.press("8");
   await expect(page.locator(".aheader h2")).toContainText("Cuts");
 
   const tiles = page.locator(".shot-tile");
@@ -1393,7 +1393,7 @@ test.describe("proxies (§19.5)", () => {
     await page.goto(rushes.url);
     // Wait for the dashboard to be up before its key: a 7 pressed before then is lost.
     await expect(page.getByRole("tab", { name: /Assets/ })).not.toHaveAttribute("data-locked");
-    await page.keyboard.press("7");
+    await page.keyboard.press("8");
     const sidebar = page.getByRole("navigation", { name: "Folders" });
     await expect(sidebar.getByRole("button", { name: /Cuts/ })).toBeVisible();
     await expect(sidebar.getByRole("button", { name: /Proxies/ })).toHaveCount(0);

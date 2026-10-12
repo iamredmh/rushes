@@ -18,6 +18,7 @@ import { PlanningTab, type PlanRow } from "./Planning.js";
 import { Script } from "./Script.js";
 import { VariantTab } from "./VariantTab.js";
 import { Voice } from "./Voice.js";
+import { Visuals } from "./Visuals.js";
 import { VersionMenu } from "./VersionMenu.js";
 import { ChangeLogButton, ChangeLogDrawer, focusRow, useChangeLog } from "./ChangeLog.js";
 import type { JumpTarget } from "../changelog.js";
@@ -29,7 +30,7 @@ declare global {
   }
 }
 
-const ORDER: Stage[] = ["script", "picture", "voice", "music", "sfx", "mix"];
+const ORDER: Stage[] = ["script", "picture", "voice", "music", "sfx", "mix", "visuals"];
 // Assets isn't a review stage (§15.3): it's a dashboard-only tab after the six stages, so it's
 // kept out of Stage and ORDER entirely and handled as its own case throughout this file.
 type View = Stage | "assets" | "brief" | "storyboard";
@@ -318,10 +319,10 @@ export function App() {
       }
       if (typing(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
       const n = Number(e.key);
-      // 1 is Planning (Brief and Script); 2 to 6 are Picture to Mix, and 7 is Assets, as they always were.
+      // 1 is Planning (Brief and Script); 2 to 6 are Picture to Mix, 7 is Visuals and 8 is Assets.
       if (n === 1) planKey();
-      else if (n >= 2 && n <= 6) show(ORDER[n - 1]);
-      else if (n === 7) showAssets();
+      else if (n >= 2 && n <= 7) show(ORDER[n - 1]);
+      else if (n === 8) showAssets();
       if ((e.key === "[" || e.key === "]") && state) {
         const nxt = neighbourVideo(state.project.videos, videoId, e.key === "]" ? 1 : -1);
         if (nxt) switchFilm(nxt);
@@ -696,6 +697,8 @@ export function App() {
           <Brief brief={state.brief} toast={toast} onChanged={() => void refresh()} settle={planSettle} />
         ) : stage === "storyboard" ? (
           <Storyboard board={state.storyboard} brief={state.brief} toast={toast} onChanged={() => void refresh()} settle={planSettle} />
+        ) : stage === "visuals" ? (
+          <Visuals state={state} toast={toast} onChanged={() => void refresh()} onPendingChange={setPending} />
         ) : stage === "script" ? (
           <Script script={state.script} toast={toast} onChanged={() => void refresh()} />
         ) : stage === "voice" ? (

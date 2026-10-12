@@ -570,7 +570,7 @@ test("Alt+arrows do nothing off the Picture tab, and the radio group never wraps
   await rushes.addFormatsCut(FOUR);
   await page.goto(rushes.url);
   await videoReady(page);
-  await page.keyboard.press("7");
+  await page.keyboard.press("8");
   await expect(page.getByRole("tab", { name: /Assets/ })).toHaveAttribute("aria-selected", "true");
   await page.keyboard.press("Alt+ArrowLeft");
   await page.keyboard.press("2");

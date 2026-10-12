@@ -277,7 +277,7 @@ test("leaving the tab stops playback, and coming back doesn't double the sources
   await page.keyboard.press(" ");
   await expect.poll(async () => (await inspect(page)).playing).toBe(true);
   await page.evaluate(() => { (window as unknown as { __old: unknown }).__old = window.__rushesAudio!.engine; });
-  await page.keyboard.press("7");
+  await page.keyboard.press("8");
   await expect(page.locator(".aheader h2")).toContainText("Music");
   const old = await page.evaluate(() => {
     const e = (window as unknown as { __old: { playing: boolean; inspect(): Snapshot } }).__old;
@@ -294,7 +294,7 @@ test("leaving the tab stops playback, and coming back doesn't double the sources
 
 test("the Assets player and Music never play together", async ({ page, rushes }) => {
   await twoBeds(page, rushes);
-  await page.keyboard.press("7");
+  await page.keyboard.press("8");
   await page.locator(".arow").nth(0).getByRole("button", { name: /^Play / }).click();
   await expect.poll(() => page.locator("audio").evaluate((el) => (el as HTMLAudioElement).paused)).toBe(false);
   // Music starts: the Assets player has stopped.
@@ -305,7 +305,7 @@ test("the Assets player and Music never play together", async ({ page, rushes })
   await expect.poll(async () => (await inspect(page)).playing).toBe(true);
   await page.evaluate(() => { (window as unknown as { __old: unknown }).__old = window.__rushesAudio!.engine; });
   // And the reverse: the Assets player starts, Music has stopped.
-  await page.keyboard.press("7");
+  await page.keyboard.press("8");
   await page.locator(".arow").nth(0).getByRole("button", { name: /^Play / }).click();
   await expect.poll(() => page.locator("audio").evaluate((el) => (el as HTMLAudioElement).paused)).toBe(false);
   expect(await page.evaluate(() => (window as unknown as { __old: { playing: boolean } }).__old.playing)).toBe(false);
@@ -1062,7 +1062,7 @@ test("switching tab, by 1–7 or by a click, refuses to drop a pending audio not
   await page.keyboard.press("2");
   await expect(page.getByRole("status")).toHaveText("Add or clear your note first");
   await expect(tab(/Music/)).toHaveAttribute("aria-selected", "true");
-  await page.keyboard.press("7");
+  await page.keyboard.press("8");
   await expect(tab(/Music/)).toHaveAttribute("aria-selected", "true");
   await tab(/Mix/).click();
   await expect(tab(/Music/)).toHaveAttribute("aria-selected", "true");
