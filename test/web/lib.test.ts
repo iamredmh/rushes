@@ -32,7 +32,7 @@ const v = (id: string) => ({ id, name: id, file: `media/${id}.wav`, meta: {}, cu
 
 const note = (over: Partial<Note>): Note => ({
   id: "n_1", stage: "picture", video: "hero", version: "v3", on: null, scope: "point", t: 12.4, tOut: null, frame: null,
-  text: "x", box: null, grab: null, shot: null, marks: [], status: "todo", reply: "", fixT: null, fixVersion: null, batch: null,
+  text: "x", box: null, pin: null, grab: null, shot: null, marks: [], status: "todo", reply: "", fixT: null, fixVersion: null, batch: null,
   format: null, createdAt: "2026-10-02T00:00:00Z", by: "user", ...over,
 });
 

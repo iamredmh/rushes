@@ -147,7 +147,7 @@ describe("rushes log (§22.7)", () => {
     }
     const e = io(root);
     await main(["log", "--area", "elsewhere"], e.x);
-    expect(e.err[0]).toBe('--area must be one of script, picture, voice, music, sfx, mix, notes, assets, project (got "elsewhere")');
+    expect(e.err[0]).toBe('--area must be one of script, picture, voice, music, sfx, mix, visuals, notes, assets, project (got "elsewhere")');
     await s.close();
   });
 

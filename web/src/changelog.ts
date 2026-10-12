@@ -9,7 +9,7 @@ export type Filter = "all" | Exclude<LogArea, "script" | "project">;
 /** The mockup's chips, in order. */
 export const FILTERS: readonly (readonly [Filter, string])[] = [
   ["all", "All"], ["picture", AREA_LABELS.picture], ["voice", AREA_LABELS.voice], ["music", AREA_LABELS.music],
-  ["sfx", AREA_LABELS.sfx], ["mix", AREA_LABELS.mix], ["notes", AREA_LABELS.notes], ["assets", AREA_LABELS.assets],
+  ["sfx", AREA_LABELS.sfx], ["mix", AREA_LABELS.mix], ["visuals", AREA_LABELS.visuals], ["notes", AREA_LABELS.notes], ["assets", AREA_LABELS.assets],
 ];
 
 export function isFilter(s: string | null): s is Filter {

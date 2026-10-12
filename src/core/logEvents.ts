@@ -3,10 +3,10 @@
 import { clip, oneLineOf, shortLabel, type Labelled } from "./labels.js";
 import type { LogEvent } from "./log.js";
 import { PICKS_MERGE_MS, type LogArea } from "./logText.js";
-import type { Batch, FileEntry, FileKind, Lane, LaneStage, Note, Picks, Project, Section, Stage, Take, Variant, Video } from "./schema.js";
+import type { Batch, FileEntry, FileKind, Lane, LaneStage, Note, Picks, Project, Section, Stage, Take, Variant, Video, Visual } from "./schema.js";
 
 /** The tabs' own names, as the dashboard shows them. */
-export const TAB_NAMES: Record<Stage, string> = { script: "Script", picture: "Picture", voice: "Voiceover", music: "Music", sfx: "Sound effects", mix: "Mix" };
+export const TAB_NAMES: Record<Stage, string> = { script: "Script", picture: "Picture", voice: "Voiceover", music: "Music", sfx: "Sound effects", mix: "Mix", visuals: "Visuals" };
 /** How a lane's stage starts a line. It's also its default lane's name (project.ts LANE_NAMES), which "to <lane>" leaves out. */
 export const STAGE_WORDS: Record<LaneStage, string> = { voice: "Voiceover", music: "Music", sfx: "Sound effects" };
 /** §16.1's Assets folders, by the kind of file they hold (web/src/lib.ts FOLDERS; test/core/log.test.ts keeps them equal). */
@@ -39,6 +39,23 @@ export function cutName(films: number, video: Pick<Video, "name">, versionId: st
 /** "9:16", "9:16 and 1:1", "9:16, 1:1 and 4:5". */
 function andList(items: readonly string[]): string {
   return items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
+/**
+ * §25.5: "“Launch carousel” v2 added: shorter headline". Named by the visual, never by a note. Versions of one visual in a
+ * burst are one line, as cuts are.
+ */
+export function visualEvent(visual: Pick<Visual, "id" | "name">, version: Labelled & { label?: string }): LogEvent {
+  const name = quoted(visual.name, "A visual");
+  // A version with no label of its own says only that it was added: its id is not a description.
+  const label = (version.label ?? "").trim() === "" ? "" : shortLabel(version);
+  const tail = label ? `: ${label}` : "";
+  return {
+    area: "visuals", kind: "visual", merge: "count", subject: visual.id,
+    text: `${name} ${version.id} added${tail}`,
+    ref: visual.id, version: version.id,
+    many: (n, subject) => `${n} versions added${subject ? ` to ${name}` : ""}, the latest ${version.id}${tail}`,
+  };
 }
 
 /** A format's ratio label as stored ("9:16", "2.39:1"): never a free text, so nothing else gets in. */

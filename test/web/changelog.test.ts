@@ -10,7 +10,7 @@ const project = {
 
 describe("the drawer's helpers (§22.8)", () => {
   it("filters are the mockup's chips, in order", () => {
-    expect(FILTERS.map(([, l]) => l)).toEqual(["All", "Picture", "Voice", "Music", "Sound effects", "Mix", "Notes", "Files"]);
+    expect(FILTERS.map(([, l]) => l)).toEqual(["All", "Picture", "Voice", "Music", "Sound effects", "Mix", "Visuals", "Notes", "Files"]);
     expect(isFilter("music")).toBe(true);
     expect(isFilter("project")).toBe(false);
     expect(isFilter(null)).toBe(false);

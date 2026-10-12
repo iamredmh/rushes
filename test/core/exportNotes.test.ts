@@ -4,7 +4,8 @@ import { addNote, onLabel } from "../../src/core/notes.js";
 import { voiceOnLabel, voiceRounds } from "../../web/src/lib.js";
 import type { Lane } from "../../web/src/types.js";
 import { addFormat, addVersion } from "../../src/core/project.js";
-import type { NotesFile, Project } from "../../src/core/schema.js";
+import { VisualsFileSchema, type NotesFile, type Project } from "../../src/core/schema.js";
+import { registerVisual } from "../../src/core/visuals.js";
 
 const project = (): Project => ({ schema: 1, rev: 0, name: "Spring Launch", fps: 30, videos: [], lanes: [], files: [], autoProxy: false });
 
@@ -250,4 +251,40 @@ it("on a cut with formats every Picture note carries its format; a one-format cu
   expect(md).toContain("- **0:01.00** · All · to do — Drop the first sound.");
   expect(md).toContain("- **0:02.00** · 9:16 · to do — Logo too close to the top.");
   expect(md).toContain("- **0:01.00** · to do — Hold longer.");
+});
+
+describe("notesMarkdown: Visuals (§25.5)", () => {
+  const visuals = () => {
+    const f = VisualsFileSchema.parse({ schema: 1, rev: 0 });
+    registerVisual(f, { name: "Launch carousel", pages: [{ files: [{ file: "a1.png", width: 1080, height: 1350 }] }, { files: [{ file: "a2.png", width: 1080, height: 1350 }] }] });
+    return f;
+  };
+  it("groups notes by visual and version, in page order, and says where each mark is", () => {
+    const notes: NotesFile = { schema: 1, rev: 0, notes: [] };
+    addNote(notes, { stage: "visuals", scope: "whole", version: "v1", on: "launch-carousel/2", format: "4x5", box: { x: 0.1, y: 0.05, w: 0.3, h: 0.2 }, text: "Shorten the headline." });
+    addNote(notes, { stage: "visuals", scope: "whole", version: "v1", on: "launch-carousel/1", format: null, text: "Feels flat." });
+    addNote(notes, { stage: "visuals", scope: "whole", version: "v1", on: "launch-carousel/2", format: "4x5", pin: { x: 0.9, y: 0.1 }, text: "Logo touches the edge." });
+    const md = notesMarkdown(project(), notes.notes, new Date(2026, 9, 12, 10, 0), { sections: [] }, undefined, visuals());
+    expect(md).toBe(
+      [
+        "# Spring Launch — notes",
+        "Exported 2026-10-12 10:00",
+        "",
+        "## Visuals",
+        "",
+        "### Launch carousel · v1",
+        "- **Page 1** · all ratios · whole image · to do — Feels flat.",
+        "- **Page 2** · 4:5 · region (left third, top third) · to do — Shorten the headline.",
+        "- **Page 2** · 4:5 · point (right, top) · to do — Logo touches the edge.",
+        "",
+      ].join("\n"),
+    );
+  });
+  it("keeps a note whose visual is gone, under (removed)", () => {
+    const notes: NotesFile = { schema: 1, rev: 0, notes: [] };
+    addNote(notes, { stage: "visuals", scope: "whole", version: "v1", on: "gone/1", format: null, text: "Orphan." });
+    const md = notesMarkdown(project(), notes.notes, new Date(2026, 9, 12, 10, 0), { sections: [] }, undefined, visuals());
+    expect(md).toContain("### gone · v1 (removed)");
+    expect(md).toContain("Orphan.");
+  });
 });

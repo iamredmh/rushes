@@ -1,4 +1,4 @@
-import { STAGES, type NotesFile, type Project, type Script, type Stage } from "./schema.js";
+import { STAGES, type NotesFile, type Project, type Script, type Stage, type VisualsFile } from "./schema.js";
 import { isChanged } from "./script.js";
 
 export interface TabState {
@@ -12,7 +12,7 @@ function laneHasVariants(p: Project, stage: "voice" | "music" | "sfx"): boolean 
   return p.lanes.some((l) => l.stage === stage && l.variants.length > 0);
 }
 
-export function tabStates(p: Project, s: Script, n: NotesFile): TabState[] {
+export function tabStates(p: Project, s: Script, n: NotesFile, v: Pick<VisualsFile, "visuals"> = { visuals: [] }): TabState[] {
   const picture = p.videos.some((v) => v.versions.length > 0);
   const voice = laneHasVariants(p, "voice");
   const music = laneHasVariants(p, "music");
@@ -24,6 +24,8 @@ export function tabStates(p: Project, s: Script, n: NotesFile): TabState[] {
     music,
     sfx,
     mix: picture && (voice || music || sfx),
+    // §25.7: Visuals unlocks when one is registered.
+    visuals: v.visuals.length > 0,
   };
   return STAGES.map((stage) => {
     const notes = n.notes.filter((x) => x.stage === stage && x.status === "todo").length;

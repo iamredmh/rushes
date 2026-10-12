@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { FORMAT_ID_RE, isPictureSize, labelOfId, ratioId, ratioLabel } from "./formats.js";
+import { FORMAT_ID_RE, MAX_FORMATS, isPictureSize, labelOfId, ratioId, ratioLabel } from "./formats.js";
 import { oneLineOf } from "./labels.js";
 import { LOG_AREAS, LOG_BY, LOG_KINDS, LOG_MAX, LOG_TEXT_MAX } from "./logText.js";
 
@@ -14,7 +14,7 @@ function fileObject<T extends z.ZodRawShape>(shape: T): z.ZodObject<T> {
   return z.looseObject(shape) as unknown as z.ZodObject<T>;
 }
 
-export const STAGES =["script", "picture", "voice", "music", "sfx", "mix"] as const;
+export const STAGES =["script", "picture", "voice", "music", "sfx", "mix", "visuals"] as const;
 export const StageSchema = z.enum(STAGES);
 export type Stage = z.infer<typeof StageSchema>;
 
@@ -198,6 +198,12 @@ export const BoxSchema = fileObject({
   h: z.number().min(0).max(1),
 });
 
+// §25.4: a point on an image, as fractions of it. Only a note on a visual has one.
+export const PinSchema = fileObject({
+  x: z.number().min(0).max(1),
+  y: z.number().min(0).max(1),
+});
+
 // §14.5/§17.1: a range note on an audio tab can carry up to four quick marks. Louder/quieter
 // need a dB amount (chosen from 1, 2, 3, 6 or 9 in the UI, 3 the default); rise/fall never carry
 // one. Both rules, plus "no duplicate kinds" and "only on audio-ish stages", are enforced on the
@@ -238,6 +244,7 @@ export const NoteSchema = z
     frame: z.number().int().nonnegative().nullable().default(null),
     text: z.string().trim().min(1).max(4000),
     box: BoxSchema.nullable().default(null),
+    pin: PinSchema.nullable().default(null),
     grab: z.string().nullable().default(null),
     shot: fileObject({ n: z.number().int().positive(), name: z.string() }).nullable().default(null),
     marks: z.array(MarkSchema).max(4).default([]),
@@ -261,6 +268,10 @@ export const NoteSchema = z
     if (n.scope === "whole" && (n.t !== null || n.tOut !== null))
       ctx.addIssue({ code: "custom", path: ["scope"], message: "a whole-track note has no t or tOut" });
 
+    // §25.4: an image has no time, and a note on one is a region, a point or the whole image.
+    if (n.pin !== null && n.stage !== "visuals") ctx.addIssue({ code: "custom", path: ["pin"], message: "a point on an image belongs to a note on a visual" });
+    if (n.pin !== null && n.box !== null) ctx.addIssue({ code: "custom", path: ["pin"], message: "a note is a region or a point, not both" });
+    if (n.stage === "visuals" && n.scope !== "whole") ctx.addIssue({ code: "custom", path: ["scope"], message: "a note on a visual has no time" });
     if (n.marks.length > 0 && !MARK_STAGES.includes(n.stage)) {
       ctx.addIssue({ code: "custom", path: ["marks"], message: `marks don't apply to the ${n.stage} stage` });
     }
@@ -445,6 +456,49 @@ export const BriefStateSchema = fileObject({
 });
 export type BriefState = z.infer<typeof BriefStateSchema>;
 
+// §25.3: a visual is one post: a still, or a carousel of pages. A version holds every page it shows, the ones it
+// inherited from the version before included, so nothing downstream has to work inheritance out.
+export const VisualImageSchema = fileObject({
+  /** A format id such as "4x5": the shape of the picture, read from its size. */
+  ratio: z.string().max(16).regex(FORMAT_ID_RE),
+  file: z.string().min(1),
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+});
+export type VisualImage = z.infer<typeof VisualImageSchema>;
+
+export const VisualPageSchema = fileObject({
+  n: z.number().int().positive(),
+  images: z.array(VisualImageSchema).min(1).max(MAX_FORMATS),
+});
+export type VisualPage = z.infer<typeof VisualPageSchema>;
+
+export const MAX_VISUAL_PAGES = 100;
+
+export const VisualVersionSchema = fileObject({
+  id,
+  addedAt: z.string(),
+  label: z.string().default(""),
+  pages: z.array(VisualPageSchema).min(1).max(MAX_VISUAL_PAGES),
+});
+export type VisualVersion = z.infer<typeof VisualVersionSchema>;
+
+export const VisualSchema = fileObject({
+  id,
+  name: z.string().trim().min(1).max(80),
+  kind: z.enum(["still", "carousel"]),
+  addedAt: z.string(),
+  versions: z.array(VisualVersionSchema).min(1),
+});
+export type Visual = z.infer<typeof VisualSchema>;
+
+export const VisualsFileSchema = fileObject({
+  schema: z.literal(1),
+  rev: z.number().int().nonnegative(),
+  visuals: z.array(VisualSchema).default([]),
+});
+export type VisualsFile = z.infer<typeof VisualsFileSchema>;
+
 export const FILES = {
   project: { name: "project.json", schema: ProjectSchema },
   script: { name: "script.json", schema: ScriptSchema },
@@ -456,6 +510,8 @@ export const FILES = {
   brief: { name: "brief.json", schema: BriefStateSchema },
   // §24.12: the storyboard is kept the same way as the brief: its file, plus the agent's last text and the hash last seen.
   storyboard: { name: "storyboard.json", schema: BriefStateSchema },
+  // §25.3: created by its first write, like the brief's.
+  visuals: { name: "visuals.json", schema: VisualsFileSchema },
 } as const;
 export type FileKey = keyof typeof FILES;
 export type FileData = {
@@ -468,4 +524,5 @@ export type FileData = {
   log: LogFile;
   brief: BriefState;
   storyboard: BriefState;
+  visuals: VisualsFile;
 };

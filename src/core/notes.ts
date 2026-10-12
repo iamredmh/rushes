@@ -16,6 +16,8 @@ export interface NewNote {
   frame?: number | null;
   text: string;
   box?: Note["box"];
+  /** §25.4: a point on a visual's image, as fractions of it. */
+  pin?: Note["pin"];
   grab?: string | null;
   /** Stamped by the server (Task 2) from the version's shots; passed through here. */
   shot?: Note["shot"];
@@ -72,6 +74,8 @@ export interface UserEdit {
   id: string;
   text?: string;
   box?: Note["box"];
+  /** §25.4: a point on a visual's image. */
+  pin?: Note["pin"];
   grab?: string | null;
   scope?: Note["scope"];
   t?: number | null;
@@ -86,7 +90,7 @@ export interface UserEdit {
 export function applyUserEdit(file: NotesFile, e: UserEdit, check?: (next: Note, prev: Note) => void): Note {
   const n = find(file, e.id);
   const next = { ...n };
-  for (const k of ["text", "box", "grab", "scope", "t", "tOut", "marks", "status", "format"] as const) {
+  for (const k of ["text", "box", "pin", "grab", "scope", "t", "tOut", "marks", "status", "format"] as const) {
     if (e[k] !== undefined) (next as Record<string, unknown>)[k] = e[k];
   }
   const parsed = NoteSchema.safeParse(next);

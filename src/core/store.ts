@@ -27,6 +27,8 @@ function defaults(key: FileKey, name: string): FileData[FileKey] {
     case "brief":
     case "storyboard":
       return { schema: 1, rev: 0, baseline: "", seen: "" };
+    case "visuals":
+      return { schema: 1, rev: 0, visuals: [] };
   }
 }
 
@@ -34,7 +36,7 @@ function defaults(key: FileKey, name: string): FileData[FileKey] {
  * Files `init` doesn't write (found.json, log.json, brief.json, storyboard.json). Each is created by its first write, and reads
  * as its default until then, so a project made before the file existed needs nothing done to it.
  */
-const CREATED_ON_WRITE: ReadonlySet<FileKey> = new Set<FileKey>(["found", "log", "brief", "storyboard"]);
+const CREATED_ON_WRITE: ReadonlySet<FileKey> = new Set<FileKey>(["found", "log", "brief", "storyboard", "visuals"]);
 
 export interface ChangeEvent {
   file: FileKey;

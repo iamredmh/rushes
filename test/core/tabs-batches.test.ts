@@ -4,7 +4,8 @@ import { createBatch, formatLines, latestBatch } from "../../src/core/batches.js
 import { addFormat, addVariant, addVersion } from "../../src/core/project.js";
 import { addTake, editSection, setSections } from "../../src/core/script.js";
 import { addNote } from "../../src/core/notes.js";
-import type { BatchesFile, NotesFile, Project, Script } from "../../src/core/schema.js";
+import { VisualsFileSchema, type BatchesFile, type NotesFile, type Project, type Script } from "../../src/core/schema.js";
+import { registerVisual } from "../../src/core/visuals.js";
 
 function ctx() {
   const project: Project = { schema: 1, rev: 0, name: "spring-launch", fps: 30, videos: [], lanes: [], files: [], autoProxy: false };
@@ -20,7 +21,7 @@ describe("tabStates", () => {
   it("starts with every tab locked, in workflow order", () => {
     const c = ctx();
     const tabs = tabStates(c.project, c.script, c.notes);
-    expect(tabs.map((t) => t.stage)).toEqual(["script", "picture", "voice", "music", "sfx", "mix"]);
+    expect(tabs.map((t) => t.stage)).toEqual(["script", "picture", "voice", "music", "sfx", "mix", "visuals"]);
     expect(tabs.every((t) => !t.unlocked)).toBe(true);
   });
 
@@ -34,6 +35,18 @@ describe("tabStates", () => {
     expect(unlocked(c)).toMatchObject({ picture: true, mix: true, voice: false, sfx: false });
     addVariant(c.project, { stage: "voice", name: "Gerald", file: "g.wav", round: "Round 1" });
     expect(unlocked(c).voice).toBe(true);
+  });
+
+  it("unlocks Visuals when one is registered, and counts its open notes (§25.7)", () => {
+    const c = ctx();
+    const visuals = VisualsFileSchema.parse({ schema: 1, rev: 0 });
+    expect(tabStates(c.project, c.script, c.notes, visuals).find((t) => t.stage === "visuals")).toMatchObject({ unlocked: false, todo: 0 });
+    registerVisual(visuals, { name: "Launch", pages: [{ files: [{ file: "a.png", width: 1080, height: 1350 }] }] });
+    addNote(c.notes, { stage: "visuals", scope: "whole", version: "v1", on: "launch/1", format: null, text: "Flat." });
+    addNote(c.notes, { stage: "visuals", scope: "whole", version: "v1", on: "launch/1", format: null, text: "Done one.", status: "done" } as never);
+    expect(tabStates(c.project, c.script, c.notes, visuals).find((t) => t.stage === "visuals")).toMatchObject({ unlocked: true, todo: 1 });
+    // Without the visuals file (an older caller) the tab is simply locked.
+    expect(tabStates(c.project, c.script, c.notes).find((t) => t.stage === "visuals")?.unlocked).toBe(false);
   });
 
   it("does not unlock Voiceover from script takes alone; only a voice lane with a read does (§18.4)", () => {
@@ -217,5 +230,22 @@ describe("createBatch", () => {
     editSection(c.script, "s1", { proposed: "A2" });
     const b = createBatch(c, "script");
     expect(b.prompt).toContain("re-record the picked voice");
+  });
+});
+
+describe("a Visuals batch (§25.5)", () => {
+  it("tells the agent to read each note's picture, register a new version with only the changed pages, and reply with its version", () => {
+    const c = ctx();
+    addNote(c.notes, { stage: "visuals", scope: "whole", version: "v1", on: "launch/3", format: "4x5", box: { x: 0.1, y: 0.2, w: 0.3, h: 0.1 }, text: "Shorten the headline." });
+    const batch = createBatch(c, "visuals", new Date("2026-10-12T10:00:00Z"));
+    expect(batch?.noteIds).toHaveLength(1);
+    expect(batch?.prompt).toContain("Work through visuals batch");
+    expect(batch?.prompt).toContain("rushes_get_batch");
+    expect(batch?.prompt).toContain("rushes_add_visual");
+    expect(batch?.prompt).toContain("only the pages that changed");
+    expect(batch?.prompt).toContain("fixVersion");
+    expect(batch?.prompt).toContain("every ratio");
+    // It is not the Picture instruction.
+    expect(batch?.prompt).not.toContain("rushes_add_version");
   });
 });

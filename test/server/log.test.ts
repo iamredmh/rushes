@@ -682,7 +682,7 @@ describe("the log's routes (§22.7)", () => {
       ["since=1791360000000", /since must be a date and time/],
       ["since=Oct%207%202026", /since must be a date and time/],
       ["since=2026-13-45", /since must be a date and time/],
-      ["area=elsewhere", /area must be one of script, picture, voice, music, sfx, mix, notes, assets, project/],
+      ["area=elsewhere", /area must be one of script, picture, voice, music, sfx, mix, visuals, notes, assets, project/],
     ];
     for (const [q, message] of cases) {
       const r = await call("GET", `/api/log?${q}`);
