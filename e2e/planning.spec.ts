@@ -109,7 +109,7 @@ test("with no brief.md, Brief is a locked page that says what to ask the agent",
   await expect(page.getByRole("button", { name: "Copy prompt for your agent" })).toBeVisible();
 });
 
-test("key 1 opens Planning on the page last used, and 2 to 7 stay where they were", async ({ page, rushes }) => {
+test("key 1 opens Planning on the page last used, and 2 to 8 stay where they were", async ({ page, rushes }) => {
   await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
   await rushes.api("PUT", "/api/script", SCRIPT);
   await rushes.addCut();
@@ -123,7 +123,7 @@ test("key 1 opens Planning on the page last used, and 2 to 7 stay where they wer
   await expect(page.getByRole("tab", { name: /Picture/ })).toHaveAttribute("aria-selected", "true");
   await page.keyboard.press("1");
   await expect(page.getByRole("heading", { name: "Brief" })).toBeVisible();
-  await page.keyboard.press("7");
+  await page.keyboard.press("8");
   await expect(page.getByRole("tab", { name: /Assets/ })).toHaveAttribute("aria-selected", "true");
 });
 

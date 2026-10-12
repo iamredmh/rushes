@@ -115,7 +115,7 @@ test("a line added in the drawer is by you, about the tab on screen; the filters
   expect(entries[0]).toMatchObject({ by: "user", area: "picture", kind: "entry" });
 
   const chips = drawer(page).getByRole("radiogroup", { name: "Show" });
-  await expect(chips.getByRole("radio")).toHaveText(["All", "Picture", "Voice", "Music", "Sound effects", "Mix", "Notes", "Files"]);
+  await expect(chips.getByRole("radio")).toHaveText(["All", "Picture", "Voice", "Music", "Sound effects", "Mix", "Visuals", "Notes", "Files"]);
   await chips.getByRole("radio", { name: "All" }).focus();
   const t0 = await page.getByLabel("Timecode").textContent();
   for (let i = 0; i < 3; i++) await page.keyboard.press("ArrowRight");
