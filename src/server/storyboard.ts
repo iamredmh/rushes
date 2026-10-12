@@ -1,9 +1,8 @@
-import { lstat } from "node:fs/promises";
-import { join } from "node:path";
 import { hashText } from "../core/brief.js";
 import { InvalidError, RushesError } from "../core/errors.js";
 import { STORYBOARD_FILE, cutShots, editShot, parseStoryboard, type Shot, type ShotEdit } from "../core/storyboard.js";
 import type { Store } from "../core/store.js";
+import { viaLink } from "./links.js";
 import { RecordFile } from "./record.js";
 
 // §24.12: storyboard.md is the file of record for the shots. See RecordFile for how it is kept.
@@ -71,23 +70,9 @@ export class StoryboardService extends RecordFile {
     };
   }
 
-  /** Whether a still, or any folder on the way to it, is a link. The project's own files are never followed out of it. */
-  private async linked(still: string): Promise<boolean> {
-    let at = this.store.root;
-    for (const seg of still.split("/")) {
-      at = join(at, seg);
-      try {
-        if ((await lstat(at)).isSymbolicLink()) return true;
-      } catch {
-        return false;
-      }
-    }
-    return false;
-  }
-
   /** The view with every still that goes through a link taken out: it is no still. */
   private async safe(v: StoryboardView): Promise<StoryboardView> {
-    const shots = await Promise.all(v.shots.map(async (s) => (s.still && (await this.linked(s.still)) ? { ...s, still: null } : s)));
+    const shots = await Promise.all(v.shots.map(async (s) => (s.still && (await viaLink(this.store.root, s.still)) ? { ...s, still: null } : s)));
     return { ...v, shots };
   }
 
@@ -122,7 +107,7 @@ export class StoryboardService extends RecordFile {
       const text = await this.readText();
       const named = text === null ? [] : parseStoryboard(text).shots.flatMap((s) => (s.still ? [s.still] : []));
       const safe: string[] = [];
-      for (const still of named) if (!(await this.linked(still))) safe.push(still);
+      for (const still of named) if (!(await viaLink(this.store.root, still))) safe.push(still);
       return new Set(safe);
     });
   }

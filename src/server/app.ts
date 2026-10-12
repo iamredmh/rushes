@@ -6,10 +6,12 @@ import { RushesError, InvalidError, NotFoundError } from "../core/errors.js";
 import { addFile, addFormat, addVariant, addVersion, ensureProjectIdOnce, lockPicture, resolveCut, resolveVideo, setShots, shotAt } from "../core/project.js";
 import { addTake, editSection, setSections } from "../core/script.js";
 import { addNote, applyReply, applyUserEdit, checkNoteFormat, filterNotes } from "../core/notes.js";
-import { FORMAT_ID_RE, MAX_FORMATS, isPictureSize, versionFormats } from "../core/formats.js";
+import { FORMAT_ID_RE, MAX_FORMATS, isPictureSize, labelOfId, versionFormats } from "../core/formats.js";
 import { createBatch, latestBatch } from "../core/batches.js";
 import { exportFileName, notesMarkdown } from "../core/exportNotes.js";
 import { tabStates } from "../core/tabs.js";
+import { addVisualVersion, checkVisualNote, registerVisual, visualNoteView, visualRatios, type PageInput } from "../core/visuals.js";
+import { readPicture } from "./visuals.js";
 import { fromManifestPath, toManifestPath } from "../core/paths.js";
 import { AUDIO_FORMATS, PROBE_TIMEOUT_MS, VIDEO_EXT, giveUpAfter, probe, probeVideo, videoGaveUp, type VideoProbe, type VideoProber } from "../core/media.js";
 import { PROXY_PATH, ProxyJobs, type ProxyEvent } from "./proxy.js";
@@ -24,14 +26,14 @@ import { BRING_IN_MAX, FoundScanner, type BringInFailure, type BringInKind, ffpr
 import { candidatePaths, listAssets, fpsFor, screenshotName } from "./assets.js";
 import { osRevealer, osOpener, OPEN_SAFE_EXT, type Revealer, type Opener } from "./reveal.js";
 import type { CorruptEvent } from "./watch.js";
-import { LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, FileKindSchema, MarkSchema, ProjectIdSchema, ShotSchema, LEVEL_MIN, LEVEL_MAX, LEVEL_STEP, type Batch, type Note } from "../core/schema.js";
+import { LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, PinSchema, FileKindSchema, MarkSchema, ProjectIdSchema, ShotSchema, LEVEL_MIN, LEVEL_MAX, LEVEL_STEP, type Batch, type Note, type VisualsFile } from "../core/schema.js";
 import { LABEL_MAX, oneLineOf } from "../core/labels.js";
 import { byOf, logBookFor } from "./logbook.js";
 import { BriefService } from "./brief.js";
 import { StoryboardService } from "./storyboard.js";
 import { buildState, planWarning } from "../core/plan.js";
 import {
-  broughtInEvent, cutEvent, fileEvent, formatEvent, lineEvent, lockEvent, notesSentEvent, picksEvent, repliesEvent, scriptEvent, takeEvent, variantEvent,
+  broughtInEvent, cutEvent, fileEvent, formatEvent, lineEvent, lockEvent, notesSentEvent, picksEvent, repliesEvent, scriptEvent, takeEvent, variantEvent, visualEvent,
 } from "../core/logEvents.js";
 import { LOG_AREAS, LOG_MAX, changeLogFileName, logText, recentChanges } from "../core/logText.js";
 import { defaultRunner, measureMix, type LoudnessRunner } from "./loudness.js";
@@ -56,6 +58,11 @@ const formatId = z.string().max(16).regex(FORMAT_ID_RE);
 /** The longest path a format may be registered under (FoundItem and FoundPathsBody use the same). */
 const MAX_PATH = 1024;
 
+/** §25.5: a note on a visual with where it is, in words, and the picture to open: what an agent reading the batch needs. */
+function withVisualViews<T extends Note>(notes: T[], visuals: Pick<VisualsFile, "visuals">): (T | (T & { visual: ReturnType<typeof visualNoteView> }))[] {
+  return notes.map((n) => (n.stage === "visuals" ? { ...n, visual: visualNoteView(n, visuals) } : n));
+}
+
 const NewNoteBody = z.object({
   stage: StageSchema,
   video: z.string().nullish(),
@@ -67,14 +74,28 @@ const NewNoteBody = z.object({
   frame: z.number().int().nonnegative().nullish(),
   text: z.string(),
   box: BoxSchema.nullish(),
+  pin: PinSchema.nullish(),
   grab: z.string().nullish(),
   marks: z.array(MarkSchema).max(4).optional(),
   format: formatId.nullish(),
 });
 
+// §25.5: a new visual (a name) or a new version of one (a visual), with the pages that are new or changed.
+const VisualBody = z
+  .object({
+    name: z.string().trim().min(1).max(80).optional(),
+    visual: z.string().trim().min(1).max(80).optional(),
+    kind: z.enum(["still", "carousel"]).optional(),
+    label: z.string().trim().max(LABEL_MAX).optional(),
+    pages: z.array(z.object({ n: z.number().int().positive().optional(), files: z.array(z.string().min(1).max(1024)).min(1).max(MAX_FORMATS) })).min(1).max(100),
+  })
+  .refine((b) => (b.name !== undefined) !== (b.visual !== undefined), { message: "send name (a new visual) or visual (a new version of one), not both" })
+  .refine((b) => b.name !== undefined || b.kind === undefined, { message: "kind is for a new visual" });
+
 const UserEditBody = z.object({
   text: z.string().optional(),
   box: BoxSchema.nullable().optional(),
+  pin: PinSchema.nullable().optional(),
   grab: z.string().nullable().optional(),
   scope: z.enum(["point", "range", "whole"]).optional(),
   t: t.nullable().optional(),
@@ -499,7 +520,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     // and the one a byte-range video seek hits over and over. Only a path that misses all three
     // falls through to candidatePaths, which does the readdir-backed discovery (§16.2's
     // auto-discovered docs/captions/exports) that a registered path never needs.
-    let known = registeredMedia(project, script).has(path) || GRAB_PATH.test(path) || SCREENSHOT_PATH.test(path);
+    let known = registeredMedia(project, script, await store.read("visuals")).has(path) || GRAB_PATH.test(path) || SCREENSHOT_PATH.test(path);
     // §24.12: a picture storyboard.md names (a safe, project-relative image path) is served too, registered or not.
     if (!known && (await storyboard.stills()).has(path)) known = true;
     // The file on disk to send. For a found file it's exactly the path that was checked.
@@ -655,11 +676,11 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   });
 
   app.post("/api/exports/notes", async (c) => {
-    const [project, notesFile, script, picks] = await Promise.all([
-      store.read("project"), store.read("notes"), store.read("script"), store.read("picks"),
+    const [project, notesFile, script, picks, visuals] = await Promise.all([
+      store.read("project"), store.read("notes"), store.read("script"), store.read("picks"), store.read("visuals"),
     ]);
     const now = new Date();
-    const md = notesMarkdown(project, notesFile.notes, now, script, picks);
+    const md = notesMarkdown(project, notesFile.notes, now, script, picks, visuals);
     const name = exportFileName(project.name, now);
     const dir = join(store.root, "exports");
     await mkdir(dir, { recursive: true });
@@ -701,10 +722,10 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   app.get("/api/state", async (c) => {
     // §20.6: found is what the last scan left in memory; it never waits on a scan or a probe.
     // §22.8: the log's head is read-only, so a state request never writes (R6).
-    const [project, script, notes, picks, batches, ffmpeg, foundSummary, logHead, briefView, storyboardView] = await Promise.all([
-      store.read("project"), store.read("script"), store.read("notes"), store.read("picks"), store.read("batches"), jobs.available(), found.summary(), log.head(), brief.view(), storyboard.view(),
+    const [project, script, notes, picks, batches, ffmpeg, foundSummary, logHead, briefView, storyboardView, visuals] = await Promise.all([
+      store.read("project"), store.read("script"), store.read("notes"), store.read("picks"), store.read("batches"), jobs.available(), found.summary(), log.head(), brief.view(), storyboard.view(), store.read("visuals"),
     ]);
-    const tabs = tabStates(project, script, notes);
+    const tabs = tabStates(project, script, notes, visuals);
     // §19.5: why each cut may play badly (or null). Never waits on a probe: an unprobed cut is
     // null until its background probe lands, which then announces a change (ruling B).
     const videos = await Promise.all(
@@ -713,7 +734,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
         versions: await Promise.all(v.versions.map(async (ver) => ({ ...ver, proxyNeed: await jobs.needNow(fromManifestPath(store.root, ver.file)) }))),
       })),
     );
-    return c.json({ project: { ...project, videos }, script, notes, picks, batches, tabs, proxies: { ffmpeg, jobs: jobs.list() }, found: foundSummary, log: logHead, brief: briefView, storyboard: storyboardView, build: buildState({ brief: briefView, script: script.sections, storyboard: storyboardView }) });
+    return c.json({ project: { ...project, videos }, script, notes, picks, batches, tabs, visuals, proxies: { ffmpeg, jobs: jobs.list() }, found: foundSummary, log: logHead, brief: briefView, storyboard: storyboardView, build: buildState({ brief: briefView, script: script.sections, storyboard: storyboardView }) });
   });
 
   // ---- found: the project's other files (§20) ----
@@ -800,10 +821,10 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   });
 
   app.get("/api/tabs", async (c) => {
-    const [project, script, notes] = await Promise.all([store.read("project"), store.read("script"), store.read("notes")]);
+    const [project, script, notes, visuals] = await Promise.all([store.read("project"), store.read("script"), store.read("notes"), store.read("visuals")]);
     const [b, sb] = await Promise.all([brief.view(), storyboard.view()]);
     return c.json({
-      tabs: tabStates(project, script, notes),
+      tabs: tabStates(project, script, notes, visuals),
       brief: { exists: b.exists, status: b.status, changed: b.changed },
       storyboard: { exists: sb.exists, shots: sb.total, approved: sb.approved, changed: sb.changed },
       build: buildState({ brief: b, script: script.sections, storyboard: sb }),
@@ -835,15 +856,17 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   app.get("/api/notes", async (c) => {
     const q = NoteQuery.safeParse(c.req.query());
     if (!q.success) throw new InvalidError("Query is invalid", q.error.issues);
-    const { notes } = await store.read("notes");
-    return c.json({ notes: filterNotes(notes, { ...q.data, onlyThisFormat: q.data.onlyThisFormat === "true" }) });
+    const [{ notes }, visuals] = await Promise.all([store.read("notes"), store.read("visuals")]);
+    return c.json({ notes: withVisualViews(filterNotes(notes, { ...q.data, onlyThisFormat: q.data.onlyThisFormat === "true" }), visuals) });
   });
 
   app.post("/api/notes", async (c) => {
     const b = await body(c, NewNoteBody);
     // The client never sends shot; the server stamps it from the version's shots.
     let shot: Note["shot"] = null;
-    if (b.stage === "picture" || b.format != null) {
+    // §25.4: a note on a visual is checked against the visual, its version, its page and its ratios.
+    if (b.stage === "visuals") checkVisualNote({ stage: b.stage, on: b.on ?? null, version: b.version ?? null, format: b.format ?? null, box: b.box ?? null, pin: b.pin ?? null }, await store.read("visuals"));
+    else if (b.stage === "picture" || b.format != null) {
       const project = await store.read("project");
       // §21.3: a format must be one of this cut's, and on a cut with formats a box belongs to one.
       checkNoteFormat({ next: { stage: b.stage, video: b.video ?? null, version: b.version ?? null, format: b.format ?? null, box: b.box ?? null } }, project);
@@ -859,8 +882,9 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   app.patch("/api/notes/:id", async (c) => {
     const b = await body(c, UserEditBody);
     // §21.3 and R7: a change of format or box is checked against the note's cut as it is now.
-    const project = b.format !== undefined || b.box !== undefined ? await store.read("project") : null;
-    const check = project ? (next: Note, prev: Note) => checkNoteFormat({ next, prev, boxRedrawn: b.box !== undefined }, project) : undefined;
+    const project = b.format !== undefined || b.box !== undefined || b.pin !== undefined ? await store.read("project") : null;
+    const visuals = project ? await store.read("visuals") : null;
+    const check = project && visuals ? (next: Note, prev: Note) => (next.stage === "visuals" ? checkVisualNote(next, visuals) : checkNoteFormat({ next, prev, boxRedrawn: b.box !== undefined }, project)) : undefined;
     const { result } = await store.update("notes", (f) => applyUserEdit(f, { id: c.req.param("id"), ...b }, check));
     return c.json({ note: result });
   });
@@ -1262,15 +1286,28 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   });
 
   app.get("/api/batches/:id", async (c) => {
-    const [batches, notes, script] = await Promise.all([store.read("batches"), store.read("notes"), store.read("script")]);
+    const [batches, notes, script, visuals] = await Promise.all([store.read("batches"), store.read("notes"), store.read("script"), store.read("visuals")]);
     const id = c.req.param("id");
     const batch = id === "latest" ? latestBatch(batches) : batches.batches.find((b) => b.id === id);
     if (!batch) throw new NotFoundError("batch", id);
     return c.json({
       batch,
-      notes: notes.notes.filter((n) => batch.noteIds.includes(n.id)),
+      notes: withVisualViews(notes.notes.filter((n) => batch.noteIds.includes(n.id)), visuals),
       sections: script.sections.filter((s) => batch.sectionIds.includes(s.id)),
     });
+  });
+
+  // ---- visuals (§25) ----
+  app.post("/api/visuals", async (c) => {
+    const b = await body(c, VisualBody);
+    // Every picture is read first, in the order given, so a refusal always names the first one and writes nothing.
+    const pages: PageInput[] = [];
+    for (const p of b.pages) pages.push({ n: p.n, files: await Promise.all(p.files.map((f) => readPicture(store.root, f))) });
+    const { result } = await store.update("visuals", (f) =>
+      b.name !== undefined ? registerVisual(f, { name: b.name, kind: b.kind, label: b.label, pages }) : addVisualVersion(f, { visual: b.visual!, label: b.label, pages }),
+    );
+    await log.add(() => visualEvent(result.visual, { id: result.version.id, note: "", file: "", label: result.version.label }), by(c));
+    return c.json({ visual: { id: result.visual.id, name: result.visual.name, kind: result.visual.kind }, version: { id: result.version.id, label: result.version.label }, pages: result.version.pages.length, ratios: visualRatios(result.version).map(labelOfId) }, 201);
   });
 
   // ---- the Change Log (§22.7) ----
