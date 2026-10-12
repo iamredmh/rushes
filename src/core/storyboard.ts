@@ -136,6 +136,9 @@ export function editShot(text: string, index: number, heading: string, edit: Sho
  * The shots as a cut's shot list: each `start` is the running total of the lengths before it. A shot with
  * no usable Length counts as one second, so two shots never start together.
  */
+/** No shot is planned longer than a day: a typo of 1e17 seconds must not swallow every start after it. */
+const MAX_SHOT_SECONDS = 86_400;
+
 export function cutShots(shots: Pick<Shot, "name" | "tag" | "length">[]): { name: string; start: number; tag: string }[] {
   let start = 0;
   let last = -1;
@@ -144,7 +147,7 @@ export function cutShots(shots: Pick<Shot, "name" | "tag" | "length">[]): { name
     const at = Math.max(Math.round(start * 1000) / 1000, last + 0.001);
     const out = { name: s.name.slice(0, 80), start: Math.round(at * 1000) / 1000, tag: s.tag.slice(0, 24) };
     last = out.start;
-    start += s.length ?? 1;
+    start += Math.min(s.length ?? 1, MAX_SHOT_SECONDS);
     return out;
   });
 }
