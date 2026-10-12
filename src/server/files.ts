@@ -2,7 +2,7 @@ import { createReadStream } from "node:fs";
 import { lstat, realpath, stat } from "node:fs/promises";
 import { extname, isAbsolute, join, normalize, sep } from "node:path";
 import { Readable } from "node:stream";
-import type { Project, Script } from "../core/schema.js";
+import type { Project, Script, VisualsFile } from "../core/schema.js";
 import { cueFiles } from "../core/cues.js";
 import { VIDEO_EXT } from "../core/media.js";
 import { PROXY_PATH } from "./proxy.js";
@@ -74,7 +74,7 @@ export const GRAB_PATH = /^\.rushes\/grabs\/[a-z0-9][a-z0-9_-]*\.png$/;
 export const SCREENSHOT_PATH = /^screenshots\/[a-z0-9][a-z0-9._-]*\.png$/;
 
 /** Every media path the project has registered. Only these (and grabs) may be served. */
-export function registeredMedia(project: Project, script: Script): Set<string> {
+export function registeredMedia(project: Project, script: Script, visuals?: Pick<VisualsFile, "visuals">): Set<string> {
   const files = new Set<string>();
   for (const v of project.videos) {
     for (const ver of v.versions) {
@@ -91,6 +91,8 @@ export function registeredMedia(project: Project, script: Script): Set<string> {
   for (const f of cueFiles(project)) files.add(f);
   for (const s of script.sections) for (const t of s.takes) files.add(t.file);
   for (const f of project.files) files.add(f.file);
+  // §25.7: every picture of every version of every visual.
+  for (const v of visuals?.visuals ?? []) for (const ver of v.versions) for (const p of ver.pages) for (const i of p.images) files.add(i.file);
   return files;
 }
 
