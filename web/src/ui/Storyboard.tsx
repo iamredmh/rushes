@@ -81,13 +81,20 @@ function Row({ shot, save, onZoom }: { shot: StoryboardShotView; save: Saver; on
     el.style.height = `${el.scrollHeight + 2}px`;
   }, [text]);
 
+  const saveAll = () => {
+    const edit: { description?: string; direction?: string } = {};
+    if (text.trim() !== shot.description.trim()) edit.description = text;
+    if (direction.trim() !== shot.direction.trim()) edit.direction = direction;
+    if (edit.description !== undefined || edit.direction !== undefined) save.shot(shot, edit);
+  };
   const saveText = useDebounced(() => {
     editing.current = false;
-    if (text.trim() !== shot.description.trim()) save.shot(shot, { description: text });
+    // Whatever else in this row is unsaved goes with it: a save refused earlier is not lost behind this one.
+    saveAll();
   }, SAVE_AFTER_MS);
   const saveDirection = useDebounced(() => {
     editing.current = false;
-    if (direction.trim() !== shot.direction.trim()) save.shot(shot, { direction });
+    saveAll();
   }, SAVE_AFTER_MS);
 
   const changed = text.trim() !== shot.current.trim() || direction.trim() !== shot.directionCurrent.trim();

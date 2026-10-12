@@ -119,9 +119,10 @@ export abstract class RecordFile {
     const tick = async () => {
       try {
         const st = await lstat(this.path).catch(() => null);
-        const sig = st ? `${st.mtimeMs}:${st.size}:${st.ino}` : "";
+        // Only a regular file counts as "there was a file": changes inside a folder at this path are none of our business.
+        const sig = st ? `${st.isFile() ? "f" : "x"}:${st.mtimeMs}:${st.size}:${st.ino}` : "";
         if (sig !== last) {
-          const hadFile = last !== null && last !== "";
+          const hadFile = last?.startsWith("f:") ?? false;
           last = sig;
           await this.sync();
           // A file that is deleted, or becomes a folder or a link, changes nothing in `.rushes/` by itself. Forget what was

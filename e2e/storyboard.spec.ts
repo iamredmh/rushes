@@ -257,3 +257,22 @@ test("a storyboard.md with no shots yet says so instead of '0 shots'", async ({ 
   await page.getByRole("menuitem", { name: /Storyboard/ }).click();
   await expect(page.getByText("storyboard.md has no shots yet")).toBeVisible();
 });
+
+test("a description the agent's rewrites refused is not lost when the same shot's direction is edited next", async ({ page, rushes }) => {
+  await withBoard(rushes);
+  await page.goto(rushes.url);
+  await openStoryboard(page);
+  let refused = 0;
+  await page.route("**/api/storyboard/shots/*", (route) => {
+    if (refused < 2) {
+      refused++;
+      return route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ error: "storyboard_changed", message: "storyboard.md changed since you loaded it." }) });
+    }
+    return route.continue();
+  });
+  await page.getByLabel("Your version of shot 1").fill("Mine.");
+  await expect(page.locator(".toast")).toContainText("Couldn't save shot 1");
+  await page.getByLabel("Direction for shot 1").fill("Slower.");
+  await expect.poll(() => read(rushes.root), { timeout: 15000 }).toContain("Direction: Slower.");
+  expect(await read(rushes.root)).toContain("Mine.");
+});

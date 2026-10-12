@@ -86,6 +86,12 @@ describe("cutShots", () => {
     expect(new Set(starts).size).toBe(5);
     expect([...starts].sort((a, b) => a - b)).toEqual(starts);
   });
+  it("keeps starts apart however long a shot is said to be", () => {
+    const starts = cutShots([1e17, 1, 1, 1].map((length, i) => ({ name: `S${i}`, tag: "", length }))).map((x) => x.start);
+    expect(new Set(starts).size).toBe(4);
+    expect([...starts].sort((a, b) => a - b)).toEqual(starts);
+    expect(starts.every((x) => Number.isFinite(x))).toBe(true);
+  });
   it("holds at most 200 shots, the most a shot list can hold", () => {
     expect(cutShots(Array.from({ length: 250 }, (_, i) => ({ name: `S${i}`, tag: "", length: 1 })))).toHaveLength(200);
   });

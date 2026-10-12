@@ -181,6 +181,25 @@ describe("BriefService: files that are not what it expects", () => {
     }
   });
 
+  it("does not announce changes inside a folder that sits where brief.md should be", async () => {
+    const { brief, store, root } = await setup(null);
+    await mkdir(join(root, "brief.md"));
+    const heard: string[] = [];
+    store.on("change", (e: { file: string }) => heard.push(e.file));
+    const stop = brief.start(50);
+    try {
+      await new Promise((r) => setTimeout(r, 300));
+      heard.length = 0;
+      await writeFile(join(root, "brief.md", "notes.txt"), "something");
+      await new Promise((r) => setTimeout(r, 400));
+      await writeFile(join(root, "brief.md", "more.txt"), "something else");
+      await new Promise((r) => setTimeout(r, 400));
+      expect(heard.filter((f) => f === "brief")).toEqual([]);
+    } finally {
+      stop();
+    }
+  });
+
   it("refuses to save over a file that is not UTF-8 text, and leaves its bytes alone", async () => {
     const { brief, root } = await setup(null);
     const bytes = Buffer.concat([Buffer.from("# Brief: Lumen\n\n## Purpose\nCaf"), Buffer.from([0xe9, 0xff]), Buffer.from("\n")]);
