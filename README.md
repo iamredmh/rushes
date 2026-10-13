@@ -111,6 +111,12 @@ The **Visuals** tab (key `7`) is for the stills, standalone images and carousels
 
 **Drag** on the picture to mark a region, click to drop a point, or press **Whole image** for a note about all of it. The composer always says where the note will go ("Adding to: Launch carousel · page 3 · 4:5 · v2"), and a draft stays with the visual you began it on. Notes belong to a page, a ratio and a version, never to where you have scrolled, so every mark is still there when you come back. The notes column lists the whole tab, grouped by visual and page, with the visual you are looking at highlighted and the rest faded; click a note to jump to it. When your agent registers a new version, your old notes stay with the version they were made on ("from v1"), marked until you tick them done.
 
+### Shelve a film
+
+A film that went nowhere can be set aside without losing it. Open the **⋯** button beside the Change Log ("Film actions · Hero") and choose **Shelve film**, or press **Shift+S**. The film leaves the bar, a toast offers **Undo**, and its open notes stop counting: they leave the Send to agent count, the tab to-do counts, batches and Export notes, and they come back when you restore the film. Nothing is deleted: its cuts, notes, picks and files stay as they were.
+
+Pills only switch films. When the films still in play do not fit the bar, the rest fold into a **+N** list (the film you are on is always shown). **Shelved (N)** at the end of the bar lists the shelved films: choose one to look at it, view-only, under a "Shelved" banner, and **Restore** it from the list or the banner. A new cut from your agent also brings a shelved film back. Your agent can see which films are shelved, but never shelves or restores one.
+
 ### Sound effects: layers by sound
 
 <img src="docs/assets/screens/sound-effects.jpg" alt="The Sound effects tab with one pass open into its layers. There is one row per sound (tick, thud, blip, chime, whoosh, counter, thump, snap), each with a count and a mark wherever it plays." width="880">
@@ -264,7 +270,8 @@ In the Voiceover, Music, Sound effects and Mix tabs:
 Anywhere:
 
 - **1–8** switch tab (1: Planning, which opens the page you used last; 7: Visuals; 8: Assets)
-- **[ / ]** previous/next film
+- **[ / ]** previous/next film in play
+- **Shift+S** shelve the current film, or restore it if it is shelved
 - **Alt+←/→** previous/next format (Picture)
 - **?** shortcuts
 - **Esc** close

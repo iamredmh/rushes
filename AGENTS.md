@@ -103,6 +103,10 @@ The user drags to mark a region on the picture, clicks for a point, or adds a no
 
 To answer feedback, change the marked pictures and register the result as a new version of the same visual: call `rushes_add_visual` with `visual` (its id or name) and `pages` listing only the pages that changed or are new, each with its `n`; every other page, and any ratio of a listed page you leave out, carries over from the version before. Pages can be added at the end and never removed. Then `rushes_reply` to each note you fixed with `status: "done"`, a one-line `reply` and `fixVersion` set to that version, as on every other tab. A note you did not fix stays `todo`, with the reason in `reply`. The user can open a note again with the tick. Rushes keeps each note on the version it was made on, and shows it as "from v1" beside the newer one.
 
+## Shelved films
+
+The user can shelve a film they have set aside (the **Film actions** menu in the dashboard). `rushes_status` returns `films`, each with `shelved`: the time it was shelved, or null. A shelved film is the user's decision: leave it alone, make no new cuts of it and fix none of its notes unless the user asks. Its open notes are not counted in the tabs or sent in batches, and `rushes_list_notes` leaves them out. A new cut of a shelved film brings it back (the reply has `restored: true`), so make one only when the user wants that film worked on again. You never shelve or restore a film: that is the user's to do.
+
 ## The loop
 
 1. **Register what you made.**

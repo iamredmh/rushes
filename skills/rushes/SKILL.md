@@ -51,6 +51,10 @@ When a user starts briefing in the chat, offer to keep `brief.md` up to date as 
 
 For stills, standalone images and carousels, register one visual per post with `rushes_add_visual`: a `name` and `pages`, each page with its pictures, one per aspect ratio, in every aspect ratio the post comes in (Rushes reads each ratio from the picture). The user marks a region, a point or the whole image in the Visuals tab and sends a batch; each note names its visual, version, page, ratio, where on the picture it is (`words`) and the `file` to open. A note with no ratio is for every ratio. Fix the pictures, register a new version with `rushes_add_visual` (`visual` and only the pages that changed, each with `n`), then `rushes_reply` to each note you fixed with `status: "done"` and `fixVersion` set to it (a note you did not fix stays `todo`, with the reason in `reply`). The full contract is in `AGENTS.md`.
 
+## Shelved films
+
+`rushes_status` returns `films`, each with `shelved` (the time the user shelved it, or null). A shelved film is one the user has set aside: leave it alone, make no new cuts of it and fix none of its notes unless they ask. A new cut of a shelved film brings it back (`restored: true` in the reply), so make one only when they want that film worked on again. You never shelve or restore a film.
+
 ## Reviewing and fixing
 
 1. Register what you made:
