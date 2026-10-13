@@ -164,6 +164,23 @@ test("a draft stays on the visual it began on, and a new mark elsewhere is refus
   await expect.poll(async () => (await notesJson(rushes)).map((n) => n.on)).toEqual(["launch-carousel/1"]);
 });
 
+/** Waits until the Visuals scroll area has stopped moving (a smooth scroll in flight is not a place to click from). */
+const scrollSettled = (page: import("@playwright/test").Page) =>
+  page.locator(".vzscroll").evaluate(
+    (el) =>
+      new Promise<void>((done) => {
+        let last = -1;
+        let still = 0;
+        const frame = () => {
+          still = el.scrollTop === last ? still + 1 : 0;
+          last = el.scrollTop;
+          if (still >= 6) done();
+          else requestAnimationFrame(frame);
+        };
+        frame();
+      }),
+  );
+
 test("clicking a faded note scrolls to its visual and shows its page, ratio and version with the box", async ({ page, rushes }) => {
   await withVisuals(rushes);
   await rushes.api("POST", "/api/notes", { stage: "visuals", scope: "whole", version: "v2", on: "launch-carousel/5", format: "4x5", box: { x: 0.1, y: 0.1, w: 0.3, h: 0.2 }, text: "Fix page five." });
@@ -174,6 +191,7 @@ test("clicking a faded note scrolls to its visual and shows its page, ratio and 
   await expect(section(page, "quote-still")).toHaveClass(/cur/);
   await expect(section(page, "quote-still").getByRole("button", { name: "16:9" })).toHaveAttribute("aria-pressed", "true");
   await expect(section(page, "quote-still").locator(".vzbox")).toHaveCount(1);
+  await scrollSettled(page);
   await page.locator('.vznote', { hasText: "Fix page five." }).click();
   await expect(section(page, "launch-carousel")).toHaveClass(/cur/);
   await expect(section(page, "launch-carousel").locator('.vzcount')).toContainText("05 / 06");
@@ -307,4 +325,93 @@ test("a version registered while you are looking at the newest is the one you ar
   await expect(section(page, "launch-carousel").locator(".vzbanner")).toHaveCount(0);
   await drag(page, "launch-carousel", [0.1, 0.2], [0.5, 0.4]);
   await expect(page.locator(".vzbox.draft")).toHaveCount(1);
+});
+
+// Deferred minors from the whole-branch review.
+test("a drag started on another page of the same visual is drawn while it is dragged, and saves on that page", async ({ page, rushes }) => {
+  await withVisuals(rushes);
+  await openVisuals(page, rushes);
+  await drag(page, "launch-carousel", [0.1, 0.2], [0.5, 0.4]); // a leftover mark with no words, on page 1
+  await page.getByRole("button", { name: "Page 3" }).click();
+  await expect(frame(page, "launch-carousel").locator("img")).toHaveAttribute("src", /p3-v2\.png/);
+  const box = (await frame(page, "launch-carousel").boundingBox())!;
+  await page.mouse.move(box.x + box.width * 0.2, box.y + box.height * 0.2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.4, box.y + box.height * 0.3, { steps: 4 });
+  await page.mouse.move(box.x + box.width * 0.6, box.y + box.height * 0.5, { steps: 4 });
+  await expect(page.locator(".vzbox.draft")).toHaveCount(1); // visible mid-drag
+  await page.mouse.up();
+  await page.getByLabel("Note text").fill("On page three");
+  await page.getByRole("button", { name: "Add note" }).click();
+  await expect.poll(async () => (await notesJson(rushes)).map((n) => n.on)).toEqual(["launch-carousel/3"]);
+});
+
+test("a drag the browser cancels stops drawing and puts the draft back as it was", async ({ page, rushes }) => {
+  await withVisuals(rushes);
+  await openVisuals(page, rushes);
+  const f = frame(page, "launch-carousel");
+  const box = (await f.boundingBox())!;
+  await page.mouse.move(box.x + box.width * 0.2, box.y + box.height * 0.2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.4, { steps: 4 });
+  await expect(page.locator(".vzbox.draft")).toHaveCount(1);
+  await f.evaluate((el) => el.dispatchEvent(new PointerEvent("pointercancel", { pointerId: 1, bubbles: true })));
+  await expect(page.locator(".vzbox.draft")).toHaveCount(0);
+  await page.mouse.move(box.x + box.width * 0.8, box.y + box.height * 0.8, { steps: 4 }); // the old gesture must not draw any more
+  await expect(page.locator(".vzbox.draft")).toHaveCount(0);
+  await page.mouse.up();
+  await expect(page.locator(".vzbox.draft")).toHaveCount(0);
+});
+
+test("Add note saves one note however quickly it is pressed twice", async ({ page, rushes }) => {
+  await withVisuals(rushes);
+  await openVisuals(page, rushes);
+  await page.route("**/api/notes", async (route) => {
+    if (route.request().method() === "POST") await new Promise((r) => setTimeout(r, 400));
+    await route.continue();
+  });
+  await page.getByLabel("Note text").fill("Only once please");
+  await page.getByRole("button", { name: "Add note" }).dblclick();
+  await expect.poll(async () => (await notesJson(rushes)).length).toBeGreaterThan(0);
+  await page.waitForTimeout(800);
+  expect((await notesJson(rushes)).map((n) => n.text)).toEqual(["Only once please"]);
+});
+
+test("the page strip loads its pictures lazily, since each is the full-size file", async ({ page, rushes }) => {
+  await withVisuals(rushes);
+  await openVisuals(page, rushes);
+  const thumbs = section(page, "launch-carousel").locator(".vzth img");
+  expect(await thumbs.count()).toBeGreaterThan(1);
+  for (const img of await thumbs.all()) await expect(img).toHaveAttribute("loading", "lazy");
+});
+
+test("the empty notes column says only that there are none, and the controls follow the Visuals conventions", async ({ page, rushes }) => {
+  await withVisuals(rushes);
+  await openVisuals(page, rushes);
+  await expect(page.locator(".vzempty")).toHaveText("No notes yet.");
+  // Page buttons keep their shape: a vz class, and the same size they have always had.
+  const next = page.getByRole("button", { name: "Next page" });
+  await expect(next).toHaveClass(/vzpill/);
+  expect(await next.evaluate((el) => { const s = getComputedStyle(el); return [s.height, s.borderTopLeftRadius, s.fontSize]; })).toEqual(["36px", "999px", "15px"]);
+  // The plain page buttons are quiet (secondary text colour, medium weight), as they were when a shared class styled them.
+  const quiet = page.getByRole("button", { name: "Full screen" }).first();
+  expect(
+    await quiet.evaluate((el) => {
+      const probe = document.createElement("i");
+      probe.style.color = "var(--text-2)";
+      document.body.append(probe);
+      const want = getComputedStyle(probe).color;
+      probe.remove();
+      const s = getComputedStyle(el);
+      return [s.color === want, s.fontWeight];
+    }),
+  ).toEqual([true, "500"]);
+  // The done tick is an icon button, so it has a tooltip like the others.
+  await rushes.api("POST", "/api/notes", { stage: "visuals", scope: "whole", version: "v2", on: "launch-carousel/1", format: "4x5", box: { x: 0.1, y: 0.1, w: 0.3, h: 0.2 }, text: "Headline too long." });
+  await expect(page.locator(".vztick").first()).toHaveAttribute("data-tip", "Mark done");
+  // Small print is no smaller than 13px, as elsewhere in the dashboard.
+  for (const sel of [".vznote .tag", ".vzkind", ".vzpgh", ".vzghead .here", ".vztarget .lbl"]) {
+    const px = await page.locator(sel).first().evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+    expect(px, sel).toBeGreaterThanOrEqual(13);
+  }
 });

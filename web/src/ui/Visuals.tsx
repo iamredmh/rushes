@@ -88,7 +88,7 @@ function Strip({ visual, view, badges, onPage }: { visual: Visual; view: View; b
         const img = p.images.find((i) => i.ratio === view.ratio) ?? p.images[0];
         return (
           <button key={p.n} class="vzth" style={{ width: `${tw}px` }} aria-label={`Page ${p.n}`} aria-current={p.n === view.page ? "true" : undefined} onClick={() => onPage(p.n)}>
-            <img src={mediaUrl(img.file)} alt="" draggable={false} />
+            <img src={mediaUrl(img.file)} alt="" draggable={false} loading="lazy" decoding="async" />
             <span class="pn">{p.n}</span>
             {badges[p.n] ? <span class="badge">{badges[p.n]}</span> : null}
           </button>
@@ -181,16 +181,16 @@ function Section({
         {visual.kind === "carousel" ? (
           <>
             <div class="vznav">
-              <button class="btn pill" aria-label="Previous page" disabled={view.page <= 1} onClick={() => onSetView({ page: view.page - 1 })}>Previous</button>
+              <button class="btn vzpill" aria-label="Previous page" disabled={view.page <= 1} onClick={() => onSetView({ page: view.page - 1 })}>Previous</button>
               <span class="vzcount" aria-label={`Page ${view.page} of ${ver.pages.length}`}>{count} / {String(ver.pages.length).padStart(2, "0")}</span>
-              <button class="btn pill" onClick={onFull}>Full screen</button>
-              <button class="btn pill primary" aria-label="Next page" disabled={view.page >= ver.pages.length} onClick={() => onSetView({ page: view.page + 1 })}>Next</button>
+              <button class="btn vzpill" onClick={onFull}>Full screen</button>
+              <button class="btn vzpill primary" aria-label="Next page" disabled={view.page >= ver.pages.length} onClick={() => onSetView({ page: view.page + 1 })}>Next</button>
             </div>
             <Strip visual={visual} view={view} badges={openByPage(notes, visual.id)} onPage={(p) => onSetView({ page: p })} />
           </>
         ) : (
           <div class="vznav">
-            <button class="btn pill" onClick={onFull}>Full screen</button>
+            <button class="btn vzpill" onClick={onFull}>Full screen</button>
             <span class="vzhint">One page{ratios.length > 1 ? ` · ${ratios.length} ratios` : ""}</span>
           </div>
         )}
@@ -217,12 +217,12 @@ function FullScreen({ visual, view, notes, onPage, onClose }: { visual: Visual; 
       <div class="bar">
         {visual.kind === "carousel" && (
           <>
-            <button class="btn pill" aria-label="Previous page" disabled={view.page <= 1} onClick={() => onPage(view.page - 1)}>Previous</button>
+            <button class="btn vzpill" aria-label="Previous page" disabled={view.page <= 1} onClick={() => onPage(view.page - 1)}>Previous</button>
             <span class="vzcount">{String(view.page).padStart(2, "0")} / {String(ver.pages.length).padStart(2, "0")}</span>
-            <button class="btn pill primary" aria-label="Next page" disabled={view.page >= ver.pages.length} onClick={() => onPage(view.page + 1)}>Next</button>
+            <button class="btn vzpill primary" aria-label="Next page" disabled={view.page >= ver.pages.length} onClick={() => onPage(view.page + 1)}>Next</button>
           </>
         )}
-        <button class="btn pill" onClick={onClose}>Close</button>
+        <button class="btn vzpill" onClick={onClose}>Close</button>
       </div>
     </div>
   );
@@ -298,11 +298,20 @@ export function Visuals({ state, toast, onChanged, onPendingChange }: { state: S
     const hold = frame.setPointerCapture ? (frame.setPointerCapture(e.pointerId), true) : false;
     const preview = (ev: PointerEvent) => {
       if (Math.hypot(ev.clientX - px, ev.clientY - py) > 5) moved = true;
-      if (moved) setDraft((d) => ({ ...(d && d.vis === v.id ? d : { vis: v.id, text: "", ...view }), shape: shapeFromDrag(a, at(ev.clientX, ev.clientY), true) ?? { box: { x: a.x, y: a.y, w: 0, h: 0 } } }));
+      if (moved) setDraft((d) => ({ vis: v.id, text: d && d.vis === v.id ? d.text : "", ...view, shape: shapeFromDrag(a, at(ev.clientX, ev.clientY), true) ?? { box: { x: a.x, y: a.y, w: 0, h: 0 } } }));
+    };
+    const before = draft;
+    const cancel = () => {
+      frame.removeEventListener("pointermove", preview);
+      frame.removeEventListener("pointerup", done);
+      frame.removeEventListener("pointercancel", cancel);
+      if (hold) frame.releasePointerCapture?.(e.pointerId);
+      setDraft(before);
     };
     const done = (ev: PointerEvent) => {
       frame.removeEventListener("pointermove", preview);
       frame.removeEventListener("pointerup", done);
+      frame.removeEventListener("pointercancel", cancel);
       const shape: Shape | null = shapeFromDrag(a, at(ev.clientX, ev.clientY), moved);
       if (hold) frame.releasePointerCapture?.(e.pointerId);
       if (!shape) return setDraft((d) => (d && d.text.trim() === "" ? null : d));
@@ -311,6 +320,7 @@ export function Visuals({ state, toast, onChanged, onPendingChange }: { state: S
     };
     frame.addEventListener("pointermove", preview);
     frame.addEventListener("pointerup", done);
+    frame.addEventListener("pointercancel", cancel);
   };
 
   const target = draft ? visuals.find((v) => v.id === draft.vis) : null;
@@ -329,7 +339,10 @@ export function Visuals({ state, toast, onChanged, onPendingChange }: { state: S
     queueMicrotask(() => text.current?.focus());
   };
 
+  const adding = useRef(false);
+  const [saving, setSaving] = useState(false);
   const add = async () => {
+    if (adding.current) return;
     const d = draft ?? (visual ? { vis: visual.id, ...viewOf(visual), shape: null, text: "" } : null);
     if (!d) return;
     const body = (text.current?.value ?? d.text).trim();
@@ -341,6 +354,9 @@ export function Visuals({ state, toast, onChanged, onPendingChange }: { state: S
     if (!canMark(v, d)) return toast(`This note is for ${d.ver}, an older version. Switch to the newest version to add notes.`);
     const shaped = !!d.shape;
     const format = shaped || d.justThis ? d.ratio : null;
+    // A second press while the first is still on its way would save the same note twice.
+    adding.current = true;
+    setSaving(true);
     try {
       const r = await api.post<{ note: Note }>("/api/notes", {
         stage: "visuals", scope: "whole", version: d.ver, on: `${d.vis}/${d.page}`, format, text: body,
@@ -353,6 +369,9 @@ export function Visuals({ state, toast, onChanged, onPendingChange }: { state: S
       void v;
     } catch (e) {
       toast(e instanceof ApiError ? e.message : (e as Error).message);
+    } finally {
+      adding.current = false;
+      setSaving(false);
     }
   };
 
@@ -470,7 +489,7 @@ export function Visuals({ state, toast, onChanged, onPendingChange }: { state: S
           <span>{openTotal} open across {openVisuals} visual{openVisuals === 1 ? "" : "s"}</span>
         </div>
         <div class="vznlist">
-          {groups.length === 0 && <div class="vzempty">No notes yet. Drag on a picture to mark a region.</div>}
+          {groups.length === 0 && <div class="vzempty">No notes yet.</div>}
           {groups.map((g) => (
             <div key={g.visual.id} class={`vzgrp${g.visual.id === cur ? " cur" : ""}`} data-grp={g.visual.id}>
               <button class="vzghead" onClick={() => !g.gone && scrollTo(g.visual.id)}>
@@ -504,7 +523,7 @@ export function Visuals({ state, toast, onChanged, onPendingChange }: { state: S
                               </div>
                             )}
                           </div>
-                          <button class="vztick" aria-label={n.status === "done" ? "Reopen" : "Mark done"} onClick={(e) => { e.stopPropagation(); void tick(n); }}>
+                          <button class="vztick" aria-label={n.status === "done" ? "Reopen" : "Mark done"} data-tip={n.status === "done" ? "Reopen" : "Mark done"} onClick={(e) => { e.stopPropagation(); void tick(n); }}>
                             <Icon name={n.status === "done" ? "check" : "circle"} />
                           </button>
                         </div>
@@ -547,7 +566,7 @@ export function Visuals({ state, toast, onChanged, onPendingChange }: { state: S
             </label>
           )}
           <div class="vzcrow">
-            <button class="btn primary" onClick={() => void add()}>Add note</button>
+            <button class="btn primary" disabled={saving} onClick={() => void add()}>Add note</button>
             <button class="btn" onClick={startWhole}>Whole image</button>
             <button class="btn ghost" disabled={!draft} onClick={() => setDraft(null)}>{draft?.text ? "Discard draft" : "Cancel"}</button>
           </div>
