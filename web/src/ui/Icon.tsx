@@ -43,6 +43,8 @@ const PATHS: Record<string, string> = {
   trash: '<path d="M4 7h16M10 11v6M14 11v6"/><path d="M6 7l1 13h10l1-13M9 7V4h6v3"/>',
   refresh: '<path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v4h-4"/>',
   stream: '<path d="M3 12h2l2-5 3 10 3-14 3 12 2-3h3"/>',
+  more: '<circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/>',
+  shelve: '<rect x="3" y="4" width="18" height="5" rx="1.5"/><path d="M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9M10 13h4"/>',
 };
 
 export function Icon({ name, class: cls }: { name: keyof typeof PATHS | string; class?: string }) {

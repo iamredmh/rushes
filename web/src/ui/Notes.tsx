@@ -50,6 +50,8 @@ export interface NotesProps {
   /** §21.5: at the bottom of the list (the "Other formats (N)" row), for the filter in use (review M6);
    *  null when there's nothing to show. */
   listFooter?(filter: Filter): ComponentChildren;
+  /** §26: a shelved film is looked at, not marked: the note box is hidden. */
+  readOnly?: boolean;
 }
 
 /** §21.2 (4), §21.5: the composer's switch, for the format on screen. */
@@ -76,7 +78,7 @@ const onFull = (on: NonNullable<NotesProps["on"]>): string | undefined => on.opt
 /** The notes column used on every tab: list, filter, done circles and the note box. */
 export function Notes({
   notes, version, placeholder, attachments, inputRef, toast, onAdd, onSeek, onChanged, onTextChange, on, scope, chips, marks, onLabel, fixedTimes, selectedId,
-  formatTag, cardExtra, formatScope, listFooter,
+  formatTag, cardExtra, formatScope, listFooter, readOnly,
 }: NotesProps) {
   const [filter, setFilter] = useState<Filter>("all");
   const ownInput = useRef<HTMLTextAreaElement>(null);
@@ -177,7 +179,7 @@ export function Notes({
         ))}
         {footer}
       </div>
-      <div class="comp">
+      <div class="comp" hidden={readOnly}>
         {(on || scope) && (
           <div class="row">
             {on && (

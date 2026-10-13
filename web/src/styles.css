@@ -93,6 +93,45 @@ svg.ic { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-wid
 .pill .n { width: 22px; height: 22px; border-radius: 50%; background: var(--line-2); color: var(--text-2); font: 600 15px/22px var(--sans); font-variant-numeric: tabular-nums; text-align: center; flex: none; }
 .pill[aria-pressed="true"] .n { background: var(--accent-soft); color: var(--accent-2); }
 .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--todo); flex: none; }
+/* §26: shelving a film. The pack with its +N and Shelved lists, the Film menu, and the view of a shelved film. */
+.fpwrap { position: relative; display: inline-flex; }
+.pill.fpmore { gap: 6px; }
+.pill.fpmore .ic { width: 16px; height: 16px; }
+.fpshelf { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 12px; border: 1px dashed var(--line-2); border-radius: 8px; background: transparent; color: var(--text-2); font-size: 15px; font-weight: 500; cursor: pointer; white-space: nowrap; }
+.fpshelf:hover, .fpshelf[aria-expanded="true"] { color: var(--text); background: var(--hover); }
+.fpshelf.on { color: var(--text); border-color: var(--todo); }
+.fpshelf .ic { width: 16px; height: 16px; }
+.fpmenu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 30; min-width: 260px; max-width: 380px; max-height: 360px; overflow: auto; background: var(--raised); border-radius: var(--r-lg); box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55); padding: 6px; display: grid; gap: 2px; }
+.fpshelfwrap .fpmenu { left: auto; right: 0; }
+.fpmenu h4 { margin: 6px 8px 4px; font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); }
+.fprow { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 36px; padding: 4px 8px; border: 0; border-radius: 8px; background: transparent; color: var(--text-2); font: inherit; text-align: left; cursor: pointer; }
+.fprow:hover { background: var(--hover); color: var(--text); }
+.fprow .n { width: 22px; height: 22px; border-radius: 50%; background: var(--line-2); color: var(--text-2); font: 600 15px/22px var(--sans); text-align: center; flex: none; }
+.fprow .pname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fprow .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--todo); flex: none; }
+.fprow.shelved { padding: 0; cursor: default; color: var(--text-3); }
+.fprow.shelved:hover { background: var(--hover); }
+.fpopen { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 4px 8px; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.fpopen .meta { font-size: 13px; color: var(--text-3); white-space: nowrap; }
+.fprestore { flex: none; }
+.fmwrap { position: relative; display: inline-flex; }
+/* Its tooltip opens leftwards from the button, so it never lies over the Shortcuts button's beside it. */
+.head .fmwrap [data-tip]::after, .head .fmwrap [data-tip]:hover::after, .head .fmwrap [data-tip]:focus-visible::after { left: auto; right: 0; transform: none; }
+.fmenu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; min-width: 260px; background: var(--raised); border-radius: var(--r-lg); box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55); padding: 6px; }
+.fmtitle { padding: 6px 8px 8px; border-bottom: 1px solid var(--line); margin-bottom: 4px; color: var(--text-3); font-size: 13px; }
+.fmtitle b { display: block; color: var(--text); font-size: 15px; font-weight: 600; }
+.fmitem { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px; border: 0; border-radius: 8px; background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.fmitem:hover, .fmitem:focus-visible { background: var(--hover); }
+.fmitem .ic { width: 16px; height: 16px; color: var(--text-2); }
+.fmitem kbd { margin-left: auto; font-family: var(--mono); font-size: 13px; color: var(--text-3); border: 1px solid var(--line-2); border-radius: 6px; padding: 0 6px; }
+.shbanner { display: flex; align-items: center; gap: 12px; padding: 10px 20px; background: var(--todo-soft); color: var(--todo); border-bottom: 1px solid rgba(245, 183, 64, 0.28); font-size: 15px; }
+.shbanner b { color: var(--text); font-weight: 600; }
+.shbanner .ic { width: 18px; height: 18px; flex: none; }
+.body.fshelved .framebox { filter: grayscale(0.85) brightness(0.75); }
+.shempty { padding: 40px 0; }
+.shempty b { color: var(--text); font-size: 18px; }
+.toast .toastact { height: 28px; padding: 0 12px; border-radius: 999px; background: var(--hover); color: var(--text); font-weight: 600; }
+.comp[hidden] { display: none; }
 .plabel { color: var(--text-3); font-size: 15px; font-weight: 500; }
 .lockbtn { background: transparent; color: var(--text-3); }
 .lockbtn:hover { background: var(--raised); color: var(--text); }
