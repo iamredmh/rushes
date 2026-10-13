@@ -1,6 +1,7 @@
 import { formatTag } from "./formats.js";
 import { slugify } from "./ids.js";
 import { onLabel, type OnContext } from "./notes.js";
+import { noteInPlay } from "./project.js";
 import { markLabel, type Note, type Picks, type Project, type Script, type Stage, type VisualsFile } from "./schema.js";
 import { labelOfId } from "./formats.js";
 import { pinWords, regionWords } from "./visuals.js";
@@ -108,6 +109,8 @@ export function notesMarkdown(
   visuals?: Pick<VisualsFile, "visuals">,
 ): string {
   const ctx: OnContext = { project, script, picks };
+  // §26: a shelved film has no section; its notes are kept in the project and come back when it is restored.
+  notes = notes.filter((n) => noteInPlay(n, project));
   const lines: string[] = [`# ${project.name} — notes`, `Exported ${localDateTime(now)}`];
 
   for (const stage of STAGE_ORDER) {

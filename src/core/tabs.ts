@@ -1,4 +1,5 @@
 import { STAGES, type NotesFile, type Project, type Script, type Stage, type VisualsFile } from "./schema.js";
+import { noteInPlay } from "./project.js";
 import { isChanged } from "./script.js";
 
 export interface TabState {
@@ -28,7 +29,8 @@ export function tabStates(p: Project, s: Script, n: NotesFile, v: Pick<VisualsFi
     visuals: v.visuals.length > 0,
   };
   return STAGES.map((stage) => {
-    const notes = n.notes.filter((x) => x.stage === stage && x.status === "todo").length;
+    // §26: a shelved film's open notes are kept but do not count.
+    const notes = n.notes.filter((x) => x.stage === stage && x.status === "todo" && noteInPlay(x, p)).length;
     const rows = stage === "script" ? s.sections.filter((x) => isChanged(x) || x.status === "flagged").length : 0;
     return { stage, unlocked: unlocked[stage], todo: notes + rows };
   });
