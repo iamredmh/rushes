@@ -76,6 +76,26 @@ describe("POST /api/visuals", () => {
     expect(await stat(store.path("visuals")).catch(() => null)).toBeNull();
   });
 
+  // Deferred minor: a refusal names the first bad picture in the order given, not whichever one fails first in time.
+  it("names the first bad picture in the order given, within a page and across pages", async () => {
+    const { call, put, root } = await setup();
+    await put("visuals/a.png", 1080, 1350);
+    await writeFile(join(root, "visuals", "doc.txt"), "hello");
+    const within = await call("POST", "/api/visuals", { name: "X", pages: [{ files: ["visuals/missing.png", "visuals/doc.txt"] }] });
+    expect([within.json.error, within.json.file]).toEqual(["unreadable", "visuals/missing.png"]);
+    const across = await call("POST", "/api/visuals", { name: "Y", pages: [{ files: ["visuals/a.png"] }, { files: ["visuals/missing.png"] }, { files: ["visuals/doc.txt"] }] });
+    expect([across.json.error, across.json.file]).toEqual(["unreadable", "visuals/missing.png"]);
+  });
+
+  // Deferred minor: a file at the project's top level whose name starts with two dots is inside the project, not outside it.
+  it("takes a picture whose name starts with two dots, and still refuses one outside the project", async () => {
+    const { call, put } = await setup();
+    await put("..cover.png", 1080, 1350);
+    expect((await call("POST", "/api/visuals", { name: "Cover", pages: [{ files: ["..cover.png"] }] })).status).toBe(201);
+    expect((await call("POST", "/api/visuals", { name: "Out", pages: [{ files: ["../cover.png"] }] })).json.error).toBe("not_in_project");
+    expect((await call("POST", "/api/visuals", { name: "Up", pages: [{ files: [".."] }] })).json.error).toBe("not_in_project");
+  });
+
   it("names the core's refusals: a duplicate name, a missing cell, an unknown visual", async () => {
     const { call, put } = await setup();
     await put("visuals/a.png", 1080, 1350);
