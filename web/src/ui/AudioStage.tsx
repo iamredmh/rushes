@@ -79,6 +79,8 @@ export interface AudioStageProps {
   stage: AudioStageId;
   /** The film being reviewed (null: none). Another film starts the notes on `defaultScope` again. Defaults to the preview's film. */
   film?: string | null;
+  /** §26: the film is shelved, so the tab is looked at, not added to: no note box (a note on it would never be counted or sent). */
+  readOnly?: boolean;
   title: string;
   /** Beside the title, e.g. Blind on Music. */
   headerExtra?: ComponentChildren;
@@ -475,6 +477,7 @@ export function AudioStage(props: AudioStageProps) {
           chips={(props.chipsFor ?? (() => AUDIO_CHIPS[stage]))(scope)}
           marks={props.marks === false ? undefined : { value: marks, onChange: setMarks }}
           onLabel={onLabel}
+          readOnly={props.readOnly}
         />
       </div>
     </div>

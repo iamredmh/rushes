@@ -767,6 +767,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
         let skipKinds = kinds;
         if (b.include?.length) {
           const included = await found.bringIn(b.include, { film: b.film, origin: "include" });
+          for (const f of included.restored ?? []) await log.add(() => filmEvent(f, false), by(c));
           if (included.added.length) await log.add(() => broughtInEvent(included.added, null), by(c));
           // An included cut becomes the cut the scoring is matched to, and a project with no cut
           // had nothing to record against: settle again now that the cut exists.
@@ -809,6 +810,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   app.post("/api/found/bring-in", async (c) => {
     const b = await body(c, FoundBringInBody);
     const r = await found.bringIn(b.files, { film: b.film });
+    for (const f of r.restored ?? []) await log.add(() => filmEvent(f, false), by(c));
     if (r.added.length) await log.add(() => broughtInEvent(r.added, null), by(c));
     return c.json(r);
   });

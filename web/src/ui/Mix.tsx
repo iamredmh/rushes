@@ -269,6 +269,7 @@ export function Mix({ state, assets, video, toast, onChanged, onPendingChange }:
       rows={rows}
       preview={preview}
       film={video?.id ?? null}
+      readOnly={!!video?.shelved}
       fps={fps}
       notes={notes}
       onOptions={options}

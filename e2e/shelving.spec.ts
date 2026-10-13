@@ -231,3 +231,25 @@ test("Escape closes the Film menu and the lists and puts focus back on their but
   await page.keyboard.press("Escape");
   await expect(page.getByRole("heading", { name: "Shortcuts" })).toHaveCount(0);
 });
+
+test("the audio tabs are view-only too while a shelved film is open: a note left there would never be counted or sent", async ({ page, rushes }) => {
+  await films(rushes, ["Hero", "Cutdown"]);
+  await rushes.addVariant("music", "A · Deep house", { seconds: 4, freq: 220 });
+  await rushes.api("PUT", "/api/videos/cutdown/shelve", { shelved: true });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await shelvedButton(page).click();
+  await page.getByRole("button", { name: "Open Cutdown" }).click();
+  await videoReady(page);
+  const music = page.getByRole("tab", { name: /Music/ });
+  await expect(music).not.toHaveAttribute("data-locked");
+  await music.click();
+  await expect(music).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator(".lane")).toHaveCount(1);
+  await expect(page.locator(".shbanner")).toContainText("Cutdown");
+  await expect(page.getByLabel("New note")).toBeHidden();
+  // Back on a film in play, the box is there.
+  await shelvedButton(page).click();
+  await page.getByRole("button", { name: "Restore Cutdown" }).click();
+  await expect(page.getByLabel("New note")).toBeVisible();
+});
