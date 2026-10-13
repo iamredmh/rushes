@@ -671,7 +671,7 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .vz:not(.cur):hover { opacity: 0.75; }
 .vzhead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .vzhead h2 { margin: 0; font-size: 17px; font-weight: 600; }
-.vzkind { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); }
+.vzkind { font-family: var(--mono); font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); }
 .vzchip { padding: 3px 12px; border: 1px solid var(--line-2); border-radius: 999px; color: var(--text-2); display: inline-flex; gap: 6px; align-items: center; min-height: 30px; }
 .vzchip:hover { background: var(--hover); color: var(--text); }
 .vzchip[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-2); }
@@ -706,10 +706,10 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 @keyframes vzflash { 50% { box-shadow: 0 0 0 8px rgba(245, 183, 64, 0.6); } }
 .vzfoot { display: grid; gap: 8px; justify-items: center; }
 .vznav { display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap; }
-.btn.pill { border-radius: 999px; height: 36px; padding: 0 20px; border: 1px solid var(--line-2); background: transparent; }
-.btn.pill:hover { background: var(--hover); }
-.btn.pill.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
-.btn.pill[disabled] { opacity: 0.35; cursor: default; }
+.btn.vzpill { border-radius: 999px; height: 36px; padding: 0 20px; border: 1px solid var(--line-2); background: transparent; color: var(--text-2); font-weight: 500; }
+.btn.vzpill:hover { background: var(--hover); color: var(--text); }
+.btn.vzpill.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.btn.vzpill[disabled] { opacity: 0.35; cursor: default; }
 .vzcount { font-family: var(--mono); color: var(--text-2); letter-spacing: 0.08em; min-width: 84px; text-align: center; }
 .vzhint { color: var(--text-3); }
 .vzthumbs { display: flex; gap: 8px; overflow-x: auto; overflow-y: hidden; padding: 4px 2px; scrollbar-width: none; max-width: 100%; }
@@ -732,9 +732,9 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .vzgrp.cur { border-color: var(--accent); background: var(--accent-soft); }
 .vzghead { display: flex; align-items: center; gap: 8px; padding: 8px 12px; font-weight: 600; width: 100%; text-align: left; }
 .vzghead .cnt { margin-left: auto; font-weight: 400; color: var(--text-2); }
-.vzghead .here { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent-2); font-weight: 600; }
+.vzghead .here { font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent-2); font-weight: 600; }
 .vzpg { padding: 0 10px 4px; }
-.vzpgh { font-family: var(--mono); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); padding: 6px 4px 2px; }
+.vzpgh { font-family: var(--mono); font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); padding: 6px 4px 2px; }
 .vznote { display: grid; grid-template-columns: 28px 1fr 30px; gap: 8px; padding: 8px 6px; border-radius: 8px; cursor: pointer; align-items: start; }
 .vznote:hover { background: var(--hover); }
 .vznote.sel { background: var(--press); }
@@ -743,7 +743,7 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .vznote .txt { display: grid; gap: 4px; min-width: 0; }
 .vznote.done .t { color: var(--text-3); text-decoration: line-through; }
 .vznote .tags { display: flex; gap: 6px; flex-wrap: wrap; }
-.vznote .tag { font-family: var(--mono); font-size: 11.5px; border: 1px solid var(--line-2); border-radius: 999px; padding: 0 8px; color: var(--text-2); }
+.vznote .tag { font-family: var(--mono); font-size: 13px; border: 1px solid var(--line-2); border-radius: 999px; padding: 0 8px; color: var(--text-2); }
 .vznote .tag.old { border-color: var(--todo); color: var(--todo); }
 .vzreply { margin-top: 2px; padding: 6px 10px; border-left: 2px solid var(--accent); background: var(--raised); border-radius: 0 8px 8px 0; color: var(--text-2); }
 .vzreply b { color: var(--accent-2); font-weight: 600; }
@@ -755,7 +755,7 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .vztarget { display: flex; gap: 8px; align-items: center; background: var(--accent-soft); border: 1px solid var(--accent); border-radius: var(--r); padding: 6px 10px; color: var(--accent-2); flex-wrap: wrap; }
 .vztarget b { color: var(--text); font-weight: 600; }
 .vztarget.away { background: var(--todo-soft); border-color: var(--todo); color: var(--todo); }
-.vztarget .lbl { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; }
+.vztarget .lbl { font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; }
 .vztarget .btn { margin-left: auto; height: 28px; }
 .vzcomposer textarea { width: 100%; min-height: 70px; resize: none; background: var(--raised); border: 1px solid transparent; border-radius: var(--r); padding: 10px 12px; line-height: 1.5; color: var(--text); }
 .vzcomposer textarea:focus { outline: none; border-color: var(--accent); }
