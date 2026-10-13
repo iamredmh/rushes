@@ -10,7 +10,7 @@ import { FORMAT_ID_RE, MAX_FORMATS, isPictureSize, labelOfId, versionFormats } f
 import { createBatch, latestBatch } from "../core/batches.js";
 import { exportFileName, notesMarkdown } from "../core/exportNotes.js";
 import { tabStates } from "../core/tabs.js";
-import { addVisualVersion, checkVisualNote, registerVisual, visualNoteView, visualRatios, type PageInput } from "../core/visuals.js";
+import { addVisualVersion, checkVisualNote, registerVisual, visualNoteView, visualRatios, type PageInput, type PictureInput } from "../core/visuals.js";
 import { readPicture } from "./visuals.js";
 import { fromManifestPath, toManifestPath } from "../core/paths.js";
 import { AUDIO_FORMATS, PROBE_TIMEOUT_MS, VIDEO_EXT, giveUpAfter, probe, probeVideo, videoGaveUp, type VideoProbe, type VideoProber } from "../core/media.js";
@@ -1302,9 +1302,13 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   // ---- visuals (§25) ----
   app.post("/api/visuals", async (c) => {
     const b = await body(c, VisualBody);
-    // Every picture is read first, in the order given, so a refusal always names the first one and writes nothing.
+    // Every picture is read first, one after the other in the order given, so a refusal always names the first bad one and writes nothing.
     const pages: PageInput[] = [];
-    for (const p of b.pages) pages.push({ n: p.n, files: await Promise.all(p.files.map((f) => readPicture(store.root, f))) });
+    for (const p of b.pages) {
+      const files: PictureInput[] = [];
+      for (const f of p.files) files.push(await readPicture(store.root, f));
+      pages.push({ n: p.n, files });
+    }
     const { result } = await store.update("visuals", (f) =>
       b.name !== undefined ? registerVisual(f, { name: b.name, kind: b.kind, label: b.label, pages }) : addVisualVersion(f, { visual: b.visual!, label: b.label, pages }),
     );

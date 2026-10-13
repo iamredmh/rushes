@@ -21,7 +21,8 @@ const refuse = (code: string, message: string, file: string): never => {
 function inProject(root: string, file: string): string | null {
   const abs = isAbsolute(file) ? normalize(file) : resolve(root, file);
   const rel = relative(root, abs);
-  if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) return null;
+  // "..cover.png" is a name inside the project; only ".." itself or ".." as a path part leads out of it.
+  if (rel === "" || rel === ".." || rel.startsWith(".." + sep) || isAbsolute(rel)) return null;
   return rel.split(sep).join("/");
 }
 
