@@ -30,8 +30,36 @@ function gif(b: Uint8Array): ImageSize | null {
 /** The start-of-frame markers, which carry the size: every one from C0 to CF except the three that are not frames. */
 const isFrame = (m: number): boolean => m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc;
 
+/**
+ * The EXIF orientation (1 to 8) in an APP1 segment whose data starts at `at` and is `len` bytes long, or 1 when there is none
+ * or it cannot be read. Only IFD0's orientation tag (0x0112) is looked at, and nothing is read outside the segment.
+ */
+function exifOrientation(b: Uint8Array, at: number, len: number): number {
+  const end = Math.min(b.length, at + len);
+  if (!ascii(b, at, "Exif") || b[at + 4] !== 0 || b[at + 5] !== 0) return 1;
+  const tiff = at + 6;
+  const little = ascii(b, tiff, "II");
+  if (!little && !ascii(b, tiff, "MM")) return 1;
+  const u16 = (o: number): number => (little ? u16le(b, o) : u16be(b, o));
+  const u32 = (o: number): number => (little ? (u16le(b, o) | (u16le(b, o + 2) << 16)) >>> 0 : u32be(b, o));
+  if (tiff + 8 > end || u16(tiff + 2) !== 42) return 1;
+  const ifd = tiff + u32(tiff + 4);
+  if (ifd + 2 > end) return 1;
+  const count = Math.min(u16(ifd), 256);
+  for (let i = 0; i < count; i++) {
+    const entry = ifd + 2 + i * 12;
+    if (entry + 12 > end) return 1;
+    if (u16(entry) === 0x0112) {
+      const value = u16(entry + 8);
+      return value >= 1 && value <= 8 ? value : 1;
+    }
+  }
+  return 1;
+}
+
 function jpeg(b: Uint8Array): ImageSize | null {
   let at = 2;
+  let orientation = 1;
   while (at + 4 <= b.length) {
     if (b[at] !== 0xff) return null;
     const marker = b[at + 1];
@@ -39,7 +67,14 @@ function jpeg(b: Uint8Array): ImageSize | null {
       at++;
       continue;
     }
-    if (isFrame(marker)) return b.length >= at + 9 ? sized(u16be(b, at + 7), u16be(b, at + 5), "jpeg") : null;
+    if (isFrame(marker)) {
+      if (b.length < at + 9) return null;
+      const [width, height] = [u16be(b, at + 7), u16be(b, at + 5)];
+      // A browser draws a picture stored on its side turned upright, so its shape is the turned one (EXIF orientations 5 to 8).
+      return orientation >= 5 ? sized(height, width, "jpeg") : sized(width, height, "jpeg");
+    }
+    // Another APP1 segment (XMP, say) says nothing about orientation and must not undo what the EXIF one said.
+    if (marker === 0xe1) orientation = [exifOrientation(b, at + 4, u16be(b, at + 2) - 2), orientation].find((o) => o !== 1) ?? 1;
     at += 2 + u16be(b, at + 2);
   }
   return null;

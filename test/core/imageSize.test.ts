@@ -21,6 +21,34 @@ const webpLossless = (w: number, h: number) => {
 };
 const webpExtended = (w: number, h: number) => webpHead([...ascii("VP8X"), 10, 0, 0, 0, 0, 0, 0, 0, ...le24(w - 1), ...le24(h - 1)]);
 
+// A JPEG whose EXIF says it is stored rotated: browsers draw it turned, so its shape is the turned one. The EXIF segment sits
+// ahead of the frame header, as a camera writes it. `endian` picks the TIFF byte order inside the segment.
+const exifJpeg = (w: number, h: number, orientation: number, endian: "II" | "MM" = "MM") => {
+  const u16 = endian === "MM" ? be16 : le16;
+  const u32 = (n: number) => (endian === "MM" ? be32(n) : [n & 255, (n >>> 8) & 255, (n >>> 16) & 255, (n >>> 24) & 255]);
+  const tiff = [...ascii(endian), ...u16(42), ...u32(8), ...u16(1), ...u16(0x0112), ...u16(3), ...u32(1), ...u16(orientation), 0, 0, ...u32(0)];
+  const app1 = [...ascii("Exif"), 0, 0, ...tiff];
+  return new Uint8Array([0xff, 0xd8, 0xff, 0xe1, ...be16(app1.length + 2), ...app1, 0xff, 0xc0, ...be16(17), 8, ...be16(h), ...be16(w), 3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1]);
+};
+
+describe("imageSize: a jpeg's EXIF orientation", () => {
+  it("swaps the sides for the four turned orientations (5 to 8), in either byte order", () => {
+    for (const o of [5, 6, 7, 8]) for (const e of ["MM", "II"] as const) expect(imageSize(exifJpeg(4000, 3000, o, e))).toEqual({ width: 3000, height: 4000, type: "jpeg" });
+  });
+  it("leaves the upright and mirrored-only orientations (1 to 4) as stored", () => {
+    for (const o of [1, 2, 3, 4]) expect(imageSize(exifJpeg(4000, 3000, o))).toEqual({ width: 4000, height: 3000, type: "jpeg" });
+  });
+  it("ignores an EXIF segment it cannot read, and a value that is not an orientation", () => {
+    expect(imageSize(exifJpeg(4000, 3000, 0))).toEqual({ width: 4000, height: 3000, type: "jpeg" });
+    expect(imageSize(exifJpeg(4000, 3000, 9))).toEqual({ width: 4000, height: 3000, type: "jpeg" });
+    const cut = exifJpeg(4000, 3000, 6).slice(0, 4 + 2 + 12);
+    expect(imageSize(cut)).toBeNull();
+    const junk = exifJpeg(4000, 3000, 6);
+    junk.set(ascii("XX"), 12);
+    expect(imageSize(junk)).toEqual({ width: 4000, height: 3000, type: "jpeg" });
+  });
+});
+
 describe("imageSize", () => {
   it("reads a png", () => expect(imageSize(png(1080, 1350))).toEqual({ width: 1080, height: 1350, type: "png" }));
   it("reads a gif", () => expect(imageSize(gif(640, 480))).toEqual({ width: 640, height: 480, type: "gif" }));
