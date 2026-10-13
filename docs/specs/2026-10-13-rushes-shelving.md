@@ -1,6 +1,6 @@
 # Rushes: shelving a film (§26)
 
-Status: DRAFT, 13 October 2026. Designed with Red in a question-by-question session the same day; every decision in 26.2 is his. The mockup (`2026-10-13-rushes-shelving-mockup.html`) shows the top bar with fifteen films, the overflow list, the Shelved list, a shelved film's banner and the empty states. Nothing is built yet.
+Status: DRAFT, 13 October 2026. Designed with Red in a question-by-question session the same day; every decision in 26.2 is his. The mockup (`2026-10-13-rushes-shelving-mockup.html`) shows the top bar with fifteen films, the overflow list, the Shelved list, a shelved film's banner and the empty states. It is built (26.12).
 
 ## 26.1 The problem
 
@@ -108,3 +108,15 @@ Deleting a film for good; a manager panel; shelving from a pill; moving Lock int
 ## 26.11 Files touched (for the plan)
 
 `src/core/schema.ts`, `project.ts`, `tabs.ts`, `batches.ts`, `exportNotes.ts`, `log.ts`/`logEvents.ts` (core); `src/server/app.ts` (route, tabs, notes, versions); `src/mcp/tools.ts` (the status sentence); `src/cli/main.ts` (`rushes status` lists shelved films); `web/src/ui/FilmPack.tsx`, `FilmMenu.tsx` and `useDismiss.ts` (new), `App.tsx`, `Picture.tsx` and `Notes.tsx` (a `readOnly` prop), `Icon.tsx`, `styles.css`, `changes.css` (the header's width steps), `web/src/lib.ts` (`inPlay`, `maxPills`, and the rules for which film is next); `e2e/shelving.spec.ts` (new); `README.md`, `AGENTS.md`, `skills/rushes/SKILL.md`; their tests.
+
+## 26.12 As built (13 October 2026)
+
+- **Data.** `Video.shelved` is an optional string (an ISO time): absent, or null from a hand-edited file, means in play. `shelveFilm` sets it (keeping the first time a film was shelved) or deletes the key, so a restore leaves nothing behind and a project that never shelves a film is byte-for-byte what it was. `inPlay` and `noteInPlay` (`src/core/project.ts`) are the only places the rule is written; the dashboard's `inPlay` is in `web/src/lib.ts`. A note on a film that is gone is still in play.
+- **What stops counting.** `tabStates`, `createBatch`, `notesMarkdown` and `GET /api/notes` (unless `includeShelved=true`) go through `noteInPlay`. Nothing is closed or changed.
+- **Server.** `PUT /api/videos/:video/shelve` with `{ shelved: boolean }` answers `{ video }` (404 for a film that is not there, 400 for a body that is not true or false) and logs only a change: "Film “Key” shelved" or "restored" (area `picture`, kind `film`, merge `replace`). `POST /api/versions` removes the mark in the same write, logs "Film “Key” restored" before the cut's own line, and replies `restored: true`; a refused cut changes nothing. `GET /api/tabs` gains `films`.
+- **The agent.** The `rushes_status`, `rushes_add_version` and `rushes_list_notes` descriptions, `AGENTS.md`, the skill and the README say what a shelved film is. `rushes status` prints a `shelved` line, and `rushes add version` says "(it was shelved: restored)". Still twenty-three tools.
+- **The pack.** `maxPills(width)` is one film for every 190 px of header, between 3 and 12, and `shownFilms` keeps the current film a pill. The pack and the Shelved button are two direct children of the header. `packShown` decides when pills show at all: two films in play, or one in play while a shelved film is open. `[` and `]` step through films in play (`neighbourVideo`).
+- **The Film menu** (`FilmMenu.tsx`) is first in the header's right-hand cluster, its tooltip opens leftwards, and its list and the two pack lists close on Escape (`useDismiss.ts`, bound in a layout effect so a key pressed at once is not missed). Shelving the film you are in goes to `filmAfterShelving`, or to the empty state, and is refused with the switching message while a note is half-typed. The toast has an Undo that restores the film and returns to it. `Shift+S` toggles, and is ignored while typing.
+- **A shelved film** opens with Picture's `readOnly` (In, Out, box and grab buttons and keys off, the note box hidden), Lock disabled, the picture dimmed, and a `ShelvedBanner` with Restore.
+- **Header room.** The two width steps moved up by the Film button's room: the Picture label goes at 1340 px and under (was 1280), the Change Log button is its icon at 1620 px and under with two formats or more (was 1560), and at the narrow step the found chip (56 px), the version control (72 px) and the gaps (8 px) tighten a little.
+- **Not built:** as 26.10.
