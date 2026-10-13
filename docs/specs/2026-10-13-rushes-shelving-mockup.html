@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rushes shelving mockup</title>
+<style>
+:root{color-scheme:dark;--bg:#0c0d0f;--app:#141518;--raised:#1c1e22;--hover:#25282d;--press:#2d3036;--line:#26282d;--line-2:#34373d;--text:#eeeef0;--text-2:#a3a6ad;--text-3:#70737a;--accent:#7c93ff;--accent-2:#9eaeff;--on-accent:#0b1026;--accent-soft:rgba(124,147,255,.14);--todo:#f5b740;--todo-soft:rgba(245,183,64,.14);--done:#4cc38a;--r:10px;--mono:ui-monospace,"SF Mono",Menlo,monospace}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg)}
+body{color:var(--text);font:15px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;padding:0}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+svg{display:block;flex:none;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.demo{padding:10px 20px;border-bottom:1px solid var(--line);background:#0a0b0d;color:var(--text-2);display:grid;gap:8px}
+.demo .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.demo b{color:var(--text)}
+.demo button{padding:5px 12px;border:1px solid var(--line-2);border-radius:999px;color:var(--text-2)}
+.demo button[aria-pressed=true]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-2)}
+.demo .what{color:var(--text);border-left:2px solid var(--todo);padding-left:10px;max-width:1100px}
+.demo kbd{font-family:var(--mono);border:1px solid var(--line-2);border-radius:6px;padding:0 6px;color:var(--text)}
+.app{max-width:1360px;margin:0 auto;background:var(--app);position:relative;display:flex;flex-direction:column;min-height:560px}
+header{display:flex;align-items:center;flex-wrap:wrap;gap:14px;padding:14px 20px;border-bottom:1px solid var(--line);flex:none;position:relative}
+.logo{width:28px;height:28px;border-radius:8px;background:var(--accent-soft);display:grid;place-items:center;color:var(--accent)}
+.crumb{color:var(--text-2);font-weight:600;display:flex;gap:6px;align-items:center;white-space:nowrap} .crumb .id{font-family:var(--mono);font-weight:500;font-size:13px;color:var(--text-3)}
+.sp{flex:1}
+.send{height:36px;background:var(--accent);color:var(--on-accent);padding:0 16px;border-radius:12px;font-weight:600;display:inline-flex;align-items:center;gap:10px}
+.send .n{background:rgba(11,16,38,.22);border-radius:999px;min-width:24px;height:24px;display:grid;place-items:center;font-variant-numeric:tabular-nums}
+.plabel{color:var(--text-3);font-weight:500}
+/* tooltips, as the dashboard draws them */
+[data-tip]{position:relative}
+[data-tip]::after{content:attr(data-tip);position:absolute;left:50%;top:calc(100% + 8px);transform:translateX(-50%) translateY(2px);background:#000;color:var(--text);font-size:13px;padding:4px 8px;border-radius:6px;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .12s,transform .12s;z-index:30}
+[data-tip]:hover::after,[data-tip]:focus-visible::after{opacity:1;transform:translateX(-50%)}
+/* the pack */
+.pack{display:flex;align-items:center;gap:2px;background:var(--app);border-radius:var(--r);padding:3px;position:relative;min-width:0}
+.pill{display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 12px;border-radius:8px;color:var(--text-2);font-weight:500;position:relative}
+.pill:hover,.pill:focus-within{color:var(--text)}
+.pill[aria-pressed=true]{background:var(--raised);color:var(--text)}
+.pill .n{width:22px;height:22px;border-radius:50%;background:var(--line-2);color:var(--text-2);font:600 15px/22px ui-sans-serif,system-ui,sans-serif;font-variant-numeric:tabular-nums;text-align:center;flex:none}
+.pill[aria-pressed=true] .n{background:var(--accent-soft);color:var(--accent-2)}
+.pill .dot{width:7px;height:7px;border-radius:50%;background:var(--todo);flex:none}
+.hdrbtns{display:inline-flex;gap:4px;align-items:center}
+.ibtn{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;color:var(--text-2);position:relative}
+.ibtn:hover,.ibtn[aria-expanded=true]{background:var(--hover);color:var(--text)}
+.ibtn[aria-disabled=true]{opacity:.35;pointer-events:none}
+.ibtn svg{width:20px;height:20px}
+.filmmenu{position:absolute;right:0;left:auto;top:calc(100% + 6px);min-width:260px;background:var(--raised);border:1px solid var(--line-2);border-radius:var(--r);box-shadow:0 14px 40px rgba(0,0,0,.5);padding:6px;z-index:20}
+.filmmenu .title{padding:6px 8px 8px;border-bottom:1px solid var(--line);margin-bottom:4px;color:var(--text-3);font-size:13px}
+.filmmenu .title b{color:var(--text);font-size:15px;display:block}
+.filmmenu .item{display:flex;align-items:center;gap:10px;width:100%;padding:8px;border-radius:8px;color:var(--text);text-align:left}
+.filmmenu .item:hover{background:var(--hover)}
+.filmmenu .item svg{width:16px;height:16px;color:var(--text-2)}
+.filmmenu .item kbd{margin-left:auto;font-family:var(--mono);font-size:13px;color:var(--text-3);border:1px solid var(--line-2);border-radius:6px;padding:0 6px}
+.menuwrap{position:relative;display:inline-block}
+.more,.shelf-btn{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 12px;border-radius:8px;color:var(--text-2);font-weight:500}
+.more:hover,.shelf-btn:hover{color:var(--text);background:var(--hover)}
+.more[aria-expanded=true],.shelf-btn[aria-expanded=true]{background:var(--raised);color:var(--text)}
+.more .dot{width:7px;height:7px;border-radius:50%;background:var(--todo)}
+.shelf-btn{margin-left:6px;border:1px dashed var(--line-2)}
+.shelf-btn svg,.more svg{width:16px;height:16px}
+.menu{position:absolute;top:calc(100% + 6px);min-width:300px;max-width:380px;max-height:360px;overflow:auto;background:var(--raised);border:1px solid var(--line-2);border-radius:var(--r);box-shadow:0 14px 40px rgba(0,0,0,.5);padding:6px;z-index:20}
+.menu .row{display:flex;align-items:center;gap:10px;padding:6px 8px;border-radius:8px;color:var(--text-2)}
+.menu .row:hover{background:var(--hover);color:var(--text)}
+.menu .row .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.menu .row .meta{font-size:13px;color:var(--text-3);white-space:nowrap}
+.menu .row .n{width:22px;height:22px;border-radius:50%;background:var(--line-2);font:600 15px/22px ui-sans-serif,system-ui,sans-serif;text-align:center;flex:none}
+.menu .row .dot{width:7px;height:7px;border-radius:50%;background:var(--todo)}
+.menu .row .ib{width:28px;height:28px;border-radius:7px;display:grid;place-items:center;color:var(--text-3)}
+.menu .row .ib:hover{background:var(--press);color:var(--text)}
+.menu h4{margin:6px 8px 4px;font-size:13px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3)}
+.menu.shelved .row{color:var(--text-3)}
+.menu .empty{padding:10px 8px;color:var(--text-3)}
+/* page */
+.page{flex:1;padding:24px 20px;display:grid;gap:14px;align-content:start}
+.banner{display:flex;align-items:center;gap:12px;padding:10px 14px;border-radius:var(--r);background:var(--todo-soft);color:var(--todo);border:1px solid rgba(245,183,64,.28)}
+.banner b{color:var(--text);font-weight:600}
+.banner .sp{flex:1}
+.banner .restore svg{width:16px;height:16px}
+.banner .restore{height:32px;padding:0 14px;border-radius:999px;background:var(--raised);color:var(--text);display:inline-flex;align-items:center;gap:8px;font-weight:600}
+.player{aspect-ratio:16/9;max-width:760px;border-radius:var(--r-lg,14px);background:linear-gradient(135deg,#1d2a3a,#0c0d0f);display:grid;place-items:center;color:var(--text-2);font-size:22px;font-weight:600}
+.page.shelved .player{filter:grayscale(1) brightness(.7)}
+.page.shelved .tools{opacity:.35;pointer-events:none}
+.tools{display:flex;gap:8px;color:var(--text-2)}
+.tools span{height:34px;padding:0 14px;border-radius:8px;background:var(--raised);display:inline-flex;align-items:center}
+.emptystate{display:grid;place-items:center;gap:12px;padding:70px 0;color:var(--text-2);text-align:center}
+.emptystate b{color:var(--text);font-size:18px}
+.emptystate button{height:36px;padding:0 16px;border-radius:999px;border:1px solid var(--line-2)}
+.toast{position:absolute;left:50%;bottom:22px;transform:translateX(-50%);background:#000;color:var(--text);border:1px solid var(--line-2);border-radius:999px;padding:8px 8px 8px 16px;display:none;gap:14px;align-items:center;z-index:40}
+.toast.on{display:flex}
+.toast button{padding:4px 12px;border-radius:999px;background:var(--raised);font-weight:600}
+</style>
+</head>
+<body>
+<div class="demo" id="demo">
+  <div class="row"><b>Shelving a film (§26).</b> The bar shows films in play; the ones that do not fit fold into <b>+N</b>; shelved films live under <b>Shelved</b>. Everything here is clickable.</div>
+  <div class="row"><b>Bar fits</b>
+    <button data-fit="15" aria-pressed="false">All</button><button data-fit="6" aria-pressed="true">6 pills</button><button data-fit="4" aria-pressed="false">4 pills</button><button data-fit="3" aria-pressed="false">3 pills</button>
+    <span style="width:14px"></span><b>Start from</b>
+    <button data-preset="busy" aria-pressed="true">15 films, none shelved</button><button data-preset="some" aria-pressed="false">5 shelved</button><button data-preset="one" aria-pressed="false">One film in play</button><button data-preset="all" aria-pressed="false">All shelved</button>
+  </div>
+  <div class="what" id="what"></div>
+  <div class="row">Try: open the <b>⋯</b> Film menu (first in the right-hand buttons, before the Change Log) and shelve · open <b>+N</b> · open <b>Shelved</b> and restore · pick a shelved film · <kbd>Shift</kbd>+<kbd>S</kbd> on the current film · <kbd>[</kbd> <kbd>]</kbd> to step through films in play.</div>
+</div>
+<div class="app" id="app">
+  <header>
+    <span class="logo"><svg viewBox="0 0 24 24" width="16" height="16"><path d="M8 5v14l11-7z" fill="currentColor"/></svg></span>
+    <nav class="crumb"><span>Lumen launch</span><span class="id">k3m9q2xd</span></nav>
+    <div class="pack" id="pack" aria-label="Films"></div>
+    <span class="plabel">Picture</span>
+    <span class="sp"></span>
+    <span id="hdrbtns" class="hdrbtns"></span>
+    <button class="send">Send to agent <span class="n" id="count">0</span></button>
+  </header>
+  <div class="page" id="page"></div>
+  <div class="toast" id="toast"><span id="toastText"></span><button id="undo">Undo</button></div>
+</div>
+<script>
+const NAMES=["Hero","Teaser","Dial","Warmth","Daylight","Repair","Giveaway","Founders","Night mode","Unboxing","Review","Wide","Square","Vertical","Credits"];
+const OPEN=[2,0,3,0,1,0,0,4,0,0,2,0,1,0,0]; // open notes per film
+const SHELVED_ON={some:[1,5,7,10,13]};
+let films, cur, fit=6, menu=null, toastTimer=null, lastShelved=null;
+const ICON={shelve:'<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="5" rx="1.5"/><path d="M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9M10 13h4"/></svg>',more:'<svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/></svg>',history:'<svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 3-6.2"/><path d="M4 4v4h4"/><path d="M12 8v4l3 2"/></svg>',undo:'<svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg>',chev:'<svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>'};
+const $=(s)=>document.querySelector(s);
+function reset(preset){
+  films=NAMES.map((name,i)=>({i,name,open:OPEN[i],shelved:null,cuts:2+(i%4)}));
+  if(preset==="some")for(const i of SHELVED_ON.some)films[i].shelved="13 Oct";
+  if(preset==="one")films.forEach((f,i)=>{if(i!==0)f.shelved="13 Oct"});
+  if(preset==="all")films.forEach(f=>f.shelved="13 Oct");
+  cur=films.find(f=>!f.shelved)?.i??null; menu=null; draw();
+}
+const live=()=>films.filter(f=>!f.shelved);
+const shelvedList=()=>films.filter(f=>f.shelved);
+function pill(f,n){return `<button class="pill" aria-pressed="${f.i===cur}" data-film="${f.i}"><span class="n">${n}</span><span class="pname">${f.name}</span>${f.open?'<span class="dot"></span>':''}</button>`}
+function draw(){
+  const L=live();
+  // which live films fold into +N: the first `fit` stay (the current one is always kept)
+  const room=Math.max(1,fit-(shelvedList().length?1:0)); // the Shelved button takes a pill's room
+  let shown=L.slice(0,room), folded=L.slice(room);
+  if(cur!==null&&folded.some(f=>f.i===cur)){const c=L.find(f=>f.i===cur);shown=[...shown.slice(0,Math.max(0,room-1)),c];folded=L.filter(f=>!shown.includes(f))}
+  const one=L.length<=1, S=shelvedList();
+  let h="";
+  if(!one){h+=shown.map(f=>pill(f,L.indexOf(f)+1)).join("");
+    if(folded.length)h+=`<button class="more" data-menu="more" aria-expanded="${menu==='more'}">+${folded.length}${folded.some(f=>f.open)?'<span class="dot"></span>':''}${ICON.chev}</button>`}
+  else if(L.length===1)h+=`<span class="crumb"><span style="color:var(--text-3)">/</span><span>${L[0].name}</span></span>`;
+  if(S.length)h+=`<button class="shelf-btn" data-menu="shelved" aria-expanded="${menu==='shelved'}">${ICON.shelve}Shelved (${S.length})</button>`;
+  const pack=$("#pack"); pack.innerHTML=h;
+  if(menu==="more")pack.insertAdjacentHTML("beforeend",`<div class="menu" style="right:auto;left:${pack.querySelector('.more').offsetLeft-8}px"><h4>More films</h4>${folded.map(f=>`<div class="row" data-film="${f.i}"><span class="n">${L.indexOf(f)+1}</span><span class="nm">${f.name}</span>${f.open?'<span class="dot"></span>':''}</div>`).join("")}</div>`);
+  if(menu==="shelved")pack.insertAdjacentHTML("beforeend",`<div class="menu shelved" style="left:auto;right:0"><h4>Shelved</h4>${S.map(f=>`<div class="row" data-film="${f.i}"><span class="nm">${f.name}</span><span class="meta">${f.cuts} cuts · ${f.shelved}</span><span class="ib" data-restore="${f.i}" data-tip="Restore film" role="button" tabindex="0">${ICON.undo}</span></div>`).join("")}</div>`);
+  // header buttons: the Change Log (inert here) and the Film menu
+  const f0=cur===null?null:films[cur];
+  $("#hdrbtns").innerHTML=`<span class="menuwrap"><button class="ibtn" data-menu="film" data-tip="${f0?`Film actions · ${f0.name}`:"Film actions"}" aria-label="Film actions" aria-expanded="${menu==='film'}" aria-disabled="${f0===null}">${ICON.more}</button>${menu==='film'&&f0?`<div class="filmmenu"><div class="title">Film<b>${f0.name}</b></div>${f0.shelved?`<button class="item" data-restore="${f0.i}">${ICON.undo}Restore film<kbd>⇧S</kbd></button>`:`<button class="item" data-shelve="${f0.i}">${ICON.shelve}Shelve film<kbd>⇧S</kbd></button>`}</div>`:""}</span><button class="ibtn" data-tip="Change Log" aria-label="Change Log">${ICON.history}</button>`;
+  // the page
+  const f=films[cur], page=$("#page");
+  if(cur===null){page.className="page";page.innerHTML=`<div class="emptystate"><b>All films are shelved</b><span>Nothing is in play. Restore one to carry on.</span><button data-menu="shelved">Open the Shelved list</button></div>`}
+  else if(f.shelved){page.className="page shelved";page.innerHTML=`<div class="banner"><span>Shelved</span><b>${f.name}</b><span>on ${f.shelved}. View only.</span><span class="sp"></span><button class="restore" data-restore="${f.i}">${ICON.undo}Restore</button></div><div class="player">${f.name} · v${f.cuts}</div><div class="tools"><span>Lock picture</span><span>Mark a region</span><span>New note</span><span>Format</span></div>`}
+  else{page.className="page";page.innerHTML=`<div class="player">${f.name} · v${f.cuts}</div><div class="tools"><span>Lock picture</span><span>Mark a region</span><span>New note</span><span>Format</span></div>`}
+  // Send to agent counts open notes of films in play only
+  $("#count").textContent=live().reduce((a,x)=>a+x.open,0);
+  const tot=films.reduce((a,x)=>a+x.open,0), hid=tot-live().reduce((a,x)=>a+x.open,0);
+  $("#what").innerHTML=cur===null?"<b>Every film is shelved.</b> Picture shows an empty state with a way to the Shelved list.":films[cur].shelved?`<b>${films[cur].name} is shelved.</b> It opens view-only under a banner; Restore puts it back. ${hid} open note${hid===1?"":"s"} on shelved films are out of the count (${tot} in all) and come back on restore.`:L.length===1?`<b>One film in play.</b> The pack collapses to the crumb, as for a one-film project today, and <b>Shelved</b> stays reachable.`:`<b>${L.length} films in play, ${S.length} shelved.</b> ${folded.length?`${folded.length} do not fit and sit under +N.`:"All fit, so there is no +N."} The count (${live().reduce((a,x)=>a+x.open,0)}) only includes films in play${hid?`; ${hid} open note${hid===1?"":"s"} on shelved films are kept but not counted`:""}.`;
+}
+function toast(text,undo){clearTimeout(toastTimer);$("#toastText").textContent=text;$("#undo").style.display=undo?"":"none";$("#toast").classList.add("on");toastTimer=setTimeout(()=>$("#toast").classList.remove("on"),5000)}
+function shelve(i){
+  if(films[i].shelved)return; const wasCur=cur===i; const L=live(); const at=L.findIndex(f=>f.i===i);
+  films[i].shelved="13 Oct"; lastShelved=i; menu=null;
+  if(wasCur){const nxt=L[at+1]??L[at-1]; cur=nxt&&nxt.i!==i?nxt.i:(live()[0]?.i??null)}
+  draw(); toast(`“${films[i].name}” shelved`,true);
+}
+function restore(i){films[i].shelved=null; menu=null; if(cur===null||films[cur].shelved)cur=i; draw(); toast(`“${films[i].name}” restored`,false)}
+document.addEventListener("click",(e)=>{
+  const t=e.target.closest("[data-shelve],[data-restore],[data-film],[data-menu],[data-fit],[data-preset],#undo"); if(!t){if(menu){menu=null;draw()}return}
+  if(t.id==="undo"){if(lastShelved!==null){restore(lastShelved);lastShelved=null}return}
+  if(t.dataset.fit){fit=+t.dataset.fit;document.querySelectorAll("[data-fit]").forEach(b=>b.setAttribute("aria-pressed",b===t));menu=null;draw();return}
+  if(t.dataset.preset){document.querySelectorAll("[data-preset]").forEach(b=>b.setAttribute("aria-pressed",b===t));reset(t.dataset.preset);return}
+  if(t.dataset.shelve!==undefined){e.stopPropagation();shelve(+t.dataset.shelve);return}
+  if(t.dataset.restore!==undefined){e.stopPropagation();restore(+t.dataset.restore);return}
+  if(t.dataset.menu){menu=menu===t.dataset.menu?null:t.dataset.menu;draw();return}
+  if(t.dataset.film!==undefined){cur=+t.dataset.film;menu=null;draw()}
+});
+document.addEventListener("keydown",(e)=>{
+  if(e.shiftKey&&e.key==="S"&&cur!==null){e.preventDefault();films[cur].shelved?restore(cur):shelve(cur);return}
+  if((e.key==="["||e.key==="]")&&cur!==null){const L=live();const here=L.findIndex(f=>f.i===cur);let to;
+    if(here>=0)to=L[here+(e.key==="]"?1:-1)];else{const after=L.filter(f=>f.i>cur),before=L.filter(f=>f.i<cur);to=e.key==="]"?after[0]:before[before.length-1]}
+    if(to){cur=to.i;draw()}}
+  if(e.key==="Escape"&&menu){menu=null;draw()}
+});
+reset("busy");
+</script>
+</body>
+</html>
