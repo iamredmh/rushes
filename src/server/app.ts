@@ -3,7 +3,7 @@ import { streamSSE } from "hono/streaming";
 import { z } from "zod";
 import type { Store, ChangeEvent } from "../core/store.js";
 import { RushesError, InvalidError, NotFoundError } from "../core/errors.js";
-import { addFile, addFormat, addVariant, addVersion, ensureProjectIdOnce, lockPicture, resolveCut, resolveVideo, setShots, shotAt } from "../core/project.js";
+import { addFile, addFormat, addVariant, addVersion, ensureProjectIdOnce, lockPicture, noteInPlay, resolveCut, resolveVideo, setShots, shelveFilm, shotAt } from "../core/project.js";
 import { addTake, editSection, setSections } from "../core/script.js";
 import { addNote, applyReply, applyUserEdit, checkNoteFormat, filterNotes } from "../core/notes.js";
 import { FORMAT_ID_RE, MAX_FORMATS, isPictureSize, labelOfId, versionFormats } from "../core/formats.js";
@@ -33,7 +33,7 @@ import { BriefService } from "./brief.js";
 import { StoryboardService } from "./storyboard.js";
 import { buildState, planWarning } from "../core/plan.js";
 import {
-  broughtInEvent, cutEvent, fileEvent, formatEvent, lineEvent, lockEvent, notesSentEvent, picksEvent, repliesEvent, scriptEvent, takeEvent, variantEvent, visualEvent,
+  broughtInEvent, cutEvent, fileEvent, filmEvent, formatEvent, lineEvent, lockEvent, notesSentEvent, picksEvent, repliesEvent, scriptEvent, takeEvent, variantEvent, visualEvent,
 } from "../core/logEvents.js";
 import { LOG_AREAS, LOG_MAX, changeLogFileName, logText, recentChanges } from "../core/logText.js";
 import { defaultRunner, measureMix, type LoudnessRunner } from "./loudness.js";
@@ -192,6 +192,8 @@ const NoteQuery = z.object({
   // §21.4: a format's notes, with the all-format notes unless onlyThisFormat (R14: Picture only).
   format: formatId.optional(),
   onlyThisFormat: z.enum(["true", "false"]).optional(),
+  // §26: the notes of a shelved film are left out unless asked for.
+  includeShelved: z.enum(["true", "false"]).optional(),
 });
 
 // ShotSchema's own limits (name trimmed 1-80 chars, tag at most 24) apply at the boundary; `n` is server-assigned.
@@ -201,6 +203,7 @@ const ShotsBody = z.object({
 });
 
 const LockBody = z.object({ version: z.string().nullable() });
+const ShelveBody = z.object({ shelved: z.boolean() });
 
 const MixLoudnessBody = z.object({ lanes: z.array(LaneStageSchema).min(1) });
 
@@ -827,6 +830,8 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     const [b, sb] = await Promise.all([brief.view(), storyboard.view()]);
     return c.json({
       tabs: tabStates(project, script, notes, visuals),
+      // §26: every film and whether it is shelved, so an agent leaves the shelved ones alone.
+      films: project.videos.map((v) => ({ id: v.id, name: v.name, shelved: v.shelved ?? null })),
       brief: { exists: b.exists, status: b.status, changed: b.changed },
       storyboard: { exists: sb.exists, shots: sb.total, approved: sb.approved, changed: sb.changed },
       build: buildState({ brief: b, script: script.sections, storyboard: sb }),
@@ -858,8 +863,9 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   app.get("/api/notes", async (c) => {
     const q = NoteQuery.safeParse(c.req.query());
     if (!q.success) throw new InvalidError("Query is invalid", q.error.issues);
-    const [{ notes }, visuals] = await Promise.all([store.read("notes"), store.read("visuals")]);
-    return c.json({ notes: withVisualViews(filterNotes(notes, { ...q.data, onlyThisFormat: q.data.onlyThisFormat === "true" }), visuals) });
+    const [{ notes }, visuals, project] = await Promise.all([store.read("notes"), store.read("visuals"), store.read("project")]);
+    const listed = filterNotes(notes, { ...q.data, onlyThisFormat: q.data.onlyThisFormat === "true" }).filter((n) => q.data.includeShelved === "true" || noteInPlay(n, project));
+    return c.json({ notes: withVisualViews(listed, visuals) });
   });
 
   app.post("/api/notes", async (c) => {
@@ -952,6 +958,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     let lockedVersion: string | null = null;
     let autoProxy = false;
     let films = 1;
+    let restored = false;
     const { result } = await store.update("project", (p) => {
       const out = addVersion(p, {
         video: b.video, file, note: b.note, label: b.label, duration: info.duration ?? read?.duration ?? null, fps: info.fps ?? read?.fps ?? null,
@@ -978,6 +985,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
         if (reachable.length) setShots(p, out.video.id, out.version.id, reachable);
       }
       lockedVersion = out.video.lockedVersion;
+      restored = out.restored;
       autoProxy = p.autoProxy;
       films = p.videos.length;
       if (info.fps && p.videos.length === 1 && p.videos[0].versions.length === 1) p.fps = info.fps;
@@ -985,6 +993,8 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     });
     // One write, one line (R4): a cut that comes with its other shapes says so on its own line
     // ("v2 and its 9:16 added: …"), rather than a line per shape.
+    // §26: a cut on a shelved film brings it back; the Change Log says so, then says what was added.
+    if (restored) await log.add(() => filmEvent(result.video, false), by(c));
     await log.add(() => cutEvent(films, result.video, result.version, result.version.formats.map((f) => f.label)), by(c));
     // §19.5: say when the cut is likely to play badly, and start its proxy straight away when the
     // project asks for that. Without ffmpeg, nothing is offered (needFor is null).
@@ -1000,8 +1010,9 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     // §24.12: a soft nudge, never a refusal: the plan (brief, script, storyboard) is not all approved yet.
     const planNote = planWarning(await planBuild());
     const warnings = { ...(formatWarnings.length ? { formatWarnings } : {}), ...(planNote ? { planWarning: planNote } : {}) };
-    if (lockedVersion) return c.json({ ...result, ...proxy, ...warnings, warning: `Picture is locked at ${lockedVersion}` }, 201);
-    return c.json({ ...result, ...proxy, ...warnings }, 201);
+    const reply = { video: result.video, version: result.version, ...(restored ? { restored: true } : {}) };
+    if (lockedVersion) return c.json({ ...reply, ...proxy, ...warnings, warning: `Picture is locked at ${lockedVersion}` }, 201);
+    return c.json({ ...reply, ...proxy, ...warnings }, 201);
   });
 
   // ---- formats (§21.4) ----
@@ -1168,6 +1179,18 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     });
     // R10: a lock that changes nothing isn't logged.
     if (result.lockedVersion !== before) await log.add(() => lockEvent(films, result), by(c));
+    return c.json({ video: result });
+  });
+
+  // §26: shelve a film, or restore it. The same call twice is the same as once, and only a change is logged.
+  app.put("/api/videos/:video/shelve", async (c) => {
+    const b = await body(c, ShelveBody);
+    let before = false;
+    const { result } = await store.update("project", (p) => {
+      before = !!resolveVideo(p, c.req.param("video")).shelved;
+      return shelveFilm(p, c.req.param("video"), b.shelved);
+    });
+    if (!!result.shelved !== before) await log.add(() => filmEvent(result, b.shelved), by(c));
     return c.json({ video: result });
   });
 
