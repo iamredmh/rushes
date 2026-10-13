@@ -156,6 +156,12 @@ export function lockEvent(films: number, video: Pick<Video, "id" | "name" | "loc
   return { area: "picture", kind: "lock", merge: "replace", subject: video.id, text, video: video.id, version: video.lockedVersion };
 }
 
+/** §26: "Film “Key” shelved", "Film “Key” restored". One line per change; the last state wins, as a lock does. */
+export function filmEvent(video: Pick<Video, "id" | "name">, shelved: boolean): LogEvent {
+  const text = ["Film", quoted(video.name, ""), shelved ? "shelved" : "restored"].filter(Boolean).join(" ");
+  return { area: "picture", kind: "film", merge: "replace", subject: video.id, text, video: video.id, version: null };
+}
+
 /** "3 notes sent from Picture"; on Script, "1 note and 2 script edits sent from Script". */
 export function notesSentEvent(batch: Pick<Batch, "stage" | "noteIds" | "sectionIds">): LogEvent {
   const tab = TAB_NAMES[batch.stage];

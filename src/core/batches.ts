@@ -1,6 +1,7 @@
 import { chipOrder, versionFormats } from "./formats.js";
 import type { Batch, BatchesFile, Note, NotesFile, Project, Script, Stage } from "./schema.js";
 import { EmptyBatchError } from "./errors.js";
+import { noteInPlay } from "./project.js";
 import { isChanged } from "./script.js";
 
 const STAGE_NAMES: Record<Stage, string> = {
@@ -22,7 +23,8 @@ export function createBatch(
   stage: Stage,
   now = new Date(),
 ): Batch {
-  const notes = ctx.notes.notes.filter((n) => n.stage === stage && n.status === "todo" && n.batch === null);
+  // §26: a shelved film is never asked about; its open notes stay unsent.
+  const notes = ctx.notes.notes.filter((n) => n.stage === stage && n.status === "todo" && n.batch === null && noteInPlay(n, ctx.project));
   const sections = stage === "script" ? ctx.script.sections.filter((s) => isChanged(s) || s.status === "flagged") : [];
   if (notes.length === 0 && sections.length === 0) throw new EmptyBatchError(stage);
 

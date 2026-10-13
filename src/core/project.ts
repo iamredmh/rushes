@@ -1,5 +1,5 @@
 import { basename } from "node:path";
-import type { Cue, FileEntry, FileKind, Format, Lane, LaneStage, Project, Shot, Variant, Version, Video } from "./schema.js";
+import type { Cue, FileEntry, FileKind, Format, Lane, LaneStage, Note, Project, Shot, Variant, Version, Video } from "./schema.js";
 import { newProjectId, slugify, uniqueId } from "./ids.js";
 import { InvalidError, NotFoundError, RushesError } from "./errors.js";
 import { checkCueFile } from "./cues.js";
@@ -52,9 +52,36 @@ export interface AddVersionInput {
   height?: number | null;
 }
 
-export function addVersion(p: Project, input: AddVersionInput, now = new Date()): { video: Video; version: Version } {
+/** §26: a film is in play unless it has been shelved. */
+export const inPlay = (video: Pick<Video, "shelved">): boolean => !video.shelved;
+
+/** §26: a note is in play unless it is on a shelved film. A note on no film, or on a film that is gone, always is. */
+export function noteInPlay(note: Pick<Note, "video">, project: Pick<Project, "videos">): boolean {
+  if (!note.video) return true;
+  const film = project.videos.find((v) => v.id === note.video);
+  return !film || inPlay(film);
+}
+
+/**
+ * §26: shelves a film (keeping the time it was first shelved), or restores it by removing the mark. Nothing else about the
+ * film changes: its cuts, notes, picks, takes and lock stay as they were. The same call twice is the same as once.
+ */
+export function shelveFilm(p: Project, videoRef: string, shelved: boolean, now = new Date()): Video {
+  const video = resolveVideo(p, videoRef);
+  if (shelved) {
+    if (!video.shelved) video.shelved = now.toISOString();
+  } else {
+    delete video.shelved;
+  }
+  return video;
+}
+
+/** `restored` is true when the cut brought a shelved film back (§26): new work means the film is in play again. */
+export function addVersion(p: Project, input: AddVersionInput, now = new Date()): { video: Video; version: Version; restored: boolean } {
   const vid = slugify(input.video);
   let video = p.videos.find((v) => v.id === input.video || v.id === vid);
+  const restored = !!video?.shelved;
+  if (video) delete video.shelved;
   if (!video) {
     video = { id: uniqueId(vid, p.videos.map((v) => v.id)), name: input.video, versions: [], lockedVersion: null };
     p.videos.push(video);
@@ -81,7 +108,7 @@ export function addVersion(p: Project, input: AddVersionInput, now = new Date())
     formats: [],
   };
   video.versions.push(version);
-  return { video, version };
+  return { video, version, restored };
 }
 
 export function latestVersion(video: Video): Version | undefined {
