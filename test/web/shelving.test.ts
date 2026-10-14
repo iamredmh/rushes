@@ -62,6 +62,14 @@ describe("maxPills: how many pills the bar shows before the rest fold into +N", 
     expect(maxPills(1100)).toBe(5);
     expect(maxPills(1900)).toBe(10);
   });
+  it("is also no more than the room the pack has once the rest of the header is at its smallest: each pill squeezed to its number, and the +N button", () => {
+    expect(maxPills(1360, 600)).toBe(7);
+    expect(maxPills(1360, 200)).toBe(5);
+    expect(maxPills(1360, 150)).toBe(3);
+    expect(maxPills(1360, 100)).toBe(2);
+    expect(maxPills(1360, 0)).toBe(2);
+    expect(maxPills(1360, undefined)).toBe(7);
+  });
   it("is never fewer than three or more than twelve", () => {
     expect(maxPills(400)).toBe(3);
     expect(maxPills(0)).toBe(3);

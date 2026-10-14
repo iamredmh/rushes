@@ -3,7 +3,7 @@
 // banner a shelved film opens under, and the empty state when every film is shelved.
 import type { RefObject } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { inPlay, maxPills, packShown, shownFilms } from "../lib.js";
+import { MORE_MIN, PACK_PADDING, PILL_MIN, inPlay, maxPills, packShown, shownFilms } from "../lib.js";
 import type { Video } from "../types.js";
 import { Icon } from "./Icon.js";
 import { useDismiss } from "./useDismiss.js";
@@ -26,6 +26,27 @@ export interface FilmPackProps {
 export const shortDate = (iso: string): string => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 
 /**
+ * The room the pack may have in its header: the header's inner width, less every other part at its smallest and the gaps. The
+ * parts the header lets give way to each other (flex-shrink above zero) count at their minimum width. Under 1001 px the header
+ * wraps instead, so there is no limit to read.
+ */
+function roomForPack(head: HTMLElement): number | undefined {
+  if (window.innerWidth <= 1000) return undefined;
+  const cs = getComputedStyle(head);
+  const gap = parseFloat(cs.columnGap) || 0;
+  let room = head.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
+  let parts = 0;
+  for (const el of Array.from(head.children) as HTMLElement[]) {
+    const k = getComputedStyle(el);
+    if (k.display === "none" || k.position === "absolute") continue;
+    parts++;
+    if (el.classList.contains("pack")) continue;
+    room -= parseFloat(k.flexShrink) > 0 ? parseFloat(k.minWidth) || 0 : el.getBoundingClientRect().width;
+  }
+  return room - Math.max(0, parts - 1) * gap;
+}
+
+/**
  * The pack and the Shelved button, as two children of the header (the header's own layout rules, which let the films' names give
  * way to each other, apply to the pack as a direct child).
  */
@@ -35,21 +56,30 @@ export function FilmPack({ films, currentId, headRef, hasTodo, onSwitch, onResto
   const multi = packShown(films, currentId);
   const [menu, setMenu] = useState<"more" | "shelved" | null>(null);
   const [headWidth, setHeadWidth] = useState(() => headRef.current?.clientWidth ?? 1440);
+  const [packRoom, setPackRoom] = useState<number | undefined>(undefined);
   const moreButton = useRef<HTMLButtonElement>(null);
   const shelfButton = useRef<HTMLButtonElement>(null);
   const moreWrap = useRef<HTMLSpanElement>(null);
   const shelfWrap = useRef<HTMLSpanElement>(null);
 
-  // The header's width, and only that: how many pills show follows the window, never the layout the pills sit in.
+  // The header's width, and the room its other parts leave the pack. The other parts count at their smallest where the header
+  // lets them give way (and not at the width the pack has made them), so what is read never depends on how many pills show.
+  const measure = () => {
+    const head = headRef.current;
+    if (!head) return;
+    setHeadWidth(head.clientWidth);
+    setPackRoom(roomForPack(head));
+  };
   useLayoutEffect(() => {
     const head = headRef.current;
     if (!head) return;
-    const read = () => setHeadWidth(head.clientWidth);
-    read();
-    const ro = new ResizeObserver(read);
+    const ro = new ResizeObserver(measure);
     ro.observe(head);
+    for (const el of Array.from(head.children)) ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [multi, shelved.length]);
+  // The header's other parts change with the film and the cut (a format toggle, a longer label): read again after every render.
+  useLayoutEffect(measure);
 
   const close = (focusButton: boolean) => {
     const was = menu;
@@ -67,9 +97,12 @@ export function FilmPack({ films, currentId, headRef, hasTodo, onSwitch, onResto
     if ((menu === "shelved" && shelved.length === 0) || (menu === "more" && !multi)) setMenu(null);
   }, [menu, shelved.length, multi]);
 
-  const indices = shownFilms(live.length, live.findIndex((f) => f.id === currentId), maxPills(headWidth));
+  const indices = shownFilms(live.length, live.findIndex((f) => f.id === currentId), maxPills(headWidth, packRoom));
   const pills = indices.map((i) => live[i]);
   const folded = live.filter((_, i) => !indices.includes(i));
+  // The header squeezes a pill to its number (24 px) before it lets the pack cover anything, so the pack's floor is the pills it
+  // was asked to show (and the +N button), not a fixed 140 px: otherwise the last pills run under the Shelved button.
+  const packMin = pills.length * PILL_MIN + PACK_PADDING + (folded.length > 0 ? MORE_MIN : 0);
   const pill = (f: Video, n: number) => (
     <button type="button" class="pill" aria-pressed={f.id === currentId} onClick={() => onSwitch(f.id)}>
       <span class="n">{n}</span>
@@ -81,7 +114,7 @@ export function FilmPack({ films, currentId, headRef, hasTodo, onSwitch, onResto
   return (
     <>
       {multi && (
-        <nav class="pack" aria-label="Films">
+        <nav class="pack" aria-label="Films" style={`--packmin: ${packMin}px`}>
           {pills.map((f) => pill(f, live.indexOf(f) + 1))}
           {folded.length > 0 && (
             <span class="fpwrap" ref={moreWrap}>
@@ -131,7 +164,7 @@ export function FilmPack({ films, currentId, headRef, hasTodo, onSwitch, onResto
             onClick={() => setMenu(menu === "shelved" ? null : "shelved")}
           >
             <Icon name="shelve" />
-            Shelved ({shelved.length})
+            <span class="fplabel">Shelved </span>({shelved.length})
           </button>
           {menu === "shelved" && (
             <div class="fpmenu" role="group" aria-label="Shelved films">
