@@ -192,7 +192,7 @@ const NoteQuery = z.object({
   // §21.4: a format's notes, with the all-format notes unless onlyThisFormat (R14: Picture only).
   format: formatId.optional(),
   onlyThisFormat: z.enum(["true", "false"]).optional(),
-  // §26: the notes of a shelved film are left out unless asked for.
+  // §26: the notes of a shelved film are left out unless asked for (or a batch is: it lists what it sent).
   includeShelved: z.enum(["true", "false"]).optional(),
 });
 
@@ -866,7 +866,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     const q = NoteQuery.safeParse(c.req.query());
     if (!q.success) throw new InvalidError("Query is invalid", q.error.issues);
     const [{ notes }, visuals, project] = await Promise.all([store.read("notes"), store.read("visuals"), store.read("project")]);
-    const listed = filterNotes(notes, { ...q.data, onlyThisFormat: q.data.onlyThisFormat === "true" }).filter((n) => q.data.includeShelved === "true" || noteInPlay(n, project));
+    const listed = filterNotes(notes, { ...q.data, onlyThisFormat: q.data.onlyThisFormat === "true" }).filter((n) => q.data.includeShelved === "true" || q.data.batch !== undefined || noteInPlay(n, project));
     return c.json({ notes: withVisualViews(listed, visuals) });
   });
 
