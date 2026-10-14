@@ -107,11 +107,21 @@ export function filmAfterShelving(videos: Video[], id: string): string | null {
 /**
  * §26.6: how many pills the bar shows before the rest fold into +N: about one film for every 190 px of header, never fewer than
  * three or more than twelve. The header already makes the pills' names give way to each other (an ellipsis); this stops
- * fifteen films being crushed to nothing. It follows only the window's width, so it never chases the layout it sits in.
+ * fifteen films being crushed to nothing. It follows the window's width, and, so the header stays one row, no more than the
+ * room the rest of the header leaves (`packRoom`, measured with its other parts at their smallest, never at what the pack gives up).
  */
-export function maxPills(headerWidth: number): number {
-  return Math.max(3, Math.min(12, Math.floor(headerWidth / 190)));
+export function maxPills(headerWidth: number, packRoom?: number): number {
+  const byWidth = Math.floor(headerWidth / 190);
+  // The room the rest of the header leaves the pack: a pill the header squeezes still needs its number, and a +N button needs its own.
+  const byRoom = packRoom === undefined ? Infinity : Math.floor((packRoom - PACK_PADDING - MORE_MIN) / PILL_MIN);
+  // Three at least, unless the header has measurably no room for three: then two, and the rest fold into +N.
+  return Math.max(packRoom === undefined ? 3 : 2, Math.min(12, byWidth, byRoom));
 }
+
+/** The least a pill takes (its number, with its gap), the pack's own padding, and the +N button. */
+export const PILL_MIN = 26;
+export const PACK_PADDING = 8;
+export const MORE_MIN = 56;
 
 /**
  * §26.6: which of `count` films in play are pills when `max` is the most that fit. All of them when they fit; otherwise the

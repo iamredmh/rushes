@@ -1,3 +1,5 @@
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { test, expect, videoReady } from "./fixture.js";
 
 // §26: shelving a film from the Film menu, the +N list, the Shelved list, and what a shelved film does and does not do.
@@ -319,3 +321,50 @@ test("a film shelved from another window does not strand the note you were typin
   await expect(pack(page).getByRole("button", { name: /Cutdown/ })).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator(".shbanner")).toHaveCount(0);
 });
+
+// Found with a real eleven-film project: the pack's min-width let the header squeeze it under its own pills, and the
+// Shelved button sat on top of the last one. Nothing in the header may cover anything else, whatever the width.
+const NAMES = [
+  "Key: nobody holds your whole key", "Pointer: your assets don't live at one address", "Signed: the network signs every page you open",
+  "Pay: you choose what to pay with", "Every network: all your assets in one place", "Unlock: sign in the way you unlock your phone",
+  "One chain: see everything, or just one network", "Wrong address caught", "Hide balance (privacy mode)", "Contacts (send to a name)", "Notes (share a note once)",
+];
+for (const width of [1600, 1440, 1360, 1280, 1150, 1101]) {
+  test(`at ${width} px eleven long-named films with four formats, four shelved, leave nothing in the header covered`, async ({ page, rushes }) => {
+    test.setTimeout(120_000);
+    const SIZES = [{ width: 640, height: 360 }, { width: 360, height: 640 }, { width: 480, height: 480 }, { width: 384, height: 480 }];
+    const first = await rushes.addFormatsCut(SIZES, { video: NAMES[0] });
+    // Each format chip carries its open-note count, as a real project's do; and the project has a real, long name.
+    for (const f of first.version.formats) await rushes.api("POST", "/api/notes", { stage: "picture", video: "key-nobody-holds-your-whole-key", version: first.version.id, format: f.id, scope: "point", t: 0.4, text: `Note on ${f.label}` });
+    const file = join(rushes.root, ".rushes", "project.json");
+    await writeFile(file, JSON.stringify({ ...JSON.parse(await readFile(file, "utf8")), name: "2026-10-12-lumen-protected-review" }, null, 2));
+    for (const name of NAMES.slice(1)) await rushes.addCut(`${name} cut`, name);
+    for (const i of [1, 7, 8, 9]) {
+      const id = ((await rushes.api("GET", "/api/state")).project.videos as any[])[i].id;
+      await rushes.api("PUT", `/api/videos/${id}/shelve`, { shelved: true });
+    }
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto(rushes.url);
+    await videoReady(page);
+    await expect(shelvedButton(page)).toBeVisible();
+    const covered = await page.locator("header.head").evaluate((h) => {
+      const boxes = [...h.children]
+        .filter((c) => (c as HTMLElement).offsetParent !== null && c.getBoundingClientRect().width > 0)
+        .map((c) => ({ name: `${c.tagName.toLowerCase()}.${c.className}`.slice(0, 32), r: c.getBoundingClientRect() }));
+      const out: string[] = [];
+      for (let i = 0; i < boxes.length; i++)
+        for (let j = i + 1; j < boxes.length; j++) {
+          const a = boxes[i].r, b = boxes[j].r;
+          const sameRow = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 4;
+          if (sameRow && Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1) out.push(`${boxes[i].name} covers ${boxes[j].name}`);
+        }
+      // The pack holds its own pills.
+      const pack = h.querySelector(".pack") as HTMLElement | null;
+      if (pack) for (const p of pack.querySelectorAll<HTMLElement>(".pill")) if (p.getBoundingClientRect().right > pack.getBoundingClientRect().right + 1) out.push(`a pill runs out of the pack: ${p.textContent?.trim().slice(0, 12)}`);
+      return out;
+    });
+    expect(covered).toEqual([]);
+    // And it stays one row from 1101 px, as a long project's header always has.
+    expect(await page.locator("header.head").evaluate((h) => Math.round(h.getBoundingClientRect().height))).toBeLessThan(90);
+  });
+}
