@@ -159,10 +159,11 @@ export function Picture({
   // jumping to a newer cut: an In/Out, a box or a half-typed note. A grab alone is excluded:
   // the frame is already saved to screenshots/, so nothing is lost if a newer cut arrives.
   useEffect(() => {
-    const pending = range.in !== null || box !== null || noteHasText;
+    // A shelved film is view-only: its note box is hidden, so a draft left in it holds nothing (and comes back if the film is restored).
+    const pending = !readOnly && (range.in !== null || box !== null || noteHasText);
     onPendingChange?.(pending);
     return () => onPendingChange?.(false);
-  }, [range.in, box, noteHasText]);
+  }, [range.in, box, noteHasText, readOnly]);
   // R7: tell the caller while a drawn box waits, so a format switch can wait for it.
   useEffect(() => {
     // As in the mockup, drawing a box puts the note back on This format, and it stays there.

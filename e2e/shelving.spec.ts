@@ -253,3 +253,69 @@ test("the audio tabs are view-only too while a shelved film is open: a note left
   await page.getByRole("button", { name: "Restore Cutdown" }).click();
   await expect(page.getByLabel("New note")).toBeVisible();
 });
+
+test("holding Shift+S shelves one film, not every film the key repeat lands on", async ({ page, rushes }) => {
+  await films(rushes, ["Hero", "Cutdown", "Teaser"]);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  const shelvedCount = async () => ((await rushes.api("GET", "/api/state")).project.videos as any[]).filter((v) => v.shelved).length;
+  await page.keyboard.down("Shift");
+  await page.keyboard.down("S");
+  await page.keyboard.down("S");
+  await page.keyboard.down("S");
+  await page.keyboard.up("S");
+  await page.keyboard.up("Shift");
+  await expect.poll(shelvedCount).toBeGreaterThanOrEqual(1);
+  await page.waitForTimeout(400);
+  expect(await shelvedCount()).toBe(1);
+});
+
+test("Undo goes back to the film only when the restore worked", async ({ page, rushes }) => {
+  await films(rushes, ["Hero", "Cutdown", "Teaser"]);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await page.route("**/api/videos/hero/shelve", (route) => {
+    if (route.request().postDataJSON()?.shelved === false) {
+      return route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "internal", message: "Could not restore" }) });
+    }
+    return route.continue();
+  });
+  await shelveCurrent(page);
+  await expect(pack(page).getByRole("button", { name: /Cutdown/ })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Undo" }).click();
+  // The restore failed: Hero is still shelved, and you are still on the film you were moved to, not on a view-only Hero.
+  await expect(page.getByText("Could not restore")).toBeVisible();
+  await expect(page.locator(".shbanner")).toHaveCount(0);
+  await expect(pack(page).getByRole("button", { name: /Cutdown/ })).toHaveAttribute("aria-pressed", "true");
+  expect(((await rushes.api("GET", "/api/state")).project.videos as any[]).find((v) => v.id === "hero").shelved).toBeTruthy();
+});
+
+test("the shelved banner is only on the tabs that are view-only", async ({ page, rushes }) => {
+  await films(rushes, ["Hero", "Cutdown"]);
+  await rushes.api("PUT", "/api/videos/cutdown/shelve", { shelved: true });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await shelvedButton(page).click();
+  await page.getByRole("button", { name: "Open Cutdown" }).click();
+  await videoReady(page);
+  await expect(page.locator(".shbanner")).toBeVisible();
+  // Assets has nothing read-only about it.
+  await page.keyboard.press("8");
+  await expect(page.locator(".shbanner")).toHaveCount(0);
+  await page.keyboard.press("2");
+  await expect(page.locator(".shbanner")).toBeVisible();
+});
+
+test("a film shelved from another window does not strand the note you were typing on it", async ({ page, rushes }) => {
+  await films(rushes, ["Hero", "Cutdown", "Teaser"]);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await page.getByLabel("New note").click();
+  await page.keyboard.type("Half a thought");
+  await rushes.api("PUT", "/api/videos/hero/shelve", { shelved: true });
+  await expect(page.locator(".shbanner")).toBeVisible();
+  // The box is hidden on a shelved film, so it no longer holds you here: switching films works.
+  await pack(page).getByRole("button", { name: /Cutdown/ }).click();
+  await expect(pack(page).getByRole("button", { name: /Cutdown/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator(".shbanner")).toHaveCount(0);
+});

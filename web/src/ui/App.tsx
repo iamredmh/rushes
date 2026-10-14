@@ -33,6 +33,8 @@ declare global {
 }
 
 const ORDER: Stage[] = ["script", "picture", "voice", "music", "sfx", "mix", "visuals"];
+// §26: the tabs that look at a film, and so are view-only while it is shelved (the others are not about one film).
+const SHELVED_VIEW_ONLY: ReadonlySet<string> = new Set(["picture", "voice", "music", "sfx", "mix"]);
 // Assets isn't a review stage (§15.3): it's a dashboard-only tab after the six stages, so it's
 // kept out of Stage and ORDER entirely and handled as its own case throughout this file.
 type View = Stage | "assets" | "brief" | "storyboard";
@@ -267,10 +269,11 @@ export function App() {
   // The latest switchFilm, for the Undo on a toast made a render ago (its own closure would still see the old film).
   const switchFilmRef = useRef(switchFilm);
   switchFilmRef.current = switchFilm;
-  const setShelved = async (film: Video, shelved: boolean) => {
-    if (!state) return;
+  /** True when the change was made: Undo goes back to the film only then. */
+  const setShelved = async (film: Video, shelved: boolean): Promise<boolean> => {
+    if (!state) return false;
     // Shelving the film you are in moves you to another film, so it waits for a half-typed note, as switching films does.
-    if (shelved && film.id === video?.id && pending) return toast(`Add or clear your note on ${film.name} first`);
+    if (shelved && film.id === video?.id && pending) return toast(`Add or clear your note on ${film.name} first`), false;
     try {
       await api.put<{ video: Video }>(`/api/videos/${film.id}/shelve`, { shelved });
       if (shelved && film.id === video?.id) {
@@ -280,12 +283,14 @@ export function App() {
       }
       void refresh();
       if (shelved) {
-        toast(`“${film.name}” shelved`, 6000, { label: "Undo", run: () => void setShelved(film, false).then(() => switchFilmRef.current(film.id)) });
+        toast(`“${film.name}” shelved`, 6000, { label: "Undo", run: () => void setShelved(film, false).then((ok) => ok && switchFilmRef.current(film.id)) });
       } else {
         toast(`“${film.name}” restored`);
       }
+      return true;
     } catch (e) {
       toast((e as Error).message);
+      return false;
     }
   };
   const toggleShelved = () => {
@@ -366,7 +371,8 @@ export function App() {
       if (n === 1) planKey();
       else if (n >= 2 && n <= 7) show(ORDER[n - 1]);
       else if (n === 8) showAssets();
-      if (e.key === "S" && e.shiftKey) toggleShelved();
+      // Not on key repeat: a held key would shelve the next film too, and the next.
+      if (e.key === "S" && e.shiftKey && !e.repeat) toggleShelved();
       if ((e.key === "[" || e.key === "]") && state) {
         const nxt = neighbourVideo(state.project.videos, videoId, e.key === "]" ? 1 : -1);
         if (nxt) switchFilm(nxt);
@@ -712,7 +718,7 @@ export function App() {
       </nav>
       {problem && !wrongProject && <div class="banner"><Icon name="alert" />{problem}</div>}
 
-      {video?.shelved && <ShelvedBanner video={video} onRestore={() => void setShelved(video, false)} />}
+      {video?.shelved && SHELVED_VIEW_ONLY.has(stage) && <ShelvedBanner video={video} onRestore={() => void setShelved(video, false)} />}
 
       <main class={`body${video?.shelved ? " fshelved" : ""}`} ref={bodyRef}>
         {stage === "assets" ? (
