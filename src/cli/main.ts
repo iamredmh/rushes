@@ -62,7 +62,7 @@ Usage
                                                     register a doc, image, caption, export, delivery or edit file
   rushes lock <video> <version>                     lock the picture at a cut
   rushes unlock <video>                             unlock the picture
-  rushes notes [--stage S] [--status todo|done] [--batch ID] [--json]
+  rushes notes [--stage S] [--status todo|done] [--batch ID] [--include-shelved] [--json]
   rushes reply <note-id> <text> [--done] [--fix-t SECONDS] [--fix-version V]
   rushes assets [--kind K] [--json]                 cuts, takes, variants, screenshots and library files
   rushes scan [--film NAME] [--json]                look through the folder for the files that go with the cut; also brings in the current set
@@ -101,6 +101,7 @@ const OPTIONS = {
   area: { type: "string" },
   md: { type: "boolean" },
   json: { type: "boolean" },
+  "include-shelved": { type: "boolean" },
   done: { type: "boolean" },
   "fix-t": { type: "string" },
   "fix-version": { type: "string" },
@@ -446,6 +447,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
       case "notes": {
         const q = new URLSearchParams();
         for (const k of ["stage", "status", "batch"] as const) if (o[k]) q.set(k, o[k]!);
+        if (o["include-shelved"]) q.set("includeShelved", "true");
         const c = await client();
         const { notes } = await c.get(`/api/notes${q.size ? `?${q}` : ""}`);
         if (o.json) return io.out(JSON.stringify(notes, null, 2)), 0;

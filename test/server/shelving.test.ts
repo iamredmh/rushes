@@ -86,6 +86,16 @@ describe("what the agent sees of a shelved film", () => {
     expect((await call("GET", "/api/notes?stage=picture&includeShelved=true")).json.notes).toHaveLength(3);
   });
 
+  it("keeps a sent batch's notes on a film shelved afterwards: asking for that batch lists them all", async () => {
+    const { call } = await setup();
+    const sent = await call("POST", "/api/batches", { stage: "picture" });
+    expect(sent.json.batch.noteIds).toHaveLength(3);
+    await call("PUT", "/api/videos/teaser/shelve", { shelved: true });
+    expect((await call("GET", "/api/notes?stage=picture")).json.notes).toHaveLength(1);
+    const batch = (await call("GET", `/api/notes?batch=${sent.json.batch.id}`)).json.notes;
+    expect(batch.map((n: any) => n.text).sort()).toEqual(["Hero fix.", "Teaser fix one.", "Teaser fix two."]);
+  });
+
   it("leaves it out of a batch, which keeps the film's notes unsent", async () => {
     const { call } = await setup();
     await call("PUT", "/api/videos/teaser/shelve", { shelved: true });

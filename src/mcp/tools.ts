@@ -147,7 +147,7 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     {
       title: "Bring files in",
       description:
-        "Registers files from inside the project folder: voice reads, music and sfx as unpicked variants, video as cuts, md, txt and pdf as docs. Nothing is picked. Returns what was added and, for each file that couldn't come in, why (a path outside the project folder is refused). Up to 60 files, 12 of a kind.",
+        "Registers files from inside the project folder: voice reads, music and sfx as unpicked variants, video as cuts, md, txt and pdf as docs. Nothing is picked. Returns what was added and, for each file that couldn't come in, why (a path outside the project folder is refused). Up to 60 files, 12 of a kind. A cut with no `film` joins a film in play, never one the user shelved; naming a shelved film (or having only shelved films) brings it back, and the reply lists it in `restored`.",
       inputSchema: {
         project,
         files: z.array(bringInItem).min(1).max(BRING_IN_MAX).describe("Each: path (absolute or relative to the project), kind when the name doesn't say, round for a voice read."),

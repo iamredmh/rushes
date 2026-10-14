@@ -39,6 +39,25 @@ describe("rushes status with a shelved film", () => {
   });
 });
 
+describe("rushes notes with a shelved film", () => {
+  it("leaves the shelved film's notes out, and lists them again with --include-shelved", async () => {
+    const { root, s, shelve } = await twoFilms();
+    const note = (video: string, text: string) =>
+      fetch(`${s.url}/api/notes`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ stage: "picture", video, version: "v1", scope: "point", t: 1, text }) });
+    await note("hero", "Hero fix.");
+    await note("teaser", "Teaser fix.");
+    await shelve("teaser", true);
+    const plain = io(root);
+    expect(await main(["notes"], plain.x)).toBe(0);
+    expect(plain.out.join("\n")).toContain("Hero fix.");
+    expect(plain.out.join("\n")).not.toContain("Teaser fix.");
+    const all = io(root);
+    expect(await main(["notes", "--include-shelved"], all.x)).toBe(0);
+    expect(all.out.join("\n")).toContain("Teaser fix.");
+    await s.close();
+  });
+});
+
 describe("rushes add version on a shelved film", () => {
   it("says the film was brought back", async () => {
     const { root, s, shelve } = await twoFilms();
