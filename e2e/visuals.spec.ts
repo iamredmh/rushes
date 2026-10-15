@@ -125,23 +125,38 @@ test("the composer always names the visual in the middle of the screen, however 
       const inMiddle = [...sc.querySelectorAll<HTMLElement>(".vz")].find((e) => e.getBoundingClientRect().top <= line && line < e.getBoundingClientRect().bottom);
       return { middle: inMiddle?.querySelector("h2")?.textContent?.trim() ?? "", target: document.querySelector(".vztarget b")?.textContent ?? "" };
     });
-  const jump = (index: number, nudge = 0) =>
-    page.evaluate(async ([k, n]) => {
+  const jump = (index: number) =>
+    page.evaluate(async (k) => {
       const sc = document.querySelector<HTMLElement>(".vzscroll")!;
-      const el = sc.querySelectorAll<HTMLElement>(".vz")[k as number];
+      const el = sc.querySelectorAll<HTMLElement>(".vz")[k];
       sc.style.scrollBehavior = "auto";
-      // The scroll position that puts the middle of the scroll area at the middle of that visual (+ a nudge).
-      const top = sc.scrollTop + (el.getBoundingClientRect().top + el.offsetHeight / 2 - (sc.getBoundingClientRect().top + sc.clientHeight / 2)) + (n as number);
+      // The scroll position that puts the middle of the scroll area at the middle of that visual.
+      const top = sc.scrollTop + (el.getBoundingClientRect().top + el.offsetHeight / 2 - (sc.getBoundingClientRect().top + sc.clientHeight / 2));
       sc.scrollTo({ top, behavior: "instant" });
       await new Promise((r) => setTimeout(r, 250));
-    }, [index, nudge] as const);
-  // Far jumps, back-and-forth, and parking the line right on a boundary between two visuals before settling.
-  for (const [k, nudge] of [[3, 0], [6, 0], [1, 0], [6, 0], [5, 0], [7, 0], [2, 0], [6, 368], [6, 0], [2, -368], [2, 0], [4, 0], [0, 0]] as const) {
-    await jump(k, nudge);
+    }, index);
+  // The middle line of the scroll area exactly on the line between visual k and the next: both touch it for a moment.
+  const onBoundary = (k: number) =>
+    page.evaluate(async (i) => {
+      const sc = document.querySelector<HTMLElement>(".vzscroll")!;
+      const next = sc.querySelectorAll<HTMLElement>(".vz")[i + 1];
+      sc.style.scrollBehavior = "auto";
+      sc.scrollTo({ top: sc.scrollTop + (next.getBoundingClientRect().top - (sc.getBoundingClientRect().top + sc.clientHeight / 2)), behavior: "instant" });
+      await new Promise((r) => setTimeout(r, 250));
+    }, k);
+  // Far jumps and back-and-forth.
+  for (const k of [3, 6, 1, 6, 5, 7, 2, 4, 0]) {
     await jump(k);
     const { middle, target } = await state();
     expect(middle).not.toBe("");
     expect(target, `after jumping to visual ${k + 1}`).toContain(middle);
+  }
+  // Parked on a boundary, then settling on either side of it: the one it settles on is the one named.
+  for (const [boundary, settle] of [[2, 2], [2, 3], [5, 5], [5, 6], [0, 0], [0, 1], [6, 6], [6, 7], [3, 3], [3, 4]] as const) {
+    await onBoundary(boundary);
+    await jump(settle);
+    const { middle, target } = await state();
+    expect(target, `parked between visuals ${boundary + 1} and ${boundary + 2}, then on ${settle + 1}`).toContain(middle);
   }
   // The version in the target is the one on screen: Post 7 has a newer version.
   await jump(6);

@@ -254,18 +254,33 @@ export function Visuals({ state, toast, onChanged, onPendingChange }: { state: S
     });
   };
 
-  // Which visual is current: the one crossing the middle of the scroll area.
+  // Which visual is current: the one the middle of the scroll area is in. It is read from where the line is (on scroll and on resize),
+  // never from which visual last started to cross it: with two touching the line at once, the last to be reported could be the wrong one.
   useEffect(() => {
     const root = scroller.current;
     if (!root) return;
-    const io = new IntersectionObserver(
-      (entries) => {
-        for (const e of entries) if (e.isIntersecting) setCur((e.target as HTMLElement).dataset.visual ?? "");
-      },
-      { root, rootMargin: "-50% 0px -50% 0px", threshold: 0 },
-    );
-    root.querySelectorAll(".vz").forEach((el) => io.observe(el));
-    return () => io.disconnect();
+    let frame = 0;
+    const pick = () => {
+      frame = 0;
+      const line = root.getBoundingClientRect().top + root.clientHeight / 2;
+      for (const el of Array.from(root.querySelectorAll<HTMLElement>(".vz"))) {
+        const r = el.getBoundingClientRect();
+        if (r.top <= line && line < r.bottom) return void setCur(el.dataset.visual ?? "");
+      }
+    };
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(pick);
+    };
+    root.addEventListener("scroll", schedule, { passive: true });
+    const ro = new ResizeObserver(schedule);
+    ro.observe(root);
+    root.querySelectorAll(".vz").forEach((el) => ro.observe(el));
+    pick();
+    return () => {
+      root.removeEventListener("scroll", schedule);
+      ro.disconnect();
+      if (frame) cancelAnimationFrame(frame);
+    };
   }, [visuals.map((v) => v.id).join(",")]);
 
   const scrollTo = (id: string, smooth = true) => {
