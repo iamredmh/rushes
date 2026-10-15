@@ -50,6 +50,25 @@ export function defaultView(v: Visual): View {
   return { page: 1, ratio: last.pages[0]?.images[0]?.ratio ?? "", ver: last.id };
 }
 
+/**
+ * What a visual remembers of what you chose: its page and ratio, and an older version only as a look back. A look back is kept
+ * with the newest version there was when you chose it (`since`), so it lapses the moment a newer one is registered.
+ */
+export type StoredView = Partial<View> & { since?: string };
+
+/** What to remember of `view`: nothing about the version when it is the newest, else the version and what was newest then. */
+export function remember(v: Visual, view: View): StoredView {
+  const { ver, ...rest } = view;
+  return ver === newest(v).id ? rest : { ...rest, ver, since: newest(v).id };
+}
+
+/** What a visual shows: the newest version, unless you are looking back and nothing newer has come in since you chose to. */
+export function resolveView(v: Visual, stored: StoredView | undefined): View {
+  const { ver, since, ...rest } = stored ?? {};
+  const lookingBack = ver !== undefined && since === newest(v).id;
+  return { ...defaultView(v), ...rest, ...(lookingBack ? { ver } : {}) };
+}
+
 /** Marks go on the newest version only: an older one is there to look at. */
 export const canMark = (v: Visual, view: View): boolean => view.ver === newest(v).id;
 

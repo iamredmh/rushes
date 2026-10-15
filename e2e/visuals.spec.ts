@@ -109,6 +109,84 @@ test("scrolling makes the visual in the middle the current one, and the composer
   await expect(section(page, "launch-carousel")).not.toHaveClass(/cur/);
 });
 
+test("the composer always names the visual in the middle of the screen, however far or in which order you scroll", async ({ page, rushes }) => {
+  // Eight visuals, as a real project has, some with newer versions: the composer's target is the one in the middle, at its newest.
+  for (let i = 1; i <= 8; i++) await pic(rushes, `visuals/v${i}.png`, 108, 135, [30 * i, 90, 160]);
+  await pic(rushes, "visuals/v-new.png", 108, 135, [20, 200, 90]);
+  for (let i = 1; i <= 8; i++) await rushes.api("POST", "/api/visuals", { name: `Post ${i}`, pages: [{ files: [`visuals/v${i}.png`] }] });
+  for (const id of ["post-3", "post-7"]) await rushes.api("POST", "/api/visuals", { visual: id, label: "Newer", pages: [{ n: 1, files: ["visuals/v-new.png"] }] });
+  await page.goto(rushes.url);
+  await page.getByRole("tab", { name: /Visuals/ }).click();
+  await expect(section(page, "post-1")).toBeVisible();
+  const state = () =>
+    page.evaluate(() => {
+      const sc = document.querySelector<HTMLElement>(".vzscroll")!;
+      const line = sc.getBoundingClientRect().top + sc.clientHeight / 2;
+      const inMiddle = [...sc.querySelectorAll<HTMLElement>(".vz")].find((e) => e.getBoundingClientRect().top <= line && line < e.getBoundingClientRect().bottom);
+      return { middle: inMiddle?.querySelector("h2")?.textContent?.trim() ?? "", target: document.querySelector(".vztarget b")?.textContent ?? "" };
+    });
+  const jump = (index: number, nudge = 0) =>
+    page.evaluate(async ([k, n]) => {
+      const sc = document.querySelector<HTMLElement>(".vzscroll")!;
+      const el = sc.querySelectorAll<HTMLElement>(".vz")[k as number];
+      sc.style.scrollBehavior = "auto";
+      // The scroll position that puts the middle of the scroll area at the middle of that visual (+ a nudge).
+      const top = sc.scrollTop + (el.getBoundingClientRect().top + el.offsetHeight / 2 - (sc.getBoundingClientRect().top + sc.clientHeight / 2)) + (n as number);
+      sc.scrollTo({ top, behavior: "instant" });
+      await new Promise((r) => setTimeout(r, 250));
+    }, [index, nudge] as const);
+  // Far jumps, back-and-forth, and parking the line right on a boundary between two visuals before settling.
+  for (const [k, nudge] of [[3, 0], [6, 0], [1, 0], [6, 0], [5, 0], [7, 0], [2, 0], [6, 368], [6, 0], [2, -368], [2, 0], [4, 0], [0, 0]] as const) {
+    await jump(k, nudge);
+    await jump(k);
+    const { middle, target } = await state();
+    expect(middle).not.toBe("");
+    expect(target, `after jumping to visual ${k + 1}`).toContain(middle);
+  }
+  // The version in the target is the one on screen: Post 7 has a newer version.
+  await jump(6);
+  await expect.poll(async () => (await state()).target).toContain("v2");
+});
+
+test("a version registered while you are looking back at an older one brings you to the newest", async ({ page, rushes }) => {
+  for (let i = 1; i <= 3; i++) await pic(rushes, `visuals/s-v${i}.png`, 108, 135, [60 * i, 90, 160]);
+  await rushes.api("POST", "/api/visuals", { name: "Scanner", pages: [{ files: ["visuals/s-v1.png"] }] });
+  await rushes.api("POST", "/api/notes", { stage: "visuals", scope: "whole", version: "v1", on: "scanner/1", format: "4x5", text: "Remove the QR code." });
+  await rushes.api("POST", "/api/visuals", { visual: "scanner", label: "QR gone", pages: [{ n: 1, files: ["visuals/s-v2.png"] }] });
+  await page.goto(rushes.url);
+  await page.getByRole("tab", { name: /Visuals/ }).click();
+  await expect(section(page, "scanner")).toBeVisible();
+  await expect(section(page, "scanner").locator(".vzchip").first()).toHaveText("v2");
+  // Open the old note to see where it was: that looks back at v1, and says so.
+  await page.locator(".vznote", { hasText: "Remove the QR code." }).click();
+  await expect(page.locator(".vzbanner")).toContainText("Viewing v1");
+  // The agent registers v3: you are taken to it, not left on v1.
+  await rushes.api("POST", "/api/visuals", { visual: "scanner", label: "Cleaner", pages: [{ n: 1, files: ["visuals/s-v3.png"] }] });
+  await expect(page.locator(".vzbanner")).toHaveCount(0);
+  await expect(section(page, "scanner").locator(".vzchip").first()).toHaveText("v3");
+  await expect(page.locator(".vztarget")).toContainText("v3");
+});
+
+test("Return submits the note, Shift+Return is a new line, and Cmd+Return still submits", async ({ page, rushes }) => {
+  await withVisuals(rushes);
+  await openVisuals(page, rushes);
+  const box = page.getByLabel("Note text");
+  await box.click();
+  await box.fill("First line");
+  await page.keyboard.press("Shift+Enter");
+  await page.keyboard.type("second line");
+  await expect(box).toHaveValue("First line\nsecond line");
+  await page.keyboard.press("Enter");
+  await expect(box).toHaveValue("");
+  await expect.poll(async () => (await notesJson(rushes)).length).toBe(1);
+  expect((await notesJson(rushes))[0]).toMatchObject({ stage: "visuals", scope: "whole", text: "First line\nsecond line" });
+  // An empty box does nothing on Return; Cmd+Return still adds.
+  await page.keyboard.press("Enter");
+  await box.fill("Third");
+  await page.keyboard.press("Meta+Enter");
+  await expect.poll(async () => (await notesJson(rushes)).length).toBe(2);
+});
+
 test("dragging draws a region, a click drops a point, and Add note saves them on the right page, ratio and version", async ({ page, rushes }) => {
   await withVisuals(rushes);
   await openVisuals(page, rushes);
