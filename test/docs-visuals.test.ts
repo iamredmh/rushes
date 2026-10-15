@@ -12,7 +12,9 @@ describe("shipped docs: Visuals (§25)", () => {
     expect(text).toContain("every aspect ratio");
     expect(text).toContain("only the pages that changed");
     expect(text).toContain("fixVersion");
-    expect(text).toContain("never mark a note done");
+    // The agent marks a fixed note done, as on every other tab (§25.5): the user can open one again.
+    expect(text).toContain('status: "done"');
+    expect(text).not.toMatch(/never mark a note done|You never mark/);
     // A note names its picture and where on it the mark is.
     expect(text).toMatch(/region.*point.*whole image/s);
   });

@@ -955,7 +955,7 @@ describe("rushes_add_visual (§25.5)", () => {
     await t.close();
   });
 
-  it("says in its description what to send for a new visual and for a new version, and that the agent never marks a note done", async () => {
+  it("says in its description what to send for a new visual and for a new version, and that a fixed note is marked done", async () => {
     const t = await connect();
     const { tools } = await t.client.listTools();
     const tool = tools.find((x) => x.name === "rushes_add_visual")!;
@@ -963,6 +963,8 @@ describe("rushes_add_visual (§25.5)", () => {
     expect(tool.description).toMatch(/only the pages that changed/);
     expect(tool.description).toMatch(/aspect ratio/);
     expect(tool.description).toMatch(/rushes_reply/);
+    expect(tool.description).toMatch(/status "done"/);
+    expect(tool.description).not.toMatch(/never mark a note done/);
     await t.close();
   });
 });

@@ -49,7 +49,7 @@ When a user starts briefing in the chat, offer to keep `brief.md` up to date as 
 
 ## Visuals
 
-For stills, standalone images and carousels, register one visual per post with `rushes_add_visual`: a `name` and `pages`, each page with its pictures, one per aspect ratio, in every aspect ratio the post comes in (Rushes reads each ratio from the picture). The user marks a region, a point or the whole image in the Visuals tab and sends a batch; each note names its visual, version, page, ratio, where on the picture it is (`words`) and the `file` to open. A note with no ratio is for every ratio. Fix the pictures, register a new version with `rushes_add_visual` (`visual` and only the pages that changed, each with `n`), then `rushes_reply` to each note with `fixVersion` set to it. You never mark a note done. The full contract is in `AGENTS.md`.
+For stills, standalone images and carousels, register one visual per post with `rushes_add_visual`: a `name` and `pages`, each page with its pictures, one per aspect ratio, in every aspect ratio the post comes in (Rushes reads each ratio from the picture). The user marks a region, a point or the whole image in the Visuals tab and sends a batch; each note names its visual, version, page, ratio, where on the picture it is (`words`) and the `file` to open. A note with no ratio is for every ratio. Fix the pictures, register a new version with `rushes_add_visual` (`visual` and only the pages that changed, each with `n`), then `rushes_reply` to each note you fixed with `status: "done"` and `fixVersion` set to it (a note you did not fix stays `todo`, with the reason in `reply`). The full contract is in `AGENTS.md`.
 
 ## Reviewing and fixing
 

@@ -245,6 +245,8 @@ describe("a Visuals batch (§25.5)", () => {
     expect(batch?.prompt).toContain("only the pages that changed");
     expect(batch?.prompt).toContain("fixVersion");
     expect(batch?.prompt).toContain("every ratio");
+    // The agent marks the notes it has fixed done, as it does on every other tab; the user can open one again.
+    expect(batch?.prompt).toContain('status "done"');
     // It is not the Picture instruction.
     expect(batch?.prompt).not.toContain("rushes_add_version");
   });

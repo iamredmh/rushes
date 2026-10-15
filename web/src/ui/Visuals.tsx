@@ -8,7 +8,7 @@ import { api, ApiError, mediaUrl } from "../api.js";
 import type { Note, State, Visual } from "../types.js";
 import {
   STRIP_VISIBLE, boxesOn, canMark, defaultView, dragRefusal, groupNotes, newest, noteNo, notePage, noteVisual, openByPage, shapeFromDrag, stripStart,
-  targetLabel, viewForNote, type Draft, type Shape, type View,
+  remember, resolveView, targetLabel, viewForNote, type Draft, type Shape, type StoredView, type View,
 } from "../visuals.js";
 import { Icon } from "./Icon.js";
 
@@ -232,8 +232,8 @@ export function Visuals({ state, toast, onChanged, onPendingChange }: { state: S
   const visuals = state.visuals.visuals;
   const all = state.notes.notes;
   const [cur, setCur] = useState(visuals[0]?.id ?? "");
-  // A visual's remembered view. `ver` is kept only when the person chose an older version; otherwise the view follows the newest.
-  const [views, setViews] = useState<Record<string, Partial<View>>>({});
+  // A visual's remembered view. An older version is kept only as a look back, until a newer one is registered; otherwise the view follows the newest.
+  const [views, setViews] = useState<Record<string, StoredView>>({});
   const [draft, setDraft] = useState<Draft | null>(null);
   const [sel, setSel] = useState<string | null>(null);
   const [fs, setFs] = useState<string | null>(null);
@@ -241,7 +241,7 @@ export function Visuals({ state, toast, onChanged, onPendingChange }: { state: S
   const scroller = useRef<HTMLDivElement>(null);
   const text = useRef<HTMLTextAreaElement>(null);
 
-  const viewOf = (v: Visual): View => ({ ...defaultView(v), ...views[v.id] });
+  const viewOf = (v: Visual): View => resolveView(v, views[v.id]);
   const visual = visuals.find((v) => v.id === cur) ?? visuals[0];
   const setView = (v: Visual, patch: Partial<View>) => {
     setViews((m) => {
@@ -250,7 +250,7 @@ export function Visuals({ state, toast, onChanged, onPendingChange }: { state: S
       const ver = v.versions.find((x) => x.id === next.ver) ?? newest(v);
       const pg = Math.max(1, Math.min(ver.pages.length, next.page));
       const ratio = ver.pages[0]?.images.some((i) => i.ratio === next.ratio) ? next.ratio : (ver.pages[0]?.images[0]?.ratio ?? next.ratio);
-      return { ...m, [v.id]: { page: pg, ratio, ...(ver.id === newest(v).id ? {} : { ver: ver.id }) } };
+      return { ...m, [v.id]: remember(v, { page: pg, ratio, ver: ver.id }) };
     });
   };
 
@@ -551,7 +551,11 @@ export function Visuals({ state, toast, onChanged, onPendingChange }: { state: S
               setDraft((d) => (d ? { ...d, text: t } : visual ? { vis: visual.id, ...viewOf(visual), shape: null, text: t } : d));
             }}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void add();
+              // Return adds the note, as it does on every other tab; Shift+Return is a new line.
+              if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+                e.preventDefault();
+                if ((e.currentTarget as HTMLTextAreaElement).value.trim()) void add();
+              }
               if (e.key === "Escape") {
                 e.stopPropagation();
                 setDraft(null);

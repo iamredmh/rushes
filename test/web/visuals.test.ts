@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  STRIP_VISIBLE, boxesOn, canMark, defaultView, dragRefusal, groupNotes, noteNo, openByPage, shapeFromDrag, stripStart, targetLabel, viewForNote,
+  STRIP_VISIBLE, boxesOn, canMark, defaultView, dragRefusal, groupNotes, noteNo, openByPage, remember, resolveView, shapeFromDrag, stripStart, targetLabel, viewForNote,
 } from "../../web/src/visuals.js";
 import type { Note, Visual } from "../../web/src/types.js";
 
@@ -43,6 +43,30 @@ describe("a mark drawn on the picture", () => {
     expect(shapeFromDrag({ x: 0.4, y: 0.6 }, { x: 0.4, y: 0.6 }, false)).toEqual({ pin: { x: 0.4, y: 0.6 } });
     expect(shapeFromDrag({ x: 0.4, y: 0.6 }, { x: 0.41, y: 0.9 }, true)).toBeNull();
     expect(shapeFromDrag({ x: 0.4, y: 0.6 }, { x: 0.9, y: 0.61 }, true)).toBeNull();
+  });
+});
+
+describe("looking back at an older version", () => {
+  const twoVersions = visual("launch", "Launch carousel", 12, 2);
+  const threeVersions = visual("launch", "Launch carousel", 12, 3);
+  it("is remembered with the newest version at the time, and the newest needs no memory", () => {
+    expect(remember(twoVersions, { page: 3, ratio: "4x5", ver: "v1" })).toEqual({ page: 3, ratio: "4x5", ver: "v1", since: "v2" });
+    expect(remember(twoVersions, { page: 3, ratio: "4x5", ver: "v2" })).toEqual({ page: 3, ratio: "4x5" });
+  });
+  it("holds while nothing newer comes in", () => {
+    const stored = remember(twoVersions, { page: 3, ratio: "4x5", ver: "v1" });
+    expect(resolveView(twoVersions, stored)).toEqual({ page: 3, ratio: "4x5", ver: "v1" });
+  });
+  it("lapses when a newer version is registered: the view follows the newest, on the same page and ratio", () => {
+    const stored = remember(twoVersions, { page: 3, ratio: "4x5", ver: "v1" });
+    expect(resolveView(threeVersions, stored)).toEqual({ page: 3, ratio: "4x5", ver: "v3" });
+    // Looking back from v2 once v3 is out is looking back, until v4.
+    const again = remember(threeVersions, { page: 3, ratio: "4x5", ver: "v2" });
+    expect(resolveView(threeVersions, again).ver).toBe("v2");
+    expect(resolveView(visual("launch", "Launch carousel", 12, 4), again).ver).toBe("v4");
+  });
+  it("starts on the newest with nothing remembered", () => {
+    expect(resolveView(threeVersions, undefined)).toEqual(defaultView(threeVersions));
   });
 });
 
