@@ -163,6 +163,35 @@ test("the composer always names the visual in the middle of the screen, however 
   await expect.poll(async () => (await state()).target).toContain("v2");
 });
 
+test("a note you click ends up on its visual even when the browser cuts the scroll short", async ({ page, rushes }) => {
+  await withVisuals(rushes);
+  await rushes.api("POST", "/api/notes", { stage: "visuals", scope: "whole", version: "v2", on: "launch-carousel/5", format: "4x5", box: { x: 0.1, y: 0.1, w: 0.3, h: 0.2 }, text: "Fix page five." });
+  await rushes.api("POST", "/api/notes", { stage: "visuals", scope: "whole", version: "v1", on: "quote-still/1", format: "16x9", box: { x: 0.2, y: 0.2, w: 0.3, h: 0.3 }, text: "Wide crop is tight." });
+  await openVisuals(page, rushes);
+  // Go down to the second visual, then click the note on the first and cut that smooth scroll off as soon as it starts, as a busy WebKit does.
+  await page.locator(".vznote", { hasText: "Wide crop is tight." }).click();
+  await expect(section(page, "quote-still")).toHaveClass(/cur/);
+  await scrollSettled(page);
+  await page.locator(".vznote", { hasText: "Fix page five." }).click();
+  await page.evaluate(() => {
+    const sc = document.querySelector<HTMLElement>(".vzscroll")!;
+    sc.scrollTo({ top: sc.scrollTop, behavior: "instant" });
+  });
+  // The first visual is current, it is the one in the middle of the screen, and the composer names it.
+  await expect(section(page, "launch-carousel")).toHaveClass(/cur/);
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const sc = document.querySelector<HTMLElement>(".vzscroll")!;
+        const line = sc.getBoundingClientRect().top + sc.clientHeight / 2;
+        const r = document.querySelector<HTMLElement>('.vz[data-visual="launch-carousel"]')!.getBoundingClientRect();
+        return r.top <= line && line < r.bottom;
+      }),
+    )
+    .toBe(true);
+  await expect(page.locator(".vztarget")).toContainText("Launch carousel");
+});
+
 test("a version registered while you are looking back at an older one brings you to the newest", async ({ page, rushes }) => {
   for (let i = 1; i <= 3; i++) await pic(rushes, `visuals/s-v${i}.png`, 108, 135, [60 * i, 90, 160]);
   await rushes.api("POST", "/api/visuals", { name: "Scanner", pages: [{ files: ["visuals/s-v1.png"] }] });

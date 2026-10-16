@@ -254,6 +254,9 @@ export function Visuals({ state, toast, onChanged, onPendingChange }: { state: S
     });
   };
 
+  // The frame watching a smooth scroll to see that it arrives (see scrollTo).
+  const settling = useRef(0);
+
   // Which visual is current: the one the middle of the scroll area is in. It is read from where the line is (on scroll and on resize),
   // never from which visual last started to cross it: with two touching the line at once, the last to be reported could be the wrong one.
   useEffect(() => {
@@ -272,20 +275,48 @@ export function Visuals({ state, toast, onChanged, onPendingChange }: { state: S
       if (!frame) frame = requestAnimationFrame(pick);
     };
     root.addEventListener("scroll", schedule, { passive: true });
+    // The reader taking the scroll over ends any scroll Rushes started for them.
+    const takeOver = () => cancelAnimationFrame(settling.current);
+    const takeOverEvents = ["wheel", "touchstart", "pointerdown", "keydown"] as const;
+    for (const t of takeOverEvents) root.addEventListener(t, takeOver, { passive: true });
     const ro = new ResizeObserver(schedule);
     ro.observe(root);
     root.querySelectorAll(".vz").forEach((el) => ro.observe(el));
     pick();
     return () => {
       root.removeEventListener("scroll", schedule);
+      for (const t of takeOverEvents) root.removeEventListener(t, takeOver);
+      cancelAnimationFrame(settling.current);
       ro.disconnect();
       if (frame) cancelAnimationFrame(frame);
     };
   }, [visuals.map((v) => v.id).join(",")]);
 
   const scrollTo = (id: string, smooth = true) => {
-    const el = scroller.current?.querySelector<HTMLElement>(`.vz[data-visual="${id}"]`);
-    if (el) scroller.current!.scrollTo({ top: el.offsetTop, behavior: smooth ? "smooth" : "instant" });
+    const root = scroller.current;
+    const el = root?.querySelector<HTMLElement>(`.vz[data-visual="${id}"]`);
+    if (!root || !el) return;
+    root.scrollTo({ top: el.offsetTop, behavior: smooth ? "smooth" : "instant" });
+    if (!smooth) return;
+    // A smooth scroll can be cut short (a layout change, a busy browser), which would leave you looking at another visual than the one
+    // you asked for. Once it has stopped moving, if the visual is still not in the middle, go there; any scroll of the reader's own ends this.
+    cancelAnimationFrame(settling.current);
+    let last = root.scrollTop;
+    let still = 0;
+    let frames = 0;
+    const watch = () => {
+      frames++;
+      still = root.scrollTop === last ? still + 1 : 0;
+      last = root.scrollTop;
+      if (still >= 15 || frames > 180) {
+        const line = root.getBoundingClientRect().top + root.clientHeight / 2;
+        const r = el.getBoundingClientRect();
+        if (!(r.top <= line && line < r.bottom)) root.scrollTo({ top: el.offsetTop, behavior: "instant" });
+        return;
+      }
+      settling.current = requestAnimationFrame(watch);
+    };
+    settling.current = requestAnimationFrame(watch);
   };
 
   // Words in a draft hold the tab, as a half-typed note does on the others.
