@@ -73,6 +73,8 @@ export interface PictureProps {
   onBoxPendingChange?(has: boolean): void;
   /** §21.5: switch to a format ("Show on 9:16" in the Other formats row); the caller's switch, refused while a box waits. */
   onFormatChange?(id: string): void;
+  /** §26: a shelved film is looked at and played, not marked: no In/Out, box or grab, and no note box. */
+  readOnly?: boolean;
 }
 
 const typing = (el: EventTarget | null) => el instanceof HTMLElement && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
@@ -81,7 +83,7 @@ const typing = (el: EventTarget | null) => el instanceof HTMLElement && (el.isCo
 export function Picture({
   video, version, fps, notes, toast, onChanged, onPendingChange, startAt, grab, onGrabChange, playerRef,
   ffmpeg = false, autoProxy = false, proxyJob, noteProxyJob, source = "proxy", onSourceChange, fileSize = null, fileRev,
-  formats = [], format = null, formatMissing = false, onPrimarySize, onBoxPendingChange, onFormatChange,
+  formats = [], format = null, formatMissing = false, onPrimarySize, onBoxPendingChange, onFormatChange, readOnly = false,
 }: PictureProps) {
   const ref = useRef<HTMLVideoElement>(null);
   const frameRef = useRef<HTMLDivElement>(null);
@@ -157,10 +159,11 @@ export function Picture({
   // jumping to a newer cut: an In/Out, a box or a half-typed note. A grab alone is excluded:
   // the frame is already saved to screenshots/, so nothing is lost if a newer cut arrives.
   useEffect(() => {
-    const pending = range.in !== null || box !== null || noteHasText;
+    // A shelved film is view-only: its note box is hidden, so a draft left in it holds nothing (and comes back if the film is restored).
+    const pending = !readOnly && (range.in !== null || box !== null || noteHasText);
     onPendingChange?.(pending);
     return () => onPendingChange?.(false);
-  }, [range.in, box, noteHasText]);
+  }, [range.in, box, noteHasText, readOnly]);
   // R7: tell the caller while a drawn box waits, so a format switch can wait for it.
   useEffect(() => {
     // As in the mockup, drawing a box puts the note back on This format, and it stays there.
@@ -484,6 +487,8 @@ export function Picture({
     }
     else if (e.key === "ArrowLeft") { e.preventDefault(); step(e.shiftKey ? -10 : -1); }
     else if (e.key === "ArrowRight") { e.preventDefault(); step(e.shiftKey ? 10 : 1); }
+    // §26: a shelved film is view only: the marking keys do nothing.
+    else if (readOnly && /^[iogbn]$/.test(k)) return;
     else if (k === "i") setIn();
     else if (k === "o") setOut();
     // Holding G repeats the key: each repeat would be another full decode and PNG round-trip.
@@ -720,11 +725,11 @@ export function Picture({
               <button aria-label="Clear range" onClick={clearRange}><Icon name="x" /></button>
             </span>
           )}
-          <button class="btn ghost ib" data-tip="Set in  I" aria-label="Set in point" onClick={setIn}><Icon name="in" /></button>
-          <button class="btn ghost ib" data-tip="Set out  O" aria-label="Set out point" onClick={setOut}><Icon name="out" /></button>
+          <button class="btn ghost ib" data-tip="Set in  I" aria-label="Set in point" disabled={readOnly} onClick={setIn}><Icon name="in" /></button>
+          <button class="btn ghost ib" data-tip="Set out  O" aria-label="Set out point" disabled={readOnly} onClick={setOut}><Icon name="out" /></button>
           <span class="vsep" />
-          <button class="btn ghost ib" data-tip="Draw a box  B" aria-label="Draw a box" aria-pressed={boxMode} onClick={() => setBoxMode(!boxMode)}><Icon name="box" /></button>
-          <button class="btn ghost ib" data-tip="Grab frame  G" aria-label="Grab frame" aria-busy={grabbing > 0} onClick={() => void grabFrame()}><Icon name="camera" /></button>
+          <button class="btn ghost ib" data-tip="Draw a box  B" aria-label="Draw a box" aria-pressed={boxMode} disabled={readOnly} onClick={() => setBoxMode(!boxMode)}><Icon name="box" /></button>
+          <button class="btn ghost ib" data-tip="Grab frame  G" aria-label="Grab frame" aria-busy={grabbing > 0} disabled={readOnly} onClick={() => void grabFrame()}><Icon name="camera" /></button>
         </div>
 
         <div
@@ -775,6 +780,7 @@ export function Picture({
       )}
 
       <Notes
+        readOnly={readOnly}
         notes={visible}
         version={version.id}
         selectedId={selectedId}

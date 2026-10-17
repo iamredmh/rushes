@@ -153,6 +153,7 @@ export function Voice({ state, assets, video, toast, onChanged, onPendingChange 
     <AudioStage
       stage="voice"
       film={video?.id ?? null}
+      readOnly={!!video?.shelved}
       title={STAGE_NAMES.voice}
       headerExtra={
         <button

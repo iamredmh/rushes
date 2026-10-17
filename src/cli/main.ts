@@ -62,7 +62,7 @@ Usage
                                                     register a doc, image, caption, export, delivery or edit file
   rushes lock <video> <version>                     lock the picture at a cut
   rushes unlock <video>                             unlock the picture
-  rushes notes [--stage S] [--status todo|done] [--batch ID] [--json]
+  rushes notes [--stage S] [--status todo|done] [--batch ID] [--include-shelved] [--json]
   rushes reply <note-id> <text> [--done] [--fix-t SECONDS] [--fix-version V]
   rushes assets [--kind K] [--json]                 cuts, takes, variants, screenshots and library files
   rushes scan [--film NAME] [--json]                look through the folder for the files that go with the cut; also brings in the current set
@@ -101,6 +101,7 @@ const OPTIONS = {
   area: { type: "string" },
   md: { type: "boolean" },
   json: { type: "boolean" },
+  "include-shelved": { type: "boolean" },
   done: { type: "boolean" },
   "fix-t": { type: "string" },
   "fix-version": { type: "string" },
@@ -335,7 +336,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         return 0;
       case "status": {
         const root = rest[0] ? resolve(io.cwd, rest[0]) : dir;
-        const { tabs, brief, storyboard, build } = await (await ensureServer(root, io.ensure)).get("/api/tabs");
+        const { tabs, brief, storyboard, build, films } = await (await ensureServer(root, io.ensure)).get("/api/tabs");
         // The second column starts in the same place on every line: as wide as the longest label shown.
         const w = storyboard?.exists ? "storyboard".length : 8;
         for (const t of tabs as { stage: string; unlocked: boolean; todo: number }[]) {
@@ -346,6 +347,9 @@ export async function main(argv: string[], io: Io): Promise<number> {
         // §24.12: storyboard.md, and whether the plan is approved, once planning has begun.
         if (storyboard?.exists) io.out(`${"storyboard".padEnd(w)} ${storyboard.approved} of ${storyboard.shots} approved${storyboard.changed ? `, ${storyboard.changed} changed` : ""}`);
         if (build?.started) io.out(`${"build".padEnd(w)} ${build.ready ? "ready" : `waiting on ${(build.waitingOn as string[]).join(", ")}`}`);
+        // §26: the films the user has set aside, so an agent leaves them alone. Nothing is printed when none are.
+        const shelved = ((films ?? []) as { name: string; shelved: string | null }[]).filter((f) => f.shelved).map((f) => f.name);
+        if (shelved.length) io.out(`${"shelved".padEnd(w)} ${shelved.join(", ")}`);
         return 0;
       }
       case "doctor": {
@@ -371,7 +375,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
             return 2;
           }
           const r = await (await client()).post("/api/versions", { video: o.video, file: resolve(io.cwd, a), note: o.note, label: o.label });
-          io.out(`Added ${r.video.name} ${r.version.id}`);
+          io.out(`Added ${r.video.name} ${r.version.id}${r.restored ? " (it was shelved: restored)" : ""}`);
           // A Rushes started by an older version ignores `label` and its reply has none.
           if (o.label?.trim() && r.version.label === undefined) io.err("An older Rushes is running and dropped the label: the cut was added without it. Run `rushes stop`, then open again.");
           // §19.5: the server says when this cut is likely to play badly in a browser.
@@ -443,6 +447,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
       case "notes": {
         const q = new URLSearchParams();
         for (const k of ["stage", "status", "batch"] as const) if (o[k]) q.set(k, o[k]!);
+        if (o["include-shelved"]) q.set("includeShelved", "true");
         const c = await client();
         const { notes } = await c.get(`/api/notes${q.size ? `?${q}` : ""}`);
         if (o.json) return io.out(JSON.stringify(notes, null, 2)), 0;

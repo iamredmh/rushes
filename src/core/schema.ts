@@ -98,6 +98,8 @@ export const VideoSchema = fileObject({
   name: z.string().min(1),
   versions: z.array(VersionSchema).default([]),
   lockedVersion: z.string().nullable().default(null),
+  // §26: the time a film was shelved. Absent (or null) means it is in play; restoring removes the key.
+  shelved: z.string().max(40).nullable().optional(),
 });
 export type Video = z.infer<typeof VideoSchema>;
 

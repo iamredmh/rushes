@@ -968,3 +968,22 @@ describe("rushes_add_visual (§25.5)", () => {
     await t.close();
   });
 });
+
+describe("shelved films (§26.5)", () => {
+  it("tells the agent which films are shelved, that it leaves them alone, and that a new cut restores one", async () => {
+    const t = await connect();
+    const { tools } = await t.client.listTools();
+    const text = (name: string) => tools.find((x) => x.name === name)!.description ?? "";
+    expect(text("rushes_status")).toMatch(/`films`/);
+    expect(text("rushes_status")).toMatch(/shelved/);
+    expect(text("rushes_status")).toMatch(/leave it alone/);
+    expect(text("rushes_add_version")).toMatch(/shelved/);
+    expect(text("rushes_add_version")).toMatch(/`restored: true`/);
+    expect(text("rushes_list_notes")).toMatch(/shelved film/);
+    expect(text("rushes_bring_in")).toMatch(/shelved/);
+    expect(text("rushes_bring_in")).toMatch(/`restored`/);
+    // It cannot shelve or restore: there is no such tool.
+    expect(tools.some((x) => /shelve|restore/i.test(x.name))).toBe(false);
+    await t.close();
+  });
+});

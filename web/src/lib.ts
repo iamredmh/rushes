@@ -72,12 +72,68 @@ export function defaultVersion(video: Video | undefined): Version | undefined {
   return latest(video);
 }
 
-/** The id of the film one step before/after `currentId` in `videos`, or null at either end or if not found. */
+/** §26: a film is in play unless it has been shelved. */
+export const inPlay = (video: Pick<Video, "shelved">): boolean => !video.shelved;
+
+/**
+ * The id of the film one step before/after `currentId` among the films in play (§26: [ and ] skip shelved films), or null
+ * at either end or if not found. From a shelved film (opened from the Shelved list) it is the nearest film in play on that side.
+ */
 export function neighbourVideo(videos: Video[], currentId: string | null, dir: -1 | 1): string | null {
   const i = videos.findIndex((v) => v.id === currentId);
   if (i === -1) return null;
-  const j = i + dir;
-  return j >= 0 && j < videos.length ? videos[j].id : null;
+  for (let j = i + dir; j >= 0 && j < videos.length; j += dir) if (inPlay(videos[j])) return videos[j].id;
+  return null;
+}
+
+/**
+ * §26.6: whether the bar shows the Films pack (pills). It needs two films in play; with one, the bar shows the film's name
+ * instead, as it does for a one-film project. Looking at a shelved film while one film is in play still shows the pack, so
+ * there is a way back to it.
+ */
+export function packShown(videos: Video[], currentId: string | null): boolean {
+  const live = videos.filter(inPlay);
+  return live.length >= 2 || (live.length === 1 && currentId !== live[0].id);
+}
+
+/** §26: where you land when the film you are on is shelved: the next film in play to its right, else the one to its left. */
+export function filmAfterShelving(videos: Video[], id: string): string | null {
+  const i = videos.findIndex((v) => v.id === id);
+  if (i === -1) return null;
+  const others = videos.map((v, j) => ({ v, j })).filter(({ v, j }) => j !== i && inPlay(v));
+  return (others.find(({ j }) => j > i) ?? others[others.length - 1])?.v.id ?? null;
+}
+
+/**
+ * §26.6: how many pills the bar shows before the rest fold into +N: about one film for every 190 px of header, never fewer than
+ * three or more than twelve. The header already makes the pills' names give way to each other (an ellipsis); this stops
+ * fifteen films being crushed to nothing. It follows the window's width, and, so the header stays one row, no more than the
+ * room the rest of the header leaves (`packRoom`, measured with its other parts at their smallest, never at what the pack gives up).
+ */
+export function maxPills(headerWidth: number, packRoom?: number): number {
+  const byWidth = Math.floor(headerWidth / 190);
+  // The room the rest of the header leaves the pack: a pill the header squeezes still needs its number, and a +N button needs its own.
+  const byRoom = packRoom === undefined ? Infinity : Math.floor((packRoom - PACK_PADDING - MORE_MIN) / PILL_MIN);
+  // Three at least, unless the header has measurably no room for three: then two, and the rest fold into +N.
+  return Math.max(packRoom === undefined ? 3 : 2, Math.min(12, byWidth, byRoom));
+}
+
+/** The least a pill takes (its number, with its gap), the pack's own padding, and the +N button. */
+export const PILL_MIN = 26;
+export const PACK_PADDING = 8;
+export const MORE_MIN = 56;
+
+/**
+ * §26.6: which of `count` films in play are pills when `max` is the most that fit. All of them when they fit; otherwise the
+ * first `max`, except that the film you are on (`current`, an index, or -1) always is one, in place of the last of those.
+ * Returns the indices shown, in order.
+ */
+export function shownFilms(count: number, current: number, max: number): number[] {
+  const all = Array.from({ length: count }, (_, i) => i);
+  if (count <= max) return all;
+  const first = all.slice(0, max);
+  if (current < 0 || first.includes(current)) return first;
+  return [...first.slice(0, max - 1), current];
 }
 
 /** Is this stage built in this release of the dashboard? Later releases add the audio tabs. */

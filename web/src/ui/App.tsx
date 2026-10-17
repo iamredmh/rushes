@@ -2,13 +2,15 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, ApiError, projectId } from "../api.js";
 import {
   LOCKED_BRIEF, LOCKED_STORYBOARD, LOCKED_TAB, testFlags, STAGE_NAMES, agentPrompt, briefPrompt, briefSendPrompt, copyShortcut, currentFormat, defaultVersion, firstView, formatChips, formatPrompt, foundChip, foundSignature,
-  isPlanPage, labelOfId, latest, lockedFound, neighbourFormat, neighbourVideo, planProgress, planTarget, previousVersion, proxyKey, readyPrompt, snap, storySendPrompt, storyboardPrompt, versionFormats, type PlanPage,
+  filmAfterShelving, inPlay, isPlanPage, labelOfId, latest, lockedFound, neighbourFormat, neighbourVideo, packShown, planProgress, planTarget, previousVersion, proxyKey, readyPrompt, snap, storySendPrompt, storyboardPrompt, versionFormats, type PlanPage,
 } from "../lib.js";
 import type { Batch, BriefView, FoundCounts, FoundKind, Stage, StoryboardView, Video } from "../types.js";
 import { useRushes } from "../useRushes.js";
 import { assetRev } from "../audio/timeline.js";
 import { Assets, type FoundRequest } from "./Assets.js";
 import { Brief } from "./Brief.js";
+import { FilmMenu } from "./FilmMenu.js";
+import { AllShelved, FilmPack, ShelvedBanner } from "./FilmPack.js";
 import { FormatToggle } from "./FormatToggle.js";
 import { Icon, STAGE_ICONS } from "./Icon.js";
 import { Mix } from "./Mix.js";
@@ -31,6 +33,8 @@ declare global {
 }
 
 const ORDER: Stage[] = ["script", "picture", "voice", "music", "sfx", "mix", "visuals"];
+// §26: the tabs that look at a film, and so are view-only while it is shelved (the others are not about one film).
+const SHELVED_VIEW_ONLY: ReadonlySet<string> = new Set(["picture", "voice", "music", "sfx", "mix"]);
 // Assets isn't a review stage (§15.3): it's a dashboard-only tab after the six stages, so it's
 // kept out of Stage and ORDER entirely and handled as its own case throughout this file.
 type View = Stage | "assets" | "brief" | "storyboard";
@@ -87,6 +91,8 @@ export function App() {
   const [videoId, setVideoId] = useState<string | null>(null);
   const [versionId, setVersionId] = useState<string | null>(null);
   const [toastText, setToastText] = useState<string | null>(null);
+  // §26: a toast may carry one action (Undo after shelving a film).
+  const [toastAction, setToastAction] = useState<{ label: string; run(): void } | null>(null);
   const [sent, setSent] = useState<Sent | null>(null);
   // §24: the planning page you were last on, which key 1 returns to (Script, the old key 1, until you open Brief).
   const [planLast, setPlanLast] = useState<PlanPage>("script");
@@ -126,10 +132,14 @@ export function App() {
   const toastedFailures = useRef(new Set<string>());
 
   // `ms`: how long it stays, for a message that takes longer than a glance to read.
-  const toast = (message: string, ms = 2400) => {
+  const toast = (message: string, ms = 2400, action: { label: string; run(): void } | null = null) => {
     setToastText(message);
+    setToastAction(action);
     clearTimeout(toastTimer.current);
-    toastTimer.current = window.setTimeout(() => setToastText(null), ms);
+    toastTimer.current = window.setTimeout(() => {
+      setToastText(null);
+      setToastAction(null);
+    }, ms);
   };
   // §20.5: a request to open Assets › Found (the header chip), and what the chip last said while Found was open.
   const [foundRequest, setFoundRequest] = useState<FoundRequest>({ n: 0, pending: false });
@@ -156,7 +166,9 @@ export function App() {
       // Opened on a planning page, so key 1 comes back to it rather than to Script.
       if (isPlanPage(first)) setPlanLast(first);
     }
-    if (videoId === null && state.project.videos[0]) setVideoId(state.project.videos[0].id);
+    // §26: open on a film in play. With every film shelved nothing is open until one is picked from the Shelved list.
+    const first = state.project.videos.find(inPlay);
+    if (videoId === null && first) setVideoId(first.id);
   }, [state]);
 
   // The tab's title follows the project's name as soon as it's known.
@@ -165,7 +177,8 @@ export function App() {
   }, [state?.project.name]);
 
   // Follow the locked version if there is one, otherwise the newest, unless you've chosen another.
-  const video = state?.project.videos.find((v) => v.id === videoId) ?? state?.project.videos[0];
+  // §26: a shelved film is the current one only when it was opened from the Shelved list; otherwise the first film in play.
+  const video = state?.project.videos.find((v) => v.id === videoId) ?? state?.project.videos.find(inPlay);
   const newest = latest(video);
   const target = defaultVersion(video);
   const version = video?.versions.find((v) => v.id === versionId) ?? target;
@@ -223,15 +236,17 @@ export function App() {
 
   /** Switches to another film, remembering this one's place and restoring the other's. Refused while marks are pending. */
   const switchFilm = (newId: string) => {
-    if (!video || newId === video.id) return;
-    if (pending) return toast(`Add or clear your note on ${video.name} first`);
+    if (newId === video?.id) return;
+    if (video && pending) return toast(`Add or clear your note on ${video.name} first`);
     // Read the live element directly, and pause it before it unmounts: React state for the
     // playhead can lag behind what's actually on screen (e.g. mid-play, or a burst of seeks),
     // so this is the only way to be sure what's saved matches what was really showing.
-    const el = playerRef.current;
-    el?.pause();
-    const t = el ? snap(el.currentTime, fps) : (memory.current.get(video.id)?.t ?? 0);
-    memory.current.set(video.id, { versionId, held, t });
+    if (video) {
+      const el = playerRef.current;
+      el?.pause();
+      const t = el ? snap(el.currentTime, fps) : (memory.current.get(video.id)?.t ?? 0);
+      memory.current.set(video.id, { versionId, held, t });
+    }
     const saved = memory.current.get(newId);
     setVideoId(newId);
     setVersionId(saved?.versionId ?? null);
@@ -247,6 +262,39 @@ export function App() {
     } catch (e) {
       toast((e as Error).message);
     }
+  };
+
+  // §26: shelve a film, or restore it. The Film menu acts on the film you are in; the Shelved list can restore any.
+  const [shelvedRequest, setShelvedRequest] = useState(0);
+  // The latest switchFilm, for the Undo on a toast made a render ago (its own closure would still see the old film).
+  const switchFilmRef = useRef(switchFilm);
+  switchFilmRef.current = switchFilm;
+  /** True when the change was made: Undo goes back to the film only then. */
+  const setShelved = async (film: Video, shelved: boolean): Promise<boolean> => {
+    if (!state) return false;
+    // Shelving the film you are in moves you to another film, so it waits for a half-typed note, as switching films does.
+    if (shelved && film.id === video?.id && pending) return toast(`Add or clear your note on ${film.name} first`), false;
+    try {
+      await api.put<{ video: Video }>(`/api/videos/${film.id}/shelve`, { shelved });
+      if (shelved && film.id === video?.id) {
+        const next = filmAfterShelving(state.project.videos, film.id);
+        if (next) switchFilm(next);
+        else setVideoId(null);
+      }
+      void refresh();
+      if (shelved) {
+        toast(`“${film.name}” shelved`, 6000, { label: "Undo", run: () => void setShelved(film, false).then((ok) => ok && switchFilmRef.current(film.id)) });
+      } else {
+        toast(`“${film.name}” restored`);
+      }
+      return true;
+    } catch (e) {
+      toast((e as Error).message);
+      return false;
+    }
+  };
+  const toggleShelved = () => {
+    if (video) void setShelved(video, !video.shelved);
   };
 
   /** §22.8 (R18): a Change Log row opens what it's about: a cut on Picture at its version, a variant on its tab. */
@@ -323,6 +371,8 @@ export function App() {
       if (n === 1) planKey();
       else if (n >= 2 && n <= 7) show(ORDER[n - 1]);
       else if (n === 8) showAssets();
+      // Not on key repeat: a held key would shelve the next film too, and the next.
+      if (e.key === "S" && e.shiftKey && !e.repeat) toggleShelved();
       if ((e.key === "[" || e.key === "]") && state) {
         const nxt = neighbourVideo(state.project.videos, videoId, e.key === "]" ? 1 : -1);
         if (nxt) switchFilm(nxt);
@@ -452,7 +502,7 @@ export function App() {
         <nav class="crumb" aria-label="Project">
           <span>{state.project.name}</span>
           {state.project.id && <span class="pid mono">{state.project.id}</span>}
-          {video && state.project.videos.length === 1 && (
+          {video && !packShown(state.project.videos, video.id) && (
             <>
               <span class="slash">/</span>
               <span class="sel">{video.name}</span>
@@ -465,16 +515,19 @@ export function App() {
             <span class="ftext">{chip}</span>
           </button>
         )}
-        {video && state.project.videos.length > 1 && (
-          <nav class="pack" aria-label="Films">
-            {state.project.videos.map((v, i) => (
-              <button class="pill" aria-pressed={v.id === video.id} onClick={() => switchFilm(v.id)}>
-                <span class="n">{i + 1}</span>
-                <span class="pname">{v.name}</span>
-                {hasTodo(v.id) && <span class="dot" />}
-              </button>
-            ))}
-          </nav>
+        {state.project.videos.length > 0 && (
+          <FilmPack
+            films={state.project.videos}
+            currentId={video?.id ?? null}
+            headRef={headRef}
+            hasTodo={hasTodo}
+            onSwitch={switchFilm}
+            onRestore={(id) => {
+              const film = state.project.videos.find((v) => v.id === id);
+              if (film) void setShelved(film, false);
+            }}
+            shelvedRequest={shelvedRequest}
+          />
         )}
         {video && (
           <>
@@ -497,6 +550,7 @@ export function App() {
               <button
                 class="btn ib lockbtn"
                 aria-pressed={locked}
+                disabled={!!video.shelved}
                 aria-label={locked ? `Picture locked at ${video.lockedVersion} · unlock` : `Lock picture at ${version.id}`}
                 data-tip={locked ? `Picture locked at ${video.lockedVersion} · unlock` : `Lock picture at ${version.id}`}
                 onClick={() => void toggleLock()}
@@ -516,6 +570,7 @@ export function App() {
           </>
         )}
         <span class="sp" />
+        <FilmMenu video={video} onToggleShelved={toggleShelved} />
         <button class="btn ghost ib tip-below" data-tip="Shortcuts  ?" aria-label="Keyboard shortcuts" onClick={() => { setSent(null); setKeysOpen(!keysOpen); }}>
           <Icon name="kbd" />
         </button>
@@ -578,7 +633,24 @@ export function App() {
           </div>
         </div>
       )}
-      {toastText && <div class="toast" role="status">{toastText}</div>}
+      {toastText && (
+        <div class="toast" role="status">
+          {toastText}
+          {toastAction && (
+            <button
+              type="button"
+              class="toastact"
+              onClick={() => {
+                setToastText(null);
+                setToastAction(null);
+                toastAction.run();
+              }}
+            >
+              {toastAction.label}
+            </button>
+          )}
+        </div>
+      )}
 
       {wrongProject && (
         <div class="banner lost" role="alert">
@@ -646,7 +718,9 @@ export function App() {
       </nav>
       {problem && !wrongProject && <div class="banner"><Icon name="alert" />{problem}</div>}
 
-      <main class="body" ref={bodyRef}>
+      {video?.shelved && SHELVED_VIEW_ONLY.has(stage) && <ShelvedBanner video={video} onRestore={() => void setShelved(video, false)} />}
+
+      <main class={`body${video?.shelved ? " fshelved" : ""}`} ref={bodyRef}>
         {stage === "assets" ? (
           unlocked ? (
             <Assets
@@ -664,9 +738,12 @@ export function App() {
           )
         ) : !unlocked ? (
           <Locked tab={stage} projectName={state.project.name} filmName={video?.name ?? null} found={state.found?.counts} onReview={openFound} toast={toast} />
+        ) : stage === "picture" && !video ? (
+          <AllShelved onOpen={() => setShelvedRequest((n) => n + 1)} />
         ) : stage === "picture" && video && version ? (
           <Picture
             key={video.id}
+            readOnly={!!video.shelved}
             video={video}
             version={version}
             fps={fps}

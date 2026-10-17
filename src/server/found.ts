@@ -21,12 +21,12 @@ import { InvalidError, RevConflictError, RushesError } from "../core/errors.js";
 import { slugify } from "../core/ids.js";
 import { AUDIO_FORMATS, probe as ffprobe } from "../core/media.js";
 import { fromManifestPath, toManifestPath } from "../core/paths.js";
-import { addFile, addVariant, addVersion, resolveVideo } from "../core/project.js";
+import { addFile, addVariant, addVersion, inPlay, resolveVideo } from "../core/project.js";
 import type { Project, Script, Version, Video } from "../core/schema.js";
 import type { ChangeEvent, Store } from "../core/store.js";
 import { cueFiles } from "../core/cues.js";
 import { logBookFor } from "./logbook.js";
-import { broughtInEvent, cutName } from "../core/logEvents.js";
+import { broughtInEvent, cutName, filmEvent } from "../core/logEvents.js";
 
 // §20: finding the project's other files. One scanner per server. The walk (Task 1's scanFolder)
 // runs in the background; GET /api/state and GET /api/found only ever read what the last walk
@@ -124,6 +124,8 @@ export interface BringInFailure {
 
 export interface BringInResult {
   added: BringInAdded[];
+  /** §26: the shelved films a cut brought back (present only when there are some). */
+  restored?: { id: string; name: string }[];
   /** Each refused item, with its path as given, why, and the code for why. */
   failed: BringInFailure[];
 }
@@ -276,7 +278,8 @@ function addedTime(v: Version): number {
 
 /**
  * §20.4's cut: the named film's newest version when it has one, otherwise the newest registered
- * cut of any film (latest `addedAt`; on a tie, the later one in the project).
+ * cut of any film (latest `addedAt`; on a tie, the later one in the project). §26: a shelved film is
+ * passed over while any film is in play, so a file nobody named a film for never restores one.
  */
 export function anchorCut(p: Project, film: string | undefined): { video: Video; version: Version } | null {
   if (film !== undefined) {
@@ -289,7 +292,8 @@ export function anchorCut(p: Project, film: string | undefined): { video: Video;
     }
   }
   let best: { video: Video; version: Version } | null = null;
-  for (const video of p.videos) {
+  const candidates = p.videos.some(inPlay) ? p.videos.filter(inPlay) : p.videos;
+  for (const video of candidates) {
     for (const version of video.versions) {
       if (!best || addedTime(version) >= addedTime(best.version)) best = { video, version };
     }
@@ -697,6 +701,7 @@ export class FoundScanner {
       // §22.5: what the current set brought in is one line, by Rushes (R8, R9); its variants are dated (R5).
       // Built inside add's guard, so a line that can't be made never undoes the bring-in (M1).
       const cut = anchor;
+      for (const f of result.restored ?? []) await logBookFor(this.store).add(() => filmEvent(f, false), "rushes");
       if (result.added.length) await logBookFor(this.store).add(() => broughtInEvent(result.added, cut ? cutName(films, cut.video, cut.version.id) : null), "rushes");
       return result;
     });
@@ -859,7 +864,7 @@ export class FoundScanner {
           this.current.delete(a.path);
         }
         this.announce();
-        return { added: result.ok, failed: [...failed, ...result.refused] };
+        return { added: result.ok, failed: [...failed, ...result.refused], ...(result.restored.length ? { restored: result.restored } : {}) };
       } catch (e) {
         if (e instanceof NothingAdded) return { added: [], failed: [...failed, ...e.refused] };
         // Another writer changed the project since it was read: check everything again.
@@ -870,8 +875,9 @@ export class FoundScanner {
   }
 
   /** Registers the plan in the project draft, in order. The cap counts only what goes in. */
-  private applyPlan(p: Project, plan: Planned[], film: string | undefined): { ok: BringInAdded[]; refused: BringInResult["failed"] } {
+  private applyPlan(p: Project, plan: Planned[], film: string | undefined): { ok: BringInAdded[]; refused: BringInResult["failed"]; restored: { id: string; name: string }[] } {
     const ok: BringInAdded[] = [];
+    const restored: { id: string; name: string }[] = [];
     const refused: BringInResult["failed"] = [];
     const perKind = new Map<BringInKind, number>();
     for (const it of plan) {
@@ -879,7 +885,7 @@ export class FoundScanner {
         refused.push(refusal(it.item.path, R.cap));
         continue;
       }
-      const out = this.register(p, it, film);
+      const out = this.register(p, it, film, restored);
       if ("reason" in out) {
         refused.push(refusal(it.item.path, out.reason));
         continue;
@@ -887,11 +893,11 @@ export class FoundScanner {
       ok.push(out);
       perKind.set(it.kind, (perKind.get(it.kind) ?? 0) + 1);
     }
-    return { ok, refused };
+    return { ok, refused, restored };
   }
 
   /** Registers one planned item in the project draft, or says why it can't, changing nothing. */
-  private register(p: Project, it: Planned, film: string | undefined): BringInAdded | { reason: string } {
+  private register(p: Project, it: Planned, film: string | undefined, restored: { id: string; name: string }[]): BringInAdded | { reason: string } {
     const stem = basename(it.rel, extname(it.rel));
     const name = fitName(stem);
     switch (it.kind) {
@@ -911,7 +917,9 @@ export class FoundScanner {
       }
       case "cut": {
         const duration = this.durations.get(revKey(it)) ?? null;
-        const { video, version } = addVersion(p, { video: filmFor(p, film) ?? (film ? fitName(film) : name), file: it.rel, duration });
+        const out = addVersion(p, { video: filmFor(p, film) ?? (film ? fitName(film) : name), file: it.rel, duration });
+        const { video, version } = out;
+        if (out.restored) restored.push({ id: video.id, name: video.name });
         return { path: it.rel, kind: it.kind, video: video.id, version: version.id };
       }
       case "doc":
