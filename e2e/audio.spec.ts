@@ -1106,7 +1106,7 @@ async function mixProject(page: Page, rushes: Rushes, opts: { pick?: { voice?: b
   if (opts.pick?.voice !== false) lanes[read.lane.id] = read.variant.id;
   if (opts.pick?.music !== false) lanes[bed.lane.id] = bed.variant.id;
   if (opts.pick?.sfx !== false) lanes[pass.lane.id] = pass.variant.id;
-  await rushes.api("PUT", "/api/picks", { lanes });
+  await rushes.api("PUT", "/api/picks", { video: "hero", lanes });
   return { read, read2, bed, pass };
 }
 
@@ -1164,7 +1164,7 @@ test("Mix shows three lanes; mute and solo change the lane gains, and solo wins"
 
   // View state only: nothing is saved, and leaving the tab resets it.
   const picks = await rushes.api("GET", "/api/picks");
-  expect(Object.keys(picks).sort()).toEqual(["lanes", "levels", "rev", "schema", "sections"]);
+  expect(Object.keys(picks).sort()).toEqual(["lanes", "levels", "rev", "schema", "sections", "videos"]);
   await page.keyboard.press("4");
   await openTab(page, /Mix/, "6");
   await loaded(page, 3);
@@ -1305,13 +1305,13 @@ test("Mix's VO lane plays the newest round's pick, matching the server (§18.4)"
   // Picking Round 2's "more sombre" makes it the newest round with a pick: it takes over, and the
   // mix changed, so the loudness readout asks again.
   const before = asked.length;
-  await rushes.api("PUT", "/api/picks", { lanes: { [read2.lane.id]: read2.variant.id } });
+  await rushes.api("PUT", "/api/picks", { video: "hero", lanes: { [read2.lane.id]: read2.variant.id } });
   await expect(page.locator('.lane[data-row="vo"] [data-meta]')).toHaveText("Round 2 · Gerald, tone · more sombre");
   await expect.poll(() => heard(page)).toEqual([`${VO_READ_2}@0`, "music/warm-keys@0", "sfx/pass-a@0"]);
   await expect.poll(() => asked.length).toBeGreaterThan(before);
 
   // With no pick left in either round, the VO lane shows "Nothing picked" again.
-  await rushes.api("PUT", "/api/picks", { lanes: { [read.lane.id]: null, [read2.lane.id]: null } });
+  await rushes.api("PUT", "/api/picks", { video: "hero", lanes: { [read.lane.id]: null, [read2.lane.id]: null } });
   await expect(page.locator('.lane[data-row="vo"] .amiss')).toHaveAttribute("data-tip", "Nothing picked");
   await expect.poll(() => heard(page)).toEqual(["music/warm-keys@0", "sfx/pass-a@0"]);
 });
@@ -1356,7 +1356,7 @@ test("a Mix note on an SFX pass named like the music bed lands on Sound effects,
   const bed = await rushes.addVariant("music", "Option A", { seconds: 4, freq: 330 });
   const pass = await rushes.addVariant("sfx", "Option A", { seconds: 4, freq: 880 });
   expect(bed.variant.id).toBe(pass.variant.id); // the clash: both "option-a"
-  await rushes.api("PUT", "/api/picks", { lanes: { [bed.lane.id]: bed.variant.id, [pass.lane.id]: pass.variant.id } });
+  await rushes.api("PUT", "/api/picks", { video: "hero", lanes: { [bed.lane.id]: bed.variant.id, [pass.lane.id]: pass.variant.id } });
   // A note saved before `on` was lane-qualified: drawn on Music, the first lane heard with that id.
   const old = (await rushes.api("POST", "/api/notes", { stage: "mix", on: "option-a", scope: "point", t: 1, text: "Old style." })).note;
   await page.goto(rushes.testUrl());
@@ -1412,14 +1412,14 @@ test("a Mix level: drags live, saves on reload, resets on double-click, and re-m
   await openTab(page, /Mix/, "6");
   await loaded(page, 3);
   await expect(page.locator('.lane[data-row="music"] .level .db')).toHaveText("−14.0 dB");
-  const picks = await rushes.api("GET", "/api/picks");
+  const picks = await rushes.api("GET", "/api/picks?video=hero");
   expect(picks.levels).toEqual({ music: -14 });
 
   // Double-click resets it to 0, live and saved.
   await page.locator('input[aria-label="Music level"]').dblclick();
   await expect(page.locator('.lane[data-row="music"] .level .db')).toHaveText("0.0 dB");
   await expect.poll(async () => (await inspect(page)).lanes.music).toBeCloseTo(1, 3);
-  await expect.poll(async () => (await rushes.api("GET", "/api/picks")).levels).toEqual({});
+  await expect.poll(async () => (await rushes.api("GET", "/api/picks?video=hero")).levels).toEqual({});
 });
 
 for (const how of ["hidden", "pagehide"] as const) {
@@ -1444,9 +1444,9 @@ for (const how of ["hidden", "pagehide"] as const) {
       }
     }, how);
     await page.close();
-    await expect.poll(async () => (await rushes.api("GET", "/api/picks")).levels, { timeout: 5_000 }).toEqual({ music: -9 });
+    await expect.poll(async () => (await rushes.api("GET", "/api/picks?video=hero")).levels, { timeout: 5_000 }).toEqual({ music: -9 });
     // Sent once: the hide took the pending save, so no timer or unmount sent it again.
-    expect(puts).toEqual([{ levels: { music: -9 } }]);
+    expect(puts).toEqual([{ video: "hero", levels: { music: -9 } }]);
   });
 }
 
@@ -1481,7 +1481,7 @@ test("a refresh from elsewhere never snaps a slider you're mid-drag on (regressi
   // Meanwhile, sfx's level changes from elsewhere (another tab, or the agent) -- a direct server
   // call, bypassing the held route above. The server emits a change event, and this tab's own SSE
   // listener refreshes state while music's save is still held pending.
-  await rushes.api("PUT", "/api/picks", { levels: { sfx: -6 } });
+  await rushes.api("PUT", "/api/picks", { video: "hero", levels: { sfx: -6 } });
   await expect(sfxDb).toHaveText("−6.0 dB");
 
   // Music's own in-progress drag must survive that refresh, not snap back to the stale server value.
@@ -1489,7 +1489,7 @@ test("a refresh from elsewhere never snaps a slider you're mid-drag on (regressi
 
   // Release the held save: it lands with the dragged value, alongside sfx's.
   releaseMusicSave();
-  await expect.poll(async () => (await rushes.api("GET", "/api/picks")).levels).toEqual({ sfx: -6, music: -14 });
+  await expect.poll(async () => (await rushes.api("GET", "/api/picks?video=hero")).levels).toEqual({ sfx: -6, music: -14 });
 });
 
 test("a burst of dragging inside the debounce window saves once, at the last value", async ({ page, rushes }) => {
@@ -1510,7 +1510,7 @@ test("a burst of dragging inside the debounce window saves once, at the last val
   await expect(page.locator('.lane[data-row="music"] .level .db')).toHaveText("−14.0 dB");
   await page.waitForTimeout(600);
   const levelCalls = calls.filter((c): c is { levels?: { music?: number } } => !!(c as { levels?: unknown }).levels);
-  expect(levelCalls).toEqual([{ levels: { music: -14 } }]);
+  expect(levelCalls).toEqual([{ video: "hero", levels: { music: -14 } }]);
 });
 
 test("a level dragged just before leaving Mix is still saved (Minor 6)", async ({ page, rushes }) => {
@@ -1520,7 +1520,7 @@ test("a level dragged just before leaving Mix is still saved (Minor 6)", async (
   await dragLevel(page, "Music level", -14);
   await page.keyboard.press("1");
   await expect(page.getByRole("tab", { name: /Planning/ })).toHaveAttribute("aria-selected", "true");
-  await expect.poll(async () => (await rushes.api("GET", "/api/picks")).levels).toEqual({ music: -14 });
+  await expect.poll(async () => (await rushes.api("GET", "/api/picks?video=hero")).levels).toEqual({ music: -14 });
   await openTab(page, /Mix/, "6");
   await expect(page.locator('.lane[data-row="music"] .level .db')).toHaveText("−14.0 dB");
 });
@@ -1602,7 +1602,7 @@ test("re-rendering the only clip mid-play keeps playing: its lane rejoins on the
   await writeFile(abs, makeWav({ seconds: 30, freq: 440 }));
   const later = new Date(Date.now() + 5000);
   await utimes(abs, later, later);
-  await rushes.api("PUT", "/api/picks", { lanes: { [bed.lane.id]: bed.variant.id } });
+  await rushes.api("PUT", "/api/picks", { video: "hero", lanes: { [bed.lane.id]: bed.variant.id } });
   await expect.poll(async () => { const m = (await inspect(page)).media; return m.length === 1 && m[0] !== first; }, { timeout: 10_000 }).toBe(true);
   await expect.poll(async () => (await inspect(page)).sources).toBe(1);
 
@@ -1682,4 +1682,36 @@ test("Space plays after a mouse click on a tab, M, S, Blind or a scope chip (§1
   await spaceToggles(page);
   await page.getByRole("group", { name: "Scope" }).getByRole("button", { name: "Whole" }).click();
   await spaceToggles(page);
+});
+
+test("Sound effects and Music list only the film you are on, with its own notes", async ({ page, rushes }) => {
+  await rushes.addCut("f2a", "F2A");
+  await rushes.addCut("f3a", "F3A");
+  await rushes.addVariant("sfx", "F2A pass", { seconds: 4, freq: 330, video: "F2A" });
+  await rushes.addVariant("sfx", "F3A pass 1", { seconds: 4, freq: 440, video: "F3A" });
+  await rushes.addVariant("sfx", "F3A pass 2", { seconds: 4, freq: 550, video: "F3A" });
+  await rushes.addVariant("music", "F2A bed", { seconds: 4, freq: 220, video: "F2A" });
+  await rushes.addVariant("music", "Any film bed", { seconds: 4, freq: 260 });
+  await rushes.addVariant("voice", "F2A read", { seconds: 4, freq: 300, round: "Round 1", video: "F2A" });
+  await rushes.api("POST", "/api/notes", { stage: "sfx", video: "f2a", scope: "whole", text: "F2A taps are too loud." });
+  await page.goto(rushes.url);
+  const film = (name: RegExp) => page.getByRole("navigation", { name: "Films" }).getByRole("button", { name });
+  const names = page.locator(".lane [data-name]");
+  await page.getByRole("tab", { name: /Sound effects/ }).click();
+  await film(/F3A/).click();
+  await expect(film(/F3A/)).toHaveAttribute("aria-pressed", "true");
+  await expect(names).toHaveText(["F3A pass 1", "F3A pass 2"]);
+  await expect(page.locator(".note", { hasText: "F2A taps are too loud." })).toHaveCount(0);
+  await film(/F2A/).click();
+  await expect(names).toHaveText(["F2A pass"]);
+  await expect(page.locator(".note", { hasText: "F2A taps are too loud." })).toHaveCount(1);
+  // A bed made for every film is listed on each.
+  await page.getByRole("tab", { name: /Music/ }).click();
+  await expect(names).toHaveText(["F2A bed", "Any film bed"]);
+  await film(/F3A/).click();
+  await expect(names).toHaveText(["Any film bed"]);
+  // F2A's read is all there is: F3A's Voiceover says it has none yet.
+  await page.getByRole("tab", { name: /Voiceover/ }).click();
+  await expect(page.locator(".lane")).toHaveCount(0);
+  await expect(page.locator(".lanesnone")).toHaveText("No voice reads for this film yet.");
 });

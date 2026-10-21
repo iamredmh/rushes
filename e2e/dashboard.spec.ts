@@ -277,7 +277,28 @@ test("Send to agent batches this tab's open notes and shows the prompt to paste"
   expect(batch.noteIds).toHaveLength(1);
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: /Send to agent/ }).click();
-  await expect(page.getByRole("status")).toHaveText("Nothing open on Picture to send");
+  await expect(page.getByRole("status")).toHaveText("Nothing open to send on any tab");
+});
+
+test("Send to agent sends every tab's open notes, whichever tab it is pressed on", async ({ page, rushes }) => {
+  await rushes.addCut();
+  await rushes.api("POST", "/api/variants", { stage: "sfx", name: "Pass A", file: "audio/sfx/a.wav" });
+  await rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 1, text: "Too dark." });
+  await rushes.api("POST", "/api/notes", { stage: "sfx", video: "hero", scope: "whole", text: "Softer taps." });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  // Mix has no notes of its own, and still sends both.
+  await page.keyboard.press("6");
+  await expect(page.getByRole("tab", { name: /Mix/ })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("button", { name: /Send to agent/ })).toContainText("2");
+  await page.getByRole("button", { name: /Send to agent/ }).click();
+  const dialog = page.getByRole("dialog", { name: "Sent to agent" });
+  await expect(dialog).toContainText("Work through batch b_1");
+  await expect(dialog).toContainText("Picture: 1 note");
+  await expect(dialog).toContainText("Sound effects: 1 note");
+  const { batch } = await rushes.api("GET", "/api/batches/latest");
+  expect(batch).toMatchObject({ stage: null });
+  expect(batch.noteIds).toHaveLength(2);
 });
 
 test.describe("without ffmpeg", () => {
@@ -715,20 +736,19 @@ test("a deleted file is marked missing in Assets", async ({ page, rushes }) => {
   await expect(row.getByRole("link", { name: "Download" })).toHaveAttribute("aria-disabled", "true");
 });
 
-test("the disabled Send to agent button on Assets still shows its tooltip", async ({ page, rushes }) => {
+test("Send to agent works from Assets too, and shows its tooltip", async ({ page, rushes }) => {
   await rushes.addCut();
+  await rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 1, text: "Too dark." });
   await page.goto(rushes.url);
   await videoReady(page);
   await page.keyboard.press("8");
-  const button = page.getByRole("button", { name: "Send to agent" });
-  await expect(button).toBeDisabled();
-  // A disabled control must still show its tooltip on hover: `pointer-events: none` on the
-  // dimmed look would stop :hover (and so the tooltip) firing at all. The tooltip fades in
-  // over 0.12s (styles.css), so poll for it rather than reading the mid-transition value.
+  const button = page.getByRole("button", { name: /^Send to agent/ });
+  await expect(button).toBeEnabled();
+  // The tooltip fades in over 0.12s (styles.css), so poll for it rather than reading the mid-transition value.
   await button.hover();
   await expect.poll(() => button.evaluate((el) => Number(getComputedStyle(el, "::after").opacity))).toBe(1);
-  const pointerEvents = await button.evaluate((el) => getComputedStyle(el).pointerEvents);
-  expect(pointerEvents).not.toBe("none");
+  await button.click();
+  await expect(page.getByRole("dialog", { name: "Sent to agent" })).toContainText("picture batch b_1");
 });
 
 test("a late grab doesn't attach to the wrong film", async ({ page, rushes }) => {

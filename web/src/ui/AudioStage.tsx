@@ -126,6 +126,13 @@ export interface AudioStageProps {
 const typing = (el: EventTarget | null) => el instanceof HTMLElement && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
 const NO_RANGE = { in: null, out: null } as { in: number | null; out: number | null };
 const ALL_SCOPES: Scope[] = ["point", "range", "whole"];
+// What a tab says when the film has nothing on it yet: its reads, beds and passes are another film's.
+const NONE_YET: Record<AudioStageId, string> = {
+  voice: "No voice reads for this film yet.",
+  music: "No music beds for this film yet.",
+  sfx: "No sound effects passes for this film yet.",
+  mix: "Nothing to mix for this film yet.",
+};
 
 export function AudioStage(props: AudioStageProps) {
   const { stage, title, headerExtra, belowLanes, rows, preview, fps, notes, onOptions, noteRow, onLabel, toast, onChanged, onPendingChange, listen } = props;
@@ -432,6 +439,7 @@ export function AudioStage(props: AudioStageProps) {
           }}
           toast={toast}
         />
+        {rows.length === 0 && <p class="lanesnone">{NONE_YET[stage]}</p>}
         {belowLanes}
       </div>
 

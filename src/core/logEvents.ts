@@ -166,9 +166,9 @@ export function filmEvent(video: Pick<Video, "id" | "name">, shelved: boolean): 
   return { area: "picture", kind: "film", merge: "replace", subject: video.id, text, video: video.id, version: null };
 }
 
-/** "3 notes sent from Picture"; on Script, "1 note and 2 script edits sent from Script". */
+/** "3 notes sent from Picture"; on Script, "1 note and 2 script edits sent from Script"; from more than one tab, "5 notes sent from several tabs". */
 export function notesSentEvent(batch: Pick<Batch, "stage" | "noteIds" | "sectionIds">): LogEvent {
-  const tab = TAB_NAMES[batch.stage];
+  const tab = batch.stage === null ? "" : TAB_NAMES[batch.stage];
   const notes = batch.noteIds.length;
   const edits = batch.sectionIds.length;
   const what = notes && edits
@@ -176,7 +176,7 @@ export function notesSentEvent(batch: Pick<Batch, "stage" | "noteIds" | "section
     : edits ? plural(edits, "script edit", "script edits") : plural(notes, "note", "notes");
   return {
     area: "notes", kind: "notes-sent", merge: "count", count: Math.max(1, notes + edits), subject: tab, tab: batch.stage,
-    text: `${what} sent from ${tab}`,
+    text: `${what} sent from ${tab || "several tabs"}`,
     many: (n, subject) => `${plural(n, "note", "notes")} sent from ${subject || "several tabs"}`,
   };
 }

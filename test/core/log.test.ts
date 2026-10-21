@@ -90,6 +90,7 @@ describe("the words of each line (§22.5, R9)", () => {
   it("notes sent, replies, files, bring-ins and a line somebody wrote", () => {
     expect(notesSentEvent({ stage: "picture", noteIds: ["a", "b", "c"], sectionIds: [] })).toMatchObject({ area: "notes", kind: "notes-sent", text: "3 notes sent from Picture", tab: "picture", count: 3 });
     expect(notesSentEvent({ stage: "script", noteIds: ["a"], sectionIds: ["s1", "s2"] }).text).toBe("1 note and 2 script edits sent from Script");
+    expect(notesSentEvent({ stage: null, noteIds: ["a", "b"], sectionIds: ["s1"] })).toMatchObject({ text: "2 notes and 1 script edit sent from several tabs", tab: null });
     expect(notesSentEvent({ stage: "script", noteIds: [], sectionIds: ["s1"] }).text).toBe("1 script edit sent from Script");
     expect(notesSentEvent({ stage: "picture", noteIds: ["a"], sectionIds: [] }).many!(5, "")).toBe("5 notes sent from several tabs");
     expect(repliesEvent([{ id: "n1", status: "done", stage: "picture" }, { id: "n2", status: "done", stage: "picture" }, { id: "n3", status: "todo", stage: "picture" }])).toMatchObject({

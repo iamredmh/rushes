@@ -176,7 +176,7 @@ Each tab shows a dot when it has open items. The **Send to agent** count and pro
 
 ### How the agent finds out about notes
 An MCP server can't wake the agent up on its own. So **Send to agent**:
-1. puts this tab's open, unbatched notes (or changed script rows) into a new batch in `batches.json`;
+1. puts every open, unbatched note, from every tab and every film in play, and the changed script rows into a new batch in `batches.json`, whichever tab it is pressed on (the batch's `stage` is that tab when everything came from one, otherwise `null`);
 2. builds a short prompt, e.g. "Work through picture batch b_4 on spring-launch / Hero 60s v3. 3 notes. Use rushes_list_notes then rushes_reply.";
 3. copies the prompt to the clipboard, so you paste it into your agent.
 

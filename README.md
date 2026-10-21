@@ -138,7 +138,7 @@ Rushes keeps a running log of what happened: each cut, read, bed and pass as it 
 ## Why Rushes
 
 - **Notes your agent can act on.** Each one carries its stage, a timecode or range, an optional box on the frame, a frame grab, and the shot it falls in.
-- **One batch at a time.** **Send to agent** covers the tab you're on, because you review one stage at a time.
+- **Everything in one batch.** **Send to agent** sends every open note from every tab and every film, whichever tab you press it on, so nothing waits behind.
 - **Versions keep their history.** Notes follow the work from cut to cut, and you can lock picture when it's done.
 - **Local, with no sign-up.** No account, no API key, nothing uploaded. It runs on your machine.
 - **Works with the agent you already use.** One MCP server for Claude Code, Codex, Cursor, Claude Desktop and Gemini CLI, a plugin and skill for Claude Code, and a command line for anything else.

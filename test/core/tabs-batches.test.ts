@@ -233,6 +233,50 @@ describe("createBatch", () => {
   });
 });
 
+describe("Send to agent: one batch from every tab", () => {
+  it("takes every tab's open notes on every film, and the changed script lines, in one batch with no stage", () => {
+    const c = ctx();
+    addVersion(c.project, { video: "f2a Ten colours", file: "renders/f2a.mp4" });
+    addVersion(c.project, { video: "f3a One phone", file: "renders/f3a.mp4" });
+    setSections(c.script, [{ start: 0, end: 5, current: "A" }]);
+    editSection(c.script, "s1", { proposed: "A2" });
+    const pic = addNote(c.notes, { stage: "picture", video: "f3a-one-phone", version: "v1", scope: "point", t: 1, text: "Logo late" });
+    const sfx2 = addNote(c.notes, { stage: "sfx", video: "f2a-ten-colours", scope: "whole", text: "Too busy" });
+    const sfx3 = addNote(c.notes, { stage: "sfx", video: "f3a-one-phone", scope: "point", t: 1.45, text: "Not a tap" });
+    const done = addNote(c.notes, { stage: "mix", video: "f3a-one-phone", scope: "whole", text: "Old" });
+    done.status = "done";
+    const b = createBatch(c, undefined, new Date("2026-10-21T13:00:00Z"));
+    expect(b).toMatchObject({ id: "b_1", stage: null, noteIds: [pic.id, sfx2.id, sfx3.id], sectionIds: ["s1"] });
+    expect(b.prompt).toContain("Work through batch b_1 on spring-launch: 4 items across 3 tabs.");
+    expect(b.prompt).toContain("- Script: 1 script section");
+    expect(b.prompt).toContain("- Picture: 1 note (f3a One phone)");
+    expect(b.prompt).toContain("- Sound effects: 2 notes (f2a Ten colours, f3a One phone)");
+    expect(b.prompt).toContain("Sound effects: Use rushes_get_batch and rushes_get_picks");
+    expect(b.prompt).toContain("Script: Use rushes_get_batch, take each section's proposed line");
+    expect(b.prompt).not.toContain("Mix");
+    expect(c.notes.notes.filter((n) => n.batch === "b_1")).toHaveLength(3);
+    // Sent once: a second press has nothing new but the script line still waiting on the agent.
+    const again = createBatch(c);
+    expect(again).toMatchObject({ stage: "script", noteIds: [], sectionIds: ["s1"] });
+  });
+
+  it("is that tab's batch, with that tab's prompt, when everything open is on one tab", () => {
+    const c = ctx();
+    addNote(c.notes, { stage: "sfx", scope: "whole", text: "Too busy" });
+    const b = createBatch(c);
+    expect(b.stage).toBe("sfx");
+    expect(b.prompt).toContain("sound effects batch b_1 on spring-launch: 1 note.");
+  });
+
+  it("leaves a shelved film's notes out, and says so when nothing is open anywhere", () => {
+    const c = ctx();
+    addVersion(c.project, { video: "Old", file: "renders/old.mp4" });
+    c.project.videos[0].shelved = "2026-10-20T10:00:00Z";
+    addNote(c.notes, { stage: "music", video: "old", scope: "whole", text: "Set aside" });
+    expect(() => createBatch(c)).toThrow("Nothing open to send");
+  });
+});
+
 describe("a Visuals batch (§25.5)", () => {
   it("tells the agent to read each note's picture, register a new version with only the changed pages, and reply with its version", () => {
     const c = ctx();

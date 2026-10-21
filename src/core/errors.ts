@@ -35,7 +35,7 @@ export class CorruptFileError extends RushesError {
 }
 
 export class EmptyBatchError extends RushesError {
-  constructor(stage: string) {
-    super(`Nothing open on the ${stage} tab to send`, 409, "empty_batch", { stage });
+  constructor(stage?: string) {
+    super(stage === undefined ? "Nothing open to send" : `Nothing open on the ${stage} tab to send`, 409, "empty_batch", stage === undefined ? {} : { stage });
   }
 }

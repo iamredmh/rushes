@@ -11,7 +11,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { api, ApiError } from "../api.js";
 import { assetRev, type Clip, laneGains } from "../audio/timeline.js";
 import {
-  clampLevel, defaultVersion, filmPicks, heardVoice, LEVEL_MAX, LEVEL_MIN, LEVEL_STEP, levelText, loudnessLanes, type LoudnessState, loudnessReadout,
+  clampLevel, defaultVersion, filmLanes, filmNotes, filmPicks, heardVoice, LEVEL_MAX, LEVEL_MIN, LEVEL_STEP, levelText, loudnessLanes, type LoudnessState, loudnessReadout,
   MIX_LANES, type MixLane, type MixModel, mixNoteRows, MIX_STAGE, mixOnLabel, mixOnOptions, STAGE_NAMES, type VariantRow, variantRows,
   voiceRounds, WHOLE_MIX,
 } from "../lib.js";
@@ -54,13 +54,15 @@ export function Mix({ state, assets, video, toast, onChanged, onPendingChange }:
 
   // ---- what each lane plays ----
   // VO: the newest voice round's pick, walking back past rounds with none (§18.4), as the server mixes it.
-  const voiceRead = heardVoice(voiceRounds(state.project.lanes, lanePicks));
+  // Only this film's reads, beds and passes (and any made for every film), as the server measures them.
+  const lanes = filmLanes(state.project.lanes, filmId);
+  const voiceRead = heardVoice(voiceRounds(lanes, lanePicks));
   const voClips: Clip[] = voiceRead && !missing(voiceRead.file)
     ? [{ id: voiceRead.key, lane: "vo", path: voiceRead.file, offset: 0, duration: 0, rev: rev(voiceRead.file) }]
     : [];
   const voGone = voiceRead ? missing(voiceRead.file) : false;
 
-  const variants = { music: variantRows(state.project.lanes, "music"), sfx: variantRows(state.project.lanes, "sfx") };
+  const variants = { music: variantRows(lanes, "music"), sfx: variantRows(lanes, "sfx") };
   const picked = (rows: VariantRow[]) => rows.filter((r) => lanePicks[r.lane] === r.variant);
   const pickedRows = { music: picked(variants.music), sfx: picked(variants.sfx) };
   const heardRows = { music: pickedRows.music.filter((r) => !missing(r.file)), sfx: pickedRows.sfx.filter((r) => !missing(r.file)) };
@@ -260,7 +262,7 @@ export function Mix({ state, assets, video, toast, onChanged, onPendingChange }:
     </div>
   );
 
-  const notes = state.notes.notes.filter((n) => n.stage === "mix");
+  const notes = filmNotes(state.notes.notes, "mix", filmId);
   const cut = defaultVersion(video ?? undefined);
   const preview: Preview | null = video && cut ? { video: video.id, version: cut.id, file: cut.file, duration: cut.duration } : null;
   const fps = state.project.fps || 30;

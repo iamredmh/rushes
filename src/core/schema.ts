@@ -119,6 +119,10 @@ export const VariantSchema = fileObject({
   file: z.string().min(1),
   meta: z.record(z.string(), z.union([z.string(), z.number()])).default({}),
   cues: z.array(CueSchema).default([]),
+  // The film (video id) this read, bed or pass was made for: only that film's tabs list it. Absent
+  // on a variant made for every film, and on every older one, so an older project loads and writes
+  // back unchanged.
+  video: id.optional(),
 });
 export type Variant = z.infer<typeof VariantSchema>;
 
@@ -339,9 +343,19 @@ export function picksForVideo(picks: Picks, videoId: string | null | undefined):
   return { ...picks, lanes: { ...(own?.lanes ?? {}) }, levels: { ...(own?.levels ?? {}) }, sections: {}, videos: {} };
 }
 
+/** The lanes one film hears: each keeps only the variants made for it or for every film, and a lane
+ *  left with none is dropped. With no film named, every lane as it is. */
+export function lanesForVideo(lanes: Lane[], videoId: string | null | undefined): Lane[] {
+  if (!videoId) return lanes;
+  return lanes
+    .map((l) => ({ ...l, variants: l.variants.filter((v) => v.video === undefined || v.video === videoId) }))
+    .filter((l) => l.variants.length > 0);
+}
+
 export const BatchSchema = fileObject({
   id,
-  stage: StageSchema,
+  // The tab the batch's items all come from, or null when it spans tabs (Send to agent sends every tab).
+  stage: StageSchema.nullable(),
   noteIds: z.array(z.string()).default([]),
   sectionIds: z.array(z.string()).default([]),
   sentAt: z.string(),

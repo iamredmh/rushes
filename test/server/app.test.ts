@@ -325,6 +325,21 @@ describe("API", () => {
     expect(saved.videos.f3a.lanes).toEqual({});
   });
 
+  it("a variant names the film it is for, and an unknown film is refused", async () => {
+    const { call, root, store } = await setup();
+    await call("POST", "/api/versions", { video: "f2a Ten colours", file: `${root}/renders/f2a.mp4` });
+    await call("POST", "/api/versions", { video: "f3a One phone", file: `${root}/renders/f3a.mp4` });
+    const a = await call("POST", "/api/variants", { stage: "sfx", name: "Haptic taps", file: "audio/sfx/f3a.wav", video: "f3a One phone" });
+    expect(a.status).toBe(201);
+    expect(a.json.variant.video).toBe("f3a-one-phone");
+    const b = await call("POST", "/api/variants", { stage: "sfx", name: "Shared", file: "audio/sfx/shared.wav" });
+    expect("video" in b.json.variant).toBe(false);
+    const bad = await call("POST", "/api/variants", { stage: "sfx", name: "Lost", file: "audio/sfx/lost.wav", video: "f9z" });
+    expect(bad.status).toBe(404);
+    const saved = await store.read("project");
+    expect(saved.lanes[0].variants.map((v) => v.id)).toEqual(["haptic-taps", "shared"]);
+  });
+
   it("a variant's description is stored as meta.description, merged with meta, and wins over meta's own", async () => {
     const { call } = await setup();
     const a = await call("POST", "/api/variants", { stage: "voice", name: "Gerald", file: "audio/g.wav", round: "Round 1", description: "Warmer, slower intro" });
@@ -405,6 +420,20 @@ describe("API", () => {
     expect(latest.json.batch.id).toBe("b_1");
     expect(latest.json.notes[0].batch).toBe("b_1");
     expect((await call("GET", "/api/batches/b_9")).status).toBe(404);
+  });
+
+  it("Send to agent with no stage sends every tab's open notes in one batch, and logs it once", async () => {
+    const { call } = await setup();
+    const a = (await call("POST", "/api/notes", { stage: "picture", scope: "point", t: 1, text: "x" })).json.note;
+    const b = (await call("POST", "/api/notes", { stage: "sfx", scope: "whole", text: "y" })).json.note;
+    const sent = await call("POST", "/api/batches", {});
+    expect(sent.status).toBe(201);
+    expect(sent.json.batch).toMatchObject({ stage: null, noteIds: [a.id, b.id] });
+    const empty = await call("POST", "/api/batches", {});
+    expect(empty.status).toBe(409);
+    expect(empty.json).toMatchObject({ error: "empty_batch", message: "Nothing open to send" });
+    const log = await call("GET", "/api/log?area=notes");
+    expect(log.json.entries[0].text).toBe("2 notes sent from several tabs");
   });
 
   it("a note sent, marked done and reopened goes in the next batch", async () => {

@@ -1486,3 +1486,35 @@ describe("withFormatRows (§21.5 Assets › Cuts)", () => {
     expect(withFormatRows(items).map((x) => x.path)).toEqual(["other.mp4", "main.mp4", "tall.mp4"]);
   });
 });
+
+import { filmLanes, filmNotes } from "../../web/src/lib.js";
+
+describe("one film's audio lists", () => {
+  const v = (id: string, video?: string) => ({ id, name: id, file: `${id}.wav`, meta: {}, cues: [], ...(video ? { video } : {}) });
+  const lanes: Lane[] = [
+    { id: "music", stage: "music", name: "Music", variants: [v("f2a-bed", "f2a"), v("f3a-bed", "f3a"), v("shared-bed")] },
+    { id: "sfx", stage: "sfx", name: "Sound effects", variants: [v("f2a-pass", "f2a"), v("f3a-pass-1", "f3a"), v("f3a-pass-2", "f3a")] },
+    { id: "round-1", stage: "voice", name: "Round 1", variants: [v("f2a-read", "f2a")] },
+  ];
+  it("lists only the film's own beds, passes and reads, plus any made for every film", () => {
+    const f3a = filmLanes(lanes, "f3a");
+    expect(variantRows(f3a, "music").map((r) => r.variant)).toEqual(["f3a-bed", "shared-bed"]);
+    expect(variantRows(f3a, "sfx").map((r) => r.variant)).toEqual(["f3a-pass-1", "f3a-pass-2"]);
+    // F2A's only round has nothing for F3A, so it isn't listed at all.
+    expect(f3a.some((l) => l.id === "round-1")).toBe(false);
+    expect(variantRows(filmLanes(lanes, "f2a"), "voice").map((r) => r.variant)).toEqual(["f2a-read"]);
+  });
+  it("lists everything when no film is named", () => {
+    expect(filmLanes(lanes, undefined)).toBe(lanes);
+  });
+  it("shows a tab's notes for the film it is on, plus any naming no film", () => {
+    const notes = [
+      note({ id: "a", stage: "sfx", video: "f2a" }),
+      note({ id: "b", stage: "sfx", video: "f3a" }),
+      note({ id: "c", stage: "sfx", video: null }),
+      note({ id: "d", stage: "music", video: "f3a" }),
+    ];
+    expect(filmNotes(notes, "sfx", "f3a").map((n) => n.id)).toEqual(["b", "c"]);
+    expect(filmNotes(notes, "sfx", null).map((n) => n.id)).toEqual(["a", "b", "c"]);
+  });
+});

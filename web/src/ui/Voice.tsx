@@ -10,7 +10,7 @@ import { assetRev, type Clip } from "../audio/timeline.js";
 import {
   AUDIO_CHIPS, blindOrder, defaultVersion, readLane, type Scope, STAGE_NAMES, type VariantRow, voiceDefaultRead, voiceListening, type VoiceNotes, voiceNoteRows,
   voiceOnLabel, voiceOnOptions, type VoiceRound, voiceRounds,
-  filmPicks,
+  filmLanes, filmNotes, filmPicks,
 } from "../lib.js";
 import type { Asset, State, Video } from "../types.js";
 import { AudioStage, type Preview } from "./AudioStage.js";
@@ -69,8 +69,9 @@ export function Voice({ state, assets, video, toast, onChanged, onPendingChange 
   // A file that isn't on disk is never loaded: its read shows the missing mark and plays silence.
   const missing = (path: string) => asset(path)?.missing === true;
 
-  // Rounds in creation order; with Blind, each round's reads shuffled and named Read 1…n.
-  const rounds = voiceRounds(state.project.lanes, filmPicks(state.picks, video?.id).lanes);
+  // Rounds in creation order, with only this film's reads (and any made for every film); with Blind,
+  // each round's reads shuffled and named Read 1…n.
+  const rounds = voiceRounds(filmLanes(state.project.lanes, video?.id), filmPicks(state.picks, video?.id).lanes);
   const shown: VoiceRound[] = rounds.map((round) => {
     if (!blind) return round;
     const order = blindOrder(round.reads.map((r) => r.key), BLIND_SEED);
@@ -101,7 +102,7 @@ export function Voice({ state, assets, video, toast, onChanged, onPendingChange 
     .flatMap((round) => round.reads.filter((r) => !missing(r.file)).map(clipOf));
 
   // ---- the lanes: the current round open, then older rounds newest first, each folded ----
-  const notes = state.notes.notes.filter((n) => n.stage === "voice");
+  const notes = filmNotes(state.notes.notes, "voice", video?.id);
   const model: VoiceNotes = { rounds, sections: state.script.sections };
   const lane = (round: VoiceRound, r: VariantRow): StageRow => ({
     key: r.key,

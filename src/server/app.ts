@@ -26,7 +26,7 @@ import { BRING_IN_MAX, FoundScanner, type BringInFailure, type BringInKind, ffpr
 import { candidatePaths, listAssets, fpsFor, screenshotName } from "./assets.js";
 import { osRevealer, osOpener, OPEN_SAFE_EXT, type Revealer, type Opener } from "./reveal.js";
 import type { CorruptEvent } from "./watch.js";
-import { LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, PinSchema, FileKindSchema, MarkSchema, ProjectIdSchema, ShotSchema, LEVEL_MIN, LEVEL_MAX, LEVEL_STEP, picksForVideo, type Levels, type Batch, type Note, type VisualsFile } from "../core/schema.js";
+import { LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, PinSchema, FileKindSchema, MarkSchema, ProjectIdSchema, ShotSchema, LEVEL_MIN, LEVEL_MAX, LEVEL_STEP, lanesForVideo, picksForVideo, type Levels, type Batch, type Note, type VisualsFile } from "../core/schema.js";
 import { LABEL_MAX, oneLineOf } from "../core/labels.js";
 import { byOf, logBookFor } from "./logbook.js";
 import { BriefService } from "./brief.js";
@@ -148,6 +148,7 @@ const VariantBody = z.object({
   file: z.string().min(1),
   meta: z.record(z.string(), z.union([z.string(), z.number()])).optional(),
   description: z.string().min(1).max(200).optional(),
+  video: z.string().min(1).max(200).optional(),
   // §23.6: a cue's file has no length cap here. The 1024 limit applies to the stored (manifest) form,
   // which checkCueFile enforces with a 400 naming the cue.
   cues: z.array(z.object({ name: z.string().min(1), t, file: z.string().min(1).optional() })).optional(),
@@ -182,7 +183,8 @@ const PickMap = z.record(z.string(), z.string().nullable());
 const LevelValue = z.number().min(LEVEL_MIN).max(LEVEL_MAX).multipleOf(LEVEL_STEP);
 const LevelsBody = z.object({ voice: LevelValue.nullable(), music: LevelValue.nullable(), sfx: LevelValue.nullable() }).partial();
 const PicksBody = z.object({ video: z.string().min(1).max(200).optional(), lanes: PickMap.optional(), sections: PickMap.optional(), levels: LevelsBody.optional() });
-const BatchBody = z.object({ stage: StageSchema });
+// No stage: every tab's open notes (Send to agent). A stage: that tab's only.
+const BatchBody = z.object({ stage: StageSchema.optional() });
 
 const NoteQuery = z.object({
   stage: StageSchema.optional(),
@@ -1295,7 +1297,9 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     const b = await body(c, MixLoudnessBody);
     const [project, picks] = await Promise.all([store.read("project"), store.read("picks")]);
     const run = opts.loudnessRunner ?? defaultRunner;
-    const result = await measureMix(project, picksForVideo(picks, b.video), b.lanes, store.root, run, opts.loudnessTimeoutMs);
+    // A film hears only its own reads, beds and passes, as its Mix tab plays them.
+    const heard = { ...project, lanes: lanesForVideo(project.lanes, b.video) };
+    const result = await measureMix(heard, picksForVideo(picks, b.video), b.lanes, store.root, run, opts.loudnessTimeoutMs);
     return c.json(result);
   });
 

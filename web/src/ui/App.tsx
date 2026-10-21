@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, ApiError, projectId } from "../api.js";
 import {
   LOCKED_BRIEF, LOCKED_STORYBOARD, LOCKED_TAB, testFlags, STAGE_NAMES, agentPrompt, briefPrompt, briefSendPrompt, copyShortcut, currentFormat, defaultVersion, firstView, formatChips, formatPrompt, foundChip, foundSignature,
-  filmAfterShelving, inPlay, isPlanPage, labelOfId, latest, lockedFound, neighbourFormat, neighbourVideo, packShown, planProgress, planTarget, previousVersion, proxyKey, readyPrompt, snap, storySendPrompt, storyboardPrompt, versionFormats, type PlanPage,
+  filmAfterShelving, inPlay, isPlanPage, labelOfId, latest, lockedFound, neighbourFormat, neighbourVideo, openToSend, packShown, planProgress, planTarget, previousVersion, proxyKey, readyPrompt, snap, storySendPrompt, storyboardPrompt, versionFormats, type PlanPage,
 } from "../lib.js";
 import type { Batch, BriefView, FoundCounts, FoundKind, Stage, StoryboardView, Video } from "../types.js";
 import { useRushes } from "../useRushes.js";
@@ -422,36 +422,35 @@ export function App() {
     return () => ro.disconnect();
   }, [shellUp]);
 
+  // Send to agent sends the whole project from whichever tab it is pressed on: every tab's open notes
+  // on every film in play and the changed script lines (one batch), plus what changed in the brief and
+  // the storyboard. Those two have no batch: their files are the record, so they are only lines to paste.
   const send = async () => {
-    if (!stage || stage === "assets") return;
+    if (!state || !stage) return;
     setKeysOpen(false);
-    // The Brief page has no batch: brief.md is the record, so this is only the message to paste. It waits for
-    // what you just typed to be saved, and is built from the brief as the server then has it.
-    if (stage === "brief") {
-      if (!state) return;
-      if (!state.brief.exists) return toast("There's no brief yet: copy the prompt on this page for your agent");
-      const fresh = ((await planSettle.current?.()) as BriefView | undefined) ?? state.brief;
-      setSent({ id: "brief", title: "Message for your agent", prompt: briefSendPrompt(state.project.name, video?.name ?? null, fresh) });
-      setCopied(false);
-      return;
-    }
-    // The Storyboard page is the same: a message, built after its saves have landed.
-    if (stage === "storyboard") {
-      if (!state) return;
-      if (!state.storyboard.exists) return toast("There's no storyboard yet: copy the prompt on this page for your agent");
-      const fresh = ((await planSettle.current?.()) as StoryboardView | undefined) ?? state.storyboard;
-      setSent({ id: "storyboard", title: "Message for your agent", prompt: storySendPrompt(state.project.name, video?.name ?? null, fresh) });
-      setCopied(false);
-      return;
-    }
+    // The Brief or Storyboard page waits for what you just typed to be saved, and is read as the server then has it.
+    const settled = stage === "brief" || stage === "storyboard" ? await planSettle.current?.() : undefined;
+    const brief = (stage === "brief" ? (settled as BriefView | undefined) : undefined) ?? state.brief;
+    const board = (stage === "storyboard" ? (settled as StoryboardView | undefined) : undefined) ?? state.storyboard;
+    // On its own page, the brief's or storyboard's line always goes; elsewhere, only when something in it changed.
+    const planning = [
+      brief.exists && (stage === "brief" || brief.changed > 0) ? briefSendPrompt(state.project.name, video?.name ?? null, brief) : null,
+      board.exists && (stage === "storyboard" || board.changed > 0) ? storySendPrompt(state.project.name, video?.name ?? null, board) : null,
+    ].filter((line): line is string => line !== null);
+    let batch: Batch | null = null;
     try {
-      const { batch } = await api.post<{ batch: Batch }>("/api/batches", { stage });
-      setSent(batch);
-      setCopied(false);
-      void refresh();
+      batch = (await api.post<{ batch: Batch }>("/api/batches", {})).batch;
     } catch (e) {
-      toast(e instanceof ApiError && e.code === "empty_batch" ? `Nothing open on ${STAGE_NAMES[stage]} to send` : (e as Error).message);
+      if (!(e instanceof ApiError && e.code === "empty_batch")) return toast((e as Error).message);
     }
+    if (!batch && planning.length === 0) {
+      if (stage === "brief" && !brief.exists) return toast("There's no brief yet: copy the prompt on this page for your agent");
+      if (stage === "storyboard" && !board.exists) return toast("There's no storyboard yet: copy the prompt on this page for your agent");
+      return toast("Nothing open to send on any tab");
+    }
+    setSent(batch ? { id: batch.id, prompt: [batch.prompt, ...planning].join("\n\n") } : { id: "plan", title: "Message for your agent", prompt: planning.join("\n\n") });
+    setCopied(false);
+    if (batch) void refresh();
   };
   const copy = async () => {
     if (!sent) return;
@@ -474,7 +473,8 @@ export function App() {
   const pictureNotes = state.notes.notes.filter((n) => n.stage === "picture" && (!n.video || n.video === video?.id));
   const hasTodo = (vid: string) => state.notes.notes.some((n) => n.stage === "picture" && n.status === "todo" && (!n.video || n.video === vid));
   const unlocked = stage === "assets" ? assetsUnlocked : stage === "brief" ? state.brief.exists : stage === "storyboard" ? state.storyboard.exists : (tab(stage)?.unlocked ?? false);
-  const open = stage === "assets" ? 0 : stage === "brief" ? state.brief.changed : stage === "storyboard" ? state.storyboard.changed : (tab(stage)?.todo ?? 0);
+  // What Send to agent would send: the same from every tab.
+  const open = openToSend(tabs, state.brief, state.storyboard);
   // §24: the Planning tab's menu, its marks while a plan is in progress (a brief and no cut yet), and its open count.
   const hasCut = !!tab("picture")?.unlocked;
   const progress = planProgress(state.brief, state.script.sections, state.storyboard);
@@ -575,13 +575,7 @@ export function App() {
           <Icon name="kbd" />
         </button>
         <ChangeLogButton log={changeLog} buttonRef={changeLogButton} />
-        <button
-          class="btn primary"
-          aria-disabled={stage === "assets"}
-          tabIndex={stage === "assets" ? -1 : undefined}
-          data-tip={stage === "assets" ? "Nothing to send from Assets" : undefined}
-          onClick={() => void send()}
-        >
+        <button class="btn primary tip-below" data-tip="Every tab's open notes, on every film" onClick={() => void send()}>
           Send to agent{open > 0 && <span class="count">{open}</span>}
         </button>
       </header>

@@ -143,12 +143,16 @@ export interface AddVariantInput {
   /** The one-line description the lane card shows. Stored as `meta.description`; wins over a `description` inside `meta`. */
   description?: string;
   cues?: { name: string; t: number; file?: string }[];
+  /** Video id or name of the film this was made for: only that film's tabs list it. Left out, every film's do. */
+  video?: string;
 }
 
 const LANE_NAMES: Record<LaneStage, string> = { voice: "Voiceover", music: "Music", sfx: "Sound effects" };
 
 export function addVariant(p: Project, input: AddVariantInput): { lane: Lane; variant: Variant } {
-  // §23: the cues first, so a cue refused for its file leaves the project untouched.
+  // The film and (§23) the cues first, so an unknown film or a cue refused for its file leaves the
+  // project untouched.
+  const video = input.video === undefined ? undefined : resolveVideo(p, input.video).id;
   const cues: Cue[] = [];
   for (const c of input.cues ?? []) {
     const cue: Cue = { id: uniqueId(slugify(c.name), cues.map((x) => x.id)), name: c.name, t: c.t };
@@ -170,6 +174,7 @@ export function addVariant(p: Project, input: AddVariantInput): { lane: Lane; va
     meta: input.description === undefined ? { ...input.meta } : { ...input.meta, description: input.description },
     cues,
   };
+  if (video !== undefined) variant.video = video;
   lane.variants.push(variant);
   return { lane, variant };
 }

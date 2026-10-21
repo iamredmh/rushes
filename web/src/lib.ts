@@ -280,6 +280,12 @@ export function briefSendPrompt(projectName: string, filmName: string | null, br
   return parts.join(" ");
 }
 
+/** How many items Send to agent sends, from any tab: every tab's open notes on films in play and
+ *  changed script lines (each tab's `todo`), plus the brief's and the storyboard's changed rows. */
+export function openToSend(tabs: Pick<TabState, "todo">[], brief: Pick<BriefView, "changed">, board: Pick<StoryboardView, "changed">): number {
+  return tabs.reduce((n, t) => n + t.todo, 0) + brief.changed + board.changed;
+}
+
 /** What Send to agent says from the Storyboard page: how many shots are approved, and which ones I changed. */
 export function storySendPrompt(projectName: string, filmName: string | null, board: Pick<StoryboardView, "approved" | "total"> & { shots: { n: number; name: string; changed: boolean }[] }): string {
   const edited = board.shots.filter((s) => s.changed).map((s) => `Shot ${String(s.n).padStart(2, "0")} · ${s.name}`);
@@ -1621,4 +1627,18 @@ export function filmPicks(picks: Picks, videoId: string | null | undefined): Pic
   if (!videoId) return picks;
   const own = picks.videos?.[videoId];
   return { ...picks, lanes: { ...(own?.lanes ?? {}) }, levels: { ...(own?.levels ?? {}) }, sections: {}, videos: {} };
+}
+
+/** The lanes one film lists, as the server's lanesForVideo: each keeps only the reads, beds and
+ *  passes made for that film or for every film, and a lane left with none is dropped. */
+export function filmLanes(lanes: Lane[], videoId: string | null | undefined): Lane[] {
+  if (!videoId) return lanes;
+  return lanes
+    .map((l) => ({ ...l, variants: l.variants.filter((v) => v.video === undefined || v.video === videoId) }))
+    .filter((l) => l.variants.length > 0);
+}
+
+/** One film's notes on an audio tab: those made on it, plus any that name no film. */
+export function filmNotes(notes: Note[], stage: Stage, videoId: string | null | undefined): Note[] {
+  return notes.filter((n) => n.stage === stage && (!videoId || !n.video || n.video === videoId));
 }

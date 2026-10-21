@@ -56,7 +56,7 @@ Usage
   rushes add format <file> [--video NAME] [--version V] [--label RATIO]
                                                     register another shape (aspect ratio) of a cut;
                                                     --label here is only a ratio hint such as 2.39:1, not the cut's label
-  rushes add variant <music|sfx|voice> <file> --name NAME [--lane ID] [--round NAME] [--description TEXT]
+  rushes add variant <music|sfx|voice> <file> --name NAME [--video NAME] [--lane ID] [--round NAME] [--description TEXT]
   rushes add shots <file.json> --video NAME [--version V]
   rushes add file <path> --kind K [--name NAME] [--note TEXT] [--video V]
                                                     register a doc, image, caption, export, delivery or edit file
@@ -392,7 +392,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         }
         if (what === "variant") {
           if (!a || !b || !o.name) return usage(io, "rushes add variant <music|sfx|voice> <file> --name NAME");
-          const r = await (await client()).post("/api/variants", { stage: a, file: resolve(io.cwd, b), name: o.name, lane: o.lane, round: o.round, description: o.description });
+          const r = await (await client()).post("/api/variants", { stage: a, file: resolve(io.cwd, b), name: o.name, lane: o.lane, round: o.round, description: o.description, video: o.video });
           io.out(`Added ${r.lane.name}: ${r.variant.name}`);
           return 0;
         }

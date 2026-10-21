@@ -245,7 +245,7 @@ test("Mix's Sound effects lane shows the card and walks its cues; it has no laye
   await rushes.addCut();
   await rushes.writeFiles([{ path: THUD, seconds: 0.4, freq: 110 }]);
   const pass = await rushes.addVariant("sfx", "Effects for Lumen", { seconds: 4, freq: 880, cues: [{ name: "whoosh", t: 0.5 }, { name: "thud", t: 2, file: THUD }] });
-  await rushes.api("PUT", "/api/picks", { lanes: { [pass.lane.id]: pass.variant.id } });
+  await rushes.api("PUT", "/api/picks", { video: "hero", lanes: { [pass.lane.id]: pass.variant.id } });
   await page.goto(rushes.testUrl());
   const tab = page.getByRole("tab", { name: /Mix/ });
   await expect(tab).not.toHaveAttribute("data-locked");

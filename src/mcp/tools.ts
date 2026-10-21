@@ -326,6 +326,11 @@ export function createMcpServer(ctx: ToolContext): McpServer {
           .max(200)
           .optional()
           .describe("One line on what this read, bed or pass is, shown on its lane card. Stored as meta.description, and wins over one given in meta."),
+        video: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("The film (id or name) this read, bed or pass is for: only that film's Voiceover, Music, Sound effects and Mix list it. Leave it out only when it is for every film. In a project with more than one film, always give it."),
         cues: z
           .array(
             z.object({
@@ -420,7 +425,7 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     {
       title: "Get a batch",
       description:
-        "The batch the user sent with Send to agent (latest by default), with its notes and script sections. A note's `on` says what it's about: null on Picture or for the whole mix, \"<lane>/<variant>\" for a music bed, SFX pass or voice variant, \"<lane>/<variant>:<cue>\" for an SFX cue, \"vo\" for the VO lane on Mix. Older notes may carry a bare variant id, \"vo\" for the assembled read, \"<section>:<take>\" for a take, or a section id.",
+        "The batch the user sent with Send to agent (latest by default), with its notes and script sections. It holds every open note from every tab and every film in play: `stage` is the tab when they all came from one, or null when it spans tabs, and each note carries its own `stage` and `video`. A note's `on` says what it's about: null on Picture or for the whole mix, \"<lane>/<variant>\" for a music bed, SFX pass or voice variant, \"<lane>/<variant>:<cue>\" for an SFX cue, \"vo\" for the VO lane on Mix. Older notes may carry a bare variant id, \"vo\" for the assembled read, \"<section>:<take>\" for a take, or a section id.",
       inputSchema: { project, id: z.string().optional() },
     },
     safe(async ({ project, id }) => (await ctx.client(project)).get(`/api/batches/${encodeURIComponent(id ?? "latest")}`)),

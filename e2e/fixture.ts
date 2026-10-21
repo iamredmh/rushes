@@ -62,6 +62,8 @@ export interface VariantOptions {
   lane?: string;
   /** Voice only: the round's name, e.g. "Round 2 · Gerald, tone" (§18.2). */
   round?: string;
+  /** The film it is for (id or name); left out, it is for every film. */
+  video?: string;
 }
 
 /** One render of a cut, for the format tests (§21): its picture size, and its length (default 4 s). */
@@ -368,7 +370,7 @@ export const test = base.extend<{ rushes: Rushes; noFfmpeg: boolean }>({
       const file = `audio/${stage}-${++wavs}-${slug}.wav`;
       await mkdir(join(root, "audio"), { recursive: true });
       await writeFile(join(root, file), makeWav({ seconds: opts.seconds, freq: opts.freq }));
-      return api("POST", "/api/variants", { stage, name, file, lane: opts.lane, round: opts.round, meta: opts.meta, cues: opts.cues });
+      return api("POST", "/api/variants", { stage, name, file, lane: opts.lane, round: opts.round, meta: opts.meta, cues: opts.cues, video: opts.video });
     };
     const writeFiles = async (files: TreeFile[]) => {
       for (const f of files) {

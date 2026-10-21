@@ -474,6 +474,7 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 /* The tab's header sits at the top of the stage, so its tooltips open downwards. */
 .ahead [data-tip]::after { bottom: auto; top: calc(100% + 8px); }
 .lanes { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.lanesnone { margin: 8px 0 0; color: var(--text-2); font-size: 15px; }
 .lane { display: grid; grid-template-columns: 180px minmax(0, 1fr) 136px; gap: 16px; align-items: center; padding: 6px 0; border-radius: var(--r); }
 .lane .nm { display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; min-width: 0; text-align: left; border: 0; background: transparent; color: var(--text); padding: 6px 8px; margin: -6px -8px; border-radius: var(--r); cursor: pointer; }
 .lane .nm:hover { background: var(--raised); }

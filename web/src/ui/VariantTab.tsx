@@ -4,7 +4,7 @@
 import { useState } from "preact/hooks";
 import { api } from "../api.js";
 import { assetRev, type Clip } from "../audio/timeline.js";
-import { blindOrder, defaultVersion, filmPicks, STAGE_NAMES, type VariantRow, variantNoteRow, variantOnLabel, variantOnOptions, variantRows } from "../lib.js";
+import { blindOrder, defaultVersion, filmLanes, filmNotes, filmPicks, STAGE_NAMES, type VariantRow, variantNoteRow, variantOnLabel, variantOnOptions, variantRows } from "../lib.js";
 import type { Asset, State, Video } from "../types.js";
 import { AudioStage, type Preview } from "./AudioStage.js";
 import { Icon } from "./Icon.js";
@@ -47,7 +47,8 @@ export function VariantTab({ stage, state, assets, video, toast, onChanged, onPe
     rerender((n) => n + 1);
   };
 
-  const all = variantRows(state.project.lanes, stage);
+  // Only this film's beds or passes (and any made for every film).
+  const all = variantRows(filmLanes(state.project.lanes, video?.id), stage);
   const order = blind ? blindOrder(all.map((r) => r.key), BLIND_SEED) : all.map((r) => r.key);
   const rows = order.map((k) => all.find((r) => r.key === k)!);
   const nameOf = (r: VariantRow) => (blind ? `Bed ${order.indexOf(r.key) + 1}` : r.name);
@@ -85,7 +86,7 @@ export function VariantTab({ stage, state, assets, video, toast, onChanged, onPe
   });
 
   const options = variantOnOptions(rows, nameOf, stage === "sfx");
-  const notes = state.notes.notes.filter((n) => n.stage === stage);
+  const notes = filmNotes(state.notes.notes, stage, video?.id);
   const cut = defaultVersion(video ?? undefined);
   const preview: Preview | null = video && cut ? { video: video.id, version: cut.id, file: cut.file, duration: cut.duration } : null;
   // ←/→ step one frame of the project's rate (§17.1).

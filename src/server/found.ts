@@ -301,6 +301,17 @@ export function anchorCut(p: Project, film: string | undefined): { video: Video;
   return best;
 }
 
+/** The film found audio is for: the named film, when it is one of this project's. Otherwise none, so
+ *  every film lists it. */
+function audioFilm(p: Project, film: string | undefined): string | undefined {
+  if (film === undefined) return undefined;
+  try {
+    return resolveVideo(p, film).id;
+  } catch {
+    return undefined;
+  }
+}
+
 /** The film a found cut joins: the anchor cut's film, else the first film. Null with no films. */
 function filmFor(p: Project, film: string | undefined): string | null {
   return anchorCut(p, film)?.video.id ?? p.videos[0]?.id ?? null;
@@ -697,7 +708,8 @@ export class FoundScanner {
       }
       if (picked.length === 0) return none();
       const reasons = new Map(picked.map((f) => [f.path, byPath.get(f.path)?.reasons ?? []]));
-      const result = await this.bringInNow(picked.map((f) => ({ path: f.path, kind: f.kind as BringInKind })), { reasons, film, origin: "auto" });
+      // The current set was matched to the anchor cut, so it comes in for that cut's film.
+      const result = await this.bringInNow(picked.map((f) => ({ path: f.path, kind: f.kind as BringInKind })), { reasons, film: film ?? anchor?.video.id, origin: "auto" });
       // §22.5: what the current set brought in is one line, by Rushes (R8, R9); its variants are dated (R5).
       // Built inside add's guard, so a line that can't be made never undoes the bring-in (M1).
       const cut = anchor;
@@ -909,7 +921,7 @@ export class FoundScanner {
         if (clash) return { reason: clash };
         const description = it.reasons.length > 0 ? it.reasons.join(" · ") : undefined;
         try {
-          const { lane, variant } = addVariant(p, { stage: it.kind, round, name, file: it.rel, description });
+          const { lane, variant } = addVariant(p, { stage: it.kind, round, name, file: it.rel, description, video: audioFilm(p, film) });
           return { path: it.rel, kind: it.kind, lane: lane.id, variant: variant.id };
         } catch (e) {
           return { reason: e instanceof RushesError ? e.message : "That file couldn't be brought in" };
