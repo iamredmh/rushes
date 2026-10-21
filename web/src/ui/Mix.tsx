@@ -11,7 +11,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { api, ApiError } from "../api.js";
 import { assetRev, type Clip, laneGains } from "../audio/timeline.js";
 import {
-  clampLevel, defaultVersion, heardVoice, LEVEL_MAX, LEVEL_MIN, LEVEL_STEP, levelText, loudnessLanes, type LoudnessState, loudnessReadout,
+  clampLevel, defaultVersion, filmPicks, heardVoice, LEVEL_MAX, LEVEL_MIN, LEVEL_STEP, levelText, loudnessLanes, type LoudnessState, loudnessReadout,
   MIX_LANES, type MixLane, type MixModel, mixNoteRows, MIX_STAGE, mixOnLabel, mixOnOptions, STAGE_NAMES, type VariantRow, variantRows,
   voiceRounds, WHOLE_MIX,
 } from "../lib.js";
@@ -48,7 +48,9 @@ export function Mix({ state, assets, video, toast, onChanged, onPendingChange }:
     return a ? assetRev(a) : undefined;
   };
   const missing = (path: string) => asset(path)?.missing === true;
-  const lanePicks = state.picks.lanes;
+  const filmId = video?.id;
+  const filmState = filmPicks(state.picks, filmId);
+  const lanePicks = filmState.lanes;
 
   // ---- what each lane plays ----
   // VO: the newest voice round's pick, walking back past rounds with none (§18.4), as the server mixes it.
@@ -76,7 +78,7 @@ export function Mix({ state, assets, video, toast, onChanged, onPendingChange }:
 
   // ---- levels (§19.6): saved with the picks, in dB. The slider stays live (and the engine hears
   // every tick) while the save to /api/picks is debounced, so dragging never spams the server. ----
-  const pickLevels = state.picks.levels;
+  const pickLevels = filmState.levels;
   const savedLevel = (lane: MixLane): number => pickLevels[MIX_STAGE[lane]] ?? 0;
   const [levels, setLevels] = useState<Record<MixLane, number>>(() => ({ vo: savedLevel("vo"), music: savedLevel("music"), sfx: savedLevel("sfx") }));
   // Each lane's debounced save still to go: its timer, and the save itself, so leaving Mix can
@@ -85,7 +87,7 @@ export function Mix({ state, assets, video, toast, onChanged, onPendingChange }:
   // Picked up elsewhere (another tab, the agent, or your own save landing) -- but never for a lane
   // with a save still pending: a refresh racing your own debounce must not snap the slider you're
   // dragging back to the stale server value underneath your hand.
-  const savedKey = JSON.stringify(pickLevels);
+  const savedKey = `${filmId}:${JSON.stringify(pickLevels)}`;
   useEffect(() => {
     setLevels((v) => {
       let changed = false;
@@ -131,6 +133,8 @@ export function Mix({ state, assets, video, toast, onChanged, onPendingChange }:
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // Switching films sends the old film's pending level saves first (each already names its own film).
+  useEffect(() => () => flushSaves(false), [filmId]);
   const setLevel = (lane: MixLane, db: number) => {
     const clamped = clampLevel(db);
     setLevels((v) => (v[lane] === clamped ? v : { ...v, [lane]: clamped }));
@@ -138,7 +142,7 @@ export function Mix({ state, assets, video, toast, onChanged, onPendingChange }:
     if (timers[lane] !== undefined) window.clearTimeout(timers[lane].id);
     // 0 dB is the default: saved as a clear (null), same as the key never having been set.
     const send = (keepalive = false) =>
-      void api.put("/api/picks", { levels: { [MIX_STAGE[lane]]: clamped === 0 ? null : clamped } }, { keepalive }).then(onChanged, (e) => {
+      void api.put("/api/picks", { video: filmId, levels: { [MIX_STAGE[lane]]: clamped === 0 ? null : clamped } }, { keepalive }).then(onChanged, (e) => {
         toast(e instanceof ApiError ? e.message : "Couldn't save the level");
       });
     const id = window.setTimeout(() => {
@@ -196,7 +200,7 @@ export function Mix({ state, assets, video, toast, onChanged, onPendingChange }:
   // Anything that changes the mix re-measures: the lanes, what each plays (picks, takes, re-renders),
   // and the levels -- the server applies them before measuring, so this follows the saved value
   // (`pickLevels`), not the slider mid-drag, which it can't see yet anyway.
-  const signature = JSON.stringify({ want, levels: pickLevels, clips: MIX_LANES.map((l) => clipsOf[l].map((c) => [c.path, c.rev ?? "", c.offset])) });
+  const signature = JSON.stringify({ want, film: filmId, levels: pickLevels, clips: MIX_LANES.map((l) => clipsOf[l].map((c) => [c.path, c.rev ?? "", c.offset])) });
   const [loudness, setLoudness] = useState<LoudnessState>({ kind: "waiting" });
   const [measuring, setMeasuring] = useState(false);
   // Bumped by clicking the readout after a timeout or an error: the server never caches either, so
@@ -216,7 +220,7 @@ export function Mix({ state, assets, video, toast, onChanged, onPendingChange }:
     setLoudness((s) => (s.kind === "empty" || s.kind === "timeout" || s.kind === "error" ? { kind: "waiting" } : s));
     setMeasuring(true);
     const timer = window.setTimeout(() => {
-      api.post<LoudnessResult>("/api/mix/loudness", { lanes: want }).then(
+      api.post<LoudnessResult>("/api/mix/loudness", { lanes: want, video: filmId }).then(
         (result) => {
           if (ask === asked.current) setLoudness({ kind: "result", result });
         },

@@ -249,6 +249,7 @@ async function fixture() {
     lanes: { music: "b" }, // sfx has no pick -> falls back to its first variant
     sections: { s2: "u1" }, // an older take pick, which the mix never uses (§18.4)
     levels: {},
+    videos: {},
   };
 
   return { root, project, picks };
@@ -336,13 +337,13 @@ describe("mixInputs", () => {
       { id: "round-1", stage: "voice", name: "Round 1", variants: [{ id: "gerald", name: "Gerald", file: "audio/gerald.wav", meta: {}, cues: [] }] },
       { id: "round-2", stage: "voice", name: "Round 2", variants: [{ id: "sombre", name: "More sombre", file: "audio/sombre.wav", meta: {}, cues: [] }] },
     );
-    const inputs = mixInputs(project, { schema: 1, rev: 0, lanes: { "round-1": "gerald" }, sections: {}, levels: {} }, ["voice"], root);
+    const inputs = mixInputs(project, { schema: 1, rev: 0, lanes: { "round-1": "gerald" }, sections: {}, levels: {}, videos: {} }, ["voice"], root);
     expect(inputs.map((i) => i.file)).toEqual([join(root, "audio", "gerald.wav")]);
   });
 
   it("with no round picked there is no VO input, even when takes exist", async () => {
     const { root, project } = await fixture();
-    const inputs = mixInputs(project, { schema: 1, rev: 0, lanes: {}, sections: {}, levels: {} }, ["voice"], root);
+    const inputs = mixInputs(project, { schema: 1, rev: 0, lanes: {}, sections: {}, levels: {}, videos: {} }, ["voice"], root);
     expect(inputs).toEqual([]);
   });
 
@@ -358,7 +359,7 @@ describe("mixInputs", () => {
       { id: "round-1", stage: "voice", name: "Round 1", variants: [{ id: "gerald", name: "Gerald", file: "audio/gerald.wav", meta: {}, cues: [] }] },
       { id: "round-2", stage: "voice", name: "Round 2", variants: [{ id: "sombre", name: "More sombre", file: "audio/sombre.wav", meta: {}, cues: [] }] },
     );
-    const inputs = mixInputs(project, { schema: 1, rev: 0, lanes: { "round-1": "gerald", "round-2": "sombre" }, sections: {}, levels: {} }, ["voice"], root);
+    const inputs = mixInputs(project, { schema: 1, rev: 0, lanes: { "round-1": "gerald", "round-2": "sombre" }, sections: {}, levels: {}, videos: {} }, ["voice"], root);
     expect(inputs.map((i) => i.file)).toEqual([join(root, "audio", "sombre.wav")]);
   });
 
@@ -394,7 +395,7 @@ describe("measureMix", () => {
     const run: LoudnessRunner = async () => ({ code: 1, stderr: "" });
     const result = await measureMix(
       { schema: 1, rev: 0, name: "demo", fps: 30, videos: [], lanes: [], files: [], autoProxy: false },
-      { schema: 1, rev: 0, lanes: {}, sections: {}, levels: {} },
+      { schema: 1, rev: 0, lanes: {}, sections: {}, levels: {}, videos: {} },
       ["voice", "music", "sfx"],
       "/nonexistent",
       run,

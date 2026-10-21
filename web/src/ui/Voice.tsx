@@ -10,6 +10,7 @@ import { assetRev, type Clip } from "../audio/timeline.js";
 import {
   AUDIO_CHIPS, blindOrder, defaultVersion, readLane, type Scope, STAGE_NAMES, type VariantRow, voiceDefaultRead, voiceListening, type VoiceNotes, voiceNoteRows,
   voiceOnLabel, voiceOnOptions, type VoiceRound, voiceRounds,
+  filmPicks,
 } from "../lib.js";
 import type { Asset, State, Video } from "../types.js";
 import { AudioStage, type Preview } from "./AudioStage.js";
@@ -69,7 +70,7 @@ export function Voice({ state, assets, video, toast, onChanged, onPendingChange 
   const missing = (path: string) => asset(path)?.missing === true;
 
   // Rounds in creation order; with Blind, each round's reads shuffled and named Read 1…n.
-  const rounds = voiceRounds(state.project.lanes, state.picks.lanes);
+  const rounds = voiceRounds(state.project.lanes, filmPicks(state.picks, video?.id).lanes);
   const shown: VoiceRound[] = rounds.map((round) => {
     if (!blind) return round;
     const order = blindOrder(round.reads.map((r) => r.key), BLIND_SEED);
@@ -82,7 +83,7 @@ export function Voice({ state, assets, video, toast, onChanged, onPendingChange 
   // null clears the round's pick (Unpick).
   const use = async (round: VoiceRound, variant: string | null) => {
     try {
-      await api.put("/api/picks", { lanes: { [round.id]: variant } });
+      await api.put("/api/picks", { video: video?.id, lanes: { [round.id]: variant } });
     } catch (e) {
       toast(`Couldn't ${variant === null ? "clear" : "set"} the pick: ${(e as Error).message}`);
     }

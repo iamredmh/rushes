@@ -17,7 +17,7 @@ function defaults(key: FileKey, name: string): FileData[FileKey] {
     case "notes":
       return { schema: 1, rev: 0, notes: [] };
     case "picks":
-      return { schema: 1, rev: 0, lanes: {}, sections: {}, levels: {} };
+      return { schema: 1, rev: 0, lanes: {}, sections: {}, levels: {}, videos: {} };
     case "batches":
       return { schema: 1, rev: 0, batches: [] };
     case "found":

@@ -303,6 +303,28 @@ describe("API", () => {
     expect(picks.json.lanes).toEqual({ music: "deep-house" });
   });
 
+  it("picks and levels belong to one film: a second film starts empty and never inherits", async () => {
+    const { call, store } = await setup();
+    const f2a = await call("PUT", "/api/picks", { video: "f2a", lanes: { music: "bed-f2a", sfx: "sfx-f2a" }, levels: { music: -6 } });
+    expect(f2a.json.lanes).toEqual({ music: "bed-f2a", sfx: "sfx-f2a" });
+    expect(f2a.json.levels).toEqual({ music: -6 });
+    // F3A hears nothing until it picks, whatever F2A has.
+    const empty = await call("GET", "/api/picks?video=f3a");
+    expect(empty.json.lanes).toEqual({});
+    expect(empty.json.levels).toEqual({});
+    const f3a = await call("PUT", "/api/picks", { video: "f3a", lanes: { music: "bed-f3a" }, levels: { sfx: -3 } });
+    expect(f3a.json.lanes).toEqual({ music: "bed-f3a" });
+    // Each film still has its own.
+    expect((await call("GET", "/api/picks?video=f2a")).json.lanes).toEqual({ music: "bed-f2a", sfx: "sfx-f2a" });
+    expect((await call("GET", "/api/picks?video=f2a")).json.levels).toEqual({ music: -6 });
+    // A clear touches only its film, and the project-wide set is never written.
+    await call("PUT", "/api/picks", { video: "f3a", lanes: { music: null } });
+    expect((await call("GET", "/api/picks?video=f2a")).json.lanes.music).toBe("bed-f2a");
+    const saved = await store.read("picks");
+    expect(saved.lanes).toEqual({});
+    expect(saved.videos.f3a.lanes).toEqual({});
+  });
+
   it("a variant's description is stored as meta.description, merged with meta, and wins over meta's own", async () => {
     const { call } = await setup();
     const a = await call("POST", "/api/variants", { stage: "voice", name: "Gerald", file: "audio/g.wav", round: "Round 1", description: "Warmer, slower intro" });

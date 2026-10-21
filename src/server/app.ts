@@ -26,7 +26,7 @@ import { BRING_IN_MAX, FoundScanner, type BringInFailure, type BringInKind, ffpr
 import { candidatePaths, listAssets, fpsFor, screenshotName } from "./assets.js";
 import { osRevealer, osOpener, OPEN_SAFE_EXT, type Revealer, type Opener } from "./reveal.js";
 import type { CorruptEvent } from "./watch.js";
-import { LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, PinSchema, FileKindSchema, MarkSchema, ProjectIdSchema, ShotSchema, LEVEL_MIN, LEVEL_MAX, LEVEL_STEP, type Batch, type Note, type VisualsFile } from "../core/schema.js";
+import { LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, PinSchema, FileKindSchema, MarkSchema, ProjectIdSchema, ShotSchema, LEVEL_MIN, LEVEL_MAX, LEVEL_STEP, picksForVideo, type Levels, type Batch, type Note, type VisualsFile } from "../core/schema.js";
 import { LABEL_MAX, oneLineOf } from "../core/labels.js";
 import { byOf, logBookFor } from "./logbook.js";
 import { BriefService } from "./brief.js";
@@ -181,7 +181,7 @@ const PickMap = z.record(z.string(), z.string().nullable());
 // §19.6: a level is −24..6 dB in 0.5 dB steps; null resets it to 0 (removes the key).
 const LevelValue = z.number().min(LEVEL_MIN).max(LEVEL_MAX).multipleOf(LEVEL_STEP);
 const LevelsBody = z.object({ voice: LevelValue.nullable(), music: LevelValue.nullable(), sfx: LevelValue.nullable() }).partial();
-const PicksBody = z.object({ lanes: PickMap.optional(), sections: PickMap.optional(), levels: LevelsBody.optional() });
+const PicksBody = z.object({ video: z.string().min(1).max(200).optional(), lanes: PickMap.optional(), sections: PickMap.optional(), levels: LevelsBody.optional() });
 const BatchBody = z.object({ stage: StageSchema });
 
 const NoteQuery = z.object({
@@ -205,7 +205,7 @@ const ShotsBody = z.object({
 const LockBody = z.object({ version: z.string().nullable() });
 const ShelveBody = z.object({ shelved: z.boolean() });
 
-const MixLoudnessBody = z.object({ lanes: z.array(LaneStageSchema).min(1) });
+const MixLoudnessBody = z.object({ lanes: z.array(LaneStageSchema).min(1), video: z.string().min(1).max(200).optional() });
 
 const SettingsBody = z.object({ autoProxy: z.boolean() }).strict();
 // A time in seconds, 0 to 24 h: an empty value, NaN, Infinity or anything huge is a 400.
@@ -1237,7 +1237,12 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   });
 
   // ---- picks ----
-  app.get("/api/picks", async (c) => c.json(await store.read("picks")));
+  // ?video=<id> reads one film's picks as a plain picks file (lanes and levels are that film's own).
+  app.get("/api/picks", async (c) => {
+    const picks = await store.read("picks");
+    const video = c.req.query("video");
+    return c.json(video ? picksForVideo(picks, video) : picks);
+  });
 
   app.put("/api/picks", async (c) => {
     const b = await body(c, PicksBody);
@@ -1248,29 +1253,41 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
         else into[k] = v;
       }
     };
-    let before: Record<string, string> = {};
-    const { data } = await store.update("picks", (p) => {
-      before = { ...p.lanes };
-      merge(p.lanes, b.lanes);
-      merge(p.sections, b.sections);
+    const mergeLevels = (into: Levels) => {
       // §19.6: same merge rule as lanes/sections -- a number sets the level, null resets it to 0
       // (deletes the key), anything not named is kept.
       for (const stage of ["voice", "music", "sfx"] as const) {
         const v = b.levels?.[stage];
         if (v === undefined) continue;
-        if (v === null) delete p.levels[stage];
-        else p.levels[stage] = v;
+        if (v === null) delete into[stage];
+        else into[stage] = v;
       }
+    };
+    let before: Record<string, string> = {};
+    const { data } = await store.update("picks", (p) => {
+      merge(p.sections, b.sections);
+      if (b.video) {
+        // A film's picks and levels are its own: another film's are never touched.
+        const own = (p.videos[b.video] ??= { lanes: {}, levels: {} });
+        before = { ...own.lanes };
+        merge(own.lanes, b.lanes);
+        mergeLevels(own.levels);
+        return;
+      }
+      before = { ...p.lanes };
+      merge(p.lanes, b.lanes);
+      mergeLevels(p.levels);
     });
+    const now = b.video ? (data.videos[b.video]?.lanes ?? {}) : data.lanes;
     // §22.5: a change of what's picked is logged; levels alone aren't (R10).
-    const changed = Object.keys({ ...before, ...data.lanes }).some((k) => before[k] !== data.lanes[k]);
+    const changed = Object.keys({ ...before, ...now }).some((k) => before[k] !== now[k]);
     if (changed) {
       // The names come from project.json; if it can't be read now, the pick still stands (ruling e).
       const project = await store.read("project").catch(() => null);
-      if (project) await log.add(() => picksEvent(project, data.lanes), by(c));
+      if (project) await log.add(() => picksEvent(project, now, project.videos.find((v) => v.id === b.video)), by(c));
       else log.failures += 1;
     }
-    return c.json(data);
+    return c.json(b.video ? picksForVideo(data, b.video) : data);
   });
 
   // ---- mix loudness (§17.6) ----
@@ -1278,7 +1295,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     const b = await body(c, MixLoudnessBody);
     const [project, picks] = await Promise.all([store.read("project"), store.read("picks")]);
     const run = opts.loudnessRunner ?? defaultRunner;
-    const result = await measureMix(project, picks, b.lanes, store.root, run, opts.loudnessTimeoutMs);
+    const result = await measureMix(project, picksForVideo(picks, b.video), b.lanes, store.root, run, opts.loudnessTimeoutMs);
     return c.json(result);
   });
 

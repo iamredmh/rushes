@@ -139,14 +139,18 @@ export function scriptEvent(sections: number): LogEvent {
   return { area: "script", kind: "script", merge: "replace", text: `Script set: ${plural(sections, "section", "sections")}` };
 }
 
-/** `Picks: voice “Vo Jules, full read”, music “Night drive, held back”`, the whole set after the change. */
-export function picksEvent(project: Pick<Project, "lanes">, lanes: Picks["lanes"]): LogEvent {
+/** `Picks: voice “Vo Jules, full read”, music “Night drive, held back”`, the whole set after the change; for one film, `Picks for “Key”: …`. */
+export function picksEvent(project: Pick<Project, "lanes">, lanes: Picks["lanes"], video?: Pick<Video, "id" | "name">): LogEvent {
   const parts: string[] = [];
   for (const lane of project.lanes) {
     const v = lane.variants.find((x) => x.id === lanes[lane.id]);
     if (v) parts.push(`${PICK_WORDS[lane.stage]} ${quoted(v.name, lane.stage === "voice" ? "a read" : "a variant")}`);
   }
-  return { area: "mix", kind: "picks", merge: "replace", windowMs: PICKS_MERGE_MS, text: parts.length ? `Picks: ${parts.join(", ")}` : "Picks cleared" };
+  const film = video ? named(video.name, PLACE_MAX) : "";
+  const head = film ? `Picks for ${quoted(film, "")}` : "Picks";
+  // Per film, so one film's picks never replace another's line in the log.
+  const scope = video ? { subject: video.id, video: video.id, version: null } : {};
+  return { area: "mix", kind: "picks", merge: "replace", windowMs: PICKS_MERGE_MS, ...scope, text: parts.length ? `${head}: ${parts.join(", ")}` : `${video ? `${head} cleared` : "Picks cleared"}` };
 }
 
 /** "Picture locked at v6", "Picture unlocked". */

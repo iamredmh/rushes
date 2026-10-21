@@ -310,15 +310,34 @@ export const LEVEL_STEP = 0.5;
 export const LevelsSchema = fileObject({ voice: z.number(), music: z.number(), sfx: z.number() }).partial().default({});
 export type Levels = z.infer<typeof LevelsSchema>;
 
+// What one film hears: its own pick per lane and its own Mix levels. Music, sound effects, the
+// voiceover read and the levels belong to a film, so a second film never inherits the first's.
+export const VideoPicksSchema = fileObject({
+  lanes: z.record(z.string(), z.string()).default({}),
+  levels: LevelsSchema,
+});
+export type VideoPicks = z.infer<typeof VideoPicksSchema>;
+
 export const PicksSchema = fileObject({
   schema: z.literal(1),
   rev: z.number().int().nonnegative(),
+  // The project-wide picks of a project from before picks were per film. Nothing reads them for a
+  // film any more; a write that names no film (an old client, a test) still lands here.
   lanes: z.record(z.string(), z.string()).default({}),
   sections: z.record(z.string(), z.string()).default({}),
   // §19.6: each Mix lane's level in dB, defaulting to 0 (absent). Keyed the same as LaneStage.
   levels: LevelsSchema,
+  // Each film's own picks and levels, keyed by video id. A film with no entry has picked nothing.
+  videos: z.record(z.string(), VideoPicksSchema).default({}),
 });
 export type Picks = z.infer<typeof PicksSchema>;
+
+/** The picks one film plays: its own entry, or nothing picked. With no film named, the project-wide set. */
+export function picksForVideo(picks: Picks, videoId: string | null | undefined): Picks {
+  if (!videoId) return picks;
+  const own = picks.videos[videoId];
+  return { ...picks, lanes: { ...(own?.lanes ?? {}) }, levels: { ...(own?.levels ?? {}) }, sections: {}, videos: {} };
+}
 
 export const BatchSchema = fileObject({
   id,

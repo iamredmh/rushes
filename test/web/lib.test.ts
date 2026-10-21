@@ -1010,7 +1010,7 @@ describe("the VO pick rule: server mix and dashboard agree (parity)", () => {
     await Promise.all(files.map((f) => writeFile(join(root, "audio", f), "x")));
     const project: Project = { schema: 1, rev: 0, name: "p", fps: 30, videos: [], files: [], lanes, autoProxy: false };
     for (const c of cases) {
-      const picks: Picks = { schema: 1, rev: 0, sections: c.sections, lanes: c.lanes, levels: {} };
+      const picks: Picks = { schema: 1, rev: 0, sections: c.sections, lanes: c.lanes, levels: {}, videos: {} };
       const server = mixInputs(project, picks, ["voice"], root).map((i) => [relative(root, i.file), i.offset]);
       // The dashboard's VO, as Mix plays it: the newest round's pick, walking back past rounds with
       // none -- never the assembled read from takes, which Rushes no longer mixes.

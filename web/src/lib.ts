@@ -1,5 +1,5 @@
 // Pure helpers for the dashboard. No DOM, so they're unit-tested in Node.
-import type { Asset, AssetKind, BriefSectionView, BriefView, Cue, FoundCounts, FoundItem, FoundKind, FoundSummary, Lane, LaneStage, LoudnessResult, Mark, Note, Project, ProxyEvent, ProxyJob, Section, Shot, Stage, StoryboardView, TabState, Video, Version } from "./types.js";
+import type { Asset, AssetKind, BriefSectionView, BriefView, Cue, FoundCounts, FoundItem, FoundKind, FoundSummary, Lane, LaneStage, LoudnessResult, Mark, Note, Picks, Project, ProxyEvent, ProxyJob, Section, Shot, Stage, StoryboardView, TabState, Video, Version } from "./types.js";
 export type { FoundItem } from "./types.js";
 
 /** 72.4 -> "1:12.40" (minutes, seconds, hundredths). */
@@ -1614,4 +1614,11 @@ export function otherFormatAction(note: Pick<Note, "format" | "box">, viewsHere:
   if (here) return { kind: "show", id: here.id, label: here.label };
   if (!note.box && !ownViews.some((f) => f.id === note.format)) return { kind: "restore" };
   return null;
+}
+
+/** A web copy of src/core/schema.ts's picksForVideo: the picks and levels one film plays, its own entry or nothing picked. */
+export function filmPicks(picks: Picks, videoId: string | null | undefined): Picks {
+  if (!videoId) return picks;
+  const own = picks.videos?.[videoId];
+  return { ...picks, lanes: { ...(own?.lanes ?? {}) }, levels: { ...(own?.levels ?? {}) }, sections: {}, videos: {} };
 }

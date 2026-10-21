@@ -4,7 +4,7 @@
 import { useState } from "preact/hooks";
 import { api } from "../api.js";
 import { assetRev, type Clip } from "../audio/timeline.js";
-import { blindOrder, defaultVersion, STAGE_NAMES, type VariantRow, variantNoteRow, variantOnLabel, variantOnOptions, variantRows } from "../lib.js";
+import { blindOrder, defaultVersion, filmPicks, STAGE_NAMES, type VariantRow, variantNoteRow, variantOnLabel, variantOnOptions, variantRows } from "../lib.js";
 import type { Asset, State, Video } from "../types.js";
 import { AudioStage, type Preview } from "./AudioStage.js";
 import { Icon } from "./Icon.js";
@@ -51,12 +51,12 @@ export function VariantTab({ stage, state, assets, video, toast, onChanged, onPe
   const order = blind ? blindOrder(all.map((r) => r.key), BLIND_SEED) : all.map((r) => r.key);
   const rows = order.map((k) => all.find((r) => r.key === k)!);
   const nameOf = (r: VariantRow) => (blind ? `Bed ${order.indexOf(r.key) + 1}` : r.name);
-  const picks = state.picks.lanes;
+  const picks = filmPicks(state.picks, video?.id).lanes;
 
   // null clears the lane's pick (Unpick).
   const use = async (r: VariantRow, variant: string | null) => {
     try {
-      await api.put("/api/picks", { lanes: { [r.lane]: variant } });
+      await api.put("/api/picks", { video: video?.id, lanes: { [r.lane]: variant } });
     } catch (e) {
       toast(`Couldn't ${variant === null ? "clear" : "set"} the pick: ${(e as Error).message}`);
     }
