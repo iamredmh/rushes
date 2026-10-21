@@ -5,6 +5,7 @@ import { addFile, addFormat, addVariant, addVersion, ensureProjectId, ensureProj
 import { fromManifestPath, toManifestPath } from "../../src/core/paths.js";
 import { newProjectId, PROJECT_ID_ALPHABET, slugify, uniqueId } from "../../src/core/ids.js";
 import { parseRate } from "../../src/core/media.js";
+import { inferFilm } from "../../src/core/project.js";
 import { lanesForVideo, NoteSchema, ProjectSchema, type Project, type Shot } from "../../src/core/schema.js";
 import { CorruptFileError, InvalidError, NotFoundError, RushesError } from "../../src/core/errors.js";
 import { tmpProject } from "../helpers/tmp.js";
@@ -308,6 +309,43 @@ describe("addVariant", () => {
     addVersion(p, { video: "Hero", file: "renders/hero.mp4" });
     expect(() => addVariant(p, { stage: "sfx", name: "Pass A", file: "s.wav", video: "Teaser" })).toThrow(/Teaser/);
     expect(p.lanes).toEqual([]);
+  });
+});
+
+describe("inferFilm: the film a variant is for when nobody said", () => {
+  const films = () => {
+    const p = empty();
+    addVersion(p, { video: "f2a Ten colours, one graphite", file: "renders/f2a.mp4" });
+    addVersion(p, { video: "f3a One phone, four buttons", file: "renders/f3a.mp4" });
+    return p;
+  };
+  it("takes the one film whose first word starts the variant's name or its file's name", () => {
+    const p = films();
+    expect(inferFilm(p, "f3a SFX pass 3: real keyboard typing", "audio/sfx/other.wav")).toBe("f3a-one-phone-four-buttons");
+    expect(inferFilm(p, "Pass 3", "audio/sfx/f2a-sfx-v3.wav")).toBe("f2a-ten-colours-one-graphite");
+    expect(inferFilm(p, "F2A bed: deep house", "audio/music/bed.wav")).toBe("f2a-ten-colours-one-graphite");
+  });
+  it("addVariant uses it when no film is named, and an explicit film wins over it", () => {
+    const p = films();
+    const a = addVariant(p, { stage: "sfx", name: "f3a SFX pass 3", file: "audio/sfx/f3a-sfx-v3.wav" });
+    expect(a.variant.video).toBe("f3a-one-phone-four-buttons");
+    const b = addVariant(p, { stage: "sfx", name: "f3a SFX pass 4", file: "audio/sfx/x.wav", video: "f2a-ten-colours-one-graphite" });
+    expect(b.variant.video).toBe("f2a-ten-colours-one-graphite");
+  });
+  it("finds nothing when no film matches, two do, or the match is shelved, so the variant stays on every film", () => {
+    const p = films();
+    expect(inferFilm(p, "Deep house bed", "audio/music/bed.wav")).toBeUndefined();
+    addVersion(p, { video: "f3a Another cut", file: "renders/f3a-b.mp4" });
+    expect(inferFilm(p, "f3a pass", "a.wav")).toBeUndefined();
+    const q = films();
+    q.videos[1].shelved = "2026-10-20T10:00:00Z";
+    expect(inferFilm(q, "f3a pass", "a.wav")).toBeUndefined();
+    expect("video" in addVariant(q, { stage: "music", name: "f3a bed", file: "b.wav" }).variant).toBe(false);
+  });
+  it("ignores a one-letter word, which would match anything", () => {
+    const p = empty();
+    addVersion(p, { video: "A launch", file: "renders/a.mp4" });
+    expect(inferFilm(p, "A deep bed", "bed.wav")).toBeUndefined();
   });
 });
 

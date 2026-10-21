@@ -220,6 +220,23 @@ describe("API", () => {
     expect((await call("GET", "/api/health")).json).toMatchObject({ ok: true, app: "rushes", root });
   });
 
+  it("a variant with no film is put on the film its name starts with, and warns when it can't be told in a multi-film project", async () => {
+    const { call, root } = await setup();
+    await call("POST", "/api/versions", { video: "f2a Ten colours", file: `${root}/renders/f2a.mp4` });
+    // One film: nothing to warn about, whatever the name.
+    const alone = await call("POST", "/api/variants", { stage: "music", name: "Deep house", file: "audio/music/a.wav" });
+    expect(alone.json.warning).toBeUndefined();
+    await call("POST", "/api/versions", { video: "f3a One phone", file: `${root}/renders/f3a.mp4` });
+    // An old agent that cannot name a film still lands on the right one when it names its tracks for it.
+    const named = await call("POST", "/api/variants", { stage: "sfx", name: "f3a SFX pass 3", file: "audio/sfx/f3a-sfx-v3.wav" });
+    expect(named.json.variant.video).toBe("f3a-one-phone");
+    expect(named.json.warning).toBeUndefined();
+    // Nothing to go on: it shows on both films, and the reply says so and how to fix it.
+    const lost = await call("POST", "/api/variants", { stage: "sfx", name: "Pass X", file: "audio/sfx/x.wav" });
+    expect(lost.json.variant.video).toBeUndefined();
+    expect(lost.json.warning).toMatch(/shows on all 2 films\. Pass `video`/);
+  });
+
   it("state carries the version the server is running, the same one health reports", async () => {
     const { call } = await setup();
     const state = (await call("GET", "/api/state")).json;

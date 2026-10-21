@@ -394,6 +394,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
           if (!a || !b || !o.name) return usage(io, "rushes add variant <music|sfx|voice> <file> --name NAME");
           const r = await (await client()).post("/api/variants", { stage: a, file: resolve(io.cwd, b), name: o.name, lane: o.lane, round: o.round, description: o.description, video: o.video });
           io.out(`Added ${r.lane.name}: ${r.variant.name}`);
+          if (r.warning) io.out(`Warning: ${r.warning}`);
           return 0;
         }
         if (what === "shots") {

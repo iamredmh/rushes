@@ -330,7 +330,7 @@ export function createMcpServer(ctx: ToolContext): McpServer {
           .string()
           .min(1)
           .optional()
-          .describe("The film (id or name) this read, bed or pass is for: only that film's Voiceover, Music, Sound effects and Mix list it. Leave it out only when it is for every film. In a project with more than one film, always give it."),
+          .describe("The film (id or name) this read, bed or pass is for: only that film's Voiceover, Music, Sound effects and Mix list it. Rushes works the film out when the read, bed or pass's name or file name starts with the film's first word (\"f3a SFX pass 3\" for \"f3a One phone\"), but always give it in a project with more than one film. The reply carries a `warning` when it ended up on every film."),
         cues: z
           .array(
             z.object({

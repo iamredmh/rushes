@@ -143,8 +143,25 @@ export interface AddVariantInput {
   /** The one-line description the lane card shows. Stored as `meta.description`; wins over a `description` inside `meta`. */
   description?: string;
   cues?: { name: string; t: number; file?: string }[];
-  /** Video id or name of the film this was made for: only that film's tabs list it. Left out, every film's do. */
+  /**
+   * Video id or name of the film this was made for: only that film's tabs list it. Left out, the film
+   * is worked out from the names (see inferFilm), and with none found, every film's tabs list it.
+   */
   video?: string;
+}
+
+/** The words of a name or file name, lower-cased: "f3a SFX pass 3" and "f3a-sfx-v3.wav" both start with "f3a". */
+const firstWord = (text: string): string => text.replace(/\.[a-z0-9]{2,4}$/i, "").toLowerCase().match(/[a-z0-9]+/)?.[0] ?? "";
+
+/**
+ * The film a variant is for when nobody said: the one film in play whose name starts with the same
+ * word as the variant's name or its file's name ("f3a One phone, four buttons" and "f3a SFX pass 3").
+ * With none matching, or more than one, no film: the variant then shows on every film, as it always has.
+ */
+export function inferFilm(p: Project, name: string, file: string): string | undefined {
+  const words = new Set([firstWord(name), firstWord(basename(file))].filter((w) => w.length >= 2));
+  const films = p.videos.filter((v) => inPlay(v) && words.has(firstWord(v.name)));
+  return films.length === 1 ? films[0].id : undefined;
 }
 
 const LANE_NAMES: Record<LaneStage, string> = { voice: "Voiceover", music: "Music", sfx: "Sound effects" };
@@ -152,7 +169,7 @@ const LANE_NAMES: Record<LaneStage, string> = { voice: "Voiceover", music: "Musi
 export function addVariant(p: Project, input: AddVariantInput): { lane: Lane; variant: Variant } {
   // The film and (§23) the cues first, so an unknown film or a cue refused for its file leaves the
   // project untouched.
-  const video = input.video === undefined ? undefined : resolveVideo(p, input.video).id;
+  const video = input.video === undefined ? inferFilm(p, input.name, input.file) : resolveVideo(p, input.video).id;
   const cues: Cue[] = [];
   for (const c of input.cues ?? []) {
     const cue: Cue = { id: uniqueId(slugify(c.name), cues.map((x) => x.id)), name: c.name, t: c.t };

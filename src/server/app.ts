@@ -3,7 +3,7 @@ import { streamSSE } from "hono/streaming";
 import { z } from "zod";
 import type { Store, ChangeEvent } from "../core/store.js";
 import { RushesError, InvalidError, NotFoundError } from "../core/errors.js";
-import { addFile, addFormat, addVariant, addVersion, ensureProjectIdOnce, lockPicture, noteInPlay, resolveCut, resolveVideo, setShots, shelveFilm, shotAt } from "../core/project.js";
+import { addFile, addFormat, addVariant, addVersion, ensureProjectIdOnce, inPlay, lockPicture, noteInPlay, resolveCut, resolveVideo, setShots, shelveFilm, shotAt } from "../core/project.js";
 import { addTake, editSection, setSections } from "../core/script.js";
 import { addNote, applyReply, applyUserEdit, checkNoteFormat, filterNotes } from "../core/notes.js";
 import { FORMAT_ID_RE, MAX_FORMATS, isPictureSize, labelOfId, versionFormats } from "../core/formats.js";
@@ -1202,7 +1202,15 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     const b = await body(c, VariantBody);
     // §23: a cue's file is stored as a manifest path, like the variant's own.
     const cues = b.cues?.map((q) => (q.file === undefined ? q : { ...q, file: toManifestPath(store.root, q.file) }));
-    const { result } = await store.update("project", (p) => addVariant(p, { ...b, cues, file: toManifestPath(store.root, b.file) }));
+    const { result } = await store.update("project", (p) => {
+      const added = addVariant(p, { ...b, cues, file: toManifestPath(store.root, b.file) });
+      // With several films in play, a variant with no film shows on all of them: say so, so the agent names one.
+      const films = p.videos.filter(inPlay).length;
+      const warning = added.variant.video === undefined && films > 1
+        ? `No film was named, and none could be told from the names, so this ${added.lane.stage === "voice" ? "read" : added.lane.stage === "music" ? "bed" : "pass"} shows on all ${films} films. Pass \`video\` (the film's id or name) to put it on one.`
+        : undefined;
+      return { ...added, ...(warning ? { warning } : {}) };
+    });
     await log.add(() => variantEvent(result.lane, result.variant), by(c));
     return c.json(result, 201);
   });
