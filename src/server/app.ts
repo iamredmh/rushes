@@ -741,7 +741,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
         versions: await Promise.all(v.versions.map(async (ver) => ({ ...ver, proxyNeed: await jobs.needNow(fromManifestPath(store.root, ver.file)) }))),
       })),
     );
-    return c.json({ project: { ...project, videos }, script, notes, picks, batches, tabs, visuals, proxies: { ffmpeg, jobs: jobs.list() }, found: foundSummary, log: logHead, brief: briefView, storyboard: storyboardView, build: buildState({ brief: briefView, script: script.sections, storyboard: storyboardView }) });
+    return c.json({ version: VERSION, project: { ...project, videos }, script, notes, picks, batches, tabs, visuals, proxies: { ffmpeg, jobs: jobs.list() }, found: foundSummary, log: logHead, brief: briefView, storyboard: storyboardView, build: buildState({ brief: briefView, script: script.sections, storyboard: storyboardView }) });
   });
 
   // ---- found: the project's other files (§20) ----

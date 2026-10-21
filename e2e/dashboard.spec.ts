@@ -1992,3 +1992,18 @@ test.describe("a tall cut without ffmpeg (fix round 1)", () => {
     await expectAllOnScreen(page);
   });
 });
+
+test("the server's version shows faintly in the corner and never gets in the way", async ({ page, rushes }) => {
+  await rushes.addCut();
+  await page.goto(rushes.url);
+  await videoReady(page);
+  const { version } = await rushes.api("GET", "/api/health");
+  const ver = page.getByLabel(`Rushes version ${version}`);
+  await expect(ver).toHaveText(`v${version}`);
+  // Subtle: small and faint, fixed to the bottom-right, and it passes clicks through.
+  const style = await ver.evaluate((el) => {
+    const s = getComputedStyle(el);
+    return { fontSize: s.fontSize, opacity: Number(s.opacity), position: s.position, pointerEvents: s.pointerEvents };
+  });
+  expect(style).toEqual({ fontSize: "11px", opacity: 0.45, position: "fixed", pointerEvents: "none" });
+});

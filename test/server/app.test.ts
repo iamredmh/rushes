@@ -3,7 +3,7 @@ import { chmod, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { Store } from "../../src/core/store.js";
 import { tmpProject } from "../helpers/tmp.js";
-import { createApp, type AppOptions } from "../../src/server/app.js";
+import { createApp, VERSION, type AppOptions } from "../../src/server/app.js";
 import type { LoudnessRunner } from "../../src/server/loudness.js";
 import { ProjectIdSchema } from "../../src/core/schema.js";
 import { addVersion } from "../../src/core/project.js";
@@ -218,6 +218,13 @@ describe("API", () => {
   it("health names the app and the project root", async () => {
     const { call, root } = await setup();
     expect((await call("GET", "/api/health")).json).toMatchObject({ ok: true, app: "rushes", root });
+  });
+
+  it("state carries the version the server is running, the same one health reports", async () => {
+    const { call } = await setup();
+    const state = (await call("GET", "/api/state")).json;
+    expect(state.version).toBe(VERSION);
+    expect(state.version).toBe((await call("GET", "/api/health")).json.version);
   });
 
   it("state starts with every tab locked", async () => {

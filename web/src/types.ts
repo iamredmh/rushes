@@ -32,6 +32,8 @@ export type Project = Omit<StoredProject, "videos"> & { videos: Video[] };
 
 /** GET /api/state */
 export interface State {
+  /** The Rushes version the server is running. Absent from a server older than this field. */
+  version?: string;
   project: Project;
   script: Script;
   notes: NotesFile;

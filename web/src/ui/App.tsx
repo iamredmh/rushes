@@ -808,6 +808,7 @@ export function App() {
           />
         ) : null}
       </main>
+      {state.version && <span class="ver" aria-label={`Rushes version ${state.version}`}>v{state.version}</span>}
     </div>
   );
 }
