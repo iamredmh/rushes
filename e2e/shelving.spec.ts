@@ -236,7 +236,7 @@ test("Escape closes the Film menu and the lists and puts focus back on their but
 
 test("the audio tabs are view-only too while a shelved film is open: a note left there would never be counted or sent", async ({ page, rushes }) => {
   await films(rushes, ["Hero", "Cutdown"]);
-  await rushes.addVariant("music", "A · Deep house", { seconds: 4, freq: 220 });
+  await rushes.addVariant("music", "A · Deep house", { seconds: 4, freq: 220, video: ["Hero", "Cutdown"] });
   await rushes.api("PUT", "/api/videos/cutdown/shelve", { shelved: true });
   await page.goto(rushes.url);
   await videoReady(page);

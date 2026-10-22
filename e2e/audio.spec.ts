@@ -441,7 +441,7 @@ test("Blind never changes the bed being heard", async ({ page, rushes }) => {
 test("a half-typed music note holds the film", async ({ page, rushes }) => {
   await rushes.addCut("hero", "Hero");
   await rushes.addCut("cutdown", "Cutdown");
-  await rushes.addVariant("music", "Bed", { seconds: 2, freq: 220 });
+  await rushes.addVariant("music", "Bed", { seconds: 2, freq: 220, video: ["Hero", "Cutdown"] });
   await page.goto(rushes.testUrl());
   await openTab(page, /Music/, "4");
   await loaded(page, 1);
@@ -519,14 +519,15 @@ const LONG = "Based on more sombre, with a slower intro and longer pauses betwee
  * Gerald, tone: more excited and more sombre, nothing picked (with `steadier`, a third read, steadier
  * pace, whose description is LONG).
  */
-async function twoRounds(rushes: Rushes, opts: { steadier?: boolean } = {}) {
-  const jane = await rushes.addVariant("voice", "Jane", { round: R1, seconds: 4, freq: 220, meta: { description: "Warm, conversational" } });
-  await rushes.addVariant("voice", "Louise", { round: R1, seconds: 4, freq: 247, meta: { description: "Bright, upbeat" } });
-  const gerald = await rushes.addVariant("voice", "Gerald", { round: R1, seconds: 4, freq: 262, meta: { description: "Low, measured" } });
+async function twoRounds(rushes: Rushes, opts: { steadier?: boolean; video?: string[] } = {}) {
+  const video = opts.video;
+  const jane = await rushes.addVariant("voice", "Jane", { round: R1, video, seconds: 4, freq: 220, meta: { description: "Warm, conversational" } });
+  await rushes.addVariant("voice", "Louise", { round: R1, video, seconds: 4, freq: 247, meta: { description: "Bright, upbeat" } });
+  const gerald = await rushes.addVariant("voice", "Gerald", { round: R1, video, seconds: 4, freq: 262, meta: { description: "Low, measured" } });
   await rushes.api("PUT", "/api/picks", { lanes: { [gerald.lane.id]: gerald.variant.id } });
-  const excited = await rushes.addVariant("voice", "more excited", { round: R2, seconds: 4, freq: 294, meta: { description: "Brighter, quicker" } });
-  const sombre = await rushes.addVariant("voice", "more sombre", { round: R2, seconds: 4, freq: 330, meta: { description: "Slower, lower" } });
-  if (opts.steadier) await rushes.addVariant("voice", "steadier pace", { round: R2, seconds: 4, freq: 349, meta: { description: LONG } });
+  const excited = await rushes.addVariant("voice", "more excited", { round: R2, video, seconds: 4, freq: 294, meta: { description: "Brighter, quicker" } });
+  const sombre = await rushes.addVariant("voice", "more sombre", { round: R2, video, seconds: 4, freq: 330, meta: { description: "Slower, lower" } });
+  if (opts.steadier) await rushes.addVariant("voice", "steadier pace", { round: R2, video, seconds: 4, freq: 349, meta: { description: LONG } });
   return { jane, gerald, excited, sombre };
 }
 
@@ -645,7 +646,7 @@ test("Voiceover decodes only what you can reach; folding mid-play never restarts
 test("which rounds are open is kept per film", async ({ page, rushes }) => {
   await rushes.addCut("hero", "Hero");
   await rushes.addCut("cutdown", "Cutdown");
-  await twoRounds(rushes);
+  await twoRounds(rushes, { video: ["Hero", "Cutdown"] });
   await openVoice(page, rushes, 2);
   const fold = page.locator(".fold");
   const film = (name: RegExp) => page.getByRole("navigation", { name: "Films" }).getByRole("button", { name });
@@ -947,7 +948,7 @@ test("a read added with no round shows under a Voiceover heading, and older note
 test("another film starts Voiceover's notes on Whole again", async ({ page, rushes }) => {
   await rushes.addCut("hero", "Hero");
   await rushes.addCut("cutdown", "Cutdown");
-  await twoRounds(rushes);
+  await twoRounds(rushes, { video: ["Hero", "Cutdown"] });
   await openVoice(page, rushes, 2);
   const scope = page.getByRole("group", { name: "Scope" });
   await scope.getByRole("button", { name: "Point" }).click();
@@ -966,6 +967,8 @@ test("another film starts Voiceover's notes on Whole again, even when neither fi
     { id: "hero", name: "Hero", versions: [], lockedVersion: null },
     { id: "cutdown", name: "Cutdown", versions: [], lockedVersion: null },
   ];
+  // Its reads are on both films.
+  for (const l of project.lanes) for (const v of l.variants) v.videos = ["hero", "cutdown"];
   project.rev += 1;
   await writeFile(file, JSON.stringify(project, null, 2));
   await openVoice(page, rushes, 2);
@@ -1026,7 +1029,7 @@ test("Unpick clears a pick: In use goes back to Use, and the pick is gone from d
 test("marks ticked without a range hold the film, as text and a range do", async ({ page, rushes }) => {
   await rushes.addCut("hero", "Hero");
   await rushes.addCut("cutdown", "Cutdown");
-  await rushes.addVariant("music", "Bed", { seconds: 2, freq: 220 });
+  await rushes.addVariant("music", "Bed", { seconds: 2, freq: 220, video: ["Hero", "Cutdown"] });
   await page.goto(rushes.testUrl());
   await openTab(page, /Music/, "4");
   await loaded(page, 1);
@@ -1691,7 +1694,7 @@ test("Sound effects and Music list only the film you are on, with its own notes"
   await rushes.addVariant("sfx", "F3A pass 1", { seconds: 4, freq: 440, video: "F3A" });
   await rushes.addVariant("sfx", "F3A pass 2", { seconds: 4, freq: 550, video: "F3A" });
   await rushes.addVariant("music", "F2A bed", { seconds: 4, freq: 220, video: "F2A" });
-  await rushes.addVariant("music", "Any film bed", { seconds: 4, freq: 260 });
+  await rushes.addVariant("music", "Any film bed", { seconds: 4, freq: 260, video: ["F2A", "F3A"] });
   await rushes.addVariant("voice", "F2A read", { seconds: 4, freq: 300, round: "Round 1", video: "F2A" });
   await rushes.api("POST", "/api/notes", { stage: "sfx", video: "f2a", scope: "whole", text: "F2A taps are too loud." });
   await page.goto(rushes.url);
@@ -1705,7 +1708,7 @@ test("Sound effects and Music list only the film you are on, with its own notes"
   await film(/F2A/).click();
   await expect(names).toHaveText(["F2A pass"]);
   await expect(page.locator(".note", { hasText: "F2A taps are too loud." })).toHaveCount(1);
-  // A bed made for every film is listed on each.
+  // A bed on both films is listed on each.
   await page.getByRole("tab", { name: /Music/ }).click();
   await expect(names).toHaveText(["F2A bed", "Any film bed"]);
   await film(/F3A/).click();

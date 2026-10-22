@@ -62,8 +62,8 @@ export interface VariantOptions {
   lane?: string;
   /** Voice only: the round's name, e.g. "Round 2 · Gerald, tone" (§18.2). */
   round?: string;
-  /** The film it is for (id or name); left out, it is for every film. */
-  video?: string;
+  /** The film it is for (id or name), or several; left out, it is on no film once there is more than one. */
+  video?: string | string[];
 }
 
 /** One render of a cut, for the format tests (§21): its picture size, and its length (default 4 s). */

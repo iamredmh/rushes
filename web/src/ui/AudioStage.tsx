@@ -419,6 +419,8 @@ export function AudioStage(props: AudioStageProps) {
             </>
           )}
         </div>
+        {/* Nothing of this film's own: say so, above the folded "Not on this film" when there is one. */}
+        {rows.every((r) => r.key.startsWith("loose")) && <p class="lanesnone">{NONE_YET[stage]}</p>}
         <Lanes
           rows={rows}
           length={length}
@@ -439,7 +441,6 @@ export function AudioStage(props: AudioStageProps) {
           }}
           toast={toast}
         />
-        {rows.length === 0 && <p class="lanesnone">{NONE_YET[stage]}</p>}
         {belowLanes}
       </div>
 
