@@ -327,10 +327,9 @@ export function createMcpServer(ctx: ToolContext): McpServer {
           .optional()
           .describe("One line on what this read, bed or pass is, shown on its lane card. Stored as meta.description, and wins over one given in meta."),
         video: z
-          .string()
-          .min(1)
+          .union([z.string().min(1), z.array(z.string().min(1)).min(1)])
           .optional()
-          .describe("The film (id or name) this read, bed or pass is for: only that film's Voiceover, Music, Sound effects and Mix list it. Rushes works the film out when the read, bed or pass's name or file name starts with the film's first word (\"f3a SFX pass 3\" for \"f3a One phone\"), but always give it in a project with more than one film. The reply carries a `warning` when it ended up on every film."),
+          .describe("The film (id or name) this read, bed or pass is for, or a list of films when one bed is fitted to several: only those films' Voiceover, Music, Sound effects and Mix list it. Rushes works out one film when the name or file name starts with the film's first word (\"f3a SFX pass 3\" for \"f3a One phone\"), but always give it in a project with more than one film: one on no film is listed on none of their tabs (it waits, folded, under \"Not on this film\"), and the reply carries a `warning`. To move one later, use rushes_set_films."),
         cues: z
           .array(
             z.object({
@@ -349,6 +348,24 @@ export function createMcpServer(ctx: ToolContext): McpServer {
       },
     },
     safe(async ({ project, ...b }) => (await ctx.client(project)).post("/api/variants", b)),
+  );
+
+  server.registerTool(
+    "rushes_set_films",
+    {
+      title: "Put a read, bed or pass on films",
+      description:
+        "Put an existing voice read, music bed or SFX pass on exactly these films: only their tabs list it, and a film it leaves drops its pick of it. An empty list puts it on no film. The user can do the same from the Films button on its card.",
+      inputSchema: {
+        project,
+        lane: z.string().min(1).describe("Lane id, from rushes_status or rushes_add_variant."),
+        variant: z.string().min(1).describe("Variant id within the lane."),
+        videos: z.array(z.string().min(1)).max(100).describe("Film ids or names, e.g. [\"Hero 60s\", \"Teaser 15s\"]."),
+      },
+    },
+    safe(async ({ project, lane, variant, videos }) =>
+      (await ctx.client(project)).put(`/api/variants/${encodeURIComponent(lane)}/${encodeURIComponent(variant)}/films`, { videos }),
+    ),
   );
 
   server.registerTool(

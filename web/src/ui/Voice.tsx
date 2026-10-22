@@ -10,10 +10,11 @@ import { assetRev, type Clip } from "../audio/timeline.js";
 import {
   AUDIO_CHIPS, blindOrder, defaultVersion, readLane, type Scope, STAGE_NAMES, type VariantRow, voiceDefaultRead, voiceListening, type VoiceNotes, voiceNoteRows,
   voiceOnLabel, voiceOnOptions, type VoiceRound, voiceRounds,
-  filmLanes, filmNotes, filmPicks,
+  filmLanes, filmNotes, filmPicks, otherLanes, variantRows,
 } from "../lib.js";
 import type { Asset, State, Video } from "../types.js";
 import { AudioStage, type Preview } from "./AudioStage.js";
+import { filmsControl, looseRows } from "./FilmsMenu.js";
 import { Icon } from "./Icon.js";
 import type { StageRow } from "./Lanes.js";
 
@@ -71,7 +72,10 @@ export function Voice({ state, assets, video, toast, onChanged, onPendingChange 
 
   // Rounds in creation order, with only this film's reads (and any made for every film); with Blind,
   // each round's reads shuffled and named Read 1…n.
-  const rounds = voiceRounds(filmLanes(state.project.lanes, video?.id), filmPicks(state.picks, video?.id).lanes);
+  const filmCount = state.project.videos.length;
+  const rounds = voiceRounds(filmLanes(state.project.lanes, video?.id, filmCount), filmPicks(state.picks, video?.id).lanes);
+  const loose = video ? variantRows(otherLanes(state.project.lanes, video.id, filmCount), "voice") : [];
+  const films = (r: VariantRow) => (filmCount > 1 ? filmsControl(r, state.project.videos, video, toast, onChanged) : undefined);
   const shown: VoiceRound[] = rounds.map((round) => {
     if (!blind) return round;
     const order = blindOrder(round.reads.map((r) => r.key), BLIND_SEED);
@@ -111,6 +115,7 @@ export function Voice({ state, assets, video, toast, onChanged, onPendingChange 
     color: VO_COLOR,
     clips: missing(r.file) ? [] : [clipOf(r)],
     use: { inUse: round.pick === r.variant, onUse: () => void use(round, r.variant), onUnpick: () => void use(round, null) },
+    films: films(r),
     on: `v:${r.key}`,
     missing: missing(r.file),
   });
@@ -144,6 +149,16 @@ export function Voice({ state, assets, video, toast, onChanged, onPendingChange 
     });
     if (isOpen) for (const r of round.reads) rows.push(lane(round, r));
   }
+  rows.push(
+    ...looseRows("voice", loose, (r) => ({
+      key: `loose/${r.key}`,
+      name: `${r.laneName} · ${r.name}`,
+      meta: r.meta,
+      color: VO_COLOR,
+      clips: [],
+      films: films(r),
+    }), () => rerender((n) => n + 1)),
+  );
 
   const onOptions = voiceOnOptions(shown, nameOf);
   const firstRead = voiceDefaultRead(rounds);

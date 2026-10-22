@@ -119,9 +119,10 @@ export const VariantSchema = fileObject({
   file: z.string().min(1),
   meta: z.record(z.string(), z.union([z.string(), z.number()])).default({}),
   cues: z.array(CueSchema).default([]),
-  // The film (video id) this read, bed or pass was made for: only that film's tabs list it. Absent
-  // on a variant made for every film, and on every older one, so an older project loads and writes
-  // back unchanged.
+  // The films (video ids) this read, bed or pass is on: only those films' tabs list it. One bed is
+  // often fitted to several films. Absent on a variant on no film yet, and on every older one.
+  videos: z.array(id).optional(),
+  // The one film an older project named (0.7.x). Read as `videos: [video]`; set films replace it.
   video: id.optional(),
 });
 export type Variant = z.infer<typeof VariantSchema>;
@@ -343,12 +344,26 @@ export function picksForVideo(picks: Picks, videoId: string | null | undefined):
   return { ...picks, lanes: { ...(own?.lanes ?? {}) }, levels: { ...(own?.levels ?? {}) }, sections: {}, videos: {} };
 }
 
-/** The lanes one film hears: each keeps only the variants made for it or for every film, and a lane
+/** The films a read, bed or pass is on: its `videos`, or an older project's one `video`, or none. */
+export function variantFilms(v: Pick<Variant, "videos" | "video">): string[] {
+  return v.videos ?? (v.video === undefined ? [] : [v.video]);
+}
+
+/**
+ * Whether a read, bed or pass is on a film. One on no film is on it only in a project with one film
+ * (there is nowhere else for it to be); with several, it is on none until it is put on one.
+ */
+export function onFilm(v: Pick<Variant, "videos" | "video">, videoId: string, filmCount: number): boolean {
+  const films = variantFilms(v);
+  return films.length === 0 ? filmCount <= 1 : films.includes(videoId);
+}
+
+/** The lanes one film hears: each keeps only the variants on that film (see onFilm), and a lane
  *  left with none is dropped. With no film named, every lane as it is. */
-export function lanesForVideo(lanes: Lane[], videoId: string | null | undefined): Lane[] {
+export function lanesForVideo(lanes: Lane[], videoId: string | null | undefined, filmCount: number): Lane[] {
   if (!videoId) return lanes;
   return lanes
-    .map((l) => ({ ...l, variants: l.variants.filter((v) => v.video === undefined || v.video === videoId) }))
+    .map((l) => ({ ...l, variants: l.variants.filter((v) => onFilm(v, videoId, filmCount)) }))
     .filter((l) => l.variants.length > 0);
 }
 

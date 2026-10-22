@@ -698,7 +698,7 @@ describe("bringing found files in", () => {
     const project = await store.read("project");
     expect(project.rev).toBe(rev + 1); // one write for the whole request
     // The scan named hero, so its audio is hero's, not the other film's.
-    expect(project.lanes.flatMap((l) => l.variants.map((v) => v.video))).toEqual(["hero", "hero", "hero"]);
+    expect(project.lanes.flatMap((l) => l.variants.map((v) => v.videos))).toEqual([["hero"], ["hero"], ["hero"]]);
     expect(await lanesOf(store)).toEqual([
       { id: "music", name: "Music", stage: "music", files: ["bed/theme.wav"] },
       { id: "sfx", name: "Sound effects", stage: "sfx", files: ["sfx/whoosh.wav"] },
@@ -902,7 +902,7 @@ describe("adopting the current set", () => {
     expect(music.variants[0].meta.description).toMatch(/^same length as the cut \(60\.0 s vs 60\.0 s\) · made /);
     expect(project.lanes.find((l) => l.id === "vo-jules")!.name).toBe("Vo Jules");
     // Matched to hero's cut, so they are hero's: only its tabs list them.
-    expect(project.lanes.flatMap((l) => l.variants.map((v) => v.video))).toEqual(["hero", "hero"]);
+    expect(project.lanes.flatMap((l) => l.variants.map((v) => v.videos))).toEqual([["hero"], ["hero"]]);
     expect(await store.read("picks")).toEqual(picks);
     expect((await scanner.summary()).broughtIn.sort()).toEqual(["bed/hero v3 theme.wav", "vo_jules/hero v3 read.wav"]);
 

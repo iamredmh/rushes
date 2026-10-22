@@ -1487,25 +1487,32 @@ describe("withFormatRows (§21.5 Assets › Cuts)", () => {
   });
 });
 
-import { filmLanes, filmNotes } from "../../web/src/lib.js";
+import { filmLanes, filmNotes, otherLanes } from "../../web/src/lib.js";
 
 describe("one film's audio lists", () => {
   const v = (id: string, video?: string) => ({ id, name: id, file: `${id}.wav`, meta: {}, cues: [], ...(video ? { video } : {}) });
   const lanes: Lane[] = [
-    { id: "music", stage: "music", name: "Music", variants: [v("f2a-bed", "f2a"), v("f3a-bed", "f3a"), v("shared-bed")] },
+    { id: "music", stage: "music", name: "Music", variants: [v("f2a-bed", "f2a"), v("f3a-bed", "f3a"), v("loose-bed"), { ...v("shared-bed"), videos: ["f2a", "f3a"] }] },
     { id: "sfx", stage: "sfx", name: "Sound effects", variants: [v("f2a-pass", "f2a"), v("f3a-pass-1", "f3a"), v("f3a-pass-2", "f3a")] },
     { id: "round-1", stage: "voice", name: "Round 1", variants: [v("f2a-read", "f2a")] },
   ];
-  it("lists only the film's own beds, passes and reads, plus any made for every film", () => {
-    const f3a = filmLanes(lanes, "f3a");
+  it("lists only the beds, passes and reads on the film, one bed on several films included", () => {
+    const f3a = filmLanes(lanes, "f3a", 2);
     expect(variantRows(f3a, "music").map((r) => r.variant)).toEqual(["f3a-bed", "shared-bed"]);
+    expect(variantRows(f3a, "music").map((r) => r.films)).toEqual([["f3a"], ["f2a", "f3a"]]);
     expect(variantRows(f3a, "sfx").map((r) => r.variant)).toEqual(["f3a-pass-1", "f3a-pass-2"]);
     // F2A's only round has nothing for F3A, so it isn't listed at all.
     expect(f3a.some((l) => l.id === "round-1")).toBe(false);
-    expect(variantRows(filmLanes(lanes, "f2a"), "voice").map((r) => r.variant)).toEqual(["f2a-read"]);
+    expect(variantRows(filmLanes(lanes, "f2a", 2), "voice").map((r) => r.variant)).toEqual(["f2a-read"]);
+  });
+  it("keeps those not on the film apart, on other films or none, unless the project has one film", () => {
+    expect(variantRows(otherLanes(lanes, "f3a", 2), "music").map((r) => r.variant)).toEqual(["f2a-bed", "loose-bed"]);
+    expect(otherLanes(lanes, "f3a", 2).find((l) => l.id === "round-1")!.variants.map((v) => v.id)).toEqual(["f2a-read"]);
+    expect(otherLanes(lanes, "f3a", 1)).toEqual([]);
+    expect(variantRows(filmLanes(lanes, "f3a", 1), "music").map((r) => r.variant)).toContain("loose-bed");
   });
   it("lists everything when no film is named", () => {
-    expect(filmLanes(lanes, undefined)).toBe(lanes);
+    expect(filmLanes(lanes, undefined, 2)).toBe(lanes);
   });
   it("shows a tab's notes for the film it is on, plus any naming no film", () => {
     const notes = [

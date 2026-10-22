@@ -186,7 +186,7 @@ If your user asked you to use Rushes, do this:
 2. If it added anything, tell the user to restart the app (or start a new session) so the `rushes_*` tools load.
 3. From then on, follow [AGENTS.md](AGENTS.md). If the user wants a new film, start with **Starting a film** in AGENTS.md: plan it with them first, then build. Otherwise, in short: register what you made, call `rushes_open`, wait for the user to press **Send to agent**, then `rushes_get_batch`, fix the notes, and `rushes_reply`.
 
-The MCP server has twenty-three tools: `rushes_open`, `rushes_status`, `rushes_add_version`, `rushes_add_format`, `rushes_add_visual`, `rushes_add_variant`, `rushes_set_script`, `rushes_get_script`, `rushes_add_take`, `rushes_list_notes`, `rushes_list_assets`, `rushes_get_batch`, `rushes_reply`, `rushes_get_picks`, `rushes_set_shots`, `rushes_lock_picture`, `rushes_add_file`, `rushes_export_notes`, `rushes_log`, `rushes_get_log`, `rushes_scan`, `rushes_bring_in` and `rushes_doctor`.
+The MCP server has twenty-four tools: `rushes_open`, `rushes_status`, `rushes_add_version`, `rushes_add_format`, `rushes_add_visual`, `rushes_add_variant`, `rushes_set_films`, `rushes_set_script`, `rushes_get_script`, `rushes_add_take`, `rushes_list_notes`, `rushes_list_assets`, `rushes_get_batch`, `rushes_reply`, `rushes_get_picks`, `rushes_set_shots`, `rushes_lock_picture`, `rushes_add_file`, `rushes_export_notes`, `rushes_log`, `rushes_get_log`, `rushes_scan`, `rushes_bring_in` and `rushes_doctor`.
 
 If you can't run commands, give the user the matching line from **Manual setup** below.
 

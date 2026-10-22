@@ -5,8 +5,8 @@ import { addFile, addFormat, addVariant, addVersion, ensureProjectId, ensureProj
 import { fromManifestPath, toManifestPath } from "../../src/core/paths.js";
 import { newProjectId, PROJECT_ID_ALPHABET, slugify, uniqueId } from "../../src/core/ids.js";
 import { parseRate } from "../../src/core/media.js";
-import { inferFilm } from "../../src/core/project.js";
-import { lanesForVideo, NoteSchema, ProjectSchema, type Project, type Shot } from "../../src/core/schema.js";
+import { inferFilm, setVariantFilms } from "../../src/core/project.js";
+import { lanesForVideo, onFilm, variantFilms, NoteSchema, ProjectSchema, type Project, type Shot } from "../../src/core/schema.js";
 import { CorruptFileError, InvalidError, NotFoundError, RushesError } from "../../src/core/errors.js";
 import { tmpProject } from "../helpers/tmp.js";
 
@@ -298,9 +298,9 @@ describe("addVariant", () => {
     addVersion(p, { video: "f2a Ten colours", file: "renders/f2a.mp4" });
     addVersion(p, { video: "f3a One phone", file: "renders/f3a.mp4" });
     const a = addVariant(p, { stage: "music", name: "Deep house", file: "a.wav", video: "f3a One phone" });
-    expect(a.variant.video).toBe("f3a-one-phone");
+    expect(a.variant.videos).toEqual(["f3a-one-phone"]);
     const b = addVariant(p, { stage: "music", name: "Pad", file: "b.wav", video: "f2a-ten-colours" });
-    expect(b.variant.video).toBe("f2a-ten-colours");
+    expect(b.variant.videos).toEqual(["f2a-ten-colours"]);
     const c = addVariant(p, { stage: "music", name: "For every film", file: "c.wav" });
     expect("video" in c.variant).toBe(false);
   });
@@ -328,11 +328,11 @@ describe("inferFilm: the film a variant is for when nobody said", () => {
   it("addVariant uses it when no film is named, and an explicit film wins over it", () => {
     const p = films();
     const a = addVariant(p, { stage: "sfx", name: "f3a SFX pass 3", file: "audio/sfx/f3a-sfx-v3.wav" });
-    expect(a.variant.video).toBe("f3a-one-phone-four-buttons");
+    expect(a.variant.videos).toEqual(["f3a-one-phone-four-buttons"]);
     const b = addVariant(p, { stage: "sfx", name: "f3a SFX pass 4", file: "audio/sfx/x.wav", video: "f2a-ten-colours-one-graphite" });
-    expect(b.variant.video).toBe("f2a-ten-colours-one-graphite");
+    expect(b.variant.videos).toEqual(["f2a-ten-colours-one-graphite"]);
   });
-  it("finds nothing when no film matches, two do, or the match is shelved, so the variant stays on every film", () => {
+  it("finds nothing when no film matches, two do, or the match is shelved, so the variant is on no film", () => {
     const p = films();
     expect(inferFilm(p, "Deep house bed", "audio/music/bed.wav")).toBeUndefined();
     addVersion(p, { video: "f3a Another cut", file: "renders/f3a-b.mp4" });
@@ -350,18 +350,55 @@ describe("inferFilm: the film a variant is for when nobody said", () => {
 });
 
 describe("lanesForVideo", () => {
-  it("keeps a film's own variants and those for every film, and drops a lane left empty", () => {
+  it("keeps the variants on a film, drops those on no film when there are several films, and drops a lane left empty", () => {
     const p = empty();
     addVersion(p, { video: "f2a", file: "renders/f2a.mp4" });
     addVersion(p, { video: "f3a", file: "renders/f3a.mp4" });
+    addVersion(p, { video: "loop", file: "renders/loop.mp4" });
     addVariant(p, { stage: "music", name: "F2A bed", file: "a.wav", video: "f2a" });
-    addVariant(p, { stage: "music", name: "Shared bed", file: "b.wav" });
+    addVariant(p, { stage: "music", name: "Loose bed", file: "b.wav" });
+    addVariant(p, { stage: "music", name: "Shared bed", file: "c.wav", video: ["f2a", "f3a"] });
     addVariant(p, { stage: "voice", round: "Round 1", name: "F2A read", file: "v.wav", video: "f2a" });
     addVariant(p, { stage: "sfx", name: "F3A pass", file: "s.wav", video: "f3a" });
-    const f3a = lanesForVideo(p.lanes, "f3a");
+    const f3a = lanesForVideo(p.lanes, "f3a", p.videos.length);
     expect(f3a.map((l) => [l.id, l.variants.map((v) => v.id)])).toEqual([["music", ["shared-bed"]], ["sfx", ["f3a-pass"]]]);
+    expect(lanesForVideo(p.lanes, "loop", p.videos.length)).toEqual([]);
     // No film named: every lane as it is.
-    expect(lanesForVideo(p.lanes, null)).toBe(p.lanes);
+    expect(lanesForVideo(p.lanes, null, p.videos.length)).toBe(p.lanes);
+  });
+
+  it("puts a variant on no film on the film when the project has only one", () => {
+    const p = empty();
+    addVersion(p, { video: "hero", file: "renders/hero.mp4" });
+    addVariant(p, { stage: "music", name: "Bed", file: "b.wav" });
+    expect(lanesForVideo(p.lanes, "hero", p.videos.length)[0].variants.map((v) => v.id)).toEqual(["bed"]);
+  });
+
+  it("reads an older project's one `video` as its film", () => {
+    const v = { id: "x", name: "X", file: "x.wav", meta: {}, cues: [], video: "f2a" };
+    expect(variantFilms(v)).toEqual(["f2a"]);
+    expect(onFilm(v, "f2a", 3)).toBe(true);
+    expect(onFilm(v, "f3a", 3)).toBe(false);
+  });
+});
+
+describe("setVariantFilms", () => {
+  it("puts a variant on exactly the films named, by id or name, and reports the films it left", () => {
+    const p = empty();
+    addVersion(p, { video: "Hero 60s", file: "renders/a.mp4" });
+    addVersion(p, { video: "Teaser 15s", file: "renders/b.mp4" });
+    addVariant(p, { stage: "music", name: "Deep house", file: "n.wav" });
+    const lane = p.lanes[0];
+    (lane.variants[0] as { video?: string }).video = "hero-60s";
+    const a = setVariantFilms(p, "music", "deep-house", ["Hero 60s", "teaser-15s", "hero-60s"]);
+    expect(a.variant.videos).toEqual(["hero-60s", "teaser-15s"]);
+    expect(a.variant.video).toBeUndefined();
+    expect(a.left).toEqual([]);
+    const b = setVariantFilms(p, "music", "deep-house", []);
+    expect(b.variant.videos).toBeUndefined();
+    expect(b.left).toEqual(["hero-60s", "teaser-15s"]);
+    expect(() => setVariantFilms(p, "music", "nope", [])).toThrow();
+    expect(() => setVariantFilms(p, "music", "deep-house", ["No such film"])).toThrow();
   });
 });
 

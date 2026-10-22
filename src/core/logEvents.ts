@@ -106,7 +106,7 @@ export function formatEvent(films: number, video: Pick<Video, "id" | "name">, ve
   };
 }
 
-/** `Music: “Night drive, driving drop” added to night-drive`; a voice read is a "read". */
+/** `Music: “Night drive, driving drop” added to deep-house`; a voice read is a "read". */
 export function variantEvent(lane: Pick<Lane, "id" | "stage" | "name">, variant: Pick<Variant, "id" | "name">): LogEvent {
   const word = STAGE_WORDS[lane.stage];
   const [one, many] = lane.stage === "voice" ? ["read", "reads"] : ["variant", "variants"];
@@ -161,6 +161,17 @@ export function lockEvent(films: number, video: Pick<Video, "id" | "name" | "loc
 }
 
 /** §26: "Film “Key” shelved", "Film “Key” restored". One line per change; the last state wins, as a lock does. */
+/** "Music: “Deep house” on Hero 60s and Teaser 15s"; with no film, "… on no film". */
+export function variantFilmsEvent(lane: Pick<Lane, "id" | "stage">, variant: Pick<Variant, "id" | "name">, films: string[]): LogEvent {
+  const word = STAGE_WORDS[lane.stage];
+  const on = films.length === 0 ? "no film" : films.length === 1 ? films[0] : `${films.slice(0, -1).join(", ")} and ${films[films.length - 1]}`;
+  return {
+    area: lane.stage, kind: "variant", merge: "replace", subject: `${lane.id}/${variant.id}`,
+    text: `${word}: ${quoted(variant.name, lane.stage === "voice" ? "a read" : "a variant")} on ${on}`,
+    ref: `${lane.id}/${variant.id}`,
+  };
+}
+
 export function filmEvent(video: Pick<Video, "id" | "name">, shelved: boolean): LogEvent {
   const text = ["Film", quoted(video.name, ""), shelved ? "shelved" : "restored"].filter(Boolean).join(" ");
   return { area: "picture", kind: "film", merge: "replace", subject: video.id, text, video: video.id, version: null };

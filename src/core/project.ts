@@ -1,5 +1,5 @@
 import { basename } from "node:path";
-import type { Cue, FileEntry, FileKind, Format, Lane, LaneStage, Note, Project, Shot, Variant, Version, Video } from "./schema.js";
+import { variantFilms, type Cue, type FileEntry, type FileKind, type Format, type Lane, type LaneStage, type Note, type Project, type Shot, type Variant, type Version, type Video } from "./schema.js";
 import { newProjectId, slugify, uniqueId } from "./ids.js";
 import { InvalidError, NotFoundError, RushesError } from "./errors.js";
 import { checkCueFile } from "./cues.js";
@@ -144,10 +144,11 @@ export interface AddVariantInput {
   description?: string;
   cues?: { name: string; t: number; file?: string }[];
   /**
-   * Video id or name of the film this was made for: only that film's tabs list it. Left out, the film
-   * is worked out from the names (see inferFilm), and with none found, every film's tabs list it.
+   * Video id or name of the film, or films, this is for: only those films' tabs list it. Left out, the
+   * film is worked out from the names (see inferFilm); with none found, it is on no film until someone
+   * puts it on one (in a project with one film, it is on that one).
    */
-  video?: string;
+  video?: string | string[];
 }
 
 /** The words of a name or file name, lower-cased: "f3a SFX pass 3" and "f3a-sfx-v3.wav" both start with "f3a". */
@@ -156,7 +157,7 @@ const firstWord = (text: string): string => text.replace(/\.[a-z0-9]{2,4}$/i, ""
 /**
  * The film a variant is for when nobody said: the one film in play whose name starts with the same
  * word as the variant's name or its file's name ("f3a One phone, four buttons" and "f3a SFX pass 3").
- * With none matching, or more than one, no film: the variant then shows on every film, as it always has.
+ * With none matching, or more than one, no film: the variant is then on no film until someone puts it on one.
  */
 export function inferFilm(p: Project, name: string, file: string): string | undefined {
   const words = new Set([firstWord(name), firstWord(basename(file))].filter((w) => w.length >= 2));
@@ -169,7 +170,7 @@ const LANE_NAMES: Record<LaneStage, string> = { voice: "Voiceover", music: "Musi
 export function addVariant(p: Project, input: AddVariantInput): { lane: Lane; variant: Variant } {
   // The film and (§23) the cues first, so an unknown film or a cue refused for its file leaves the
   // project untouched.
-  const video = input.video === undefined ? inferFilm(p, input.name, input.file) : resolveVideo(p, input.video).id;
+  const videos = input.video === undefined ? [inferFilm(p, input.name, input.file)].filter((v) => v !== undefined) : filmIds(p, input.video);
   const cues: Cue[] = [];
   for (const c of input.cues ?? []) {
     const cue: Cue = { id: uniqueId(slugify(c.name), cues.map((x) => x.id)), name: c.name, t: c.t };
@@ -191,9 +192,30 @@ export function addVariant(p: Project, input: AddVariantInput): { lane: Lane; va
     meta: input.description === undefined ? { ...input.meta } : { ...input.meta, description: input.description },
     cues,
   };
-  if (video !== undefined) variant.video = video;
+  if (videos.length > 0) variant.videos = videos;
   lane.variants.push(variant);
   return { lane, variant };
+}
+
+/** Film ids for one ref or several (id or name each), each once, in the order given. Throws on an unknown film. */
+function filmIds(p: Project, refs: string | string[]): string[] {
+  return [...new Set((Array.isArray(refs) ? refs : [refs]).map((r) => resolveVideo(p, r).id))];
+}
+
+/**
+ * Put a read, bed or pass on exactly these films (ids or names); an empty list puts it on none.
+ * Returns the films it left, so the caller can drop those films' picks of it.
+ */
+export function setVariantFilms(p: Project, laneId: string, variantId: string, refs: string[]): { lane: Lane; variant: Variant; left: string[] } {
+  const lane = p.lanes.find((l) => l.id === laneId);
+  const variant = lane?.variants.find((v) => v.id === variantId);
+  if (!lane || !variant) throw new NotFoundError("variant", `${laneId}/${variantId}`);
+  const videos = filmIds(p, refs);
+  const left = variantFilms(variant).filter((v) => !videos.includes(v));
+  delete variant.video;
+  if (videos.length > 0) variant.videos = videos;
+  else delete variant.videos;
+  return { lane, variant, left };
 }
 
 export interface AddFileInput {

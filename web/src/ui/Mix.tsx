@@ -55,7 +55,7 @@ export function Mix({ state, assets, video, toast, onChanged, onPendingChange }:
   // ---- what each lane plays ----
   // VO: the newest voice round's pick, walking back past rounds with none (§18.4), as the server mixes it.
   // Only this film's reads, beds and passes (and any made for every film), as the server measures them.
-  const lanes = filmLanes(state.project.lanes, filmId);
+  const lanes = filmLanes(state.project.lanes, filmId, state.project.videos.length);
   const voiceRead = heardVoice(voiceRounds(lanes, lanePicks));
   const voClips: Clip[] = voiceRead && !missing(voiceRead.file)
     ? [{ id: voiceRead.key, lane: "vo", path: voiceRead.file, offset: 0, duration: 0, rev: rev(voiceRead.file) }]

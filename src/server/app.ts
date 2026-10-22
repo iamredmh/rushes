@@ -3,7 +3,7 @@ import { streamSSE } from "hono/streaming";
 import { z } from "zod";
 import type { Store, ChangeEvent } from "../core/store.js";
 import { RushesError, InvalidError, NotFoundError } from "../core/errors.js";
-import { addFile, addFormat, addVariant, addVersion, ensureProjectIdOnce, inPlay, lockPicture, noteInPlay, resolveCut, resolveVideo, setShots, shelveFilm, shotAt } from "../core/project.js";
+import { addFile, addFormat, addVariant, addVersion, ensureProjectIdOnce, inPlay, lockPicture, noteInPlay, resolveCut, resolveVideo, setShots, setVariantFilms, shelveFilm, shotAt } from "../core/project.js";
 import { addTake, editSection, setSections } from "../core/script.js";
 import { addNote, applyReply, applyUserEdit, checkNoteFormat, filterNotes } from "../core/notes.js";
 import { FORMAT_ID_RE, MAX_FORMATS, isPictureSize, labelOfId, versionFormats } from "../core/formats.js";
@@ -26,19 +26,19 @@ import { BRING_IN_MAX, FoundScanner, type BringInFailure, type BringInKind, ffpr
 import { candidatePaths, listAssets, fpsFor, screenshotName } from "./assets.js";
 import { osRevealer, osOpener, OPEN_SAFE_EXT, type Revealer, type Opener } from "./reveal.js";
 import type { CorruptEvent } from "./watch.js";
-import { LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, PinSchema, FileKindSchema, MarkSchema, ProjectIdSchema, ShotSchema, LEVEL_MIN, LEVEL_MAX, LEVEL_STEP, lanesForVideo, picksForVideo, type Levels, type Batch, type Note, type VisualsFile } from "../core/schema.js";
+import { LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, PinSchema, FileKindSchema, MarkSchema, ProjectIdSchema, ShotSchema, LEVEL_MIN, LEVEL_MAX, LEVEL_STEP, lanesForVideo, picksForVideo, variantFilms, type Levels, type Batch, type Note, type VisualsFile } from "../core/schema.js";
 import { LABEL_MAX, oneLineOf } from "../core/labels.js";
 import { byOf, logBookFor } from "./logbook.js";
 import { BriefService } from "./brief.js";
 import { StoryboardService } from "./storyboard.js";
 import { buildState, planWarning } from "../core/plan.js";
 import {
-  broughtInEvent, cutEvent, fileEvent, filmEvent, formatEvent, lineEvent, lockEvent, notesSentEvent, picksEvent, repliesEvent, scriptEvent, takeEvent, variantEvent, visualEvent,
+  broughtInEvent, cutEvent, fileEvent, filmEvent, formatEvent, lineEvent, lockEvent, notesSentEvent, picksEvent, repliesEvent, scriptEvent, takeEvent, variantEvent, variantFilmsEvent, visualEvent,
 } from "../core/logEvents.js";
 import { LOG_AREAS, LOG_MAX, changeLogFileName, logText, recentChanges } from "../core/logText.js";
 import { defaultRunner, measureMix, type LoudnessRunner } from "./loudness.js";
 
-export const VERSION = "0.7.3";
+export const VERSION = "0.8.0";
 
 async function body<T>(c: Context, schema: z.ZodType<T>): Promise<T> {
   let json: unknown;
@@ -148,11 +148,13 @@ const VariantBody = z.object({
   file: z.string().min(1),
   meta: z.record(z.string(), z.union([z.string(), z.number()])).optional(),
   description: z.string().min(1).max(200).optional(),
-  video: z.string().min(1).max(200).optional(),
+  // One film or several: a bed is often fitted to more than one.
+  video: z.union([z.string().min(1).max(200), z.array(z.string().min(1).max(200)).min(1).max(100)]).optional(),
   // §23.6: a cue's file has no length cap here. The 1024 limit applies to the stored (manifest) form,
   // which checkCueFile enforces with a 400 naming the cue.
   cues: z.array(z.object({ name: z.string().min(1), t, file: z.string().min(1).optional() })).optional(),
 });
+const VariantFilmsBody = z.object({ videos: z.array(z.string().min(1).max(200)).max(100) });
 const ScriptBody = z.object({
   wordsPerSecond: z.number().positive().optional(),
   replace: z.boolean().optional(),
@@ -1204,15 +1206,31 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     const cues = b.cues?.map((q) => (q.file === undefined ? q : { ...q, file: toManifestPath(store.root, q.file) }));
     const { result } = await store.update("project", (p) => {
       const added = addVariant(p, { ...b, cues, file: toManifestPath(store.root, b.file) });
-      // With several films in play, a variant with no film shows on all of them: say so, so the agent names one.
-      const films = p.videos.filter(inPlay).length;
-      const warning = added.variant.video === undefined && films > 1
-        ? `No film was named, and none could be told from the names, so this ${added.lane.stage === "voice" ? "read" : added.lane.stage === "music" ? "bed" : "pass"} shows on all ${films} films. Pass \`video\` (the film's id or name) to put it on one.`
+      // With more than one film, a variant on no film is listed on none of their tabs: say so, so the agent names one.
+      const warning = variantFilms(added.variant).length === 0 && p.videos.length > 1
+        ? `No film was named, and none could be told from the names, so this ${added.lane.stage === "voice" ? "read" : added.lane.stage === "music" ? "bed" : "pass"} is on no film: it waits, folded, under "Not on this film" on each film's tab. Pass \`video\` (a film's id or name, or a list of them) to put it on films.`
         : undefined;
       return { ...added, ...(warning ? { warning } : {}) };
     });
     await log.add(() => variantEvent(result.lane, result.variant), by(c));
     return c.json(result, 201);
+  });
+
+  // Put a read, bed or pass on exactly these films. A film it leaves drops its pick of it.
+  app.put("/api/variants/:lane/:variant/films", async (c) => {
+    const b = await body(c, VariantFilmsBody);
+    const { result, data } = await store.update("project", (p) => setVariantFilms(p, c.req.param("lane"), c.req.param("variant"), b.videos));
+    if (result.left.length > 0) {
+      await store.update("picks", (k) => {
+        for (const film of result.left) {
+          const own = k.videos[film];
+          if (own?.lanes[result.lane.id] === result.variant.id) delete own.lanes[result.lane.id];
+        }
+      });
+    }
+    const names = variantFilms(result.variant).map((id) => data.videos.find((v) => v.id === id)?.name ?? id);
+    await log.add(() => variantFilmsEvent(result.lane, result.variant, names), by(c));
+    return c.json({ lane: result.lane, variant: result.variant });
   });
 
   // ---- script ----
@@ -1306,7 +1324,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     const [project, picks] = await Promise.all([store.read("project"), store.read("picks")]);
     const run = opts.loudnessRunner ?? defaultRunner;
     // A film hears only its own reads, beds and passes, as its Mix tab plays them.
-    const heard = { ...project, lanes: lanesForVideo(project.lanes, b.video) };
+    const heard = { ...project, lanes: lanesForVideo(project.lanes, b.video, project.videos.length) };
     const result = await measureMix(heard, picksForVideo(picks, b.video), b.lanes, store.root, run, opts.loudnessTimeoutMs);
     return c.json(result);
   });

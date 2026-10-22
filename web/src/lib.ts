@@ -1,5 +1,5 @@
 // Pure helpers for the dashboard. No DOM, so they're unit-tested in Node.
-import type { Asset, AssetKind, BriefSectionView, BriefView, Cue, FoundCounts, FoundItem, FoundKind, FoundSummary, Lane, LaneStage, LoudnessResult, Mark, Note, Picks, Project, ProxyEvent, ProxyJob, Section, Shot, Stage, StoryboardView, TabState, Video, Version } from "./types.js";
+import type { Asset, AssetKind, BriefSectionView, BriefView, Cue, FoundCounts, FoundItem, FoundKind, FoundSummary, Lane, LaneStage, LoudnessResult, Mark, Note, Picks, Project, ProxyEvent, ProxyJob, Section, Shot, Stage, StoryboardView, TabState, Variant, Video, Version } from "./types.js";
 export type { FoundItem } from "./types.js";
 
 /** 72.4 -> "1:12.40" (minutes, seconds, hundredths). */
@@ -653,6 +653,8 @@ export interface VariantRow {
   meta: string | null;
   file: string;
   cues: Cue[];
+  /** The films it is on (see variantFilms). */
+  films: string[];
 }
 
 /** Every variant of every lane on `stage`, in manifest order. */
@@ -663,7 +665,7 @@ export function variantRows(lanes: Lane[], stage: "voice" | "music" | "sfx"): Va
     for (const v of l.variants) {
       rows.push({
         key: `${l.id}/${v.id}`, lane: l.id, laneName: l.name, variant: v.id, name: v.name,
-        meta: variantMeta(v.meta, stage === "sfx" ? v.cues.length : 0), file: v.file, cues: v.cues,
+        meta: variantMeta(v.meta, stage === "sfx" ? v.cues.length : 0), file: v.file, cues: v.cues, films: variantFilms(v),
       });
     }
   }
@@ -1629,12 +1631,34 @@ export function filmPicks(picks: Picks, videoId: string | null | undefined): Pic
   return { ...picks, lanes: { ...(own?.lanes ?? {}) }, levels: { ...(own?.levels ?? {}) }, sections: {}, videos: {} };
 }
 
+/** A web copy of src/core/schema.ts's variantFilms: a variant's `videos`, or an older project's one `video`. */
+export function variantFilms(v: Pick<Variant, "videos" | "video">): string[] {
+  return v.videos ?? (v.video === undefined ? [] : [v.video]);
+}
+
 /** The lanes one film lists, as the server's lanesForVideo: each keeps only the reads, beds and
- *  passes made for that film or for every film, and a lane left with none is dropped. */
-export function filmLanes(lanes: Lane[], videoId: string | null | undefined): Lane[] {
+ *  passes on that film (one on no film counts only in a project with one film), and a lane left
+ *  with none is dropped. */
+export function filmLanes(lanes: Lane[], videoId: string | null | undefined, filmCount: number): Lane[] {
   if (!videoId) return lanes;
   return lanes
-    .map((l) => ({ ...l, variants: l.variants.filter((v) => v.video === undefined || v.video === videoId) }))
+    .map((l) => ({
+      ...l,
+      variants: l.variants.filter((v) => {
+        const films = variantFilms(v);
+        return films.length === 0 ? filmCount <= 1 : films.includes(videoId);
+      }),
+    }))
+    .filter((l) => l.variants.length > 0);
+}
+
+/** The reads, beds and passes not on this film (on other films, or on none), in a project with more
+ *  than one film: the tab keeps them folded under "Not on this film", to put one on it. */
+export function otherLanes(lanes: Lane[], videoId: string, filmCount: number): Lane[] {
+  if (filmCount <= 1) return [];
+  const here = new Set(filmLanes(lanes, videoId, filmCount).flatMap((l) => l.variants.map((v) => `${l.id}/${v.id}`)));
+  return lanes
+    .map((l) => ({ ...l, variants: l.variants.filter((v) => !here.has(`${l.id}/${v.id}`)) }))
     .filter((l) => l.variants.length > 0);
 }
 

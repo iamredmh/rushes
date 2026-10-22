@@ -16,6 +16,7 @@ import { Missing } from "./AssetViews.js";
 import { cueKeys, cueLabel, cueName, cuesInTime } from "../cues.js";
 import { type CardCue, CUE_CARD_ID, CueCard, cardHover, useCueCard } from "./CueCard.js";
 import { CueLayers, rovingKeyDown } from "./CueLayers.js";
+import { FilmsMenu, type FilmsControl } from "./FilmsMenu.js";
 import { Icon } from "./Icon.js";
 
 /** One lane on an audio tab. */
@@ -50,6 +51,8 @@ export interface StageRow {
   order?: number;
   /** Use / In use. `onUnpick`, when given, puts an Unpick button beside In use that clears the pick. */
   use?: { inUse: boolean; onUse(): void; onUnpick?(): void };
+  /** The Films button: which films this read, bed or pass is on. */
+  films?: FilmsControl;
   /** Other controls for the right-hand column (M / S on Mix). */
   controls?: ComponentChildren;
   /** The On menu value that clicking this lane selects. */
@@ -387,6 +390,7 @@ export function Lanes({ rows, length, media, selected, marks, range, onSelect, o
               <div class="playhead" />
             </div>
             <div class="ctl">
+              {row.films && <FilmsMenu name={row.name} control={row.films} />}
               {row.use && (
                 <button
                   type="button"

@@ -229,12 +229,12 @@ describe("API", () => {
     await call("POST", "/api/versions", { video: "f3a One phone", file: `${root}/renders/f3a.mp4` });
     // An old agent that cannot name a film still lands on the right one when it names its tracks for it.
     const named = await call("POST", "/api/variants", { stage: "sfx", name: "f3a SFX pass 3", file: "audio/sfx/f3a-sfx-v3.wav" });
-    expect(named.json.variant.video).toBe("f3a-one-phone");
+    expect(named.json.variant.videos).toEqual(["f3a-one-phone"]);
     expect(named.json.warning).toBeUndefined();
-    // Nothing to go on: it shows on both films, and the reply says so and how to fix it.
+    // Nothing to go on: it is on no film, and the reply says so and how to fix it.
     const lost = await call("POST", "/api/variants", { stage: "sfx", name: "Pass X", file: "audio/sfx/x.wav" });
-    expect(lost.json.variant.video).toBeUndefined();
-    expect(lost.json.warning).toMatch(/shows on all 2 films\. Pass `video`/);
+    expect(lost.json.variant.videos).toBeUndefined();
+    expect(lost.json.warning).toMatch(/is on no film: it waits, folded, under "Not on this film".*Pass `video`/);
   });
 
   it("state carries the version the server is running, the same one health reports", async () => {
@@ -355,13 +355,31 @@ describe("API", () => {
     await call("POST", "/api/versions", { video: "f3a One phone", file: `${root}/renders/f3a.mp4` });
     const a = await call("POST", "/api/variants", { stage: "sfx", name: "Haptic taps", file: "audio/sfx/f3a.wav", video: "f3a One phone" });
     expect(a.status).toBe(201);
-    expect(a.json.variant.video).toBe("f3a-one-phone");
-    const b = await call("POST", "/api/variants", { stage: "sfx", name: "Shared", file: "audio/sfx/shared.wav" });
-    expect("video" in b.json.variant).toBe(false);
+    expect(a.json.variant.videos).toEqual(["f3a-one-phone"]);
+    const b = await call("POST", "/api/variants", { stage: "sfx", name: "Shared", file: "audio/sfx/shared.wav", video: ["f2a Ten colours", "f3a-one-phone"] });
+    expect(b.json.variant.videos).toEqual(["f2a-ten-colours", "f3a-one-phone"]);
     const bad = await call("POST", "/api/variants", { stage: "sfx", name: "Lost", file: "audio/sfx/lost.wav", video: "f9z" });
     expect(bad.status).toBe(404);
     const saved = await store.read("project");
     expect(saved.lanes[0].variants.map((v) => v.id)).toEqual(["haptic-taps", "shared"]);
+  });
+
+  it("puts a variant on films, drops the pick of a film it leaves, and logs it", async () => {
+    const { call, root, store } = await setup();
+    await call("POST", "/api/versions", { video: "Hero 60s", file: `${root}/renders/a.mp4` });
+    await call("POST", "/api/versions", { video: "Teaser 15s", file: `${root}/renders/b.mp4` });
+    await call("POST", "/api/variants", { stage: "music", name: "Deep house", file: "audio/music/n.wav", video: "Hero 60s" });
+    await call("PUT", "/api/picks", { video: "hero-60s", lanes: { music: "deep-house" } });
+    const both = await call("PUT", "/api/variants/music/deep-house/films", { videos: ["Hero 60s", "Teaser 15s"] });
+    expect(both.status).toBe(200);
+    expect(both.json.variant.videos).toEqual(["hero-60s", "teaser-15s"]);
+    expect((await store.read("picks")).videos["hero-60s"].lanes.music).toBe("deep-house");
+    await call("PUT", "/api/variants/music/deep-house/films", { videos: ["teaser-15s"] });
+    expect((await store.read("picks")).videos["hero-60s"].lanes.music).toBeUndefined();
+    const log = (await call("GET", "/api/log")).json;
+    expect(JSON.stringify(log)).toMatch(/Deep house.{0,4} on Teaser 15s/);
+    expect((await call("PUT", "/api/variants/music/nope/films", { videos: [] })).status).toBe(404);
+    expect((await call("PUT", "/api/variants/music/deep-house/films", { videos: ["f9z"] })).status).toBe(404);
   });
 
   it("a variant's description is stored as meta.description, merged with meta, and wins over meta's own", async () => {
