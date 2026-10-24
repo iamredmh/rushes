@@ -4,7 +4,7 @@
 import { useState } from "preact/hooks";
 import { api } from "../api.js";
 import { assetRev, type Clip } from "../audio/timeline.js";
-import { blindOrder, defaultVersion, filmLanes, filmNotes, filmPicks, otherLanes, STAGE_NAMES, type VariantRow, variantNoteRow, variantOnLabel, variantOnOptions, variantRows } from "../lib.js";
+import { blindOrder, defaultVersion, filmLanes, filmNotes, filmPicks, otherLanes, STAGE_NAMES, type VariantRow, variantEngineLane, variantNoteRow, variantOnLabel, variantOnOptions, variantRows } from "../lib.js";
 import type { Asset, State, Video } from "../types.js";
 import { AudioStage, type Preview } from "./AudioStage.js";
 import { filmsControl, looseRows } from "./FilmsMenu.js";
@@ -70,7 +70,8 @@ export function VariantTab({ stage, state, assets, video, toast, onChanged, onPe
 
   const stageRows: StageRow[] = rows.map((r) => {
     const asset = assets.find((a) => a.path === r.file);
-    const clip: Clip = { id: r.key, lane: r.lane, path: r.file, offset: 0, duration: 0, rev: asset ? assetRev(asset) : undefined };
+    const engineLane = variantEngineLane(stage);
+    const clip: Clip = { id: r.key, lane: engineLane, path: r.file, offset: 0, duration: 0, rev: asset ? assetRev(asset) : undefined };
     const picked = picks[r.lane] === r.variant;
     return {
       key: r.key,
@@ -80,7 +81,7 @@ export function VariantTab({ stage, state, assets, video, toast, onChanged, onPe
       clips: [clip],
       cues: stage === "sfx" ? r.cues : undefined,
       layers: stage === "sfx" ? { open: openLayers.has(r.key), onToggle: () => toggleLayers(r.key) } : undefined,
-      audition: { lane: r.lane, clip: r.key },
+      audition: { lane: engineLane, clip: r.key },
       picked,
       // Manifest order: with nothing picked or selected, the first bed plays, Blind or not.
       order: all.indexOf(r),

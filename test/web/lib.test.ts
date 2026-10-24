@@ -14,7 +14,7 @@ import { OPEN_SAFE_EXT as SERVER_OPEN_SAFE_EXT } from "../../src/server/reveal.j
 import { markLabel as serverMarkLabel, type Mark } from "../../src/core/schema.js";
 import {
   AUDIO_CHIPS, BUILT, blindOrder, laneSelection, markLabel, marksLabel, scopeOptions, noteFocus, setMarkDb, spacePressesButton, testFlags, toggleMark, watchFocusOrigin, variantMeta,
-  variantNoteRow, variantNoteTarget, variantOnLabel, variantOnOptions, variantRows,
+  variantEngineLane, variantNoteRow, variantNoteTarget, variantOnLabel, variantOnOptions, variantRows,
 } from "../../web/src/lib.js";
 import type { Lane } from "../../web/src/types.js";
 import { mixInputs } from "../../src/server/loudness.js";
@@ -613,6 +613,21 @@ describe("audio tabs: lanes", () => {
     expect(laneSelection(rows, null)).toEqual({ m: "b", s: "x" });
     expect(laneSelection(rows, "a")).toEqual({ m: "a", s: "x" });
     expect(laneSelection(rows, "read")).toEqual({ m: "b", s: "x" });
+  });
+  it("plays only the selected bed even when the beds are filed under several project lanes", () => {
+    const lane = (id: string, ids: string[]) => ({
+      id, stage: "music", name: id,
+      variants: ids.map((v) => ({ id: v, name: v, file: `${v}.wav`, cues: [], meta: null })),
+    });
+    const rows = variantRows(
+      [lane("stems", ["a", "b"]), lane("night", ["d", "e"]), lane("composed", ["g"])] as unknown as Lane[],
+      "music",
+    ).map((r, order) => ({ key: r.key, order, audition: { lane: variantEngineLane("music"), clip: r.key } }));
+    expect(rows).toHaveLength(5);
+    // Nothing selected: one bed, the first.
+    expect(Object.values(laneSelection(rows, null))).toEqual(["stems/a"]);
+    // Click a bed in any project lane: that one alone is heard.
+    for (const r of rows) expect(Object.values(laneSelection(rows, r.key))).toEqual([r.key]);
   });
   it("shuffles for Blind stably, as a permutation", () => {
     const keys = ["a", "b", "c", "d", "e", "f"];

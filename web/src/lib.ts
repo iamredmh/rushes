@@ -672,6 +672,15 @@ export function variantRows(lanes: Lane[], stage: "voice" | "music" | "sfx"): Va
   return rows;
 }
 
+/**
+ * The engine lane a Music or Sound effects row plays on. Every row of a tab shares one, whichever
+ * project lane it's filed under: the beds (or passes) are alternatives, so only one is heard at a
+ * time. Picks stay per project lane (`row.lane`); this is only what the player layers.
+ */
+export function variantEngineLane(stage: "music" | "sfx"): string {
+  return stage;
+}
+
 /** One entry in a note's On menu: `on` is what's saved, `t` a cue's own time. */
 export interface OnOption {
   value: string;
