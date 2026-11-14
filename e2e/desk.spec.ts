@@ -426,8 +426,12 @@ test("F puts the monitor full screen", async ({ page, rushes, browserName }) => 
   await expect(transport(page).getByRole("button", { name: "Full screen · F" })).toBeVisible();
   await page.keyboard.press("f");
   const full = () => page.evaluate(() => document.fullscreenElement?.classList.contains("monitor") ?? false);
-  // WebKit's headless runner may refuse full screen outright; Chromium grants it to a key press.
-  if (browserName === "webkit" && !(await full())) test.skip(true, "this WebKit cannot go full screen");
+  // WebKit's headless runner may refuse full screen outright; Chromium grants it to a key press. The request settles a
+  // moment after the key, so WebKit is given until then before the test calls it refused.
+  if (browserName === "webkit") {
+    const granted = await expect.poll(full, { timeout: 3000 }).toBe(true).then(() => true, () => false);
+    if (!granted) test.skip(true, "this WebKit cannot go full screen");
+  }
   await expect.poll(full).toBe(true);
   await page.keyboard.press("f");
   await expect.poll(full).toBe(false);
