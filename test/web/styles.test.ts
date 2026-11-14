@@ -25,6 +25,17 @@ function outsideSupports(text: string): string {
 }
 
 describe("styles.css", () => {
+  it("sets the interface in Geist and timecode in Geist Mono", () => {
+    expect(css).toMatch(/--sans:\s*"Geist",/);
+    expect(css).toMatch(/--mono:\s*"Geist Mono",/);
+    expect(css).not.toMatch(/Figtree|JetBrains/);
+  });
+  it("bundles its fonts and fetches none", () => {
+    const main = readFileSync(new URL("../../web/src/main.tsx", import.meta.url), "utf8");
+    expect(main).toMatch(/@fontsource\/geist\/400\.css/);
+    expect(main).toMatch(/@fontsource\/geist-mono\/400\.css/);
+    expect(main + css).not.toMatch(/fonts\.googleapis|fonts\.gstatic/);
+  });
   it("uses container units and containers only inside @supports (width: 1cqw)", () => {
     expect(css).toContain("@supports (width: 1cqw)");
     const rest = outsideSupports(css).replace(/\/\*[\s\S]*?\*\//g, "");
