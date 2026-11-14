@@ -42,14 +42,12 @@
 
 /* ---- the workspaces: one segmented control in the middle of the bar ---- */
 .ws { display: flex; align-items: center; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
-.ws .plan { display: inline-flex; }
 .ws .tab { gap: 6px; height: 28px; padding: 0 10px; margin: 0; border: 0; border-radius: 6px; color: var(--text-2); font-size: 13px; font-weight: 500; }
 .ws .tab .ic { width: 15px; height: 15px; }
 .ws .tab:hover { background: var(--hover); color: var(--text); }
 .ws .tab[aria-selected="true"] { background: var(--raised); color: var(--text); font-weight: 600; border-bottom-color: transparent; }
 .ws .tab[data-locked="true"] { color: var(--text-4); }
 .ws .tab .pready { width: 14px; height: 14px; color: var(--done); }
-.ws .tab .pmarks .pready { width: 14px; height: 14px; }
 .wcount { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-2); font: 600 12.5px/18px var(--mono); text-align: center; }
 .ws [data-tip]::after { font-size: 12.5px; }
 

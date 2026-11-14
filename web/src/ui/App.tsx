@@ -15,7 +15,7 @@ import { FormatToggle } from "./FormatToggle.js";
 import { Icon, STAGE_ICONS } from "./Icon.js";
 import { Picture, type Source } from "./Picture.js";
 import { Storyboard } from "./Storyboard.js";
-import { PlanningTab, type PlanRow } from "./Planning.js";
+import { PlanSwitch, type PlanTabRow } from "./Planning.js";
 import { Script } from "./Script.js";
 import { VariantTab } from "./VariantTab.js";
 import { Voice } from "./Voice.js";
@@ -50,7 +50,7 @@ const REVIEW_TABS: { view: Exclude<Stage, "script" | "visuals" | "mix">; label: 
 ];
 // Assets isn't a review stage (§15.3): it's a dashboard-only view, kept out of Stage and handled as its own case throughout this file.
 type View = DeskView;
-/** What Send to agent shows: a batch, or (from the Brief page) a message that is not recorded anywhere. */
+/** What Send shows: a batch, or (from the Brief page) a message that is not recorded anywhere. */
 type Sent = Pick<Batch, "id" | "prompt"> & { title?: string };
 const typing = (el: EventTarget | null) => el instanceof HTMLElement && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
 
@@ -110,7 +110,7 @@ export function App() {
   const [planLast, setPlanLast] = useState<PlanPage>("script");
   // §27, 5.3: the Review tab you were last on, which the Review workspace opens on.
   const [reviewLast, setReviewLast] = useState<View>("picture");
-  // The Brief and Storyboard pages register how to wait for their saves here, for Send to agent.
+  // The Brief and Storyboard pages register how to wait for their saves here, for Send.
   const planSettle = useRef<(() => Promise<unknown>) | null>(null);
   const [keysOpen, setKeysOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -437,7 +437,7 @@ export function App() {
     return () => ro.disconnect();
   }, [shellUp]);
 
-  // Send to agent sends the whole project from whichever tab it is pressed on: every tab's open notes
+  // Send sends the whole project from whichever tab it is pressed on: every tab's open notes
   // on every film in play and the changed script lines (one batch), plus what changed in the brief and
   // the storyboard. Those two have no batch: their files are the record, so they are only lines to paste.
   const send = async () => {
@@ -496,18 +496,19 @@ export function App() {
   const soundOnly = !version && (!!(filmUse?.voice || filmUse?.music || filmUse?.sfx) || mixNotes.length > 0) && (!!video || state.project.videos.length === 0);
   const timelineOpen = !!tab("picture")?.unlocked || soundOnly;
   const unlocked = stage === "assets" ? assetsUnlocked : stage === "brief" ? state.brief.exists : stage === "storyboard" ? state.storyboard.exists : stage === "picture" ? timelineOpen : (tab(stage)?.unlocked ?? false);
-  // §24: the Planning tab's menu, its marks while a plan is in progress (a brief and no cut yet), and its open count.
+  // §27: the Plan switch's pages, each with its tick and its dot, and the Plan workspace's tick (all three approved) and dot.
   const hasCut = !!tab("picture")?.unlocked;
   const progress = planProgress(state.brief, state.script.sections, state.storyboard);
   const approved = progress.brief === "ok" && progress.script === "ok" && progress.storyboard === "ok";
-  // Marks show while planning has begun (a brief or a storyboard) and no cut exists yet.
+  // Ready to build shows while planning has begun (a brief or a storyboard) and no cut exists yet.
   const planning = state.build.started && !hasCut;
-  const planRows: PlanRow[] = [
-    { page: "brief", name: "Brief", icon: "brief", unlocked: state.brief.exists, progress: planning ? progress.brief : null, ask: LOCKED_BRIEF.ask },
-    { page: "script", name: "Script", icon: STAGE_ICONS.script, unlocked: !!tab("script")?.unlocked, progress: planning && tab("script")?.unlocked ? progress.script : null, ask: LOCKED_TAB.script.ask },
-    { page: "storyboard", name: "Storyboard", icon: "story", unlocked: state.storyboard.exists, progress: planning && state.storyboard.exists ? progress.storyboard : null, ask: LOCKED_STORYBOARD.ask },
+  const scriptTodo = tab("script")?.todo ?? 0;
+  const planRows: PlanTabRow[] = [
+    { page: "brief", name: "Brief", icon: "brief", unlocked: state.brief.exists, ask: LOCKED_BRIEF.ask, approved: progress.brief === "ok", open: state.brief.changed },
+    { page: "script", name: "Script", icon: STAGE_ICONS.script, unlocked: !!tab("script")?.unlocked, ask: LOCKED_TAB.script.ask, approved: progress.script === "ok", open: scriptTodo },
+    { page: "storyboard", name: "Storyboard", icon: "story", unlocked: state.storyboard.exists, ask: LOCKED_STORYBOARD.ask, approved: progress.storyboard === "ok", open: state.storyboard.changed },
   ];
-  const planOpen = state.brief.changed + state.storyboard.changed + (tab("script")?.todo ?? 0);
+  const planOpen = state.brief.changed + state.storyboard.changed + scriptTodo;
   const copyReady = async () => {
     try {
       await navigator.clipboard.writeText(readyPrompt(state.project.name, video?.name ?? null));
@@ -584,7 +585,7 @@ export function App() {
       projectId: projectId() ?? "",
       head: state.log,
       project: state.project,
-      // The Change Log has no Brief or Storyboard area: a line added from either goes under Script, its neighbour in Planning.
+      // The Change Log has no Brief or Storyboard area: a line added from either goes under Script, its neighbour in Plan.
       stage: stage === "brief" || stage === "storyboard" ? "script" : stage,
       toast,
       onJump: (to) => {
@@ -686,21 +687,11 @@ export function App() {
         workspaces={
           <Workspaces
             current={place.workspace}
-            plan={{
-              selected: isPlanPage(stage) ? stage : null,
-              rows: planRows,
-              marks: planning ? progress : null,
-              open: planOpen,
-              locked: planRows.every((r) => !r.unlocked),
-              ready: planning && state.build.ready,
-              approved,
-              onCopyReady: () => void copyReady(),
-              onPick: (p) => show(p),
-            }}
+            plan={{ approved, open: planOpen, locked: planRows.every((r) => !r.unlocked) }}
             hasVisuals={!!tab("visuals")?.unlocked}
             assetsUnlocked={assetsUnlocked}
             found={foundUnseen ? { count: foundTotal(state.found?.counts), text: chip! } : null}
-            onPick={(ws) => (ws === "assets" ? showAssets() : ws === "visuals" ? show("visuals") : show(reviewLast as Stage))}
+            onPick={(ws) => (ws === "plan" ? planKey() : ws === "assets" ? showAssets() : ws === "visuals" ? show("visuals") : show(reviewLast as Stage))}
           />
         }
         notesToggle={panelHere ? <PanelToggle shown={panel.shown} onToggle={panel.toggle} buttonRef={panelToggle} /> : null}
@@ -790,6 +781,23 @@ export function App() {
         )}
         {problem && !wrongProject && <div class="banner"><Icon name="alert" />{problem}</div>}
 
+        {place.workspace === "plan" && (
+          <div class="rtabrow planrow">
+            <PlanSwitch rows={planRows} selected={isPlanPage(stage) ? stage : null} onPick={(p) => show(p)} />
+            {planning && state.build.ready && (
+              <div class="planready">
+                <span class="rd">
+                  <Icon name="check" />
+                  Ready to build
+                </span>
+                <button type="button" class="btn" onClick={() => void copyReady()}>
+                  <Icon name="copy" />
+                  Copy prompt for your agent
+                </button>
+              </div>
+            )}
+          </div>
+        )}
         {reviewTabsShown && (
           <div class="rtabrow">
             <ReviewTabs rows={reviewRows} selected={stage} onPick={(v) => show(v as Stage)} />

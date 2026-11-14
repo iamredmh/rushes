@@ -54,8 +54,8 @@
   --shadow: rgba(0, 0, 0, 0.6);
   --sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
-  --r: 10px;
-  --r-lg: 14px;
+  --r: 6px;
+  --r-lg: 8px;
   /* The work area's padding. */
   --body-pad: 24px;
 }
@@ -248,8 +248,6 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .tc { font: 500 17px var(--mono); letter-spacing: -0.01em; padding: 0 8px; }
 .tc small { font-size: 13px; color: var(--text-3); margin-left: 4px; }
-.vsep { width: 1px; height: 20px; background: var(--line-2); margin: 0 6px; }
-.rng { font: 500 13px var(--mono); color: var(--todo); padding: 0 4px; }
 .playhead { position: absolute; top: -5px; bottom: -5px; width: 2px; background: var(--text); border-radius: 2px; z-index: 4; pointer-events: none; }
 .playhead::before { content: ""; position: absolute; top: -4px; left: -4px; width: 10px; height: 10px; border-radius: 50%; background: var(--text); }
 .mk { position: absolute; top: 50%; width: 10px; height: 10px; border-radius: 50%; transform: translate(-50%, -50%); z-index: 3; box-shadow: 0 0 0 2px var(--raised); }
@@ -325,86 +323,79 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .chipx button { border: 0; background: transparent; color: inherit; cursor: pointer; padding: 2px; display: grid; }
 .chipx svg.ic { width: 14px; height: 14px; }
 
-/* script */
+/* §24, §27: the Plan pages (Brief, Script, Storyboard). One column of rows divided by thin lines; every text you can edit
+   sits in a field with a visible edge; an edited row shows "Edited by you" over the baseline struck through; the status
+   line sits at the foot of the page, in view while the page scrolls. */
+.ppage { gap: 14px; padding-bottom: 0; }
 .shead { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.shead h2 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
-.shead .meta { color: var(--text-3); font-size: 15px; }
-.sgrid { display: grid; grid-template-columns: 84px minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
-.scols { padding: 0 20px; color: var(--text-3); font-size: 15px; font-weight: 500; }
-.srow { background: var(--raised); border-radius: var(--r-lg); padding: 18px 20px; display: grid; gap: 14px; box-shadow: inset 0 0 0 1px transparent; transition: box-shadow 0.12s; }
-.srow.changed { box-shadow: inset 0 0 0 1.5px var(--todo); }
-.when { display: grid; gap: 6px; font: 500 13px var(--mono); color: var(--text-2); }
-.when b { font: 600 15px var(--sans); color: var(--text); }
-.stat { display: inline-flex; align-items: center; gap: 6px; font: 500 15px var(--sans); color: var(--text-3); }
+.ppage .shead { gap: 12px; flex-wrap: wrap; }
+.shead h2 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
+.shead .meta { color: var(--text-3); font-size: 13px; }
+.prows { display: grid; border-top: 1px solid var(--line); }
+.srow, .sbrow { display: grid; gap: 10px; padding: 14px 4px 14px 10px; border-bottom: 1px solid var(--line); border-left: 2px solid transparent; }
+.srow.changed, .sbrow.changed { border-left-color: var(--todo); }
+.prows > :last-child { border-bottom: 0; }
+.sgrid { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 14px; align-items: start; }
+.brow { grid-template-columns: 150px minmax(0, 1fr); gap: 14px; align-items: start; }
+.plabel { font-weight: 600; font-size: 13px; padding-top: 8px; overflow-wrap: anywhere; }
+.pbody { display: grid; gap: 6px; min-width: 0; }
+.when { display: grid; gap: 4px; padding-top: 6px; font: 500 12.5px var(--mono); color: var(--text-2); }
+.when b { font: 600 13px var(--sans); color: var(--text); }
+.stat { display: inline-flex; align-items: center; gap: 6px; font: 500 12.5px var(--sans); color: var(--text-3); }
 .stat i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-.cur { font-size: 16px; line-height: 1.6; color: var(--text-2); padding-top: 9px; white-space: pre-wrap; }
-.srow textarea { min-height: 84px; font-size: 16px; line-height: 1.6; overflow: hidden; }
-.sfoot { display: grid; grid-template-columns: 84px minmax(0, 1fr) auto; gap: 16px; align-items: center; }
-.fit { height: 6px; border-radius: 3px; background: var(--app); position: relative; overflow: hidden; cursor: help; }
-.fit i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; background: var(--done); }
+.input.pfield { display: block; min-height: 0; padding: 7px 10px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--app); font-size: 14px; line-height: 1.55; overflow: hidden; }
+.input.pfield:hover { border-color: var(--text-4); }
+.input.pfield:focus { border-color: var(--accent); }
+.edited { display: grid; gap: 2px; padding: 2px 0 0 10px; border-left: 2px solid var(--todo-line); }
+.edited .ehead { display: flex; align-items: center; gap: 6px; min-height: 24px; }
+.edited .etag { color: var(--todo); font-size: 12.5px; font-weight: 600; }
+.edited .ib { width: 24px; height: 24px; }
+.edited .was { margin: 0; color: var(--text-3); font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.edited .was del { text-decoration-color: var(--text-3); }
+.edited .wl { font-weight: 500; }
+.sfoot { display: grid; grid-template-columns: 84px minmax(0, 1fr) auto; gap: 14px; align-items: center; }
+.fit { height: 4px; border-radius: 2px; background: var(--raised); position: relative; overflow: hidden; cursor: help; }
+.fit i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 2px; background: var(--done); }
 .fit.tight i { background: var(--todo); }
 .fit.over i { background: var(--over); }
-.sact { display: flex; gap: 6px; align-items: center; }
-.dirin { background: var(--app); border: 1px solid transparent; border-radius: var(--r); height: 36px; padding: 0 12px; font-size: 15px; width: 100%; }
+.sact { display: flex; gap: 4px; align-items: center; }
+.dirin { background: var(--app); border: 1px solid var(--line-2); border-radius: 6px; height: 30px; padding: 0 10px; font-size: 13px; width: 100%; color: var(--text); }
+.dirin:hover { border-color: var(--text-4); }
 .dirin:focus { border-color: var(--accent); outline: none; }
 .dirin::placeholder { color: var(--text-3); }
-
-/* §24: the Brief page reuses the Script page's rows; its first column is the section's heading. */
-.bgrid { grid-template-columns: 150px minmax(0, 1fr) minmax(0, 1fr); }
-.blabel { font-weight: 600; font-size: 15px; padding-top: 9px; }
-.byours { display: grid; gap: 8px; justify-items: start; }
-.byours textarea { width: 100%; }
-.bfoot { display: flex; align-items: center; gap: 14px; margin-top: 6px; }
+.pfoot { position: sticky; bottom: 0; z-index: 2; display: flex; align-items: center; gap: 14px; min-height: 44px; padding: 8px 0; border-top: 1px solid var(--line); background: var(--bg); }
+.pstatus { margin: 0; color: var(--text-2); font-size: 12.5px; }
+.pfoot .btn { margin-left: auto; height: 30px; padding: 0 12px; font-size: 13px; }
 .bapprove.approved { color: var(--done); box-shadow: inset 0 0 0 1px var(--done); }
 
 /* §24.12: the Storyboard page: the Script page's rows, with a still beside each. The classes are sb-prefixed: Picture's shot strip owns .shot. */
-.sbhead { display: grid; grid-template-columns: 200px minmax(0, 1fr) minmax(0, 1fr); gap: 16px; padding: 0 20px; color: var(--text-3); font-size: 15px; font-weight: 500; }
-.sbtotal { display: flex; gap: 14px; align-items: center; color: var(--text-2); font-size: 15px; }
-.sbtotal .bar { flex: 1; height: 6px; border-radius: 3px; background: var(--raised); overflow: hidden; }
-.sbtotal .bar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
-.sbrow { background: var(--raised); border-radius: var(--r-lg); padding: 16px 20px; display: grid; grid-template-columns: 200px minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; box-shadow: inset 0 0 0 1px transparent; transition: box-shadow 0.12s; }
-.sbrow.changed { box-shadow: inset 0 0 0 1.5px var(--todo); }
-.sbid { display: grid; gap: 8px; }
-.sbstill { display: block; width: 100%; aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden; border: 1px solid var(--line-2); padding: 0; cursor: zoom-in; background: var(--bg); }
+.sbtotal { display: flex; gap: 14px; align-items: center; color: var(--text-2); font-size: 13px; }
+.sbtotal .bar { flex: 1; height: 4px; border-radius: 2px; background: var(--raised); overflow: hidden; }
+.sbtotal .bar i { display: block; height: 100%; background: var(--accent); border-radius: 2px; }
+.sbrow { grid-template-columns: 200px minmax(0, 1fr); column-gap: 14px; align-items: start; }
+.sbid { grid-row: span 2; display: grid; gap: 6px; }
+.sbstill { display: block; width: 100%; aspect-ratio: 16 / 9; border-radius: 6px; overflow: hidden; border: 1px solid var(--line-2); padding: 0; cursor: zoom-in; background: var(--bg); }
 .sbstill img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.nostill { display: grid; place-items: center; width: 100%; height: 100%; color: var(--text-3); font-size: 15px; padding: 8px; text-align: center; }
-.sbmeta { display: flex; gap: 12px; align-items: baseline; font-family: var(--mono); color: var(--text-2); font-size: 15px; }
+.nostill { display: grid; place-items: center; width: 100%; height: 100%; color: var(--text-3); font-size: 12.5px; padding: 8px; text-align: center; }
+.sbmeta { display: flex; gap: 10px; align-items: baseline; font-family: var(--mono); color: var(--text-2); font-size: 12.5px; }
 .sbmeta b { color: var(--text); }
-.sbtag { margin-left: auto; font-family: inherit; font-size: 15px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); font-weight: 600; }
-.sbrow .cur { padding-top: 2px; }
-.sbname { display: block; color: var(--text); margin-bottom: 4px; font-weight: 500; }
-.sbrow textarea { min-height: 84px; font-size: 16px; line-height: 1.6; overflow: hidden; }
-.sblow { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; }
-.sbdir { flex: 1; background: var(--app); border: 1px solid transparent; border-radius: var(--r); height: 36px; padding: 0 12px; font-size: 15px; color: var(--text); min-width: 0; }
-.sbdir:focus { border-color: var(--accent); outline: none; }
-.sbdir::placeholder { color: var(--text-3); }
+.sbtag { margin-left: auto; font-family: inherit; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); font-weight: 600; }
+.sbname { display: block; color: var(--text); font-size: 13px; font-weight: 600; }
+.sblow { grid-column: 2; display: flex; gap: 6px; align-items: center; }
+.sbdir { flex: 1; min-width: 0; }
 .sblight { position: fixed; inset: 0; background: var(--scrim-2); backdrop-filter: blur(8px); display: grid; place-items: center; z-index: 60; cursor: zoom-out; padding: 24px; }
 .sblbx { width: min(900px, 100%); display: grid; gap: 12px; }
-.sbbig { aspect-ratio: 16 / 9; border-radius: 12px; overflow: hidden; border: 1px solid var(--line-2); background: var(--bg); }
+.sbbig { aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden; border: 1px solid var(--line-2); background: var(--bg); }
 .sbbig img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .sblcap { color: var(--text-2); }
 .sblcap b { color: var(--text); }
 .sblcap p { margin: 6px 0 0; max-width: 70ch; white-space: pre-wrap; }
-.pmarks .pready { width: 18px; height: 18px; color: var(--done); }
-.planready { border-top: 1px solid var(--line); margin-top: 4px; padding: 10px 8px 4px; display: grid; gap: 8px; }
-.planready .rd { display: flex; gap: 8px; align-items: center; color: var(--done); font-weight: 600; font-size: 15px; }
-.planready .rd .ic { width: 18px; height: 18px; }
 
-/* §24: the Planning tab, its menu and its marks. The menu is fixed, not absolute: the tab bar scrolls sideways and would clip it. */
-.plan { display: inline-flex; }
-.tab .chev { width: 14px; height: 14px; margin-left: -2px; opacity: 0.6; }
-.tab[aria-expanded="true"] { background: var(--tint); }
-.pmarks { display: inline-flex; gap: 5px; }
-.pm { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--text-3); display: block; box-sizing: border-box; }
-.pm.part { border-color: var(--todo); background: linear-gradient(90deg, var(--todo) 50%, transparent 50%); }
-.pm.ok { border-color: var(--done); background: var(--done); }
-.planmenu { position: fixed; z-index: 45; min-width: 220px; background: var(--raised); border-radius: var(--r-lg); padding: 6px; box-shadow: 0 16px 48px var(--shadow); display: grid; gap: 2px; }
-.planitem { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 12px; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 15px; border-radius: 10px; cursor: pointer; text-align: left; }
-.planitem:hover, .planitem:focus-visible { background: var(--hover); }
-.planitem.cur { color: var(--accent-2); }
-.planitem[data-locked="true"] { color: var(--text-3); }
-.planitem .pm, .planitem .pi, .planitem .lk { margin-left: auto; }
-.planitem .pi { width: 18px; height: 18px; color: var(--done); }
+/* §27: the Plan workspace's row above the work area: the switch, and Ready to build once the plan is approved. */
+.planready { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+.planready .rd { display: flex; gap: 6px; align-items: center; color: var(--done); font-weight: 600; font-size: 13px; white-space: nowrap; }
+.planready .rd .ic { width: 15px; height: 15px; }
+.ptabs .tab .pready { width: 14px; height: 14px; color: var(--done); }
 .ib.okd[aria-pressed="true"] { background: var(--done-soft); color: var(--done); }
 .ib.flagd[aria-pressed="true"] { background: var(--todo-soft); color: var(--todo); }
 /* A native `disabled` button never matches :hover in any browser (regardless of
@@ -520,15 +511,13 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .onwrap { position: relative; display: inline-flex; align-items: center; min-width: 0; max-width: 100%; }
 /* The On menu shares its row with the scope switch and gives way to it, so the row never wraps. */
 .comp .row > .onwrap { flex: 1 1 0; }
-.comp .row > .onwrap .onsel { width: 100%; }
 .comp .row > .onwrap + .sp { flex: 0 0 0; }
 .onwrap svg.ic { position: absolute; right: 9px; width: 14px; height: 14px; color: var(--text-2); pointer-events: none; }
 /* The On menu's tooltip (a round and read name can be long): left-aligned over the menu and wrapping
    within the composer, so it never runs off the window's edge. */
 .onwrap[data-tip]::after { left: 0; transform: translateY(2px); width: max-content; max-width: max(100%, 240px); white-space: normal; line-height: 1.3; text-align: left; }
 .onwrap[data-tip]:hover::after { transform: none; }
-.sel.onsel, .sel.dbsel { background: var(--app); color: var(--text); padding: 0 30px 0 12px; max-width: 100%; text-overflow: ellipsis; }
-.sel.dbsel { height: 30px; padding: 0 28px 0 10px; }
+.sel.dbsel { height: 30px; background: var(--app); color: var(--text); padding: 0 28px 0 10px; max-width: 100%; text-overflow: ellipsis; }
 
 /* lightbox */
 .lightbox { position: fixed; inset: 0; background: var(--scrim); display: grid; place-items: center; z-index: 50; padding: 24px; }
@@ -542,9 +531,9 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 }
 @media (max-width: 680px) {
   :root { --body-pad: 16px; }
-  .sgrid, .sfoot, .bgrid, .sbrow { grid-template-columns: minmax(0, 1fr); }
-  .sbhead { display: none; }
-  .scols { display: none; }
+  .sgrid, .sfoot, .brow, .sbrow { grid-template-columns: minmax(0, 1fr); }
+  .sbid { grid-row: auto; }
+  .sblow { grid-column: 1; }
   .when { grid-auto-flow: column; justify-content: start; align-items: center; gap: 12px; }
 }
 /* ---- Assets › Found (§20.5) ---- */
@@ -677,7 +666,7 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .vzbanner { background: var(--todo-soft); border: 1px solid var(--todo); color: var(--todo); border-radius: var(--r); padding: 2px 12px; }
 .vzfwrap { min-height: 0; display: grid; place-items: center; position: relative; }
 .vzframe { position: relative; background: var(--black); border-radius: 6px; overflow: hidden; box-shadow: 0 0 0 1px var(--line-2); touch-action: none; user-select: none; }
-.vz.cur .vzframe { box-shadow: 0 0 0 2px var(--accent), 0 10px 40px var(--shadow); cursor: crosshair; }
+.vz.cur .vzframe { box-shadow: 0 0 0 2px var(--accent); cursor: crosshair; }
 .vz:not(.cur) .vzframe { cursor: pointer; }
 .vzfs .vzframe { box-shadow: none; cursor: default; }
 .vzframe img { width: 100%; height: 100%; display: block; pointer-events: none; -webkit-user-drag: none; }

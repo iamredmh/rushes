@@ -1,8 +1,8 @@
 import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { test, expect, openReviewTab, reviewTab, openWorkspace, workspaceTab, notesPanel, sendButton, sentDialog } from "./fixture.js";
+import { test, expect, reviewTab, openWorkspace, workspaceTab, notesPanel, sendButton, sentDialog, planSwitch, planTab, openPlanPage, editedMark, baselineText, planStatus } from "./fixture.js";
 
-// §24 step 2: Planning is one tab with a menu (Brief, Script); brief.md is the file of record for the Brief page.
+// §24 step 2, §27: Plan is a workspace with a three-part switch (Brief, Script, Storyboard); brief.md is the file of record for the Brief page.
 
 const BRIEF = `# Brief: Lumen launch film
 
@@ -18,40 +18,41 @@ Calm and dry.
 const SCRIPT = { sections: [{ start: 0, end: 13, current: "Your work lives on one laptop." }] };
 const read = (root: string) => readFile(join(root, "brief.md"), "utf8");
 
-test("Planning is one tab with a menu holding Brief and Script", async ({ page, rushes }) => {
+test("Plan is one workspace with a switch holding Brief, Script and Storyboard", async ({ page, rushes }) => {
   await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
   await rushes.api("PUT", "/api/script", SCRIPT);
   await page.goto(rushes.url);
-  const planning = workspaceTab(page, "Plan");
-  await expect(planning).toHaveAttribute("aria-selected", "true");
+  const plan = workspaceTab(page, "Plan");
+  await expect(plan).toHaveAttribute("aria-selected", "true");
   await expect(page.getByRole("heading", { name: "Brief" })).toBeVisible();
-  await expect(page.getByRole("tab", { name: /Script/ })).toHaveCount(0);
-  await planning.click();
-  const menu = page.getByRole("menu", { name: "Planning" });
-  await expect(menu.getByRole("menuitem")).toHaveText([/Brief/, /Script/, /Storyboard/]);
-  await menu.getByRole("menuitem", { name: /Script/ }).click();
+  // The pages are on the switch in the work area, not in the top bar, and there is no menu of them any more.
+  await expect(page.getByRole("tablist", { name: "Workspaces" }).getByRole("tab", { name: /Script/ })).toHaveCount(0);
+  await expect(planSwitch(page).getByRole("tab")).toHaveText([/Brief/, /Script/, /Storyboard/]);
+  await expect(planTab(page, "Brief")).toHaveAttribute("aria-selected", "true");
+  await planTab(page, "Script").click();
   await expect(page.getByRole("heading", { name: "Script" })).toBeVisible();
-  await expect(menu).toHaveCount(0);
-  await expect(planning).toHaveAttribute("aria-selected", "true");
+  await expect(planTab(page, "Script")).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("menu", { name: "Planning" })).toHaveCount(0);
+  await expect(plan).toHaveAttribute("aria-selected", "true");
 });
 
-test("the menu is keyboard-driven: ArrowDown opens it, arrows move, Enter picks, Escape closes", async ({ page, rushes }) => {
+test("the switch is keyboard-driven: arrows move between its pages, Enter opens one", async ({ page, rushes }) => {
   await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
   await rushes.api("PUT", "/api/script", SCRIPT);
   await page.goto(rushes.url);
-  const planning = workspaceTab(page, "Plan");
-  await planning.focus();
-  await page.keyboard.press("ArrowDown");
-  await expect(page.getByRole("menuitem", { name: /Brief/ })).toBeFocused();
-  await page.keyboard.press("ArrowDown");
-  await expect(page.getByRole("menuitem", { name: /Script/ })).toBeFocused();
+  await planTab(page, "Brief").focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(planTab(page, "Script")).toBeFocused();
+  await page.keyboard.press("ArrowRight");
+  await expect(planTab(page, "Storyboard")).toBeFocused();
+  await page.keyboard.press("ArrowLeft");
+  await expect(planTab(page, "Script")).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(page.getByRole("heading", { name: "Script" })).toBeVisible();
-  await planning.focus();
-  await page.keyboard.press("ArrowDown");
-  await page.keyboard.press("Escape");
-  await expect(page.getByRole("menu")).toHaveCount(0);
-  await expect(planning).toBeFocused();
+  await page.keyboard.press("Home");
+  await expect(planTab(page, "Brief")).toBeFocused();
+  await page.keyboard.press("End");
+  await expect(planTab(page, "Storyboard")).toBeFocused();
 });
 
 test("Brief edits are saved to brief.md, marked as changed, and can be reverted", async ({ page, rushes }) => {
@@ -59,11 +60,14 @@ test("Brief edits are saved to brief.md, marked as changed, and can be reverted"
   await page.goto(rushes.url);
   const box = page.getByLabel("Your version of Purpose");
   await box.fill("Show how fast Lumen is.");
-  await expect(page.locator('.srow[data-section="Purpose"]')).toHaveClass(/changed/);
+  const row = page.locator('.srow[data-section="Purpose"]');
+  await expect(row).toHaveClass(/changed/);
   await expect.poll(() => read(rushes.root)).toContain("## Purpose\nShow how fast Lumen is.\n");
-  await expect(page.locator('.srow[data-section="Purpose"] .cur')).toHaveText("Show that Lumen finds the best takes.");
+  await expect(editedMark(row)).toContainText("Edited by you");
+  await expect(baselineText(row)).toHaveText("Show that Lumen finds the best takes.");
   await page.getByRole("button", { name: "Revert Purpose" }).click();
   await expect(box).toHaveValue("Show that Lumen finds the best takes.");
+  await expect(editedMark(row)).toHaveCount(0);
   await expect.poll(() => read(rushes.root)).toBe(BRIEF);
 });
 
@@ -87,21 +91,22 @@ test("approving sets the status line, and editing an approved brief reopens it",
   await expect(page.getByRole("button", { name: "Approve brief" })).toBeVisible();
 });
 
-test("a change the agent makes to brief.md shows up without a reload, and becomes Current", async ({ page, rushes }) => {
+test("a change the agent makes to brief.md shows up without a reload, and becomes the baseline", async ({ page, rushes }) => {
   await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
   await page.goto(rushes.url);
-  await expect(page.locator('.srow[data-section="Tone"] .cur')).toHaveText("Calm and dry.");
+  const tone = page.locator('.srow[data-section="Tone"]');
+  await expect(page.getByLabel("Your version of Tone")).toHaveValue("Calm and dry.");
   await rushes.writeFiles([{ path: "brief.md", text: BRIEF.replace("Calm and dry.", "Warm and quick.") }]);
-  await expect(page.locator('.srow[data-section="Tone"] .cur')).toHaveText("Warm and quick.", { timeout: 8000 });
-  await expect(page.getByLabel("Your version of Tone")).toHaveValue("Warm and quick.");
-  await expect(page.locator('.srow[data-section="Tone"]')).not.toHaveClass(/changed/);
+  await expect(page.getByLabel("Your version of Tone")).toHaveValue("Warm and quick.", { timeout: 8000 });
+  await expect(editedMark(tone)).toHaveCount(0);
+  await expect(tone).not.toHaveClass(/changed/);
 });
 
 test("with no brief.md, Brief is a locked page that says what to ask the agent", async ({ page, rushes }) => {
   await rushes.api("PUT", "/api/script", SCRIPT);
   await page.goto(rushes.url);
   await openWorkspace(page, "Plan");
-  const brief = page.getByRole("menuitem", { name: /Brief/ });
+  const brief = planTab(page, "Brief");
   await expect(brief).toHaveAttribute("data-locked", "true");
   await brief.click();
   await expect(page.getByRole("heading", { name: "Brief" })).toBeVisible();
@@ -109,7 +114,7 @@ test("with no brief.md, Brief is a locked page that says what to ask the agent",
   await expect(page.getByRole("button", { name: "Copy prompt for your agent" })).toBeVisible();
 });
 
-test("key 1 opens Planning on the page last used, and 2 to 8 stay where they were", async ({ page, rushes }) => {
+test("key 1 opens Plan on the page last used, and 2 to 8 stay where they were", async ({ page, rushes }) => {
   await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
   await rushes.api("PUT", "/api/script", SCRIPT);
   await rushes.addCut();
@@ -117,8 +122,8 @@ test("key 1 opens Planning on the page last used, and 2 to 8 stay where they wer
   await expect(reviewTab(page, "Timeline")).toHaveAttribute("aria-selected", "true");
   await page.keyboard.press("1");
   await expect(page.getByRole("heading", { name: "Script" })).toBeVisible();
-  await openWorkspace(page, "Plan");
-  await page.getByRole("menuitem", { name: /Brief/ }).click();
+  await expect(planTab(page, "Script")).toHaveAttribute("aria-selected", "true");
+  await openPlanPage(page, "Brief");
   await page.keyboard.press("2");
   await expect(reviewTab(page, "Timeline")).toHaveAttribute("aria-selected", "true");
   await page.keyboard.press("1");
@@ -139,14 +144,80 @@ test("Send on Brief gives a message that names what changed, and records nothing
   expect((await rushes.api("GET", "/api/state")).batches.batches).toHaveLength(0);
 });
 
-test("while a plan is in progress the Planning tab carries a mark for the brief and one for the script", async ({ page, rushes }) => {
+test("the switch carries a tick on the approved brief and none on the script still to approve, and keeps it once a cut exists", async ({ page, rushes }) => {
   await rushes.writeFiles([{ path: "brief.md", text: BRIEF.replace("Status: draft", "Status: approved") }]);
   await rushes.api("PUT", "/api/script", SCRIPT);
   await page.goto(rushes.url);
-  await expect(page.locator(".pmarks .pm.ok")).toHaveCount(1);
-  await expect(page.locator(".pmarks .pm.none")).toHaveCount(2);
+  await expect(planTab(page, "Brief")).toHaveAccessibleName(/Approved/);
+  await expect(planTab(page, "Script")).not.toHaveAccessibleName(/Approved/);
+  await expect(planTab(page, "Storyboard")).not.toHaveAccessibleName(/Approved/);
+  // Not all three are approved, so the top bar's Plan tab has no tick of its own.
+  await expect(workspaceTab(page, "Plan").locator(".pready")).toHaveCount(0);
   await rushes.addCut();
-  await expect(page.locator(".pmarks")).toHaveCount(0);
+  await openWorkspace(page, "Review");
+  await expect(reviewTab(page, "Timeline")).toBeVisible();
+  await openWorkspace(page, "Plan");
+  await expect(planTab(page, "Brief")).toHaveAccessibleName(/Approved/);
+});
+
+test("the switch shows a tick on an approved page, and a dot on a page with edits not sent yet", async ({ page, rushes }) => {
+  await rushes.writeFiles([{ path: "brief.md", text: BRIEF.replace("Status: draft", "Status: approved") }]);
+  await rushes.api("PUT", "/api/script", SCRIPT);
+  await page.goto(rushes.url);
+  await expect(planTab(page, "Brief").locator(".pready")).toBeVisible();
+  await expect(planTab(page, "Brief").locator(".dot")).toHaveCount(0);
+  // Editing the approved brief reopens it: the tick goes and the dot says there is an edit to send.
+  await page.getByLabel("Your version of Tone").fill("Warm.");
+  await expect(planTab(page, "Brief").locator(".dot")).toBeVisible();
+  await expect(planTab(page, "Brief")).not.toHaveAccessibleName(/Approved/);
+  await expect(planTab(page, "Brief").locator(".pready")).toHaveCount(0);
+});
+
+test("editing a script line marks it Edited by you, with the current wording struck through beneath, and Send counts it", async ({ page, rushes }) => {
+  await rushes.api("PUT", "/api/script", SCRIPT);
+  await page.goto(rushes.url);
+  await openPlanPage(page, "Script");
+  const row = page.locator(".srow").first();
+  await expect(editedMark(row)).toHaveCount(0);
+  await expect(planStatus(page)).toHaveText("0 of 1 line approved · 0 edited");
+  await expect(sendButton(page)).toHaveCount(0);
+  await row.getByRole("textbox", { name: /^Your version of/ }).fill("Your work lives everywhere.");
+  await expect(editedMark(row)).toContainText("Edited by you");
+  await expect(baselineText(row)).toHaveText("Your work lives on one laptop.");
+  await expect(sendButton(page)).toHaveAccessibleName("Send 1");
+  await expect(planStatus(page)).toHaveText("0 of 1 line approved · 1 edited");
+  await expect(planTab(page, "Script").locator(".dot")).toBeVisible();
+  // Revert goes back to the current wording, and the mark goes with it.
+  await row.getByRole("button", { name: "Revert" }).click();
+  await expect(editedMark(row)).toHaveCount(0);
+  await expect(sendButton(page)).toHaveCount(0);
+});
+
+test("the top bar's Plan tab opens the Plan page last used", async ({ page, rushes }) => {
+  await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
+  await rushes.api("PUT", "/api/script", SCRIPT);
+  await rushes.addCut();
+  await page.goto(rushes.url);
+  await openPlanPage(page, "Script");
+  await openWorkspace(page, "Review");
+  await expect(reviewTab(page, "Timeline")).toHaveAttribute("aria-selected", "true");
+  await workspaceTab(page, "Plan").click();
+  await expect(page.getByRole("heading", { name: "Script" })).toBeVisible();
+  await expect(planTab(page, "Script")).toHaveAttribute("aria-selected", "true");
+});
+
+test("every editable text on a Plan page sits in a field with a visible edge, at rest", async ({ page, rushes }) => {
+  await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
+  await page.goto(rushes.url);
+  const box = page.getByLabel("Your version of Tone");
+  await expect(box).toBeVisible();
+  const edge = await box.evaluate((el) => {
+    const s = getComputedStyle(el);
+    return { width: parseFloat(s.borderTopWidth), colour: s.borderTopColor, bg: getComputedStyle(el.closest(".srow")!).backgroundColor };
+  });
+  expect(edge.width).toBeGreaterThan(0);
+  expect(edge.colour).not.toBe("rgba(0, 0, 0, 0)");
+  expect(edge.colour).not.toBe(edge.bg);
 });
 
 test("a save refused because the agent rewrote the file is tried again against the file's new hash", async ({ page, rushes }) => {
@@ -174,17 +245,19 @@ test("a save refused twice says so and leaves the file alone", async ({ page, ru
   expect(await read(rushes.root)).toBe(BRIEF);
 });
 
-test("with the Planning menu open, a digit stays in the menu instead of switching tabs", async ({ page, rushes }) => {
+test("a digit typed in a Plan page's field stays in the field instead of switching workspace", async ({ page, rushes }) => {
   await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
   await rushes.addCut();
   await page.goto(rushes.url);
-  await openWorkspace(page, "Plan");
-  await expect(page.getByRole("menu", { name: "Planning" })).toBeVisible();
-  // Outside the menu, 3 is Voiceover. Inside it, the key stays put.
+  await openPlanPage(page, "Brief");
+  const tone = page.getByLabel("Your version of Tone");
+  await tone.click();
+  await tone.press("End");
+  // Outside a field, 3 is Voice. Inside one, the key is text.
   await page.keyboard.press("3");
-  await expect(reviewTab(page, "Timeline")).toHaveAttribute("aria-selected", "true");
-  await expect(reviewTab(page, "Voice")).toHaveAttribute("aria-selected", "false");
-  await expect(page.getByRole("menu", { name: "Planning" })).toBeVisible();
+  await expect(tone).toHaveValue("Calm and dry.3");
+  await expect(workspaceTab(page, "Plan")).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("heading", { name: "Brief" })).toBeVisible();
 });
 
 // Final review: the first two lost the person's work, and the 409 tests above fake the server's answer.
@@ -239,8 +312,7 @@ test("an unchanged brief's page still offers Send, and its message carries the b
 test("the locked Brief page offers its own prompt, and no Send, since there is no brief to send", async ({ page, rushes }) => {
   await rushes.api("PUT", "/api/script", SCRIPT);
   await page.goto(rushes.url);
-  await openWorkspace(page, "Plan");
-  await page.getByRole("menuitem", { name: /Brief/ }).click();
+  await openPlanPage(page, "Brief");
   await expect(page.getByLabel("Prompt for your agent")).toHaveValue(/brief\.md/);
   await expect(notesPanel(page)).toBeVisible();
   await expect(sendButton(page)).toHaveCount(0);
@@ -248,37 +320,31 @@ test("the locked Brief page offers its own prompt, and no Send, since there is n
 });
 
 // Deferred minors from the step 2 review.
-test("with the Planning menu open over Picture, left and right do not step the frame", async ({ page, rushes }) => {
+test("left and right on the Plan switch move between its pages and reach nothing behind it", async ({ page, rushes }) => {
   await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
+  await rushes.api("PUT", "/api/script", SCRIPT);
   await rushes.addCut();
   await page.goto(rushes.url);
-  await openReviewTab(page, "Timeline");
-  const tc = page.getByLabel("Timecode");
-  await expect(tc).toBeVisible();
-  // Outside the menu, the arrow steps a frame (this is what the menu must not let through).
-  const before = await tc.textContent();
-  await page.getByRole("button", { name: "Forward one frame" }).focus();
-  await page.keyboard.press("ArrowRight");
-  await expect(tc).not.toHaveText(before!);
-  const stepped = await tc.textContent();
-  await openWorkspace(page, "Plan");
-  await expect(page.getByRole("menu", { name: "Planning" })).toBeVisible();
+  await openPlanPage(page, "Brief");
+  await planTab(page, "Brief").focus();
   await page.keyboard.press("ArrowRight");
   await page.keyboard.press("ArrowRight");
-  await expect(tc).toHaveText(stepped!);
+  await expect(planTab(page, "Storyboard")).toBeFocused();
+  // Moving along the switch opens nothing: the page and the workspace stay where they were until a page is picked.
+  await expect(page.getByRole("heading", { name: "Brief" })).toBeVisible();
+  await expect(workspaceTab(page, "Plan")).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByLabel("Timecode")).toHaveCount(0);
 });
 
-test("picking a Planning menu item with the keyboard leaves focus on the Planning tab, not nowhere", async ({ page, rushes }) => {
+test("picking a page on the Plan switch with the keyboard leaves focus on its tab, not nowhere", async ({ page, rushes }) => {
   await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
   await rushes.api("PUT", "/api/script", SCRIPT);
   await page.goto(rushes.url);
-  const planning = workspaceTab(page, "Plan");
-  await planning.focus();
-  await page.keyboard.press("ArrowDown");
-  await page.keyboard.press("ArrowDown");
+  await planTab(page, "Brief").focus();
+  await page.keyboard.press("ArrowRight");
   await page.keyboard.press("Enter");
   await expect(page.getByRole("heading", { name: "Script" })).toBeVisible();
-  await expect(planning).toBeFocused();
+  await expect(planTab(page, "Script")).toBeFocused();
 });
 
 test("text refused twice is tried again when the file next changes, not left until the next edit", async ({ page, rushes }) => {

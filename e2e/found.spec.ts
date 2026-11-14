@@ -1,5 +1,5 @@
 import type { Locator, Page } from "@playwright/test";
-import { expect, hasFfmpeg, test, type Rushes, openReviewTab, reviewTab, openWorkspace, workspaceTab, foundBadge, openMore } from "./fixture.js";
+import { expect, hasFfmpeg, test, type Rushes, openReviewTab, reviewTab, openWorkspace, workspaceTab, foundBadge, openMore, openPlanPage } from "./fixture.js";
 
 declare global {
   interface Window {
@@ -807,9 +807,8 @@ test("a locked tab says how many files of its kind were found, with a Review but
   await reviewTab(page, "Timeline").click();
   await expect(page.locator(".locked")).toHaveCount(0);
   await expect(foundLine(page)).toHaveCount(0);
-  // Script lives in the Planning menu now.
-  await workspaceTab(page, "Plan").click();
-  await page.getByRole("menuitem", { name: /^Script/ }).click();
+  // Script lives on the Plan workspace's switch now.
+  await openPlanPage(page, "Script");
   await expect(foundLine(page)).toHaveCount(0);
 
   // Review opens Assets > Found, filtered to the kind the tab is for.

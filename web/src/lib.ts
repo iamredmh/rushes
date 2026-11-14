@@ -177,12 +177,12 @@ export function agentPrompt(stage: Stage | "assets", projectName: string, filmNa
   return PROMPT_TEMPLATE[stage](projectName, filmName);
 }
 
-/** §24: Brief, Script and Storyboard share one Planning tab. Brief and Storyboard are dashboard pages over files, not review stages. */
+/** §24: Brief, Script and Storyboard share the Plan workspace. Brief and Storyboard are dashboard pages over files, not review stages. */
 export type PlanPage = "brief" | "script" | "storyboard";
 export const PLAN_PAGES: readonly PlanPage[] = ["brief", "script", "storyboard"];
 export const isPlanPage = (view: string | null): view is PlanPage => view === "brief" || view === "script" || view === "storyboard";
 
-/** How far one planning step has got, for the marks on the Planning tab. */
+/** How far one planning step has got, for the ticks on the Plan switch. */
 export type Progress = "none" | "part" | "ok";
 
 /** The brief is `ok` once approved; the script and the storyboard are `ok` when every part is, `part` when some are. */
@@ -223,12 +223,12 @@ export function storyboardPrompt(projectName: string, filmName: string | null): 
   return `In Rushes project "${projectName}", sketch the shots${filmClause("for", filmName)} from the approved script: write storyboard.md with one "## Shot 01 · Name" section per shot (Tag, Length, Still and Status: draft lines, then what happens), make a still for each, and save them under storyboard/ (see "Starting a film" in AGENTS.md).`;
 }
 
-/** What the Planning menu's "Ready to build" copies once the plan is approved. */
+/** What the Plan workspace's "Ready to build" copies once the plan is approved. */
 export function readyPrompt(projectName: string, filmName: string | null): string {
   return `The plan is approved in Rushes project "${projectName}"${filmClause("for", filmName)}. Build the film from brief.md and storyboard.md, name each scene after its planned shot, and register the cut with rushes_add_version.`;
 }
 
-/** What Send to agent says from the Brief page. Nothing is recorded: the file itself is the record. */
+/** What Send says from the Brief page. Nothing is recorded: the file itself is the record. */
 export function briefSendPrompt(projectName: string, filmName: string | null, brief: { status: BriefView["status"]; sections: Pick<BriefSectionView, "heading" | "changed">[] }): string {
   const approved = brief.status === "approved";
   const edited = brief.sections.filter((s) => s.changed).map((s) => s.heading);
@@ -238,13 +238,13 @@ export function briefSendPrompt(projectName: string, filmName: string | null, br
   return parts.join(" ");
 }
 
-/** How many items Send to agent sends, from any tab: every tab's open notes on films in play and
+/** How many items Send sends, from any tab: every tab's open notes on films in play and
  *  changed script lines (each tab's `todo`), plus the brief's and the storyboard's changed rows. */
 export function openToSend(tabs: Pick<TabState, "todo">[], brief: Pick<BriefView, "changed">, board: Pick<StoryboardView, "changed">): number {
   return tabs.reduce((n, t) => n + t.todo, 0) + brief.changed + board.changed;
 }
 
-/** What Send to agent says from the Storyboard page: how many shots are approved, and which ones I changed. */
+/** What Send says from the Storyboard page: how many shots are approved, and which ones I changed. */
 export function storySendPrompt(projectName: string, filmName: string | null, board: Pick<StoryboardView, "approved" | "total"> & { shots: { n: number; name: string; changed: boolean }[] }): string {
   const edited = board.shots.filter((s) => s.changed).map((s) => `Shot ${String(s.n).padStart(2, "0")} · ${s.name}`);
   const parts = [`In Rushes project "${projectName}"${filmClause("for", filmName)}, ${board.approved} of ${board.total} shots in storyboard.md are approved.`];

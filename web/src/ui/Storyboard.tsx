@@ -1,43 +1,15 @@
-// §24.12: the Storyboard page. storyboard.md is the file of record: one row per shot, the agent's description beside
-// yours, a direction, and a tick to approve. It works like Script, with no notes. Changing an approved shot reopens it.
+// §24.12, §27: the Storyboard page. storyboard.md is the file of record: one row per shot, its still, your description in
+// a field (marked "Edited by you" over the agent's when they differ), a direction, and a tick to approve. It works like
+// Script. Changing an approved shot reopens it.
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { mediaUrl } from "../api.js";
 import { briefTargetSeconds } from "../lib.js";
 import type { BriefView, StoryboardShotView, StoryboardView } from "../types.js";
 import { Icon } from "./Icon.js";
+import { approvedOf, EditedMark, PlanField, PlanStatus, useDebounced, type Baseline } from "./Planning.js";
 import { useRecordSaves } from "./useRecordSaves.js";
 
 const SAVE_AFTER_MS = 500;
-
-/** Run `fn` once input has paused for `ms`; flush() runs it now. A pending run is flushed, not dropped, on unmount. */
-function useDebounced(fn: () => void, ms: number) {
-  const timer = useRef<number | undefined>(undefined);
-  const latest = useRef(fn);
-  latest.current = fn;
-  useEffect(
-    () => () => {
-      if (timer.current === undefined) return;
-      clearTimeout(timer.current);
-      latest.current();
-    },
-    [],
-  );
-  return {
-    schedule() {
-      clearTimeout(timer.current);
-      timer.current = window.setTimeout(() => {
-        timer.current = undefined;
-        latest.current();
-      }, ms);
-    },
-    flush() {
-      if (timer.current === undefined) return;
-      clearTimeout(timer.current);
-      timer.current = undefined;
-      latest.current();
-    },
-  };
-}
 
 /** A shot is found again by its heading and which of that heading it is, not by its position: the agent may add one above it. */
 const occurrenceOf = (shots: StoryboardShotView[], at: number): number => shots.slice(0, at).filter((x) => x.heading === shots[at].heading).length;
@@ -65,7 +37,6 @@ function Row({ shot, save, onZoom }: { shot: StoryboardShotView; save: Saver; on
   const [text, setText] = useState(shot.description);
   const [direction, setDirection] = useState(shot.direction);
   const editing = useRef(false);
-  const area = useRef<HTMLTextAreaElement>(null);
 
   // The agent changed the shot, or another window did: follow it unless you're mid-edit.
   useEffect(() => {
@@ -74,13 +45,6 @@ function Row({ shot, save, onZoom }: { shot: StoryboardShotView; save: Saver; on
   useEffect(() => {
     if (!editing.current) setDirection(shot.direction);
   }, [shot.direction]);
-  useLayoutEffect(() => {
-    const el = area.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${el.scrollHeight + 2}px`;
-  }, [text]);
-
   const saveAll = () => {
     const edit: { description?: string; direction?: string } = {};
     if (text.trim() !== shot.description.trim()) edit.description = text;
@@ -97,7 +61,11 @@ function Row({ shot, save, onZoom }: { shot: StoryboardShotView; save: Saver; on
     saveAll();
   }, SAVE_AFTER_MS);
 
-  const changed = text.trim() !== shot.current.trim() || direction.trim() !== shot.directionCurrent.trim();
+  // What your edits replaced, struck through under the field: the description, then the direction, whichever differ.
+  const baseline: Baseline[] = [];
+  if (text.trim() !== shot.current.trim()) baseline.push({ text: shot.current });
+  if (direction.trim() !== shot.directionCurrent.trim()) baseline.push({ label: "Direction", text: shot.directionCurrent });
+  const changed = baseline.length > 0;
   const approved = shot.status === "approved";
   return (
     <div class={`sbrow${changed ? " changed" : ""}`} data-shot={shot.heading}>
@@ -111,25 +79,34 @@ function Row({ shot, save, onZoom }: { shot: StoryboardShotView; save: Saver; on
           {shot.tag && <span class="sbtag">{shot.tag}</span>}
         </div>
       </div>
-      <div class="cur">
+      <div class="pbody">
         <b class="sbname">{shot.name}</b>
-        {shot.current}
+        <PlanField
+          label={`Your version of shot ${shot.n}`}
+          value={text}
+          onInput={(t) => {
+            editing.current = true;
+            setText(t);
+            saveText.schedule();
+          }}
+          onBlur={() => saveText.flush()}
+        />
+        {changed && (
+          <EditedMark
+            baseline={baseline}
+            revertLabel={`Revert shot ${shot.n}`}
+            onRevert={() => {
+              editing.current = false;
+              setText(shot.current);
+              setDirection(shot.directionCurrent);
+              save.shot(shot, { description: shot.current, direction: shot.directionCurrent });
+            }}
+          />
+        )}
       </div>
-      <textarea
-        ref={area}
-        class="input"
-        aria-label={`Your version of shot ${shot.n}`}
-        value={text}
-        onInput={(e) => {
-          editing.current = true;
-          setText((e.target as HTMLTextAreaElement).value);
-          saveText.schedule();
-        }}
-        onBlur={() => saveText.flush()}
-      />
       <div class="sblow">
         <input
-          class="sbdir"
+          class="dirin sbdir"
           placeholder="Direction"
           aria-label={`Direction for shot ${shot.n}`}
           value={direction}
@@ -140,21 +117,6 @@ function Row({ shot, save, onZoom }: { shot: StoryboardShotView; save: Saver; on
           }}
           onBlur={() => saveDirection.flush()}
         />
-        {changed && (
-          <button
-            class="btn ghost ib"
-            data-tip="Revert to current"
-            aria-label={`Revert shot ${shot.n}`}
-            onClick={() => {
-              editing.current = false;
-              setText(shot.current);
-              setDirection(shot.directionCurrent);
-              save.shot(shot, { description: shot.current, direction: shot.directionCurrent });
-            }}
-          >
-            <Icon name="undo" />
-          </button>
-        )}
         <button
           class={`btn ib okd${approved ? " on" : ""}`}
           data-tip={approved ? "Unapprove" : "Approve"}
@@ -254,12 +216,9 @@ export function Storyboard({
   const target = briefTargetSeconds(brief);
   const zoomed = board.shots.find((s) => s.heading === zoom);
   return (
-    <div class="col">
+    <div class="col ppage">
       <div class="shead">
         <h2>Storyboard</h2>
-        <span class="meta">
-          {board.total > 0 && `${board.total} shot${board.total === 1 ? "" : "s"} · ${board.changed} changed`}
-        </span>
       </div>
       <div class="sbtotal mono" aria-label="Planned length">
         <span>{target ? `${board.plannedLength.toFixed(1)} / ${target} s planned` : `${board.plannedLength.toFixed(1)} s planned`}</span>
@@ -270,8 +229,7 @@ export function Storyboard({
         )}
       </div>
       {board.total === 0 && <p class="sbnone">storyboard.md has no shots yet. Your agent adds them as `## Shot 01 · Name` sections.</p>}
-      <div class="sbhead"><span /><span>Current</span><span>Yours</span></div>
-      <div style={{ display: "grid", gap: "12px" }}>
+      <div class="prows">
         {board.shots.map((s, i) => (
           <Row key={`${s.heading}#${occurrenceOf(board.shots, i)}`} shot={s} save={save} onZoom={() => {
               opener.current = document.activeElement as HTMLElement | null;
@@ -279,6 +237,7 @@ export function Storyboard({
             }} />
         ))}
       </div>
+      <PlanStatus counts={board.total > 0 ? { approved: approvedOf(board.approved, board.total, "shot"), edited: board.changed } : null} />
       {zoomed && (
         <Lightbox
           shot={zoomed}

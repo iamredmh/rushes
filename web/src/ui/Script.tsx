@@ -1,9 +1,12 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+// §27: the Script page. One row per line: your version in a field, marked "Edited by you" over the current wording when
+// they differ (a changed line goes with Send), with its fit, its direction, a flag and a tick.
+import { useEffect, useRef, useState } from "preact/hooks";
 import { api } from "../api.js";
 import { fit, fmt, isChanged } from "../lib.js";
 import type { Script as ScriptData, Section } from "../types.js";
 import { sectionLineLabel } from "../../../src/core/notes.js";
 import { Icon } from "./Icon.js";
+import { approvedOf, EditedMark, PlanField, PlanStatus, useDebounced } from "./Planning.js";
 
 const STATUS = {
   approved: { color: "var(--done)", label: "Approved" },
@@ -13,33 +16,6 @@ const STATUS = {
 
 const SAVE_AFTER_MS = 500;
 
-/** Run `fn` once input has paused for `ms`; flush() runs it now. A pending run is flushed, not dropped, on unmount. */
-function useDebounced(fn: () => void, ms: number) {
-  const timer = useRef<number | undefined>(undefined);
-  const latest = useRef(fn);
-  latest.current = fn;
-  useEffect(
-    () => () => {
-      if (timer.current === undefined) return;
-      clearTimeout(timer.current);
-      latest.current();
-    },
-    [],
-  );
-  return {
-    schedule() {
-      clearTimeout(timer.current);
-      timer.current = window.setTimeout(() => latest.current(), ms);
-    },
-    flush() {
-      if (timer.current === undefined) return;
-      clearTimeout(timer.current);
-      timer.current = undefined;
-      latest.current();
-    },
-  };
-}
-
 /** §27, 5.8: a script line as the notes panel names it: "S2 · The scan finds it" (the same words export and the CLI use). */
 const lineLabel = sectionLineLabel;
 
@@ -47,7 +23,6 @@ function Row({ section, wps, toast, onChanged, onPick }: { section: Section; wps
   const [text, setText] = useState(section.proposed ?? section.current);
   const [direction, setDirection] = useState(section.direction);
   const editing = useRef(false);
-  const area = useRef<HTMLTextAreaElement>(null);
 
   // The agent changed the line, or another window did: follow it unless you're mid-edit.
   useEffect(() => {
@@ -56,14 +31,6 @@ function Row({ section, wps, toast, onChanged, onPick }: { section: Section; wps
   useEffect(() => {
     if (!editing.current) setDirection(section.direction);
   }, [section.direction]);
-
-  // Grow the box to fit its text.
-  useLayoutEffect(() => {
-    const el = area.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${el.scrollHeight + 2}px`;
-  }, [text]);
 
   const patch = async (body: Record<string, unknown>) => {
     try {
@@ -96,19 +63,29 @@ function Row({ section, wps, toast, onChanged, onPick }: { section: Section; wps
           <span>{fmt(section.start).replace(/\.\d+$/, "")}–{fmt(section.end).replace(/\.\d+$/, "")}</span>
           <span class="stat" aria-label={status.label} data-tip={status.label} title={status.label}><i style={{ background: status.color }} /></span>
         </div>
-        <div class="cur">{section.current}</div>
-        <textarea
-          ref={area}
-          class="input"
-          aria-label={`Your version of ${section.id}`}
-          value={text}
-          onInput={(e) => {
-            editing.current = true;
-            setText((e.target as HTMLTextAreaElement).value);
-            saveText.schedule();
-          }}
-          onBlur={() => saveText.flush()}
-        />
+        <div class="pbody">
+          <PlanField
+            label={`Your version of ${section.id}`}
+            value={text}
+            onInput={(t) => {
+              editing.current = true;
+              setText(t);
+              saveText.schedule();
+            }}
+            onBlur={() => saveText.flush()}
+          />
+          {changed && (
+            <EditedMark
+              baseline={[{ text: section.current }]}
+              revertLabel="Revert"
+              onRevert={() => {
+                editing.current = false;
+                setText(section.current);
+                void patch({ proposed: null });
+              }}
+            />
+          )}
+        </div>
       </div>
       <div class="sfoot">
         <div class={`fit${f.state === "ok" ? "" : ` ${f.state}`}`} title={`${f.words} words · ${f.seconds.toFixed(1)} s of ${slot.toFixed(1)} s`}>
@@ -127,19 +104,6 @@ function Row({ section, wps, toast, onChanged, onPick }: { section: Section; wps
           onBlur={() => saveDirection.flush()}
         />
         <div class="sact">
-          {changed && (
-            <button
-              class="btn ghost ib"
-              data-tip="Revert to current"
-              aria-label="Revert"
-              onClick={() => {
-                setText(section.current);
-                void patch({ proposed: null });
-              }}
-            >
-              <Icon name="undo" />
-            </button>
-          )}
           <button
             class={`btn ib flagd${section.status === "flagged" ? "" : " ghost"}`}
             data-tip={section.status === "flagged" ? "Unflag" : "Flag"}
@@ -164,21 +128,19 @@ function Row({ section, wps, toast, onChanged, onPick }: { section: Section; wps
   );
 }
 
-/** The VO script: the agent's current line beside your version, one row per section. */
+/** The VO script: one row per line, your version over the current wording when you've changed it, and the count at the foot. */
 export function Script({ script, toast, onChanged, onPickLine }: { script: ScriptData; toast(message: string): void; onChanged(): void; onPickLine?(line: { id: string; label: string }): void }) {
   const changed = script.sections.filter(isChanged).length;
+  const approved = script.sections.filter((s) => s.status === "approved").length;
   return (
-    <div class="col">
+    <div class="col ppage">
       <div class="shead">
         <h2>Script</h2>
-        <span class="meta">
-          {script.sections.length} section{script.sections.length === 1 ? "" : "s"} · {changed} changed
-        </span>
       </div>
-      <div class="sgrid scols"><span /><span>Current</span><span>Yours</span></div>
-      <div style={{ display: "grid", gap: "12px" }}>
+      <div class="prows">
         {script.sections.map((s) => <Row key={s.id} section={s} wps={script.wordsPerSecond} toast={toast} onChanged={onChanged} onPick={onPickLine} />)}
       </div>
+      <PlanStatus counts={script.sections.length > 0 ? { approved: approvedOf(approved, script.sections.length, "line"), edited: changed } : null} />
     </div>
   );
 }

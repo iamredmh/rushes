@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { test, expect, reviewTab, openWorkspace, notesPanel, sendButton, sentDialog } from "./fixture.js";
+import { test, expect, reviewTab, openWorkspace, notesPanel, sendButton, sentDialog, workspaceTab, planSwitch, planTab, openPlanPage, editedMark, baselineText, planStatus } from "./fixture.js";
 
 // §24.12: the Storyboard page over storyboard.md, and the plan's gate.
 
@@ -38,16 +38,14 @@ async function withBoard(rushes: { root: string; writeFiles(f: { path: string; t
 }
 
 async function openStoryboard(page: import("@playwright/test").Page) {
-  await openWorkspace(page, "Plan");
-  await page.getByRole("menuitem", { name: /Storyboard/ }).click();
-  await expect(page.getByRole("heading", { name: "Storyboard" })).toBeVisible();
+  await openPlanPage(page, "Storyboard");
 }
 
 test("with no storyboard.md, Storyboard is a locked page that says what to ask the agent", async ({ page, rushes }) => {
   await rushes.api("PUT", "/api/script", SCRIPT);
   await page.goto(rushes.url);
   await openWorkspace(page, "Plan");
-  const item = page.getByRole("menuitem", { name: /Storyboard/ });
+  const item = planTab(page, "Storyboard");
   await expect(item).toHaveAttribute("data-locked", "true");
   await item.click();
   await expect(page.getByRole("heading", { name: "Storyboard" })).toBeVisible();
@@ -66,7 +64,10 @@ test("shows a row per shot with its still, and an empty frame for a still that i
   await expect(img).toBeVisible();
   expect(await img.evaluate((i: HTMLImageElement) => i.naturalWidth)).toBeGreaterThan(0);
   await expect(row(page, "Shot 02 · Drop a folder")).toContainText("No still");
-  await expect(row(page, "Shot 01 · Cold open").locator(".cur")).toContainText("The headline sits on a pale card.");
+  await expect(row(page, "Shot 01 · Cold open")).toContainText("Cold open");
+  await expect(page.getByLabel("Your version of shot 1")).toHaveValue("The headline sits on a pale card.");
+  await expect(editedMark(row(page, "Shot 01 · Cold open"))).toHaveCount(0);
+  await expect(planStatus(page)).toHaveText("0 of 2 shots approved · 0 edited");
 });
 
 test("planned length is shown against the brief's target", async ({ page, rushes }) => {
@@ -86,9 +87,12 @@ test("edits to a shot's words and direction are saved into storyboard.md, marked
   await page.getByLabel("Direction for shot 1").fill("Slower.");
   await expect(r).toHaveClass(/changed/);
   await expect.poll(() => read(rushes.root)).toContain("Direction: Slower.\n\nA pale card, then the title.\n");
-  await expect(r.locator(".cur")).toContainText("The headline sits on a pale card.");
+  await expect(editedMark(r)).toContainText("Edited by you");
+  await expect(baselineText(r).first()).toHaveText("The headline sits on a pale card.");
+  await expect(planStatus(page)).toHaveText("0 of 2 shots approved · 1 edited");
   await page.getByRole("button", { name: "Revert shot 1" }).click();
   await expect(page.getByLabel("Your version of shot 1")).toHaveValue("The headline sits on a pale card.");
+  await expect(editedMark(r)).toHaveCount(0);
   await expect.poll(() => read(rushes.root)).toBe(BOARD);
 });
 
@@ -105,13 +109,13 @@ test("approving a shot sets its status, and changing an approved shot reopens it
   await expect(page.getByRole("button", { name: "Approve shot 1" })).toHaveAttribute("aria-pressed", "false");
 });
 
-test("a change the agent makes to storyboard.md shows up without a reload, and becomes Current", async ({ page, rushes }) => {
+test("a change the agent makes to storyboard.md shows up without a reload, and becomes the baseline", async ({ page, rushes }) => {
   await withBoard(rushes);
   await page.goto(rushes.url);
   await openStoryboard(page);
   await rushes.writeFiles([{ path: "storyboard.md", text: BOARD.replace("A folder of clips lands in the window.", "Clips fall in from the right.") }]);
-  await expect(row(page, "Shot 02 · Drop a folder").locator(".cur")).toContainText("Clips fall in from the right.", { timeout: 8000 });
-  await expect(page.getByLabel("Your version of shot 2")).toHaveValue("Clips fall in from the right.");
+  await expect(page.getByLabel("Your version of shot 2")).toHaveValue("Clips fall in from the right.", { timeout: 8000 });
+  await expect(editedMark(row(page, "Shot 02 · Drop a folder"))).toHaveCount(0);
   await expect(row(page, "Shot 02 · Drop a folder")).not.toHaveClass(/changed/);
 });
 
@@ -196,24 +200,25 @@ test("a still opens large, and Escape closes it without leaving the page", async
   await expect(page.getByRole("heading", { name: "Storyboard" })).toBeVisible();
 });
 
-test("the Planning tab says Ready to build once the brief, the script and every shot are approved", async ({ page, rushes }) => {
+test("the Plan workspace says Ready to build once the brief, the script and every shot are approved", async ({ page, rushes }) => {
   await withBoard(rushes, BOARD.replaceAll("Status: draft", "Status: approved"));
   await rushes.writeFiles([{ path: "brief.md", text: BRIEF.replace("Status: draft", "Status: approved") }]);
   await rushes.api("PUT", "/api/script", SCRIPT);
   const { script } = await rushes.api("GET", "/api/script");
   await rushes.api("PATCH", `/api/script/${script.sections[0].id}`, { status: "approved" });
   await page.goto(rushes.url);
-  await expect(page.locator(".pmarks .pready")).toBeVisible();
-  await openWorkspace(page, "Plan");
-  const menu = page.getByRole("menu", { name: "Planning" });
-  await expect(menu).toContainText("Ready to build");
-  await expect(menu.getByRole("menuitem", { name: "Copy prompt for your agent" })).toBeVisible();
+  await expect(workspaceTab(page, "Plan").locator(".pready")).toBeVisible();
+  for (const name of ["Brief", "Script", "Storyboard"] as const) await expect(planTab(page, name)).toHaveAccessibleName(/Approved/);
+  const row = page.locator(".planrow");
+  await expect(row).toContainText("Ready to build");
+  await expect(row.getByRole("button", { name: "Copy prompt for your agent" })).toBeVisible();
   // One shot reopened and it is no longer ready.
-  await page.keyboard.press("Escape");
   await openStoryboard(page);
   await page.getByRole("button", { name: "Approve shot 1" }).click();
-  await expect(page.locator(".pmarks .pready")).toHaveCount(0);
-  await expect(page.locator(".pmarks .pm")).toHaveCount(3);
+  await expect(workspaceTab(page, "Plan").locator(".pready")).toHaveCount(0);
+  await expect(planTab(page, "Storyboard")).not.toHaveAccessibleName(/Approved/);
+  await expect(planSwitch(page)).toBeVisible();
+  await expect(row).not.toContainText("Ready to build");
 });
 
 test("a film's first cut starts with the storyboard's shots, and says what the plan is waiting on", async ({ rushes }) => {
@@ -254,8 +259,7 @@ test("the tick is not tried again against a shot the agent has rewritten since y
 test("a storyboard.md with no shots yet says so instead of '0 shots'", async ({ page, rushes }) => {
   await rushes.writeFiles([{ path: "storyboard.md", text: "# Storyboard: Lumen\n\nNotes only, no shots.\n" }]);
   await page.goto(rushes.url);
-  await openWorkspace(page, "Plan");
-  await page.getByRole("menuitem", { name: /Storyboard/ }).click();
+  await openPlanPage(page, "Storyboard");
   await expect(page.getByText("storyboard.md has no shots yet")).toBeVisible();
 });
 

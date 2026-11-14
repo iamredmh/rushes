@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { BrowserContext, Page } from "@playwright/test";
 import { expect, hasFfmpeg, needsH264, pickVersion, type Rushes, test, cutButton, videoReady, reviewTab, openWorkspace, openMore, workspaceTab, openReviewTab, currentFilm, pickFilm, filmButton,
-  autoProxySetting, rangeChip, ruler, shotBlocks, toolButton, transport, pictureTrack, CUT_SOUND_LANE, CUT_SOUND_WAVE, sendButton, sentDialog, statusSend } from "./fixture.js";
+  autoProxySetting, rangeChip, ruler, shotBlocks, toolButton, transport, pictureTrack, CUT_SOUND_LANE, CUT_SOUND_WAVE, sendButton, sentDialog, statusSend, baselineText } from "./fixture.js";
 
 const CLIP = fileURLToPath(new URL("./fixtures/clip.mp4", import.meta.url));
 // A 1x1 transparent PNG, reused for every screenshot the library tests need on disk: its
@@ -345,7 +345,7 @@ test("an agent's change doesn't overwrite a line you're still typing", async ({ 
   await box.press("End");
   await page.keyboard.type(" Still typing");
   await rushes.api("PUT", "/api/script", { sections: [{ id: "s1", start: 0, end: 13, current: "The agent's new line." }] });
-  await expect(page.locator(".srow .cur")).toHaveText("The agent's new line.");
+  await expect(baselineText(page.locator(".srow"))).toHaveText("The agent's new line.");
   await expect(box).toHaveValue("First line. Still typing");
 });
 
