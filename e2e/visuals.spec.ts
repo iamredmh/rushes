@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { deflateSync } from "node:zlib";
-import { test, expect, openWorkspace, workspaceTab } from "./fixture.js";
+import { test, expect, openWorkspace, workspaceTab, sendNotes, sentDialog, statusSend } from "./fixture.js";
 
 // §25: the Visuals tab: stills and carousels, one page at a time, marked up region by region.
 
@@ -376,17 +376,18 @@ test("Full screen shows the page large with its boxes and cannot mark; Escape cl
   await expect(section(page, "launch-carousel").locator(".vzcount")).toContainText("02 / 06");
 });
 
-test("the done tick closes a note and reopens it, and Send to agent sends the Visuals notes", async ({ page, rushes }) => {
+test("the done tick closes a note and reopens it, and Send, by the status bar's line, sends the Visuals notes", async ({ page, rushes }) => {
   await withVisuals(rushes);
   await rushes.api("POST", "/api/notes", { stage: "visuals", scope: "whole", version: "v2", on: "launch-carousel/1", format: "4x5", box: { x: 0.1, y: 0.1, w: 0.3, h: 0.2 }, text: "First." });
   await rushes.api("POST", "/api/notes", { stage: "visuals", scope: "whole", version: "v2", on: "launch-carousel/2", format: null, text: "Second." });
   await openVisuals(page, rushes);
-  await expect(page.getByRole("button", { name: /Send to agent/ })).toContainText("2");
+  // Visuals has no notes panel: the status bar counts what waits, and leads to Send.
+  await expect(statusSend(page)).toHaveText("send 2 notes");
   await page.locator(".vznote", { hasText: "First." }).getByRole("button", { name: "Mark done" }).click();
   await expect.poll(async () => (await notesJson(rushes)).find((n) => n.text === "First.").status).toBe("done");
-  await expect(page.getByRole("button", { name: /Send to agent/ })).toContainText("1");
-  await page.getByRole("button", { name: /Send to agent/ }).click();
-  const dialog = page.getByRole("dialog", { name: "Sent to agent" });
+  await expect(statusSend(page)).toHaveText("send 1 note");
+  await sendNotes(page);
+  const dialog = sentDialog(page);
   await expect(dialog).toContainText("rushes_add_visual");
   expect(await readFile(join(rushes.root, ".rushes", "batches.json"), "utf8")).toContain('"stage": "visuals"');
 });

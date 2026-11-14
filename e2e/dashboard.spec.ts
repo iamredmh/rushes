@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { BrowserContext, Page } from "@playwright/test";
 import { expect, hasFfmpeg, needsH264, pickVersion, type Rushes, test, cutButton, videoReady, reviewTab, openWorkspace, openMore, workspaceTab, openReviewTab, currentFilm, pickFilm, filmButton,
-  autoProxySetting, rangeChip, ruler, shotBlocks, toolButton, transport, pictureTrack, CUT_SOUND_LANE, CUT_SOUND_WAVE } from "./fixture.js";
+  autoProxySetting, rangeChip, ruler, shotBlocks, toolButton, transport, pictureTrack, CUT_SOUND_LANE, CUT_SOUND_WAVE, sendButton, sentDialog, statusSend } from "./fixture.js";
 
 const CLIP = fileURLToPath(new URL("./fixtures/clip.mp4", import.meta.url));
 // A 1x1 transparent PNG, reused for every screenshot the library tests need on disk: its
@@ -33,7 +33,8 @@ test("a locked tab opens, explains itself and offers a prompt for your agent (lo
   await page.goto(rushes.url);
   await videoReady(page);
 
-  // 1. Click Music: it opens (never a toast), shows what it's for, and there's no notes column.
+  // 1. Click Music: it opens (never a toast), shows what it's for, and there's no note box (the notes panel keeps only its
+  // list, Activity and Send).
   // A locked tab is an ordinary enabled button -- never aria-disabled -- so an unmodified click
   // works exactly like it would on any other tab.
   const musicTab = reviewTab(page, "Music");
@@ -41,7 +42,7 @@ test("a locked tab opens, explains itself and offers a prompt for your agent (lo
   await expect(page).toHaveURL(rushes.url);
   await expect(musicTab).toHaveAttribute("aria-selected", "true");
   await expect(page.getByText("Compare music beds against the picture and pick one.")).toBeVisible();
-  await expect(page.getByRole("complementary", { name: "Notes" })).toHaveCount(0);
+  await expect(page.getByRole("textbox", { name: "New note" })).toHaveCount(0);
   // Locked, but still announced as such: a visually hidden "Locked" word in the accessible name.
   await expect(musicTab).toHaveAccessibleName(/Locked/);
 
@@ -149,7 +150,8 @@ test("a box on a vertical cut in a frame that doesn't fit it is still measured a
   await videoReady(page);
   // Force the frame back to 16:9, as Safari used to leave it: the 9:16 picture is pillarboxed
   // inside a wider overlay, so the overlay and the picture are no longer the same rect.
-  await page.addStyleTag({ content: ".framebox .frame{width:100%!important;aspect-ratio:16/9!important}" });
+  // (As wide as the monitor's box allows at 16:9: with the notes panel at 300 px the box is wider than 16:9 at 1440×900.)
+  await page.addStyleTag({ content: ".framebox .frame{width:min(100cqw, 100cqh * 16 / 9)!important;aspect-ratio:16/9!important}" });
   const overlay = (await page.locator(".overlay").boundingBox())!;
   expect(overlay.width / overlay.height).toBeCloseTo(16 / 9, 1);
   // The picture's rect follows the overlay's new size a frame later (ResizeObserver): wait until
@@ -270,21 +272,21 @@ test("script edits are saved, marked as changed, and can be reverted", async ({ 
   await expect.poll(async () => (await rushes.api("GET", "/api/script")).script.sections[0].proposed).toBe(null);
 });
 
-test("Send to agent batches this tab's open notes and shows the prompt to paste", async ({ page, rushes }) => {
+test("Send batches this tab's open notes and shows the prompt to paste", async ({ page, rushes }) => {
   await rushes.addCut();
   await rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 1, text: "Too dark." });
   await page.goto(rushes.url);
-  await expect(page.getByRole("button", { name: /Send to agent/ })).toContainText("1");
-  await page.getByRole("button", { name: /Send to agent/ }).click();
-  await expect(page.getByRole("dialog", { name: "Sent to agent" })).toContainText("picture batch b_1");
+  await expect(sendButton(page)).toContainText("1");
+  await sendButton(page).click();
+  await expect(sentDialog(page)).toContainText("picture batch b_1");
   const { batch } = await rushes.api("GET", "/api/batches/latest");
   expect(batch.noteIds).toHaveLength(1);
   await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: /Send to agent/ }).click();
-  await expect(page.getByRole("status")).toHaveText("Nothing open to send on any tab");
+  // Nothing is left open to send: Send goes until something waits again.
+  await expect(sendButton(page)).toHaveCount(0);
 });
 
-test("Send to agent sends every tab's open notes, whichever tab it is pressed on", async ({ page, rushes }) => {
+test("Send sends every tab's open notes, whichever tab it is pressed on", async ({ page, rushes }) => {
   await rushes.addCut();
   await rushes.api("POST", "/api/variants", { stage: "sfx", name: "Pass A", file: "audio/sfx/a.wav" });
   await rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 1, text: "Too dark." });
@@ -293,9 +295,9 @@ test("Send to agent sends every tab's open notes, whichever tab it is pressed on
   await videoReady(page);
   // Voice has no notes of its own (and nothing to review yet), and still sends both.
   await openReviewTab(page, "Voice");
-  await expect(page.getByRole("button", { name: /Send to agent/ })).toContainText("2");
-  await page.getByRole("button", { name: /Send to agent/ }).click();
-  const dialog = page.getByRole("dialog", { name: "Sent to agent" });
+  await expect(sendButton(page)).toContainText("2");
+  await sendButton(page).click();
+  const dialog = sentDialog(page);
   await expect(dialog).toContainText("Work through batch b_1");
   await expect(dialog).toContainText("Picture: 1 note");
   await expect(dialog).toContainText("Sound effects: 1 note");
@@ -440,13 +442,12 @@ test("switching films with a note half-typed is refused, and the note is kept", 
   await expect(page.getByLabel("New note")).toHaveValue("Still deciding what this is about.");
 });
 
-test("tooltips in the top bar and the row under it open below their button, inside the window", async ({ page, rushes }) => {
+test("tooltips in the top bar open below their button, inside the window", async ({ page, rushes }) => {
   await rushes.addCut();
   await page.goto(rushes.url);
   await videoReady(page);
-  // (The Change Log button names itself in words above 1100 px, so it has no tooltip there.)
-  for (const name of [/^More$/, /^Send to agent/]) {
-    const button = page.getByRole("button", { name });
+  for (const name of [/^More$/, /the notes panel/]) {
+    const button = page.locator("header.top").getByRole("button", { name });
     await button.hover();
     const tip = await button.evaluate((el) => {
       const after = getComputedStyle(el, "::after");
@@ -803,19 +804,20 @@ test("a deleted file is marked missing in Assets", async ({ page, rushes }) => {
   await expect(row.getByRole("link", { name: "Download" })).toHaveAttribute("aria-disabled", "true");
 });
 
-test("Send to agent works from Assets too, and shows its tooltip", async ({ page, rushes }) => {
+test("Send works from Assets too, by the status bar's line, and shows its tooltip", async ({ page, rushes }) => {
   await rushes.addCut();
   await rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 1, text: "Too dark." });
   await page.goto(rushes.url);
   await videoReady(page);
   await page.keyboard.press("8");
-  const button = page.getByRole("button", { name: /^Send to agent/ });
+  await statusSend(page).click();
+  const button = sendButton(page);
   await expect(button).toBeEnabled();
   // The tooltip fades in over 0.12s (styles.css), so poll for it rather than reading the mid-transition value.
   await button.hover();
   await expect.poll(() => button.evaluate((el) => Number(getComputedStyle(el, "::after").opacity))).toBe(1);
   await button.click();
-  await expect(page.getByRole("dialog", { name: "Sent to agent" })).toContainText("picture batch b_1");
+  await expect(sentDialog(page)).toContainText("picture batch b_1");
 });
 
 test("a late grab doesn't attach to the wrong film", async ({ page, rushes }) => {
@@ -2001,12 +2003,16 @@ test.describe("a tall cut (fix round 1)", () => {
     expect(track.y - (r.y + r.height)).toBeLessThan(4);
   });
 
-  test("a 16:9 cut looks as it did: the picture is the monitor's full width at 1440×900", async ({ page, rushes }) => {
+  test("a 16:9 cut fills the monitor at 1440×900: its full width or its full height, whichever it meets first", async ({ page, rushes }) => {
     await rushes.addCut();
     await page.goto(rushes.url);
     await videoReady(page);
     const fit = (await page.locator(".monitor .fitbox").boundingBox())!;
-    await expect.poll(async () => Math.round((await frameBox(page)).width)).toBe(Math.round(fit.width));
+    // §27, 5.7: with the notes panel 300 px wide the monitor's box is wider than 16:9 here, so the picture meets its height.
+    await expect.poll(async () => {
+      const f = await frameBox(page);
+      return Math.round(f.width) === Math.round(fit.width) || Math.round(f.height) === Math.round(fit.height);
+    }).toBe(true);
     const f = await frameBox(page);
     expect(Math.abs(f.height - f.width * (9 / 16))).toBeLessThanOrEqual(2);
     await expectAllOnScreen(page);

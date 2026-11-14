@@ -39,7 +39,13 @@ function useDebounced(fn: () => void, ms: number) {
   };
 }
 
-function Row({ section, wps, toast, onChanged }: { section: Section; wps: number; toast(message: string): void; onChanged(): void }) {
+/** §27, 5.8: a script line as the notes panel names it: "S2 · The scan finds it". */
+export function lineLabel(section: Pick<Section, "id" | "current">): string {
+  const words = section.current.trim().replace(/\s+/g, " ");
+  return `${section.id.toUpperCase()} · ${words.length > 48 ? `${words.slice(0, 47).trimEnd()}…` : words}`;
+}
+
+function Row({ section, wps, toast, onChanged, onPick }: { section: Section; wps: number; toast(message: string): void; onChanged(): void; onPick?(line: { id: string; label: string }): void }) {
   const [text, setText] = useState(section.proposed ?? section.current);
   const [direction, setDirection] = useState(section.direction);
   const editing = useRef(false);
@@ -84,7 +90,8 @@ function Row({ section, wps, toast, onChanged }: { section: Section; wps: number
   const status = STATUS[section.status];
 
   return (
-    <div class={`srow${changed ? " changed" : ""}`} data-section={section.id}>
+    // Working in a row (a click or focus anywhere in it) makes its line the target of the next note in the notes panel.
+    <div class={`srow${changed ? " changed" : ""}`} data-section={section.id} onFocusIn={() => onPick?.({ id: section.id, label: lineLabel(section) })} onClick={() => onPick?.({ id: section.id, label: lineLabel(section) })}>
       <div class="sgrid">
         <div class="when">
           <b>{section.id.toUpperCase()}</b>
@@ -160,7 +167,7 @@ function Row({ section, wps, toast, onChanged }: { section: Section; wps: number
 }
 
 /** The VO script: the agent's current line beside your version, one row per section. */
-export function Script({ script, toast, onChanged }: { script: ScriptData; toast(message: string): void; onChanged(): void }) {
+export function Script({ script, toast, onChanged, onPickLine }: { script: ScriptData; toast(message: string): void; onChanged(): void; onPickLine?(line: { id: string; label: string }): void }) {
   const changed = script.sections.filter(isChanged).length;
   return (
     <div class="col">
@@ -172,7 +179,7 @@ export function Script({ script, toast, onChanged }: { script: ScriptData; toast
       </div>
       <div class="sgrid scols"><span /><span>Current</span><span>Yours</span></div>
       <div style={{ display: "grid", gap: "12px" }}>
-        {script.sections.map((s) => <Row key={s.id} section={s} wps={script.wordsPerSecond} toast={toast} onChanged={onChanged} />)}
+        {script.sections.map((s) => <Row key={s.id} section={s} wps={script.wordsPerSecond} toast={toast} onChanged={onChanged} onPick={onPickLine} />)}
       </div>
     </div>
   );

@@ -1,21 +1,21 @@
 import type { ComponentChildren } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, mediaUrl, originalFrame } from "../api.js";
-import { rulerMarks, type Tool } from "../desk.js";
+import { noteTarget, rulerMarks, type Selection, type Tool } from "../desk.js";
 import {
-  BOX_REASON, boxFrom, boxShowsOn, contentRect, fmt, frameAt, noteFormatTag, noteTime, otherFormatNotes, placeNote, RESHAPE_MS, reshapeKeyframes, scopeHint, shotAt,
+  AUDIO_CHIPS, BOX_REASON, boxFrom, boxShowsOn, contentRect, fmt, frameAt, MIX_STAGE, noteFormatTag, noteTime, otherFormatNotes, placeNote, RESHAPE_MS, reshapeKeyframes, scopeHint, shotAt,
   shotLabel, shotSeek, snap, spacePressesButton, stepFrame, testFlags, versionFormats, visibleNotes,
   type FormatView, type ProxyProgress,
 } from "../lib.js";
-import type { Asset, Note, ProxyJob, State, Video, Version } from "../types.js";
+import type { Asset, Mark, Note, ProxyJob, State, Video, Version } from "../types.js";
 import { FormatScope } from "./FormatScope.js";
 import { Icon } from "./Icon.js";
-import { Notes } from "./Notes.js";
+import { NotesPanel } from "./desk/NotesPanel.js";
 import { OtherFormats } from "./OtherFormats.js";
 import { ProxyBar } from "./ProxyBar.js";
 import { PictureTrack } from "./desk/PictureTrack.js";
 import { Ruler, type RulerMarker } from "./desk/Ruler.js";
-import { LoudnessReadout, type SoundTab, SoundTracks, useMix } from "./desk/SoundTracks.js";
+import { LoudnessReadout, type SoundTab, SoundTracks, takeOn, useMix } from "./desk/SoundTracks.js";
 import { ToolStrip } from "./desk/ToolStrip.js";
 import { Transport } from "./desk/Transport.js";
 import { shortLabel } from "../versions.js";
@@ -171,6 +171,16 @@ export function Picture({
   const [noteHasText, setNoteHasText] = useState(false);
   // §27, 5.4: whether the note box has focus, so the Note tool shows as the one in use.
   const [noteFocused, setNoteFocused] = useState(false);
+  // §27, 5.7: what the next note is about. A take picked on its sound row (at the time clicked, or the whole take), else
+  // "This frame" or "The whole mix" as the target line's menu says; a range marked narrows either to the range.
+  const [takeSel, setTakeSel] = useState<Extract<Selection, { kind: "take" }> | null>(null);
+  const [aim, setAim] = useState<"frame" | "mix">("frame");
+  const [noteMarks, setNoteMarks] = useState<Mark[]>([]);
+  const clearSelection = () => {
+    setTakeSel(null);
+    setAim("frame");
+    setNoteMarks([]);
+  };
   // §27, 5.5: the level and mute, remembered per browser; §27, 5.4: the timeline's share of the column, once dragged.
   const [sound, setSound] = useState(readVolume);
   const [split, setSplit] = useState(readSplit);
@@ -434,6 +444,7 @@ export function Picture({
   const tool: Tool = noteFocused ? "note" : boxMode ? "box" : marking ? "range" : "select";
   const selectTool = () => {
     setBoxMode(false);
+    clearSelection();
     if (marking) clearRange();
     if (input.current && document.activeElement === input.current) input.current.blur();
   };
@@ -462,6 +473,16 @@ export function Picture({
 
   // §27, 5.6: the takes in use, played in step with the picture, and the cut's own sound.
   const mix = useMix({ state, assets, video, version, player: ref, duration, monitor: sound, toast, onChanged });
+  // A take picked as the target that is no longer in use (unpicked here, by the agent or in another tab) lets go.
+  const takeGone = takeSel !== null && !mix.rows.some((r) => r.take && takeOn(r.take) === takeSel.on);
+  useEffect(() => {
+    if (takeGone) {
+      setTakeSel(null);
+      setNoteMarks([]);
+    }
+  }, [takeGone]);
+  // The notes on the takes in use are this tab's too: listed, and marked on their rows.
+  const takeNotes = state.notes.notes.filter((n) => (n.stage === "voice" || n.stage === "music" || n.stage === "sfx") && (!n.video || n.video === video.id) && mix.noteRow(n) !== null);
 
   // §27, 5.5: the level and mute live on the element, and are remembered per browser. With a take in use the takes are
   // heard instead (through the engine, at the same level), and the cut's own sound only when its row says so.
@@ -547,17 +568,39 @@ export function Picture({
     }
   };
 
+  /** The selection now, read at the moment it is used: the playhead from the element, never a render behind. */
+  const selectionAt = (at: number): Selection => {
+    const marked = range.in !== null && range.out !== null ? { t: range.in, tOut: range.out } : null;
+    if (takeSel) return marked ? { ...takeSel, ...marked } : takeSel;
+    if (aim === "mix") return marked ? { kind: "mix", ...marked } : { kind: "mix" };
+    return marked ? { kind: "range", ...marked } : { kind: "frame", t: at };
+  };
+  const targetAt = (at: number) => {
+    const sel = selectionAt(at);
+    return noteTarget(sel, shotAt(shots, sel.kind === "frame" || sel.kind === "range" ? sel.t : at), fps);
+  };
+
   const add = async (text: string) => {
-    const isRange = range.in !== null && range.out !== null;
-    const at = isRange ? range.in! : now();
+    const target = targetAt(now());
+    if (target.stage !== "picture") {
+      // A take or the whole mix (§27, 5.7): its stage and `on`, with the marks when it is a range on a take.
+      await api.post("/api/notes", {
+        stage: target.stage, video: video.id, version: version.id, on: target.on, scope: target.scope, t: target.t, tOut: target.tOut, text,
+        marks: target.scope === "range" && takeSel ? noteMarks : [],
+      });
+      clearRange();
+      setNoteMarks([]);
+      onChanged();
+      return;
+    }
     await api.post("/api/notes", {
       stage: "picture",
       video: video.id,
       version: version.id,
-      scope: isRange ? "range" : "point",
-      t: at,
-      tOut: isRange ? range.out : null,
-      frame: frameAt(at, fps),
+      scope: target.scope,
+      t: target.t,
+      tOut: target.tOut,
+      frame: frameAt(target.t!, fps),
       text,
       box,
       grab,
@@ -569,25 +612,6 @@ export function Picture({
     setNoteScope("this");
     setBox(null);
     onGrabChange(video.id, null);
-    onChanged();
-  };
-
-  // §27, 5.6: until the notes panel's target line, a second button sends what is typed as a note on the whole mix:
-  // at the playhead, or on the range marked.
-  const addMix = async (text: string) => {
-    const isRange = range.in !== null && range.out !== null;
-    await api.post("/api/notes", {
-      stage: "mix",
-      video: video.id,
-      version: version.id,
-      on: null,
-      scope: isRange ? "range" : "point",
-      t: isRange ? range.in : now(),
-      tOut: isRange ? range.out : null,
-      text,
-      marks: [],
-    });
-    clearRange();
     onChanged();
   };
 
@@ -607,6 +631,7 @@ export function Picture({
     else if (e.key === "ArrowLeft") { e.preventDefault(); step(e.shiftKey ? -10 : -1); }
     else if (e.key === "ArrowRight") { e.preventDefault(); step(e.shiftKey ? 10 : 1); }
     else if (k === "v") selectTool();
+    else if (e.key === "Escape") clearSelection();
     else if (k === "f") { e.preventDefault(); if (!e.repeat) fullScreen(); }
     // §26: a shelved film is view only: the marking keys do nothing.
     else if (readOnly && /^[iogbn]$/.test(k)) return;
@@ -699,7 +724,11 @@ export function Picture({
   const selected = visible.find((n) => n.id === selectedId) ?? null;
   const shownBox = selected?.box && (!selected.version || selected.version === version.id) && boxShowsOn(selected, format, primaryId) ? selected.box : null;
   const rangeLabel = range.in === null ? null : range.out === null ? `${fmt(range.in)} →` : noteTime(range.in, range.out);
-  const placeholder = range.in !== null && range.out === null ? "Set an Out point" : `Note at ${rangeLabel && range.out !== null ? rangeLabel : fmt(t)}`;
+  // §27, 5.7: the target line, from the selection, read at the snapped playhead as a note taken now would be.
+  const target = targetAt(snap(t, fps));
+  const placeholder = range.in !== null && range.out === null
+    ? "Set an Out point"
+    : target.stage === "picture" ? `Note at ${rangeLabel && range.out !== null ? rangeLabel : fmt(t)}` : `Note on ${target.label}`;
 
   /** Duration, aspect and the once-only start seek, read off a <video> that's reached
    *  HAVE_METADATA. Shared between the element's own onLoadedMetadata handler and the ref
@@ -922,13 +951,30 @@ export function Picture({
               seek(shotSeek(start, fps));
             }}
           />
-          <SoundTracks mix={mix} duration={duration} t={t} onSeek={seek} onOpenTab={onOpenTab} />
+          <SoundTracks
+            mix={mix}
+            duration={duration}
+            t={t}
+            onSeek={seek}
+            onOpenTab={onOpenTab}
+            selected={takeSel ? (mix.rows.find((r) => r.take && takeOn(r.take) === takeSel.on)?.lane ?? null) : null}
+            notes={[...visible, ...takeNotes]}
+            onPick={readOnly ? undefined : (row, at) => {
+              const take = row.take!;
+              const to = at === null ? null : snap(at, fps);
+              setTakeSel({ kind: "take", stage: MIX_STAGE[row.lane], on: takeOn(take), name: take.variant.name, t: to });
+              if (to !== null) {
+                ref.current?.pause();
+                seek(to);
+              }
+            }}
+          />
         </div>
       </div>
 
-      <Notes
+      <NotesPanel
         readOnly={readOnly}
-        notes={visible}
+        notes={[...visible, ...takeNotes]}
         version={version.id}
         selectedId={selectedId}
         placeholder={placeholder}
@@ -938,7 +984,13 @@ export function Picture({
         onChanged={onChanged}
         onTextChange={setNoteHasText}
         onLabel={mix.noteLabel}
-        altAdd={mix.inUse && !readOnly ? { label: "Note on the mix", onAdd: addMix } : undefined}
+        target={{
+          label: target.label,
+          menu: !takeSel ? { value: aim, onChange: (v) => setAim(v) } : undefined,
+          onClear: takeSel || aim === "mix" ? clearSelection : undefined,
+        }}
+        chips={takeSel ? AUDIO_CHIPS[takeSel.stage] : undefined}
+        marks={takeSel && range.in !== null && range.out !== null ? { value: noteMarks, onChange: setNoteMarks } : undefined}
         formatTag={(n) => noteFormatTag(n, many)}
         cardExtra={many && view ? (n) => (
           <FormatScope

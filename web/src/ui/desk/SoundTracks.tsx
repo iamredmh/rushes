@@ -13,7 +13,7 @@ import { cueKeys, cueLabel, cueName, cuesInTime } from "../../cues.js";
 import { takeCount, takeGroups, type TakeGroups, type TakeRow } from "../../desk.js";
 import {
   clampLevel, filmLanes, filmPicks, LEVEL_MAX, LEVEL_MIN, LEVEL_STEP, levelText, loudnessLanes, type LoudnessState, loudnessReadout, MIX_LANES,
-  type MixLane, type MixModel, mixOnLabel, MIX_STAGE, takeInUse, variantRows, type VariantRow,
+  type MixLane, type MixModel, mixNoteTarget, mixOnLabel, MIX_STAGE, takeInUse, variantRows, type VariantRow, WHOLE_MIX,
 } from "../../lib.js";
 import type { Asset, LoudnessResult, Note, State, Version, Video } from "../../types.js";
 import { audioTestHook } from "../AudioStage.js";
@@ -88,9 +88,14 @@ export interface Mix {
   /** The engine and its length: the clock itself when there is no cut to follow. */
   engine: AudioEngine;
   length: number;
-  /** What a note on the mix is on, for the notes list ("Whole mix", "Music · Warm keys"); null for any other note. */
+  /** What a note on the mix or on a take in use is on, for the notes list ("Whole mix", "Music · Warm keys"); null for any other note. */
   noteLabel(n: Note): string | null;
+  /** §27, 5.7: the row a note is marked on: a take in use's (by its stage and `on`), or an older Mix note's lane. */
+  noteRow(n: Note): MixLane | null;
 }
+
+/** The `on` a note on a take carries: "<lane>/<variant>", with ":<cue>" for one of a pass's cues. */
+export const takeOn = (take: TakeRow) => `${take.lane}/${take.variant.id}`;
 
 /** Everything the Timeline tab's sound needs: what plays, how loud, what is heard and what it measures. */
 export function useMix({ state, assets, video, version, player, duration, monitor, toast, onChanged }: MixInput): Mix {
@@ -277,6 +282,19 @@ export function useMix({ state, assets, video, version, player, duration, monito
   const heardRows = (stage: "music" | "sfx"): VariantRow[] => variants[stage].filter((r) => takeInUse(use, stage, r) && !asset(r.file)?.missing);
   const model: MixModel = { variants, heard: { vo: heard.vo, music: heardRows("music"), sfx: heardRows("sfx") } };
 
+  const rowOfTake = (n: Note): SoundRow | null => {
+    if (n.on === null || (n.stage !== "voice" && n.stage !== "music" && n.stage !== "sfx")) return null;
+    const on = n.on;
+    return rows.find((r) => r.take && MIX_STAGE[r.lane] === n.stage && (on === takeOn(r.take) || on.startsWith(`${takeOn(r.take)}:`))) ?? null;
+  };
+  const noteRow = (n: Note): MixLane | null => {
+    if (n.stage === "mix") {
+      const target = mixNoteTarget(model, n.on);
+      return target === null || target === WHOLE_MIX ? null : target;
+    }
+    return rowOfTake(n)?.lane ?? null;
+  };
+
   return {
     rows,
     media,
@@ -290,7 +308,12 @@ export function useMix({ state, assets, video, version, player, duration, monito
     toggleCut: () => setCutChoice(!cutMuted),
     videoMuted: cutMuted || anySolo,
     loudness: { state: loudness, measuring, retry: () => setRetries((n) => n + 1) },
-    noteLabel: (n) => (n.stage === "mix" ? mixOnLabel(model, n.on) : null),
+    noteLabel: (n) => {
+      if (n.stage === "mix") return mixOnLabel(model, n.on);
+      const r = rowOfTake(n);
+      return r ? `${NAME[r.lane]} · ${r.take!.variant.name}` : null;
+    },
+    noteRow,
     engine,
     length,
   };
@@ -304,16 +327,27 @@ export interface SoundTracksProps {
   onSeek(t: number): void;
   /** A take count was clicked: open that sound's tab. */
   onOpenTab?(tab: SoundTab): void;
+  /** §27, 5.7: a row with a take in use was picked: its block clicked at `t` (the note is at that point, and the playhead
+   *  goes there too), or its name clicked (`t` null: the whole take). Its take becomes the note's target. */
+  onPick?(row: SoundRow, t: number | null): void;
+  /** The row whose take is the note's target. */
+  selected?: MixLane | null;
+  /** The notes marked on the rows (each on the row `mix.noteRow` names). */
+  notes?: Note[];
 }
 
 const TAB: Record<MixLane, SoundTab> = { vo: "voice", music: "music", sfx: "sfx" };
 
 /** The rows under the Picture track. */
-export function SoundTracks({ mix, duration, t, onSeek, onOpenTab }: SoundTracksProps) {
+export function SoundTracks({ mix, duration, t, onSeek, onOpenTab, onPick, selected = null, notes = [] }: SoundTracksProps) {
   const pct = (s: number) => (duration > 0 ? Math.min(100, Math.max(0, (s / duration) * 100)) : 0);
-  const seekAt = (e: MouseEvent) => {
+  const timeAt = (e: MouseEvent): number | null => {
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    if (r.width > 0) onSeek(((e.clientX - r.left) / r.width) * duration);
+    return r.width > 0 ? Math.min(duration, Math.max(0, ((e.clientX - r.left) / r.width) * duration)) : null;
+  };
+  const seekAt = (e: MouseEvent) => {
+    const at = timeAt(e);
+    if (at !== null) onSeek(at);
   };
   // §23: the one hover card for the Effects block's cues.
   const { shown: shownCard, api: card } = useCueCard();
@@ -337,11 +371,17 @@ export function SoundTracks({ mix, duration, t, onSeek, onOpenTab }: SoundTracks
         const timed = row.lane === "sfx" && row.block === "take" ? cuesInTime(take!.variant.cues) : [];
         const ckeys = cueKeys(timed);
         const chip = count.fresh > 0 ? `${count.fresh} new` : String(count.all);
+        const here = notes.filter((n) => n.t !== null && mix.noteRow(n) === row.lane);
+        const picked = selected === row.lane && take !== null;
         return (
-          <div key={row.lane} class={`trow strack${take ? "" : " idle"}`} role="group" aria-label={`${name} track`} data-sound={row.lane} style={{ "--c": COLOR[row.lane] }}>
+          <div key={row.lane} class={`trow strack${take ? "" : " idle"}${picked ? " picked" : ""}`} role="group" aria-label={`${name} track`} data-sound={row.lane} aria-current={picked ? "true" : undefined} style={{ "--c": COLOR[row.lane] }}>
             <div class="thead shead">
               <i class="sw" aria-hidden="true" />
-              <span class="snm">{name}</span>
+              {take && onPick ? (
+                <button type="button" class="snm" aria-pressed={picked} aria-label={`${name}: note on the whole take`} data-tip={`Note on the whole of ${take.variant.name}`} onClick={() => onPick(row, null)}>{name}</button>
+              ) : (
+                <span class="snm">{name}</span>
+              )}
               {count.all > 0 && (
                 <button
                   type="button"
@@ -377,7 +417,15 @@ export function SoundTracks({ mix, duration, t, onSeek, onOpenTab }: SoundTracks
                 </>
               )}
             </div>
-            <div class="tlane" onClick={seekAt}>
+            <div
+              class="tlane"
+              onClick={(e) => {
+                const at = timeAt(e);
+                if (at === null) return;
+                if (take && onPick) onPick(row, at);
+                else onSeek(at);
+              }}
+            >
               {row.block === "take" ? (
                 <>
                   <div
@@ -423,6 +471,11 @@ export function SoundTracks({ mix, duration, t, onSeek, onOpenTab }: SoundTracks
                   </button>
                 );
               })}
+              {here.map((n) => n.tOut !== null ? (
+                <span key={n.id} class={`span ${n.status}`} data-note={n.id} title={n.text} style={{ left: `${pct(n.t!)}%`, width: `${pct(n.tOut) - pct(n.t!)}%` }} />
+              ) : (
+                <span key={n.id} class={`mk ${n.status}`} data-note={n.id} title={n.text} style={{ left: `${pct(n.t!)}%` }} />
+              ))}
               <span class="playhead" style={{ left: `${pct(t)}%` }} />
             </div>
           </div>

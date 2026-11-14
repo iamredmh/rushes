@@ -107,8 +107,10 @@ export function takeCount(g: TakeGroups): { all: number; fresh: number } {
 export interface NextInput {
   plan: { exists: boolean; approved: boolean };
   hasCut: boolean;
-  /** Notes and edits waiting to be sent. */
+  /** Notes and edits waiting to be sent (unsentCount). */
   unsent: number;
+  /** Where Send is (the view whose notes panel to open), when the line should lead there. */
+  sendTo?: DeskView | null;
   /** To-do notes on this film, sent or not. */
   openNotes: number;
   locked: boolean;
@@ -124,11 +126,12 @@ const counted = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`
 
 /**
  * The status bar's one line (§27, 5.9): the first of these that applies. `go` is where clicking it
- * leads, or null when the step is not somewhere on the desk (asking the agent, pressing Send).
+ * leads (for Send, the view whose notes panel holds it), or null when the step is not somewhere on the desk (asking the agent).
  */
 export function nextHint(i: NextInput): { text: string; go: DeskView | null } {
+  // With somewhere to send from, what waits is sent first, cut or no cut (a Visuals note, a plan's edits).
+  if (i.unsent > 0 && (i.hasCut || i.sendTo)) return { text: `send ${counted(i.unsent, "note")}`, go: i.sendTo ?? null };
   if (!i.hasCut) return i.plan.exists && !i.plan.approved ? { text: "approve the plan", go: "script" } : { text: "ask for cut 1", go: null };
-  if (i.unsent > 0) return { text: `send ${counted(i.unsent, "note")}`, go: null };
   if (i.openNotes > 0) return { text: `${counted(i.openNotes, "note")} open`, go: "picture" };
   if (!i.locked) return { text: "lock picture", go: "picture" };
   // One sound at a time: voice is settled before music is asked for.
@@ -140,6 +143,82 @@ export function nextHint(i: NextInput): { text: string; go: DeskView | null } {
     if (s.inUse && s.stale) return { text: `the ${w.one.replace(/^an? /, "")} in use was made for an older cut`, go: stage };
   }
   return { text: "nothing to do", go: null };
+}
+
+/**
+ * §27, 5.7: what a new note is about, as the selection says. A take carries `tOut` when a range is marked on it, and the
+ * whole mix a time when the note is at a moment of it; neither field is needed for the rest.
+ */
+export type Selection =
+  | { kind: "frame"; t: number }
+  | { kind: "range"; t: number; tOut: number }
+  | { kind: "shot"; n: number; name: string; t: number }
+  | { kind: "take"; stage: LaneStage; on: string; name: string; t: number | null; tOut?: number | null }
+  | { kind: "mix"; t?: number | null; tOut?: number | null }
+  | { kind: "line"; id: string; label: string };
+
+export interface NoteTarget {
+  stage: Stage;
+  on: string | null;
+  scope: "point" | "range" | "whole";
+  t: number | null;
+  tOut: number | null;
+  /** The note box's target line: "00:00:11:00 · 03 The scan", "Voice · George · retimed", "The whole mix". */
+  label: string;
+}
+
+const two = (n: number) => String(n).padStart(2, "0");
+
+/** Hours, minutes, seconds and frames: "00:00:11:00", at the nearest frame. */
+export function timecode(t: number, fps: number): string {
+  const rate = Math.max(1, Math.round(fps));
+  const frames = Math.round(Math.max(0, t) * rate);
+  const f = frames % rate;
+  const s = Math.floor(frames / rate);
+  return `${two(Math.floor(s / 3600))}:${two(Math.floor(s / 60) % 60)}:${two(s % 60)}:${two(f)}`;
+}
+
+const SOUND_NAMES: Record<LaneStage, string> = { voice: "Voice", music: "Music", sfx: "Effects" };
+
+/** The stage, `on`, scope and times a note is saved with for a selection, and the words that name it. `shot` is the shot at the time. */
+export function noteTarget(s: Selection, shot: { n: number; name: string } | null, fps = 30): NoteTarget {
+  const tc = (t: number) => timecode(t, fps);
+  const when = (t: number | null | undefined, tOut: number | null | undefined) => (t == null ? null : tOut == null ? tc(t) : `${tc(t)}–${tc(tOut)}`);
+  const timed = (t: number | null | undefined, tOut: number | null | undefined) => ({
+    scope: (t == null ? "whole" : tOut == null ? "point" : "range") as NoteTarget["scope"],
+    t: t ?? null,
+    tOut: t == null ? null : (tOut ?? null),
+  });
+  const named = (shotHere: { n: number; name: string } | null) => (shotHere ? ` · ${two(shotHere.n)} ${shotHere.name}` : "");
+  switch (s.kind) {
+    case "frame":
+      return { stage: "picture", on: null, scope: "point", t: s.t, tOut: null, label: `${tc(s.t)}${named(shot)}` };
+    case "range":
+      return { stage: "picture", on: null, scope: "range", t: s.t, tOut: s.tOut, label: `${when(s.t, s.tOut)}${named(shot)}` };
+    case "shot":
+      return { stage: "picture", on: null, scope: "point", t: s.t, tOut: null, label: `${tc(s.t)}${named(s)}` };
+    case "take": {
+      const at = when(s.t, s.tOut);
+      return { stage: s.stage, on: s.on, ...timed(s.t, s.tOut), label: `${at ? `${at} · ` : ""}${SOUND_NAMES[s.stage]} · ${s.name}` };
+    }
+    case "mix": {
+      const at = when(s.t, s.tOut);
+      return { stage: "mix", on: null, ...timed(s.t, s.tOut), label: `${at ? `${at} · ` : ""}The whole mix` };
+    }
+    case "line":
+      return { stage: "script", on: s.id, scope: "whole", t: null, tOut: null, label: s.label };
+  }
+}
+
+/**
+ * What Send would send that has not been sent yet (§27, 5.7 and 5.9): to-do notes with no batch (on films in play, or on
+ * no film), the changed script rows (the script tab's to-do less its own notes), and the brief's and storyboard's
+ * changes. Send's count and the status bar's line are this one number.
+ */
+export function unsentCount(i: { notes: Note[]; inPlay: ReadonlySet<string>; scriptTodo: number; briefChanged: number; storyboardChanged: number }): number {
+  const waiting = (n: Note) => n.status === "todo" && (!n.video || i.inPlay.has(n.video));
+  const scriptRows = i.scriptTodo - i.notes.filter((n) => n.stage === "script" && waiting(n)).length;
+  return i.notes.filter((n) => waiting(n) && n.batch === null).length + Math.max(0, scriptRows) + i.briefChanged + i.storyboardChanged;
 }
 
 /** A note's marker on the ruler: where it starts and, for a range, how wide, as percentages of the cut. */

@@ -3,12 +3,13 @@
 // same rows, mute, solo, levels and loudness as the Timeline tab (`useMix`, `SoundTracks`), and notes on the mix.
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api } from "../../api.js";
-import { copyShortcut, fmt, LOCKED_TAB, snap, spacePressesButton, stepFrame } from "../../lib.js";
+import { noteTarget, type Selection } from "../../desk.js";
+import { AUDIO_CHIPS, copyShortcut, LOCKED_TAB, MIX_STAGE, snap, spacePressesButton, stepFrame } from "../../lib.js";
 import type { Asset, Note, State, Video } from "../../types.js";
 import { Icon } from "../Icon.js";
-import { Notes } from "../Notes.js";
+import { NotesPanel } from "./NotesPanel.js";
 import { Ruler } from "./Ruler.js";
-import { LoudnessReadout, type SoundTab, SoundTracks, useMix } from "./SoundTracks.js";
+import { LoudnessReadout, type SoundTab, SoundTracks, takeOn, useMix } from "./SoundTracks.js";
 import { Transport } from "./Transport.js";
 
 const NO_PLAYER = { current: null };
@@ -41,6 +42,15 @@ export function NoCutTimeline({ state, assets, video, notes, prompt, readOnly = 
   useEffect(() => engine.onChange(() => setPlaying(engine.playing)), [engine]);
   const input = useRef<HTMLTextAreaElement>(null);
   const [hasText, setHasText] = useState(false);
+  // §27, 5.7: a take picked on its row is the note's target; otherwise the mix at the playhead (there is no frame).
+  const [takeSel, setTakeSel] = useState<Extract<Selection, { kind: "take" }> | null>(null);
+  const takeGone = takeSel !== null && !mix.rows.some((r) => r.take && takeOn(r.take) === takeSel.on);
+  useEffect(() => {
+    if (takeGone) setTakeSel(null);
+  }, [takeGone]);
+  const takeNotes = state.notes.notes.filter((n) => (n.stage === "voice" || n.stage === "music" || n.stage === "sfx") && (!n.video || n.video === video?.id) && mix.noteRow(n) !== null);
+  const targetAt = (at: number) => noteTarget(takeSel ?? { kind: "mix", t: at }, null, fps);
+  const target = targetAt(snap(t, fps));
   useLayoutEffect(() => onPendingChange?.(hasText), [hasText]);
   useEffect(() => () => onPendingChange?.(false), []);
 
@@ -59,6 +69,7 @@ export function NoCutTimeline({ state, assets, video, notes, prompt, readOnly = 
     } else if (e.key === "ArrowLeft") { e.preventDefault(); step(e.shiftKey ? -10 : -1); }
     else if (e.key === "ArrowRight") { e.preventDefault(); step(e.shiftKey ? 10 : 1); }
     else if (e.key.toLowerCase() === "n" && !readOnly) { e.preventDefault(); input.current?.focus(); }
+    else if (e.key.toLowerCase() === "v" || e.key === "Escape") setTakeSel(null);
   };
   useLayoutEffect(() => {
     const k = (e: KeyboardEvent) => onKey.current(e);
@@ -66,8 +77,9 @@ export function NoCutTimeline({ state, assets, video, notes, prompt, readOnly = 
     return () => window.removeEventListener("keydown", k);
   }, []);
 
-  const addMix = async (text: string) => {
-    await api.post("/api/notes", { stage: "mix", video: video?.id ?? null, version: null, on: null, scope: "point", t: snap(engine.time, fps), tOut: null, text, marks: [] });
+  const add = async (text: string) => {
+    const at = targetAt(snap(engine.time, fps));
+    await api.post("/api/notes", { stage: at.stage, video: video?.id ?? null, version: null, on: at.on, scope: at.scope, t: at.t, tOut: at.tOut, text, marks: [] });
     onChanged();
   };
   const copyPrompt = async () => {
@@ -109,23 +121,40 @@ export function NoCutTimeline({ state, assets, video, notes, prompt, readOnly = 
             <div class="thead" />
             <Ruler duration={length} t={t} marks={[]} live={null} onSeek={(to) => engine.seek(to)} onMark={() => undefined} />
           </div>
-          <SoundTracks mix={mix} duration={length} t={t} onSeek={(to) => engine.seek(to)} onOpenTab={onOpenTab} />
+          <SoundTracks
+            mix={mix}
+            duration={length}
+            t={t}
+            onSeek={(to) => engine.seek(to)}
+            onOpenTab={onOpenTab}
+            selected={takeSel ? (mix.rows.find((r) => r.take && takeOn(r.take) === takeSel.on)?.lane ?? null) : null}
+            notes={[...notes, ...takeNotes]}
+            onPick={readOnly ? undefined : (row, at) => {
+              const to = at === null ? null : snap(at, fps);
+              setTakeSel({ kind: "take", stage: MIX_STAGE[row.lane], on: takeOn(row.take!), name: row.take!.variant.name, t: to });
+              if (to !== null) {
+                engine.pause();
+                engine.seek(to);
+              }
+            }}
+          />
         </div>
       </div>
-      <Notes
+      <NotesPanel
         readOnly={readOnly}
-        notes={notes}
+        notes={[...notes, ...takeNotes]}
         version={null}
-        placeholder={`Note on the mix at ${fmt(t)}`}
+        placeholder={`Note on ${target.label}`}
         inputRef={input}
         toast={toast}
-        onAdd={addMix}
+        onAdd={add}
         onChanged={onChanged}
         onTextChange={setHasText}
         onLabel={mix.noteLabel}
         fixedTimes
         onSeek={(to) => engine.seek(to)}
-        altAdd={readOnly ? undefined : { label: "Note on the mix", onAdd: addMix }}
+        target={{ label: target.label, onClear: takeSel ? () => setTakeSel(null) : undefined }}
+        chips={takeSel ? AUDIO_CHIPS[takeSel.stage] : undefined}
       />
     </div>
   );

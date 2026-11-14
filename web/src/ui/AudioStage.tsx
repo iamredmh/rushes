@@ -11,13 +11,14 @@ import { type AudioEngine, type EngineSnapshot, liveContexts } from "../audio/en
 import { type SampleState, samples } from "../audio/sample.js";
 import { type Clip, needsVideoSync, setStreamThreshold } from "../audio/timeline.js";
 import { useAudioStage } from "../audio/useAudioStage.js";
+import { noteTarget, timecode } from "../desk.js";
 import {
   AUDIO_CHIPS, type AudioStageId, fmt, laneSelection, type Listening, notePending, noteTime, type OnOption, type Scope, snap, spacePressesButton, stepFrame, testFlags,
 } from "../lib.js";
 import type { Mark, Note } from "../types.js";
 import { Icon } from "./Icon.js";
 import { type LaneMark, Lanes, type StageRow, waveDraws } from "./Lanes.js";
-import { Notes } from "./Notes.js";
+import { NotesPanel } from "./desk/NotesPanel.js";
 
 // ---- test-only switches (never on in normal use) ----
 // `?test=1` exposes the engine on window.__rushesAudio for the e2e suite; `&streamOver=1` streams
@@ -79,7 +80,7 @@ export interface Preview {
 
 export interface AudioStageProps {
   stage: AudioStageId;
-  /** The film being reviewed (null: none). Another film starts the notes on `defaultScope` again. Defaults to the preview's film. */
+  /** The film being reviewed (null: none). Another film starts the note's target on its default again. Defaults to the preview's film. */
   film?: string | null;
   /** §26: the film is shelved, so the tab is looked at, not added to: no note box (a note on it would never be counted or sent). */
   readOnly?: boolean;
@@ -96,7 +97,7 @@ export interface AudioStageProps {
   fps: number;
   /** This tab's notes. */
   notes: Note[];
-  /** The On menu. A row's `on` names one of these. */
+  /** What a note can be on: a row's `on` names one of these (§27, 5.7: picked by clicking the row, not from a menu). */
   onOptions: OnOption[];
   /** The row (or rows) a note is drawn on, or null (whole notes are never drawn). */
   noteRow(note: Note): string | string[] | null;
@@ -111,14 +112,12 @@ export interface AudioStageProps {
    * each row's `audition` and `picked` (laneSelection). Applied as gain ramps, never a restart.
    */
   listen?(selected: string | null): Listening;
-  /** The On menu's value until a lane is clicked. Defaults to the picked row's, else the first row's. */
+  /** What a note is on until a lane is clicked. Defaults to the picked row's, else the first row's. */
   defaultOn?: string;
   /** A lane was clicked. */
   onSelect?(row: StageRow): void;
-  /** The scope segments this tab offers, in order. Defaults to all three. */
+  /** What notes this tab takes: a range is offered only when "range" is among them. Defaults to all three. */
   scopes?: Scope[];
-  /** The scope selected before the user changes it. Defaults to "point". */
-  defaultScope?: Scope;
   /** The quick-start chips for the current scope. Defaults to this stage's AUDIO_CHIPS. */
   chipsFor?(scope: Scope): string[];
   /** Whether Range offers quick marks (Rise/Fall/Louder/Quieter). Defaults to true. */
@@ -152,32 +151,30 @@ export function AudioStage(props: AudioStageProps) {
   const { engine, playing, length, media } = useAudioStage(clips, videoDuration);
 
   const [picked, setSelected] = useState<string | null>(null);
-  const [onValue, setOnValue] = useState<string | null>(null);
-  // The On value the selected lane set, so it can go with the lane.
-  const selectedOn = useRef<string | null>(null);
+  // §27, 5.7: what the next note is on, as the selection says: the lane (or cue) last clicked, at the time clicked or
+  // the whole take; nothing clicked, the default take, whole. The value is one of onOptions'.
+  const [aim, setAim] = useState<{ value: string; t: number | null } | null>(null);
   // A selected lane that's gone (a removed variant, a folded Voiceover round) selects nothing: the
-  // default is heard again, and On goes back to its default too, unless you've pointed it elsewhere since.
+  // default is heard again, and the note's target goes back to its default too.
   const selected = rows.some((r) => r.key === picked) ? picked : null;
   useLayoutEffect(() => {
     if (picked === null || selected !== null) return;
     setSelected(null);
-    if (selectedOn.current !== null && onValue === selectedOn.current) setOnValue(null);
-    selectedOn.current = null;
+    setAim(null);
   }, [selected]);
   const [range, setRange] = useState(NO_RANGE);
-  const [scope, setScope] = useState<Scope>(props.defaultScope ?? "point");
   const [marks, setMarks] = useState<Mark[]>([]);
   const [noteHasText, setNoteHasText] = useState(false);
   const hasRange = (props.scopes ?? ALL_SCOPES).includes("range");
-  const baseScope: Scope = props.defaultScope ?? "point";
-  // Another film (or another cut of it) starts from the tab's own scope again, with or without a
+  const offersPoint = (props.scopes ?? ALL_SCOPES).includes("point");
+  // Another film (or another cut of it) starts the note's target from its default again, with or without a
   // preview. A pending note refuses the switch, so nothing in progress is dropped here.
   const filmKey = `${props.film !== undefined ? (props.film ?? "") : (preview?.video ?? "")}/${preview?.version ?? ""}`;
   const seenFilm = useRef(filmKey);
   useLayoutEffect(() => {
     if (seenFilm.current === filmKey) return;
     seenFilm.current = filmKey;
-    setScope(baseScope);
+    setAim(null);
   }, [filmKey]);
 
   // Nothing pending is dropped: a half-typed note, a range or ticked marks hold the film (and its
@@ -204,11 +201,27 @@ export function AudioStage(props: AudioStageProps) {
   // The engine keeps a lane's selection and gain apart from its clips, so this may run before setClips.
   useLayoutEffect(() => apply(listening), [engine, JSON.stringify(listening)]);
 
-  // The On menu defaults to the lane you last clicked, else the pick, else the first entry; an
-  // entry that's gone (a variant removed, say) falls back the same way.
+  // The target defaults to the pick, else the first entry; an entry that's gone (a variant removed, say) falls back the same way.
   const fallbackOn = props.defaultOn ?? rows.find((r) => r.picked)?.on ?? rows[0]?.on ?? onOptions[0]?.value ?? null;
-  const onCurrent = onOptions.some((o) => o.value === onValue) ? onValue : fallbackOn;
-  const option = onOptions.find((o) => o.value === onCurrent) ?? null;
+  const aimed = aim !== null && onOptions.some((o) => o.value === aim.value) ? aim : null;
+  const option = onOptions.find((o) => o.value === (aimed?.value ?? fallbackOn)) ?? null;
+  const aimT = aimed?.t ?? null;
+  const clearAim = () => {
+    setAim(null);
+    setSelected(null);
+    setRange(NO_RANGE);
+    setMarks([]);
+  };
+  /** The note's stage, `on`, scope, times and target line, read at `at` (the playhead now). */
+  const targetAt = (at: number) => {
+    const marked = hasRange && range.in !== null && range.out !== null ? { t: range.in, tOut: range.out } : null;
+    const t = marked ? marked.t : option?.t ?? aimT;
+    if (stage === "mix" || !option || option.on === null) {
+      const when = marked ? noteTime(marked.t, marked.tOut) : timecode(snap(at, fps), fps);
+      return { stage, on: option?.on ?? null, scope: (marked ? "range" : "point") as Scope, t: marked?.t ?? snap(at, fps), tOut: marked?.tOut ?? null, label: `${when} · ${title}` };
+    }
+    return noteTarget({ kind: "take", stage, on: option.on, name: option.full ?? option.label, t, tOut: marked?.tOut ?? null }, null, fps);
+  };
 
   // ---- the playhead, timecode and preview: refs, never per-frame state ----
   const root = useRef<HTMLDivElement>(null);
@@ -221,13 +234,11 @@ export function AudioStage(props: AudioStageProps) {
   const lastPaintT = useRef(0);
   const input = useRef<HTMLTextAreaElement>(null);
   const placeholderFor = (t: number) => {
-    if (scope === "whole") return stage === "voice" ? "Note on the whole read" : "Note on the whole track";
-    if (hasRange) {
-      if (range.in !== null && range.out === null) return "Set an Out point";
-      if (range.in !== null && range.out !== null) return `Note on ${noteTime(range.in, range.out)}`;
-      if (scope === "range") return "Set In and Out";
-    }
-    return `Note at ${fmt(option?.t ?? snap(t, fps))}`;
+    if (hasRange && range.in !== null && range.out === null) return "Set an Out point";
+    const target = targetAt(t);
+    if (target.scope === "whole") return stage === "voice" ? "Note on the whole read" : "Note on the whole track";
+    if (target.scope === "range") return `Note on ${noteTime(target.t, target.tOut)}`;
+    return `Note at ${fmt(target.t ?? snap(t, fps))}`;
   };
   const paint = (t: number) => {
     const len = engine.length;
@@ -279,7 +290,6 @@ export function AudioStage(props: AudioStageProps) {
   const setIn = () => {
     if (!hasRange) return;
     setRange({ in: snap(engine.time, fps), out: null });
-    setScope("range");
   };
   const setOut = () => {
     if (!hasRange) return;
@@ -287,31 +297,19 @@ export function AudioStage(props: AudioStageProps) {
     const start = range.in ?? 0;
     if (at <= start) return toast("Out has to come after In");
     setRange({ in: start, out: at });
-    setScope("range");
   };
   const clearRange = () => {
     setRange(NO_RANGE);
     setMarks([]);
-    if (scope === "range") setScope(baseScope);
-  };
-  const changeScope = (s: Scope) => {
-    // A tab that doesn't offer Range never enters it, whoever asks.
-    if (s === "range" && !hasRange) return;
-    setScope(s);
-    if (s !== "range") {
-      setRange(NO_RANGE);
-      setMarks([]);
-    }
   };
 
   // Clicking a lane selects it, auditions it at the playhead (a 4 ms gain ramp, the playhead
-  // untouched) and points the On menu at it.
-  const select = (row: StageRow) => {
+  // untouched) and makes its take the note's target: the whole take, or the point clicked (`t`).
+  const select = (row: StageRow, t: number | null = null) => {
     setSelected(row.key);
     // Heard in the click itself, not a render later.
     apply(plan(row.key));
-    selectedOn.current = row.on ?? null;
-    if (row.on) setOnValue(row.on);
+    if (row.on) setAim({ value: row.on, t: offersPoint ? t : null });
     props.onSelect?.(row);
   };
 
@@ -331,6 +329,7 @@ export function AudioStage(props: AudioStageProps) {
     else if (k === "i") setIn();
     else if (k === "o") setOut();
     else if (k === "n") { e.preventDefault(); input.current?.focus(); }
+    else if (k === "v" || e.key === "Escape") clearAim();
   };
   // Bound in a layout effect, so a key pressed straight after switching to the tab is never missed.
   useLayoutEffect(() => {
@@ -353,30 +352,22 @@ export function AudioStage(props: AudioStageProps) {
 
   // ---- notes ----
   const add = async (text: string) => {
-    let t: number | null = null;
-    let tOut: number | null = null;
-    if (scope === "range") {
-      if (range.in === null || range.out === null) throw new Error("set In and Out for a range");
-      t = range.in;
-      tOut = range.out;
-    } else if (scope === "point") {
-      // A note on a cue is saved at the cue's time (§17.4); otherwise at the playhead.
-      t = option?.t ?? snap(engine.time, fps);
-    }
+    if (hasRange && range.in !== null && range.out === null) throw new Error("set an Out point for the range");
+    // A note on a cue is saved at the cue's time (§17.4); a click on a lane, at the time clicked; else the whole take.
+    const target = targetAt(engine.time);
     await api.post("/api/notes", {
       stage,
       video: preview?.video ?? null,
       version: preview?.version ?? null,
-      on: option?.on ?? null,
-      scope,
-      t,
-      tOut,
+      on: target.on,
+      scope: target.scope,
+      t: target.t,
+      tOut: target.tOut,
       text,
-      marks: scope === "range" ? marks : [],
+      marks: target.scope === "range" ? marks : [],
     });
     setRange(NO_RANGE);
     setMarks([]);
-    setScope(baseScope);
     onChanged();
   };
 
@@ -393,6 +384,8 @@ export function AudioStage(props: AudioStageProps) {
   }
 
   const rangeLabel = range.in === null ? null : range.out === null ? `${fmt(range.in)} →` : noteTime(range.in, range.out);
+  // The target line, as of the last render (a point or a range does not move with the playhead; "this moment" waits for the next render).
+  const noteTarget_ = targetAt(engine.time);
 
   return (
     <div class="astage" ref={root}>
@@ -432,13 +425,10 @@ export function AudioStage(props: AudioStageProps) {
           range={range}
           onSelect={select}
           onSeek={(t, row, cue) => {
-            select(row);
+            select(row, snap(t, fps));
             // §23: a cue's label or tick also aims the note at that cue, so the next note lands on it at its time.
-            const aim = cue === undefined ? undefined : onOptions.find((o) => o.value === `c:${row.key}:${cue}`);
-            if (aim) {
-              selectedOn.current = aim.value;
-              setOnValue(aim.value);
-            }
+            const cueAim = cue === undefined ? undefined : onOptions.find((o) => o.value === `c:${row.key}:${cue}`);
+            if (cueAim) setAim({ value: cueAim.value, t: null });
             engine.seek(t);
           }}
           toast={toast}
@@ -472,7 +462,7 @@ export function AudioStage(props: AudioStageProps) {
             <div class="tcover" ref={pvTc}>{fmt(engine.time)}</div>
           </div>
         </div>
-        <Notes
+        <NotesPanel
           notes={notes}
           version={version}
           placeholder={placeholderFor(engine.time)}
@@ -483,10 +473,9 @@ export function AudioStage(props: AudioStageProps) {
           onTextChange={setNoteHasText}
           fixedTimes
           onSeek={(t) => engine.seek(t)}
-          on={{ options: onOptions, value: onCurrent, onChange: setOnValue }}
-          scope={{ value: scope, onChange: changeScope, options: props.scopes }}
-          chips={(props.chipsFor ?? (() => AUDIO_CHIPS[stage]))(scope)}
-          marks={props.marks === false ? undefined : { value: marks, onChange: setMarks }}
+          target={{ label: noteTarget_.label, onClear: aimed || selected || range.in !== null ? clearAim : undefined }}
+          chips={(props.chipsFor ?? (() => AUDIO_CHIPS[stage]))(noteTarget_.scope)}
+          marks={props.marks === false || noteTarget_.scope !== "range" ? undefined : { value: marks, onChange: setMarks }}
           onLabel={onLabel}
           readOnly={props.readOnly}
         />

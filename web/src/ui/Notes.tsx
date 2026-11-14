@@ -1,7 +1,7 @@
 import type { ComponentChildren, RefObject } from "preact";
 import { useRef, useState } from "preact/hooks";
 import { api, mediaUrl } from "../api.js";
-import { MARK_DB, type MarkKind, marksLabel, noteTime, onOptionGroups, type OnOption, placeNote, type Scope, scopeOptions, setMarkDb, shotLabel, toggleMark } from "../lib.js";
+import { MARK_DB, type MarkKind, marksLabel, noteTime, placeNote, setMarkDb, shotLabel, toggleMark } from "../lib.js";
 import type { Mark, Note } from "../types.js";
 import { FormatScope } from "./FormatScope.js";
 import { Icon } from "./Icon.js";
@@ -25,14 +25,11 @@ export interface NotesProps {
   onChanged(): void;
   /** Whether the note box has anything typed in it, so the player knows a note is pending. */
   onTextChange?(hasText: boolean): void;
-  // The audio tabs' extras (§17.1). All optional: Picture passes none of them and is unchanged.
-  /** The On menu: what the next note is about. */
-  on?: { options: OnOption[]; value: string | null; onChange(value: string): void };
-  /** The Point / Range / Whole switch. */
-  scope?: { value: Scope; onChange(scope: Scope): void; options?: Scope[] };
-  /** Quick-start chips: each puts "Chip: " in the note box, and never sends anything. */
+  /** §27, 5.7: the target line above the box, from the selection (noteTarget). */
+  target?: NoteTargetLine;
+  /** Quick-start chips (a take is the target): each puts "Chip: " in the note box, and never sends anything. */
   chips?: string[];
-  /** Quick marks, offered only while the scope is Range. */
+  /** Quick marks, offered while the target is a range on a take. */
   marks?: { value: Mark[]; onChange(marks: Mark[]): void };
   /** What a listed note is on ("B · Warm keys", "Cue · Swipe"), shown beside its time. */
   onLabel?(note: Note): string | null;
@@ -52,8 +49,15 @@ export interface NotesProps {
   listFooter?(filter: Filter): ComponentChildren;
   /** §26: a shelved film is looked at, not marked: the note box is hidden. */
   readOnly?: boolean;
-  /** §27, 5.6: a second way to send what is typed, under the box ("Note on the mix"), until the notes panel's target line. */
-  altAdd?: { label: string; onAdd(text: string): Promise<void> };
+}
+
+/** §27, 5.7: what the next note is about, named on the line above the box. */
+export interface NoteTargetLine {
+  label: string;
+  /** With nothing selected on the Timeline tab: "This frame" or "The whole mix". */
+  menu?: { value: "frame" | "mix"; onChange(value: "frame" | "mix"): void };
+  /** Lets go of the selection, back to the default target (also Esc in an empty note box). */
+  onClear?(): void;
 }
 
 /** §21.2 (4), §21.5: the composer's switch, for the format on screen. */
@@ -75,12 +79,11 @@ const MARK_KINDS: { kind: MarkKind; label: string }[] = [
   { kind: "louder", label: "Louder" },
   { kind: "quieter", label: "Quieter" },
 ];
-const onFull = (on: NonNullable<NotesProps["on"]>): string | undefined => on.options.find((o) => o.value === on.value)?.full;
 
 /** The notes column used on every tab: list, filter, done circles and the note box. */
 export function Notes({
-  notes, version, placeholder, attachments, inputRef, toast, onAdd, onSeek, onChanged, onTextChange, on, scope, chips, marks, onLabel, fixedTimes, selectedId,
-  formatTag, cardExtra, formatScope, listFooter, readOnly, altAdd,
+  notes, version, placeholder, attachments, inputRef, toast, onAdd, onSeek, onChanged, onTextChange, target, chips, marks, onLabel, fixedTimes, selectedId,
+  formatTag, cardExtra, formatScope, listFooter, readOnly,
 }: NotesProps) {
   const [filter, setFilter] = useState<Filter>("all");
   const ownInput = useRef<HTMLTextAreaElement>(null);
@@ -103,12 +106,12 @@ export function Notes({
     onChanged();
   };
 
-  const submit = async (add: (text: string) => Promise<void> = onAdd) => {
+  const submit = async () => {
     const value = text.trim();
     if (!value || busy) return;
     setBusy(true);
     try {
-      await add(value);
+      await onAdd(value);
       setText("");
       onTextChange?.(false);
     } catch (e) {
@@ -132,10 +135,8 @@ export function Notes({
   };
 
   return (
-    <aside class="panel side" aria-label="Notes">
+    <div class="panel side notes" role="region" aria-label="Notes">
       <div class="ph">
-        <h3>Notes</h3>
-        <span class="sp" />
         <div class="seg" role="group" aria-label="Filter notes">
           {(["all", "todo", "done"] as const).map((f) => (
             <button aria-pressed={filter === f} onClick={() => setFilter(f)}>
@@ -182,50 +183,42 @@ export function Notes({
         {footer}
       </div>
       <div class="comp" hidden={readOnly}>
-        {(on || scope) && (
-          <div class="row">
-            {on && (
-              // The selected entry's full name (its round, on Voiceover) as the tooltip. A <select>
-              // draws no ::after, so the wrapper shows it; the select carries it too, for reading.
-              <span class="onwrap" data-tip={onFull(on)}>
+        {target && (
+          <div class="row ntarget" role="group" aria-label="Note target">
+            {target.menu ? (
+              <span class="onwrap">
                 <select
-                  class="sel onsel"
-                  aria-label="Note on"
-                  data-tip={onFull(on)}
-                  value={on.value ?? ""}
+                  class="sel ntsel"
+                  aria-label="Aim the note at"
+                  value={target.menu.value}
                   onChange={(e) => {
                     const el = e.target as HTMLSelectElement;
-                    on.onChange(el.value);
+                    target.menu!.onChange(el.value === "mix" ? "mix" : "frame");
                     // So the keys go back to the transport rather than the menu.
                     el.blur();
                   }}
                 >
-                  {onOptionGroups(on.options).map((g) =>
-                    g.group === undefined
-                      ? g.options.map((o) => <option value={o.value}>{o.label}</option>)
-                      : <optgroup label={g.group}>{g.options.map((o) => <option value={o.value}>{o.label}</option>)}</optgroup>,
-                  )}
+                  <option value="frame">This frame</option>
+                  <option value="mix">The whole mix</option>
                 </select>
                 <Icon name="chev" />
               </span>
-            )}
-            <span class="sp" />
-            {scope && (
-              <div class="seg" role="group" aria-label="Scope">
-                {scopeOptions(scope.options).map((s) => (
-                  <button type="button" aria-pressed={scope.value === s.value} onClick={() => scope.onChange(s.value)}>{s.label}</button>
-                ))}
-              </div>
+            ) : null}
+            {!(target.menu && target.menu.value === "mix" && target.label === "The whole mix") && <span class="ntl tip-wrap" data-target="" data-tip={target.label}>{target.label}</span>}
+            {target.onClear && (
+              <button type="button" class="btn ghost ib sm ntclear" aria-label="Clear the selection · Esc" data-tip="Clear the selection · Esc" onClick={target.onClear}>
+                <Icon name="x" />
+              </button>
             )}
           </div>
         )}
-        {/* In Range, the marks row takes the chips' place, so the composer never grows by a row. */}
-        {chips && chips.length > 0 && !(marks && scope?.value === "range") && (
+        {/* With a range, the marks row takes the chips' place, so the composer never grows by a row. */}
+        {chips && chips.length > 0 && !marks && (
           <div class="row" role="group" aria-label="Start a note">
             {chips.map((c) => <button type="button" class="chip" onClick={() => begin(`${c}: `)}>{c}</button>)}
           </div>
         )}
-        {marks && scope?.value === "range" && (
+        {marks && (
           <div class="row" role="group" aria-label="Marks">
             {MARK_KINDS.map(({ kind, label }) => {
               const m = marks.value.find((x) => x.kind === kind);
@@ -286,20 +279,19 @@ export function Notes({
                 e.preventDefault();
                 void submit();
               }
-              if (e.key === "Escape") (e.target as HTMLTextAreaElement).blur();
+              if (e.key === "Escape") {
+                // An empty box lets go of the selection too (§27, 5.7), so the next note is on this frame again.
+                if (text.trim() === "") target?.onClear?.();
+                (e.target as HTMLTextAreaElement).blur();
+              }
             }}
           />
           <button class="btn primary ib sm send" data-tip="Add note  ↵" aria-label="Add note" onClick={() => void submit()}>
             <Icon name="send" />
           </button>
         </div>
-        {altAdd && (
-          <div class="row altadd">
-            <button type="button" class="btn sm" disabled={busy} onClick={() => void submit(altAdd.onAdd)}>{altAdd.label}</button>
-          </div>
-        )}
         {formatScope && <p class="fhint">{formatScope.hint}</p>}
       </div>
-    </aside>
+    </div>
   );
 }

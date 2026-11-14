@@ -197,7 +197,6 @@ export function Voice({ state, assets, video, toast, onChanged, onPendingChange 
       noteRow={(n) => voiceNoteRows(model, n)}
       onLabel={(n) => voiceOnLabel(model, n.on, nameOf)}
       scopes={SCOPES}
-      defaultScope="whole"
       chipsFor={(scope) => CHIPS[scope === "point" ? "point" : "whole"]}
       marks={false}
       toast={toast}

@@ -5,7 +5,7 @@ import { readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { makeWav } from "./fixtures/wav.js";
 import {
-  expect, type Rushes, test, openReviewTab, reviewTab, workspaceTab, currentFilm, pickFilm, videoReady, loudness, mixNoteButton, rangeChip, rulerMarkers, soundBlock, soundButton, soundTrack,
+  expect, type Rushes, test, openReviewTab, reviewTab, workspaceTab, currentFilm, pickFilm, videoReady, loudness, rangeChip, notesPanel, panelToggle, noteTargetLine, noteTargetMenu, clearTarget, rulerMarkers, soundBlock, soundButton, soundTrack,
 } from "./fixture.js";
 
 test("the generated WAV fixture decodes in Chromium to the tone it describes", async ({ page }) => {
@@ -132,17 +132,20 @@ test("only one bed is in use at a time, across rounds, and the timeline plays th
   await expect(soundTrack(page, "Music")).not.toContainText("Drift");
 });
 
-// Regression guard for AudioStage's per-tab scopes/chips/marks (Plan 3b Task 2): Music passes
-// none of the new props, so it must keep all three scopes, its In/Out buttons and its Range marks.
-test("Music still offers Point, Range and Whole, In/Out, and Range marks", async ({ page, rushes }) => {
+// Regression guard for AudioStage's per-tab notes (Plan 3b Task 2; §27, 5.7: the selection decides, not a switch): Music
+// takes a note on a whole bed, a point on it and a range on it, keeps its In/Out buttons and its Range marks.
+test("Music takes notes on a whole bed, a point and a range, with In/Out and Range marks", async ({ page, rushes }) => {
   await twoBeds(page, rushes);
-  const scopeGroup = page.getByRole("group", { name: "Scope" });
-  await expect(scopeGroup.getByRole("button", { name: "Point" })).toBeVisible();
-  await expect(scopeGroup.getByRole("button", { name: "Range" })).toBeVisible();
-  await expect(scopeGroup.getByRole("button", { name: "Whole" })).toBeVisible();
+  await page.getByRole("button", { name: "B · Warm keys", exact: true }).click();
+  await expect(noteTargetLine(page)).toHaveText("Music · B · Warm keys");
+  await clickLaneAt(page, "music/b-warm-keys", 1);
+  await expect(noteTargetLine(page)).toContainText(/^00:00:01:00 · Music · B · Warm keys/);
   await expect(page.getByRole("button", { name: "Set in point" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Set out point" })).toBeVisible();
-  await scopeGroup.getByRole("button", { name: "Range" }).click();
+  await page.keyboard.press("i");
+  for (let i = 0; i < 10; i++) await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("o");
+  await expect(noteTargetLine(page)).toContainText("–");
   await expect(page.getByRole("group", { name: "Marks" })).toBeVisible();
 });
 
@@ -170,8 +173,8 @@ test("switching beds mid-play doesn't move the playhead", async ({ page, rushes 
   await expect(page.locator('.lane[data-row="music/b-warm-keys"]')).toHaveAttribute("aria-current", "true");
   // Auditioning doesn't change the pick.
   expect((await rushes.api("GET", "/api/picks")).lanes).toEqual({});
-  // The On menu follows the lane you clicked.
-  await expect(page.getByRole("combobox", { name: "Note on" }).locator("option:checked")).toHaveText("B · Warm keys");
+  // The note's target follows the lane you clicked.
+  await expect(noteTargetLine(page)).toHaveText("Music · B · Warm keys");
 });
 
 test("a range note with Fall and Quieter 3 dB saves its marks and draws on its lane", async ({ page, rushes }) => {
@@ -182,7 +185,8 @@ test("a range note with Fall and Quieter 3 dB saves its marks and draws on its l
   for (let i = 0; i < 30; i++) await page.keyboard.press("ArrowRight");
   await page.keyboard.press("o");
   await expect(page.locator(".bar .chipx")).toContainText("0:00.50–0:01.50");
-  await expect(page.getByRole("group", { name: "Scope" }).getByRole("button", { name: "Range" })).toHaveAttribute("aria-pressed", "true");
+  await expect(noteTargetLine(page)).toContainText("– ");
+  await expect(noteTargetLine(page)).toContainText("Music · B · Warm keys");
   const marks = page.getByRole("group", { name: "Marks" });
   await marks.getByRole("button", { name: "Fall" }).click();
   await marks.getByRole("button", { name: "Quieter" }).click();
@@ -202,13 +206,15 @@ test("a range note with Fall and Quieter 3 dB saves its marks and draws on its l
   await expect(page.locator(".note .on")).toHaveText("B · Warm keys");
   await expect(page.locator(`.lane[data-row="music/b-warm-keys"] .span[data-note="${notes[0].id}"]`)).toHaveCount(1);
   await expect(page.locator(`.lane[data-row="music/a-deep-house"] [data-note]`)).toHaveCount(0);
-  // The composer is back to a point note with no marks showing.
+  // The range is used up: the composer is back to the bed, whole, with no marks showing.
   await expect(page.getByRole("group", { name: "Marks" })).toHaveCount(0);
+  await expect(noteTargetLine(page)).toHaveText("Music · B · Warm keys");
 });
 
 test("a whole note sends no time and is listed but not drawn", async ({ page, rushes }) => {
   await twoBeds(page, rushes);
-  await page.getByRole("group", { name: "Scope" }).getByRole("button", { name: "Whole" }).click();
+  // Nothing clicked: the note is on the first bed, whole.
+  await expect(noteTargetLine(page)).toHaveText("Music · A · Deep house");
   await page.getByRole("button", { name: "Tempo" }).click();
   await expect(page.getByRole("textbox", { name: "New note" })).toHaveValue("Tempo: ");
   await page.keyboard.type("110 BPM, keep the bassline.");
@@ -258,7 +264,9 @@ test("Sound effects labels cues, and a note on a cue saves the cue and its time"
   await loaded(page, 2);
   await expect(page.locator('.lane[data-row="sfx/pass-a"] .cue')).toHaveText(["Whoosh", "Swipe"]);
   await expect(page.locator('.lane[data-row="sfx/pass-a"] [data-meta]')).toHaveText("Subtle · 2 cues");
-  await page.getByRole("combobox", { name: "Note on" }).selectOption({ label: "Cue · Swipe" });
+  // A cue's label aims the note at that cue, at its time.
+  await page.locator('.lane[data-row="sfx/pass-a"] .cue', { hasText: "Swipe" }).click();
+  await expect(noteTargetLine(page)).toHaveText(/^00:00:01:\d\d · Effects · Cue · Swipe$/);
   await page.keyboard.press("n");
   await page.keyboard.type("Lands three frames late.");
   await page.keyboard.press("Enter");
@@ -394,7 +402,8 @@ test("a note on a cue two passes share names its pass, and an old bare cue id st
   await openReviewTab(page, "Effects");
   await loaded(page, 2);
   await expect(page.locator(`.lane[data-row="sfx/pass-a"] .mk[data-note="${old.id}"]`)).toHaveCount(1);
-  await page.getByRole("combobox", { name: "Note on" }).selectOption({ label: "Cue · Swipe · Pass B" });
+  await page.locator('.lane[data-row="sfx/pass-b"] .cue', { hasText: "Swipe" }).click();
+  await expect(noteTargetLine(page)).toContainText("Effects · Cue · Swipe · Pass B");
   await page.keyboard.press("n");
   await page.keyboard.type("Too bright on B.");
   await page.keyboard.press("Enter");
@@ -425,12 +434,14 @@ test("the notes column shows three marked notes in full above the composer, at 1
   await expect(page.locator(".note")).toHaveCount(3);
   const comp = page.locator(".comp");
   const pointHeight = (await comp.boundingBox())!.height;
-  // Range swaps the chips for the marks: the composer doesn't grow.
-  await page.getByRole("group", { name: "Scope" }).getByRole("button", { name: "Range" }).click();
+  // A range swaps the chips for the marks: the composer doesn't grow.
+  await page.keyboard.press("i");
+  for (let i = 0; i < 10; i++) await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("o");
   await expect(page.getByRole("group", { name: "Marks" })).toBeVisible();
   await expect(page.getByRole("group", { name: "Start a note" })).toHaveCount(0);
   expect(Math.abs((await comp.boundingBox())!.height - pointHeight)).toBeLessThanOrEqual(1);
-  const list = (await page.locator(".side .list").boundingBox())!;
+  const list = (await notesPanel(page).locator(".list").boundingBox())!;
   const compTop = (await comp.boundingBox())!.y;
   for (let i = 0; i < 3; i++) {
     const box = (await page.locator(".note").nth(i).boundingBox())!;
@@ -560,7 +571,13 @@ async function openVoice(page: Page, rushes: Rushes, files: number) {
   await loaded(page, files);
 }
 
-const onMenu = (page: Page) => page.getByRole("combobox", { name: "Note on" });
+/** §27, 5.7: a click on a lane's track at `t` seconds: its take becomes the note's target, at that point. */
+async function clickLaneAt(page: Page, row: string, t: number) {
+  const track = page.locator(`.lane[data-row="${row}"] .track`);
+  const r = (await track.boundingBox())!;
+  const length = await page.evaluate(() => window.__rushesAudio!.engine!.length);
+  await page.mouse.click(r.x + (r.width * t) / length, r.y + r.height / 2);
+}
 
 test("Voiceover shows the current round open under its name, and an older round folded into one row", async ({ page, rushes }) => {
   await twoRounds(rushes);
@@ -591,7 +608,7 @@ test("Voiceover shows the current round open under its name, and an older round 
   await fold.click();
   await expect(page.locator(".lane")).toHaveCount(2);
   await expect.poll(() => heard(page)).toEqual([`${R2_ID}/more-excited@0`]);
-  await expect(onMenu(page).locator("option:checked")).toHaveText("more excited");
+  await expect(noteTargetLine(page)).toHaveText(`Voice · ${R2} · more excited`);
 });
 
 test("Voiceover decodes only what you can reach; folding mid-play never restarts the heard read (§19.8)", async ({ page, rushes }) => {
@@ -745,12 +762,11 @@ test("Voiceover plays one read at a time: the current round's first, then a clic
   expect(await heard(page)).toEqual([`${R2_ID}/more-sombre@0`]);
 });
 
-test("Voiceover notes are Whole or Point, Whole first: no In/Out, no ranges, and chips for each scope", async ({ page, rushes }) => {
+test("Voiceover notes are on a whole read or a point on it, whole first: no In/Out, no ranges, and chips for each", async ({ page, rushes }) => {
   await twoRounds(rushes);
   await openVoice(page, rushes, 2);
-  const scope = page.getByRole("group", { name: "Scope" });
-  await expect(scope.getByRole("button")).toHaveText(["Whole", "Point"]);
-  await expect(scope.getByRole("button", { name: "Whole" })).toHaveAttribute("aria-pressed", "true");
+  // Nothing clicked: the whole of the current round's first read.
+  await expect(noteTargetLine(page)).toHaveText(`Voice · ${R2} · more excited`);
   await expect(page.getByRole("button", { name: "Set in point" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Set out point" })).toHaveCount(0);
   // I and O do nothing here.
@@ -760,34 +776,34 @@ test("Voiceover notes are Whole or Point, Whole first: no In/Out, no ranges, and
   await page.keyboard.press("o");
   await expect(page.locator(".bar .chipx")).toHaveCount(0);
   await expect(page.locator(".lane .span")).toHaveCount(0);
-  await expect(scope.getByRole("button", { name: "Whole" })).toHaveAttribute("aria-pressed", "true");
+  await expect(noteTargetLine(page)).toHaveText(`Voice · ${R2} · more excited`);
   const chips = page.getByRole("group", { name: "Start a note" }).getByRole("button");
   await expect(chips).toHaveText(["Speaker", "Pacing", "Tone", "Overall"]);
-  await scope.getByRole("button", { name: "Point" }).click();
+  // A click on the read's lane: a point on it, with the point's chips.
+  await clickLaneAt(page, `${R2_ID}/more-excited`, 1);
+  await expect(noteTargetLine(page)).toContainText(/^00:00:01:00 · Voice/);
   await expect(chips).toHaveText(["Fix this", "Keep this"]);
   await expect(page.getByRole("group", { name: "Marks" })).toHaveCount(0);
 });
 
-test("a Point note draws on its read's lane only; a Whole note is listed and not drawn", async ({ page, rushes }) => {
+test("a point note draws on its read's lane only; a whole note is listed and not drawn", async ({ page, rushes }) => {
   await twoRounds(rushes);
   await openVoice(page, rushes, 2);
-  const scope = page.getByRole("group", { name: "Scope" });
-  await page.getByRole("button", { name: "more excited", exact: true }).click();
-  await page.evaluate(() => window.__rushesAudio!.engine!.seek(1.5));
-  await scope.getByRole("button", { name: "Point" }).click();
+  await clickLaneAt(page, `${R2_ID}/more-excited`, 1.5);
+  await expect(noteTargetLine(page)).toContainText("Voice");
   await page.keyboard.press("n");
   await page.keyboard.type("Clipped word here.");
   await page.keyboard.press("Enter");
   await expect(page.locator(".note")).toHaveCount(1);
   let { notes } = await rushes.api("GET", "/api/notes?stage=voice");
-  expect(notes[0]).toMatchObject({ stage: "voice", scope: "point", on: `${R2_ID}/more-excited`, t: 1.5 });
+  expect(notes[0]).toMatchObject({ stage: "voice", scope: "point", on: `${R2_ID}/more-excited` });
+  expect(notes[0].t).toBeCloseTo(1.5, 1);
   await expect(page.locator(`.lane[data-row="${R2_ID}/more-excited"] .mk[data-note="${notes[0].id}"]`)).toHaveCount(1);
   await expect(page.locator(`.lane [data-note="${notes[0].id}"]`)).toHaveCount(1);
   await expect(page.locator(`.note[data-note="${notes[0].id}"] .on`)).toHaveText("more excited");
-  // A note sent, the scope goes back to Whole.
-  await expect(scope.getByRole("button", { name: "Whole" })).toHaveAttribute("aria-pressed", "true");
-
+  // Its name clicked, a read is the target whole.
   await page.getByRole("button", { name: "more sombre", exact: true }).click();
+  await expect(noteTargetLine(page)).toHaveText(`Voice · ${R2} · more sombre`);
   await page.keyboard.press("n");
   await page.keyboard.type("A touch slow overall.");
   await page.keyboard.press("Enter");
@@ -807,34 +823,38 @@ test("Blind on Voiceover names reads Read 1…n and never reveals an older round
   await expect(page.locator(".lane [data-meta]")).toHaveText(["·····", "·····"]);
   await expect(page.locator(".fold")).toContainText("picked a read");
   await expect(page.locator(".fold")).not.toContainText("Gerald");
-  // Each round's reads sit under the round's name, so two "Read 1"s are never confused.
-  await expect(onMenu(page).locator("optgroup")).toHaveCount(2);
-  expect(await onMenu(page).locator("optgroup").evaluateAll((gs) => gs.map((g) => g.getAttribute("label")))).toEqual([R2, R1]);
-  await expect(onMenu(page).locator("optgroup").nth(0).locator("option")).toHaveText(["Read 1", "Read 2"]);
-  await expect(onMenu(page).locator("optgroup").nth(1).locator("option")).toHaveText(["Read 1", "Read 2", "Read 3"]);
+  // The note's target names a read's round, so two "Read 1"s are never confused, and never its real name.
+  await expect(noteTargetLine(page)).toHaveText(new RegExp(`^Voice · ${R2} · Read \\d$`));
+  await expect(noteTargetLine(page)).not.toContainText("excited");
   // Opened, the older round's reads are blind too.
   await page.locator(".fold").click();
   await expect(page.locator(".lane [data-name]")).toHaveText(["Read 1", "Read 2", "Read 1", "Read 2", "Read 3"]);
+  await page.locator(".lane [data-name]").nth(2).click();
+  await expect(noteTargetLine(page)).toHaveText(`Voice · ${R1} · Read 1`);
+  await expect(noteTargetLine(page)).not.toContainText("Jane");
   await page.getByRole("button", { name: "Blind" }).click();
   await expect(page.locator(".fold")).toContainText("picked Gerald");
 });
 
-test("two rounds that both hold a Gerald list him twice in the On menu, each under its own round", async ({ page, rushes }) => {
+test("two rounds that both hold a Gerald are told apart by the note's target, each by its own round", async ({ page, rushes }) => {
   const R3 = "Round 3 · Gerald, fixes";
   await rushes.addVariant("voice", "Jane", { round: R1, seconds: 4, freq: 220 });
   await rushes.addVariant("voice", "Gerald", { round: R1, seconds: 4, freq: 262 });
   await rushes.addVariant("voice", "Gerald", { round: R3, seconds: 4, freq: 294 });
   await openVoice(page, rushes, 1);
-  const groups = onMenu(page).locator("optgroup");
-  expect(await groups.evaluateAll((gs) => gs.map((g) => g.getAttribute("label")))).toEqual([R3, R1]);
-  await expect(groups.nth(0).locator("option")).toHaveText(["Gerald"]);
-  await expect(groups.nth(1).locator("option")).toHaveText(["Jane", "Gerald"]);
-  // Choosing the older round's Gerald from the menu files the note on that round's read.
-  await onMenu(page).selectOption({ value: "v:round-1-voices/gerald" });
-  await expect(onMenu(page)).toHaveAttribute("data-tip", `${R1} · Gerald`);
+  await expect(noteTargetLine(page)).toHaveText(`Voice · ${R3} · Gerald`);
+  // The older round's Gerald, picked by his lane, files the note on that round's read.
+  await page.locator(".fold").click();
+  await page.locator('.lane[data-row="round-1-voices/gerald"] .nm').click();
+  await expect(noteTargetLine(page)).toHaveText(`Voice · ${R1} · Gerald`);
+  await page.keyboard.press("n");
+  await page.keyboard.type("Warmer.");
+  await page.keyboard.press("Enter");
+  await expect.poll(async () => (await rushes.api("GET", "/api/notes?stage=voice")).notes.length).toBe(1);
+  expect((await rushes.api("GET", "/api/notes?stage=voice")).notes[0]).toMatchObject({ on: "round-1-voices/gerald", scope: "whole" });
 });
 
-test("a cut-off read description shows in full as a tooltip, and the On menu's tooltip names the round", async ({ page, rushes }) => {
+test("a cut-off read description shows in full as a tooltip, and the note's target names the round", async ({ page, rushes }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await twoRounds(rushes, { steadier: true });
   await openVoice(page, rushes, 3);
@@ -844,8 +864,7 @@ test("a cut-off read description shows in full as a tooltip, and the On menu's t
   await expect(page.locator(`.lane[data-row="${R2_ID}/more-sombre"] [data-meta]`)).not.toHaveAttribute("data-tip");
   await expect(page.locator(`.lane[data-row="${R2_ID}/more-sombre"] [data-name]`).locator("..")).not.toHaveAttribute("data-tip");
   await page.getByRole("button", { name: "more sombre", exact: true }).click();
-  await expect(onMenu(page).locator("option:checked")).toHaveText("more sombre");
-  await expect(onMenu(page)).toHaveAttribute("data-tip", `${R2} · more sombre`);
+  await expect(noteTargetLine(page)).toHaveText(`Voice · ${R2} · more sombre`);
 });
 
 test("a cut-off description's tooltip isn't clipped by the name column's ellipsis", async ({ page, rushes }) => {
@@ -875,9 +894,10 @@ test("an older Range note on a read draws on Voiceover as a point at its In, nev
   await expect(row.locator(`.span[data-note="${note.id}"]`)).toHaveCount(0);
 });
 
-test("a cut-off round heading, fold row and On menu name show in full as tooltips, inside the window", async ({ page, rushes }) => {
-  // A narrow window, and long round names (64 characters: a lane id, the name slugged, holds no more).
-  await page.setViewportSize({ width: 1024, height: 900 });
+test("a cut-off round heading, fold row and the note's target show in full as tooltips, inside the window", async ({ page, rushes }) => {
+  // A narrow window, and long round names (64 characters: a lane id, the name slugged, holds no more). Under 1100 px the
+  // notes panel is a drawer, so the lanes have the window's width: 600 px cuts the names short.
+  await page.setViewportSize({ width: 600, height: 900 });
   const OLD = `Round 1 · ${"WARM, MELLOW, MOODY MALE VOICES ".repeat(2)}`.slice(0, 64).trim();
   const NEW = `Round 2 · ${"WOMEN'S VOICES, WARMER, SLOWER, MORE WONDER ".repeat(2)}`.slice(0, 64).trim();
   await rushes.addVariant("voice", "Gerald", { round: OLD, seconds: 4, freq: 262 });
@@ -894,9 +914,11 @@ test("a cut-off round heading, fold row and On menu name show in full as tooltip
     expect(await el.evaluate((e) => getComputedStyle(e, "::after").whiteSpace)).toBe("normal");
   }
   await page.getByRole("button", { name: "more sombre", exact: true }).click();
-  const on = page.locator(".onwrap");
-  await expect(on).toHaveAttribute("data-tip", `${NEW} · more sombre`);
-  // The On menu's tooltip wraps and stays inside the window rather than running off its right edge.
+  await panelToggle(page).click();
+  const on = noteTargetLine(page).locator(".ntl");
+  await expect(on).toHaveAttribute("data-tip", `Voice · ${NEW} · more sombre`);
+  await on.hover();
+  // The target's tooltip wraps and stays inside the window rather than running off its right edge.
   const box = await on.evaluate((e) => {
     const after = getComputedStyle(e, "::after");
     return { left: e.getBoundingClientRect().left, width: parseFloat(after.width), ws: after.whiteSpace, vw: window.innerWidth };
@@ -966,20 +988,19 @@ test("a read added with no round shows under a Voiceover heading, and older note
   expect(errors).toEqual([]);
 });
 
-test("another film starts Voiceover's notes on Whole again", async ({ page, rushes }) => {
+test("another film starts Voiceover's notes on the whole read again", async ({ page, rushes }) => {
   await rushes.addCut("hero", "Hero");
   await rushes.addCut("cutdown", "Cutdown");
   await twoRounds(rushes, { video: ["Hero", "Cutdown"] });
   await openVoice(page, rushes, 2);
-  const scope = page.getByRole("group", { name: "Scope" });
-  await scope.getByRole("button", { name: "Point" }).click();
-  await expect(scope.getByRole("button", { name: "Point" })).toHaveAttribute("aria-pressed", "true");
+  await clickLaneAt(page, `${R2_ID}/more-sombre`, 1);
+  await expect(noteTargetLine(page)).toContainText(/^00:00:01:00 · Voice · .* · more sombre$/);
   await page.keyboard.press("]");
   await expect(currentFilm(page)).toHaveText("Cutdown");
-  await expect(scope.getByRole("button", { name: "Whole" })).toHaveAttribute("aria-pressed", "true");
+  await expect(noteTargetLine(page)).toHaveText(`Voice · ${R2} · more excited`);
 });
 
-test("another film starts Voiceover's notes on Whole again, even when neither film has a cut", async ({ page, rushes }) => {
+test("another film starts Voiceover's notes on the whole read again, even when neither film has a cut", async ({ page, rushes }) => {
   await twoRounds(rushes);
   // Two films with no cut yet, as a hand edit of the project file can leave them: no preview at all.
   const file = join(rushes.root, ".rushes", "project.json");
@@ -995,12 +1016,11 @@ test("another film starts Voiceover's notes on Whole again, even when neither fi
   await openVoice(page, rushes, 2);
   await expect(currentFilm(page)).toHaveText("Hero");
   await expect(page.getByLabel("No cut yet")).toBeVisible();
-  const scope = page.getByRole("group", { name: "Scope" });
-  await scope.getByRole("button", { name: "Point" }).click();
-  await expect(scope.getByRole("button", { name: "Point" })).toHaveAttribute("aria-pressed", "true");
+  await clickLaneAt(page, `${R2_ID}/more-sombre`, 1);
+  await expect(noteTargetLine(page)).toContainText(/^00:00:01:00 · Voice · .* · more sombre$/);
   await page.keyboard.press("]");
   await expect(currentFilm(page)).toHaveText("Cutdown");
-  await expect(scope.getByRole("button", { name: "Whole" })).toHaveAttribute("aria-pressed", "true");
+  await expect(noteTargetLine(page)).toHaveText(`Voice · ${R2} · more excited`);
 });
 
 test("a round whose reads are all missing shows the missing marks and plays silence", async ({ page, rushes }) => {
@@ -1046,22 +1066,24 @@ test("Unpick clears a pick: In use goes back to Use, and the pick is gone from d
 
 // ---- One definition of pending (Task 5) ----
 
-test("marks ticked without a range hold the film, as text and a range do", async ({ page, rushes }) => {
+test("marks ticked on a range hold the film, as text and the range do", async ({ page, rushes }) => {
   await rushes.addCut("hero", "Hero");
   await rushes.addCut("cutdown", "Cutdown");
   await rushes.addVariant("music", "Bed", { seconds: 2, freq: 220, video: ["Hero", "Cutdown"] });
   await page.goto(rushes.testUrl());
   await openReviewTab(page, "Music");
   await loaded(page, 1);
-  await page.getByRole("group", { name: "Scope" }).getByRole("button", { name: "Range" }).click();
+  await page.keyboard.press("i");
+  for (let i = 0; i < 10; i++) await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("o");
   await page.getByRole("group", { name: "Marks" }).getByRole("button", { name: "Fall" }).click();
-  await expect(page.locator(".bar .chipx")).toHaveCount(0);
   await page.keyboard.press("]");
   await expect(page.getByRole("status")).toHaveText("Add or clear your note on Hero first");
   await expect(currentFilm(page)).toHaveText("Hero");
   await expect(page.getByRole("group", { name: "Marks" }).getByRole("button", { name: "Fall" })).toHaveAttribute("aria-pressed", "true");
-  // Untick it and the film can go.
-  await page.getByRole("group", { name: "Marks" }).getByRole("button", { name: "Fall" }).click();
+  // Clear the range (its marks go with it) and the film can go.
+  await page.locator(".bar .chipx").getByRole("button", { name: "Clear range" }).click();
+  await expect(page.getByRole("group", { name: "Marks" })).toHaveCount(0);
   await page.keyboard.press("]");
   await expect(currentFilm(page)).toHaveText("Cutdown");
 });
@@ -1091,7 +1113,8 @@ test("switching tab, by 1–7 or by a click, refuses to drop a pending audio not
   await expect(reviewTab(page, "Music")).toHaveAttribute("aria-selected", "true");
 
   // Marks and half-typed text survive the refused switch, exactly as they were.
-  await page.getByRole("group", { name: "Scope" }).getByRole("button", { name: "Range" }).click();
+  for (let i = 0; i < 10; i++) await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("o");
   await page.getByRole("group", { name: "Marks" }).getByRole("button", { name: "Fall" }).click();
   await page.keyboard.press("n");
   await page.keyboard.type("Half a thought");
@@ -1344,40 +1367,51 @@ test("the Voice row plays the read in use, matching the server (§18.4, §27.6)"
   await expect.poll(() => heard(page)).toEqual(["music/warm-keys@0", "sfx/pass-a@0"]);
 });
 
-test("notes on the mix: Note on the mix saves a range or a point on the whole mix, listed with the picture's and marked on the ruler", async ({ page, rushes }) => {
+test("Mix notes: a range on Music with Quieter 3 dB, written through the target line, is saved on the bed and spans its row; the whole mix is a menu away", async ({ page, rushes }) => {
   const { bed } = await mixProject(page, rushes);
-  // One the Mix tab saved on Music, before the desk: listed with what it is on.
+  // One the Mix tab saved on Music, before the desk: still listed with what it is on and its marks, and drawn on its row.
   const old = (await rushes.api("POST", "/api/notes", { stage: "mix", video: "hero", on: `${bed.lane.id}/${bed.variant.id}`, scope: "range", t: 0.5, tOut: 1, marks: [{ kind: "quieter", db: 3 }], text: "Music creeps up under the line." })).note;
   await openMix(page, rushes, 3);
   await expect(page.locator(`.note[data-note="${old.id}"] .on`)).toHaveText("Music · Warm keys");
   await expect(page.locator(`.note[data-note="${old.id}"] .nmarks`)).toHaveText("Quieter 3 dB");
+  await expect(soundTrack(page, "Music").locator(`.span[data-note="${old.id}"]`)).toHaveCount(1);
 
+  // The bed, picked by its row's name, then a range marked: the note is a range on the bed, with its marks.
+  await soundTrack(page, "Music").getByRole("button", { name: "Music: note on the whole take" }).click();
   await seekPicture(page, 1);
   await page.keyboard.press("i");
   await seekPicture(page, 2);
   await page.keyboard.press("o");
   await expect(rangeChip(page)).toBeVisible();
+  await expect(noteTargetLine(page)).toContainText("00:00:01:00–00:00:02:00 · Music · Warm keys");
+  const marks = notesPanel(page).getByRole("group", { name: "Marks" });
+  await marks.getByRole("button", { name: "Quieter" }).click();
+  await expect(notesPanel(page).getByRole("combobox", { name: "Quieter by" })).toHaveValue("3");
   await page.keyboard.press("n");
   await page.keyboard.type("Too busy here.");
-  await mixNoteButton(page).click();
+  await page.keyboard.press("Enter");
   await expect(page.locator(".note")).toHaveCount(2);
-  let { notes } = await rushes.api("GET", "/api/notes?stage=mix");
-  const range = notes.find((n: { text: string }) => n.text === "Too busy here.");
-  expect(range).toMatchObject({ stage: "mix", on: null, scope: "range", t: 1, tOut: 2, marks: [] });
-  await expect(page.locator(`.note[data-note="${range.id}"] .on`)).toHaveText("Whole mix");
+  const range = (await rushes.api("GET", "/api/notes?stage=music")).notes.find((n: { text: string }) => n.text === "Too busy here.");
+  expect(range).toMatchObject({ stage: "music", on: `${bed.lane.id}/${bed.variant.id}`, scope: "range", t: 1, tOut: 2, marks: [{ kind: "quieter", db: 3 }] });
+  await expect(page.locator(`.note[data-note="${range.id}"] .on`)).toHaveText("Music · Warm keys");
+  await expect(page.locator(`.note[data-note="${range.id}"] .nmarks`)).toHaveText("Quieter 3 dB");
+  await expect(soundTrack(page, "Music").locator(`.span[data-note="${range.id}"]`)).toHaveCount(1);
+  await expect(soundTrack(page, "Voice").locator(".span, .mk")).toHaveCount(0);
   // The range is used up by the note, as a picture note uses it.
   await expect(rangeChip(page)).toHaveCount(0);
 
+  // Let go of the bed: the menu offers the whole mix, which is saved as a whole-mix note is.
+  await clearTarget(page).click();
+  await noteTargetMenu(page).selectOption({ label: "The whole mix" });
   await page.getByRole("textbox", { name: "New note" }).click();
   await page.keyboard.type("A touch quiet overall.");
-  await mixNoteButton(page).click();
+  await page.keyboard.press("Enter");
   await expect(page.locator(".note")).toHaveCount(3);
-  ({ notes } = await rushes.api("GET", "/api/notes?stage=mix"));
-  const point = notes.find((n: { text: string }) => n.text === "A touch quiet overall.");
-  expect(point).toMatchObject({ on: null, scope: "point", t: 2, marks: [] });
-  // Each is a marker on the ruler, with the picture's notes.
-  await expect(rulerMarkers(page)).toHaveCount(3);
-  // Enter still adds a picture note.
+  const whole = (await rushes.api("GET", "/api/notes?stage=mix")).notes.find((n: { text: string }) => n.text === "A touch quiet overall.");
+  expect(whole).toMatchObject({ on: null, scope: "whole", t: null, marks: [] });
+  await expect(page.locator(`.note[data-note="${whole.id}"] .on`)).toHaveText("Whole mix");
+  // This frame again: Enter adds a picture note.
+  await noteTargetMenu(page).selectOption({ label: "This frame" });
   await page.getByRole("textbox", { name: "New note" }).click();
   await page.keyboard.type("Frame is soft.");
   await page.keyboard.press("Enter");
@@ -1385,7 +1419,7 @@ test("notes on the mix: Note on the mix saves a range or a point on the whole mi
   expect((await rushes.api("GET", "/api/notes?stage=picture")).notes).toHaveLength(1);
 });
 
-test("a Mix note on an SFX pass named like the music bed is listed on Sound effects, and an old bare id on Music", async ({ page, rushes }) => {
+test("a Mix note on an SFX pass named like the music bed is marked on the Effects row, and an old bare id on Music", async ({ page, rushes }) => {
   await rushes.addCut();
   const bed = await rushes.addVariant("music", "Option A", { seconds: 4, freq: 330 });
   const pass = await rushes.addVariant("sfx", "Option A", { seconds: 4, freq: 880 });
@@ -1393,12 +1427,31 @@ test("a Mix note on an SFX pass named like the music bed is listed on Sound effe
   await rushes.api("PUT", "/api/picks", { video: "hero", lanes: { [bed.lane.id]: bed.variant.id, [pass.lane.id]: pass.variant.id } });
   // A note saved before `on` was lane-qualified: on Music, the first lane heard with that id.
   const old = (await rushes.api("POST", "/api/notes", { stage: "mix", on: "option-a", scope: "point", t: 1, text: "Old style." })).note;
-  const added = (await rushes.api("POST", "/api/notes", { stage: "mix", video: "hero", on: "sfx/option-a", scope: "point", t: 2, text: "Too loud here." })).note;
+  // One the Mix tab saved on the pass, lane-qualified.
+  const mixed = (await rushes.api("POST", "/api/notes", { stage: "mix", video: "hero", on: "sfx/option-a", scope: "point", t: 3, text: "Mix tab's note." })).note;
   await page.goto(rushes.testUrl());
   await videoReady(page);
   await loaded(page, 2);
   await expect(page.locator(`.note[data-note="${old.id}"] .on`)).toHaveText("Music · Option A");
-  await expect(page.locator(`.note[data-note="${added.id}"] .on`)).toHaveText("Sound effects · Option A");
+  await expect(soundTrack(page, "Music").locator(`.mk[data-note="${old.id}"]`)).toHaveCount(1);
+  await expect(page.locator(`.note[data-note="${mixed.id}"] .on`)).toHaveText("Sound effects · Option A");
+  await expect(soundTrack(page, "Effects").locator(`.mk[data-note="${mixed.id}"]`)).toHaveCount(1);
+  // A note on the pass, written through the target line: a click on the Effects row's block at 2 s.
+  const lane = soundTrack(page, "Effects").locator(".tlane");
+  const r = (await lane.boundingBox())!;
+  const dur = await page.locator("video").evaluate((v: HTMLVideoElement) => v.duration);
+  await page.mouse.click(r.x + (r.width * 2) / dur, r.y + r.height / 2);
+  await expect(noteTargetLine(page)).toContainText("Effects · Option A");
+  await page.getByRole("textbox", { name: "New note" }).fill("Too loud here.");
+  await page.getByRole("textbox", { name: "New note" }).press("Enter");
+  await expect.poll(async () => (await rushes.api("GET", "/api/notes?stage=sfx")).notes.length).toBe(1);
+  const added = (await rushes.api("GET", "/api/notes?stage=sfx")).notes[0];
+  expect(added).toMatchObject({ stage: "sfx", on: `${pass.lane.id}/${pass.variant.id}`, scope: "point" });
+  expect(added.t).toBeGreaterThan(1.8);
+  expect(added.t).toBeLessThan(2.2);
+  await expect(page.locator(`.note[data-note="${added.id}"] .on`)).toHaveText("Effects · Option A");
+  await expect(soundTrack(page, "Effects").locator(`.mk[data-note="${added.id}"]`)).toHaveCount(1);
+  await expect(soundTrack(page, "Music").locator(`.mk[data-note="${added.id}"]`)).toHaveCount(0);
 });
 
 // ---- Levels (§19.6, Plan 4 Task 2) ----
@@ -1705,7 +1758,9 @@ test("Space plays after a mouse click on a tab, M, S, Blind or a scope chip (§1
   await button("Blind").click();
   await expect(button("Blind")).toHaveAttribute("aria-pressed", "true");
   await spaceToggles(page);
-  await page.getByRole("group", { name: "Scope" }).getByRole("button", { name: "Whole" }).click();
+  // A lane picked as the note's target, then let go of by the target line's own button.
+  await page.locator(".lane .nm").first().click();
+  await clearTarget(page).click();
   await spaceToggles(page);
 });
 

@@ -4,14 +4,16 @@ import type { Page } from "@playwright/test";
 import {
   expect, test, videoReady, cutButton, currentFilm, filmButton, openWorkspace, pickFilm, reviewTab, workspaceTab, type FormatSize, type Rushes,
   monitor, pictureTrack, ruler, rulerMarkers, shotBlocks, TOOL_TIPS, toolButton, toolStrip, transport,
-  hasFfmpeg, loudness, mixNoteButton, soundBlock, soundButton, soundLevel, soundTakes, soundTrack,
+  hasFfmpeg, loudness, soundBlock, soundButton, soundLevel, soundTakes, soundTrack,
+  notesPanel, noteTargetLine, noteTargetMenu, panelToggle, sendButton, sentDialog, statusSend,
 } from "./fixture.js";
 
 // §27, 5.1 to 5.3 and 5.9: the desk's frame. A top bar and a status bar that never move, the Film and Cut menus,
 // the workspaces with Review's tabs, and the one line that says what to do next.
 
 const topBar = (page: Page) => page.locator("header.top");
-const deskBar = (page: Page) => page.locator(".deskbar");
+// The row under the top bar: Review's tabs (Send and Activity are in the notes panel now).
+const deskBar = (page: Page) => page.locator(".rtabrow");
 const toggle = (page: Page) => page.getByRole("radiogroup", { name: "Format" });
 const statusBar = (page: Page) => page.locator("footer.status");
 
@@ -118,8 +120,8 @@ test("the status bar says what is next and goes there", async ({ page, rushes })
   const { note } = await rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 0.5, text: "Hold the end card." });
   await expect(statusBar(page)).toContainText("Next: send 1 note");
   // Sent, it is open until the agent deals with it.
-  await page.getByRole("button", { name: /^Send to agent/ }).click();
-  await expect(page.getByRole("dialog", { name: "Sent to agent" })).toBeVisible();
+  await sendButton(page).click();
+  await expect(sentDialog(page)).toBeVisible();
   await expect(statusBar(page)).toContainText("Next: 1 note open");
   await page.keyboard.press("Escape");
   // The note dealt with and picture locked, a read arrives: choosing one is next, and the line goes to Voice.
@@ -237,7 +239,7 @@ test("from 1100 to 1600 px the desk's bars never wrap and the format switch stay
   await videoReady(page);
   await expect(cutButton(page)).toContainText("Tighter middle");
   await expect(toggle(page).getByRole("radio")).toHaveCount(4);
-  await expect(page.getByRole("button", { name: /^Send to agent/ })).toContainText("8");
+  await expect(sendButton(page)).toContainText("8");
   const bad: string[] = [];
   for (let width = 1100; width <= 1600; width += 20) {
     await page.setViewportSize({ width, height: 900 });
@@ -653,8 +655,10 @@ test("a project with takes in use and no cut plays them on the Timeline tab, wit
   await soundButton(page, "Music", "Mute").click();
   await expect.poll(async () => (await audio(page))!.lanes).toEqual({ vo: 1, music: 0, sfx: 1 });
   await transport(page).getByRole("button", { name: "Pause · Space" }).click();
+  // With no cut there is no frame: the note is on the mix, at the playhead.
+  await expect(noteTargetLine(page)).toContainText("The whole mix");
   await page.getByRole("textbox", { name: "New note" }).fill("Music fights the read.");
-  await mixNoteButton(page).click();
+  await page.getByRole("textbox", { name: "New note" }).press("Enter");
   await expect(page.locator(".note .nx")).toHaveText(["Music fights the read."]);
   expect((await rushes.api("GET", "/api/notes?stage=mix")).notes).toHaveLength(1);
   // The tab is open by its tab too.
@@ -710,17 +714,164 @@ test.describe("the cut's own sound", () => {
   });
 });
 
-test("notes on the mix are listed on the Timeline tab, and Note on the mix saves one on the whole mix", async ({ page, rushes }) => {
+test("notes on the mix are listed on the Timeline tab, and The whole mix in the target line saves one on the whole mix", async ({ page, rushes }) => {
   await threeInUse(rushes);
   await rushes.api("POST", "/api/notes", { stage: "mix", video: "hero", on: null, scope: "point", t: 1, text: "Music a touch loud." });
   await openTimeline(page, rushes, 3);
   await expect(page.locator(".note .nx")).toHaveText(["Music a touch loud."]);
   await expect(page.locator(".note .on")).toHaveText(["Whole mix"]);
+  await noteTargetMenu(page).selectOption({ label: "The whole mix" });
   await page.getByRole("textbox", { name: "New note" }).fill("Voice sits under the bed.");
-  await mixNoteButton(page).click();
+  await page.getByRole("textbox", { name: "New note" }).press("Enter");
   await expect(page.locator(".note")).toHaveCount(2);
   const { notes } = await rushes.api("GET", "/api/notes?stage=mix");
   expect(notes.find((n: { text: string }) => n.text === "Voice sits under the bed.")).toMatchObject({ stage: "mix", on: null, video: "hero" });
   // The mix tab is gone: Review has the timeline and a tab per sound.
   await expect(page.getByRole("tablist", { name: "Review" }).getByRole("tab")).toHaveText([/^Timeline/, /^Voice/, /^Music/, /^Effects/]);
+});
+
+// §27, 5.7: the notes panel. Its note box aims each note from the selection, Send counts what waits, and it hides.
+test.describe("the notes panel", () => {
+  const box = (page: Page) => notesPanel(page).getByRole("textbox", { name: "New note" });
+  const notesOn = async (rushes: Rushes, stage: string) => (await rushes.api("GET", `/api/notes?stage=${stage}`)).notes as { text: string; stage: string; on: string | null; scope: string; t: number | null; tOut: number | null }[];
+
+  test("with a take selected by its row's name, a note is on that take: its stage and on, the whole take", async ({ page, rushes }) => {
+    const { bed } = await threeInUse(rushes);
+    await openTimeline(page, rushes, 3);
+    await soundTrack(page, "Music").getByRole("button", { name: "Music: note on the whole take" }).click();
+    await expect(noteTargetLine(page)).toContainText("Music · Warm keys");
+    await expect(notesPanel(page).getByRole("group", { name: "Start a note" }).getByRole("button")).toHaveText(["Tempo", "Key", "Energy", "Ending"]);
+    await box(page).fill("Ending is too abrupt.");
+    await box(page).press("Enter");
+    await expect.poll(async () => (await notesOn(rushes, "music")).length).toBe(1);
+    expect((await notesOn(rushes, "music"))[0]).toMatchObject({ stage: "music", on: `${bed.lane.id}/${bed.variant.id}`, scope: "whole", t: null, tOut: null });
+    await expect(notesPanel(page).locator(".note .on")).toHaveText(["Music · Warm keys"]);
+  });
+
+  test("a click on a take's block aims the note at that point on that take, and the note is marked on its row", async ({ page, rushes }) => {
+    const { pass } = await threeInUse(rushes);
+    await openTimeline(page, rushes, 3);
+    const lane = soundTrack(page, "Effects").locator(".tlane");
+    const r = (await lane.boundingBox())!;
+    await page.mouse.click(r.x + r.width / 2, r.y + r.height / 2);
+    await expect(noteTargetLine(page)).toContainText(/^00:00:0\d:\d\d · Effects · Pass A/);
+    await box(page).fill("The whoosh is late.");
+    await box(page).press("Enter");
+    await expect.poll(async () => (await notesOn(rushes, "sfx")).length).toBe(1);
+    const saved = (await notesOn(rushes, "sfx"))[0];
+    expect(saved).toMatchObject({ stage: "sfx", on: `${pass.lane.id}/${pass.variant.id}`, scope: "point" });
+    expect(saved.t).toBeGreaterThan(0);
+    await expect(soundTrack(page, "Effects").locator(".mk")).toHaveCount(1);
+    await expect(soundTrack(page, "Music").locator(".mk")).toHaveCount(0);
+    // Esc in the empty box lets go of the take: the next note is on this frame again.
+    await box(page).focus();
+    await page.keyboard.press("Escape");
+    await expect(noteTargetMenu(page)).toHaveValue("frame");
+  });
+
+  test("with nothing selected a note is on picture at the playhead; choosing The whole mix puts it on the mix", async ({ page, rushes }) => {
+    await threeInUse(rushes);
+    await openTimeline(page, rushes, 3);
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("ArrowRight");
+    await expect(noteTargetMenu(page)).toHaveValue("frame");
+    await expect(noteTargetLine(page)).toContainText("00:00:00:03");
+    await box(page).fill("Hold here.");
+    await box(page).press("Enter");
+    await expect.poll(async () => (await notesOn(rushes, "picture")).length).toBe(1);
+    expect((await notesOn(rushes, "picture"))[0]).toMatchObject({ stage: "picture", on: null, scope: "point", t: 0.1 });
+    await noteTargetMenu(page).selectOption({ label: "The whole mix" });
+    await expect(noteTargetLine(page)).toContainText("The whole mix");
+    await box(page).fill("Voice sits under the bed.");
+    await box(page).press("Enter");
+    await expect.poll(async () => (await notesOn(rushes, "mix")).length).toBe(1);
+    expect((await notesOn(rushes, "mix"))[0]).toMatchObject({ stage: "mix", on: null, scope: "whole", t: null });
+  });
+
+  test("Send shows its count only while something waits, and opens the prompt with Copy", async ({ page, rushes }) => {
+    await rushes.addCut();
+    await page.goto(rushes.url);
+    await videoReady(page);
+    await expect(notesPanel(page)).toBeVisible();
+    await expect(sendButton(page)).toHaveCount(0);
+    await rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 0.5, text: "Hold the end card." });
+    await expect(sendButton(page)).toHaveText("Send1");
+    await expect(sendButton(page)).toHaveAccessibleName("Send 1");
+    await sendButton(page).click();
+    await expect(sentDialog(page)).toContainText("picture");
+    await expect(sentDialog(page).getByRole("button", { name: "Copy prompt" })).toBeVisible();
+    // Sent, nothing waits: Send goes until the next note.
+    await expect(sendButton(page)).toHaveCount(0);
+  });
+
+  test("\\ hides and shows the panel, remembered in this browser, and never while typing", async ({ page, rushes }) => {
+    await rushes.addCut();
+    await page.goto(rushes.url);
+    await videoReady(page);
+    const monitorWidth = async () => (await monitor(page).boundingBox())!.width;
+    const wide = await monitorWidth();
+    await box(page).fill("half\\");
+    await expect(notesPanel(page)).toBeVisible();
+    await box(page).fill("");
+    await box(page).blur();
+    await page.keyboard.press("\\");
+    await expect(notesPanel(page)).toBeHidden();
+    expect(await monitorWidth()).toBeGreaterThan(wide + 200);
+    await expect(panelToggle(page)).toHaveAttribute("aria-pressed", "false");
+    await page.reload();
+    await videoReady(page);
+    await expect(notesPanel(page)).toBeHidden();
+    await panelToggle(page).click();
+    await expect(notesPanel(page)).toBeVisible();
+    await expect(panelToggle(page)).toHaveAttribute("data-tip", "Hide the notes panel · \\");
+    // In the shortcuts sheet.
+    await page.keyboard.press("?");
+    await expect(page.getByRole("dialog", { name: "Keyboard shortcuts" })).toContainText("Hide or show the notes panel");
+  });
+
+  test("a half-typed note waits in the hidden panel", async ({ page, rushes }) => {
+    await rushes.addCut();
+    await page.goto(rushes.url);
+    await videoReady(page);
+    await box(page).fill("Keep this");
+    await panelToggle(page).click();
+    await expect(notesPanel(page)).toBeHidden();
+    await panelToggle(page).click();
+    await expect(box(page)).toHaveValue("Keep this");
+  });
+
+  test("at 1000 px wide the panel is a drawer over the work area, opened and closed with \\ and its button", async ({ page, rushes }) => {
+    await page.setViewportSize({ width: 1000, height: 800 });
+    await rushes.addCut();
+    await page.goto(rushes.url);
+    await videoReady(page);
+    await expect(notesPanel(page)).toBeHidden();
+    const before = (await monitor(page).boundingBox())!;
+    await page.keyboard.press("\\");
+    await expect(notesPanel(page)).toBeVisible();
+    const drawer = (await notesPanel(page).boundingBox())!;
+    // Over the work area: the monitor keeps its width underneath it.
+    expect((await monitor(page).boundingBox())!.width).toBe(before.width);
+    expect(drawer.x).toBeLessThan(before.x + before.width);
+    expect(Math.round(drawer.x + drawer.width)).toBe(1000);
+    await notesPanel(page).getByRole("button", { name: "Hide the notes panel · \\" }).click();
+    await expect(notesPanel(page)).toBeHidden();
+    await panelToggle(page).click();
+    await expect(notesPanel(page)).toBeVisible();
+    await page.keyboard.press("\\");
+    await expect(notesPanel(page)).toBeHidden();
+  });
+
+  test("the status bar's send N notes opens Send in the panel, from Visuals and Assets too", async ({ page, rushes }) => {
+    await rushes.addCut();
+    await rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 0.5, text: "Hold the end card." });
+    await page.goto(rushes.url);
+    await videoReady(page);
+    await openWorkspace(page, "Assets");
+    await expect(notesPanel(page)).toHaveCount(0);
+    await statusSend(page).click();
+    await expect(workspaceTab(page, "Review")).toHaveAttribute("aria-selected", "true");
+    await expect(sendButton(page)).toBeFocused();
+  });
 });

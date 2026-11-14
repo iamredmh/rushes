@@ -1,11 +1,12 @@
+import type { ComponentChildren } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, ApiError, projectId } from "../api.js";
 import {
   LOCKED_BRIEF, LOCKED_STORYBOARD, LOCKED_TAB, testFlags, STAGE_NAMES, agentPrompt, briefPrompt, briefSendPrompt, copyShortcut, currentFormat, defaultVersion, filmLanes, filmPicks, firstView, formatChips, formatPrompt, foundChip, foundSignature, foundTotal,
-  filmAfterShelving, inPlay, isPlanPage, labelOfId, latest, lockedFound, neighbourFormat, neighbourVideo, openToSend, planProgress, planTarget, previousVersion, proxyKey, readyPrompt, snap, storySendPrompt, storyboardPrompt, versionFormats, type PlanPage,
+  filmAfterShelving, inPlay, isPlanPage, labelOfId, latest, lockedFound, neighbourFormat, neighbourVideo, planProgress, planTarget, previousVersion, proxyKey, readyPrompt, snap, storySendPrompt, storyboardPrompt, versionFormats, type PlanPage,
 } from "../lib.js";
-import { deskPlace, deskView, nextHint, takeCount, takeGroups, viewForKey, type DeskView } from "../desk.js";
-import type { Batch, BriefView, FoundCounts, FoundKind, Stage, StoryboardView, Video } from "../types.js";
+import { deskPlace, deskView, nextHint, noteTarget, takeCount, takeGroups, unsentCount, viewForKey, type DeskView } from "../desk.js";
+import type { Batch, BriefView, FoundCounts, FoundKind, Note, Stage, StoryboardView, Video } from "../types.js";
 import { useRushes } from "../useRushes.js";
 import { Assets, type FoundRequest } from "./Assets.js";
 import { Brief } from "./Brief.js";
@@ -18,12 +19,13 @@ import { Script } from "./Script.js";
 import { VariantTab } from "./VariantTab.js";
 import { Voice } from "./Voice.js";
 import { Visuals } from "./Visuals.js";
-import { ChangeLogButton, ChangeLogDrawer, focusRow, useChangeLog } from "./ChangeLog.js";
+import { focusRow, useChangeLog } from "./ChangeLog.js";
 import type { JumpTarget } from "../changelog.js";
 import { CutMenu } from "./desk/CutMenu.js";
 import { NoCutTimeline } from "./desk/NoCut.js";
 import { AllShelved, FilmSelect, ShelvedBanner } from "./desk/FilmSelect.js";
 import { MoreMenu } from "./desk/MoreMenu.js";
+import { NotesPanel, PanelContext, PanelToggle, usePanelPlace, type PanelShared } from "./desk/NotesPanel.js";
 import { ReviewTabs, type ReviewTabRow } from "./desk/ReviewTabs.js";
 import { StatusBar } from "./desk/StatusBar.js";
 import { TopBar } from "./desk/TopBar.js";
@@ -155,9 +157,15 @@ export function App() {
   // §20.5: a request to open Assets › Found (the header chip), and what the chip last said while Found was open.
   const [foundRequest, setFoundRequest] = useState<FoundRequest>({ n: 0, pending: false });
   const [foundSeen, setFoundSeen] = useState<string | null>(null);
-  // §22.8: the Change Log drawer, and whether lines arrived since it was last open.
-  const changeLog = useChangeLog(projectId() ?? "", state?.log);
-  const changeLogButton = useRef<HTMLButtonElement>(null);
+  // §27, 5.7: the notes panel, in Review and Plan: its width and whether it is shown, and its Activity tab (the Change Log),
+  // whose dot says lines arrived since it was last on screen.
+  const panel = usePanelPlace();
+  const panelHere = !!stage && (deskPlace(stage).workspace === "review" || deskPlace(stage).workspace === "plan");
+  const changeLog = useChangeLog(projectId() ?? "", state?.log, (open) => open && panelHere && panel.shown);
+  const [reveal, setReveal] = useState(false);
+  const panelToggle = useRef<HTMLButtonElement>(null);
+  // §27, 5.8: the script line a note on a Plan page is about, picked by working in its row.
+  const [planLine, setPlanLine] = useState<{ id: string; label: string } | null>(null);
 
   // §19.5: a proxy that fails says why, in whichever tab is open; the bar returns to the offer.
   useEffect(() => {
@@ -386,6 +394,11 @@ export function App() {
         if (nxt) switchFilm(nxt);
       }
       if (e.key === "?") setKeysOpen((o) => !o);
+      // §27, 5.7: \ hides and shows the notes panel (the drawer, under 1100 px), where there is one.
+      if (e.key === "\\" && panelHere && !e.repeat) {
+        e.preventDefault();
+        panel.toggle();
+      }
       if (e.key === "Escape") {
         setKeysOpen(false);
         setSent(null);
@@ -395,10 +408,7 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   });
 
-  // The top bar, and the row under it that holds the Change Log button: the drawer sits under that row, so the button
-  // that closes it stays in view.
   const headRef = useRef<HTMLElement>(null);
-  const barRef = useRef<HTMLDivElement>(null);
   // §27, 5.1: the room inside the work area, as --work-h on it, so Picture can cap its player at it (the timeline and the
   // note box stay on screen with a tall cut) and Visuals can fill it. It follows the work area's own size: a banner, a
   // taller top bar or a resized window all change it without a render.
@@ -477,8 +487,6 @@ export function App() {
   const soundOnly = !version && (!!(filmUse?.voice || filmUse?.music || filmUse?.sfx) || mixNotes.length > 0) && (!!video || state.project.videos.length === 0);
   const timelineOpen = !!tab("picture")?.unlocked || soundOnly;
   const unlocked = stage === "assets" ? assetsUnlocked : stage === "brief" ? state.brief.exists : stage === "storyboard" ? state.storyboard.exists : stage === "picture" ? timelineOpen : (tab(stage)?.unlocked ?? false);
-  // What Send to agent would send: the same from every tab.
-  const open = openToSend(tabs, state.brief, state.storyboard);
   // §24: the Planning tab's menu, its marks while a plan is in progress (a brief and no cut yet), and its open count.
   const hasCut = !!tab("picture")?.unlocked;
   const progress = planProgress(state.brief, state.script.sections, state.storyboard);
@@ -513,22 +521,34 @@ export function App() {
     const c = takeCount(g);
     return { started: c.all > 0, fresh: c.fresh, inUse: g.inUse !== null, stale: !!g.inUse?.stale };
   };
-  // What Send would send that has not been sent yet: to-do notes with no batch (on films in play), changed script rows,
-  // and the brief's and storyboard's changes. Send's own count (`open`) also counts notes already sent and still open.
+  // What Send would send that has not been sent yet: one number for Send's count and the status bar's line.
   const inPlayIds = new Set(state.project.videos.filter(inPlay).map((v) => v.id));
-  const todoInPlay = (n: (typeof state.notes.notes)[number]) => n.status === "todo" && (!n.video || inPlayIds.has(n.video));
-  const scriptRows = (tab("script")?.todo ?? 0) - state.notes.notes.filter((n) => n.stage === "script" && todoInPlay(n)).length;
-  const unsent = state.notes.notes.filter((n) => todoInPlay(n) && n.batch === null).length + Math.max(0, scriptRows) + state.brief.changed + state.storyboard.changed;
+  const unsent = unsentCount({ notes: state.notes.notes, inPlay: inPlayIds, scriptTodo: tab("script")?.todo ?? 0, briefChanged: state.brief.changed, storyboardChanged: state.storyboard.changed });
+  // Where Send is, for the status bar's "send N notes": Plan when only the plan's edits wait, else Review.
+  const planOnly = state.notes.notes.every((n) => n.stage === "script" || n.status !== "todo" || n.batch !== null || (!!n.video && !inPlayIds.has(n.video)));
+  const sendTo: View = planOnly && unsent > 0 && (state.brief.changed + state.storyboard.changed + (tab("script")?.todo ?? 0)) > 0
+    ? (isPlanPage(stage) ? stage : planLast)
+    : deskPlace(stage).workspace === "review" ? stage : reviewLast;
   const next = nextHint({
     plan: { exists: state.brief.exists || state.storyboard.exists || state.script.sections.length > 0, approved },
     hasCut: !!version,
     unsent,
+    sendTo,
     openNotes: video ? openNotes(video.id) : 0,
     locked,
     sound: { voice: soundState(sounds.voice), music: soundState(sounds.music), sfx: soundState(sounds.sfx) },
   });
   /** Where the status bar's line leads: a plan page opens as key 1 would. */
   const goNext = (to: View) => {
+    if (unsent > 0 && to === sendTo) {
+      // Send, in the notes panel: the panel shown on its Notes tab, and Send brought into view.
+      if (pending && to !== stage) return toast("Add or clear your note first");
+      if (to !== stage) show(to as Stage);
+      panel.setShown(true);
+      changeLog.setOpen(false);
+      setReveal(true);
+      return;
+    }
     if (isPlanPage(to)) return planKey();
     show(to as Stage);
   };
@@ -548,8 +568,65 @@ export function App() {
   const formatLabel = (views.find((f) => f.id === format) ?? views.find((f) => f.primary) ?? views[0])?.label ?? null;
   const foundUnseen = chip !== null && foundSignature(state.found) !== foundSeen && foundTotal(state.found?.counts) > 0;
 
+  // §27, 5.7: what every notes panel shares, wherever it is mounted.
+  const panelShared: PanelShared = {
+    log: changeLog,
+    activity: {
+      projectId: projectId() ?? "",
+      head: state.log,
+      project: state.project,
+      // The Change Log has no Brief or Storyboard area: a line added from either goes under Script, its neighbour in Planning.
+      stage: stage === "brief" || stage === "storyboard" ? "script" : stage,
+      toast,
+      onJump: (to) => {
+        jump(to);
+        // In the drawer the jump's destination is underneath: the drawer closes on it, and focus goes back to its button
+        // (a lane row the jump opens takes it a frame later).
+        if (panel.narrow) {
+          panel.setShown(false);
+          panelToggle.current?.focus();
+        }
+      },
+    },
+    send: { count: unsent, onSend: () => void send() },
+    shown: panel.shown,
+    narrow: panel.narrow,
+    setShown: panel.setShown,
+    width: panel.width,
+    setWidth: panel.setWidth,
+    reveal,
+    onRevealed: () => setReveal(false),
+  };
+  /** A page with no notes of its own (a locked page, a Plan page): it sits beside a notes panel the desk mounts for it. */
+  const withPanel = (page: ComponentChildren, side: ComponentChildren = <NotesPanel notes={[]} version={null} placeholder="" readOnly toast={toast} onAdd={async () => undefined} onChanged={() => void refresh()} />) => (
+    <div class="split deskcols">
+      <div class="wsmain">{page}</div>
+      {side}
+    </div>
+  );
+  // §27, 5.8: the Plan pages' notes are the script's: on a line picked in Script, or on the script as a whole.
+  const scriptNotes = state.notes.notes.filter((n) => n.stage === "script");
+  const planTargetNow = planLine && stage === "script" ? noteTarget({ kind: "line", ...planLine }, null) : { stage: "script" as const, on: null, scope: "whole" as const, t: null, tOut: null, label: "The script" };
+  const planPanel = (
+    <NotesPanel
+      notes={scriptNotes}
+      version={null}
+      placeholder={`Note on ${planTargetNow.label}`}
+      fixedTimes
+      toast={toast}
+      onLabel={(n: Note) => (n.on ? n.on.toUpperCase() : "Script")}
+      target={{ label: planTargetNow.label, onClear: planLine && stage === "script" ? () => setPlanLine(null) : undefined }}
+      onAdd={async (text) => {
+        await api.post("/api/notes", { stage: "script", video: null, version: null, on: planTargetNow.on, scope: "whole", t: null, tOut: null, text });
+        void refresh();
+      }}
+      onChanged={() => void refresh()}
+    />
+  );
+
   return (
-    <div class="shell">
+    <PanelContext.Provider value={panelShared}>
+    <div class={`shell${panelHere && !panel.narrow && !panel.shown ? " nhidden" : ""}`} style={{ "--notes-w": `${panel.width}px` }}>
       <TopBar
         barRef={headRef}
         project={state.project.name}
@@ -606,6 +683,7 @@ export function App() {
             onPick={(ws) => (ws === "assets" ? showAssets() : ws === "visuals" ? show("visuals") : show(reviewLast as Stage))}
           />
         }
+        notesToggle={panelHere ? <PanelToggle shown={panel.shown} onToggle={panel.toggle} buttonRef={panelToggle} /> : null}
         more={
           <MoreMenu
             found={chip}
@@ -621,18 +699,6 @@ export function App() {
             onChanged={() => void refresh()}
           />
         }
-      />
-      <ChangeLogDrawer
-        log={changeLog}
-        projectId={projectId() ?? ""}
-        head={state.log}
-        project={state.project}
-        // The Change Log has no Brief or Storyboard area: a line added from either goes under Script, its neighbour in Planning.
-        stage={stage === "brief" || stage === "storyboard" ? "script" : stage}
-        header={barRef}
-        buttonRef={changeLogButton}
-        toast={toast}
-        onJump={jump}
       />
 
       {sent && (
@@ -670,6 +736,7 @@ export function App() {
             <span><kbd>[</kbd> <kbd>]</kbd></span><span>Previous or next film</span>
             <span><kbd>Shift</kbd> <kbd>S</kbd></span><span>Shelve or restore the film</span>
             <span><kbd>Alt</kbd> <kbd>←</kbd> <kbd>→</kbd></span><span>Previous or next format</span>
+            <span><kbd>\\</kbd></span><span>Hide or show the notes panel</span>
             <span><kbd>?</kbd></span><span>Shortcuts</span>
             <span><kbd>Esc</kbd></span><span>Close</span>
           </div>
@@ -703,16 +770,11 @@ export function App() {
         )}
         {problem && !wrongProject && <div class="banner"><Icon name="alert" />{problem}</div>}
 
-        {/* Until the notes panel (§27, 5.7) takes them in, Send to agent and the Change Log sit at the top of the work area,
-            beside Review's tabs. */}
-        <div class="deskbar" ref={barRef}>
-          {reviewTabsShown && <ReviewTabs rows={reviewRows} selected={stage} onPick={(v) => show(v as Stage)} />}
-          <span class="sp" />
-          <ChangeLogButton log={changeLog} buttonRef={changeLogButton} />
-          <button class="btn primary sendbtn" data-tip="Every tab's open notes, on every film" onClick={() => void send()}>
-            Send to agent{open > 0 && <span class="count">{open}</span>}
-          </button>
-        </div>
+        {reviewTabsShown && (
+          <div class="rtabrow">
+            <ReviewTabs rows={reviewRows} selected={stage} onPick={(v) => show(v as Stage)} />
+          </div>
+        )}
 
         {video?.shelved && SHELVED_VIEW_ONLY.has(stage) && <ShelvedBanner video={video} onRestore={() => void setShelved(video, false)} />}
 
@@ -733,7 +795,7 @@ export function App() {
               <Locked tab="assets" projectName={state.project.name} filmName={video?.name ?? null} found={state.found?.counts} onReview={openFound} toast={toast} />
             )
           ) : !unlocked ? (
-            <Locked tab={stage} projectName={state.project.name} filmName={video?.name ?? null} found={state.found?.counts} onReview={openFound} toast={toast} />
+            withPanel(<Locked tab={stage} projectName={state.project.name} filmName={video?.name ?? null} found={state.found?.counts} onReview={openFound} toast={toast} />)
           ) : stage === "picture" && soundOnly ? (
             <NoCutTimeline
               key={video?.id ?? "project"}
@@ -749,7 +811,7 @@ export function App() {
               onOpenTab={(tab) => show(tab)}
             />
           ) : stage === "picture" && !video ? (
-            <AllShelved onOpen={() => setShelvedRequest((n) => n + 1)} />
+            withPanel(<AllShelved onOpen={() => setShelvedRequest((n) => n + 1)} />)
           ) : stage === "picture" && video && version ? (
             <Picture
               key={video.id}
@@ -785,13 +847,13 @@ export function App() {
               onOpenTab={(tab) => show(tab)}
             />
           ) : stage === "brief" ? (
-            <Brief brief={state.brief} toast={toast} onChanged={() => void refresh()} settle={planSettle} />
+            withPanel(<Brief brief={state.brief} toast={toast} onChanged={() => void refresh()} settle={planSettle} />, planPanel)
           ) : stage === "storyboard" ? (
-            <Storyboard board={state.storyboard} brief={state.brief} toast={toast} onChanged={() => void refresh()} settle={planSettle} />
+            withPanel(<Storyboard board={state.storyboard} brief={state.brief} toast={toast} onChanged={() => void refresh()} settle={planSettle} />, planPanel)
           ) : stage === "visuals" ? (
             <Visuals state={state} toast={toast} onChanged={() => void refresh()} onPendingChange={setPending} />
           ) : stage === "script" ? (
-            <Script script={state.script} toast={toast} onChanged={() => void refresh()} />
+            withPanel(<Script script={state.script} toast={toast} onChanged={() => void refresh()} onPickLine={setPlanLine} />, planPanel)
           ) : stage === "voice" ? (
             // Its own engine, disposed (and stopped) when you leave, like the other audio tabs.
             <Voice
@@ -827,5 +889,6 @@ export function App() {
       />
       {state.version && <span class="ver" aria-label={`Rushes version ${state.version}`}>v{state.version}</span>}
     </div>
+    </PanelContext.Provider>
   );
 }

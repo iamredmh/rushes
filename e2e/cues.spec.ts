@@ -1,7 +1,7 @@
 // §23: sound-effects cue layers -- the hover card, the chevron's layers by sound, the keyboard and
 // a cue's own sample. Every page goes to `rushes.testUrl()` (`?test=1`), which exposes the engine.
 import type { Page } from "@playwright/test";
-import { expect, type Rushes, test, reviewTab, openWorkspace, soundTrack } from "./fixture.js";
+import { expect, type Rushes, test, reviewTab, openWorkspace, soundTrack, noteTargetLine } from "./fixture.js";
 
 type Hook = {
   inspect(): { playing: boolean; time: number; media: string[] } | null;
@@ -104,7 +104,8 @@ test("the cue labels are one Tab stop; ←/→ walk them in time without steppin
   await page.keyboard.press("Enter");
   await expect.poll(async () => (await hook(page)).time).toBeCloseTo(4.5, 3);
   expect((await hook(page)).playing).toBe(false);
-  await expect(page.getByRole("combobox", { name: "Note on" })).toHaveValue(`c:${PASS}:thud-3`);
+  // §27, 5.7: the note's target is that cue, at its time.
+  await expect(noteTargetLine(page)).toContainText(/^00:00:04:\d\d · Effects · Cue · thud/);
   await expect(lane(page)).toHaveAttribute("aria-current", "true");
   await expect(cue("thud at 0:04.50")).toHaveAttribute("tabindex", "0");
   await expect(lane(page).locator('.cue[tabindex="0"]')).toHaveCount(1);
@@ -171,7 +172,7 @@ test("in a layer, ←/→ move between its ticks without stepping frames, Enter 
   await expect(tick("thud at 0:03.00")).toBeFocused();
   await page.keyboard.press("Enter");
   await expect.poll(async () => (await hook(page)).time).toBeCloseTo(3, 3);
-  await expect(page.getByRole("combobox", { name: "Note on" })).toHaveValue(`c:${PASS}:thud`);
+  await expect(noteTargetLine(page)).toContainText(/^00:00:03:00 · Effects · Cue · thud/);
   await expect(layers(page).locator('.clayer[data-layer="thud"] .ltick[tabindex="0"]')).toHaveAccessibleName("thud at 0:03.00");
 });
 
