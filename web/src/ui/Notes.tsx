@@ -57,6 +57,10 @@ export interface NotesProps {
 /** §27, 5.7: what the next note is about, named on the line above the box. */
 export interface NoteTargetLine {
   label: string;
+  /** The label in two parts (final review I6): the time, beside the menu on the first line, and the name, on a line of
+   *  its own. Without them the whole label is the name. */
+  when?: string | null;
+  name?: string;
   /**
    * The other thing the note could be on, as a two-item menu: "This frame" or "The whole mix" with nothing selected on
    * the Timeline tab; "This moment" or "The whole read" with a take selected on its own tab. The line hides its label
@@ -213,7 +217,22 @@ export function Notes({
                 <Icon name="chev" />
               </span>
             ) : null}
-            {target.label !== target.menu?.options.find((o) => o.value === target.menu!.value)?.label && <span class="ntl tip-wrap" data-target="" data-tip={target.label}>{target.label}</span>}
+            {(() => {
+              // The first line: the menu and the time; the second: the name, which wraps to two lines before it is cut
+              // short, whole in its tooltip. The name is left out while it only repeats the menu's choice. The parts
+              // read as one label (with " · " between them) to anything that reads the line's text.
+              const when = target.when ?? null;
+              const name = target.name ?? (when === null ? target.label : "");
+              const showName = name !== "" && name !== target.menu?.options.find((o) => o.value === target.menu!.value)?.label;
+              if (when === null && !showName) return null;
+              return (
+                <span class="ntl" data-target="">
+                  {when !== null && <span class="ntwhen">{when}</span>}
+                  {when !== null && showName && <span class="ntsep"> · </span>}
+                  {showName && <span class="ntname tip-wrap tip-start" data-tip={name}><span class="ntclamp">{name}</span></span>}
+                </span>
+              );
+            })()}
             {target.onClear && (
               <button type="button" class="btn ghost ib sm ntclear" aria-label="Clear the selection · Esc" data-tip="Clear the selection · Esc" onClick={target.onClear}>
                 <Icon name="x" />

@@ -916,6 +916,8 @@ export function Picture({
         onLabel={mix.noteLabel}
         target={{
           label: target.label,
+          when: target.when,
+          name: target.name,
           menu: !takeSel ? { value: aim, options: AIM_OPTIONS, onChange: (v) => setAim(v === "mix" ? "mix" : "frame") } : undefined,
           onClear: takeSel || aim === "mix" ? clearSelection : undefined,
         }}

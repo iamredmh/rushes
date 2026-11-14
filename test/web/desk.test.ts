@@ -297,29 +297,29 @@ describe("rulerMarks", () => {
 describe("noteTarget", () => {
   const scan = { n: 3, name: "The scan" };
   it("aims at this frame: picture, a point at the playhead, named by its timecode and shot", () => {
-    expect(noteTarget({ kind: "frame", t: 11 }, scan, 25)).toEqual({ stage: "picture", on: null, scope: "point", t: 11, tOut: null, label: "00:00:11:00 · 03 The scan" });
-    expect(noteTarget({ kind: "frame", t: 61.48 }, null, 25).label).toBe("00:01:01:12");
+    expect(noteTarget({ kind: "frame", t: 11 }, scan, 25)).toEqual({ stage: "picture", on: null, scope: "point", t: 11, tOut: null, label: "00:00:11:00 · 03 The scan", when: "00:00:11:00", name: "03 The scan" });
+    expect(noteTarget({ kind: "frame", t: 61.48 }, null, 25)).toMatchObject({ label: "00:01:01:12", when: "00:01:01:12", name: "" });
   });
   it("aims at a range marked: picture, from In to Out", () => {
-    expect(noteTarget({ kind: "range", t: 11, tOut: 12.5 }, scan, 24)).toEqual({ stage: "picture", on: null, scope: "range", t: 11, tOut: 12.5, label: "00:00:11:00–00:00:12:12 · 03 The scan" });
+    expect(noteTarget({ kind: "range", t: 11, tOut: 12.5 }, scan, 24)).toEqual({ stage: "picture", on: null, scope: "range", t: 11, tOut: 12.5, label: "00:00:11:00–00:00:12:12 · 03 The scan", when: "00:00:11:00–00:00:12:12", name: "03 The scan" });
   });
   it("aims at a shot: picture, a point where it starts, named by the shot", () => {
-    expect(noteTarget({ kind: "shot", n: 4, name: "The door", t: 14 }, scan, 30)).toEqual({ stage: "picture", on: null, scope: "point", t: 14, tOut: null, label: "00:00:14:00 · 04 The door" });
+    expect(noteTarget({ kind: "shot", n: 4, name: "The door", t: 14 }, scan, 30)).toEqual({ stage: "picture", on: null, scope: "point", t: 14, tOut: null, label: "00:00:14:00 · 04 The door", when: "00:00:14:00", name: "04 The door" });
   });
   it("aims at a whole take: its sound's stage and on, no time", () => {
-    expect(noteTarget({ kind: "take", stage: "voice", on: "r2/george", name: "George · retimed", t: null }, scan, 30)).toEqual({ stage: "voice", on: "r2/george", scope: "whole", t: null, tOut: null, label: "Voice · George · retimed" });
+    expect(noteTarget({ kind: "take", stage: "voice", on: "r2/george", name: "George · retimed", t: null }, scan, 30)).toEqual({ stage: "voice", on: "r2/george", scope: "whole", t: null, tOut: null, label: "Voice · George · retimed", when: null, name: "Voice · George · retimed" });
   });
   it("aims at a point on a take when its block was clicked, and a range on it when one is marked", () => {
-    expect(noteTarget({ kind: "take", stage: "music", on: "b/warm", name: "Warm keys", t: 2 }, null, 30)).toEqual({ stage: "music", on: "b/warm", scope: "point", t: 2, tOut: null, label: "00:00:02:00 · Music · Warm keys" });
-    expect(noteTarget({ kind: "take", stage: "sfx", on: "p/a", name: "Pass A", t: 1, tOut: 2 }, null, 30)).toEqual({ stage: "sfx", on: "p/a", scope: "range", t: 1, tOut: 2, label: "00:00:01:00–00:00:02:00 · Effects · Pass A" });
+    expect(noteTarget({ kind: "take", stage: "music", on: "b/warm", name: "Warm keys", t: 2 }, null, 30)).toEqual({ stage: "music", on: "b/warm", scope: "point", t: 2, tOut: null, label: "00:00:02:00 · Music · Warm keys", when: "00:00:02:00", name: "Music · Warm keys" });
+    expect(noteTarget({ kind: "take", stage: "sfx", on: "p/a", name: "Pass A", t: 1, tOut: 2 }, null, 30)).toEqual({ stage: "sfx", on: "p/a", scope: "range", t: 1, tOut: 2, label: "00:00:01:00–00:00:02:00 · Effects · Pass A", when: "00:00:01:00–00:00:02:00", name: "Effects · Pass A" });
   });
   it("aims at the whole mix: stage mix, on null, as a whole-mix note is stored", () => {
-    expect(noteTarget({ kind: "mix" }, scan, 30)).toEqual({ stage: "mix", on: null, scope: "whole", t: null, tOut: null, label: "The whole mix" });
-    expect(noteTarget({ kind: "mix", t: 3 }, scan, 30)).toEqual({ stage: "mix", on: null, scope: "point", t: 3, tOut: null, label: "00:00:03:00 · The whole mix" });
+    expect(noteTarget({ kind: "mix" }, scan, 30)).toEqual({ stage: "mix", on: null, scope: "whole", t: null, tOut: null, label: "The whole mix", when: null, name: "The whole mix" });
+    expect(noteTarget({ kind: "mix", t: 3 }, scan, 30)).toEqual({ stage: "mix", on: null, scope: "point", t: 3, tOut: null, label: "00:00:03:00 · The whole mix", when: "00:00:03:00", name: "The whole mix" });
     expect(noteTarget({ kind: "mix", t: 3, tOut: 4 }, scan, 30).scope).toBe("range");
   });
   it("aims at a script line: stage script, on its id, the whole line", () => {
-    expect(noteTarget({ kind: "line", id: "s2", label: "S2 · The scan finds it" }, scan, 30)).toEqual({ stage: "script", on: "s2", scope: "whole", t: null, tOut: null, label: "S2 · The scan finds it" });
+    expect(noteTarget({ kind: "line", id: "s2", label: "S2 · The scan finds it" }, scan, 30)).toEqual({ stage: "script", on: "s2", scope: "whole", t: null, tOut: null, label: "S2 · The scan finds it", when: null, name: "S2 · The scan finds it" });
   });
 });
 

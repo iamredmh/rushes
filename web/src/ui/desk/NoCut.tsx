@@ -147,7 +147,7 @@ export function NoCutTimeline({ state, assets, video, notes, prompt, readOnly = 
         onLabel={mix.noteLabel}
         fixedTimes
         onSeek={(to) => engine.seek(to)}
-        target={{ label: target.label, onClear: takeSel ? takes.clear : undefined }}
+        target={{ label: target.label, when: target.when, name: target.name, onClear: takeSel ? takes.clear : undefined }}
         chips={takeSel ? AUDIO_CHIPS[takeSel.stage] : undefined}
       />
     </div>

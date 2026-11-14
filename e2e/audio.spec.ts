@@ -5,7 +5,7 @@ import { readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { makeWav } from "./fixtures/wav.js";
 import {
-  expect, type Rushes, test, openReviewTab, reviewTab, workspaceTab, currentFilm, pickFilm, videoReady, loudness, rangeChip, notesPanel, panelToggle, noteTargetLine, noteTargetLabel, noteTargetMenu, clearTarget, rulerMarkers, soundBlock, soundButton, soundTrack,
+  expect, type Rushes, test, openReviewTab, reviewTab, workspaceTab, currentFilm, pickFilm, videoReady, loudness, rangeChip, notesPanel, panelToggle, noteTargetLine, noteTargetLabel, noteTargetName, noteTargetMenu, clearTarget, rulerMarkers, soundBlock, soundButton, soundTrack,
   monitor, playButton, toolButton, takesList, takeHeadings, takeRow, takeRows, takeCircle, takeName, takeBlock, pressRowButton, foldToggle, clickTakeAt, expectReadableInRow,
 } from "./fixture.js";
 
@@ -937,7 +937,8 @@ test("a cut-off round heading and the note's target show in full as tooltips, in
   }
   await takeName(page, "more sombre").click();
   await panelToggle(page).click();
-  const on = noteTargetLabel(page);
+  // The tooltip is on the target's name, its own line under the menu (final review I6).
+  const on = noteTargetName(page);
   await expect(on).toHaveAttribute("data-tip", `Voice · ${NEW} · more sombre`);
   await on.hover();
   // The target's tooltip wraps and stays inside the window rather than running off its right edge.
