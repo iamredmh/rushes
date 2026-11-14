@@ -8,7 +8,7 @@ import {
 import type { Asset, State, Video } from "../types.js";
 import { AudioStage, filmsOf, type Preview, takeList } from "./AudioStage.js";
 import { filmsControl } from "./FilmsMenu.js";
-import { otherSounds } from "./desk/SoundTracks.js";
+import { otherSounds } from "./desk/useMix.js";
 import { BlindButton } from "./VariantTab.js";
 
 const CHIPS: Record<"whole" | "point", string[]> = {

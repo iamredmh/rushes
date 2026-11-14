@@ -30,7 +30,7 @@ import { escapeIsFree, NotesPanel, useNoteBox } from "./desk/NotesPanel.js";
 import { PictureTrack } from "./desk/PictureTrack.js";
 import { Ruler, type RulerMarker } from "./desk/Ruler.js";
 import { type LooseItem, type TakeItem, type TakeListSection, type TakeMark, Takes } from "./desk/Takes.js";
-import type { OtherSounds } from "./desk/SoundTracks.js";
+import type { OtherSounds } from "./desk/useMix.js";
 import { ToolStrip } from "./desk/ToolStrip.js";
 import { Transport } from "./desk/Transport.js";
 
