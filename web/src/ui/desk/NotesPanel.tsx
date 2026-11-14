@@ -57,10 +57,13 @@ const CLOSES_ON_ESCAPE = '[role="dialog"], [role="menu"], [role="listbox"], .fmt
 
 /**
  * Whether an Escape pressed on the desk itself is free to let go of the note's target (§27, 5.7): not when something
- * else takes it (a field, or a menu, dialog or popover it closes; one Escape does one thing).
+ * else takes it (a field, or a menu, dialog or popover it closes; one Escape does one thing), and not from a control in
+ * the notes panel, whose own Escape is the note box's.
  */
 export function escapeIsFree(e: KeyboardEvent): boolean {
-  return e.key === "Escape" && !e.defaultPrevented && document.querySelector(CLOSES_ON_ESCAPE) === null;
+  if (e.key !== "Escape" || e.defaultPrevented || document.querySelector(CLOSES_ON_ESCAPE) !== null) return false;
+  const from = e.target instanceof Element ? e.target : null;
+  return !from?.closest(".npanel");
 }
 
 const WIDTH_KEY = "rushes:notes-width";
@@ -254,7 +257,7 @@ export function NotesPanel(props: NotesPanelProps) {
       )}
       {(send.count > 0 || send.always) && (
         <div class="nfoot">
-          <button ref={sendRef} type="button" class="btn primary sendbtn" aria-label={send.count > 0 ? `Send ${send.count}` : "Send"} data-tip="Every tab's open notes, on every film" onClick={send.onSend}>
+          <button ref={sendRef} type="button" class="btn primary sendbtn" aria-label={send.count > 0 ? `Send ${send.count}` : "Send"} data-tip="Notes and edits not sent yet, from every tab and film" onClick={send.onSend}>
             Send{send.count > 0 && <span class="count">{send.count}</span>}
           </button>
         </div>

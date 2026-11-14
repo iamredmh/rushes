@@ -27,10 +27,14 @@ export function stepFrame(t: number, fps: number, n: number, duration: number): 
   return Math.min(Math.max(0, frame / fps), duration || Infinity);
 }
 
-/** Where a note sits in the version being watched, and where it came from if it was left on another one. */
+/**
+ * Where a note sits in the version being watched, and where it came from if it was left on another one. A note on a take
+ * (Voice, Music, Effects) is timed on the take itself, which does not move with the cut: it sits where it was saved.
+ */
 export function placeNote(note: Note, version: string | null): { t: number | null; tOut: number | null; from: string | null } {
   if (note.t === null) return { t: null, tOut: null, from: null };
-  if (!note.version || note.version === version) return { t: note.t, tOut: note.tOut, from: null };
+  const onTake = note.stage === "voice" || note.stage === "music" || note.stage === "sfx";
+  if (onTake || !note.version || note.version === version) return { t: note.t, tOut: note.tOut, from: null };
   const from = `${note.version} at ${fmt(note.t)}`;
   if (note.fixT !== null && note.fixVersion === version) {
     const len = note.tOut !== null ? note.tOut - note.t : null;

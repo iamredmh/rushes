@@ -78,6 +78,11 @@ describe("placeNote", () => {
     expect(placed.tOut).toBeCloseTo(5.6, 6);
     expect(placed.from).toBe("v2 at 0:04.10");
   });
+  it("leaves a note on a take where it is, on any cut: its time is the take's own, not the cut's", () => {
+    for (const stage of ["voice", "music", "sfx"] as const) {
+      expect(placeNote(note({ stage, version: "v1", t: 2, tOut: 3, scope: "range", on: "music/pulse" }), "v3")).toEqual({ t: 2, tOut: 3, from: null });
+    }
+  });
   it("keeps an unfixed note from an older cut at its old time, and says where it's from", () => {
     expect(placeNote(note({ version: "v1", t: 2 }), "v3")).toEqual({ t: 2, tOut: null, from: "v1 at 0:02.00" });
   });
