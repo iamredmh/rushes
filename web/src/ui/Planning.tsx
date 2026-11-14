@@ -54,6 +54,10 @@ export interface PlanTabRow {
  * The Plan workspace's three-part switch. Left and right (and Home, End) move along it without opening anything, the way a
  * tab list does; Enter or a click opens the page. The keys it handles stop here, so nothing behind it hears them.
  */
+/** The Plan page on show is the switch's tab panel: its id, and each tab's. */
+export const PLAN_PANEL_ID = "plan-page";
+export const planTabId = (page: PlanPage) => `ptab-${page}`;
+
 export function PlanSwitch({ rows, selected, onPick }: { rows: PlanTabRow[]; selected: PlanPage | null; onPick(page: PlanPage): void }) {
   const tabs = useRef<(HTMLButtonElement | null)[]>([]);
   const at = Math.max(0, rows.findIndex((r) => r.page === selected));
@@ -78,6 +82,8 @@ export function PlanSwitch({ rows, selected, onPick }: { rows: PlanTabRow[]; sel
           type="button"
           class="tab"
           role="tab"
+          id={planTabId(r.page)}
+          aria-controls={PLAN_PANEL_ID}
           aria-selected={selected === r.page}
           tabIndex={i === at ? 0 : -1}
           data-locked={r.unlocked ? undefined : "true"}

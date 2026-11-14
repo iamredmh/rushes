@@ -103,6 +103,9 @@ test("approving a shot sets its status, and changing an approved shot reopens it
   await page.getByRole("button", { name: "Approve shot 1" }).click();
   await expect.poll(() => read(rushes.root)).toContain("Status: approved");
   await expect(page.getByRole("button", { name: "Approve shot 1" })).toHaveAttribute("aria-pressed", "true");
+  // Its tooltip is its name, on or off.
+  await expect(page.getByRole("button", { name: "Approve shot 1" })).toHaveAttribute("data-tip", "Approve shot 1");
+  await expect(page.getByRole("button", { name: "Enlarge the still for shot 1" })).toHaveAttribute("data-tip", "Enlarge the still for shot 1");
   await page.getByLabel("Your version of shot 1").fill("Different.");
   await expect.poll(() => read(rushes.root)).toContain("Different.");
   expect(await read(rushes.root)).not.toContain("Status: approved");

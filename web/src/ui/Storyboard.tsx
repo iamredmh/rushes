@@ -70,7 +70,7 @@ function Row({ shot, save, onZoom }: { shot: StoryboardShotView; save: Saver; on
   return (
     <div class={`sbrow${changed ? " changed" : ""}`} data-shot={shot.heading}>
       <div class="sbid">
-        <button class="sbstill" aria-label={`Enlarge the still for shot ${shot.n}`} data-tip="Enlarge" onClick={onZoom}>
+        <button class="sbstill" aria-label={`Enlarge the still for shot ${shot.n}`} data-tip={`Enlarge the still for shot ${shot.n}`} onClick={onZoom}>
           <Still shot={shot} />
         </button>
         <div class="sbmeta">
@@ -119,7 +119,8 @@ function Row({ shot, save, onZoom }: { shot: StoryboardShotView; save: Saver; on
         />
         <button
           class={`btn ib okd${approved ? " on" : ""}`}
-          data-tip={approved ? "Unapprove" : "Approve"}
+          // A toggle: its name stays and aria-pressed says whether it is on; the tooltip is its name.
+          data-tip={`Approve shot ${shot.n}`}
           aria-label={`Approve shot ${shot.n}`}
           aria-pressed={approved}
           onClick={() => save.shot(shot, { status: approved ? "draft" : "approved" })}
