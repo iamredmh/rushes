@@ -15,7 +15,8 @@ export interface TransportProps {
   muted: boolean;
   onVolume(level: number): void;
   onMute(): void;
-  onFullScreen(): void;
+  /** Full screen is the monitor's; with no picture (no cut yet) there is no button. */
+  onFullScreen?(): void;
   /** §27, 5.6: the loudness of what you hear, beside the volume while a take is in use. */
   loudness?: ComponentChildren;
 }
@@ -58,9 +59,11 @@ export function Transport({ t, duration, playing, onToggle, onStep, rangeLabel, 
           // So Space, the arrows and the other keys go back to the player once the level is set.
           onPointerUp={(e) => (e.currentTarget as HTMLElement).blur()}
         />
-        <button class="btn ghost ib" data-tip="Full screen · F" aria-label="Full screen · F" onClick={(e) => { if (e.detail > 0) (e.currentTarget as HTMLElement).blur(); onFullScreen(); }}>
-          <Icon name="expand" />
-        </button>
+        {onFullScreen && (
+          <button class="btn ghost ib" data-tip="Full screen · F" aria-label="Full screen · F" onClick={(e) => { if (e.detail > 0) (e.currentTarget as HTMLElement).blur(); onFullScreen(); }}>
+            <Icon name="expand" />
+          </button>
+        )}
       </div>
     </div>
   );

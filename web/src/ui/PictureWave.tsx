@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { mediaUrl, projectId } from "../api.js";
 import { testFlags } from "../lib.js";
-import { cachedWave, FALLBACK_RATE, hasCachedWave, loadWave, rememberWave, watchPixelRatio, waveKey, type Wave, type WaveDeps } from "../peaks.js";
+import { cachedSilent, cachedWave, FALLBACK_RATE, hasCachedWave, loadWave, rememberWave, watchPixelRatio, waveKey, type Wave, type WaveDeps } from "../peaks.js";
 import type { Version } from "../types.js";
 
 /** The first retry while the server is still making the peaks; it doubles up to RETRY_MAX_MS. A `change` asks sooner. */
@@ -32,10 +32,12 @@ const browserDeps: WaveDeps = {
  * The waveform for the cut on screen, or null while it loads and when there's nothing to draw.
  * Only ever this cut's: an answer for a version or film you've since left is dropped. `version`
  * is a new object on every state refresh, which is how a `change` (the server's peaks landing)
- * prompts an early retry.
+ * prompts an early retry. `known` says the answer is in; `silent` that the cut has no audio at all (a waveform that
+ * couldn't be had is not silent).
  */
-export function usePictureWave(video: string, version: Version, size: number | null, rev: string | undefined, length: number): Wave | null {
-  const key = waveKey(video, version.id, version.file, rev);
+export function usePictureWave(video: string | null, version: Version | null, size: number | null, rev: string | undefined, length: number): { wave: Wave | null; known: boolean; silent: boolean } {
+  // With no cut there is nothing to ask about (§27, 5.6: the takes can play with no cut).
+  const key = video && version ? waveKey(video, version.id, version.file, rev) : "";
   // The player's length (0 until its metadata loads), for the no-ffmpeg fallback's 15-minute cap:
   // a fallback waits for it, and gives up after LENGTH_WAIT_MS.
   const lengthRef = useRef(length);
@@ -51,12 +53,13 @@ export function usePictureWave(video: string, version: Version, size: number | n
           lengthWaiters.current.push(res);
           window.setTimeout(() => res(null), LENGTH_WAIT_MS);
         });
-  const [shown, setShown] = useState<{ key: string; wave: Wave | null } | null>(() => (hasCachedWave(key) ? { key, wave: cachedWave(key) } : null));
+  const [shown, setShown] = useState<{ key: string; wave: Wave | null; silent: boolean } | null>(() => (key && hasCachedWave(key) ? { key, wave: cachedWave(key), silent: cachedSilent(key) } : null));
   const retryNow = useRef<(() => void) | null>(null);
 
   useEffect(() => {
+    if (!video || !version) return;
     if (hasCachedWave(key)) {
-      setShown({ key, wave: cachedWave(key) });
+      setShown({ key, wave: cachedWave(key), silent: cachedSilent(key) });
       return;
     }
     const ac = new AbortController();
@@ -85,8 +88,9 @@ export function usePictureWave(video: string, version: Version, size: number | n
         return;
       }
       const wave = out.kind === "wave" ? out.wave : null;
-      rememberWave(key, wave);
-      setShown({ key, wave });
+      const silent = out.kind === "none" && out.silent === true;
+      rememberWave(key, wave, silent);
+      setShown({ key, wave, silent });
     };
     void attempt();
     return () => {
@@ -100,7 +104,7 @@ export function usePictureWave(video: string, version: Version, size: number | n
     retryNow.current?.();
   }, [version]);
 
-  return shown && shown.key === key ? shown.wave : null;
+  return shown && shown.key === key ? { wave: shown.wave, known: true, silent: shown.silent } : { wave: null, known: false, silent: false };
 }
 
 // Test-only (`?test=1`): how many times the Picture waveform has been drawn, so e2e can check

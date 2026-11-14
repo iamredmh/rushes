@@ -21,6 +21,7 @@ import { Visuals } from "./Visuals.js";
 import { ChangeLogButton, ChangeLogDrawer, focusRow, useChangeLog } from "./ChangeLog.js";
 import type { JumpTarget } from "../changelog.js";
 import { CutMenu } from "./desk/CutMenu.js";
+import { NoCutTimeline } from "./desk/NoCut.js";
 import { AllShelved, FilmSelect, ShelvedBanner } from "./desk/FilmSelect.js";
 import { MoreMenu } from "./desk/MoreMenu.js";
 import { ReviewTabs, type ReviewTabRow } from "./desk/ReviewTabs.js";
@@ -469,7 +470,13 @@ export function App() {
   const pictureNotes = state.notes.notes.filter((n) => (n.stage === "picture" || n.stage === "mix") && (!n.video || n.video === video?.id));
   /** A film's open notes on the tabs that look at it, for the Film menu and the status bar. */
   const openNotes = (vid: string) => state.notes.notes.filter((n) => n.status === "todo" && SHELVED_VIEW_ONLY.has(n.stage) && (!n.video || n.video === vid)).length;
-  const unlocked = stage === "assets" ? assetsUnlocked : stage === "brief" ? state.brief.exists : stage === "storyboard" ? state.storyboard.exists : (tab(stage)?.unlocked ?? false);
+  // §27, 5.6: with no cut, the Timeline tab still opens when the film has a take in use or a note on the mix: the takes
+  // play together there (what the Mix tab did), with the engine as the clock.
+  const filmUse = filmPicks(state.picks, video?.id).use;
+  const mixNotes = state.notes.notes.filter((n) => n.stage === "mix" && (!n.video || n.video === video?.id));
+  const soundOnly = !version && (!!(filmUse?.voice || filmUse?.music || filmUse?.sfx) || mixNotes.length > 0) && (!!video || state.project.videos.length === 0);
+  const timelineOpen = !!tab("picture")?.unlocked || soundOnly;
+  const unlocked = stage === "assets" ? assetsUnlocked : stage === "brief" ? state.brief.exists : stage === "storyboard" ? state.storyboard.exists : stage === "picture" ? timelineOpen : (tab(stage)?.unlocked ?? false);
   // What Send to agent would send: the same from every tab.
   const open = openToSend(tabs, state.brief, state.storyboard);
   // §24: the Planning tab's menu, its marks while a plan is in progress (a brief and no cut yet), and its open count.
@@ -496,7 +503,7 @@ export function App() {
   // §27: where the view sits on the desk, and each sound's takes on this film.
   const place = deskPlace(stage);
   const lanes = filmLanes(state.project.lanes, video?.id, state.project.videos.length);
-  const use = filmPicks(state.picks, video?.id).use;
+  const use = filmUse;
   const sounds = {
     voice: takeGroups(lanes, "voice", use?.voice, video),
     music: takeGroups(lanes, "music", use?.music, video),
@@ -529,7 +536,7 @@ export function App() {
     view,
     label,
     icon: STAGE_ICONS[view],
-    locked: !tab(view)?.unlocked,
+    locked: view === "picture" ? !timelineOpen : !tab(view)?.unlocked,
     ask: LOCKED_TAB[view].ask,
     takes: view === "voice" || view === "music" || view === "sfx" ? takeCount(sounds[view]) : null,
     // The timeline holds the mix's notes too (§27, 5.6).
@@ -727,6 +734,20 @@ export function App() {
             )
           ) : !unlocked ? (
             <Locked tab={stage} projectName={state.project.name} filmName={video?.name ?? null} found={state.found?.counts} onReview={openFound} toast={toast} />
+          ) : stage === "picture" && soundOnly ? (
+            <NoCutTimeline
+              key={video?.id ?? "project"}
+              state={state}
+              assets={assets}
+              video={video ?? null}
+              notes={mixNotes}
+              prompt={agentPrompt("picture", state.project.name, video?.name ?? null)}
+              readOnly={!!video?.shelved}
+              toast={toast}
+              onChanged={() => void refresh()}
+              onPendingChange={setPending}
+              onOpenTab={(tab) => show(tab)}
+            />
           ) : stage === "picture" && !video ? (
             <AllShelved onOpen={() => setShelvedRequest((n) => n + 1)} />
           ) : stage === "picture" && video && version ? (
