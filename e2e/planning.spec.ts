@@ -222,6 +222,20 @@ test("key 1 on the Brief page the dashboard opened on stays on Brief", async ({ 
   await expect(page.getByRole("heading", { name: "Script" })).toHaveCount(0);
 });
 
+test("an unchanged brief's page still offers Send, and its message carries the brief's line", async ({ page, rushes }) => {
+  await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
+  await page.goto(rushes.url);
+  await expect(page.getByRole("heading", { name: "Brief" })).toBeVisible();
+  await expect(sendButton(page)).toHaveAccessibleName("Send");
+  await sendButton(page).click();
+  await expect(sentDialog(page)).toContainText("Message for your agent");
+  await expect(sentDialog(page)).toContainText("the brief is still a draft");
+  // Elsewhere, with nothing waiting, there is no Send.
+  await sentDialog(page).getByRole("button", { name: "Close" }).click();
+  await page.keyboard.press("2");
+  await expect(sendButton(page)).toHaveCount(0);
+});
+
 test("the locked Brief page offers its own prompt, and no Send, since there is no brief to send", async ({ page, rushes }) => {
   await rushes.api("PUT", "/api/script", SCRIPT);
   await page.goto(rushes.url);

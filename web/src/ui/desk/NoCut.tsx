@@ -3,13 +3,14 @@
 // same rows, mute, solo, levels and loudness as the Timeline tab (`useMix`, `SoundTracks`), and notes on the mix.
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api } from "../../api.js";
-import { noteTarget, type Selection } from "../../desk.js";
-import { AUDIO_CHIPS, copyShortcut, LOCKED_TAB, MIX_STAGE, snap, spacePressesButton, stepFrame } from "../../lib.js";
+import { noteTarget } from "../../desk.js";
+import { AUDIO_CHIPS, copyShortcut, LOCKED_TAB, snap, spacePressesButton, stepFrame } from "../../lib.js";
 import type { Asset, Note, State, Video } from "../../types.js";
 import { Icon } from "../Icon.js";
-import { NotesPanel } from "./NotesPanel.js";
+import { escapeIsFree, NotesPanel, useNoteBox } from "./NotesPanel.js";
+import { useTakeSelection } from "./useTakeSelection.js";
 import { Ruler } from "./Ruler.js";
-import { LoudnessReadout, type SoundTab, SoundTracks, takeOn, useMix } from "./SoundTracks.js";
+import { LoudnessReadout, type SoundTab, SoundTracks, useMix } from "./SoundTracks.js";
 import { Transport } from "./Transport.js";
 
 const NO_PLAYER = { current: null };
@@ -43,12 +44,12 @@ export function NoCutTimeline({ state, assets, video, notes, prompt, readOnly = 
   const input = useRef<HTMLTextAreaElement>(null);
   const [hasText, setHasText] = useState(false);
   // §27, 5.7: a take picked on its row is the note's target; otherwise the mix at the playhead (there is no frame).
-  const [takeSel, setTakeSel] = useState<Extract<Selection, { kind: "take" }> | null>(null);
-  const takeGone = takeSel !== null && !mix.rows.some((r) => r.take && takeOn(r.take) === takeSel.on);
-  useEffect(() => {
-    if (takeGone) setTakeSel(null);
-  }, [takeGone]);
-  const takeNotes = state.notes.notes.filter((n) => (n.stage === "voice" || n.stage === "music" || n.stage === "sfx") && (!n.video || n.video === video?.id) && mix.noteRow(n) !== null);
+  const takes = useTakeSelection(mix, state.notes.notes, video, fps, (to) => {
+    engine.pause();
+    engine.seek(to);
+  });
+  const { takeSel, takeNotes } = takes;
+  const openNoteBox = useNoteBox(input);
   const targetAt = (at: number) => noteTarget(takeSel ?? { kind: "mix", t: at }, null, fps);
   const target = targetAt(snap(t, fps));
   useLayoutEffect(() => onPendingChange?.(hasText), [hasText]);
@@ -68,8 +69,8 @@ export function NoCutTimeline({ state, assets, video, notes, prompt, readOnly = 
       toggle();
     } else if (e.key === "ArrowLeft") { e.preventDefault(); step(e.shiftKey ? -10 : -1); }
     else if (e.key === "ArrowRight") { e.preventDefault(); step(e.shiftKey ? 10 : 1); }
-    else if (e.key.toLowerCase() === "n" && !readOnly) { e.preventDefault(); input.current?.focus(); }
-    else if (e.key.toLowerCase() === "v" || e.key === "Escape") setTakeSel(null);
+    else if (e.key.toLowerCase() === "n" && !readOnly) { e.preventDefault(); openNoteBox(); }
+    else if (e.key.toLowerCase() === "v" || escapeIsFree(e)) takes.clear();
   };
   useLayoutEffect(() => {
     const k = (e: KeyboardEvent) => onKey.current(e);
@@ -127,16 +128,9 @@ export function NoCutTimeline({ state, assets, video, notes, prompt, readOnly = 
             t={t}
             onSeek={(to) => engine.seek(to)}
             onOpenTab={onOpenTab}
-            selected={takeSel ? (mix.rows.find((r) => r.take && takeOn(r.take) === takeSel.on)?.lane ?? null) : null}
+            selected={takes.selected}
             notes={[...notes, ...takeNotes]}
-            onPick={readOnly ? undefined : (row, at) => {
-              const to = at === null ? null : snap(at, fps);
-              setTakeSel({ kind: "take", stage: MIX_STAGE[row.lane], on: takeOn(row.take!), name: row.take!.variant.name, t: to });
-              if (to !== null) {
-                engine.pause();
-                engine.seek(to);
-              }
-            }}
+            onPick={readOnly ? undefined : takes.pick}
           />
         </div>
       </div>
@@ -153,7 +147,7 @@ export function NoCutTimeline({ state, assets, video, notes, prompt, readOnly = 
         onLabel={mix.noteLabel}
         fixedTimes
         onSeek={(to) => engine.seek(to)}
-        target={{ label: target.label, onClear: takeSel ? () => setTakeSel(null) : undefined }}
+        target={{ label: target.label, onClear: takeSel ? takes.clear : undefined }}
         chips={takeSel ? AUDIO_CHIPS[takeSel.stage] : undefined}
       />
     </div>

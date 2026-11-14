@@ -6,10 +6,11 @@ import { markLabel, type Note, type Picks, type Project, type Script, type Stage
 import { labelOfId } from "./formats.js";
 import { pinWords, regionWords } from "./visuals.js";
 
-// Picture notes are grouped by film and version; the other stages list straight through.
-// Script isn't included here -- script edits live in script.json, not notes.json.
-const STAGE_ORDER: Exclude<Stage, "script">[] = ["picture", "voice", "music", "sfx", "mix", "visuals"];
-const STAGE_TITLES: Record<Exclude<Stage, "script">, string> = {
+// Picture notes are grouped by film and version; the other stages list straight through. The script's own edits
+// live in script.json and are not exported here; notes on the script (§27, 5.8: on a line, or the whole script) are.
+const STAGE_ORDER: Stage[] = ["script", "picture", "voice", "music", "sfx", "mix", "visuals"];
+const STAGE_TITLES: Record<Stage, string> = {
+  script: "Script",
   picture: "Picture",
   voice: "Voiceover",
   music: "Music",
@@ -91,7 +92,8 @@ function byTimecode(a: Note, b: Note): number {
 
 /**
  * The project's notes as Markdown: a title and export date, then one `##` section per stage
- * that has notes, in workflow order (script is never included -- it lives in script.json).
+ * that has notes, in workflow order (the script's own edits are never included -- they live in script.json; notes
+ * on the script are, each naming its line).
  * Picture notes are further grouped under a `### <Film> · <version>` heading per film and
  * version that has notes, in the project's own video/version order. A note whose video or
  * version no longer exists in the project (hand-edited away, say) is never dropped (M3): it's

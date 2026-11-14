@@ -1417,6 +1417,11 @@ test("Mix notes: a range on Music with Quieter 3 dB, written through the target 
   await page.keyboard.press("Enter");
   await expect(page.locator(".note")).toHaveCount(4);
   expect((await rushes.api("GET", "/api/notes?stage=picture")).notes).toHaveLength(1);
+  // Each note with a time is a marker on the ruler, with the picture's: the old Mix-tab note, the range on the bed and the
+  // picture note (the whole-mix note has no time).
+  await expect(rulerMarkers(page)).toHaveCount(3);
+  await expect(rulerMarkers(page).and(page.locator(`[data-note="${old.id}"]`))).toHaveCount(1);
+  await expect(rulerMarkers(page).and(page.locator(`[data-note="${range.id}"]`))).toHaveCount(1);
 });
 
 test("a Mix note on an SFX pass named like the music bed is marked on the Effects row, and an old bare id on Music", async ({ page, rushes }) => {

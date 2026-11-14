@@ -674,9 +674,9 @@ export function clearTarget(page: Page): Locator {
   return noteTargetLine(page).getByRole("button", { name: "Clear the selection · Esc" });
 }
 
-/** The panel's Send, "Send 3", shown only while something waits to be sent. */
+/** The panel's Send, "Send 3", shown while something waits to be sent (and plain "Send" on a Brief or Storyboard page). */
 export function sendButton(page: Page): Locator {
-  return notesPanel(page).getByRole("button", { name: /^Send \d+$/ });
+  return notesPanel(page).getByRole("button", { name: /^Send( \d+)?$/ });
 }
 
 /** What Send opens: the batch's prompt, with Copy. */

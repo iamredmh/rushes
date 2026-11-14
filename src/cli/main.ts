@@ -453,7 +453,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         const { notes } = await c.get(`/api/notes${q.size ? `?${q}` : ""}`);
         if (o.json) return io.out(JSON.stringify(notes, null, 2)), 0;
         // What an audio note is on (M4) and a Picture note's format (§21.4, R4), from the state.
-        const state: (OnContext & { project: Project }) | null = (notes as Note[]).some((n) => n.stage !== "script") ? await c.get("/api/state") : null;
+        const state: (OnContext & { project: Project }) | null = (notes as Note[]).some((n) => n.stage !== "script" || n.on != null) ? await c.get("/api/state") : null;
         for (const n of notes) {
           const label = state ? onLabel(n, state) : null;
           const on = label ? `${stripControl(label)}  ` : "";

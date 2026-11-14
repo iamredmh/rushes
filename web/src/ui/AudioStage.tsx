@@ -18,7 +18,7 @@ import {
 import type { Mark, Note } from "../types.js";
 import { Icon } from "./Icon.js";
 import { type LaneMark, Lanes, type StageRow, waveDraws } from "./Lanes.js";
-import { NotesPanel } from "./desk/NotesPanel.js";
+import { escapeIsFree, NotesPanel, useNoteBox } from "./desk/NotesPanel.js";
 
 // ---- test-only switches (never on in normal use) ----
 // `?test=1` exposes the engine on window.__rushesAudio for the e2e suite; `&streamOver=1` streams
@@ -206,11 +206,10 @@ export function AudioStage(props: AudioStageProps) {
   const aimed = aim !== null && onOptions.some((o) => o.value === aim.value) ? aim : null;
   const option = onOptions.find((o) => o.value === (aimed?.value ?? fallbackOn)) ?? null;
   const aimT = aimed?.t ?? null;
+  // Lets go of the lane and its target; a marked range and its ticked marks stay (Clear range is their control).
   const clearAim = () => {
     setAim(null);
     setSelected(null);
-    setRange(NO_RANGE);
-    setMarks([]);
   };
   /** The note's stage, `on`, scope, times and target line, read at `at` (the playhead now). */
   const targetAt = (at: number) => {
@@ -233,6 +232,7 @@ export function AudioStage(props: AudioStageProps) {
   const pvStarted = useRef(false);
   const lastPaintT = useRef(0);
   const input = useRef<HTMLTextAreaElement>(null);
+  const openNoteBox = useNoteBox(input);
   const placeholderFor = (t: number) => {
     if (hasRange && range.in !== null && range.out === null) return "Set an Out point";
     const target = targetAt(t);
@@ -328,8 +328,8 @@ export function AudioStage(props: AudioStageProps) {
     else if (e.key === "ArrowRight") { e.preventDefault(); step(e.shiftKey ? 10 : 1); }
     else if (k === "i") setIn();
     else if (k === "o") setOut();
-    else if (k === "n") { e.preventDefault(); input.current?.focus(); }
-    else if (k === "v" || e.key === "Escape") clearAim();
+    else if (k === "n") { e.preventDefault(); openNoteBox(); }
+    else if (k === "v" || escapeIsFree(e)) clearAim();
   };
   // Bound in a layout effect, so a key pressed straight after switching to the tab is never missed.
   useLayoutEffect(() => {
@@ -473,7 +473,7 @@ export function AudioStage(props: AudioStageProps) {
           onTextChange={setNoteHasText}
           fixedTimes
           onSeek={(t) => engine.seek(t)}
-          target={{ label: noteTarget_.label, onClear: aimed || selected || range.in !== null ? clearAim : undefined }}
+          target={{ label: noteTarget_.label, onClear: aimed || selected ? clearAim : undefined }}
           chips={(props.chipsFor ?? (() => AUDIO_CHIPS[stage]))(noteTarget_.scope)}
           marks={props.marks === false || noteTarget_.scope !== "range" ? undefined : { value: marks, onChange: setMarks }}
           onLabel={onLabel}

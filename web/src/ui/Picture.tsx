@@ -3,19 +3,20 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, mediaUrl, originalFrame } from "../api.js";
 import { noteTarget, rulerMarks, type Selection, type Tool } from "../desk.js";
 import {
-  AUDIO_CHIPS, BOX_REASON, boxFrom, boxShowsOn, contentRect, fmt, frameAt, MIX_STAGE, noteFormatTag, noteTime, otherFormatNotes, placeNote, RESHAPE_MS, reshapeKeyframes, scopeHint, shotAt,
+  AUDIO_CHIPS, BOX_REASON, boxFrom, boxShowsOn, contentRect, fmt, frameAt, noteFormatTag, noteTime, otherFormatNotes, placeNote, RESHAPE_MS, reshapeKeyframes, scopeHint, shotAt,
   shotLabel, shotSeek, snap, spacePressesButton, stepFrame, testFlags, versionFormats, visibleNotes,
   type FormatView, type ProxyProgress,
 } from "../lib.js";
 import type { Asset, Mark, Note, ProxyJob, State, Video, Version } from "../types.js";
 import { FormatScope } from "./FormatScope.js";
 import { Icon } from "./Icon.js";
-import { NotesPanel } from "./desk/NotesPanel.js";
+import { escapeIsFree, NotesPanel, useNoteBox } from "./desk/NotesPanel.js";
+import { useTakeSelection } from "./desk/useTakeSelection.js";
 import { OtherFormats } from "./OtherFormats.js";
 import { ProxyBar } from "./ProxyBar.js";
 import { PictureTrack } from "./desk/PictureTrack.js";
 import { Ruler, type RulerMarker } from "./desk/Ruler.js";
-import { LoudnessReadout, type SoundTab, SoundTracks, takeOn, useMix } from "./desk/SoundTracks.js";
+import { LoudnessReadout, type SoundTab, SoundTracks, useMix } from "./desk/SoundTracks.js";
 import { ToolStrip } from "./desk/ToolStrip.js";
 import { Transport } from "./desk/Transport.js";
 import { shortLabel } from "../versions.js";
@@ -173,14 +174,14 @@ export function Picture({
   const [noteFocused, setNoteFocused] = useState(false);
   // §27, 5.7: what the next note is about. A take picked on its sound row (at the time clicked, or the whole take), else
   // "This frame" or "The whole mix" as the target line's menu says; a range marked narrows either to the range.
-  const [takeSel, setTakeSel] = useState<Extract<Selection, { kind: "take" }> | null>(null);
   const [aim, setAim] = useState<"frame" | "mix">("frame");
   const [noteMarks, setNoteMarks] = useState<Mark[]>([]);
+  // Lets go of the take and the menu's choice; a marked range and its ticked marks stay (they have their own control).
   const clearSelection = () => {
-    setTakeSel(null);
+    takes.clear();
     setAim("frame");
-    setNoteMarks([]);
   };
+  const openNoteBox = useNoteBox(input);
   // §27, 5.5: the level and mute, remembered per browser; §27, 5.4: the timeline's share of the column, once dragged.
   const [sound, setSound] = useState(readVolume);
   const [split, setSplit] = useState(readSplit);
@@ -474,15 +475,12 @@ export function Picture({
   // §27, 5.6: the takes in use, played in step with the picture, and the cut's own sound.
   const mix = useMix({ state, assets, video, version, player: ref, duration, monitor: sound, toast, onChanged });
   // A take picked as the target that is no longer in use (unpicked here, by the agent or in another tab) lets go.
-  const takeGone = takeSel !== null && !mix.rows.some((r) => r.take && takeOn(r.take) === takeSel.on);
-  useEffect(() => {
-    if (takeGone) {
-      setTakeSel(null);
-      setNoteMarks([]);
-    }
-  }, [takeGone]);
   // The notes on the takes in use are this tab's too: listed, and marked on their rows.
-  const takeNotes = state.notes.notes.filter((n) => (n.stage === "voice" || n.stage === "music" || n.stage === "sfx") && (!n.video || n.video === video.id) && mix.noteRow(n) !== null);
+  const takes = useTakeSelection(mix, state.notes.notes, video, fps, (to) => {
+    ref.current?.pause();
+    seek(to);
+  }, () => setNoteMarks([]));
+  const { takeSel, takeNotes } = takes;
 
   // §27, 5.5: the level and mute live on the element, and are remembered per browser. With a take in use the takes are
   // heard instead (through the engine, at the same level), and the cut's own sound only when its row says so.
@@ -631,7 +629,7 @@ export function Picture({
     else if (e.key === "ArrowLeft") { e.preventDefault(); step(e.shiftKey ? -10 : -1); }
     else if (e.key === "ArrowRight") { e.preventDefault(); step(e.shiftKey ? 10 : 1); }
     else if (k === "v") selectTool();
-    else if (e.key === "Escape") clearSelection();
+    else if (escapeIsFree(e)) clearSelection();
     else if (k === "f") { e.preventDefault(); if (!e.repeat) fullScreen(); }
     // §26: a shelved film is view only: the marking keys do nothing.
     else if (readOnly && /^[iogbn]$/.test(k)) return;
@@ -640,7 +638,7 @@ export function Picture({
     // Holding G repeats the key: each repeat would be another full decode and PNG round-trip.
     else if (k === "g" && !e.repeat) void grabFrame();
     else if (k === "b") setBoxMode((m) => !m);
-    else if (k === "n") { e.preventDefault(); input.current?.focus(); }
+    else if (k === "n") { e.preventDefault(); openNoteBox(); }
   };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => onKeyRef.current(e);
@@ -704,7 +702,8 @@ export function Picture({
   // same snapped time, so the strip and the timecode must agree with it rather than with `t`.
   const current = shotAt(shots, snap(t, fps));
 
-  const placed = visible.map((n) => ({ n, at: placeNote(n, version.id) })).filter(({ at }) => at.t !== null);
+  // The ruler marks every note this tab lists that has a time: the picture's, the mix's and those on the takes in use.
+  const placed = [...visible, ...takeNotes].map((n) => ({ n, at: placeNote(n, version.id) })).filter(({ at }) => at.t !== null);
   // The ruler's markers: each note placed on this cut, a ring for an all-format note on a cut with formats (§21.5).
   const marks: RulerMarker[] = rulerMarks(placed.map(({ n, at }) => ({ ...n, t: at.t, tOut: at.tOut })), duration).map((m, i) => {
     const n = placed[i].n;
@@ -775,7 +774,7 @@ export function Picture({
             readOnly={readOnly}
             grabbing={grabbing > 0}
             onSelect={selectTool}
-            onNote={() => input.current?.focus()}
+            onNote={openNoteBox}
             onRange={rangeTool}
             onBox={() => setBoxMode((m) => !m)}
             onGrab={() => void grabFrame()}
@@ -957,17 +956,9 @@ export function Picture({
             t={t}
             onSeek={seek}
             onOpenTab={onOpenTab}
-            selected={takeSel ? (mix.rows.find((r) => r.take && takeOn(r.take) === takeSel.on)?.lane ?? null) : null}
+            selected={takes.selected}
             notes={[...visible, ...takeNotes]}
-            onPick={readOnly ? undefined : (row, at) => {
-              const take = row.take!;
-              const to = at === null ? null : snap(at, fps);
-              setTakeSel({ kind: "take", stage: MIX_STAGE[row.lane], on: takeOn(take), name: take.variant.name, t: to });
-              if (to !== null) {
-                ref.current?.pause();
-                seek(to);
-              }
-            }}
+            onPick={readOnly ? undefined : takes.pick}
           />
         </div>
       </div>

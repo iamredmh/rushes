@@ -19,7 +19,7 @@ describe("exportFileName", () => {
 });
 
 describe("notesMarkdown", () => {
-  it("is a title, export date, then one section per stage with notes, in workflow order -- never script", () => {
+  it("is a title, export date, then one section per stage with notes, in workflow order -- never the script's own edits", () => {
     const notes: NotesFile = { schema: 1, rev: 0, notes: [] };
     addNote(notes, { stage: "mix", scope: "whole", text: "Loudness check" });
     addNote(notes, { stage: "music", scope: "whole", on: "deep-house", text: "Tempo feels slow" });
@@ -31,6 +31,29 @@ describe("notesMarkdown", () => {
         "",
         "## Music",
         "- **Whole** · to do — Tempo feels slow",
+        "",
+        "## Mix",
+        "- **Whole** · Whole mix · to do — Loudness check",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  it("lists notes on the script first, each naming its line (§27, 5.8)", () => {
+    const notes: NotesFile = { schema: 1, rev: 0, notes: [] };
+    addNote(notes, { stage: "script", scope: "whole", on: "s2", text: "Say it plainer." });
+    addNote(notes, { stage: "script", scope: "whole", on: null, text: "Too long overall." });
+    addNote(notes, { stage: "mix", scope: "whole", text: "Loudness check" });
+    const script = { sections: [{ id: "s2", start: 3, end: 7, current: "The scan finds it", proposed: null, direction: "", status: "draft" as const, takes: [] }] };
+    const md = notesMarkdown(project(), notes.notes, new Date(2026, 9, 3, 14, 5), script);
+    expect(md).toBe(
+      [
+        "# Spring Launch — notes",
+        "Exported 2026-10-03 14:05",
+        "",
+        "## Script",
+        "- **Whole** · S2 · The scan finds it · to do — Say it plainer.",
+        "- **Whole** · to do — Too long overall.",
         "",
         "## Mix",
         "- **Whole** · Whole mix · to do — Loudness check",

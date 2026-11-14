@@ -191,6 +191,13 @@ describe("onLabel (what an audio note is on, for export and the CLI)", () => {
   };
   const label = (stage: Note["stage"], on: string | null) => onLabel({ stage, on }, ctx);
 
+  it("names a script note's line by its section id and the start of its words, and nothing once the section has gone (§27, 5.8)", () => {
+    const words = { project: { lanes: [] }, script: { sections: [{ id: "s3", start: 0, end: 4, current: "  The scan finds   the patch before anyone notices it is even there, quietly. ", proposed: null, direction: "", status: "draft" as const, takes: [] }] } };
+    expect(onLabel({ stage: "script", on: "s3" }, words)).toBe("S3 · The scan finds the patch before anyone notices…");
+    expect(label("script", "s2")).toBe("S2 · x");
+    expect(label("script", "s9")).toBeNull();
+    expect(label("script", null)).toBeNull();
+  });
   it("names a lane-qualified variant or cue by its lane and name", () => {
     expect(label("music", "music/option-a")).toBe("Music · Option A");
     expect(label("music", "sting/a")).toBe("Sting · A");
