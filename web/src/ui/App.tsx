@@ -26,7 +26,7 @@ import { CutMenu } from "./desk/CutMenu.js";
 import { NoCutTimeline } from "./desk/NoCut.js";
 import { AllShelved, FilmSelect, ShelvedBanner } from "./desk/FilmSelect.js";
 import { MoreMenu } from "./desk/MoreMenu.js";
-import { NotesPanel, PanelContext, PanelToggle, usePanelPlace, type PanelShared } from "./desk/NotesPanel.js";
+import { NotesPanel, PanelContext, PanelToggle, usePanelPlace, type NotesPanelProps, type PanelShared } from "./desk/NotesPanel.js";
 import { ReviewTabs, type ReviewTabRow } from "./desk/ReviewTabs.js";
 import { StatusBar } from "./desk/StatusBar.js";
 import { TopBar } from "./desk/TopBar.js";
@@ -95,6 +95,15 @@ function Locked({ tab, projectName, filmName, found, onReview, toast }: { tab: S
       )}
     </div>
   );
+}
+
+/**
+ * The Plan pages' notes panel. A half-typed note in it is pending, as in Review's views (final review I2): the desk refuses
+ * a switch that would unmount it or aim it elsewhere, and lets go once the panel itself goes.
+ */
+function PlanNotesPanel({ onPendingChange, ...props }: NotesPanelProps & { onPendingChange(pending: boolean): void }) {
+  useEffect(() => () => onPendingChange(false), []);
+  return <NotesPanel {...props} onTextChange={onPendingChange} />;
 }
 
 export function App() {
@@ -631,8 +640,10 @@ export function App() {
   // §27, 5.8: the Plan pages' notes are the script's: on a line picked in Script, or on the script as a whole.
   const scriptNotes = state.notes.notes.filter((n) => n.stage === "script");
   const planTargetNow = planLine && stage === "script" ? noteTarget({ kind: "line", ...planLine }, null) : { stage: "script" as const, on: null, scope: "whole" as const, t: null, tOut: null, label: "The script" };
+  // m7 (ruling): the Brief and Storyboard pages take no notes of their own; a note on the plan is written on the Script page.
+  const planBox = stage === "script";
   const planPanel = (
-    <NotesPanel
+    <PlanNotesPanel
       notes={scriptNotes}
       version={null}
       placeholder={`Note on ${planTargetNow.label}`}
@@ -646,6 +657,9 @@ export function App() {
         void refresh();
       }}
       onChanged={() => void refresh()}
+      onPendingChange={setPending}
+      readOnly={!planBox}
+      instead={planBox ? undefined : "Notes on the plan are written on the Script page."}
     />
   );
 
