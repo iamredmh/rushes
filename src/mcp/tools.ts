@@ -304,7 +304,7 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     {
       title: "Add an audio variant",
       description:
-        "Add a voice read (in a round), music bed or SFX pass for side-by-side review. Returns its lane and variant ids: a note on it is `on` \"<lane id>/<variant id>\".",
+        "Add a voice read, music bed or SFX pass for side-by-side review, each in a round. A take you add is not in use and is not heard in the mix until the user picks it. Returns its lane and variant ids: a note on it is `on` \"<lane id>/<variant id>\".",
       inputSchema: {
         project,
         stage: z.enum(["voice", "music", "sfx"]),
@@ -317,7 +317,7 @@ export function createMcpServer(ctx: ToolContext): McpServer {
           .max(64)
           .optional()
           .describe(
-            'Round name for voice reads (up to 64 characters), e.g. "Round 2 · Gerald, tone". Reads in one round are compared side by side; a new direction gets a new round.',
+            'Round name (up to 64 characters) for a read, a bed or an effects pass, e.g. "Round 2 · Gerald, tone" or "Round 2 · softer middle". Takes in one round are compared side by side; a new direction gets a new round.',
           ),
         meta: z.record(z.string(), z.union([z.string(), z.number()])).optional().describe("e.g. {\"bpm\": 120, \"key\": \"A minor\"}"),
         description: z

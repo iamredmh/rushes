@@ -375,6 +375,32 @@ describe("API", () => {
       expect(back.json.use.music).toMatchObject({ lane: "round-1", variant: "pulse" });
       expect((await call("GET", "/api/picks")).json.use.music.lane).toBe("round-1");
     });
+    it("PUT /api/variants/:lane/:variant/put-away hides a take and brings it back", async () => {
+      const { call } = await two();
+      const away = await call("PUT", "/api/variants/round-1/george/put-away", { away: true });
+      expect(away.status).toBe(200);
+      expect(away.json.variant.putAway).toMatch(/^\d{4}-\d\d-\d\dT/);
+      const back = await call("PUT", "/api/variants/round-1/george/put-away", { away: false });
+      expect(back.json.variant.putAway).toBeUndefined();
+      expect((await call("PUT", "/api/variants/round-1/nope/put-away", { away: true })).status).toBe(404);
+      expect((await call("PUT", "/api/variants/round-1/george/put-away", { away: "yes" })).status).toBe(400);
+    });
+    it("refuses to put away the take in use, naming the film", async () => {
+      const { call } = await two();
+      await call("PUT", "/api/picks", { video: "hero", lanes: { "round-1": "george" } });
+      const refused = await call("PUT", "/api/variants/round-1/george/put-away", { away: true });
+      expect(refused.status).toBe(400);
+      expect(refused.json).toMatchObject({ error: "invalid", message: "This one is in use on Hero. Choose another first." });
+      // Once another read is in use, it can go.
+      await call("PUT", "/api/picks", { video: "hero", lanes: { "round-2": "george-slow" } });
+      expect((await call("PUT", "/api/variants/round-1/george/put-away", { away: true })).status).toBe(200);
+    });
+    it("a new take says when it arrived and the cut it was made for", async () => {
+      const { call } = await two();
+      const v = (await call("POST", "/api/variants", { stage: "music", name: "Pulse", file: "audio/p.wav", video: "Hero" })).json.variant;
+      expect(v.addedAt).toMatch(/^\d{4}-\d\d-\d\dT/);
+      expect(v.madeFor).toEqual({ hero: "v1" });
+    });
     it("a lane the project does not know is still merged plainly, as before", async () => {
       const { call } = await two();
       const put = await call("PUT", "/api/picks", { video: "hero", lanes: { "not-a-lane": "x" } });

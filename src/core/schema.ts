@@ -124,6 +124,13 @@ export const VariantSchema = fileObject({
   videos: z.array(id).optional(),
   // The one film an older project named (0.7.x). Read as `videos: [video]`; set films replace it.
   video: id.optional(),
+  // §27.6, all absent on a take from before it. When it arrived:
+  addedAt: z.string().optional(),
+  // the cut that was current, per film it is on (film id -> version id), so a take made for an
+  // older cut can be told from one made for this one. No entry for a film that had no cut then.
+  madeFor: z.record(z.string(), z.string()).optional(),
+  // and when it was put away (hidden, never deleted).
+  putAway: z.string().optional(),
 });
 export type Variant = z.infer<typeof VariantSchema>;
 
