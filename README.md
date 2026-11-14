@@ -75,19 +75,19 @@ Four workspaces in the top bar, in the order the work happens; the first, Plan, 
 
 ### Timeline: point at the exact frame
 
-<img src="docs/assets/screens/picture-review.jpg" alt="The Picture tab on the first cut of a launch film, paused at 0:03.00. A dashed box is drawn round the word 'shot.' at the end of the headline. Four open notes are listed beside the video, two with frame grabs." width="880">
+<img src="docs/assets/screens/picture-review.jpg" alt="The Review workspace's Timeline tab on cut v1 of the demo film, paused at 0:03.00 on a test pattern of colour bars. A dashed box is drawn round a checker block in the lower right of the frame. The notes panel on the right lists the open notes, with the boxed note selected; under the monitor, the ruler marks each note above the Picture track and a row each for Voice, Music and Effects." width="880">
 
 Pin a note to a moment, to a range, or to a box drawn on the frame. Grab a frame to show what you mean. Every note records the shot it falls in.
 
 ### The agent replies on every note
 
-<img src="docs/assets/screens/picture-fixed.jpg" alt="The Picture tab on version two of the film, paused at 0:14.40 on a count-up that now lands on '11 min'. In the notes, a green tick and the agent's reply sit under the note that asked for the change." width="880">
+<img src="docs/assets/screens/picture-fixed.jpg" alt="The Timeline tab on cut v2, the hue pass of the same test pattern. In the notes panel the note about the checker block, carried over from v1 at 0:03.00, has a green tick and the agent's reply under it: v2 is a hue pass, and the block and the bars shift together now." width="880">
 
 When the agent delivers a new cut, each note shows where it landed in the new version and what the agent did about it. A green tick means it's done. Anything the agent didn't fix stays open, with a reason.
 
 ### Plan: the brief, the script and the storyboard
 
-<img src="docs/assets/screens/script-review.jpg" alt="The Script tab. Each section shows the agent's current line on the left and the user's rewrite on the right. Two sections are outlined as changed, each with a short direction such as 'Two short sentences. Easier to say.'" width="880">
+<img src="docs/assets/screens/script-review.jpg" alt="The Script page in the Plan workspace, with the Brief, Script and Storyboard switch above it. Each of the four lines sits in a field with its timing and a fit bar. The second line is marked Edited by you, with the agent's wording struck through beneath it and the direction 'Two short sentences. Easier to say.'; the third has a direction of its own. The foot reads 0 of 4 lines approved, 1 edited, and the status bar says Next: send 7 changes." width="880">
 
 Rewrite a line, add a direction, flag it or approve it. Every line sits in a field; once you change one, its row says **Edited by you**, with the agent's wording struck through beneath it and a button to go back to it, and the change goes with your next **Send**. The bar on each row shows whether the line still fits its slot. When the agent adopts your edit, it records the next voice read from the corrected script.
 
@@ -95,13 +95,13 @@ Plan is one workspace, so planning never crowds the review. A switch at its top 
 
 ### Voice: compare reads, round by round
 
-<img src="docs/assets/screens/voiceover.jpg" alt="The Voiceover tab. The current round, 'George, slower', is picked and in use. The earlier round is open below it with two reads, George and Eliza, side by side. A note on the earlier round has the agent's reply: Round 2 is George at 93% pace." width="880">
+<img src="docs/assets/screens/voiceover.jpg" alt="The Voice tab. Under the monitor, Round 2's read, Voice A slower, is In use, and Earlier lists Round 1's two reads, Voice A and Voice B, each with its waveform and description. In the notes panel, the note on Round 1's Voice A has a green tick and the agent's reply: Round 2 is Voice A at a slower pace." width="880">
 
 Reads of the same script sit side by side in rounds. Switch between them with no gap in playback, or turn on **Blind** to hide which is which. Leave a note on a whole read, or at a point in it. Each sound's tab lists its takes as **New**, **In use**, **Earlier** and **Put away**; a take isn't on the timeline until you pick it.
 
 ### Music: audition the beds
 
-<img src="docs/assets/screens/music.jpg" alt="The Music tab with three beds, each with its waveform. Bed B is in use. Two open notes are marked on the waveforms: a 'Fall' on bed A and a 'Rise' on bed B." width="880">
+<img src="docs/assets/screens/music.jpg" alt="The Music tab with two beds, each with its waveform: Warm pad is In use, Pulse is listed under Earlier. Two open notes are marked on the waveforms and listed in the notes panel: a point on Pulse at 0:02 and a 'Fall' range on Warm pad from 0:06 to 0:09." width="880">
 
 Switch beds instantly while the picture plays. Mark a range as **Rise**, **Fall**, **Louder** or **Quieter**, and your agent gets it as a note it can act on.
 
@@ -119,19 +119,19 @@ The **Film** menu in the top bar switches films, each listed with its open notes
 
 ### Effects: layers by sound
 
-<img src="docs/assets/screens/sound-effects.jpg" alt="The Sound effects tab with one pass open into its layers. There is one row per sound (tick, thud, blip, chime, whoosh, counter, thump, snap), each with a count and a mark wherever it plays." width="880">
+<img src="docs/assets/screens/sound-effects.jpg" alt="The Effects tab with the pass in use, Pass A, open into its layers: one row per sound (Whoosh 1, Whoosh 2 and Whoosh 3), each with a count and a mark where it plays, under the pass's waveform with its three cues labelled." width="880">
 
 Every cue is labelled on the waveform. Open the pass into **layers by sound**: one row per sound, with a count, and a tick wherever it plays. Click a layer's file to hear that sample on its own.
 
 ### Everything together on the Timeline
 
-<img src="docs/assets/screens/mix.jpg" alt="The Mix tab. Voiceover, music and sound effects each have a lane with mute and solo buttons and a level slider. Below them, integrated loudness, true peak and the level of the music under the voice are shown. A note asks for the music to be 2 dB quieter through the middle." width="880">
+<img src="docs/assets/screens/timeline-sound.jpg" alt="The Timeline tab with a take in use for each sound: rows for Voice, Music and Effects under the Picture track, each with its take's waveform, mute (M) and solo (S) buttons and a level, the music at -12 dB. The transport above them reads the loudness of what you hear: -18.8 LUFS, the true peak in dBTP and the music 6 dB under the voice." width="880">
 
 There is no separate mix: the takes in use play together against the picture on the **Timeline** tab. Each sound has its own row there with mute (**M**), solo (**S**) and a level, and the tab reads the loudness and true peak (with ffmpeg installed).
 
 ### Activity: the Change Log
 
-<img src="docs/assets/screens/change-log.jpg" alt="The Change Log drawer open over the Picture tab. It lists, newest first, the picks, the sound effects pass, the music beds, the picture lock, the agent's replies to five notes, the voiceover reads and the script, each marked as by the agent or by you." width="880">
+<img src="docs/assets/screens/activity.jpg" alt="The notes panel's Activity tab beside the Timeline: an 'Add a line to the log' box, filters by area (All, Picture, Voice, Music, Sound effects, Mix, Visuals, Notes, Files), and today's entries newest first: the agent's replies to two notes, the picks for the film, and the two cuts added, each marked as by the agent or by Rushes, with Export as Markdown at the foot." width="880">
 
 Rushes keeps a running log of what happened, in the **Activity** tab of the notes panel: each cut, read, bed and pass as it arrives, notes sent, and the agent's replies. Export it as Markdown for whoever needs to catch up.
 
