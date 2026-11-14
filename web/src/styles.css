@@ -23,8 +23,8 @@
   --vo: #4fd1c5;
   --music: #a78bfa;
   --sfx: #fb923c;
-  --sans: "Figtree", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
   --r: 10px;
   --r-lg: 14px;
   /* The page body's padding, and where it starts (App sets --body-top from the real header and tabs). */
@@ -423,7 +423,7 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .apreview .markdown pre { background: var(--app); border-radius: var(--r); padding: 12px; overflow: auto; }
 .apreview .markdown pre code { background: transparent; padding: 0; }
 .apreview .plain { margin: 0; white-space: pre-wrap; word-break: break-word; font-family: var(--sans); font-size: 15px; color: var(--text); }
-/* Figtree UI text is never under 15px (spec §10) -- M8. */
+/* Interface text is never under 15px (spec §10) -- M8. */
 .atrunc { margin-top: 12px; color: var(--text-3); font-size: 15px; }
 .aempty { color: var(--text-3); font-size: 15px; margin: 8px 0; }
 
@@ -532,7 +532,7 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .level input[type="range"] { flex: 1 1 auto; min-width: 0; accent-color: var(--accent); }
 /* Fixed width, right-aligned and never wrapping: the value never spills out of its column. */
 .level .db { flex: none; width: 76px; text-align: right; color: var(--text-2); white-space: nowrap; }
-/* Mix: the loudness readout under the lanes. Figtree with tabular figures: mono is kept for timecodes and ids. */
+/* Mix: the loudness readout under the lanes. The interface face with tabular figures: mono is kept for timecodes and ids. */
 .meter { display: flex; align-items: flex-end; gap: 28px; flex-wrap: wrap; padding: 6px 0 0; }
 .meter > div { display: grid; gap: 2px; }
 .meter b { font: 600 20px/1.2 var(--sans); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; width: max-content; }
