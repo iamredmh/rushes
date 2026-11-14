@@ -7,6 +7,7 @@ import { makeDemo, makeRunner, pickVoices, type DemoDeps, type Runner } from "..
 import { fromManifestPath } from "../../src/core/paths.js";
 import { Store } from "../../src/core/store.js";
 import { onLabel } from "../../src/core/notes.js";
+import { startServer } from "../../src/server/start.js";
 
 const made: string[] = [];
 afterEach(async () => {
@@ -106,10 +107,12 @@ describe("makeDemo", () => {
     expect(sfxLanes[0].variants).toHaveLength(1);
     expect(sfxLanes[0].variants[0].cues).toHaveLength(3);
 
+    // The film's own picks: a film plays its own, never the project-wide set (final review I7).
     const picks = await store.read("picks");
-    expect(picks.levels.music).toBe(-12);
-    expect(picks.lanes.music).toBe("warm-pad");
-    expect(picks.lanes["round-1-voices"]).toBe("voice-a");
+    const own = picks.videos[project.videos[0].id];
+    expect(own.levels.music).toBe(-12);
+    expect(own.lanes.music).toBe("warm-pad");
+    expect(own.lanes["round-1-voices"]).toBe("voice-a");
 
     const notes = await store.read("notes");
     expect(notes.notes).toHaveLength(4);
@@ -127,6 +130,32 @@ describe("makeDemo", () => {
     const script = await store.read("script");
     expect(script.sections).toHaveLength(4);
     expect(script.sections.filter((s) => s.current.includes("Lumen")).length).toBeGreaterThan(0);
+  });
+
+  // Final review I7: the demo's picks and level were written project-wide, so its film played nothing; its sound notes had
+  // no film, so with a second film they were open on every film; and the project said 30 fps over two 25 fps cuts.
+  it("gives its film a read and a bed in use, the bed at -12 dB, and its notes, as the server reports them for the film", async () => {
+    const dir = await emptyDir();
+    await makeDemo(dir, deps());
+    const project = await new Store(dir).read("project");
+    expect(project.fps).toBe(25);
+    expect(project.videos[0].versions.map((v) => v.fps)).toEqual([25, 25]);
+    const film = project.videos[0].id;
+    const s = await startServer(dir, { port: 0, found: { probe: async () => null } });
+    try {
+      const picks = await (await fetch(`${s.url}/api/picks?video=${film}`)).json();
+      // Set as a pick made on the desk is (setInUse), not worked out from the lanes after the fact.
+      expect(picks.use.voice).toMatchObject({ lane: "round-1-voices", variant: "voice-a", at: "2026-10-04T10:00:00.000Z" });
+      expect(picks.use.music).toMatchObject({ lane: "music", variant: "warm-pad", at: "2026-10-04T10:00:00.000Z" });
+      expect(picks.use.sfx).toBeUndefined();
+      expect(picks.levels).toEqual({ music: -12 });
+      const state = await (await fetch(`${s.url}/api/state`)).json();
+      expect(state.notes.notes.map((n: { stage: string; video: string | null }) => `${n.stage}:${n.video}`).sort()).toEqual(
+        ["mix", "music", "picture", "voice"].map((stage) => `${stage}:${film}`),
+      );
+    } finally {
+      await s.close();
+    }
   });
 
   it("puts the Voiceover note on a real Round 1 read, named in its text (§18.3: no 'Assembled read')", async () => {

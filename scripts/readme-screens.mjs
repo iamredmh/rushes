@@ -4,9 +4,10 @@
 //   npm run build && node scripts/readme-screens.mjs [--out docs/assets/screens] [--keep]
 //
 // It builds a fresh demo project in a temporary folder (`rushes demo --no-browser`, which needs ffmpeg), serves it on a
-// free port, makes the few changes a person would make on the way (a take in use for each sound, a box and a note on
-// the first cut, the agent's replies, two rewritten script lines), and photographs the desk in headless Chromium at
-// 1280 css px wide, 1.375x, dark: 1760 x 1100 pixels (the Script page 1760 x 1271), shown 880 wide in the README.
+// free port, makes the few changes a person would make on the way (Round 2's read and the effects pass in use, a box and
+// a note on the first cut, the agent's replies, two rewritten script lines), and photographs the desk in headless
+// Chromium at 1280 css px wide, 1.375x, dark: 1760 x 1100 pixels (the Script page 1760 x 1271), shown 880 wide in the
+// README.
 // The server is stopped and the folder deleted at the end (--keep leaves the folder and prints where it is).
 import { spawn, spawnSync } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -60,9 +61,28 @@ const api = async (method, path, body) => {
 const FILM = "lumen-launch";
 const browser = await chromium.launch();
 try {
+  // ---- the demo as it comes: its film opens on the Timeline with a read and a bed in use, the bed at −12 dB ----
+  {
+    const first = await browser.newPage({ viewport: { width: WIDTH, height: Math.ceil(HEIGHT) } });
+    await first.goto(url);
+    await first.keyboard.press("2");
+    const row = (sound) => first.getByRole("group", { name: `${sound} track`, exact: true });
+    await row("Music").locator(".db").waitFor();
+    const got = {
+      voice: await row("Voice").locator(".sblock .slbl").textContent(),
+      music: await row("Music").locator(".sblock .slbl").textContent(),
+      level: await row("Music").locator(".db").textContent(),
+    };
+    if (!/^(Voice|Placeholder) A\b/.test(got.voice) || got.music !== "Warm pad" || got.level !== "−12.0 dB") {
+      throw new Error(`A fresh demo's Timeline should have Voice A and Warm pad in use, the bed at −12.0 dB: ${JSON.stringify(got)}`);
+    }
+    await first.close();
+  }
+
   // ---- what a person does on the way ----
-  // A take in use for each sound on the film, and the bed a little under the voice.
-  await api("PUT", "/api/picks", { video: FILM, lanes: { "round-2-voice-a-pace": "voice-a-slower", music: "warm-pad", sfx: "pass-a" }, levels: { music: -12 } });
+  // The demo has Warm pad and a Round 1 read in use on the film, the bed at -12 dB: Round 2's read and the effects pass
+  // are picked too, so every sound has a take in use.
+  await api("PUT", "/api/picks", { video: FILM, lanes: { "round-2-voice-a-pace": "voice-a-slower", sfx: "pass-a" } });
   // Notes on the first cut: one with a box drawn round the checker block.
   const { note: boxed } = await api("POST", "/api/notes", {
     stage: "picture", video: FILM, version: "v1", scope: "point", t: 3, frame: 75,

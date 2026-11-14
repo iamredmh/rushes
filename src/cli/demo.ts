@@ -4,6 +4,7 @@ import { mkdir, readdir, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { addVariant, addVersion, setShots, shotAt } from "../core/project.js";
 import { addNote } from "../core/notes.js";
+import { setInUse } from "../core/picks.js";
 import { setSections } from "../core/script.js";
 import { toManifestPath } from "../core/paths.js";
 import { Store } from "../core/store.js";
@@ -261,6 +262,8 @@ export async function makeDemo(dir: string, deps: DemoDeps): Promise<{ dir: stri
     let pictureNoteShot: ReturnType<typeof shotAt> = null;
     const pictureNoteT = 10;
     await store.update("project", (p) => {
+      // The project's frame rate is its cuts' (the store starts a project at 30).
+      p.fps = 25;
       const { video, version: v1 } = addVersion(p, { video: `${PRODUCT} launch`, file: toManifestPath(root, v1Abs), duration: DURATION, fps: 25, note: "First cut of the test pattern" }, deps.now);
       videoId = video.id;
       const cut = setShots(p, video.id, v1.id, [0, 6, 12, 18, 24].map((start, i) => ({ name: `Shot ${i + 1}`, start })));
@@ -320,9 +323,11 @@ export async function makeDemo(dir: string, deps: DemoDeps): Promise<{ dir: stri
     await renderChord(deps.ffmpeg, warmPadWav, { freqs: [196, 246.94, 293.66], seconds: 12 });
     await renderChord(deps.ffmpeg, pulseWav, { freqs: [220, 277.18, 329.63], seconds: 12, pulseHz: 2.5 });
 
+    let musicLaneId = "";
     let musicVariantId = "";
     await store.update("project", (p) => {
-      const { variant } = addVariant(p, { stage: "music", name: "Warm pad", file: toManifestPath(root, warmPadWav) });
+      const { lane, variant } = addVariant(p, { stage: "music", name: "Warm pad", file: toManifestPath(root, warmPadWav) });
+      musicLaneId = lane.id;
       musicVariantId = variant.id;
       addVariant(p, { stage: "music", name: "Pulse", file: toManifestPath(root, pulseWav) });
     });
@@ -344,11 +349,17 @@ export async function makeDemo(dir: string, deps: DemoDeps): Promise<{ dir: stri
       });
     });
 
-    // 6. Picks: music and round 1, with music's level set to -12 dB so Mix shows a level.
+    // 6. Picks: Warm pad and Round 1's Voice A in use on the film, as a pick on the desk makes them (setInUse, as the
+    // server's PUT /api/picks does), with the bed at -12 dB so the Timeline shows a level. A film plays its own picks.
+    const { lanes } = await store.read("project");
     await store.update("picks", (picks) => {
-      picks.lanes.music = musicVariantId;
-      picks.lanes[round1LaneId] = voiceAId;
-      picks.levels.music = -12;
+      const own = (picks.videos[videoId] ??= { lanes: {}, levels: {} });
+      for (const [laneId, variantId] of [[round1LaneId, voiceAId], [musicLaneId, musicVariantId]]) {
+        const lane = lanes.find((l) => l.id === laneId);
+        if (!lane) throw new Error(`The demo has no ${laneId} lane`);
+        setInUse(own, lanes, lane, variantId, deps.now);
+      }
+      own.levels.music = -12;
     });
 
     // 7. Example notes: a point on Picture, a whole note on a Round 1 read, a range note with "Fall"
@@ -356,9 +367,9 @@ export async function makeDemo(dir: string, deps: DemoDeps): Promise<{ dir: stri
     const voiceNote = hasSay ? `${shortA} reads warmer than ${shortB}. Lean that way for launch.` : `${shortA} over ${shortB} for now. Swap in real reads before launch.`;
     await store.update("notes", (notes) => {
       addNote(notes, { stage: "picture", video: videoId, version: "v1", scope: "point", t: pictureNoteT, shot: pictureNoteShot, text: "Hold the opening frame a beat longer before the cut." }, deps.now);
-      addNote(notes, { stage: "voice", on: `${round1LaneId}/${voiceAId}`, scope: "whole", text: voiceNote }, deps.now);
-      addNote(notes, { stage: "music", on: `music/${musicVariantId}`, scope: "range", t: 6, tOut: 9, marks: [{ kind: "fall" }], text: "Let the pad fall away under the last line." }, deps.now);
-      addNote(notes, { stage: "mix", on: null, scope: "whole", text: "Check the whole mix against a phone speaker before sign-off." }, deps.now);
+      addNote(notes, { stage: "voice", video: videoId, on: `${round1LaneId}/${voiceAId}`, scope: "whole", text: voiceNote }, deps.now);
+      addNote(notes, { stage: "music", video: videoId, on: `${musicLaneId}/${musicVariantId}`, scope: "range", t: 6, tOut: 9, marks: [{ kind: "fall" }], text: "Let the pad fall away under the last line." }, deps.now);
+      addNote(notes, { stage: "mix", video: videoId, on: null, scope: "whole", text: "Check the whole mix against a phone speaker before sign-off." }, deps.now);
     });
 
     return { dir: root };
