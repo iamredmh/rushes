@@ -902,6 +902,66 @@ test.describe("the notes panel", () => {
     expect((await notesOn(rushes, "mix"))[0]).toMatchObject({ stage: "mix", on: null, scope: "whole", t: null });
   });
 
+  test("Escape from a control in the notes panel keeps the take selected", async ({ page, rushes }) => {
+    await threeInUse(rushes);
+    await openTimeline(page, rushes, 3);
+    await soundTrack(page, "Music").getByRole("button", { name: "Music: note on the whole take" }).click();
+    await expect(noteTargetLine(page)).toContainText("Music · Warm keys");
+    await panelTab(page, "Notes").focus();
+    await page.keyboard.press("Escape");
+    await expect(noteTargetLine(page)).toContainText("Music · Warm keys");
+    // Escape from the desk itself still lets go of it.
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.keyboard.press("Escape");
+    await expect(noteTargetMenu(page)).toHaveValue("frame");
+  });
+
+  test("a note on a take or the mix uses up the box drawn before it: it does not wait for the next picture note", async ({ page, rushes }) => {
+    await threeInUse(rushes);
+    await openTimeline(page, rushes, 3);
+    await page.keyboard.press("b");
+    const o = (await page.locator(".overlay").boundingBox())!;
+    await page.mouse.move(o.x + o.width * 0.3, o.y + o.height * 0.3);
+    await page.mouse.down();
+    await page.mouse.move(o.x + o.width * 0.6, o.y + o.height * 0.6, { steps: 4 });
+    await page.mouse.up();
+    await expect(page.getByRole("button", { name: "Remove box" })).toBeVisible();
+    await soundTrack(page, "Music").getByRole("button", { name: "Music: note on the whole take" }).click();
+    await box(page).fill("Ending is too abrupt.");
+    await box(page).press("Enter");
+    await expect.poll(async () => (await notesOn(rushes, "music")).length).toBe(1);
+    await expect(page.getByRole("button", { name: "Remove box" })).toHaveCount(0);
+    // The next note, on picture, carries no box.
+    await box(page).focus();
+    await page.keyboard.press("Escape");
+    await expect(noteTargetMenu(page)).toHaveValue("frame");
+    await box(page).fill("Hold here.");
+    await box(page).press("Enter");
+    await expect.poll(async () => (await notesOn(rushes, "picture")).length).toBe(1);
+    expect(((await notesOn(rushes, "picture"))[0] as { box: unknown }).box).toBeNull();
+  });
+
+  test("Activity, left open, is not fetched again on every switch of view", async ({ page, rushes }) => {
+    await rushes.addCut();
+    await rushes.addVariant("voice", "Read A", { seconds: 2, freq: 220 });
+    await page.goto(rushes.url);
+    await videoReady(page);
+    await openActivity(page);
+    await expect(activity(page).locator(".lrow").first()).toBeVisible();
+    const asks: string[] = [];
+    page.on("request", (r) => {
+      if (r.url().includes("/api/log?")) asks.push(r.url());
+    });
+    await openReviewTab(page, "Voice");
+    await expect(activity(page).locator(".lrow").first()).toBeVisible();
+    await openReviewTab(page, "Timeline");
+    await expect(activity(page).locator(".lrow").first()).toBeVisible();
+    expect(asks).toEqual([]);
+    // A new line in the log is fetched as before.
+    await rushes.api("POST", "/api/log", { area: "picture", text: "A line from the agent" });
+    await expect(activity(page)).toContainText("A line from the agent");
+  });
+
   test("Send shows its count only while something waits, and opens the prompt with Copy", async ({ page, rushes }) => {
     await rushes.addCut();
     await page.goto(rushes.url);
@@ -911,6 +971,8 @@ test.describe("the notes panel", () => {
     await rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 0.5, text: "Hold the end card." });
     await expect(sendButton(page)).toHaveText("Send1");
     await expect(sendButton(page)).toHaveAccessibleName("Send 1");
+    // Its tooltip says what the count counts: what has not been sent yet.
+    await expect(sendButton(page)).toHaveAttribute("data-tip", "Notes and edits not sent yet, from every tab and film");
     await sendButton(page).click();
     await expect(sentDialog(page)).toContainText("picture");
     await expect(sentDialog(page).getByRole("button", { name: "Copy prompt" })).toBeVisible();

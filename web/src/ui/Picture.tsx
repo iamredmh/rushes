@@ -541,6 +541,11 @@ export function Picture({
       });
       clearRange();
       setNoteMarks([]);
+      // A box, a grabbed frame and the format scope belong to a picture note: this note used the box up, so none is left
+      // waiting to land on the next picture note by surprise.
+      setNoteScope("this");
+      setBox(null);
+      onGrabChange(video.id, null);
       onChanged();
       return;
     }

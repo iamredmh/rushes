@@ -15,6 +15,13 @@ const LIMIT = 1000;
 /** Scrolled further than this counts as reading: new lines wait behind the pill (§22.8). */
 const READING_PX = 40;
 
+/**
+ * The last list loaded, per project and filter, with the log head it was loaded at. Every view mounts its own notes panel,
+ * so switching view remounts the list: it shows this at once, and asks the server again only when the head has moved.
+ */
+const loaded = new Map<string, { head: string; view: LogView }>();
+const headKey = (h: LogHead | null | undefined) => `${h?.rev ?? ""}:${h?.mark ?? ""}`;
+
 const session = (): KeyStore | undefined => {
   try {
     return window.sessionStorage;
@@ -58,13 +65,16 @@ function Row({ entry: e, to, onGo }: { entry: LogLine; to: JumpTarget | null; on
 }
 
 export function ActivityList({ log, projectId, head, project, stage, toast, onJump, onEscape }: ActivityListProps) {
-  const [view, setView] = useState<LogView | null>(null);
-  const [waiting, setWaiting] = useState<LogView | null>(null);
-  const [problem, setProblem] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>(() => {
     const saved = recall(session(), storageKey(projectId, "log-filter"));
     return isFilter(saved) ? saved : "all";
   });
+  const cacheKey = (f: Filter) => `${projectId}\n${f}`;
+  const [view, setView] = useState<LogView | null>(() => loaded.get(cacheKey(filter))?.view ?? null);
+  const [waiting, setWaiting] = useState<LogView | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const headNow = useRef(head);
+  headNow.current = head;
   const [text, setText] = useState("");
   const list = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
@@ -86,9 +96,12 @@ export function ActivityList({ log, projectId, head, project, stage, toast, onJu
   const load = async (force = false) => {
     const n = ++seq.current;
     const q = new URLSearchParams({ limit: String(LIMIT) });
-    if (filterRef.current !== "all") q.set("area", filterRef.current);
+    const asked = filterRef.current;
+    const at = headKey(headNow.current);
+    if (asked !== "all") q.set("area", asked);
     try {
       const next = await api.get<LogView>(`/api/log?${q}`);
+      loaded.set(cacheKey(asked), { head: at, view: next });
       if (n !== seq.current) return;
       setProblem(null);
       if (!force && shown.current && reading()) setWaiting(next);
@@ -100,8 +113,17 @@ export function ActivityList({ log, projectId, head, project, stage, toast, onJu
       else setProblem(problemText("read", e));
     }
   };
-  // A new filter starts at the top.
+  // A new filter starts at the top. Mounted again on a list already loaded at this head (a switch of view), it is shown
+  // as it was, with no fetch.
+  const mounted = useRef(false);
   useEffect(() => {
+    const first = !mounted.current;
+    mounted.current = true;
+    const kept = loaded.get(cacheKey(filter));
+    if (first && kept && kept.head === headKey(head)) {
+      apply(kept.view);
+      return;
+    }
     if (list.current) list.current.scrollTop = 0;
     setWaiting(null);
     void load(true);
