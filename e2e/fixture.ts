@@ -663,7 +663,7 @@ export function takeRows(page: Page): Locator {
   return takesList(page).locator(".take:not(.loose)");
 }
 
-/** A row's circle: a radio, checked on the take in use ("In use"), else "Use this one". */
+/** A row's circle: a radio, checked on the take in use ("In use: <name>"), else "Use this one: <name>". */
 export function takeCircle(page: Page, name: string): Locator {
   return takeRow(page, name).getByRole("radio");
 }
@@ -683,9 +683,18 @@ export function takeBlock(page: Page, name: string): Locator {
   return takeRow(page, name).locator(".tlane");
 }
 
-/** A row's Put away, or Bring back on a put-away take. */
-export function putAwayButton(page: Page, name: string, kind: "Put away" | "Bring back" = "Put away"): Locator {
+/**
+ * A row's slot button: Put away, Bring back on a put-away take, or Unpick on the take in use. It shows on the row under the
+ * pointer, with focus inside it, or selected (pressRowButton hovers the row first).
+ */
+export function putAwayButton(page: Page, name: string, kind: "Put away" | "Bring back" | "Unpick" = "Put away"): Locator {
   return takeRow(page, name).getByRole("button", { name: kind, exact: true });
+}
+
+/** Presses a row's Put away, Bring back or Unpick the way a mouse would: the row hovered, so the button shows, then clicked. */
+export async function pressRowButton(page: Page, name: string, kind: "Put away" | "Bring back" | "Unpick" = "Put away"): Promise<void> {
+  await takeRow(page, name).hover();
+  await putAwayButton(page, name, kind).click();
 }
 
 /** Show / Hide on a folded group's line: "Put away" or "Not on this film". */

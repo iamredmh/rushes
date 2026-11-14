@@ -7,6 +7,7 @@ import { agentPrompt, AUDIO_CHIPS, defaultVersion, filmLanes, filmNotes, filmPic
 import type { Asset, State, Video } from "../types.js";
 import { AudioStage, filmsOf, type Preview, takeList } from "./AudioStage.js";
 import { filmsControl } from "./FilmsMenu.js";
+import { otherSounds } from "./desk/SoundTracks.js";
 import { Icon } from "./Icon.js";
 
 // Blind holds for the session: its shuffle is fixed at page load, and the switch survives a trip to another tab.
@@ -75,6 +76,7 @@ export function VariantTab({ stage, state, assets, video, toast, onChanged, onPe
       film={video?.id ?? null}
       readOnly={!!video?.shelved}
       list={list}
+      others={otherSounds(state, assets, video ?? null, stage)}
       loose={{ items: loose.map((r) => ({ key: r.key, name: r.name, meta: r.meta, films: films(r), none: r.films.length === 0 })), what: loose.length === 1 ? words.one : words.many }}
       headerExtra={stage === "music" ? <BlindButton on={blind} onToggle={() => setBlind(!blind)} /> : undefined}
       preview={preview}

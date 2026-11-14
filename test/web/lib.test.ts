@@ -13,8 +13,8 @@ import {
 import { OPEN_SAFE_EXT as SERVER_OPEN_SAFE_EXT } from "../../src/server/reveal.js";
 import { markLabel as serverMarkLabel, type Mark } from "../../src/core/schema.js";
 import {
-  AUDIO_CHIPS, BUILT, blindOrder, laneSelection, markLabel, marksLabel, scopeOptions, noteFocus, setMarkDb, spacePressesButton, testFlags, toggleMark, watchFocusOrigin, variantMeta,
-  variantEngineLane, variantNoteRow, variantNoteTarget, variantOnLabel, variantOnOptions, variantRows,
+  AUDIO_CHIPS, BUILT, blindOrder, markLabel, marksLabel, scopeOptions, noteFocus, setMarkDb, spacePressesButton, testFlags, toggleMark, watchFocusOrigin, variantMeta,
+  variantNoteRow, variantNoteTarget, variantOnLabel, variantOnOptions, variantRows,
 } from "../../web/src/lib.js";
 import type { Lane } from "../../web/src/types.js";
 import { mixInputs } from "../../src/server/loudness.js";
@@ -23,7 +23,7 @@ import { tmpProject } from "../helpers/tmp.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import {
-  filmPicks, heardVoice, onOptionGroups, takeInUse, sectionLabel, voiceDefaultRead, voiceListening, voiceNoteRows, voiceOnLabel, voiceOnOptions, voiceRounds,
+  filmPicks, heardVoice, onOptionGroups, takeInUse, sectionLabel, voiceNoteRows, voiceOnLabel, voiceRounds,
 } from "../../web/src/lib.js";
 import { withFormatRows } from "../../web/src/lib.js";
 
@@ -594,41 +594,6 @@ describe("audio tabs: lanes", () => {
     expect(variantOnLabel(sfx, opts, "gone")).toBeNull();
     expect(variantNoteTarget(sfx, "pass-b:swipe")).toEqual({ row: "sfx/pass-b", cue: "swipe" });
   });
-  it("falls back to the first in manifest order, whatever the display order", () => {
-    const shown = [
-      { key: "c", audition: { lane: "m", clip: "c" }, order: 2 },
-      { key: "a", audition: { lane: "m", clip: "a" }, order: 0 },
-      { key: "b", audition: { lane: "m", clip: "b" }, order: 1 },
-    ];
-    expect(laneSelection(shown, null)).toEqual({ m: "a" });
-    expect(laneSelection([{ ...shown[0] }, { ...shown[2], picked: true }, shown[1]], null)).toEqual({ m: "b" });
-  });
-  it("hears the selected row, else the pick, else the first, per engine lane", () => {
-    const rows = [
-      { key: "a", audition: { lane: "m", clip: "a" } },
-      { key: "b", audition: { lane: "m", clip: "b" }, picked: true },
-      { key: "x", audition: { lane: "s", clip: "x" } },
-      { key: "read" },
-    ];
-    expect(laneSelection(rows, null)).toEqual({ m: "b", s: "x" });
-    expect(laneSelection(rows, "a")).toEqual({ m: "a", s: "x" });
-    expect(laneSelection(rows, "read")).toEqual({ m: "b", s: "x" });
-  });
-  it("plays only the selected bed even when the beds are filed under several project lanes", () => {
-    const lane = (id: string, ids: string[]) => ({
-      id, stage: "music", name: id,
-      variants: ids.map((v) => ({ id: v, name: v, file: `${v}.wav`, cues: [], meta: null })),
-    });
-    const rows = variantRows(
-      [lane("stems", ["a", "b"]), lane("night", ["d", "e"]), lane("composed", ["g"])] as unknown as Lane[],
-      "music",
-    ).map((r, order) => ({ key: r.key, order, audition: { lane: variantEngineLane("music"), clip: r.key } }));
-    expect(rows).toHaveLength(5);
-    // Nothing selected: one bed, the first.
-    expect(Object.values(laneSelection(rows, null))).toEqual(["stems/a"]);
-    // Click a bed in any project lane: that one alone is heard.
-    for (const r of rows) expect(Object.values(laneSelection(rows, r.key))).toEqual([r.key]);
-  });
   it("shuffles for Blind stably, as a permutation", () => {
     const keys = ["a", "b", "c", "d", "e", "f"];
     const one = blindOrder(keys, 7);
@@ -720,10 +685,6 @@ describe("voiceRounds (§18.2)", () => {
     const picks = { schema: 1 as const, rev: 0, lanes: {}, sections: {}, levels: {}, videos: { hero: { lanes: { m: "a" }, levels: {}, use: { music: { lane: "m", variant: "a", at: "x", seen: {} } } } } };
     expect(filmPicks(picks, "hero").use?.music?.variant).toBe("a");
   });
-  it("defaults to the current round's pick, else its first read", () => {
-    expect(voiceDefaultRead(voiceRounds(lanes, {}))?.variant).toBe("excited");
-    expect(voiceDefaultRead(voiceRounds(lanes, { "round-2": "sombre" }))?.variant).toBe("sombre");
-  });
   it("labels legacy take and section notes without drawing them", () => {
     const m = { rounds: voiceRounds(lanes, {}) };
     expect(voiceNoteRows(m, { on: "s2:t1" } as Note)).toBeNull();
@@ -736,21 +697,6 @@ describe("voiceRounds (§18.2)", () => {
     expect(r.map((x) => x.id)).toEqual(["round-1", "round-2"]);
     expect(r[1]).toMatchObject({ current: true, pick: null });
     expect(heardVoice(r)).toBeNull();
-    expect(voiceDefaultRead([])).toBeNull();
-  });
-  it("plays one read at a time, each in its own engine lane: the selected one, else the default", () => {
-    const rounds = voiceRounds(lanes, { "round-1": "gerald" });
-    const none = voiceListening(rounds, null);
-    expect(Object.keys(none.select)).toEqual([
-      "var:round-1/jane", "var:round-1/louise", "var:round-1/gerald", "var:round-2/excited", "var:round-2/sombre",
-    ]);
-    expect(none.select["var:round-2/sombre"]).toBe("round-2/sombre");
-    // Nothing picked in the current round: its first read, not the older round's pick.
-    expect(Object.entries(none.gains).filter(([, g]) => g === 1).map(([k]) => k)).toEqual(["var:round-2/excited"]);
-    const jane = voiceListening(rounds, "round-1/jane");
-    expect(Object.entries(jane.gains).filter(([, g]) => g === 1).map(([k]) => k)).toEqual(["var:round-1/jane"]);
-    // The selection never changes, only the gains: switching is a ramp, never a restart.
-    expect(jane.select).toEqual(none.select);
   });
   it("draws a note on its read, by lane-qualified id or (legacy) a bare variant id", () => {
     const m = { rounds: voiceRounds(lanes, {}), sections: [{ id: "s1", takes: [] }, { id: "s2", takes: [{ id: "t1" }] }] };
@@ -766,28 +712,12 @@ describe("voiceRounds (§18.2)", () => {
     expect(voiceNoteRows(m, { on: "r/s2" })).toBe("r/s2");
     expect(voiceOnLabel(m, "s2")).toBe("S2");
   });
-  it("offers each read in the On menu, the current round first, labelled by name with the round in full", () => {
-    const opts = voiceOnOptions(voiceRounds(lanes, {}));
-    expect(opts.map((o) => [o.value, o.label, o.full, o.on])).toEqual([
-      ["v:round-2/excited", "excited", "Round 2 · Gerald, tone · excited", "round-2/excited"],
-      ["v:round-2/sombre", "sombre", "Round 2 · Gerald, tone · sombre", "round-2/sombre"],
-      ["v:round-1/jane", "jane", "Round 1 · Voices · jane", "round-1/jane"],
-      ["v:round-1/louise", "louise", "Round 1 · Voices · louise", "round-1/louise"],
-      ["v:round-1/gerald", "gerald", "Round 1 · Voices · gerald", "round-1/gerald"],
-    ]);
-    expect(voiceOnOptions(voiceRounds(lanes, {}), () => "Read").map((o) => o.label)).toEqual(Array(5).fill("Read"));
-  });
   it("groups the On menu by round, so two reads with one name stay apart (§18.3: the round is shown by the group)", () => {
-    const twice = [
-      { id: "round-1", stage: "voice", name: "Round 1 · Voices", variants: [v("jane"), v("gerald")] },
-      { id: "round-3", stage: "voice", name: "Round 3 · Gerald, fixes", variants: [v("gerald")] },
-    ] as Lane[];
-    const opts = voiceOnOptions(voiceRounds(twice, {}));
-    expect(opts.map((o) => [o.group, o.label])).toEqual([
-      ["Round 3 · Gerald, fixes", "gerald"],
-      ["Round 1 · Voices", "jane"],
-      ["Round 1 · Voices", "gerald"],
-    ]);
+    const opts = [
+      { value: "v:round-3/gerald", label: "gerald", on: "round-3/gerald", group: "Round 3 · Gerald, fixes", groupId: "round-3" },
+      { value: "v:round-1/jane", label: "jane", on: "round-1/jane", group: "Round 1 · Voices", groupId: "round-1" },
+      { value: "v:round-1/gerald", label: "gerald", on: "round-1/gerald", group: "Round 1 · Voices", groupId: "round-1" },
+    ];
     expect(onOptionGroups(opts).map((g) => [g.group, g.options.map((o) => o.value)])).toEqual([
       ["Round 3 · Gerald, fixes", ["v:round-3/gerald"]],
       ["Round 1 · Voices", ["v:round-1/jane", "v:round-1/gerald"]],

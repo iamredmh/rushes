@@ -6,7 +6,7 @@ import {
   monitor, pictureTrack, ruler, rulerMarkers, shotBlocks, TOOL_TIPS, toolButton, toolStrip, transport,
   hasFfmpeg, loudness, soundBlock, soundButton, soundLevel, soundTakes, soundTrack,
   notesPanel, noteTargetLine, noteTargetLabel, noteTargetMenu, panelTab, panelToggle, rangeChip, sendButton, sentDialog, statusSend,
-  openReviewTab, takesList, takeHeadings, takeRow, takeRows, takeCircle, takeName, takeTag, takeBlock, putAwayButton, foldToggle,
+  openReviewTab, takesList, takeHeadings, takeRow, takeRows, takeCircle, takeName, takeTag, takeBlock, putAwayButton, pressRowButton, foldToggle,
 } from "./fixture.js";
 
 // §27, 5.1 to 5.3 and 5.9: the desk's frame. A top bar and a status bar that never move, the Film and Cut menus,
@@ -983,9 +983,11 @@ test.describe("a tab per sound", () => {
     await expect(takeRows(page)).toHaveCount(4);
     await expect(takeRows(page).locator(".knm")).toHaveText(["Gerald, warmer", "Gerald", "Gerald, slower", "Jane"]);
     await expect(takeCircle(page, "Gerald")).toHaveAttribute("aria-checked", "true");
-    await expect(takeCircle(page, "Gerald")).toHaveAccessibleName("In use");
+    await expect(takeCircle(page, "Gerald")).toHaveAccessibleName("In use: Gerald");
+    await expect(takeCircle(page, "Gerald")).toHaveAttribute("data-tip", "In use");
     await expect(takeCircle(page, "Jane")).toHaveAttribute("aria-checked", "false");
-    await expect(takeCircle(page, "Jane")).toHaveAccessibleName("Use this one");
+    await expect(takeCircle(page, "Jane")).toHaveAccessibleName("Use this one: Jane");
+    await expect(takeCircle(page, "Jane")).toHaveAttribute("data-tip", "Use this one");
     // The same frame as the timeline: the monitor, the transport, the ruler and the Picture row above the list.
     await expect(monitor(page)).toBeVisible();
     await expect(transport(page)).toBeVisible();
@@ -1009,7 +1011,7 @@ test.describe("a tab per sound", () => {
     await expect(takeBlock(page, "Drift").locator(".sblock")).not.toHaveClass(/\bstale\b/);
   });
 
-  test("the circle on a New take makes it In use, the tab's count drops to a plain number, and the circle again unpicks it", async ({ page, rushes }) => {
+  test("the circle on a New take makes it In use, the tab's count drops to a plain number, and Unpick (not the circle again) unpicks it", async ({ page, rushes }) => {
     await rushes.addCut();
     await rushes.addVariant("music", "Pulse", { seconds: 2, freq: 220, round: "Round 1" });
     await rushes.addVariant("music", "Drift", { seconds: 2, freq: 330, round: "Round 2" });
@@ -1023,8 +1025,12 @@ test.describe("a tab per sound", () => {
     await expect(takeHeadings(page)).toHaveText(["In use · Round 2", "Earlier · Round 1"]);
     await expect(reviewTab(page, "Music")).toHaveText("Music 2");
     expect((await rushes.api("GET", "/api/picks?video=hero")).use.music).toMatchObject({ lane: "round-2", variant: "drift" });
-    // Pressed again, the circle on the take in use unpicks it: nothing is in use, so both wait to be chosen again.
+    // Pressed again, the circle on the take in use changes nothing; Unpick, in the row's slot, unpicks it: nothing is in
+    // use, so both wait to be chosen again.
     await takeCircle(page, "Drift").click();
+    await expect(takeCircle(page, "Drift")).toHaveAttribute("aria-checked", "true");
+    expect((await rushes.api("GET", "/api/picks?video=hero")).use.music).toMatchObject({ lane: "round-2", variant: "drift" });
+    await pressRowButton(page, "Drift", "Unpick");
     await expect(takeCircle(page, "Drift")).toHaveAttribute("aria-checked", "false");
     await expect(reviewTab(page, "Music")).toHaveText("Music 2 new");
     expect((await rushes.api("GET", "/api/picks?video=hero")).use.music).toBeUndefined();
@@ -1040,15 +1046,16 @@ test.describe("a tab per sound", () => {
     await openReviewTab(page, "Music");
     await expect(takeHeadings(page)).toHaveText(["In use · Round 2", "Earlier · Round 1"]);
     await expect(putAwayButton(page, "Drift")).toHaveCount(0);
-    await putAwayButton(page, "Pulse").click();
+    await pressRowButton(page, "Pulse");
     await expect(takeHeadings(page)).toHaveText(["In use · Round 2", "Put away · 1"]);
     await expect(takeRow(page, "Pulse")).toHaveCount(0);
     const lane = (await rushes.api("GET", "/api/state")).project.lanes.find((l: { id: string }) => l.id === "round-1");
     expect(lane.variants[0].putAway).toEqual(expect.any(String));
     await foldToggle(page, "Put away").click();
     await expect(foldToggle(page, "Put away")).toHaveAttribute("aria-expanded", "true");
-    await putAwayButton(page, "Pulse", "Bring back").click();
+    await pressRowButton(page, "Pulse", "Bring back");
     await expect(takeHeadings(page)).toHaveText(["In use · Round 2", "Earlier · Round 1"]);
+    await takeRow(page, "Pulse").hover();
     await expect(putAwayButton(page, "Pulse")).toBeVisible();
     expect((await rushes.api("GET", "/api/state")).project.lanes.find((l: { id: string }) => l.id === "round-1").variants[0].putAway).toBeUndefined();
   });
@@ -1133,5 +1140,99 @@ test.describe("a tab per sound", () => {
     await box.press("Enter");
     await expect.poll(async () => (await rushes.api("GET", "/api/notes?stage=music")).notes.length).toBe(1);
     expect((await rushes.api("GET", "/api/notes?stage=music")).notes[0]).toMatchObject({ on: "round-1/pulse", scope: "whole", t: null });
+  });
+
+  test("Films opens on a take that is not in use, and Put away has its own place: their boxes never overlap", async ({ page, rushes }) => {
+    await rushes.addCut("hero", "Hero");
+    await rushes.addCut("cutdown", "Cutdown");
+    await rushes.addVariant("music", "Pulse", { seconds: 2, freq: 220, round: "Round 1", video: ["Hero", "Cutdown"] });
+    const drift = await rushes.addVariant("music", "Drift", { seconds: 2, freq: 330, round: "Round 2", video: ["Hero", "Cutdown"] });
+    await rushes.api("PUT", "/api/picks", { video: "hero", lanes: { [drift.lane.id]: drift.variant.id } });
+    await page.goto(rushes.url);
+    await videoReady(page);
+    await openReviewTab(page, "Music");
+    const films = takeRow(page, "Pulse").getByRole("button", { name: /^Films for Pulse/ });
+    // A mouse on the row: Put away shows, beside Films, not over it.
+    await takeRow(page, "Pulse").hover();
+    await expect(putAwayButton(page, "Pulse")).toBeVisible();
+    const f = (await films.boundingBox())!;
+    const p = (await putAwayButton(page, "Pulse").boundingBox())!;
+    expect(f.x + f.width <= p.x || p.x + p.width <= f.x).toBe(true);
+    await films.click();
+    await expect(page.getByRole("group", { name: "Films for Pulse" })).toBeVisible();
+    // Nothing was put away by reaching for Films.
+    await expect(takeHeadings(page)).toHaveText(["In use · Round 2", "Earlier · Round 1"]);
+    // The take in use has Unpick in the same place.
+    await takeRow(page, "Drift").hover();
+    await expect(putAwayButton(page, "Drift", "Unpick")).toBeVisible();
+  });
+
+  test("on Effects, choosing The whole pass with a cue selected puts the note on the pass, not the cue", async ({ page, rushes }) => {
+    await rushes.addCut();
+    await rushes.addVariant("sfx", "Pass A", { seconds: 3, freq: 880, round: "Round 1", cues: [{ name: "Swipe", t: 1.5 }] });
+    await page.goto(rushes.testUrl());
+    await videoReady(page);
+    await openReviewTab(page, "Effects");
+    await loadedOn(page, 1);
+    await takeRow(page, "Pass A").locator(".cue", { hasText: "Swipe" }).click();
+    await expect(noteTargetLabel(page)).toHaveText(/^00:00:01:\d\d · Effects · Cue · Swipe$/);
+    await noteTargetMenu(page).selectOption({ label: "The whole pass" });
+    await expect(noteTargetLabel(page)).toHaveText("Effects · Pass A");
+    const box = notesPanel(page).getByRole("textbox", { name: "New note" });
+    await box.fill("Too busy overall.");
+    await box.press("Enter");
+    await expect.poll(async () => (await rushes.api("GET", "/api/notes?stage=sfx")).notes.length).toBe(1);
+    expect((await rushes.api("GET", "/api/notes?stage=sfx")).notes[0]).toMatchObject({ on: "round-1/pass-a", scope: "whole", t: null });
+  });
+
+  test("a sound's tab plays the other sounds in use under its take, at their saved levels; Only this sound plays it alone, remembered", async ({ page, rushes }) => {
+    const { bed } = await threeInUse(rushes);
+    const glow = await rushes.addVariant("music", "Glow", { seconds: 4, freq: 440 });
+    await rushes.api("PUT", "/api/picks", { video: "hero", levels: { voice: -6, sfx: 3 } });
+    await page.goto(rushes.testUrl());
+    await videoReady(page);
+    await openReviewTab(page, "Music");
+    await loadedOn(page, 4);
+    // Nothing selected: the bed in use, with the read and the pass in use under it.
+    await expect.poll(async () => (await heardOn(page)).sort()).toEqual([`${bed.lane.id}/${bed.variant.id}`, "round-1-voices/gerald", "sfx/pass-a"].sort());
+    // Each at its saved level, as on the timeline.
+    const lanes = (await audio(page))!.lanes;
+    expect(lanes.vo).toBeCloseTo(10 ** (-6 / 20), 3);
+    expect(lanes.sfx).toBeCloseTo(10 ** (3 / 20), 3);
+    expect(lanes.music).toBeCloseTo(1, 3);
+    // An earlier bed selected plays in the bed's place; the others stay.
+    await takeName(page, "Glow").click();
+    await expect.poll(async () => (await heardOn(page)).sort()).toEqual([`${glow.lane.id}/${glow.variant.id}`, "round-1-voices/gerald", "sfx/pass-a"].sort());
+    // Only this sound: the bed alone, and still so after a reload.
+    const alone = page.getByRole("button", { name: "Only this sound" });
+    await expect(alone).toHaveAttribute("aria-pressed", "false");
+    await alone.click();
+    await expect(alone).toHaveAttribute("aria-pressed", "true");
+    await expect.poll(() => heardOn(page)).toEqual([`${glow.lane.id}/${glow.variant.id}`]);
+    await page.reload();
+    await openReviewTab(page, "Music");
+    await loadedOn(page, 4);
+    await expect(page.getByRole("button", { name: "Only this sound" })).toHaveAttribute("aria-pressed", "true");
+    await expect.poll(() => heardOn(page)).toEqual([`${bed.lane.id}/${bed.variant.id}`]);
+  });
+
+  test("beds added with no round on two days show under two day headings, the newest day first", async ({ page, rushes }) => {
+    await rushes.addCut();
+    await rushes.addVariant("music", "Monday bed", { seconds: 2, freq: 220 });
+    await rushes.addVariant("music", "Tuesday bed", { seconds: 2, freq: 330 });
+    // Date them a day apart, as if they had come in on different days.
+    const file = join(rushes.root, ".rushes", "project.json");
+    const project = JSON.parse(await readFile(file, "utf8"));
+    const music = project.lanes.find((l: { id: string }) => l.id === "music");
+    music.variants[0].addedAt = "2026-11-09T12:00:00.000Z";
+    music.variants[1].addedAt = "2026-11-10T12:00:00.000Z";
+    project.rev += 1;
+    await writeFile(file, JSON.stringify(project, null, 2));
+    await page.goto(rushes.url);
+    await videoReady(page);
+    await openReviewTab(page, "Music");
+    const day = (iso: string) => page.evaluate((d) => new Date(d).toLocaleDateString("en-GB", { day: "numeric", month: "short" }), iso);
+    await expect(takeHeadings(page)).toHaveText([`New · ${await day("2026-11-10T12:00:00.000Z")}`, `New · ${await day("2026-11-09T12:00:00.000Z")}`]);
+    await expect(takeRows(page).locator(".knm")).toHaveText(["Tuesday bed", "Monday bed"]);
   });
 });
