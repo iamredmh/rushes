@@ -5,6 +5,7 @@ import {
   LOCKED_BRIEF, LOCKED_STORYBOARD, LOCKED_TAB, testFlags, STAGE_NAMES, agentPrompt, briefPrompt, briefSendPrompt, copyShortcut, currentFormat, defaultVersion, filmLanes, filmPicks, firstView, formatChips, formatPrompt, foundChip, foundSignature, foundTotal,
   filmAfterShelving, inPlay, isPlanPage, labelOfId, latest, lockedFound, neighbourFormat, neighbourVideo, planProgress, planTarget, previousVersion, proxyKey, readyPrompt, snap, storySendPrompt, storyboardPrompt, versionFormats, type PlanPage,
 } from "../lib.js";
+import { onLabel } from "../../../src/core/notes.js";
 import { deskPlace, deskView, nextHint, noteTarget, takeCount, takeGroups, unsentCount, viewForKey, type DeskView } from "../desk.js";
 import type { Batch, BriefView, FoundCounts, FoundKind, Note, Stage, StoryboardView, Video } from "../types.js";
 import { useRushes } from "../useRushes.js";
@@ -164,6 +165,14 @@ export function App() {
   const changeLog = useChangeLog(projectId() ?? "", state?.log, (open) => open && panelHere && panel.shown);
   const [reveal, setReveal] = useState(false);
   const panelToggle = useRef<HTMLButtonElement>(null);
+  // A note box to focus once the panel that holds it is on screen (revealNotes).
+  const afterReveal = useRef<(() => void) | null>(null);
+  useLayoutEffect(() => {
+    const then = afterReveal.current;
+    if (!then) return;
+    afterReveal.current = null;
+    then();
+  });
   // §27, 5.8: the script line a note on a Plan page is about, picked by working in its row.
   const [planLine, setPlanLine] = useState<{ id: string; label: string } | null>(null);
 
@@ -588,7 +597,8 @@ export function App() {
         }
       },
     },
-    send: { count: unsent, onSend: () => void send() },
+    // On its own page Send always carries the brief's or storyboard's line (send()), so it shows there whenever that file exists.
+    send: { count: unsent, always: (stage === "brief" && state.brief.exists) || (stage === "storyboard" && state.storyboard.exists), onSend: () => void send() },
     shown: panel.shown,
     narrow: panel.narrow,
     setShown: panel.setShown,
@@ -596,6 +606,15 @@ export function App() {
     setWidth: panel.setWidth,
     reveal,
     onRevealed: () => setReveal(false),
+    revealNotes: (then) => {
+      afterReveal.current = then;
+      panel.setShown(true);
+      if (changeLog.open) changeLog.setOpen(false, false);
+      else if (panel.shown) {
+        afterReveal.current = null;
+        then();
+      }
+    },
   };
   /** A page with no notes of its own (a locked page, a Plan page): it sits beside a notes panel the desk mounts for it. */
   const withPanel = (page: ComponentChildren, side: ComponentChildren = <NotesPanel notes={[]} version={null} placeholder="" readOnly toast={toast} onAdd={async () => undefined} onChanged={() => void refresh()} />) => (
@@ -614,7 +633,8 @@ export function App() {
       placeholder={`Note on ${planTargetNow.label}`}
       fixedTimes
       toast={toast}
-      onLabel={(n: Note) => (n.on ? n.on.toUpperCase() : "Script")}
+      // The line a note is about, in the words export and the CLI use; nothing when the section has gone.
+      onLabel={(n: Note) => (n.on === null ? "The script" : onLabel(n, { project: state.project, script: state.script }))}
       target={{ label: planTargetNow.label, onClear: planLine && stage === "script" ? () => setPlanLine(null) : undefined }}
       onAdd={async (text) => {
         await api.post("/api/notes", { stage: "script", video: null, version: null, on: planTargetNow.on, scope: "whole", t: null, tOut: null, text });

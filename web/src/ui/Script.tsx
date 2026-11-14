@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api } from "../api.js";
 import { fit, fmt, isChanged } from "../lib.js";
 import type { Script as ScriptData, Section } from "../types.js";
+import { sectionLineLabel } from "../../../src/core/notes.js";
 import { Icon } from "./Icon.js";
 
 const STATUS = {
@@ -39,11 +40,8 @@ function useDebounced(fn: () => void, ms: number) {
   };
 }
 
-/** §27, 5.8: a script line as the notes panel names it: "S2 · The scan finds it". */
-export function lineLabel(section: Pick<Section, "id" | "current">): string {
-  const words = section.current.trim().replace(/\s+/g, " ");
-  return `${section.id.toUpperCase()} · ${words.length > 48 ? `${words.slice(0, 47).trimEnd()}…` : words}`;
-}
+/** §27, 5.8: a script line as the notes panel names it: "S2 · The scan finds it" (the same words export and the CLI use). */
+const lineLabel = sectionLineLabel;
 
 function Row({ section, wps, toast, onChanged, onPick }: { section: Section; wps: number; toast(message: string): void; onChanged(): void; onPick?(line: { id: string; label: string }): void }) {
   const [text, setText] = useState(section.proposed ?? section.current);

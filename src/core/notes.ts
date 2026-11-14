@@ -134,6 +134,12 @@ export function checkNoteFormat({ next, prev, boxRedrawn = false }: NoteFormatCh
   }
 }
 
+/** A script line in words, as the Script page and the notes panel name it: "S2 · The scan finds it", cut at 48 characters. */
+export function sectionLineLabel(section: { id: string; current: string }): string {
+  const words = section.current.trim().replace(/\s+/g, " ");
+  return `${section.id.toUpperCase()} · ${words.length > 48 ? `${words.slice(0, 47).trimEnd()}…` : words}`;
+}
+
 /** What `onLabel` needs to resolve a note's `on`. `picks` only steers an older bare id on Mix. */
 export interface OnContext {
   project: Pick<Project, "lanes">;
@@ -147,11 +153,16 @@ export interface OnContext {
  * section ("S2"), the read ("Assembled read") or, on Mix, "Whole mix" / "Voiceover". Resolved in
  * the same order as the dashboard: the exact lane-qualified variant (`"<lane>/<variant>"`) or cue
  * (`"<lane>/<variant>:<cue>"`) first, then `"vo"`, a take (`"<section>:<take>"`), a section id, and
- * last the older bare forms (a bare variant id, `"<variant>:<cue>"` or a bare cue id). Null on
- * Picture and Script, or when `on` names nothing that's still there.
+ * last the older bare forms (a bare variant id, `"<variant>:<cue>"` or a bare cue id). On Script, the line a
+ * note is about (§27, 5.8: `on` is its section id), as "S2 · The scan finds it". Null on Picture, on a
+ * Script note with no line, or when `on` names nothing that's still there.
  */
 export function onLabel(note: Pick<Note, "stage" | "on">, ctx: OnContext): string | null {
   const { stage, on } = note;
+  if (stage === "script") {
+    const section = on === null ? undefined : ctx.script.sections.find((s) => s.id === on);
+    return section ? sectionLineLabel(section) : null;
+  }
   if (stage !== "voice" && stage !== "music" && stage !== "sfx" && stage !== "mix") return null;
   if (on === null) return stage === "mix" ? "Whole mix" : stage === "voice" ? "Assembled read" : null;
 

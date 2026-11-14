@@ -5,7 +5,7 @@ import {
   expect, test, videoReady, cutButton, currentFilm, filmButton, openWorkspace, pickFilm, reviewTab, workspaceTab, type FormatSize, type Rushes,
   monitor, pictureTrack, ruler, rulerMarkers, shotBlocks, TOOL_TIPS, toolButton, toolStrip, transport,
   hasFfmpeg, loudness, soundBlock, soundButton, soundLevel, soundTakes, soundTrack,
-  notesPanel, noteTargetLine, noteTargetMenu, panelToggle, sendButton, sentDialog, statusSend,
+  notesPanel, noteTargetLine, noteTargetMenu, panelTab, panelToggle, rangeChip, sendButton, sentDialog, statusSend,
 } from "./fixture.js";
 
 // §27, 5.1 to 5.3 and 5.9: the desk's frame. A top bar and a status bar that never move, the Film and Cut menus,
@@ -839,6 +839,91 @@ test.describe("the notes panel", () => {
     await expect(notesPanel(page)).toBeHidden();
     await panelToggle(page).click();
     await expect(box(page)).toHaveValue("Keep this");
+  });
+
+  test("N and the Note tool show the hidden panel on its Notes tab and focus the note box", async ({ page, rushes }) => {
+    await rushes.addCut();
+    await page.goto(rushes.url);
+    await videoReady(page);
+    await page.keyboard.press("\\");
+    await expect(notesPanel(page)).toBeHidden();
+    await page.keyboard.press("n");
+    await expect(notesPanel(page)).toBeVisible();
+    await expect(box(page)).toBeFocused();
+    // From Activity too: back on Notes, with the box focused.
+    await box(page).blur();
+    await panelTab(page, "Activity").click();
+    await page.locator("main.body").click({ position: { x: 5, y: 5 } });
+    await toolButton(page, "Note").click();
+    await expect(panelTab(page, "Notes")).toHaveAttribute("aria-selected", "true");
+    await expect(box(page)).toBeFocused();
+    await box(page).blur();
+    await page.keyboard.press("\\");
+    await expect(notesPanel(page)).toBeHidden();
+    await toolButton(page, "Note").click();
+    await expect(notesPanel(page)).toBeVisible();
+    await expect(box(page)).toBeFocused();
+  });
+
+  test("at 1000 px N and the Note tool open the drawer and focus the note box, on the Timeline and on a Voice tab", async ({ page, rushes }) => {
+    await page.setViewportSize({ width: 1000, height: 800 });
+    await rushes.addCut();
+    await rushes.addVariant("voice", "Gerald", { round: "Round 1", seconds: 2, freq: 220 });
+    await page.goto(rushes.url);
+    await videoReady(page);
+    await expect(notesPanel(page)).toBeHidden();
+    await page.keyboard.press("n");
+    await expect(notesPanel(page)).toBeVisible();
+    await expect(box(page)).toBeFocused();
+    await box(page).blur();
+    await page.keyboard.press("\\");
+    await expect(notesPanel(page)).toBeHidden();
+    await toolButton(page, "Note").click();
+    await expect(notesPanel(page)).toBeVisible();
+    await expect(box(page)).toBeFocused();
+    await box(page).blur();
+    await page.keyboard.press("\\");
+    await page.keyboard.press("3");
+    await expect(reviewTab(page, "Voice")).toHaveAttribute("aria-selected", "true");
+    await expect(notesPanel(page)).toBeHidden();
+    await page.keyboard.press("n");
+    await expect(notesPanel(page)).toBeVisible();
+    await expect(box(page)).toBeFocused();
+  });
+
+  test("Escape that closes a menu or the Sent panel leaves the take, the range and its marks; Escape in the empty box lets go of the take only", async ({ page, rushes }) => {
+    await threeInUse(rushes);
+    await rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 0.5, text: "Hold the end card." });
+    await openTimeline(page, rushes, 3);
+    await soundTrack(page, "Music").getByRole("button", { name: "Music: note on the whole take" }).click();
+    await page.keyboard.press("i");
+    for (let i = 0; i < 10; i++) await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("o");
+    const marks = notesPanel(page).getByRole("group", { name: "Marks" });
+    await marks.getByRole("button", { name: "Quieter" }).click();
+    const kept = async () => {
+      await expect(noteTargetLine(page)).toContainText("Music · Warm keys");
+      await expect(rangeChip(page)).toBeVisible();
+      await expect(marks.getByRole("button", { name: "Quieter" })).toHaveAttribute("aria-pressed", "true");
+    };
+    await kept();
+    // The More menu, closed by Escape.
+    await page.getByRole("button", { name: "More", exact: true }).click();
+    await expect(page.getByRole("menu")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("menu")).toHaveCount(0);
+    await kept();
+    // The Sent panel, closed by Escape.
+    await sendButton(page).click();
+    await expect(sentDialog(page)).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(sentDialog(page)).toHaveCount(0);
+    await kept();
+    // Escape in the empty note box: the take goes, the range stays.
+    await box(page).focus();
+    await page.keyboard.press("Escape");
+    await expect(noteTargetMenu(page)).toHaveValue("frame");
+    await expect(rangeChip(page)).toBeVisible();
   });
 
   test("at 1000 px wide the panel is a drawer over the work area, opened and closed with \\ and its button", async ({ page, rushes }) => {

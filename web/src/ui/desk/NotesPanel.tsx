@@ -20,8 +20,9 @@ export const PANEL_DRAWER_BELOW = 1100;
 export interface PanelShared {
   log: ChangeLogState;
   activity: Omit<ActivityListProps, "log" | "onEscape">;
-  /** What Send sends that is still waiting, and Send itself. */
-  send: { count: number; onSend(): void };
+  /** What Send sends that is still waiting, and Send itself. `always`: shown even with nothing waiting (on its own Brief or
+   *  Storyboard page, Send always carries that page's line). */
+  send: { count: number; always?: boolean; onSend(): void };
   /** On screen: not hidden (wide), or the drawer open (narrow). */
   shown: boolean;
   /** Under 1100 px: the panel is a drawer. */
@@ -33,9 +34,34 @@ export interface PanelShared {
   /** Send is to be brought into view and given focus (the status bar's "send N notes"), by whichever panel is mounted. */
   reveal: boolean;
   onRevealed(): void;
+  /** Shows the panel on its Notes tab (opening the drawer under 1100 px), then runs `then` once it is on screen. */
+  revealNotes(then: () => void): void;
 }
 
 export const PanelContext = createContext<PanelShared | null>(null);
+
+/**
+ * Focuses a view's note box (N, the Note tool): the panel is shown on its Notes tab first when it is hidden, the drawer
+ * is closed or Activity is on show, since a box inside a hidden panel cannot take focus.
+ */
+export function useNoteBox(box: RefObject<HTMLTextAreaElement>): () => void {
+  const desk = useContext(PanelContext);
+  return () => {
+    if (desk && (!desk.shown || desk.log.open)) desk.revealNotes(() => box.current?.focus());
+    else box.current?.focus();
+  };
+}
+
+/** What a menu, a dialog or a popover that an Escape closes looks like on the page. */
+const CLOSES_ON_ESCAPE = '[role="dialog"], [role="menu"], [role="listbox"], .fmtpop.open';
+
+/**
+ * Whether an Escape pressed on the desk itself is free to let go of the note's target (§27, 5.7): not when something
+ * else takes it (a field, or a menu, dialog or popover it closes; one Escape does one thing).
+ */
+export function escapeIsFree(e: KeyboardEvent): boolean {
+  return e.key === "Escape" && !e.defaultPrevented && document.querySelector(CLOSES_ON_ESCAPE) === null;
+}
 
 const WIDTH_KEY = "rushes:notes-width";
 const HIDDEN_KEY = "rushes:notes-hidden";
@@ -226,10 +252,10 @@ export function NotesPanel(props: NotesPanelProps) {
           <ActivityList {...activity} log={log} onEscape={() => activityTab.current?.focus()} />
         </div>
       )}
-      {send.count > 0 && (
+      {(send.count > 0 || send.always) && (
         <div class="nfoot">
-          <button ref={sendRef} type="button" class="btn primary sendbtn" aria-label={`Send ${send.count}`} data-tip="Every tab's open notes, on every film" onClick={send.onSend}>
-            Send<span class="count">{send.count}</span>
+          <button ref={sendRef} type="button" class="btn primary sendbtn" aria-label={send.count > 0 ? `Send ${send.count}` : "Send"} data-tip="Every tab's open notes, on every film" onClick={send.onSend}>
+            Send{send.count > 0 && <span class="count">{send.count}</span>}
           </button>
         </div>
       )}
