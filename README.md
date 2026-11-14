@@ -131,7 +131,7 @@ There is no separate mix: the takes in use play together against the picture on 
 
 ### Activity: the Change Log
 
-<img src="docs/assets/screens/activity.jpg" alt="The notes panel's Activity tab beside the Timeline: an 'Add a line to the log' box, filters by area (All, Picture, Voice, Music, Sound effects, Mix, Visuals, Notes, Files), and today's entries newest first: the agent's replies to two notes, the picks for the film, and the two cuts added, each marked as by the agent or by Rushes, with Export as Markdown at the foot." width="880">
+<img src="docs/assets/screens/activity.jpg" alt="The notes panel's Activity tab beside the Timeline: an 'Add a line to the log' box, filters by area (All, Picture, Voice, Music, Effects, Mix, Visuals, Notes, Files), and today's entries newest first: the agent's replies to two notes, the picks for the film, and the two cuts added, each marked as by the agent or by Rushes, with Export as Markdown at the foot." width="880">
 
 Rushes keeps a running log of what happened, in the **Activity** tab of the notes panel: each cut, read, bed and pass as it arrives, notes sent, and the agent's replies. Export it as Markdown for whoever needs to catch up.
 
