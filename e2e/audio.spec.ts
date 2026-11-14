@@ -835,7 +835,7 @@ test("a point note draws on its read's block only; a whole note is listed and no
   await expect(page.locator(`.note[data-note="${whole.id}"] .on`)).toHaveText("more sombre");
 });
 
-test("Blind on Voiceover names reads Read 1…n and never reveals which read is in use", async ({ page, rushes }) => {
+test("Blind on Voiceover names every read Read 1…n, the one in use too, and never shows a real name", async ({ page, rushes }) => {
   await twoRounds(rushes);
   await openVoice(page, rushes, 5);
   await page.getByRole("button", { name: "Blind" }).click();
