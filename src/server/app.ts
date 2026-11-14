@@ -27,7 +27,8 @@ import { candidatePaths, listAssets, fpsFor, screenshotName } from "./assets.js"
 import { osRevealer, osOpener, OPEN_SAFE_EXT, type Revealer, type Opener } from "./reveal.js";
 import type { CorruptEvent } from "./watch.js";
 import { inUse, setInUse } from "../core/picks.js";
-import { LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, PinSchema, FileKindSchema, MarkSchema, ProjectIdSchema, ShotSchema, LEVEL_MIN, LEVEL_MAX, LEVEL_STEP, lanesForVideo, picksForVideo, variantFilms, type Levels, type Batch, type Note, type Picks, type Project, type VisualsFile } from "../core/schema.js";
+import { putAway } from "../core/takes.js";
+import { LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, PinSchema, FileKindSchema, MarkSchema, ProjectIdSchema, ShotSchema, LEVEL_MIN, LEVEL_MAX, LEVEL_STEP, lanesForVideo, picksForVideo, variantFilms, type InUse, type Levels, type Batch, type Note, type Picks, type Project, type VisualsFile } from "../core/schema.js";
 import { LABEL_MAX, oneLineOf } from "../core/labels.js";
 import { byOf, logBookFor } from "./logbook.js";
 import { BriefService } from "./brief.js";
@@ -185,6 +186,7 @@ const PickMap = z.record(z.string(), z.string().nullable());
 // §19.6: a level is −24..6 dB in 0.5 dB steps; null resets it to 0 (removes the key).
 const LevelValue = z.number().min(LEVEL_MIN).max(LEVEL_MAX).multipleOf(LEVEL_STEP);
 const LevelsBody = z.object({ voice: LevelValue.nullable(), music: LevelValue.nullable(), sfx: LevelValue.nullable() }).partial();
+const PutAwayBody = z.object({ away: z.boolean() });
 const PicksBody = z.object({ video: z.string().min(1).max(200).optional(), lanes: PickMap.optional(), sections: PickMap.optional(), levels: LevelsBody.optional() });
 // No stage: every tab's open notes (Send to agent). A stage: that tab's only.
 const BatchBody = z.object({ stage: StageSchema.optional() });
@@ -1233,6 +1235,23 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     const names = variantFilms(result.variant).map((id) => data.videos.find((v) => v.id === id)?.name ?? id);
     await log.add(() => variantFilmsEvent(result.lane, result.variant, names), by(c));
     return c.json({ lane: result.lane, variant: result.variant });
+  });
+
+  // §27.6: put a read, bed or pass away (hidden, never deleted), or bring it back. The take in use
+  // on any film stays where it can be seen: choose another first.
+  app.put("/api/variants/:lane/:variant/put-away", async (c) => {
+    const b = await body(c, PutAwayBody);
+    const laneId = c.req.param("lane");
+    const variantId = c.req.param("variant");
+    const picks = await store.read("picks");
+    const { result } = await store.update("project", (p) => {
+      const stage = p.lanes.find((l) => l.id === laneId)?.stage;
+      const isIt = (use: InUse) => stage !== undefined && use[stage]?.lane === laneId && use[stage]?.variant === variantId;
+      const usedOn = p.videos.filter((v) => isIt(inUse(p, picksForVideo(picks, v.id)))).map((v) => v.name);
+      if (p.videos.length === 0 && isIt(inUse(p, picks))) usedOn.push("this film");
+      return putAway(p, laneId, variantId, b.away, usedOn);
+    });
+    return c.json({ variant: result });
   });
 
   // ---- script ----

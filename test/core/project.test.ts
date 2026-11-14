@@ -6,6 +6,7 @@ import { fromManifestPath, toManifestPath } from "../../src/core/paths.js";
 import { newProjectId, PROJECT_ID_ALPHABET, slugify, uniqueId } from "../../src/core/ids.js";
 import { parseRate } from "../../src/core/media.js";
 import { inferFilm, setVariantFilms } from "../../src/core/project.js";
+import { putAway } from "../../src/core/takes.js";
 import { lanesForVideo, onFilm, variantFilms, NoteSchema, ProjectSchema, type Project, type Shot } from "../../src/core/schema.js";
 import { CorruptFileError, InvalidError, NotFoundError, RushesError } from "../../src/core/errors.js";
 import { tmpProject } from "../helpers/tmp.js";
@@ -689,5 +690,60 @@ describe("formats in the data (§21.3)", () => {
     raw.videos[0].versions[0].formats.push(raw.videos[0].versions[0].formats[0]);
     await writeFile(store.path("project"), JSON.stringify(raw));
     await expect(store.read("project")).rejects.toThrow(/project\.json can't be read/);
+  });
+});
+
+describe("what a take knows about itself (§27.6)", () => {
+  const at = new Date("2026-11-14T10:00:00.000Z");
+  const withHero = (): Project => {
+    const p = empty();
+    addVersion(p, { video: "Hero", file: "renders/hero_v1.mp4" });
+    addVersion(p, { video: "Hero", file: "renders/hero_v2.mp4" });
+    return p;
+  };
+  it("a new take records when it arrived and the cut it was made for", () => {
+    const p = withHero();
+    const { variant } = addVariant(p, { stage: "music", name: "Pulse", file: "audio/pulse.mp3", video: "Hero" }, at);
+    expect(variant.addedAt).toBe("2026-11-14T10:00:00.000Z");
+    expect(variant.madeFor).toEqual({ hero: "v2" });
+  });
+  it("a take on a film with no cut records no cut, and one on no film records none", () => {
+    const p = withHero();
+    p.videos.push({ ...p.videos[0], id: "teaser", name: "Teaser", versions: [] });
+    expect(addVariant(p, { stage: "music", name: "Drift", file: "audio/drift.mp3", video: "Teaser" }, at).variant.madeFor).toBeUndefined();
+    expect(addVariant(p, { stage: "music", name: "Loose", file: "audio/loose.mp3", video: [] }, at).variant.madeFor).toBeUndefined();
+  });
+  it("a round name makes a lane for music and effects, as it does for voice", () => {
+    const p = withHero();
+    const music = addVariant(p, { stage: "music", name: "Drift", file: "audio/drift.mp3", round: "Round 2 · softer" });
+    expect(music.lane).toMatchObject({ id: "round-2-softer", stage: "music", name: "Round 2 · softer" });
+    const sfx = addVariant(p, { stage: "sfx", name: "Soft UI", file: "audio/soft.wav", round: "Pass round 1" });
+    expect(sfx.lane).toMatchObject({ stage: "sfx", name: "Pass round 1" });
+  });
+  it("putting a take on a second film records that film's cut; taking it off forgets it", () => {
+    const p = withHero();
+    addVersion(p, { video: "Teaser", file: "renders/teaser_v1.mp4" });
+    const { lane, variant } = addVariant(p, { stage: "music", name: "Pulse", file: "audio/pulse.mp3", video: "Hero" }, at);
+    setVariantFilms(p, lane.id, variant.id, ["Hero", "Teaser"]);
+    expect(variant.madeFor).toEqual({ hero: "v2", teaser: "v1" });
+    // A later cut of Hero does not rewrite what the take was made for.
+    addVersion(p, { video: "Hero", file: "renders/hero_v3.mp4" });
+    setVariantFilms(p, lane.id, variant.id, ["Hero", "Teaser"]);
+    expect(variant.madeFor).toEqual({ hero: "v2", teaser: "v1" });
+    setVariantFilms(p, lane.id, variant.id, ["Teaser"]);
+    expect(variant.madeFor).toEqual({ teaser: "v1" });
+    setVariantFilms(p, lane.id, variant.id, []);
+    expect(variant.madeFor).toBeUndefined();
+  });
+  it("putting away the take in use is refused, and any other take is hidden and can come back", () => {
+    const p = withHero();
+    const { lane, variant } = addVariant(p, { stage: "music", name: "Pulse", file: "audio/pulse.mp3", video: "Hero" }, at);
+    expect(() => putAway(p, lane.id, variant.id, true, ["Hero"], at)).toThrow("This one is in use on Hero. Choose another first.");
+    expect(variant.putAway).toBeUndefined();
+    expect(putAway(p, lane.id, variant.id, true, [], at).putAway).toBe("2026-11-14T10:00:00.000Z");
+    expect(putAway(p, lane.id, variant.id, false, [], at).putAway).toBeUndefined();
+    expect(() => putAway(p, lane.id, "nope", true, [], at)).toThrow(NotFoundError);
+    // Bringing one back is never refused, in use or not.
+    expect(putAway(p, lane.id, variant.id, false, ["Hero"], at).putAway).toBeUndefined();
   });
 });

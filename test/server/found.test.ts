@@ -659,7 +659,8 @@ describe("bringing found files in", () => {
     expect(project.lanes).toHaveLength(1);
     expect(project.lanes[0]).toMatchObject({ id: "vo-jules", name: "Vo Jules", stage: "voice" });
     expect(project.lanes[0].variants).toEqual([
-      { id: "hero-read", name: "hero read", file: "vo_jules/hero read.wav", meta: { description: "made 12 min before it · name shares “hero”" }, cues: [] },
+      // §27.6: brought in like any take, it records when it arrived (no film here, so no cut it was made for).
+      { id: "hero-read", name: "hero read", file: "vo_jules/hero read.wav", meta: { description: "made 12 min before it · name shares “hero”" }, cues: [], addedAt: expect.any(String) },
     ]);
     // Nothing is picked.
     expect(await store.read("picks")).toEqual(picksBefore); // same rev, same picks

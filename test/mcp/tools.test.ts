@@ -68,7 +68,7 @@ describe("MCP tools", () => {
     expect(take).toMatch(/Voiceover tab and the mix ignore takes/);
     expect(take).toMatch(/rushes_add_variant/);
     expect(take).toMatch(/round/);
-    expect(tool("rushes_add_variant").description).toMatch(/voice read \(in a round\)/);
+    expect(tool("rushes_add_variant").description).toMatch(/each in a round/);
     expect(tool("rushes_add_variant").description).not.toMatch(/VO lane variant/);
     expect(prop("rushes_add_variant", "lane")).toMatch(/Defaults to `round` slugged, else the stage/);
     expect(prop("rushes_add_variant", "lane")).toMatch(/wins over `round`/i);

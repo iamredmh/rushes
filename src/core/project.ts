@@ -167,7 +167,7 @@ export function inferFilm(p: Project, name: string, file: string): string | unde
 
 const LANE_NAMES: Record<LaneStage, string> = { voice: "Voiceover", music: "Music", sfx: "Sound effects" };
 
-export function addVariant(p: Project, input: AddVariantInput): { lane: Lane; variant: Variant } {
+export function addVariant(p: Project, input: AddVariantInput, now = new Date()): { lane: Lane; variant: Variant } {
   // The film and (§23) the cues first, so an unknown film or a cue refused for its file leaves the
   // project untouched.
   const videos = input.video === undefined ? [inferFilm(p, input.name, input.file)].filter((v) => v !== undefined) : filmIds(p, input.video);
@@ -191,10 +191,19 @@ export function addVariant(p: Project, input: AddVariantInput): { lane: Lane; va
     file: input.file,
     meta: input.description === undefined ? { ...input.meta } : { ...input.meta, description: input.description },
     cues,
+    addedAt: now.toISOString(),
   };
   if (videos.length > 0) variant.videos = videos;
+  for (const film of videos) recordMadeFor(p, variant, film);
   lane.variants.push(variant);
   return { lane, variant };
+}
+
+/** §27.6: note the cut `film` is on now as the one this take was made for. A film with no cut leaves no entry. */
+function recordMadeFor(p: Project, variant: Variant, film: string): void {
+  const video = p.videos.find((v) => v.id === film);
+  const cut = video && latestVersion(video);
+  if (cut) (variant.madeFor ??= {})[film] = cut.id;
 }
 
 /** Film ids for one ref or several (id or name each), each once, in the order given. Throws on an unknown film. */
@@ -211,10 +220,17 @@ export function setVariantFilms(p: Project, laneId: string, variantId: string, r
   const variant = lane?.variants.find((v) => v.id === variantId);
   if (!lane || !variant) throw new NotFoundError("variant", `${laneId}/${variantId}`);
   const videos = filmIds(p, refs);
-  const left = variantFilms(variant).filter((v) => !videos.includes(v));
+  const was = variantFilms(variant);
+  const left = was.filter((v) => !videos.includes(v));
   delete variant.video;
   if (videos.length > 0) variant.videos = videos;
   else delete variant.videos;
+  // §27.6: a film it joins records the cut it has now; one it stays on keeps what it had; one it leaves is forgotten.
+  for (const film of videos) if (!was.includes(film) && variant.madeFor?.[film] === undefined) recordMadeFor(p, variant, film);
+  if (variant.madeFor) {
+    for (const film of Object.keys(variant.madeFor)) if (!videos.includes(film)) delete variant.madeFor[film];
+    if (Object.keys(variant.madeFor).length === 0) delete variant.madeFor;
+  }
   return { lane, variant, left };
 }
 
