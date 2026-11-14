@@ -5,7 +5,7 @@ import { useEffect, useState } from "preact/hooks";
 import type { Selection } from "../../desk.js";
 import { MIX_STAGE, snap, type MixLane } from "../../lib.js";
 import type { Note, Video } from "../../types.js";
-import { type Mix, type SoundRow, takeOn } from "./SoundTracks.js";
+import { type Mix, type SoundRow, takeOn } from "./useMix.js";
 
 export type TakeSelection = Extract<Selection, { kind: "take" }>;
 

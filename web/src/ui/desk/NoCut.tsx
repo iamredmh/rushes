@@ -10,7 +10,8 @@ import { Icon } from "../Icon.js";
 import { escapeIsFree, NotesPanel, useNoteBox } from "./NotesPanel.js";
 import { useTakeSelection } from "./useTakeSelection.js";
 import { Ruler } from "./Ruler.js";
-import { LoudnessReadout, type SoundTab, SoundTracks, useMix } from "./SoundTracks.js";
+import { LoudnessReadout, type SoundTab, SoundTracks } from "./SoundTracks.js";
+import { useMix } from "./useMix.js";
 import { Transport } from "./Transport.js";
 
 const NO_PLAYER = { current: null };

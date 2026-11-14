@@ -7,7 +7,7 @@ import { agentPrompt, AUDIO_CHIPS, defaultVersion, filmLanes, filmNotes, filmPic
 import type { Asset, State, Video } from "../types.js";
 import { AudioStage, filmsOf, type Preview, takeList } from "./AudioStage.js";
 import { filmsControl } from "./FilmsMenu.js";
-import { otherSounds } from "./desk/SoundTracks.js";
+import { otherSounds } from "./desk/useMix.js";
 import { Icon } from "./Icon.js";
 
 // Blind holds for the session: its shuffle is fixed at page load, and the switch survives a trip to another tab.
