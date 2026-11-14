@@ -726,7 +726,7 @@ export function Picture({
   };
 
   return (
-    <div class="split">
+    <div class="split deskcols">
       <div class="tl" ref={columnRef}>
         <div class="monitor" ref={monitorRef}>
           <ToolStrip

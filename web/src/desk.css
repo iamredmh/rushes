@@ -97,7 +97,7 @@
 /* ---- the Timeline tab (5.4 to 5.6): a column the height of the work area. The monitor takes what is left; the
    transport is one row; the timeline panel is as tall as its rows, at most 55% of the column, and scrolls inside
    itself. The divider between them sets the panel's share once dragged. ---- */
-.split > .tl { display: flex; flex-direction: column; min-width: 0; height: max(var(--work-h, calc(100vh - 160px)), 360px); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--app); font-size: 13px; }
+.deskcols > .tl { display: flex; flex-direction: column; min-width: 0; height: max(var(--work-h, calc(100vh - 160px)), 360px); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--app); font-size: 13px; }
 .tl [data-tip]::after { font-size: 12.5px; padding: 5px 8px; border-radius: 5px; }
 
 .monitor { position: relative; flex: 1 1 0; min-height: 140px; display: flex; background: var(--black); }
@@ -200,25 +200,26 @@
 /* §27, 5.6: the sound rows. A swatch in the sound's colour, its name and take count, then M, S and the level. */
 .strack .tlane { height: 28px; cursor: pointer; }
 .strack.csound .tlane { height: 40px; }
-/* A sound with nothing playing is a quiet, thinner row: there, so it is clear what comes later, but not taking the monitor's room. */
-.strack.idle .tlane { height: 20px; }
+/* A sound with nothing playing is a quiet, thinner row: there, so it is clear what comes later, but not taking the monitor's
+   room. Tall enough for its label ("Not started", "Nothing chosen yet") at the desk's 12.5 px, descenders and all. */
+.strack.idle .tlane { height: 24px; }
 .strack.idle .sblock { top: 2px; bottom: 2px; }
 .strack.idle .shead { color: var(--text-3); }
-.shead { gap: 5px; min-width: 0; flex-wrap: nowrap; }
-.shead .sw { flex: none; width: 8px; height: 8px; border-radius: 2px; background: var(--c); }
-.shead .snm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.shead .tcount { flex: none; border: 0; background: none; padding: 0 4px; border-radius: 4px; cursor: pointer; font-family: var(--mono); }
-.shead .tcount:not(.new) { background: var(--raised); }
-.shead .tcount:hover { color: var(--text); }
-.shead .ms { flex: none; width: 20px; height: 20px; border-radius: 4px; font: 600 12.5px/1 var(--sans); }
-.shead .slvl { display: flex; align-items: center; gap: 4px; flex: none; }
-.shead .slvl input { width: 48px; margin: 0; accent-color: var(--c); }
-.shead .db { width: 50px; font-size: 12.5px; font-weight: 500; color: var(--text-3); text-align: right; white-space: nowrap; }
+.strack .shead { gap: 5px; min-width: 0; flex-wrap: nowrap; }
+.strack .shead .sw { flex: none; width: 8px; height: 8px; border-radius: 2px; background: var(--c); }
+.strack .shead .snm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.strack .shead .tcount { flex: none; border: 0; background: none; padding: 0 4px; border-radius: 4px; cursor: pointer; font-family: var(--mono); }
+.strack .shead .tcount:not(.new) { background: var(--raised); }
+.strack .shead .tcount:hover { color: var(--text); }
+.strack .shead .ms { flex: none; width: 20px; height: 20px; border-radius: 4px; font: 600 12.5px/1 var(--sans); }
+.strack .shead .slvl { display: flex; align-items: center; gap: 4px; flex: none; }
+.strack .shead .slvl input { width: 48px; margin: 0; accent-color: var(--c); }
+.strack .shead .db { width: 50px; font-size: 12.5px; font-weight: 500; color: var(--text-3); text-align: right; white-space: nowrap; }
 /* One block: the take in use, its name over its waveform; dashed and empty when nothing plays. */
 .sblock { position: absolute; top: 3px; bottom: 3px; display: flex; align-items: center; min-width: 0; padding: 0 8px; border: 1px solid var(--line-2); border-left: 2px solid var(--c); border-radius: 4px; background: var(--raised); color: var(--text-2); font: 12.5px/1 var(--sans); overflow: hidden; pointer-events: none; }
 .sblock .slbl { position: relative; z-index: 1; padding: 2px 5px; border-radius: 3px; background: var(--raised); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sblock.empty { border: 1px dashed var(--line-2); background: none; color: var(--text-3); }
-.sblock.empty .slbl { background: none; padding: 0; }
+.sblock.none { border: 1px dashed var(--line-2); background: none; color: var(--text-3); }
+.sblock.none .slbl { background: none; padding: 0; line-height: 16px; }
 .sblock.gone { color: var(--over); }
 /* A take made for an older cut (madeForStale): a dashed amber outline. */
 .sblock.stale { border: 1px dashed var(--todo); border-left: 2px dashed var(--todo); }
@@ -279,8 +280,9 @@
 
 /* ---- §27, 5.7: the notes panel. The right column of Review and Plan, as tall as the work area and --notes-w wide (300 px
    until its divider is dragged). Hidden (\), the workspace takes the room; under 1100 px it is a drawer over the work area. ---- */
-.split { grid-template-columns: minmax(0, 1fr) var(--notes-w, 300px); gap: 0; }
-.nhidden .split { grid-template-columns: minmax(0, 1fr); }
+/* The desk's two columns, the workspace and the notes panel (scoped: Assets' preview is a .split of its own). */
+.deskcols { display: grid; grid-template-columns: minmax(0, 1fr) var(--notes-w, 300px); gap: 0; align-items: stretch; }
+.nhidden .deskcols { grid-template-columns: minmax(0, 1fr); }
 .deskcols > .wsmain { min-width: 0; height: max(var(--work-h, calc(100vh - 160px)), 360px); overflow: auto; padding-right: 12px; }
 .npanel { position: relative; display: flex; flex-direction: column; min-width: 0; height: max(var(--work-h, calc(100vh - 160px)), 360px); padding-left: 8px; font-size: 13px; }
 .npanel[hidden] { display: none; }
@@ -356,9 +358,9 @@
 .top .ntoggle[aria-pressed="true"] { color: var(--accent-2); }
 /* §27, 5.7: the sound row whose take is the note's target, and the notes marked on the rows. */
 .strack.picked .sblock { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
-.shead button.snm { padding: 0 3px; margin: 0 -3px; border: 0; border-radius: 3px; background: none; color: inherit; font: inherit; cursor: pointer; }
-.shead button.snm:hover { color: var(--text); background: var(--hover); }
-.shead button.snm[aria-pressed="true"] { color: var(--accent-2); }
+.strack .shead button.snm { padding: 0 3px; margin: 0 -3px; border: 0; border-radius: 3px; background: none; color: inherit; font: inherit; cursor: pointer; }
+.strack .shead button.snm:hover { color: var(--text); background: var(--hover); }
+.strack .shead button.snm[aria-pressed="true"] { color: var(--accent-2); }
 .strack .tlane .mk { z-index: 3; width: 8px; height: 8px; pointer-events: none; }
 .strack .tlane .span { top: 2px; bottom: 2px; z-index: 2; }
 
@@ -431,7 +433,7 @@ span.knm, span.knm:hover { cursor: default; background: none; }
 .takes .cltrack { grid-area: track; height: 24px; margin: 0 12px; border-radius: 4px; }
 
 @media (max-width: 1099px) {
-  .split { grid-template-columns: minmax(0, 1fr); }
+  .deskcols { grid-template-columns: minmax(0, 1fr); }
   /* Under the top bar's tooltips and menus (37 and up) and the monitor's format switch (36), over the rest of the work area. */
   .npanel.drawer { position: fixed; top: 44px; right: 0; bottom: 26px; z-index: 35; width: min(var(--notes-w, 300px), 100vw); height: auto; padding-left: 0; background: var(--raised); border-left: 1px solid var(--line-2); box-shadow: -16px 0 40px var(--shadow); }
   .npanel.drawer > .ntabs, .npanel.drawer > .nfoot { border-radius: 0; }

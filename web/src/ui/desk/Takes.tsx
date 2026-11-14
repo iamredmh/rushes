@@ -268,7 +268,7 @@ export function Takes(props: TakesProps) {
             </span>
           </div>
           <div class="tlane" onClick={(e) => onSelect(it, timeAt(e))}>
-            <div class={`sblock${take.stale ? " stale" : ""}${label ? " empty gone" : ""}`} style={{ left: "0%", width: `${label ? 100 : pct(end)}%` }}>
+            <div class={`sblock${take.stale ? " stale" : ""}${label ? " none gone" : ""}`} style={{ left: "0%", width: `${label ? 100 : pct(end)}%` }}>
               <span class="slbl" data-meta data-tip={label === null && flags.includes("m") && it.meta ? it.meta : undefined}>
                 {label ?? (
                   <>
@@ -373,7 +373,7 @@ export function Takes(props: TakesProps) {
                 {l.films && <FilmsMenu name={l.name} control={l.films} />}
               </div>
               <div class="tlane">
-                <div class="sblock empty" style={{ left: "0%", width: "100%" }}>
+                <div class="sblock none" style={{ left: "0%", width: "100%" }}>
                   <span class="slbl tip-wrap" data-tip={l.meta && cut[`l:${l.key}`]?.includes("m") ? l.meta : undefined}><span data-meta-text>{l.meta ?? ""}</span></span>
                 </div>
               </div>

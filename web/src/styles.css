@@ -211,21 +211,22 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 /* The version the server is running: a faint mark in the corner, never in the way of a click. */
 .ver { position: fixed; right: 10px; bottom: 6px; z-index: 5; font: 11px/1 var(--mono); color: var(--text-2); opacity: 0.45; pointer-events: none; }
 .col { max-width: 1000px; margin: 0 auto; display: grid; gap: 16px; }
-.empty { max-width: 420px; margin: 12vh auto 0; text-align: center; display: grid; gap: 10px; justify-items: center; color: var(--text-2); }
-.empty svg.ic { width: 32px; height: 32px; color: var(--text-3); }
-.empty h2 { margin: 0; font-size: 18px; color: var(--text); font-weight: 600; }
-.empty p { margin: 0; }
-.empty.locked { max-width: 480px; margin-top: 10vh; }
-.empty.locked .promptbox { width: 100%; min-height: 108px; resize: vertical; margin-top: 4px; background: var(--bg); border: 1px solid var(--line); border-radius: var(--r); padding: 12px 14px; font-size: 15px; line-height: 1.6; color: var(--text); text-align: left; }
+.emptypage { max-width: 420px; margin: 12vh auto 0; text-align: center; display: grid; gap: 10px; justify-items: center; color: var(--text-2); }
+.emptypage svg.ic { width: 32px; height: 32px; color: var(--text-3); }
+.emptypage h2 { margin: 0; font-size: 18px; color: var(--text); font-weight: 600; }
+.emptypage p { margin: 0; }
+.emptypage.locked { max-width: 480px; margin-top: 10vh; }
+.emptypage.locked .promptbox { width: 100%; min-height: 108px; resize: vertical; margin-top: 4px; background: var(--bg); border: 1px solid var(--line); border-radius: var(--r); padding: 12px 14px; font-size: 15px; line-height: 1.6; color: var(--text); text-align: left; }
 /* §20.5: under the prompt, one line saying files of this kind were found, and a button to look at them. */
-.empty.locked .foundline { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px 12px; margin-top: 10px; font-size: 15px; color: var(--text); }
-.empty.locked .foundline .btn { font-size: 15px; }
-/* .empty svg.ic (above) is sized for the page's own icon; the Copy button's icon stays the
+.emptypage.locked .foundline { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px 12px; margin-top: 10px; font-size: 15px; color: var(--text); }
+.emptypage.locked .foundline .btn { font-size: 15px; }
+/* .emptypage svg.ic (above) is sized for the page's own icon; the Copy button's icon stays the
    standard button size, matching every other .btn icon in the app. */
-.empty .btn svg.ic { width: 18px; height: 18px; color: inherit; }
+.emptypage .btn svg.ic { width: 18px; height: 18px; color: inherit; }
 
+/* Assets' list beside its preview. */
+.abody.split { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 20px; align-items: stretch; }
 /* player */
-.split { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 20px; align-items: stretch; }
 /* .frame sizes itself to the cut (aspect-ratio set from the video, 16:9 before metadata
    loads), not a fixed 16:9 box: a vertical cut shrinks its width to fit max-height, centred. */
 .frame { position: relative; aspect-ratio: 16 / 9; max-width: 100%; max-height: min(70vh, 640px); margin: 0 auto; border-radius: var(--r-lg); overflow: hidden; background: var(--black); }
@@ -327,10 +328,10 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
    sits in a field with a visible edge; an edited row shows "Edited by you" over the baseline struck through; the status
    line sits at the foot of the page, in view while the page scrolls. */
 .ppage { gap: 14px; padding-bottom: 0; }
-.shead { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.ppage .shead { gap: 12px; flex-wrap: wrap; }
-.shead h2 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
-.shead .meta { color: var(--text-3); font-size: 13px; }
+/* A Plan page's head (Brief, Script, Storyboard). Scoped to the page: the desk's sound rows have a .shead of their own. */
+.ppage .shead { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.ppage .shead h2 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
+.ppage .shead .meta { color: var(--text-3); font-size: 13px; }
 .prows { display: grid; border-top: 1px solid var(--line); }
 .srow, .sbrow { display: grid; gap: 10px; padding: 14px 4px 14px 10px; border-bottom: 1px solid var(--line); border-left: 2px solid transparent; }
 .srow.changed, .sbrow.changed { border-left-color: var(--todo); }
@@ -526,7 +527,7 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .lbactions { display: flex; align-items: center; justify-content: center; gap: 4px; }
 
 @media (max-width: 1000px) {
-  .split { grid-template-columns: minmax(0, 1fr); }
+  .abody.split { grid-template-columns: minmax(0, 1fr); }
   .side { height: auto; min-height: 480px; }
 }
 @media (max-width: 680px) {

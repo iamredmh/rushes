@@ -75,7 +75,7 @@ function Locked({ tab, projectName, filmName, found, onReview, toast }: { tab: S
     }
   };
   return (
-    <div class="empty locked">
+    <div class="emptypage locked">
       <Icon name={icon} />
       <h2>{name}</h2>
       <p>{what}</p>
@@ -480,7 +480,7 @@ export function App() {
   if (!state || !stage) {
     return (
       <div class="shell">
-        {problem ? <div class="banner"><Icon name="alert" />{problem}</div> : <div class="empty"><p>Loading…</p></div>}
+        {problem ? <div class="banner"><Icon name="alert" />{problem}</div> : <div class="emptypage"><p>Loading…</p></div>}
       </div>
     );
   }

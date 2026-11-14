@@ -4,7 +4,7 @@ import type { Page } from "@playwright/test";
 import {
   expect, test, videoReady, cutButton, pickVersion, currentFilm, filmButton, openWorkspace, pickFilm, reviewTab, workspaceTab, type FormatSize, type Rushes,
   ELEVEN_FILMS, ELEVEN_FILMS_PROJECT, monitor, pictureTrack, ruler, rulerMarkers, shotBlocks, TOOL_TIPS, toolButton, toolStrip, transport,
-  hasFfmpeg, loudness, playButton, soundBlock, soundButton, soundLevel, soundTakes, soundTrack,
+  hasFfmpeg, loudness, playButton, soundBlock, soundButton, soundLabel, soundLevel, soundTakes, soundTrack, expectReadableInRow, timelinePanel,
   activity, openActivity, notesPanel, noteTargetLine, noteTargetLabel, noteTargetMenu, panelTab, panelToggle, rangeChip, sendButton, sentDialog, statusSend,
   openReviewTab, takesList, takeHeadings, takeRow, takeRows, takeCircle, takeName, takeTag, takeBlock, putAwayButton, pressRowButton, foldToggle,
 } from "./fixture.js";
@@ -659,10 +659,13 @@ test("unpicking the bed leaves Music empty and the rest playing; a sound with no
   await rushes.api("PUT", "/api/picks", { video: "hero", lanes: { [read.lane.id]: read.variant.id, [bed.lane.id]: bed.variant.id } });
   await openTimeline(page, rushes, 2);
   await expect(soundBlock(page, "Effects")).toHaveText("Not started");
-  await expect(soundBlock(page, "Effects")).toHaveClass(/empty/);
+  await expect(soundBlock(page, "Effects")).toHaveClass(/\bnone\b/);
+  // Readable in its row, not only present in the page (final review I1).
+  await expectReadableInRow(soundLabel(page, "Effects"), soundTrack(page, "Effects"));
   await rushes.api("PUT", "/api/picks", { video: "hero", lanes: { [bed.lane.id]: null } });
   // The bed is still there, waiting to be chosen again.
   await expect(soundBlock(page, "Music")).toHaveText("Nothing chosen yet");
+  await expectReadableInRow(soundLabel(page, "Music"), soundTrack(page, "Music"));
   await expect.poll(() => heardNow(page)).toEqual(["round-1-voices/gerald"]);
   await transport(page).getByRole("button", { name: "Play · Space" }).click();
   await expect.poll(async () => (await audio(page))!.time).toBeGreaterThan(0.3);
@@ -674,6 +677,7 @@ test("a take whose file is missing says File not found, and the others still pla
   await rm(join(rushes.root, file));
   await openTimeline(page, rushes, 2);
   await expect(soundBlock(page, "Effects")).toHaveText("File not found");
+  await expectReadableInRow(soundLabel(page, "Effects"), soundTrack(page, "Effects"));
   expect(await heardNow(page)).toEqual(["round-1-voices/gerald", "music/warm-keys"]);
   await transport(page).getByRole("button", { name: "Play · Space" }).click();
   await expect.poll(async () => (await audio(page))!.time).toBeGreaterThan(0.3);
@@ -694,7 +698,12 @@ test("a take made for an older cut has a dashed amber outline", async ({ page, r
 test("a cut with no sound of its own and no takes has no sound to follow and no Cut sound row", async ({ page, rushes }) => {
   await rushes.addCut();
   await openTimeline(page, rushes, 0);
-  for (const name of ["Voice", "Music", "Effects"] as const) await expect(soundBlock(page, name)).toHaveText("Not started");
+  for (const name of ["Voice", "Music", "Effects"] as const) {
+    await expect(soundBlock(page, name)).toHaveText("Not started");
+    await expectReadableInRow(soundLabel(page, name), soundTrack(page, name));
+  }
+  // The rows fit, so the timeline panel does not scroll inside itself.
+  expect(await timelinePanel(page).evaluate((el) => el.scrollHeight <= el.clientHeight + 1)).toBe(true);
   await expect(soundTrack(page, "Cut sound")).toHaveCount(0);
   expect(await videoMuted(page)).toBe(false);
 });

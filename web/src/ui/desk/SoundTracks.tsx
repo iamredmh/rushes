@@ -140,7 +140,7 @@ export function SoundTracks({ mix, duration, t, onSeek, onOpenTab, onPick, selec
                   <Wave segments={[{ offset: 0, duration: loaded?.duration ?? 0, peaks: loaded ? loaded.peaks : null }]} length={duration} color={COLOR[row.lane]} />
                 </>
               ) : (
-                <div class={`sblock empty${row.block === "missing" || row.block === "broken" ? " gone" : ""}`} style={{ left: "0%", width: "100%" }}>
+                <div class={`sblock none${row.block === "missing" || row.block === "broken" ? " gone" : ""}`} style={{ left: "0%", width: "100%" }}>
                   <span class="slbl">{label}</span>
                 </div>
               )}
@@ -198,7 +198,7 @@ export function SoundTracks({ mix, duration, t, onSeek, onOpenTab, onPick, selec
                 <PictureWave wave={mix.cut.wave} length={duration} />
               </>
             ) : (
-              <div class="sblock empty" style={{ left: "0%", width: "100%" }}>
+              <div class="sblock none" style={{ left: "0%", width: "100%" }}>
                 <span class="slbl">{mix.cut.known ? "No waveform" : ""}</span>
               </div>
             )}
