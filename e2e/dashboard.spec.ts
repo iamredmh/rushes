@@ -138,10 +138,14 @@ test("a box on a vertical cut is measured against the picture, not the 16:9 fram
   await expect(page.locator(".note")).toHaveCount(1);
   const { notes } = await rushes.api("GET", "/api/notes?stage=picture");
   const close = (v: number, exp: number) => expect(Math.abs(v - exp)).toBeLessThanOrEqual(0.02);
-  close(notes[0].box.x, 0);
-  close(notes[0].box.y, 0);
-  close(notes[0].box.w, 0.5);
-  close(notes[0].box.h, 0.5);
+  // Measured from where the drag started, 6 px in: a fraction of the picture, whatever size the monitor gives it (the
+  // timeline's rows take a little more of the column than when this was written).
+  const inX = 6 / overlay.width;
+  const inY = 6 / overlay.height;
+  close(notes[0].box.x, inX);
+  close(notes[0].box.y, inY);
+  close(notes[0].box.w, 0.5 - inX);
+  close(notes[0].box.h, 0.5 - inY);
 });
 
 test("a box on a vertical cut in a frame that doesn't fit it is still measured against the picture", async ({ page, rushes }) => {
