@@ -15,12 +15,12 @@ describe("shipped docs: shelved films (§26)", () => {
     expect(text).toMatch(/never shelve/i);
   });
 
-  it("README describes the Film menu, the Shelved list, the +N list, and what shelving does to the counts", () => {
+  it("README describes the More menu's Shelve film, the Film menu's Shelved list, and what shelving does to the counts", () => {
     const text = read("README.md");
     expect(text).toContain("### Shelve a film");
-    expect(text).toContain("Film actions");
+    expect(text).toContain("Open the **More** menu");
     expect(text).toContain("**Shelved (N)**");
-    expect(text).toContain("+N");
+    expect(text).toContain("The **Film** menu in the top bar switches films");
     expect(text).toContain("Shift+S");
     expect(text).toMatch(/open notes.*(stop counting|do not count)/s);
     expect(text).toContain("**[ / ]** previous/next film in play");

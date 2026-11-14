@@ -13,7 +13,7 @@ describe("shipped docs on cue samples and layers by sound (§23)", () => {
 
   it("README explains the card, the layers by sound and their keys", () => {
     const text = read("README.md");
-    for (const words of ["layers by sound", "`thud ×19`", "source file", "**Esc** hides the card", "Mix's Sound effects lane has the card too"]) {
+    for (const words of ["layers by sound", "`thud ×19`", "source file", "**Esc** hides the card", "The Effects row on the Timeline tab has the card too"]) {
       expect(text).toContain(words);
     }
   });
