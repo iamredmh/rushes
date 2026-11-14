@@ -14,7 +14,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { LoadResult } from "../../audio/engine.js";
 import { type Clip, mediaKey } from "../../audio/timeline.js";
 import { cueKeys, cueLabel, cueName, cuesInTime } from "../../cues.js";
-import { pctOf, type TakeRow } from "../../desk.js";
+import { markTitle, type NoteState, pctOf, type TakeRow } from "../../desk.js";
 import { cueRoom } from "../../lib.js";
 import type { Cue } from "../../types.js";
 import { Missing } from "../AssetViews.js";
@@ -63,7 +63,7 @@ export interface TakeMark {
   id: string;
   t: number;
   tOut: number | null;
-  status: "todo" | "done";
+  status: NoteState;
   text: string;
 }
 
@@ -322,8 +322,8 @@ export function Takes(props: TakesProps) {
                 </button>
               );
             })}
-            {here.map((m) => m.tOut !== null && <span key={`s${m.id}`} class={`span ${m.status}`} data-note={m.id} title={m.text} style={{ left: `${pct(m.t)}%`, width: `${pct(m.tOut) - pct(m.t)}%` }} />)}
-            {here.map((m) => <span key={m.id} class={`mk ${m.status}`} data-note={m.id} title={m.text} style={{ left: `${pct(m.t)}%` }} />)}
+            {here.map((m) => m.tOut !== null && <span key={`s${m.id}`} class={`span ${m.status}`} data-note={m.id} title={markTitle(m.status, m.text)} style={{ left: `${pct(m.t)}%`, width: `${pct(m.tOut) - pct(m.t)}%` }} />)}
+            {here.map((m) => <span key={m.id} class={`mk ${m.status}`} data-note={m.id} title={markTitle(m.status, m.text)} style={{ left: `${pct(m.t)}%` }} />)}
             {range.in !== null && <span class="span live" style={{ left: `${pct(range.in)}%`, width: `${pct(range.out ?? range.in + Math.max(0.2, length / 200)) - pct(range.in)}%` }} />}
             <span class="playhead" />
           </div>

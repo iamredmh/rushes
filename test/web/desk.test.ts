@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defaultTake, deskPlace, nextHint, pctOf, type NextInput, noteTarget, rulerMarks, takeCount, takeGroups, takeKey, takeSections, timecode, unsentCount, unsentEdits, deskView, viewForKey, viewForTab } from "../../web/src/desk.js";
+import { defaultTake, deskPlace, nextHint, NOTE_STATE_LABEL, noteState, pctOf, type NextInput, noteTarget, rulerMarks, takeCount, takeGroups, takeKey, takeSections, timecode, unsentCount, unsentEdits, deskView, viewForKey, viewForTab } from "../../web/src/desk.js";
 import type { Lane, Note, Variant } from "../../web/src/types.js";
 
 describe("deskPlace", () => {
@@ -272,6 +272,18 @@ describe("rulerMarks", () => {
   it("clamps a note past the end to 100, and a range to what is left", () => {
     expect(rulerMarks([note("a", 6)], 4)).toEqual([{ id: "a", left: 100, width: null, status: "todo" }]);
     expect(rulerMarks([note("b", 3, 6)], 4)).toEqual([{ id: "b", left: 75, width: 25, status: "todo" }]);
+  });
+  // Spec 5.5, ruled in the final review (I4): amber to do, blue while the agent has it, green done.
+  it("marks a to-do note that went in a batch as sent, and a done one as done whatever its batch", () => {
+    const sent = { ...note("a", 2), batch: "b_1" };
+    const done = { ...note("b", 1, 2, "done"), batch: "b_1" };
+    expect(rulerMarks([note("c", 3), sent, done], 4).map((m) => [m.id, m.status])).toEqual([["c", "todo"], ["a", "sent"], ["b", "done"]]);
+  });
+  it("says what each state is, for a marker's name and a note's dot", () => {
+    expect(noteState({ status: "todo", batch: null })).toBe("todo");
+    expect(noteState({ status: "todo", batch: "b_1" })).toBe("sent");
+    expect(noteState({ status: "done", batch: "b_1" })).toBe("done");
+    expect(NOTE_STATE_LABEL.sent).toBe("With your agent");
   });
   it("keeps a done note's status", () => {
     expect(rulerMarks([note("a", 1, null, "done")], 4)[0].status).toBe("done");

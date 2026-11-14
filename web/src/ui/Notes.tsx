@@ -3,6 +3,7 @@ import { useRef, useState } from "preact/hooks";
 import { api, mediaUrl } from "../api.js";
 import { MARK_DB, type MarkKind, marksLabel, noteTime, placeNote, setMarkDb, shotLabel, toggleMark } from "../lib.js";
 import type { Mark, Note } from "../types.js";
+import { markTitle, noteState } from "../desk.js";
 import { FormatScope } from "./FormatScope.js";
 import { Icon } from "./Icon.js";
 
@@ -78,6 +79,9 @@ export interface ComposerFormat {
   /** The line under the note box: where the note will show. */
   hint: string;
 }
+
+/** A note's dot: what pressing it does, after "With your agent · " while the agent has the note (final review I4, m12). */
+const dotName = (n: Note): string => (n.status === "done" ? "Reopen" : markTitle(noteState(n), "Mark done"));
 
 const MARK_KINDS: { kind: MarkKind; label: string }[] = [
   { kind: "rise", label: "Rise" },
@@ -156,8 +160,8 @@ export function Notes({
         {placed.length === 0 && <div class="none">{filter !== "all" ? "Nothing here." : footer ? "None on this format." : "No notes yet."}</div>}
         {placed.map(({ n, at }) => (
           // Keyed (review M3): a card that shows on the next format keeps its node, and its focus.
-          <div key={n.id} class={`note${n.status === "done" ? " done" : ""}`} data-note={n.id} aria-current={selectedId === n.id ? "true" : undefined}>
-            <button class="chk" aria-label={n.status === "done" ? "Reopen" : "Mark done"} title={n.status === "done" ? "Reopen" : "Mark done"} onClick={() => void toggle(n)}>
+          <div key={n.id} class={`note${noteState(n) === "todo" ? "" : ` ${noteState(n)}`}`} data-note={n.id} aria-current={selectedId === n.id ? "true" : undefined}>
+            <button class="chk" aria-label={dotName(n)} data-tip={dotName(n)} onClick={() => void toggle(n)}>
               <Icon name="check" />
             </button>
             <div class="nt">
