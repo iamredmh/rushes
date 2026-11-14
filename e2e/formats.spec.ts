@@ -1,7 +1,7 @@
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Page } from "@playwright/test";
-import { expect, hasFfmpeg, pickVersion, test, cutButton, videoReady, openWorkspace, workspaceTab, pickFilm, filmButton, cutLength, rangeChip, ruler, rulerMarkers, shotBlocks } from "./fixture.js";
+import { expect, hasFfmpeg, pickVersion, test, cutButton, videoReady, openWorkspace, workspaceTab, pickFilm, filmButton, cutLength, rangeChip, ruler, rulerMarkers, shotBlocks, shapeButton } from "./fixture.js";
 
 test.skip(!hasFfmpeg, "formats are generated with ffmpeg and measured with ffprobe");
 
@@ -84,8 +84,49 @@ test("switching while paused keeps the time and stays paused", async ({ page, ru
   expect(await video.evaluate((v: HTMLVideoElement) => v.paused)).toBe(true);
 });
 
-// §27, 5.4: a cut with one format and no other shape to explain has no switch on the monitor at all (desk.spec). The single
-// chip and its popover show when an earlier cut had other shapes: this cut is one format beside them.
+// §27, 5.4 and 5.9: a plain one-format cut has no switch on the monitor; its shape in the status bar is the button that opens
+// the prompt, by keyboard as well as by pointer.
+test("one format: the status bar's shape opens the copy prompt, and it is reachable by keyboard (R5)", async ({ page, rushes, context, browserName }) => {
+  if (browserName === "chromium") await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await rushes.addCut();
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await expect(page.getByRole("radiogroup", { name: "Format" })).toHaveCount(0);
+  const shape = shapeButton(page);
+  await expect(shape).toHaveText("16:9");
+  await expect(shape).toHaveAccessibleName("16:9 · other shapes");
+  await expect(shape).toHaveAttribute("data-tip", "16:9 · other shapes");
+  await expect(shape).toHaveAttribute("aria-expanded", "false");
+  await shape.focus();
+  await page.keyboard.press("Enter");
+  const pop = page.getByRole("dialog", { name: "Other shapes" });
+  await expect(pop).toContainText("One format. Your agent can add more with rushes_add_format.");
+  const copy = pop.getByRole("button", { name: "Copy a prompt for your agent" });
+  await expect(copy).toBeFocused();
+  // Above the status bar, inside the window.
+  const p = (await pop.boundingBox())!;
+  const bar = (await page.locator("footer.status").boundingBox())!;
+  const vp = page.viewportSize()!;
+  expect(p.y + p.height).toBeLessThanOrEqual(bar.y + 1);
+  expect(p.x).toBeGreaterThanOrEqual(0);
+  expect(p.x + p.width).toBeLessThanOrEqual(vp.width);
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".toast")).toHaveText(/Prompt copied|Couldn't reach the clipboard/);
+  if (browserName === "chromium") {
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('register the other shapes of "Hero" v1');
+  }
+  // Escape closes it and gives focus back to the shape; a click outside closes it too.
+  await page.keyboard.press("Escape");
+  await expect(pop).toHaveCount(0);
+  await expect(shape).toBeFocused();
+  await shape.click();
+  await expect(pop).toBeVisible();
+  await page.mouse.click(600, 300);
+  await expect(pop).toHaveCount(0);
+});
+
+// §27, 5.4: the single chip and its popover show on the monitor when an earlier cut had other shapes: this cut is one format
+// beside them. (A plain one-format cut has no switch; the status bar offers the prompt, above.)
 test("one format: the chip is greyed and out of the tab order, and the copy prompt is reachable by keyboard (R5)", async ({ page, rushes, context, browserName }) => {
   if (browserName === "chromium") await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await rushes.addFormatsCut(FOUR);
@@ -300,8 +341,9 @@ test("a one-format cut names no format in any request: loading, a note, a grab",
   await rushes.addCut();
   await page.goto(rushes.url);
   await videoReady(page);
-  // §27, 5.4: one format, nothing to switch: no switch on the monitor.
+  // §27, 5.4: one format, nothing to switch: no switch on the monitor; the status bar's shape offers the prompt instead.
   await expect(page.getByRole("radiogroup", { name: "Format" })).toHaveCount(0);
+  await expect(shapeButton(page)).toHaveText("16:9");
   await page.keyboard.press("g");
   await expect(page.locator(".toast")).toContainText("Saved to");
   await page.keyboard.press("n");
@@ -323,7 +365,7 @@ test.describe("an older cut with no stored size (no ffprobe on the server)", () 
     await videoReady(page);
     // §27, 5.4: a one-format cut has no switch; the status bar names its shape, as the player measured it.
     await expect(page.getByRole("radiogroup", { name: "Format" })).toHaveCount(0);
-    await expect(page.locator("footer.status .smeta")).toContainText("16:9");
+    await expect(shapeButton(page)).toHaveText("16:9");
     await page.keyboard.press("g");
     await expect(page.locator(".toast")).toContainText("Saved to");
     await page.keyboard.press("n");
@@ -407,9 +449,10 @@ test("a remembered format whose file has gone keeps its shape after a film switc
 });
 
 // M2, R2.
-// §27, 5.4: a one-format cut has no switch on the monitor, so no single chip or Copy prompt either; the shape the player
-// measures from the proxy is the one the status bar names.
-test("a cut stored with no size, playing its proxy, still gets its shape measured", async ({ page, rushes }) => {
+// §27, 5.4 and 5.9: a one-format cut has no switch on the monitor; the shape the player measures from the proxy is the one the
+// status bar names, and that shape is the button that offers the Copy prompt.
+test("a cut stored with no size, playing its proxy, still gets its single shape and the Copy prompt", async ({ page, rushes, context, browserName }) => {
+  if (browserName === "chromium") await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await rushes.addProResCut({ seconds: 2 });
   await rushes.api("POST", "/api/videos/hero/versions/v1/proxy", {});
   await expect.poll(async () => (await rushes.api("GET", "/api/state")).project.videos[0].versions[0].proxy !== null, { timeout: 20_000 }).toBe(true);
@@ -423,8 +466,14 @@ test("a cut stored with no size, playing its proxy, still gets its shape measure
   await expect.poll(async () => (await rushes.api("GET", "/api/state")).project.videos[0].versions[0].width, { timeout: 10_000 }).toBeNull();
   await page.goto(rushes.url);
   await expect(page.getByRole("button", { name: "Proxy", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.locator("footer.status .smeta")).toContainText("16:9");
+  await expect(shapeButton(page)).toHaveText("16:9");
   await expect(page.getByRole("radiogroup", { name: "Format" })).toHaveCount(0);
+  await shapeButton(page).click();
+  await page.getByRole("dialog", { name: "Other shapes" }).getByRole("button", { name: "Copy a prompt for your agent" }).click();
+  await expect(page.locator(".toast")).toHaveText(/Prompt copied|Couldn't reach the clipboard/);
+  if (browserName === "chromium") {
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('register the other shapes of "Hero" v1');
+  }
 });
 
 // M3.
@@ -629,8 +678,8 @@ test("a note written on 9:16 stays on 9:16; an all-format note shows on every fo
   await expect(radio(page, "4:5")).toHaveAccessibleName("4:5, 1 open note");
   await expect(rulerMarkers(page)).toHaveCount(2);
   await expect(rulerMarkers(page).and(page.locator(".ring"))).toHaveCount(1);
-  await expect(rulerMarkers(page).and(page.locator(".ring"))).toHaveAttribute("title", "All · Drop the first sound.");
-  await expect(rulerMarkers(page).and(page.locator(":not(.ring)"))).toHaveAttribute("title", "9:16 · Logo sits too close to the top edge.");
+  await expect(rulerMarkers(page).and(page.locator(".ring"))).toHaveAttribute("aria-label", "All · Drop the first sound.");
+  await expect(rulerMarkers(page).and(page.locator(":not(.ring)"))).toHaveAttribute("aria-label", "9:16 · Logo sits too close to the top edge.");
   // Type is 15 px or larger: the switch, the hint and the tags.
   const sizes = await page.locator(".fscope [role=radio], .fhint, .list .ftag").evaluateAll((els) => els.map((el) => parseFloat(getComputedStyle(el).fontSize)));
   expect(sizes.length).toBeGreaterThanOrEqual(5);
@@ -664,7 +713,7 @@ test("one format: no switch in the composer, notes save for the whole cut, and n
   await expect(page.locator(".note")).toHaveCount(1);
   await expect(page.locator(".note .ftag")).toHaveCount(0);
   await expect(rulerMarkers(page).and(page.locator(".ring"))).toHaveCount(0);
-  await expect(rulerMarkers(page)).toHaveAttribute("title", "Hold longer.");
+  await expect(rulerMarkers(page)).toHaveAttribute("aria-label", "Hold longer.");
   await expect(page.locator(".otherrow")).toHaveCount(0);
   await page.locator(".note .t").click();
   await expect(page.locator(".note .fscope")).toHaveCount(0);
@@ -982,7 +1031,7 @@ test("an all-format note and a format note at the same moment are both reachable
   const hits = await page.evaluate(() => {
     const ring = document.querySelector(".ruler .mk.ring")!.getBoundingClientRect();
     const dot = document.querySelector(".ruler .mk:not(.ring)")!.getBoundingClientRect();
-    const at = (x: number, y: number) => (document.elementFromPoint(x, y) as HTMLElement | null)?.title ?? null;
+    const at = (x: number, y: number) => (document.elementFromPoint(x, y) as HTMLElement | null)?.getAttribute("aria-label") ?? null;
     return { centre: at(dot.x + dot.width / 2, dot.y + dot.height / 2), band: at(ring.x + ring.width / 2 + 6, ring.y + ring.height / 2), ringSize: ring.width };
   });
   expect(hits.centre).toBe("9:16 · Tall at two.");

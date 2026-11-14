@@ -807,6 +807,8 @@ export function App() {
         next={next}
         onGo={goNext}
         cut={video && version ? { format: formatLabel, fps, id: version.id, lockedAt: video.lockedVersion } : null}
+        // §27, 5.9: with one shape and so no switch on the monitor, the status bar's shape offers the request for the others.
+        shapes={stage === "picture" && video && version && chips.length === 1 ? { prompt: formatPrompt(state.project.name, video.name, version.id), toast } : null}
       />
       {state.version && <span class="ver" aria-label={`Rushes version ${state.version}`}>v{state.version}</span>}
     </div>
