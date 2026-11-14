@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { makeWav } from "./fixtures/wav.js";
 import {
   expect, type Rushes, test, openReviewTab, reviewTab, workspaceTab, currentFilm, pickFilm, videoReady, loudness, rangeChip, notesPanel, panelToggle, noteTargetLine, noteTargetLabel, noteTargetMenu, clearTarget, rulerMarkers, soundBlock, soundButton, soundTrack,
-  monitor, playButton, toolButton, takesList, takeHeadings, takeRow, takeRows, takeCircle, takeName, takeBlock, putAwayButton, foldToggle, clickTakeAt,
+  monitor, playButton, toolButton, takesList, takeHeadings, takeRow, takeRows, takeCircle, takeName, takeBlock, pressRowButton, foldToggle, clickTakeAt,
 } from "./fixture.js";
 
 test("the generated WAV fixture decodes in Chromium to the tone it describes", async ({ page }) => {
@@ -95,10 +95,10 @@ test("Music shows a row per bed, and its circle persists the pick", async ({ pag
   await expect(rows.nth(1).locator("[data-meta]")).toHaveText("Soft keys, no drums");
   const useB = takeCircle(page, "B · Warm keys");
   await expect(useB).toHaveAttribute("aria-checked", "false");
-  await expect(useB).toHaveAccessibleName("Use this one");
+  await expect(useB).toHaveAccessibleName("Use this one: B · Warm keys");
   await useB.click();
   await expect(useB).toHaveAttribute("aria-checked", "true");
-  await expect(useB).toHaveAccessibleName("In use");
+  await expect(useB).toHaveAccessibleName("In use: B · Warm keys");
   const picks = await rushes.api("GET", "/api/picks");
   expect(picks.lanes).toEqual({ music: "b-warm-keys" });
   // The picked bed is what plays when nothing's selected.
@@ -599,7 +599,7 @@ test("Voiceover lists every round's reads open: New, In use and Earlier, each un
   // A read heard that is then put away (and so leaves the list) stops being heard: the read in use takes over.
   await takeName(page, "Jane").click();
   await expect.poll(() => heard(page)).toEqual(["round-1-voices/jane@0"]);
-  await putAwayButton(page, "Jane").click();
+  await pressRowButton(page, "Jane");
   await expect(takeRow(page, "Jane")).toHaveCount(0);
   await expect.poll(() => heard(page)).toEqual(["round-1-voices/gerald@0"]);
   await expect(noteTargetLabel(page)).toHaveText(`Voice · ${R1} · Gerald`);
@@ -706,7 +706,7 @@ test("Put away shows a dot while one of its reads has an open note; an older rou
   await expect(page.locator(`.note[data-note="${note.id}"] .on`)).toHaveText("Round 1 · Voices · Jane");
   await expect(rowOf(page, key).locator(`.mk[data-note="${note.id}"]`)).toHaveCount(1);
   // Put away, Jane's open note shows as a dot on the folded line.
-  await putAwayButton(page, "Jane").click();
+  await pressRowButton(page, "Jane");
   await expect(takesList(page).locator('.kfold[data-fold="away"] .fdot')).toHaveCount(1);
   await page.locator(`.note[data-note="${note.id}"] .chk`).click();
   await expect(takesList(page).locator('.kfold[data-fold="away"] .fdot')).toHaveCount(0);
@@ -969,7 +969,7 @@ test("a description cut off only once its long-file mark appears still gets its 
   await expect(meta).toHaveAttribute("data-tip", description);
 });
 
-test("a read added with no round shows under a Voiceover heading, and older notes are listed, not drawn", async ({ page, rushes }) => {
+test("a read added with no round shows under the day it arrived, and older notes are listed, not drawn", async ({ page, rushes }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   const read = await rushes.addVariant("voice", "A · Current", { seconds: 4, freq: 196 });
@@ -981,7 +981,9 @@ test("a read added with no round shows under a Voiceover heading, and older note
   const { note: noOn } = await rushes.api("POST", "/api/notes", { stage: "voice", on: null, scope: "whole", text: "No on at all." });
   const { note: gone } = await rushes.api("POST", "/api/notes", { stage: "voice", on: "s1:t9", scope: "point", t: 2, text: "A take that's gone." });
   await openVoice(page, rushes, 1);
-  await expect(takeHeadings(page)).toHaveText(["New · Voiceover"]);
+  // A read with no round is shown under the day it arrived (§27, 5.8).
+  const today = await page.evaluate(() => new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short" }));
+  await expect(takeHeadings(page)).toHaveText([`New · ${today}`]);
   await expect(takeRows(page).locator("[data-name]")).toHaveText(["A · Current"]);
   await expect(takesList(page).locator(".kfold")).toHaveCount(0);
   await expect(page.locator(".note")).toHaveCount(4);
@@ -1029,8 +1031,8 @@ test("another film starts Voiceover's notes on the whole read again, even when n
   await page.keyboard.press("]");
   await expect(currentFilm(page)).toHaveText("Cutdown");
   expect((await inspect(page)).time).toBe(0);
-  await expect(noteTargetLabel(page)).not.toContainText("00:00:01:00");
-  await expect(noteTargetLabel(page)).not.toContainText("more sombre");
+  // Nothing in use on Cutdown: the whole of the first read waiting.
+  await expect(noteTargetLabel(page)).toHaveText(`Voice · ${R2} · more excited`);
 });
 
 test("a round whose reads are all missing shows the missing marks and plays silence", async ({ page, rushes }) => {
@@ -1055,18 +1057,27 @@ test("a round whose reads are all missing shows the missing marks and plays sile
 
 // ---- Picks can be cleared (Task 5) ----
 
-test("Unpick clears a pick: the circle on the take in use, pressed again, and the pick is gone from disk", async ({ page, rushes }) => {
+test("Unpick clears a pick: In use goes back to Use, and the pick is gone from disk; the circle in use pressed again changes nothing", async ({ page, rushes }) => {
   await twoBeds(page, rushes);
   const useB = takeCircle(page, "B · Warm keys");
-  // Nothing picked: no circle says it unpicks.
-  await expect(takesList(page).locator('[role="radio"][aria-description]')).toHaveCount(0);
+  // Nothing picked: no Unpick anywhere.
+  await expect(takesList(page).getByRole("button", { name: "Unpick", exact: true })).toHaveCount(0);
   await useB.click();
   await expect(useB).toHaveAttribute("aria-checked", "true");
-  await expect(useB).toHaveAccessibleDescription("Press again to unpick it");
+  await expect(useB).toHaveAccessibleName("In use: B · Warm keys");
+  // The circle of the take in use, pressed again by click or by Space, keeps the pick.
   await useB.click();
+  await expect(useB).toHaveAttribute("aria-checked", "true");
+  await useB.focus();
+  await page.keyboard.press(" ");
+  await expect(useB).toHaveAttribute("aria-checked", "true");
+  expect((await rushes.api("GET", "/api/picks")).lanes).toEqual({ music: "b-warm-keys" });
+  // Unpick is its own button, on the take in use only.
+  await expect(takesList(page).getByRole("button", { name: "Unpick", exact: true })).toHaveCount(1);
+  await pressRowButton(page, "B · Warm keys", "Unpick");
   await expect(useB).toHaveAttribute("aria-checked", "false");
-  await expect(useB).toHaveAccessibleName("Use this one");
-  await expect(takesList(page).locator('[role="radio"][aria-description]')).toHaveCount(0);
+  await expect(useB).toHaveAccessibleName("Use this one: B · Warm keys");
+  await expect(takesList(page).getByRole("button", { name: "Unpick", exact: true })).toHaveCount(0);
   expect((await rushes.api("GET", "/api/picks")).lanes).toEqual({});
   // With no pick, the first bed in manifest order plays again.
   await expect.poll(async () => (await inspect(page)).gains).toMatchObject({ "music/a-deep-house": 1, "music/b-warm-keys": 0 });
@@ -1633,7 +1644,8 @@ test("leaving the timeline stops the mix and releases its engine", async ({ page
   await page.evaluate(() => { (window as unknown as { __old: unknown }).__old = window.__rushesAudio!.engine; });
   await page.keyboard.press("4");
   await expect(reviewTab(page, "Music")).toHaveAttribute("aria-selected", "true");
-  await loaded(page, 1);
+  // The Music tab plays the bed with the read and the pass in use under it (§27, 5.8): three files.
+  await loaded(page, 3);
   const old = await page.evaluate(() => {
     const e = (window as unknown as { __old: { playing: boolean; inspect(): Snapshot } }).__old;
     return { playing: e.playing, sources: e.inspect().sources, live: window.__rushesAudio!.liveContexts() };
@@ -1766,7 +1778,8 @@ test("Space plays after a mouse click on a tab, M, S, Blind or a scope chip (§1
   await spaceToggles(page);
 
   await openReviewTab(page, "Music");
-  await loaded(page, 1);
+  // The bed, with the read and the pass in use under it (§27, 5.8).
+  await loaded(page, 3);
   await spaceToggles(page);
   await button("Blind").click();
   await expect(button("Blind")).toHaveAttribute("aria-pressed", "true");

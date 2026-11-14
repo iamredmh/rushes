@@ -8,6 +8,7 @@ import {
 import type { Asset, State, Video } from "../types.js";
 import { AudioStage, filmsOf, type Preview, takeList } from "./AudioStage.js";
 import { filmsControl } from "./FilmsMenu.js";
+import { otherSounds } from "./desk/SoundTracks.js";
 import { BlindButton } from "./VariantTab.js";
 
 const CHIPS: Record<"whole" | "point", string[]> = {
@@ -62,6 +63,7 @@ export function Voice({ state, assets, video, toast, onChanged, onPendingChange 
       film={video?.id ?? null}
       readOnly={!!video?.shelved}
       list={list}
+      others={otherSounds(state, assets, video ?? null, "voice")}
       loose={{
         items: loose.map((r) => ({ key: r.key, name: `${r.laneName} · ${r.name}`, meta: r.meta, films: films(r), none: r.films.length === 0 })),
         what: loose.length === 1 ? "read" : "reads",

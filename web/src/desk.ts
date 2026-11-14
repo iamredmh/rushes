@@ -72,29 +72,57 @@ export interface TakeGroups {
   away: TakeRow[];
 }
 
-/** A sound's takes in the order its tab shows them. `lanes` are the film's own (filmLanes); `use` is its take in use for the sound. */
-export function takeGroups(lanes: Lane[], stage: LaneStage, use: Use | undefined, video: Pick<Video, "id" | "versions"> | undefined): TakeGroups {
+/** The desk's short date, "14 Nov": a shelved film's day, and the day a round of takes with no name arrived. */
+export const shortDate = (iso: string, timeZone?: string): string => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone });
+
+/**
+ * A sound's takes in the order its tab shows them. `lanes` are the film's own (filmLanes); `use` is its take in use for the
+ * sound. Takes added with no round sit in the stage's own lane (id = the stage): they are shown as a round per local day
+ * they arrived ("14 Nov"), newest day first, and those with no date under the lane's name. `timeZone` sets "local" (tests).
+ */
+export function takeGroups(lanes: Lane[], stage: LaneStage, use: Use | undefined, video: Pick<Video, "id" | "versions"> | undefined, timeZone?: string): TakeGroups {
   const out: TakeGroups = { fresh: [], inUse: null, earlier: [], away: [] };
   const rounds = lanes.filter((l) => l.stage === stage);
+  const dayKey = (iso: string) => new Date(iso).toLocaleDateString("en-CA", { timeZone });
   for (let i = rounds.length - 1; i >= 0; i--) {
     const l = rounds[i];
-    const rest: TakeRow[] = [];
-    for (const variant of l.variants) {
-      const inUse = use !== undefined && use.lane === l.id && use.variant === variant.id;
-      const row: TakeRow = {
-        lane: l.id,
-        round: l.name,
-        variant,
-        madeFor: (video && variant.madeFor?.[video.id]) ?? null,
-        stale: video ? madeForStale(variant, video) : false,
-        inUse,
-      };
-      if (inUse) out.inUse = row;
-      else if (variant.putAway !== undefined) out.away.push(row);
-      else if (isNewTake(variant, use)) out.fresh.push(row);
-      else rest.push(row);
+    // The rounds this lane shows as: itself, or (the stage's own lane) one per day, newest first, the undated last.
+    const parts: { key: string; round: string; variants: Variant[] }[] = [];
+    if (l.id !== stage) parts.push({ key: "", round: l.name, variants: l.variants });
+    else {
+      const byDay = new Map<string, { key: string; round: string; variants: Variant[] }>();
+      const undated: Variant[] = [];
+      for (const v of l.variants) {
+        if (v.addedAt === undefined) {
+          undated.push(v);
+          continue;
+        }
+        const k = dayKey(v.addedAt);
+        if (!byDay.has(k)) byDay.set(k, { key: k, round: shortDate(v.addedAt, timeZone), variants: [] });
+        byDay.get(k)!.variants.push(v);
+      }
+      parts.push(...[...byDay.values()].sort((a, b) => (a.key < b.key ? 1 : a.key > b.key ? -1 : 0)));
+      if (undated.length > 0) parts.push({ key: "", round: l.name, variants: undated });
     }
-    if (rest.length > 0) out.earlier.push({ round: l.name, takes: rest });
+    for (const part of parts) {
+      const rest: TakeRow[] = [];
+      for (const variant of part.variants) {
+        const inUse = use !== undefined && use.lane === l.id && use.variant === variant.id;
+        const row: TakeRow = {
+          lane: l.id,
+          round: part.round,
+          variant,
+          madeFor: (video && variant.madeFor?.[video.id]) ?? null,
+          stale: video ? madeForStale(variant, video) : false,
+          inUse,
+        };
+        if (inUse) out.inUse = row;
+        else if (variant.putAway !== undefined) out.away.push(row);
+        else if (isNewTake(variant, use)) out.fresh.push(row);
+        else rest.push(row);
+      }
+      if (rest.length > 0) out.earlier.push({ round: part.round, takes: rest });
+    }
   }
   return out;
 }
@@ -124,10 +152,10 @@ const SECTION_WORD: Record<TakeSection["kind"], string> = { fresh: "New", inUse:
 export function takeSections(g: TakeGroups, shuffle: (takes: TakeRow[]) => TakeRow[] = (t) => t): TakeSection[] {
   const out: TakeSection[] = [];
   const push = (kind: TakeSection["kind"], round: string, takes: TakeRow[]) => out.push({ kind, heading: `${SECTION_WORD[kind]} · ${round}`, takes: shuffle(takes) });
-  // New is newest round first already; consecutive takes of one round share a heading.
+  // New is newest round first already; consecutive takes of one round (one lane, one day) share a heading.
   let run: TakeRow[] = [];
   for (const t of g.fresh) {
-    if (run.length > 0 && run[0].lane !== t.lane) {
+    if (run.length > 0 && (run[0].lane !== t.lane || run[0].round !== t.round)) {
       push("fresh", run[0].round, run);
       run = [];
     }

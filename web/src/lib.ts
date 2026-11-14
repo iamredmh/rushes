@@ -630,15 +630,6 @@ export function variantRows(lanes: Lane[], stage: "voice" | "music" | "sfx"): Va
   return rows;
 }
 
-/**
- * The engine lane a Music or Sound effects row plays on. Every row of a tab shares one, whichever
- * project lane it's filed under: the beds (or passes) are alternatives, so only one is heard at a
- * time. Picks stay per project lane (`row.lane`); this is only what the player layers.
- */
-export function variantEngineLane(stage: "music" | "sfx"): string {
-  return stage;
-}
-
 /** One entry in a note's On menu: `on` is what's saved, `t` a cue's own time. */
 export interface OnOption {
   value: string;
@@ -762,27 +753,6 @@ export function variantOnLabel(rows: VariantRow[], options: OnOption[], on: stri
   return options.find((o) => o.value === value)?.label ?? null;
 }
 
-/**
- * Which clip each engine lane plays: the selected row's clip in its lane, else the picked one,
- * else the lane's first in manifest order (`order`, else array order). Audition and Use can differ (§17.3).
- */
-export function laneSelection(
-  rows: { key: string; audition?: { lane: string; clip: string }; picked?: boolean; order?: number }[],
-  selected: string | null,
-): Record<string, string> {
-  const out: Record<string, string> = {};
-  const sel = rows.find((r) => r.key === selected)?.audition;
-  // "First" means manifest order (`order`), never display order, so Blind's shuffle can't change what plays.
-  const ordered = rows.map((r, i) => ({ r, i })).sort((a, b) => (a.r.order ?? a.i) - (b.r.order ?? b.i)).map((x) => x.r);
-  for (const r of ordered) {
-    const a = r.audition;
-    if (!a || out[a.lane] !== undefined) continue;
-    if (sel && sel.lane === a.lane) out[a.lane] = sel.clip;
-    else out[a.lane] = (rows.find((x) => x.picked && x.audition?.lane === a.lane) ?? r).audition!.clip;
-  }
-  return out;
-}
-
 /** A stable shuffle of `keys` for Blind: the same seed always gives the same order. */
 export function blindOrder(keys: string[], seed: number): string[] {
   const hash = (k: string) => {
@@ -856,15 +826,6 @@ export function sectionLabel(id: string): string {
 
 /** The `on` an old note on the assembled read saved; also Mix's VO row key. */
 export const READ_ROW = "vo";
-/** The engine lane of a voice lane: each read plays in `${voiceLane(lane)}/${variant}`, a lane of its own. */
-export const voiceLane = (laneId: string): string => `var:${laneId}`;
-
-/** What an audio tab hears: per engine lane, the one clip that plays (null: all of them), and the lane's gain. */
-export interface Listening {
-  select: Record<string, string | null>;
-  gains: Record<string, number>;
-}
-
 /** A Voiceover round (§18.2): one `voice` lane, named for the round, with its own pick. */
 export interface VoiceRound {
   /** The lane id. */
@@ -911,31 +872,6 @@ export function heardVoice(rounds: VoiceRound[], use?: InUse): VariantRow | null
   return null;
 }
 
-/** What Voiceover plays with no lane clicked, and On's default: the current round's pick, else its first read. */
-export function voiceDefaultRead(rounds: VoiceRound[]): VariantRow | null {
-  const current = rounds.find((r) => r.current);
-  return current ? (pickedRead(current) ?? current.reads[0] ?? null) : null;
-}
-
-/** The engine lane one read plays in: every read is a lane of its own. */
-export const readLane = (r: Pick<VariantRow, "lane" | "variant">): string => `${voiceLane(r.lane)}/${r.variant}`;
-
-/**
- * What Voiceover plays (§18.3): one read at a time, the selected one, else `voiceDefaultRead`. Every
- * read sits in its own engine lane, so switching is lane gains on one clock and never moves the playhead.
- */
-export function voiceListening(rounds: VoiceRound[], selected: string | null): Listening {
-  const reads = rounds.flatMap((r) => r.reads);
-  const heard = reads.find((r) => r.key === selected) ?? voiceDefaultRead(rounds);
-  const select: Record<string, string | null> = {};
-  const gains: Record<string, number> = {};
-  for (const r of reads) {
-    select[readLane(r)] = r.key;
-    gains[readLane(r)] = r.key === heard?.key ? 1 : 0;
-  }
-  return { select, gains };
-}
-
 /** What Voiceover's notes resolve against: the rounds, and the script's sections and their takes (for older notes). */
 export interface VoiceNotes {
   rounds: VoiceRound[];
@@ -969,20 +905,6 @@ function voiceTarget(m: VoiceNotes, on: string | null): { round: VoiceRound; rea
  */
 export function voiceNoteRows(m: VoiceNotes, note: Pick<Note, "on">): string | null {
   return voiceTarget(m, note.on)?.read.key ?? null;
-}
-
-/**
- * The On menu on Voiceover: one entry per read, the current round first, then older rounds newest
- * first, each round's reads in the order given, grouped by round (`group`, an <optgroup>). The label
- * is the read's name (`nameOf`, so Blind can hide it); `full` adds the round's name, for the tooltip.
- * Values: "v:<lane>/<variant>".
- */
-export function voiceOnOptions(rounds: VoiceRound[], nameOf: (r: VariantRow) => string = (r) => r.name): OnOption[] {
-  const out: OnOption[] = [];
-  for (const round of [...rounds].reverse()) {
-    for (const r of round.reads) out.push({ value: `v:${r.key}`, label: nameOf(r), full: `${round.name} · ${nameOf(r)}`, group: round.name, groupId: round.id, on: variantOn(r), row: r.key });
-  }
-  return out;
 }
 
 /**

@@ -3,8 +3,9 @@
 // the divider, then the timeline panel: the ruler, the Picture row, and the sound's takes (Takes). The notes panel is
 // the right-hand column, its target line following the selection and the playhead.
 //
-// One AudioEngine per mount (useAudioStage) is the clock, and it plays only this sound's takes: the one selected, else
-// the take in use, else the first one waiting. Selecting is a 4 ms gain ramp on one clock, never a restart; nothing is
+// One AudioEngine per mount (useAudioStage) is the clock. It plays this sound's take (the one selected, else the take in
+// use, else the first one waiting) with the other sounds' takes in use under it at their saved levels, as the Timeline
+// tab would; "Only this sound" silences the others. Selecting is a 4 ms gain ramp on one clock, never a restart; nothing is
 // saved until a circle is pressed. Nothing here re-renders per frame: the parts that show the time (the transport, the
 // ruler, the Picture row, the monitor's timecode and the notes panel) each follow the engine on their own (Clocked),
 // and the takes' playheads are moved through a ref.
@@ -29,6 +30,7 @@ import { escapeIsFree, NotesPanel, useNoteBox } from "./desk/NotesPanel.js";
 import { PictureTrack } from "./desk/PictureTrack.js";
 import { Ruler, type RulerMarker } from "./desk/Ruler.js";
 import { type LooseItem, type TakeItem, type TakeListSection, type TakeMark, Takes } from "./desk/Takes.js";
+import type { OtherSounds } from "./desk/SoundTracks.js";
 import { ToolStrip } from "./desk/ToolStrip.js";
 import { Transport } from "./desk/Transport.js";
 
@@ -164,6 +166,8 @@ export interface AudioStageProps {
   loose: { items: LooseItem[]; what: string };
   /** Beside the tab's name on the ruler's row: Blind on Voice and Music. */
   headerExtra?: ComponentChildren;
+  /** The other sounds' takes in use and the saved levels (otherSounds): heard under this sound's take, as on the timeline. */
+  others: OtherSounds;
   preview: Preview | null;
   /** What to ask your agent for, for a cut (the no-cut slate). */
   prompt: string;
@@ -195,6 +199,25 @@ const NO_RANGE = { in: null, out: null } as { in: number | null; out: number | n
 const COLOR: Record<SoundStage, string> = { voice: "var(--vo)", music: "var(--music)", sfx: "var(--sfx)" };
 // Which folded groups are open, per sound, for the session.
 const awayOpen = new Set<SoundStage>();
+/** A sound's engine lane on the timeline, whose saved level it plays at. */
+const MIX_LANE: Record<SoundStage, "vo" | "music" | "sfx"> = { voice: "vo", music: "music", sfx: "sfx" };
+/** "Only this sound": remembered per browser, off by default. */
+const ALONE_KEY = "rushes:solo-tab";
+function readAlone(): boolean {
+  try {
+    return localStorage.getItem(ALONE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+function keepAlone(on: boolean): void {
+  try {
+    if (on) localStorage.setItem(ALONE_KEY, "1");
+    else localStorage.removeItem(ALONE_KEY);
+  } catch {
+    // Storage refused (a private window): the setting holds for this visit only.
+  }
+}
 const looseOpen = new Set<SoundStage>();
 
 /** Re-renders its children as the engine's clock moves, so the parent never has to. */
@@ -224,7 +247,15 @@ export function AudioStage(props: AudioStageProps) {
   const showAway = awayOpen.has(stage);
   const items = [...list.sections.flatMap((s) => s.items), ...(showAway ? list.away : [])];
   // Only the takes you can reach are decoded: a folded Put away keeps its files out of the engine.
-  const clips = items.flatMap((it) => (it.clip ? [it.clip] : []));
+  const ownClips = items.flatMap((it) => (it.clip ? [it.clip] : []));
+  // §27, 5.8: the other sounds' takes in use play under it, at their saved levels, unless Only this sound is on.
+  const others = props.others;
+  const clips = [...ownClips, ...others.clips];
+  const [alone, setAloneState] = useState(readAlone);
+  const setAlone = (on: boolean) => {
+    setAloneState(on);
+    keepAlone(on);
+  };
   const [loadedDuration, setLoadedDuration] = useState<number | null>(null);
   const [aspect, setAspect] = useState(16 / 9);
   const file = preview?.version.file;
@@ -254,7 +285,13 @@ export function AudioStage(props: AudioStageProps) {
 
   // ---- the transport's level, the divider, the tools ----
   const [sound, setSound] = useVolume();
-  useLayoutEffect(() => engine.setLaneGain(stage, sound.muted ? 0 : sound.level), [engine, sound]);
+  // What you hear: each sound at its saved level (this one's on its own lane), the transport's level on top.
+  const master = sound.muted ? 0 : sound.level;
+  const laneLevels: Record<string, number> = { [stage]: others.gains[MIX_LANE[stage]] * master };
+  for (const lane of ["vo", "music", "sfx"] as const) if (MIX_LANE[stage] !== lane) laneLevels[lane] = alone ? 0 : others.gains[lane] * master;
+  useLayoutEffect(() => {
+    for (const [lane, gain] of Object.entries(laneLevels)) engine.setLaneGain(lane, gain);
+  }, [engine, JSON.stringify(laneLevels)]);
   const split = useSplit();
   const [range, setRange] = useState(NO_RANGE);
   const [marks, setMarks] = useState<Mark[]>([]);
@@ -308,10 +345,13 @@ export function AudioStage(props: AudioStageProps) {
       const when = marked ? noteTime(marked.t, marked.tOut) : timecode(snap(at, fps), fps);
       return { stage, on: null, scope: (marked ? "range" : "point") as Scope, t: marked?.t ?? snap(at, fps), tOut: marked?.tOut ?? null, label: `${when} · ${title}` };
     }
-    const on = cue ? `${targetItem.key}:${cue}` : targetItem.key;
-    const name = targetName(targetItem, cue);
+    // A cue is a point at its own time; chosen whole, the note is on the pass, not the cue.
+    const point = marked !== null || pointAt(at);
+    const onCue = point ? cue : null;
+    const on = onCue ? `${targetItem.key}:${onCue}` : targetItem.key;
+    const name = targetName(targetItem, onCue);
     if (marked) return noteTarget({ kind: "take", stage, on, name, t: marked.t, tOut: marked.tOut }, null, fps);
-    const t = pointAt(at) ? (cue ? targetItem.cues.find((c) => c.id === cue)!.t : snap(at, fps)) : null;
+    const t = point ? (onCue ? targetItem.cues.find((c) => c.id === onCue)!.t : snap(at, fps)) : null;
     return noteTarget({ kind: "take", stage, on, name, t }, null, fps);
   };
   const placeholderAt = (at: number) => {
@@ -584,6 +624,11 @@ export function AudioStage(props: AudioStageProps) {
             <div class="thead">
               <span class="kttl">{title}</span>
               <span class="sp" />
+              {others.clips.length > 0 && (
+                <button type="button" class="btn ghost sm kalone" aria-pressed={alone} data-tip={alone ? "The other sounds are silent" : "Hear this sound without the others"} onClick={() => setAlone(!alone)}>
+                  Only this sound
+                </button>
+              )}
               {props.headerExtra}
             </div>
             <Clocked engine={engine}>

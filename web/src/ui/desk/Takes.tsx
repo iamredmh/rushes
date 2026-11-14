@@ -3,8 +3,9 @@
 // One list for Voice, Music and Effects: what differs (Blind's names, an effects pass's cues and layers) comes in on the
 // items and props.
 //
-// A row is a circle (a radio: the take in use is checked; pressed again, it unpicks), the name (a click selects the take
-// and auditions it), a tag with the cut it was made for, Films, Put away (Bring back on a put-away take) and the take's
+// A row is a circle (a radio: the take in use is checked), the name (a click selects the take
+// and auditions it), a tag with the cut it was made for, Films, Put away (Bring back on a put-away take, Unpick on the
+// take in use) and the take's
 // waveform as a block on the shared time scale. Every circle is one radio group: one Tab stop, moved by the arrows.
 //
 // Nothing here re-renders per frame: the playheads are plain elements the tab moves through a ref.
@@ -211,15 +212,14 @@ export function Takes(props: TakesProps) {
                 role="radio"
                 class="kpick tip-start"
                 aria-checked={take.inUse}
-                aria-label={tip}
-                aria-description={take.inUse ? "Press again to unpick it" : undefined}
+                aria-label={`${tip}: ${it.name}`}
                 data-tip={tip}
                 tabIndex={it.key === tabStop ? 0 : -1}
                 onKeyDown={rove}
+                // The take in use stays in use when its circle is pressed again (Space also plays): Unpick is its own button.
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (take.inUse) onUnpick(it);
-                  else onPick(it);
+                  if (!take.inUse) onPick(it);
                 }}
               />
             )}
@@ -244,11 +244,17 @@ export function Takes(props: TakesProps) {
             )}
             <span class="sp" />
             {it.films && <FilmsMenu name={it.name} control={it.films} />}
-            {put && (
-              <button type="button" class="btn ghost sm kput" onClick={() => onPutAway(it, put === "away")}>
-                {put === "away" ? "Put away" : "Bring back"}
-              </button>
-            )}
+            {/* Its own slot, as wide whatever it holds: Put away, Bring back, or Unpick on the take in use. It shows on the
+                row under the pointer, with focus inside it, or selected; hidden, it takes no clicks. */}
+            <span class="kslot">
+              {put === null ? (
+                <button type="button" class="btn ghost sm kput" onClick={() => onUnpick(it)}>Unpick</button>
+              ) : (
+                <button type="button" class="btn ghost sm kput" onClick={() => onPutAway(it, put === "away")}>
+                  {put === "away" ? "Put away" : "Bring back"}
+                </button>
+              )}
+            </span>
           </div>
           <div class="tlane" onClick={(e) => onSelect(it, timeAt(e))}>
             <div class={`sblock${take.stale ? " stale" : ""}${label ? " empty gone" : ""}`} style={{ left: "0%", width: `${label ? 100 : pct(end)}%` }}>

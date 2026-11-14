@@ -1,15 +1,13 @@
 // §27, 5.2: the Film menu. One button naming the film you are in; its menu lists the films in play by number and full name
 // with their open notes, and the shelved films in a group at the foot, each with Restore. It replaces the film pills, the +N
 // list and the Shelved button (§26.6). One film in play and none shelved: the film's name, plain, with no menu.
+import { shortDate } from "../../desk.js";
 import { useEffect } from "preact/hooks";
 import { inPlay } from "../../lib.js";
 import { typeAhead } from "../../versions.js";
 import type { Video } from "../../types.js";
 import { Icon } from "../Icon.js";
 import { useMenu } from "./useMenu.js";
-
-/** "13 Oct". */
-export const shortDate = (iso: string): string => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 
 export interface FilmSelectProps {
   /** Every film, in the project's order. */

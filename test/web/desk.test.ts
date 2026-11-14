@@ -114,6 +114,38 @@ describe("takeGroups", () => {
   });
 });
 
+describe("takeGroups: takes added with no round", () => {
+  // The stage's own lane (id "music"): two beds on 12 Nov, one on 14 Nov (just after midnight in London, still 13 Nov in
+  // New York), and one from before takes were dated. A real round beside it keeps its name.
+  const lanes = [
+    lane("music", "Music", "music", [
+      take("a", { addedAt: "2026-11-12T09:00:00.000Z" }),
+      take("old"),
+      take("b", { addedAt: "2026-11-12T15:00:00.000Z" }),
+      take("c", { addedAt: "2026-11-14T00:30:00.000Z" }),
+    ]),
+    lane("round-2", "Round 2", "music", [take("r", { addedAt: "2026-11-13T09:00:00.000Z" })]),
+  ];
+  const pick = { lane: "music", variant: "a", at: "2026-11-12T16:00:00.000Z", seen: {} };
+
+  it("groups them by the local day they arrived, newest day first, each headed by the day; undated ones under the lane's name", () => {
+    const g = takeGroups(lanes, "music", undefined, hero, "Europe/London");
+    expect(g.fresh.map((t) => [t.variant.id, t.round])).toEqual([["r", "Round 2"], ["c", "14 Nov"], ["a", "12 Nov"], ["b", "12 Nov"]]);
+    expect(g.earlier).toEqual([{ round: "Music", takes: [expect.objectContaining({ variant: expect.objectContaining({ id: "old" }) })] }]);
+    expect(takeSections(g).map((s) => s.heading)).toEqual(["New · Round 2", "New · 14 Nov", "New · 12 Nov", "Earlier · Music"]);
+  });
+  it("uses the day where you are", () => {
+    const g = takeGroups(lanes, "music", undefined, hero, "America/New_York");
+    expect(g.fresh.find((t) => t.variant.id === "c")?.round).toBe("13 Nov");
+  });
+  it("splits Earlier by day too", () => {
+    const g = takeGroups(lanes, "music", pick, hero, "Europe/London");
+    expect(g.inUse).toMatchObject({ round: "12 Nov", variant: expect.objectContaining({ id: "a" }) });
+    expect(g.earlier.map((r) => [r.round, r.takes.map((t) => t.variant.id)])).toEqual([["12 Nov", ["b"]], ["Music", ["old"]]]);
+    expect(takeSections(g).map((s) => s.heading)).toEqual(["New · Round 2", "New · 14 Nov", "In use · 12 Nov", "Earlier · 12 Nov", "Earlier · Music"]);
+  });
+});
+
 describe("takeSections", () => {
   const lanes = [
     lane("round-1", "Round 1", "voice", [take("a", { addedAt: "2026-11-10T09:00:00.000Z" }), take("b", { addedAt: "2026-11-10T09:00:00.000Z" })]),

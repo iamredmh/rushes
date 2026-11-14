@@ -356,13 +356,15 @@
 
 /* ---- §27, 5.8: a sound's tab. Its takes under the ruler and the Picture row (which stay at the top as the list scrolls), a
    heading per group, and a row per take: a circle, the name, the cut it was made for, Films and Put away, then its block. ---- */
-.takespanel { --kh: 320px; }
+.takespanel { --kh: 360px; }
+@media (max-width: 1299px) { .takespanel { --kh: 320px; } }
 .takespanel .trow { grid-template-columns: var(--kh) minmax(0, 1fr); }
 .takespanel .kstick { position: sticky; top: 0; z-index: 6; background: var(--app); }
 .rrow .kttl { font-weight: 600; color: var(--text); }
 .kblind { height: 22px; padding: 0 8px; gap: 4px; font-size: 12.5px; }
 .kblind .ic { width: 13px; height: 13px; }
-.kblind[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-2); }
+.kblind[aria-pressed="true"], .kalone[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-2); }
+.kalone { height: 22px; padding: 0 8px; font-size: 12.5px; }
 .khd { margin: 0; padding: 8px 10px 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-top: 1px solid var(--line); color: var(--text-3); font-size: 12.5px; font-weight: 600; }
 .khd[data-tip]::after { left: 10px; bottom: auto; top: calc(100% + 2px); transform: none; width: max-content; max-width: min(520px, 80vw); white-space: normal; line-height: 1.3; text-align: left; }
 .kfold { display: flex; align-items: center; gap: 8px; padding-right: 10px; border-top: 1px solid var(--line); }
@@ -390,12 +392,11 @@ span.knm, span.knm:hover { cursor: default; background: none; }
 .take.picked .sblock { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 .ktag { flex: none; padding: 0 5px; border-radius: 4px; background: var(--raised); color: var(--text-3); font-size: 12.5px; line-height: 18px; }
 .ktag.stale { background: var(--todo-soft); color: var(--todo); }
-.take .khead { position: relative; }
-/* Put away shows on the row under the pointer, the row with focus inside it and the selected row, over the end of its head,
-   so the name keeps the room the rest of the time. */
-.take .kput { position: absolute; right: 8px; top: 50%; height: 22px; padding: 0 8px; font-size: 12.5px; transform: translateY(-50%); opacity: 0; background: var(--app); box-shadow: -10px 0 8px var(--app); }
-.take .kput:hover { background: var(--hover); }
-.take:hover .kput, .take:focus-within .kput, .take.picked .kput { opacity: 1; }
+/* Put away, Bring back or Unpick: a slot of its own at the end of the head, its width kept so nothing moves when it shows.
+   It shows on the row under the pointer, with focus inside it, or selected; hidden, it takes no clicks. */
+.take .kslot { flex: none; display: flex; justify-content: flex-end; width: 84px; }
+.take .kput { height: 22px; padding: 0 8px; font-size: 12.5px; visibility: hidden; }
+.take:hover .kput, .take:focus-within .kput, .take.picked .kput { visibility: visible; }
 .take .filmsbtn { height: 22px; font-size: 12.5px; }
 .take .sblock { border-left: 2px solid var(--c); overflow: visible; }
 .kfold .fdot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--todo); }
