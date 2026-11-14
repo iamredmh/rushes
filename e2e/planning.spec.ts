@@ -83,12 +83,15 @@ test("two edits in a row both land, and the tab count follows", async ({ page, r
 test("approving sets the status line, and editing an approved brief reopens it", async ({ page, rushes }) => {
   await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
   await page.goto(rushes.url);
+  await expect(planStatus(page)).toHaveText("Brief not approved yet · 0 edited");
   await page.getByRole("button", { name: "Approve brief" }).click();
   await expect.poll(() => read(rushes.root)).toContain("Status: approved");
   await expect(page.getByRole("button", { name: "Approved" })).toHaveAttribute("aria-pressed", "true");
+  await expect(planStatus(page)).toHaveText("Brief approved · 0 edited");
   await page.getByLabel("Your version of Tone").fill("Warm.");
   await expect.poll(() => read(rushes.root)).toContain("Status: draft");
   await expect(page.getByRole("button", { name: "Approve brief" })).toBeVisible();
+  await expect(planStatus(page)).toHaveText("Brief not approved yet · 1 edited");
 });
 
 test("a change the agent makes to brief.md shows up without a reload, and becomes the baseline", async ({ page, rushes }) => {
@@ -185,12 +188,21 @@ test("editing a script line marks it Edited by you, with the current wording str
   await expect(editedMark(row)).toContainText("Edited by you");
   await expect(baselineText(row)).toHaveText("Your work lives on one laptop.");
   await expect(sendButton(page)).toHaveAccessibleName("Send 1");
+  // An edited line is a change, not a note, and the status bar says so (Send itself is "Send 1").
+  await expect(page.locator("footer.status")).toContainText("Next: send 1 change");
+  await expect(page.locator("footer.status")).not.toContainText("note");
   await expect(planStatus(page)).toHaveText("0 of 1 line approved · 1 edited");
   await expect(planTab(page, "Script").locator(".dot")).toBeVisible();
   // Revert goes back to the current wording, and the mark goes with it.
   await row.getByRole("button", { name: "Revert" }).click();
   await expect(editedMark(row)).toHaveCount(0);
   await expect(sendButton(page)).toHaveCount(0);
+  // Approve is a toggle whose tooltip is its name, on or off.
+  const approve = row.getByRole("button", { name: "Approve", exact: true });
+  await expect(approve).toHaveAttribute("data-tip", "Approve");
+  await approve.click();
+  await expect(approve).toHaveAttribute("aria-pressed", "true");
+  await expect(approve).toHaveAttribute("data-tip", "Approve");
 });
 
 test("the top bar's Plan tab opens the Plan page last used", async ({ page, rushes }) => {
@@ -207,17 +219,30 @@ test("the top bar's Plan tab opens the Plan page last used", async ({ page, rush
 });
 
 test("every editable text on a Plan page sits in a field with a visible edge, at rest", async ({ page, rushes }) => {
-  await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
+  await rushes.writeFiles([
+    { path: "brief.md", text: BRIEF },
+    { path: "storyboard.md", text: "# Storyboard: Lumen launch film\n\n## Shot 01 · Cold open\nTag: ESTABLISH\nLength: 3\nStatus: draft\nDirection:\n\nThe headline sits on a pale card.\n" },
+  ]);
+  await rushes.api("PUT", "/api/script", SCRIPT);
   await page.goto(rushes.url);
-  const box = page.getByLabel("Your version of Tone");
-  await expect(box).toBeVisible();
-  const edge = await box.evaluate((el) => {
-    const s = getComputedStyle(el);
-    return { width: parseFloat(s.borderTopWidth), colour: s.borderTopColor, bg: getComputedStyle(el.closest(".srow")!).backgroundColor };
-  });
-  expect(edge.width).toBeGreaterThan(0);
-  expect(edge.colour).not.toBe("rgba(0, 0, 0, 0)");
-  expect(edge.colour).not.toBe(edge.bg);
+  const hasEdge = async (box: import("@playwright/test").Locator, row: string) => {
+    await expect(box).toBeVisible();
+    const edge = await box.evaluate((el, row) => {
+      const s = getComputedStyle(el);
+      return { width: parseFloat(s.borderTopWidth), colour: s.borderTopColor, bg: getComputedStyle(el.closest(row)!).backgroundColor };
+    }, row);
+    expect(edge.width).toBeGreaterThan(0);
+    expect(edge.colour).not.toBe("rgba(0, 0, 0, 0)");
+    expect(edge.colour).not.toBe(edge.bg);
+  };
+  await openPlanPage(page, "Brief");
+  await hasEdge(page.getByLabel("Your version of Tone"), ".srow");
+  // A script line, a storyboard shot and its direction too.
+  await openPlanPage(page, "Script");
+  await hasEdge(page.locator(".srow").first().getByRole("textbox", { name: /^Your version of/ }), ".srow");
+  await openPlanPage(page, "Storyboard");
+  await hasEdge(page.getByLabel("Your version of shot 1"), ".sbrow");
+  await hasEdge(page.getByLabel("Direction for shot 1"), ".sbrow");
 });
 
 test("a save refused because the agent rewrote the file is tried again against the file's new hash", async ({ page, rushes }) => {
@@ -332,8 +357,21 @@ test("left and right on the Plan switch move between its pages and reach nothing
   await expect(planTab(page, "Storyboard")).toBeFocused();
   // Moving along the switch opens nothing: the page and the workspace stay where they were until a page is picked.
   await expect(page.getByRole("heading", { name: "Brief" })).toBeVisible();
+  await expect(planTab(page, "Brief")).toHaveAttribute("aria-selected", "true");
   await expect(workspaceTab(page, "Plan")).toHaveAttribute("aria-selected", "true");
-  await expect(page.getByLabel("Timecode")).toHaveCount(0);
+  // The arrows never reached the desk's own key handler: its listener on the window heard none of them.
+  await page.evaluate(() => {
+    (window as unknown as { __heard: string[] }).__heard = [];
+    window.addEventListener("keydown", (e) => (window as unknown as { __heard: string[] }).__heard.push(e.key));
+  });
+  await page.keyboard.press("ArrowLeft");
+  await expect(planTab(page, "Script")).toBeFocused();
+  await page.keyboard.press("ArrowRight");
+  await expect(planTab(page, "Storyboard")).toBeFocused();
+  expect(await page.evaluate(() => (window as unknown as { __heard: string[] }).__heard)).toEqual([]);
+  // And the switch is a tab list over the page on show: its tabs control the Plan page, which is their tab panel.
+  await expect(planTab(page, "Brief")).toHaveAttribute("aria-controls", "plan-page");
+  await expect(page.getByRole("tabpanel", { name: /^Brief/ })).toBeVisible();
 });
 
 test("picking a page on the Plan switch with the keyboard leaves focus on its tab, not nowhere", async ({ page, rushes }) => {
@@ -389,6 +427,8 @@ test("the Brief page shows the film's title, and says so when brief.md has no se
   await rushes.writeFiles([{ path: "brief.md", text: "# Brief: Lumen launch film\n\nStatus: draft\n\nJust some notes, no headings.\n" }]);
   await expect(page.getByText("brief.md has no ## sections yet")).toBeVisible({ timeout: 8000 });
   await expect(page.locator(".shead")).not.toContainText("0 sections");
+  // With nothing to count, the page has no status line.
+  await expect(planStatus(page)).toHaveCount(0);
 });
 
 test("a brief.md that is deleted while the page is open is dropped without a reload", async ({ page, rushes }) => {

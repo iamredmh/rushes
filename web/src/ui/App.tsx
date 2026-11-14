@@ -15,7 +15,7 @@ import { FormatToggle } from "./FormatToggle.js";
 import { Icon, STAGE_ICONS } from "./Icon.js";
 import { Picture, type Source } from "./Picture.js";
 import { Storyboard } from "./Storyboard.js";
-import { PlanSwitch, type PlanTabRow } from "./Planning.js";
+import { PLAN_PANEL_ID, PlanSwitch, planTabId, type PlanTabRow } from "./Planning.js";
 import { Script } from "./Script.js";
 import { VariantTab } from "./VariantTab.js";
 import { Voice } from "./Voice.js";
@@ -623,7 +623,8 @@ export function App() {
   /** A page with no notes of its own (a locked page, a Plan page): it sits beside a notes panel the desk mounts for it. */
   const withPanel = (page: ComponentChildren, side: ComponentChildren = <NotesPanel notes={[]} version={null} placeholder="" readOnly toast={toast} onAdd={async () => undefined} onChanged={() => void refresh()} />) => (
     <div class="split deskcols">
-      <div class="wsmain">{page}</div>
+      {/* A Plan page is the Plan switch's tab panel. */}
+      <div class="wsmain" {...(isPlanPage(stage) ? { role: "tabpanel", id: PLAN_PANEL_ID, "aria-labelledby": planTabId(stage) } : {})}>{page}</div>
       {side}
     </div>
   );

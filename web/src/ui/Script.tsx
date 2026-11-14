@@ -115,7 +115,8 @@ function Row({ section, wps, toast, onChanged, onPick }: { section: Section; wps
           </button>
           <button
             class="btn ib okd"
-            data-tip={section.status === "approved" ? "Unapprove" : "Approve"}
+            // A toggle: its name stays "Approve" and aria-pressed says whether it is on; the tooltip is its name.
+            data-tip="Approve"
             aria-label="Approve"
             aria-pressed={section.status === "approved"}
             onClick={() => void patch({ status: section.status === "approved" ? "draft" : "approved" })}
