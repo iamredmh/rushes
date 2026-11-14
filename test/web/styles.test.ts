@@ -31,7 +31,7 @@ describe("styles.css", () => {
     expect(css).not.toMatch(/Figtree|JetBrains/);
   });
   it("keeps every colour in the two token blocks", () => {
-    for (const file of ["styles.css", "changes.css", "cues.css"]) {
+    for (const file of ["styles.css", "changes.css", "cues.css", "desk.css"]) {
       const text = readFileSync(new URL(`../../web/src/${file}`, import.meta.url), "utf8")
         .replace(/:root\s*\{[^}]*\}/g, "")
         .replace(/:root\[data-theme="light"\]\s*\{[^}]*\}/g, "")

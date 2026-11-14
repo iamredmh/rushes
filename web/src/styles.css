@@ -56,7 +56,7 @@
   --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
   --r: 10px;
   --r-lg: 14px;
-  /* The page body's padding, and where it starts (App sets --body-top from the real header and tabs). */
+  /* The work area's padding. */
   --body-pad: 24px;
 }
 :root[data-theme="light"] {
@@ -127,6 +127,8 @@
 /* Visually hidden but still in the accessible name/description -- never aria-hidden. */
 .vh { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 html, body { margin: 0; background: var(--bg); height: 100%; }
+/* §27, 5.1: the desk is exactly the window's height, from the root down. */
+#app { height: 100%; }
 body { color: var(--text); font: 15px/1.5 var(--sans); -webkit-font-smoothing: antialiased; }
 button, input, textarea, select { font: inherit; color: inherit; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -163,52 +165,15 @@ svg.ic { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-wid
 [data-tip] { position: relative; }
 [data-tip]::after { content: attr(data-tip); position: absolute; left: 50%; bottom: calc(100% + 8px); transform: translateX(-50%) translateY(2px); background: var(--tip); color: var(--on-tip); font: 500 15px/1 var(--sans); padding: 7px 9px; border-radius: 7px; white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity 0.12s, transform 0.12s; z-index: 30; }
 [data-tip]:hover::after, [data-tip]:focus-visible::after { opacity: 1; transform: translateX(-50%); }
-.tip-below[data-tip]::after,
-/* Everything in the header sits at the top of the window, so its tooltips open downwards. */
-.head [data-tip]::after { bottom: auto; top: calc(100% + 8px); }
+.tip-below[data-tip]::after { bottom: auto; top: calc(100% + 8px); }
 
-/* The header's last button sits at the window's right edge: its tooltip is anchored to the right, or it widens the page. */
-.head > .btn.primary[data-tip]::after { left: auto; right: 0; transform: none; }
-
-/* frame */
-.shell { min-height: 100%; display: flex; flex-direction: column; }
-.head { display: flex; align-items: center; gap: 14px; padding: 14px 20px; flex-wrap: wrap; }
+/* frame (§27, 5.1): the window's height exactly, in three rows: the top bar, the work area and the status bar. Nothing
+   uses the document's scroll; a screen taller than its room scrolls inside the work area, and the bars never move. */
+.shell { height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; grid-template-columns: minmax(0, 1fr); overflow: hidden; }
+.work { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .logo { width: 28px; height: 28px; border-radius: 8px; background: var(--accent); display: grid; place-items: center; color: var(--on-accent); }
 .logo svg { width: 14px; height: 14px; fill: currentColor; stroke: none; }
-.crumb { display: flex; align-items: center; gap: 4px; font-weight: 600; font-size: 15px; }
-.crumb .slash { color: var(--text-3); }
-.crumb .pid { font-weight: 500; font-size: 13px; color: var(--text-3); margin-left: 2px; }
-.pack { display: flex; align-items: center; gap: 2px; background: var(--app); border-radius: var(--r); padding: 3px; }
-.pill { display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; color: var(--text-2); font-size: 15px; font-weight: 500; cursor: pointer; }
-.pill:hover { color: var(--text); }
-.pill[aria-pressed="true"] { background: var(--raised); color: var(--text); }
-.pill .n { width: 22px; height: 22px; border-radius: 50%; background: var(--line-2); color: var(--text-2); font: 600 15px/22px var(--sans); font-variant-numeric: tabular-nums; text-align: center; flex: none; }
-.pill[aria-pressed="true"] .n { background: var(--accent-soft); color: var(--accent-2); }
-.pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--todo); flex: none; }
-/* §26: shelving a film. The pack with its +N and Shelved lists, the Film menu, and the view of a shelved film. */
-.fpwrap { position: relative; display: inline-flex; }
-.pill.fpmore { gap: 6px; }
-.pill.fpmore .ic { width: 16px; height: 16px; }
-.fpshelf { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 12px; border: 1px dashed var(--line-2); border-radius: 8px; background: transparent; color: var(--text-2); font-size: 15px; font-weight: 500; cursor: pointer; white-space: nowrap; }
-.fpshelf:hover, .fpshelf[aria-expanded="true"] { color: var(--text); background: var(--hover); }
-.fpshelf.on { color: var(--text); border-color: var(--todo); }
-.fpshelf .ic { width: 16px; height: 16px; }
-.fpmenu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 30; min-width: 260px; max-width: 380px; max-height: 360px; overflow: auto; background: var(--raised); border-radius: var(--r-lg); box-shadow: 0 16px 48px var(--shadow); padding: 6px; display: grid; gap: 2px; }
-.fpshelfwrap .fpmenu { left: auto; right: 0; }
-.fpmenu h4 { margin: 6px 8px 4px; font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); }
-.fprow { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 36px; padding: 4px 8px; border: 0; border-radius: 8px; background: transparent; color: var(--text-2); font: inherit; text-align: left; cursor: pointer; }
-.fprow:hover { background: var(--hover); color: var(--text); }
-.fprow .n { width: 22px; height: 22px; border-radius: 50%; background: var(--line-2); color: var(--text-2); font: 600 15px/22px var(--sans); text-align: center; flex: none; }
-.fprow .pname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fprow .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--todo); flex: none; }
-.fprow.shelved { padding: 0; cursor: default; color: var(--text-3); }
-.fprow.shelved:hover { background: var(--hover); }
-.fpopen { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 4px 8px; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
-.fpopen .meta { font-size: 13px; color: var(--text-3); white-space: nowrap; }
-.fprestore { flex: none; }
 .fmwrap { position: relative; display: inline-flex; }
-/* Its tooltip opens leftwards from the button, so it never lies over the Shortcuts button's beside it. */
-.head .fmwrap [data-tip]::after, .head .fmwrap [data-tip]:hover::after, .head .fmwrap [data-tip]:focus-visible::after { left: auto; right: 0; transform: none; }
 .fmenu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; min-width: 260px; background: var(--raised); border-radius: var(--r-lg); box-shadow: 0 16px 48px var(--shadow); padding: 6px; }
 .fmtitle { padding: 6px 8px 8px; border-bottom: 1px solid var(--line); margin-bottom: 4px; color: var(--text-3); font-size: 13px; }
 .fmtitle b { display: block; color: var(--text); font-size: 15px; font-weight: 600; }
@@ -224,11 +189,6 @@ svg.ic { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-wid
 .shempty b { color: var(--text); font-size: 18px; }
 .toast .toastact { height: 28px; padding: 0 12px; border-radius: 999px; background: var(--hover); color: var(--text); font-weight: 600; }
 .comp[hidden] { display: none; }
-.plabel { color: var(--text-3); font-size: 15px; font-weight: 500; }
-.lockbtn { background: transparent; color: var(--text-3); }
-.lockbtn:hover { background: var(--raised); color: var(--text); }
-.lockbtn[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-2); }
-.tabs { display: flex; gap: 4px; padding: 0 14px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
 .tab { border: 0; background: transparent; display: flex; align-items: center; gap: 8px; padding: 12px 14px 13px; color: var(--text-2); font-weight: 500; font-size: 15px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; border-radius: 8px 8px 0 0; }
 .tab:hover { color: var(--text); background: var(--tint); }
 .tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
@@ -246,7 +206,8 @@ svg.ic { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-wid
 .pop h3 { margin: 0; font-size: 15px; font-weight: 600; }
 .keys { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; font-size: 15px; color: var(--text-2); }
 kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; padding: 3px 7px; color: var(--text); box-shadow: inset 0 -1px 0 var(--line-2); }
-.body { padding: var(--body-pad); flex: 1; }
+/* App writes the room inside it as --work-h, so a screen can fit itself to what the frame leaves, whatever the bars above take. */
+.body { padding: var(--body-pad); flex: 1 1 0; min-height: 0; overflow: auto; }
 /* The version the server is running: a faint mark in the corner, never in the way of a click. */
 .ver { position: fixed; right: 10px; bottom: 6px; z-index: 5; font: 11px/1 var(--mono); color: var(--text-2); opacity: 0.45; pointer-events: none; }
 .col { max-width: 1000px; margin: 0 auto; display: grid; gap: 16px; }
@@ -283,7 +244,7 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
    writes it inline with the cut's own ratio. It's all behind @supports: a browser without
    container units keeps the earlier layout, the min(70vh, 640px) cap above. */
 @supports (width: 1cqw) {
-  .split > .stack { display: flex; flex-direction: column; align-self: start; container-type: inline-size; max-height: max(calc(100vh - var(--body-top, 114px) - 2 * var(--body-pad)), var(--player-floor, 0px)); }
+  .split > .stack { display: flex; flex-direction: column; align-self: start; container-type: inline-size; max-height: max(var(--work-h, calc(100vh - 160px)), var(--player-floor, 0px)); }
   .split > .stack > * { flex: none; }
   .split > .stack > .framebox { flex: 0 1 auto; height: min(640px, 70vh, calc(100cqw * 9 / 16)); min-height: 200px; container-type: size; }
   .split > .stack > .framebox .frame { width: min(100cqw, calc(100cqh * var(--ar, 16 / 9))); }
@@ -392,7 +353,6 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .chipx { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 6px 0 10px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-2); font-size: 15px; font-weight: 500; }
 .chipx button { border: 0; background: transparent; color: inherit; cursor: pointer; padding: 2px; display: grid; }
 .chipx svg.ic { width: 14px; height: 14px; }
-.chipx.go { border: 0; padding: 0 12px; cursor: pointer; }
 
 /* script */
 .shead { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
@@ -680,16 +640,12 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 }
 @media (max-width: 680px) {
   :root { --body-pad: 16px; }
-  .head { padding: 12px 14px; }
   .sgrid, .sfoot, .bgrid, .sbrow { grid-template-columns: minmax(0, 1fr); }
   .sbhead { display: none; }
   .scols { display: none; }
   .when { grid-auto-flow: column; justify-content: start; align-items: center; gap: 12px; }
 }
 /* ---- Assets › Found (§20.5) ---- */
-.foundchip { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px; border: 0; border-radius: 999px; background: var(--accent-soft); color: var(--accent-2); font-size: 15px; font-weight: 600; cursor: pointer; white-space: nowrap; }
-.foundchip:hover { background: var(--accent-soft); }
-.foundchip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-2); flex: none; }
 .amain.found { grid-template-columns: minmax(0, 1fr); }
 /* The controls sit at the window's right edge: their tooltips open below, anchored to the right, and wrap, so they never widen the page. */
 .amain.found .acontrols [data-tip]::after { left: auto; right: 0; bottom: auto; top: calc(100% + 8px); transform: none; white-space: normal; width: max-content; max-width: 280px; line-height: 1.3; text-align: left; }
@@ -798,7 +754,7 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .sbnone { margin: 4px 0 0; color: var(--text-2); font-size: 15px; line-height: 1.6; }
 
 /* §25: the Visuals tab. Every class here starts with vz. */
-.vzsplit { display: grid; grid-template-columns: minmax(0, 1fr) 380px; height: calc(100vh - var(--body-top, 114px)); min-height: 560px; margin: calc(var(--body-pad, 24px) * -1); }
+.vzsplit { display: grid; grid-template-columns: minmax(0, 1fr) 380px; height: calc(var(--work-h, calc(100vh - 160px)) + 2 * var(--body-pad, 24px)); min-height: 560px; margin: calc(var(--body-pad, 24px) * -1); }
 .vzscroll { overflow-y: auto; scroll-snap-type: y proximity; min-height: 0; }
 .vz { height: 100%; min-height: 520px; scroll-snap-align: start; scroll-snap-stop: always; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 10px; padding: 14px 22px 12px; border-bottom: 1px solid var(--line); transition: opacity 0.25s; }
 .vz:not(.cur) { opacity: 0.5; }

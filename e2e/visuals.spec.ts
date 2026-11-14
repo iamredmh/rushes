@@ -70,15 +70,19 @@ async function drag(page: import("@playwright/test").Page, id: string, from: [nu
   await page.mouse.up();
 }
 
-test("Visuals is a locked tab with a prompt until a visual is registered, then opens", async ({ page, rushes }) => {
+test("Visuals is a page with a prompt (key 7) until a visual is registered, then a workspace of its own that opens", async ({ page, rushes }) => {
   await page.goto(rushes.url);
+  // §27, 5.3: no Visuals workspace while the project has none; its key still opens the page that asks for one.
   const tab = workspaceTab(page, "Visuals");
-  await expect(tab).toHaveAttribute("data-locked", "true");
-  await tab.click();
+  await expect(workspaceTab(page, "Assets")).toBeVisible();
+  await expect(tab).toHaveCount(0);
+  await page.keyboard.press("7");
   await expect(page.getByLabel("Prompt for your agent")).toHaveValue(/rushes_add_visual/);
   await withVisuals(rushes);
+  await expect(tab).toBeVisible();
   await expect(tab).not.toHaveAttribute("data-locked", "true");
   await tab.click();
+  await expect(tab).toHaveAttribute("aria-selected", "true");
   await expect(section(page, "launch-carousel")).toBeVisible();
 });
 

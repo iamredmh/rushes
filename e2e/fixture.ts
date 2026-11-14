@@ -449,17 +449,14 @@ export async function videoReady(page: Page): Promise<void> {
 export type WorkspaceName = "Plan" | "Review" | "Visuals" | "Assets";
 export type ReviewTabName = "Timeline" | "Voice" | "Music" | "Effects" | "Mix";
 
-const OLD_WORKSPACE: Record<WorkspaceName, RegExp> = { Plan: /Planning/, Review: /Picture/, Visuals: /Visuals/, Assets: /Assets/ };
-const OLD_REVIEW_TAB: Record<ReviewTabName, RegExp> = { Timeline: /Picture/, Voice: /Voiceover/, Music: /Music/, Effects: /Sound effects/, Mix: /Mix/ };
-
 /** A workspace's tab in the top bar (Plan's opens the planning pages' menu). */
 export function workspaceTab(page: Page, name: WorkspaceName): Locator {
-  return page.getByRole("tablist", { name: "Stages" }).getByRole("tab", { name: OLD_WORKSPACE[name] });
+  return page.getByRole("tablist", { name: "Workspaces" }).getByRole("tab", { name: new RegExp(`^${name}`) });
 }
 
-/** One of Review's tabs: the timeline and each sound. */
+/** One of Review's tabs: the timeline and each sound. They show while Review is the workspace. */
 export function reviewTab(page: Page, name: ReviewTabName): Locator {
-  return page.getByRole("tablist", { name: "Stages" }).getByRole("tab", { name: OLD_REVIEW_TAB[name] });
+  return page.getByRole("tablist", { name: "Review" }).getByRole("tab", { name: new RegExp(`^${name}`) });
 }
 
 /** Opens a workspace the way a person would. Plan's tab opens the menu of planning pages and leaves it open. */
@@ -470,44 +467,50 @@ export async function openWorkspace(page: Page, name: WorkspaceName): Promise<vo
 }
 
 /**
- * Opens one of Review's tabs by clicking it, and waits until it is selected. Focus is then let go, as a number key
- * would leave it, so Space and the arrows reach the page rather than the tab.
+ * Opens one of Review's tabs by clicking it (opening Review first when another workspace is up), and waits until it is
+ * selected. Focus is then let go, as a number key would leave it, so Space and the arrows reach the page rather than the tab.
  */
 export async function openReviewTab(page: Page, name: ReviewTabName): Promise<void> {
+  const review = workspaceTab(page, "Review");
+  await expect(review).toBeVisible();
+  if ((await review.getAttribute("aria-selected")) !== "true") await openWorkspace(page, "Review");
   const tab = reviewTab(page, name);
   await tab.click();
   await expect(tab).toHaveAttribute("aria-selected", "true");
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
 }
 
-/** The film on screen, as the top bar names it. */
-export function currentFilm(page: Page): Locator {
-  return page.locator('nav[aria-label="Films"] .pill[aria-pressed="true"] .pname, header.head .crumb .sel');
+/** The Film button in the top bar (a menu button once there is more than one film to choose from). */
+export function filmButton(page: Page): Locator {
+  return page.getByRole("button", { name: /^Film:/ });
 }
 
-/** Switches to a film in play by its name. `expectSwitch: false` asks without waiting for it (a switch that is refused). */
+/** The film on screen, as the top bar names it. */
+export function currentFilm(page: Page): Locator {
+  return page.locator("header.top .filmsel .filmname");
+}
+
+/** Switches to a film by its name from the Film menu. `expectSwitch: false` asks without waiting for it (a switch that is refused). */
 export async function pickFilm(page: Page, name: string, expectSwitch = true): Promise<void> {
-  const pack = page.getByRole("navigation", { name: "Films" });
   const named = new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  const pill = pack.getByRole("button", { name: named });
-  await expect(pack.getByRole("button").first()).toBeVisible();
-  if ((await pill.count()) === 0) {
-    await pack.getByRole("button", { name: /more films/ }).click();
-    await page.getByRole("group", { name: "More films" }).getByRole("button", { name: named }).click();
-  } else {
-    await pill.click();
-  }
+  await filmButton(page).click();
+  await page.getByRole("menu", { name: "Films" }).getByRole("menuitem", { name: named }).first().click();
   if (expectSwitch) await expect(currentFilm(page)).toHaveText(name);
 }
 
-/** §22.8: the cut control, a menu button carrying the cut on screen as `data-version`. */
+/** §27, 5.2: the Cut menu's button, carrying the cut on screen as `data-version`. */
 export function cutButton(page: Page): Locator {
-  return page.getByRole("button", { name: /^Version/ });
+  return page.getByRole("button", { name: /^Cut:/ });
 }
 
-/** Opens the menu of actions that are not about one place on the desk (Shelve, Appearance and the rest). */
+/** §27, 5.3: the count of files found on the Assets workspace's tab, shown until Found has been looked at. */
+export function foundBadge(page: Page): Locator {
+  return workspaceTab(page, "Assets").locator(".wcount");
+}
+
+/** Opens the More menu, at the right of the top bar (Shelve, Appearance, the shortcuts and the rest). */
 export async function openMore(page: Page): Promise<void> {
-  await page.getByRole("button", { name: "Film actions" }).click();
+  await page.getByRole("button", { name: "More", exact: true }).click();
 }
 
 /** Picks a version from the version list, the way a person would, and waits until it's on screen. */

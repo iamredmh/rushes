@@ -1,7 +1,7 @@
 // §23: sound-effects cue layers -- the hover card, the chevron's layers by sound, the keyboard and
 // a cue's own sample. Every page goes to `rushes.testUrl()` (`?test=1`), which exposes the engine.
 import type { Page } from "@playwright/test";
-import { expect, type Rushes, test, reviewTab, openWorkspace } from "./fixture.js";
+import { expect, type Rushes, test, reviewTab, openWorkspace, openReviewTab } from "./fixture.js";
 
 type Hook = {
   inspect(): { playing: boolean; time: number; media: string[] } | null;
@@ -249,7 +249,8 @@ test("Mix's Sound effects lane shows the card and walks its cues; it has no laye
   await page.goto(rushes.testUrl());
   const tab = reviewTab(page, "Mix");
   await expect(tab).not.toHaveAttribute("data-locked");
-  await page.keyboard.press("6");
+  // 6, once Mix's key, is the timeline now (§27, 5.3): Mix is opened by its tab until sound joins the timeline.
+  await openReviewTab(page, "Mix");
   await expect(page.locator(".lane")).toHaveCount(3);
   const sfx = page.locator('.lane[data-row="sfx"]');
   await expect(sfx.locator(".cue")).toHaveCount(2);

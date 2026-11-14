@@ -1,0 +1,119 @@
+/* §27, 5.1 to 5.3 and 5.9: the desk's frame. The top bar, the workspaces, Review's tabs, the menus they open and the
+   status bar. Colours are tokens only (styles.css); interface text is 12.5 to 13 px, nothing under 11 px. */
+
+/* ---- top bar: one line, 44 px. The left part gives way (names cut short with an ellipsis); the workspaces stay whole
+   and centred; More sits at the right. ---- */
+.top { position: relative; z-index: 37; display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 12px; height: 44px; padding: 0 10px; border-bottom: 1px solid var(--line); background: var(--app); font-size: 13px; }
+.top [data-tip]::after { bottom: auto; top: calc(100% + 6px); font-size: 12.5px; padding: 5px 8px; border-radius: 5px; }
+.tleft { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.tright { display: flex; align-items: center; justify-content: flex-end; gap: 4px; min-width: 0; }
+/* The last control's tooltip is anchored to the right, so it never widens the page. */
+.tright [data-tip]::after, .tright [data-tip]:hover::after, .tright [data-tip]:focus-visible::after { left: auto; right: 0; transform: none; }
+.top .logo { width: 22px; height: 22px; border-radius: 6px; flex: none; margin-right: 4px; }
+.top .logo svg { width: 11px; height: 11px; }
+.proj { flex: 0 1 auto; min-width: 48px; max-width: 220px; font-weight: 600; margin-right: 6px; }
+.proj .pname { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A name that is cut short shows whole in its tooltip, and only then is it worth one: it is never wider than the window. */
+.proj[data-tip]::after { left: 0; transform: none; }
+.proj[data-tip]:hover::after { transform: none; }
+
+/* The Film and Cut buttons: a small label and the name, cut short before anything else gives way. */
+.top .pick, .top .vbtn, .filmsel.plain { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; height: 30px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--text); font-size: 13px; cursor: pointer; white-space: nowrap; }
+.filmsel.plain { cursor: default; }
+.top .pick:hover, .top .pick[aria-expanded="true"], .top .vbtn:hover, .top .vbtn[aria-expanded="true"] { background: var(--hover); }
+.top .pick small, .top .vbtn small, .filmsel.plain small { color: var(--text-3); font-size: 12.5px; flex: none; }
+.top .pick .filmname, .filmsel.plain .filmname { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.top .pick .ic, .top .vbtn .ic { width: 14px; height: 14px; flex: none; color: var(--text-3); }
+.top .fshelved { flex: none; font-size: 12.5px; color: var(--todo); }
+.filmsel { flex: 0 1 auto; min-width: 72px; position: relative; display: inline-flex; }
+.filmsel.plain[data-tip]::after { left: 0; transform: none; }
+.top .vwrap { flex: 0 1 auto; min-width: 64px; max-width: 340px; }
+.top .vbtn .vid { font-family: var(--mono); font-size: 12.5px; color: var(--accent-2); flex: none; }
+.top .vbtn .vlbl { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-2); }
+/* A cut newer than the one on screen. */
+.vnewer { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.top .vmenu { top: calc(100% + 6px); }
+.top .vdetail { grid-column: 2; grid-row: 1 / span 2; }
+.vfoot { grid-column: 1; display: grid; gap: 2px; padding: 4px 6px 6px; border-top: 1px solid var(--line); }
+.vmenu.touch .vfoot { grid-column: auto; }
+.vfoot .mi .nm { flex: 1; min-width: 0; }
+.vfoot .mi .c { flex: none; font-family: var(--mono); font-size: 12.5px; color: var(--text-3); }
+@media (max-width: 640px) { .top .vdetail { grid-column: auto; grid-row: auto; } }
+
+/* ---- the workspaces: one segmented control in the middle of the bar ---- */
+.ws { display: flex; align-items: center; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.ws .plan { display: inline-flex; }
+.ws .tab { gap: 6px; height: 28px; padding: 0 10px; margin: 0; border: 0; border-radius: 6px; color: var(--text-2); font-size: 13px; font-weight: 500; }
+.ws .tab .ic { width: 15px; height: 15px; }
+.ws .tab:hover { background: var(--hover); color: var(--text); }
+.ws .tab[aria-selected="true"] { background: var(--raised); color: var(--text); font-weight: 600; border-bottom-color: transparent; }
+.ws .tab[data-locked="true"] { color: var(--text-4); }
+.ws .tab .pready { width: 14px; height: 14px; color: var(--done); }
+.ws .tab .pmarks .pready { width: 14px; height: 14px; }
+.wcount { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-2); font: 600 12.5px/18px var(--mono); text-align: center; }
+.ws [data-tip]::after { font-size: 12.5px; }
+
+/* ---- the menus the bar opens ---- */
+.mwrap { position: relative; display: inline-flex; min-width: 0; }
+.dmenu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 45; display: grid; gap: 1px; min-width: 260px; max-width: min(440px, calc(100vw - 20px)); max-height: min(70vh, 560px); overflow: auto; padding: 5px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--raised); box-shadow: 0 14px 30px var(--shadow); font-size: 13px; }
+.more .dmenu { left: auto; right: 0; min-width: 300px; }
+.dmenu hr { margin: 4px 0; border: 0; border-top: 1px solid var(--line); }
+.dmenu .hd { padding: 6px 8px 2px; color: var(--text-3); font-size: 12.5px; font-weight: 600; }
+.dmenu .mi, .vfoot .mi { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 30px; padding: 5px 8px; border: 0; border-radius: 5px; background: transparent; color: var(--text); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.dmenu .mi:hover, .dmenu .mi:focus-visible, .vfoot .mi:hover, .vfoot .mi:focus-visible { background: var(--hover); outline: none; }
+.dmenu .mi:disabled, .vfoot .mi:disabled { color: var(--text-4); cursor: default; background: transparent; }
+.dmenu .mi[aria-current="true"] { background: var(--accent-soft); }
+.dmenu .mi .ic { width: 15px; height: 15px; color: var(--text-2); }
+.dmenu .mi .k { flex: none; min-width: 18px; font-family: var(--mono); font-size: 12.5px; color: var(--text-3); }
+.dmenu .mi .nm { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.dmenu .mi .c { flex: none; margin-left: auto; max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 12.5px; color: var(--text-3); }
+.dmenu .mi .c.todo { color: var(--todo); }
+.dmenu .mi .c.fn { font-family: var(--sans); }
+.dmenu .mi kbd { flex: none; font-size: 11px; padding: 1px 5px; }
+.dmenu .mi .mtick { flex: none; display: grid; place-items: center; width: 15px; height: 15px; border: 1px solid var(--line-2); border-radius: 4px; }
+.dmenu .mi[aria-checked="true"] .mtick { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.dmenu .mi .mtick .ic { width: 12px; height: 12px; color: inherit; }
+.dmenu .mrow { display: flex; align-items: center; gap: 2px; }
+.dmenu .mrow .mi { flex: 1; min-width: 0; color: var(--text-2); }
+.top .ibtn, .dmenu .ibtn { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--text-2); cursor: pointer; }
+.top .ibtn:hover, .top .ibtn[aria-expanded="true"], .dmenu .ibtn:hover, .dmenu .ibtn:focus-visible { background: var(--hover); color: var(--text); outline: none; }
+.top .ibtn .ic, .dmenu .ibtn .ic { width: 16px; height: 16px; }
+.dmenu .ibtn[data-tip]::after { left: auto; right: 0; transform: none; bottom: auto; top: calc(100% + 4px); font-size: 12.5px; }
+
+/* ---- the work area's top row: Review's tabs, the format switch, and (until the notes panel) the Change Log and Send ---- */
+.deskbar { position: relative; z-index: 36; display: flex; align-items: center; gap: 8px; min-height: 46px; padding: 4px 10px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.deskbar [data-tip]::after { bottom: auto; top: calc(100% + 6px); font-size: 12.5px; }
+.deskbar > .sendbtn[data-tip]::after { left: auto; right: 0; transform: none; }
+.deskbar .btn { height: 30px; padding: 0 12px; font-size: 13px; border-radius: 6px; }
+.deskbar .clog { border-radius: 6px; }
+.deskbar .clog .ic { width: 16px; height: 16px; }
+.deskbar .count { min-width: 18px; height: 18px; padding: 0 5px; font: 600 12.5px/18px var(--mono); }
+.rtabs { display: flex; align-items: center; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.rtabs .tab { gap: 6px; height: 30px; padding: 0 10px; margin: 0; border: 0; border-radius: 6px; font-size: 13px; }
+.rtabs .tab .ic { width: 15px; height: 15px; }
+.rtabs .tab[aria-selected="true"] { background: var(--raised); color: var(--text); font-weight: 600; }
+/* A tab's open-notes dot sits on its corner and takes no room, so nothing after the tabs (the format switch) moves when a note arrives. */
+.rtabs .tab { position: relative; }
+.rtabs .tab .dot { position: absolute; top: 5px; right: 3px; width: 6px; height: 6px; }
+.tcount { font-size: 12.5px; color: var(--text-3); font-weight: 500; }
+.tcount.new { padding: 0 6px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-2); font-weight: 600; }
+.deskbar .fmtwrap { margin-left: 6px; }
+
+/* ---- status bar: one line, 26 px, at the foot. The Change Log drawer stops above it, so it never covers it. ---- */
+.drawer { bottom: 26px; }
+.status { display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 84px 0 10px; border-top: 1px solid var(--line); background: var(--app); color: var(--text-3); font-size: 12.5px; white-space: nowrap; overflow: hidden; }
+.status > .ic { width: 14px; height: 14px; }
+.status .next { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.status .next b { color: var(--text); font-weight: 500; }
+.status .nextgo { padding: 0; border: 0; background: none; color: var(--accent-2); font: inherit; font-weight: 500; cursor: pointer; }
+.status .nextgo:hover { text-decoration: underline; }
+.status .smeta { display: flex; gap: 12px; font-size: 12.5px; color: var(--text-2); }
+
+/* Narrow windows (under the 1100 px the desk is made for): the project's name and the small labels go first, so the
+   Film and Cut buttons keep to their side of the centred workspaces. */
+@media (max-width: 900px) {
+  .proj, .top .pick small, .top .vbtn small, .filmsel.plain small, .top .vbtn .vlbl { display: none; }
+  .filmsel { min-width: 40px; }
+  .top .vwrap { min-width: 44px; }
+  .ws .tab { padding: 0 8px; }
+}

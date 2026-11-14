@@ -2,7 +2,7 @@ import { access, copyFile, mkdir, readFile, readdir, rm, writeFile } from "node:
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { BrowserContext, Page } from "@playwright/test";
-import { expect, hasFfmpeg, needsH264, pickVersion, type Rushes, test, cutButton, videoReady, reviewTab, openWorkspace, openMore, workspaceTab, openReviewTab, currentFilm, pickFilm } from "./fixture.js";
+import { expect, hasFfmpeg, needsH264, pickVersion, type Rushes, test, cutButton, videoReady, reviewTab, openWorkspace, openMore, workspaceTab, openReviewTab, currentFilm, pickFilm, filmButton } from "./fixture.js";
 
 const CLIP = fileURLToPath(new URL("./fixtures/clip.mp4", import.meta.url));
 // A 1x1 transparent PNG, reused for every screenshot the library tests need on disk: its
@@ -12,12 +12,14 @@ const TINY_PNG = Buffer.from(
   "base64",
 );
 
-test("tabs stay locked until the project has something, then unlock live", async ({ page, rushes }) => {
+test("Review stays locked until the project has something, then unlocks live", async ({ page, rushes }) => {
   await page.goto(rushes.url);
-  await expect(reviewTab(page, "Timeline")).toHaveAttribute("data-locked", "true");
+  // Nothing to review yet: Review is the page that asks for cut 1, with no tabs.
+  await expect(workspaceTab(page, "Review")).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tablist", { name: "Review" })).toHaveCount(0);
   await expect(page.getByText("Watch each cut, leave timecoded notes and lock the picture.")).toBeVisible();
   await rushes.addCut("first cut");
-  // No reload: the server's change event unlocks the tab.
+  // No reload: the server's change event brings the tabs, the timeline unlocked.
   await expect(reviewTab(page, "Timeline")).not.toHaveAttribute("data-locked");
   await openReviewTab(page, "Timeline");
   await videoReady(page);
@@ -202,15 +204,15 @@ test("a new cut mid-review waits for a click instead of dropping pending marks",
   await expect(page.locator(".comp .chipx", { hasText: "Box" })).toBeVisible();
   await page.getByLabel("New note").fill("Still deciding what this is about.");
   await rushes.addCut("tighter cut");
-  await expect(page.locator(".chipx.go")).toContainText("v2 ready");
+  await expect(cutButton(page)).toHaveAccessibleDescription("v2 is ready");
   await expect(cutButton(page)).toHaveAttribute("data-version", "v1");
   // The marks made before the cut arrived are all still there.
   await expect(page.locator(".bar .chipx")).toContainText("0:01.00–0:02.00");
   await expect(page.locator(".comp .chipx", { hasText: "Box" })).toBeVisible();
   expect(await page.locator("video").evaluate((v: HTMLVideoElement) => v.currentTime)).toBeCloseTo(2, 2);
-  // A second cut while still holding: the chip names the newest one.
+  // A second cut while still holding: the Cut button's dot names the newest one.
   await rushes.addCut("tighter still");
-  await expect(page.locator(".chipx.go")).toContainText("v3 ready");
+  await expect(cutButton(page)).toHaveAccessibleDescription("v3 is ready");
   await expect(cutButton(page)).toHaveAttribute("data-version", "v1");
   await page.getByLabel("New note").press("Enter");
   await expect(page.locator(".note")).toHaveCount(1);
@@ -218,12 +220,13 @@ test("a new cut mid-review waits for a click instead of dropping pending marks",
   expect(notes[0]).toMatchObject({ version: "v1", scope: "range", t: 1, tOut: 2 });
   expect(notes[0].box.x).toBeCloseTo(0.25, 1);
   expect(notes[0].box.w).toBeCloseTo(0.5, 1);
-  // The chip stays up rather than auto-switching once the pending work clears.
+  // The dot stays rather than auto-switching once the pending work clears.
   await expect(cutButton(page)).toHaveAttribute("data-version", "v1");
-  await expect(page.locator(".chipx.go")).toContainText("v3 ready");
-  await page.locator(".chipx.go").click();
+  await expect(cutButton(page)).toHaveAccessibleDescription("v3 is ready");
+  await expect(cutButton(page).locator(".vnewer")).toBeVisible();
+  await pickVersion(page, "v3");
   await expect(cutButton(page)).toHaveAttribute("data-version", "v3");
-  await expect(page.locator(".chipx.go")).not.toBeVisible();
+  await expect(cutButton(page).locator(".vnewer")).toHaveCount(0);
 });
 
 test("an agent's reply appears live, and ticking the circle marks a note done", async ({ page, rushes }) => {
@@ -288,8 +291,7 @@ test("Send to agent sends every tab's open notes, whichever tab it is pressed on
   await page.goto(rushes.url);
   await videoReady(page);
   // Mix has no notes of its own, and still sends both.
-  await page.keyboard.press("6");
-  await expect(reviewTab(page, "Mix")).toHaveAttribute("aria-selected", "true");
+  await openReviewTab(page, "Mix");
   await expect(page.getByRole("button", { name: /Send to agent/ })).toContainText("2");
   await page.getByRole("button", { name: /Send to agent/ }).click();
   const dialog = page.getByRole("dialog", { name: "Sent to agent" });
@@ -383,13 +385,14 @@ test("every project has its own address and title", async ({ page, rushes }) => 
   await expect(page.locator(".pid")).toHaveText(id);
 });
 
-test("a pack shows a pill per film, and each film remembers where you were", async ({ page, rushes }) => {
+test("the Film menu lists each film, and each film remembers where you were", async ({ page, rushes }) => {
   await rushes.addCut("hero cut");
   await rushes.addCut("cutdown cut", "Cutdown");
   await page.goto(rushes.url);
   await videoReady(page);
-  const pack = page.getByRole("navigation", { name: "Films" });
-  await expect(pack.getByRole("button")).toHaveCount(2);
+  await filmButton(page).click();
+  await expect(page.getByRole("menu", { name: "Films" }).getByRole("menuitem")).toHaveText([/Hero/, /Cutdown/]);
+  await page.keyboard.press("Escape");
   await expect(currentFilm(page)).toHaveText("Hero");
   for (let i = 0; i < 15; i++) await page.keyboard.press("ArrowRight");
   await expect(page.getByLabel("Timecode")).toContainText("0:00.50");
@@ -436,11 +439,12 @@ test("switching films with a note half-typed is refused, and the note is kept", 
   await expect(page.getByLabel("New note")).toHaveValue("Still deciding what this is about.");
 });
 
-test("tooltips in the header open below their button, inside the window", async ({ page, rushes }) => {
+test("tooltips in the top bar and the row under it open below their button, inside the window", async ({ page, rushes }) => {
   await rushes.addCut();
   await page.goto(rushes.url);
   await videoReady(page);
-  for (const name of [/Lock picture at v1/, /Keyboard shortcuts/]) {
+  // (The Change Log button names itself in words above 1100 px, so it has no tooltip there.)
+  for (const name of [/^More$/, /^Send to agent/]) {
     const button = page.getByRole("button", { name });
     await button.hover();
     const tip = await button.evaluate((el) => {
@@ -451,6 +455,9 @@ test("tooltips in the header open below their button, inside the window", async 
     });
     expect(tip.content).not.toBe("none");
     expect(tip.top).toBeGreaterThanOrEqual(tip.buttonBottom);
+    // And it stays inside the window: the last button's opens leftwards.
+    const right = await button.evaluate((el) => el.getBoundingClientRect().left + parseFloat(getComputedStyle(el, "::after").left) + parseFloat(getComputedStyle(el, "::after").width));
+    expect(right).toBeLessThanOrEqual(1440);
   }
 });
 
@@ -461,10 +468,10 @@ test("a locked picture opens on the locked cut", async ({ page, rushes }) => {
   await page.goto(rushes.url);
   await videoReady(page);
   await expect(cutButton(page)).toHaveAttribute("data-version", "v1");
-  const lockBtn = page.getByRole("button", { name: "Picture locked at v1 · unlock" });
-  await expect(lockBtn).toHaveAttribute("aria-pressed", "true");
-  await expect(page.locator(".chipx.go")).toContainText("v2 ready");
-  await lockBtn.click();
+  await expect(page.locator("footer.status")).toContainText("v1 locked");
+  await expect(cutButton(page)).toHaveAccessibleDescription("v2 is ready");
+  await cutButton(page).click();
+  await page.getByRole("button", { name: /^Unlock picture/ }).click();
   await expect.poll(async () => (await rushes.api("GET", "/api/state")).project.videos[0].lockedVersion).toBeNull();
 });
 
@@ -482,7 +489,7 @@ test("choosing the newest cut by hand on a locked film doesn't snap back to the 
   expect(project.videos[0].lockedVersion).toBe("v1");
 });
 
-test("the lock button names the locked cut even while viewing a newer one", async ({ page, rushes }) => {
+test("the lock row names the locked cut even while viewing a newer one", async ({ page, rushes }) => {
   const { version: v1 } = await rushes.addCut("first cut");
   await rushes.addCut("second cut");
   await rushes.api("PUT", "/api/videos/Hero/lock", { version: v1.id });
@@ -490,7 +497,10 @@ test("the lock button names the locked cut even while viewing a newer one", asyn
   await videoReady(page);
   await pickVersion(page, "v2");
   await videoReady(page);
-  await expect(page.getByRole("button", { name: "Picture locked at v1 · unlock" })).toHaveAttribute("aria-pressed", "true");
+  await cutButton(page).click();
+  await expect(page.getByRole("button", { name: /^Unlock picture/ })).toContainText("locked at v1");
+  await page.keyboard.press("Escape");
+  await expect(page.locator("footer.status")).toContainText("v2 · v1 locked");
 });
 
 test("a version pin left over from peeking at a cut doesn't block the next one from following, once unlocked", async ({ page, rushes }) => {
@@ -499,11 +509,12 @@ test("a version pin left over from peeking at a cut doesn't block the next one f
   await page.goto(rushes.url);
   await videoReady(page);
   await rushes.addCut("second cut"); // v2, arrives while locked at v1
-  await expect(page.locator(".chipx.go")).toContainText("v2 ready");
-  await page.locator(".chipx.go").click(); // peek at v2 without unlocking: a version pin
+  await expect(cutButton(page)).toHaveAccessibleDescription("v2 is ready");
+  await pickVersion(page, "v2"); // peek at v2 without unlocking: a version pin
   await videoReady(page);
   await expect(cutButton(page)).toHaveAttribute("data-version", "v2");
-  await page.getByRole("button", { name: /unlock/ }).click();
+  await cutButton(page).click();
+  await page.getByRole("button", { name: /^Unlock picture/ }).click();
   await expect.poll(async () => (await rushes.api("GET", "/api/state")).project.videos[0].lockedVersion).toBeNull();
   await rushes.addCut("third cut"); // v3, now unlocked: the stale v2 pin must not swallow this
   await expect(cutButton(page)).toHaveAttribute("data-version", "v3");
@@ -625,7 +636,7 @@ test("playing into the next shot never scrolls the page", async ({ page, rushes 
   // miss it. It is far outside the strip's box: reaching it has to scroll the strip.
   await expect(page.locator(".shot").nth(11)).toHaveAttribute("aria-current", "true", { timeout: 10_000 });
   expect(await page.evaluate(() => window.scrollY)).toBe(0);
-  await expect(page.locator("header.head")).toBeInViewport();
+  await expect(page.locator("header.top")).toBeInViewport();
   expect(await page.locator(".shots").evaluate((el) => el.scrollLeft)).toBeGreaterThan(0);
 });
 
@@ -1909,15 +1920,18 @@ test.describe("the Picture waveform (§19.9)", () => {
 
 // ---- a tall cut leaves room for the timeline and the note box (§19.9, fix round 1) ----
 
-/** The bottoms of everything that must stay on screen under the picture, and the window's height. */
+/**
+ * The bottoms of everything that must stay on screen under the picture, and where the work area ends (§27, 5.1: the
+ * window less the status bar under it), which is the screen's bottom as far as Picture is concerned.
+ */
 async function playerBottoms(page: Page) {
   return page.evaluate(() => {
     const bottom = (sel: string) => document.querySelector(sel)!.getBoundingClientRect().bottom;
-    return { height: innerHeight, bar: bottom(".bar"), track: bottom(".track"), ends: bottom(".ends"), composer: bottom(".comp") };
+    return { height: bottom("main.body"), bar: bottom(".bar"), track: bottom(".track"), ends: bottom(".ends"), composer: bottom(".comp") };
   });
 }
 
-/** The column ends at the window's edge less the body's 24 px padding: the picture gave way only as much as it had to. */
+/** The column ends at the work area's edge less its 24 px padding: the picture gave way only as much as it had to. */
 async function expectColumnFilled(page: Page): Promise<void> {
   const b = await playerBottoms(page);
   expect(b.ends).toBeGreaterThanOrEqual(b.height - 24 - 2);
@@ -1997,16 +2011,21 @@ test.describe("a tall cut (fix round 1)", () => {
   });
 });
 
-test.describe("the player follows the real header height (fix round 2)", () => {
-  test("a header that grows without the page re-rendering still leaves the timeline and note box on screen", async ({ page, rushes }) => {
+test.describe("the player follows the real height of the bars above it (fix round 2)", () => {
+  test("a top bar that grows without the page re-rendering still leaves the timeline and note box on screen", async ({ page, rushes }) => {
     await rushes.addVerticalCut();
     await page.goto(rushes.url);
     await videoReady(page);
     await expectAllOnScreen(page);
-    // A taller header (a wrapped crumb, a late web font): no state changes, so the app doesn't render.
-    await page.addStyleTag({ content: ".head { padding-top: 70px; }" });
+    const before = await playerBottoms(page);
+    // A taller top bar (a late web font, a zoomed page): no state changes, so the app doesn't render.
+    await page.addStyleTag({ content: "header.top { height: 114px; }" });
+    await expect.poll(async () => (await page.locator("header.top").boundingBox())!.height).toBe(114);
     await expectAllOnScreen(page);
     await expectColumnFilled(page);
+    // The picture gave way by what the bar took.
+    expect((await playerBottoms(page)).height).toBe(before.height);
+    expect((await frameBox(page)).height).toBeLessThan(640);
   });
 });
 

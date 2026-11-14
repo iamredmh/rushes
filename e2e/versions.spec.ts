@@ -27,7 +27,7 @@ test("the version control shows the cut and its short label, and lists every cut
   const button = cutButton(page);
   // Locked at v1: the film opens on it.
   await expect(button).toHaveAttribute("data-version", "v1");
-  await expect(button).toHaveAccessibleName("Version: v1 · first pass");
+  await expect(button).toHaveAccessibleName("Cut: v1 · first pass");
   await expect(button).toHaveAttribute("aria-haspopup", "listbox");
   await expect(button).toHaveAttribute("aria-expanded", "false");
   await button.click();
@@ -122,13 +122,16 @@ test("the version list works from the keyboard: arrows, Home, End, type-ahead, E
   // Closed, the arrows step frames again.
   await page.keyboard.press("ArrowRight");
   await expect(page.getByLabel("Timecode")).toContainText("0:00.03");
-  // Tab from an open list closes it and carries on to the next control, the lock.
+  // Tab from an open list carries on to the lock row at its foot (§27, 5.2), and Tab from there closes it.
   await button.focus();
   await page.keyboard.press("ArrowDown");
   await expect(option(page, "v1")).toBeFocused();
-  await page.keyboard.press(test.info().project.name === "webkit" ? "Alt+Tab" : "Tab");
-  await expect(page.getByRole("listbox")).toHaveCount(0);
+  const tab = test.info().project.name === "webkit" ? "Alt+Tab" : "Tab";
+  await page.keyboard.press(tab);
   await expect(page.getByRole("button", { name: "Lock picture at v1" })).toBeFocused();
+  await expect(page.getByRole("listbox")).toBeVisible();
+  await page.keyboard.press(tab);
+  await expect(page.getByRole("listbox")).toHaveCount(0);
 });
 
 test("type-ahead joins digits typed together: 1 then 1 is v11, and a lone 1 later is v1 (§22.8)", async ({ page, rushes }) => {
@@ -181,10 +184,10 @@ test("picking a cut from the list keeps the page as it was: the film, the tab, t
   await page.getByRole("textbox", { name: "New note" }).fill("a draft about the end card");
   await pickVersion(page, "v1");
   await videoReady(page);
-  await expect(cutButton(page)).toHaveAccessibleName("Version: v1 · teaser first");
+  await expect(cutButton(page)).toHaveAccessibleName("Cut: v1 · teaser first");
   await expect(currentFilm(page)).toHaveText("Teaser");
   await expect(reviewTab(page, "Timeline")).toHaveAttribute("aria-selected", "true");
-  await expect(page.getByRole("button", { name: "Picture locked at v2 · unlock" })).toBeVisible();
+  await expect(page.locator("footer.status")).toContainText("v1 · v2 locked");
   await expect(page.getByRole("textbox", { name: "New note" })).toHaveValue("a draft about the end card");
   expect((await rushes.api("GET", "/api/state")).project.videos[1].lockedVersion).toBe("v2");
 });
@@ -379,13 +382,13 @@ test("an agent's label wins over the derived one, and a hand-edited one over 48 
   await rushes.api("POST", "/api/versions", { video: "Hero", file: "renders/hero_v1.mp4", note: "v2: the long detail", label: "Launch slower" });
   await expect(rushes.api("POST", "/api/versions", { video: "Hero", file: "renders/hero_v1.mp4", label: "x".repeat(49) })).rejects.toThrow(/48 characters at most/);
   await page.goto(rushes.url);
-  await expect(cutButton(page)).toHaveAccessibleName("Version: v2 · Launch slower");
+  await expect(cutButton(page)).toHaveAccessibleName("Cut: v2 · Launch slower");
   const path = join(rushes.root, ".rushes", "project.json");
   const p = JSON.parse(await readFile(path, "utf8"));
   p.videos[0].versions[1].label = "A label somebody typed by hand that runs on far past the limit of the list";
   p.rev += 1;
   await writeFile(path, JSON.stringify(p, null, 2));
-  await expect(cutButton(page)).toHaveAccessibleName("Version: v2 · A label somebody typed by hand that runs on far…");
+  await expect(cutButton(page)).toHaveAccessibleName("Cut: v2 · A label somebody typed by hand that runs on far…");
 });
 
 test("on a touch screen the first tap shows a cut's note under its row and a second tap picks it (R20)", async ({ page, rushes }) => {
@@ -420,6 +423,6 @@ test("pickVersion pins a cut by hand: the lock and the newest cut still don't mo
   await expect(cutButton(page)).toHaveAttribute("data-version", "v2");
   expect((await rushes.api("GET", "/api/state")).project.videos[0].lockedVersion).toBe("v1");
   await rushes.addCut("third cut");
-  await expect(page.getByRole("button", { name: "v3 is ready" })).toBeVisible();
+  await expect(cutButton(page)).toHaveAccessibleDescription("v3 is ready");
   await expect(cutButton(page)).toHaveAttribute("data-version", "v2");
 });
