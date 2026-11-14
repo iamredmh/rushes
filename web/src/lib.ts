@@ -1,5 +1,5 @@
 // Pure helpers for the dashboard. No DOM, so they're unit-tested in Node.
-import type { Asset, AssetKind, BriefSectionView, BriefView, Cue, FoundCounts, FoundItem, FoundKind, FoundSummary, Lane, LaneStage, LoudnessResult, Mark, Note, Picks, Project, ProxyEvent, ProxyJob, Section, Shot, Stage, StoryboardView, TabState, Variant, Video, Version } from "./types.js";
+import type { Asset, AssetKind, BriefSectionView, BriefView, Cue, FoundCounts, FoundItem, FoundKind, FoundSummary, InUse, Lane, LaneStage, LoudnessResult, Mark, Note, Picks, Project, ProxyEvent, ProxyJob, Section, Shot, Stage, StoryboardView, TabState, Variant, Video, Version } from "./types.js";
 export type { FoundItem } from "./types.js";
 
 /** 72.4 -> "1:12.40" (minutes, seconds, hundredths). */
@@ -949,8 +949,19 @@ export function voiceRounds(lanes: Lane[], picks: Record<string, string>): Voice
 
 const pickedRead = (r: VoiceRound): VariantRow | null => r.reads.find((x) => x.variant === r.pick) ?? null;
 
-/** The VO the mix hears (§18.4): the newest round's pick, walking back past rounds with none; else null. */
-export function heardVoice(rounds: VoiceRound[]): VariantRow | null {
+/** §27.6: whether a read, bed or pass is the one in use for its sound, as the server worked it out. */
+export function takeInUse(use: InUse | undefined, stage: LaneStage, r: Pick<VariantRow, "lane" | "variant">): boolean {
+  const u = use?.[stage];
+  return u !== undefined && u.lane === r.lane && u.variant === r.variant;
+}
+
+/**
+ * The VO the mix hears. With the take in use given (§27.6: the server's answer, in every state it
+ * sends), that read, from whichever round, or null. Without it, the rule from before: the newest
+ * round's pick, walking back past rounds with none (§18.4).
+ */
+export function heardVoice(rounds: VoiceRound[], use?: InUse): VariantRow | null {
+  if (use !== undefined) return rounds.flatMap((r) => r.reads).find((r) => takeInUse(use, "voice", r)) ?? null;
   for (let i = rounds.length - 1; i >= 0; i--) {
     const read = pickedRead(rounds[i]);
     if (read) return read;
@@ -1653,7 +1664,7 @@ export function otherFormatAction(note: Pick<Note, "format" | "box">, viewsHere:
 export function filmPicks(picks: Picks, videoId: string | null | undefined): Picks {
   if (!videoId) return picks;
   const own = picks.videos?.[videoId];
-  return { ...picks, lanes: { ...(own?.lanes ?? {}) }, levels: { ...(own?.levels ?? {}) }, sections: {}, videos: {} };
+  return { ...picks, lanes: { ...(own?.lanes ?? {}) }, levels: { ...(own?.levels ?? {}) }, use: { ...(own?.use ?? {}) }, sections: {}, videos: {} };
 }
 
 /** A web copy of src/core/schema.ts's variantFilms: a variant's `videos`, or an older project's one `video`. */

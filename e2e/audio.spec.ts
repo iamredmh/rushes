@@ -109,6 +109,35 @@ test("Music shows a card per bed, and Use persists the pick", async ({ page, rus
   await expect(page.getByRole("button", { name: "Use B · Warm keys" })).toHaveAttribute("aria-pressed", "true");
 });
 
+test("only one bed is in use at a time, across rounds, and Mix plays that one (§27.6)", async ({ page, rushes }) => {
+  await rushes.addCut();
+  await rushes.addVariant("music", "Pulse", { seconds: 4, freq: 220, round: "Round 1" });
+  await rushes.addVariant("music", "Drift", { seconds: 4, freq: 330, round: "Round 2" });
+  await page.goto(rushes.testUrl());
+  await openTab(page, /Music/, "4");
+  await expect(page.locator(".lane")).toHaveCount(2);
+  const pulse = page.getByRole("button", { name: "Use Pulse" });
+  const drift = page.getByRole("button", { name: "Use Drift" });
+  await pulse.click();
+  await expect(pulse).toHaveText("In use");
+  await drift.click();
+  await expect(drift).toHaveText("In use");
+  // Round 1 still remembers Pulse as its own pick, but one bed is in use for the film.
+  await expect(pulse).toHaveText("Use");
+  expect((await rushes.api("GET", "/api/picks?video=hero")).lanes).toEqual({ "round-1": "pulse", "round-2": "drift" });
+  // The earlier bed can be brought back, though its round is not the newest.
+  await pulse.click();
+  await expect(pulse).toHaveText("In use");
+  await expect(drift).toHaveText("Use");
+  expect((await rushes.api("GET", "/api/picks?video=hero")).use.music).toMatchObject({ lane: "round-1", variant: "pulse" });
+  await page.reload();
+  await openTab(page, /Music/, "4");
+  await expect(page.getByRole("button", { name: "Use Pulse" })).toHaveText("In use");
+  await openTab(page, /Mix/, "6");
+  await expect(page.locator(".lane").filter({ hasText: "Music" })).toContainText("Pulse");
+  await expect(page.locator(".lane").filter({ hasText: "Music" })).not.toContainText("Drift");
+});
+
 // Regression guard for AudioStage's per-tab scopes/chips/marks (Plan 3b Task 2): Music passes
 // none of the new props, so it must keep all three scopes, its In/Out buttons and its Range marks.
 test("Music still offers Point, Range and Whole, In/Out, and Range marks", async ({ page, rushes }) => {
@@ -1167,7 +1196,8 @@ test("Mix shows three lanes; mute and solo change the lane gains, and solo wins"
 
   // View state only: nothing is saved, and leaving the tab resets it.
   const picks = await rushes.api("GET", "/api/picks");
-  expect(Object.keys(picks).sort()).toEqual(["lanes", "levels", "rev", "schema", "sections", "videos"]);
+  // (`use` is the take in use per sound, §27.6: worked out by the server, not mute or solo.)
+  expect(Object.keys(picks).sort()).toEqual(["lanes", "levels", "rev", "schema", "sections", "use", "videos"]);
   await page.keyboard.press("4");
   await openTab(page, /Mix/, "6");
   await loaded(page, 3);

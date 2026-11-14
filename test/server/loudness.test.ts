@@ -278,12 +278,38 @@ describe("mixInputs", () => {
     expect(mixInputs(project, picks, ["music"], root)).toEqual([
       { file: join(root, "audio", "music-b.wav"), offset: 0, stage: "music", gainDb: 0 },
     ]);
-    // Picking the sting too adds it.
+    // §27.6: one bed is in use at a time. A project from before that, with a pick in both lanes,
+    // plays the newest lane's; the other is still there to pick.
     const both: Picks = { ...picks, lanes: { ...picks.lanes, sting: "a" } };
-    expect(mixInputs(project, both, ["music"], root).map((i) => i.file)).toEqual([
-      join(root, "audio", "music-b.wav"),
-      join(root, "audio", "music-a.wav"),
-    ]);
+    expect(mixInputs(project, both, ["music"], root).map((i) => i.file)).toEqual([join(root, "audio", "music-a.wav")]);
+  });
+
+  it("mixes the take in use when it is not in the newest lane (§27.6: an earlier one brought back)", async () => {
+    const { root, project, picks } = await fixture();
+    project.lanes.push({ id: "sting", stage: "music", name: "Sting", variants: [{ id: "a", name: "A", file: "audio/music-a.wav", meta: {}, cues: [] }] });
+    const lanes = { music: "b", sting: "a" };
+    const back: Picks = { ...picks, lanes, use: { music: { lane: "music", variant: "b", at: "2026-11-14T10:00:00.000Z", seen: lanes } } };
+    expect(mixInputs(project, back, ["music"], root).map((i) => i.file)).toEqual([join(root, "audio", "music-b.wav")]);
+  });
+
+  it("mixes an earlier voice round when it is the one in use (§27.6)", async () => {
+    const { root, project } = await fixture();
+    project.lanes = project.lanes.filter((l) => l.stage !== "voice");
+    await Promise.all([writeFile(join(root, "audio", "gerald.wav"), "x"), writeFile(join(root, "audio", "sombre.wav"), "x")]);
+    project.lanes.push(
+      { id: "round-1", stage: "voice", name: "Round 1", variants: [{ id: "gerald", name: "Gerald", file: "audio/gerald.wav", meta: {}, cues: [] }] },
+      { id: "round-2", stage: "voice", name: "Round 2", variants: [{ id: "sombre", name: "More sombre", file: "audio/sombre.wav", meta: {}, cues: [] }] },
+    );
+    const lanes = { "round-1": "gerald", "round-2": "sombre" };
+    const picks: Picks = { schema: 1, rev: 0, lanes, sections: {}, levels: {}, videos: {}, use: { voice: { lane: "round-1", variant: "gerald", at: "2026-11-14T10:00:00.000Z", seen: lanes } } };
+    expect(mixInputs(project, picks, ["voice"], root).map((i) => i.file)).toEqual([join(root, "audio", "gerald.wav")]);
+  });
+
+  it("mixes nothing for a sound whose take in use is missing from disk", async () => {
+    const { root, project, picks } = await fixture();
+    project.lanes[0].variants.push({ id: "gone", name: "Gone", file: "audio/not-there.wav", meta: {}, cues: [] });
+    const lanes = { music: "gone" };
+    expect(mixInputs(project, { ...picks, lanes, use: { music: { lane: "music", variant: "gone", at: "x", seen: lanes } } }, ["music"], root)).toEqual([]);
   });
 
   it("sets each input's gainDb from picks.levels, 0 when a lane has none (§19.6)", async () => {

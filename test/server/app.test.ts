@@ -327,6 +327,62 @@ describe("API", () => {
     expect(picks.json.lanes).toEqual({ music: "deep-house" });
   });
 
+  describe("the take in use (§27.6)", () => {
+    const two = async () => {
+      const s = await setup();
+      await s.call("POST", "/api/versions", { video: "Hero", file: `${s.root}/renders/a.mp4` });
+      await s.call("POST", "/api/variants", { stage: "voice", name: "George", file: "audio/g.wav", round: "Round 1", video: "Hero" });
+      await s.call("POST", "/api/variants", { stage: "voice", name: "George slow", file: "audio/gs.wav", round: "Round 2", video: "Hero" });
+      return s;
+    };
+    it("PUT /api/picks records the take in use and says so in the reply", async () => {
+      const { call } = await two();
+      const put = await call("PUT", "/api/picks", { video: "hero", lanes: { "round-2": "george-slow" } });
+      expect(put.json.use.voice).toMatchObject({ lane: "round-2", variant: "george-slow" });
+      expect(put.json.use.voice.at).toMatch(/^\d{4}-\d\d-\d\dT/);
+    });
+    it("picking in an older round makes it the one in use without clearing the newer round's pick", async () => {
+      const { call } = await two();
+      await call("PUT", "/api/picks", { video: "hero", lanes: { "round-2": "george-slow" } });
+      const back = await call("PUT", "/api/picks", { video: "hero", lanes: { "round-1": "george" } });
+      expect(back.json.use.voice).toMatchObject({ lane: "round-1", variant: "george" });
+      expect(back.json.lanes["round-2"]).toBe("george-slow");
+      expect((await call("GET", "/api/picks?video=hero")).json.use.voice.lane).toBe("round-1");
+      const state = (await call("GET", "/api/state")).json;
+      expect(state.picks.videos.hero.use.voice.lane).toBe("round-1");
+    });
+    it("works out the take in use for picks saved before it existed", async () => {
+      const { call, store } = await two();
+      await store.update("picks", (p) => { p.videos.hero = { lanes: { "round-1": "george", "round-2": "george-slow" }, levels: {} }; });
+      const got = (await call("GET", "/api/picks?video=hero")).json;
+      expect(got.use.voice).toEqual({ lane: "round-2", variant: "george-slow", at: "", seen: {} });
+    });
+    it("unpicking the lane in use falls back to another picked round, then to nothing", async () => {
+      const { call } = await two();
+      await call("PUT", "/api/picks", { video: "hero", lanes: { "round-2": "george-slow" } });
+      await call("PUT", "/api/picks", { video: "hero", lanes: { "round-1": "george" } });
+      const one = await call("PUT", "/api/picks", { video: "hero", lanes: { "round-1": null } });
+      expect(one.json.use.voice).toMatchObject({ lane: "round-2", variant: "george-slow" });
+      const none = await call("PUT", "/api/picks", { video: "hero", lanes: { "round-2": null } });
+      expect(none.json.use.voice).toBeUndefined();
+    });
+    it("a project with no film yet keeps its take in use too", async () => {
+      const { call } = await setup();
+      await call("POST", "/api/variants", { stage: "music", name: "Pulse", file: "audio/p.wav", round: "Round 1" });
+      await call("POST", "/api/variants", { stage: "music", name: "Drift", file: "audio/d.wav", round: "Round 2" });
+      await call("PUT", "/api/picks", { lanes: { "round-2": "drift" } });
+      const back = await call("PUT", "/api/picks", { lanes: { "round-1": "pulse" } });
+      expect(back.json.use.music).toMatchObject({ lane: "round-1", variant: "pulse" });
+      expect((await call("GET", "/api/picks")).json.use.music.lane).toBe("round-1");
+    });
+    it("a lane the project does not know is still merged plainly, as before", async () => {
+      const { call } = await two();
+      const put = await call("PUT", "/api/picks", { video: "hero", lanes: { "not-a-lane": "x" } });
+      expect(put.json.lanes["not-a-lane"]).toBe("x");
+      expect(put.json.use).toEqual({});
+    });
+  });
+
   it("picks and levels belong to one film: a second film starts empty and never inherits", async () => {
     const { call, store } = await setup();
     const f2a = await call("PUT", "/api/picks", { video: "f2a", lanes: { music: "bed-f2a", sfx: "sfx-f2a" }, levels: { music: -6 } });
@@ -376,6 +432,9 @@ describe("API", () => {
     expect((await store.read("picks")).videos["hero-60s"].lanes.music).toBe("deep-house");
     await call("PUT", "/api/variants/music/deep-house/films", { videos: ["teaser-15s"] });
     expect((await store.read("picks")).videos["hero-60s"].lanes.music).toBeUndefined();
+    // §27.6: and it is no longer that film's bed in use.
+    expect((await call("GET", "/api/picks?video=hero-60s")).json.use.music).toBeUndefined();
+    expect((await store.read("picks")).videos["hero-60s"].use?.music).toBeUndefined();
     const log = (await call("GET", "/api/log")).json;
     expect(JSON.stringify(log)).toMatch(/Deep house.{0,4} on Teaser 15s/);
     expect((await call("PUT", "/api/variants/music/nope/films", { videos: [] })).status).toBe(404);

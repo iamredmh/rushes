@@ -23,7 +23,7 @@ import { tmpProject } from "../helpers/tmp.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import {
-  heardVoice, onOptionGroups, sectionLabel, voiceDefaultRead, voiceListening, voiceNoteRows, voiceOnLabel, voiceOnOptions, voiceRounds,
+  filmPicks, heardVoice, onOptionGroups, takeInUse, sectionLabel, voiceDefaultRead, voiceListening, voiceNoteRows, voiceOnLabel, voiceOnOptions, voiceRounds,
 } from "../../web/src/lib.js";
 import { withFormatRows } from "../../web/src/lib.js";
 
@@ -710,6 +710,15 @@ describe("voiceRounds (§18.2)", () => {
     expect(heardVoice(voiceRounds(lanes, { "round-1": "gerald" }))?.variant).toBe("gerald");
     expect(heardVoice(voiceRounds(lanes, { "round-1": "gerald", "round-2": "sombre" }))?.variant).toBe("sombre");
     expect(heardVoice(voiceRounds(lanes, {}))).toBeNull();
+    // §27.6: with the take in use worked out by the server, that is the read heard, even from an earlier round.
+    const both = voiceRounds(lanes, { "round-1": "gerald", "round-2": "sombre" });
+    expect(heardVoice(both, { voice: { lane: "round-1", variant: "gerald", at: "x", seen: {} } })?.variant).toBe("gerald");
+    expect(heardVoice(both, {})).toBeNull();
+    expect(takeInUse({ voice: { lane: "round-1", variant: "gerald", at: "x", seen: {} } }, "voice", { lane: "round-1", variant: "gerald" })).toBe(true);
+    expect(takeInUse({ voice: { lane: "round-1", variant: "gerald", at: "x", seen: {} } }, "voice", { lane: "round-2", variant: "sombre" })).toBe(false);
+    expect(takeInUse(undefined, "music", { lane: "music", variant: "a" })).toBe(false);
+    const picks = { schema: 1 as const, rev: 0, lanes: {}, sections: {}, levels: {}, videos: { hero: { lanes: { m: "a" }, levels: {}, use: { music: { lane: "m", variant: "a", at: "x", seen: {} } } } } };
+    expect(filmPicks(picks, "hero").use?.music?.variant).toBe("a");
   });
   it("defaults to the current round's pick, else its first read", () => {
     expect(voiceDefaultRead(voiceRounds(lanes, {}))?.variant).toBe("excited");

@@ -486,7 +486,7 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     {
       title: "Get picks",
       description:
-        "Which variant is in use per audio lane (per round on Voiceover), and each Mix lane's level in dB (where the user wants voice, music and sfx to sit). Picks and levels belong to one film: pass `video` (the film's id, as in the note you are fixing) to read that film's own; without it you get the whole file, each film's under `videos`. Section take picks are kept for older projects but not used.",
+        "Which read, bed and effects pass is in use for a film (`use.voice`, `use.music`, `use.sfx`: one each, or absent when nothing is picked), and each sound's level in dB (where the user wants voice, music and sfx to sit). A take you add is not in use until the user picks it. `lanes` still lists the pick inside each round. Picks and levels belong to one film: pass `video` (the film's id, as in the note you are fixing) to read that film's own; without it you get the whole file, each film's under `videos`. Section take picks are kept for older projects but not used.",
       inputSchema: { project, video: z.string().optional().describe("The film's id. Picks and levels are per film.") },
     },
     safe(async ({ project, video }) => (await ctx.client(project)).get(`/api/picks${video ? `?video=${encodeURIComponent(video)}` : ""}`)),

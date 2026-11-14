@@ -72,7 +72,8 @@ describe("MCP tools", () => {
     expect(tool("rushes_add_variant").description).not.toMatch(/VO lane variant/);
     expect(prop("rushes_add_variant", "lane")).toMatch(/Defaults to `round` slugged, else the stage/);
     expect(prop("rushes_add_variant", "lane")).toMatch(/wins over `round`/i);
-    expect(tool("rushes_get_picks").description).toMatch(/per round on Voiceover/);
+    expect(tool("rushes_get_picks").description).toMatch(/one each/);
+    expect(tool("rushes_get_picks").description).toMatch(/not in use until the user picks it/);
     expect(tool("rushes_get_picks").description).not.toMatch(/take per script section/);
     await t.close();
   });

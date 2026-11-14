@@ -14,6 +14,7 @@ import {
   clampLevel, defaultVersion, filmLanes, filmNotes, filmPicks, heardVoice, LEVEL_MAX, LEVEL_MIN, LEVEL_STEP, levelText, loudnessLanes, type LoudnessState, loudnessReadout,
   MIX_LANES, type MixLane, type MixModel, mixNoteRows, MIX_STAGE, mixOnLabel, mixOnOptions, STAGE_NAMES, type VariantRow, variantRows,
   voiceRounds, WHOLE_MIX,
+  takeInUse,
 } from "../lib.js";
 import type { Asset, LoudnessResult, State, Video } from "../types.js";
 import { AudioStage, type Preview } from "./AudioStage.js";
@@ -53,18 +54,18 @@ export function Mix({ state, assets, video, toast, onChanged, onPendingChange }:
   const lanePicks = filmState.lanes;
 
   // ---- what each lane plays ----
-  // VO: the newest voice round's pick, walking back past rounds with none (§18.4), as the server mixes it.
+  // One take per sound: the take in use, as the server worked it out and mixes it (§27.6).
   // Only this film's reads, beds and passes (and any made for every film), as the server measures them.
   const lanes = filmLanes(state.project.lanes, filmId, state.project.videos.length);
-  const voiceRead = heardVoice(voiceRounds(lanes, lanePicks));
+  const voiceRead = heardVoice(voiceRounds(lanes, lanePicks), filmState.use ?? {});
   const voClips: Clip[] = voiceRead && !missing(voiceRead.file)
     ? [{ id: voiceRead.key, lane: "vo", path: voiceRead.file, offset: 0, duration: 0, rev: rev(voiceRead.file) }]
     : [];
   const voGone = voiceRead ? missing(voiceRead.file) : false;
 
   const variants = { music: variantRows(lanes, "music"), sfx: variantRows(lanes, "sfx") };
-  const picked = (rows: VariantRow[]) => rows.filter((r) => lanePicks[r.lane] === r.variant);
-  const pickedRows = { music: picked(variants.music), sfx: picked(variants.sfx) };
+  const picked = (rows: VariantRow[], stage: "music" | "sfx") => rows.filter((r) => takeInUse(filmState.use, stage, r));
+  const pickedRows = { music: picked(variants.music, "music"), sfx: picked(variants.sfx, "sfx") };
   const heardRows = { music: pickedRows.music.filter((r) => !missing(r.file)), sfx: pickedRows.sfx.filter((r) => !missing(r.file)) };
   const variantClips = (lane: "music" | "sfx"): Clip[] =>
     heardRows[lane].map((r) => ({ id: r.key, lane, path: r.file, offset: 0, duration: 0, rev: rev(r.file) }));
