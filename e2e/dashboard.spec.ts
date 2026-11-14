@@ -577,6 +577,26 @@ test("the shot strip names each shot, follows the playhead, and notes record the
   await expect(page.locator(".track .tick")).toHaveCount(2);
 });
 
+test("playing into the next shot never scrolls the page", async ({ page, rushes }) => {
+  // A short window: the player fills it, so the strip of shots sits below the fold.
+  await page.setViewportSize({ width: 1440, height: 700 });
+  await rushes.addCut();
+  await rushes.api("PUT", "/api/videos/hero/shots", {
+    shots: Array.from({ length: 12 }, (_, i) => ({ name: `Shot ${i + 1}`, start: Math.round(i * 20) / 100 })),
+  });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await expect(page.locator(".shot")).toHaveCount(12);
+  expect(await page.evaluate(() => window.scrollY)).toBe(0);
+  await page.getByRole("button", { name: "Play", exact: true }).click();
+  // The last shot starts at 2.2 s and stays current to the end of the 6 s cut, so the wait cannot
+  // miss it. It is far outside the strip's box: reaching it has to scroll the strip.
+  await expect(page.locator(".shot").nth(11)).toHaveAttribute("aria-current", "true", { timeout: 10_000 });
+  expect(await page.evaluate(() => window.scrollY)).toBe(0);
+  await expect(page.locator("header.head")).toBeInViewport();
+  expect(await page.locator(".shots").evaluate((el) => el.scrollLeft)).toBeGreaterThan(0);
+});
+
 test("clicking a shot that starts between frames lands a note in that shot, not the one before it", async ({ page, rushes }) => {
   await rushes.addCut();
   await rushes.api("PUT", "/api/videos/hero/shots", { shots: [{ name: "A", start: 0 }, { name: "B", start: 1.71 }] });

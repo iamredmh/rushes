@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, mediaUrl, originalFrame } from "../api.js";
 import {
   BOX_REASON, boxFrom, boxShowsOn, contentRect, fmt, frameAt, noteFormatTag, noteTime, otherFormatNotes, placeNote, RESHAPE_MS, reshapeKeyframes, scopeHint, shotAt,
-  shotLabel, shotSeek, snap, spacePressesButton, stepFrame, testFlags, versionFormats, visibleNotes,
+  shotLabel, shotSeek, snap, spacePressesButton, stepFrame, stripScrollLeft, testFlags, versionFormats, visibleNotes,
   type FormatView, type ProxyProgress,
 } from "../lib.js";
 import type { Note, ProxyJob, Video, Version } from "../types.js";
@@ -563,7 +563,13 @@ export function Picture({
   // Keeps the current card in view while playing, never merely because the player re-renders.
   useEffect(() => {
     if (!playingRef.current || current === null) return;
-    shotRefs.current[current.n]?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    // The strip's own scroll only. scrollIntoView would move every scrolling ancestor, the page
+    // included, and the strip can sit below the window: the header then scrolled away mid-play.
+    const card = shotRefs.current[current.n];
+    const strip = card?.parentElement;
+    if (!card || !strip) return;
+    const left = stripScrollLeft(strip, { offsetLeft: card.offsetLeft - strip.offsetLeft, offsetWidth: card.offsetWidth });
+    if (left !== null) strip.scrollTo({ left });
   }, [current?.n]);
 
   const placed = visible.map((n) => ({ n, at: placeNote(n, version.id) })).filter(({ at }) => at.t !== null);
