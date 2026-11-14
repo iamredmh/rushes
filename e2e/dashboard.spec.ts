@@ -2,7 +2,7 @@ import { access, copyFile, mkdir, readFile, readdir, rm, writeFile } from "node:
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { BrowserContext, Page } from "@playwright/test";
-import { expect, hasFfmpeg, needsH264, pickVersion, type Rushes, test, versionButton, videoReady } from "./fixture.js";
+import { expect, hasFfmpeg, needsH264, pickVersion, type Rushes, test, cutButton, videoReady, reviewTab, openWorkspace, openMore, workspaceTab, openReviewTab, currentFilm, pickFilm } from "./fixture.js";
 
 const CLIP = fileURLToPath(new URL("./fixtures/clip.mp4", import.meta.url));
 // A 1x1 transparent PNG, reused for every screenshot the library tests need on disk: its
@@ -14,14 +14,14 @@ const TINY_PNG = Buffer.from(
 
 test("tabs stay locked until the project has something, then unlock live", async ({ page, rushes }) => {
   await page.goto(rushes.url);
-  await expect(page.getByRole("tab", { name: /Picture/ })).toHaveAttribute("data-locked", "true");
+  await expect(reviewTab(page, "Timeline")).toHaveAttribute("data-locked", "true");
   await expect(page.getByText("Watch each cut, leave timecoded notes and lock the picture.")).toBeVisible();
   await rushes.addCut("first cut");
   // No reload: the server's change event unlocks the tab.
-  await expect(page.getByRole("tab", { name: /Picture/ })).not.toHaveAttribute("data-locked");
-  await page.getByRole("tab", { name: /Picture/ }).click();
+  await expect(reviewTab(page, "Timeline")).not.toHaveAttribute("data-locked");
+  await openReviewTab(page, "Timeline");
   await videoReady(page);
-  await expect(versionButton(page)).toHaveAttribute("data-version", "v1");
+  await expect(cutButton(page)).toHaveAttribute("data-version", "v1");
 });
 
 test("a locked tab opens, explains itself and offers a prompt for your agent (locked, §19.1)", async ({ page, rushes, context, browserName }) => {
@@ -33,7 +33,7 @@ test("a locked tab opens, explains itself and offers a prompt for your agent (lo
   // 1. Click Music: it opens (never a toast), shows what it's for, and there's no notes column.
   // A locked tab is an ordinary enabled button -- never aria-disabled -- so an unmodified click
   // works exactly like it would on any other tab.
-  const musicTab = page.getByRole("tab", { name: /Music/ });
+  const musicTab = reviewTab(page, "Music");
   await musicTab.click();
   await expect(page).toHaveURL(rushes.url);
   await expect(musicTab).toHaveAttribute("aria-selected", "true");
@@ -56,7 +56,7 @@ test("a locked tab opens, explains itself and offers a prompt for your agent (lo
   await expect(musicTab).toHaveAttribute("data-tip", "Locked: ask your agent for music beds");
 
   // 4. Press 4, the Music key, from elsewhere: the Music locked page opens.
-  await page.getByRole("tab", { name: /Picture/ }).click();
+  await openReviewTab(page, "Timeline");
   await videoReady(page);
   await page.keyboard.press("4");
   await expect(musicTab).toHaveAttribute("aria-selected", "true");
@@ -203,7 +203,7 @@ test("a new cut mid-review waits for a click instead of dropping pending marks",
   await page.getByLabel("New note").fill("Still deciding what this is about.");
   await rushes.addCut("tighter cut");
   await expect(page.locator(".chipx.go")).toContainText("v2 ready");
-  await expect(versionButton(page)).toHaveAttribute("data-version", "v1");
+  await expect(cutButton(page)).toHaveAttribute("data-version", "v1");
   // The marks made before the cut arrived are all still there.
   await expect(page.locator(".bar .chipx")).toContainText("0:01.00–0:02.00");
   await expect(page.locator(".comp .chipx", { hasText: "Box" })).toBeVisible();
@@ -211,7 +211,7 @@ test("a new cut mid-review waits for a click instead of dropping pending marks",
   // A second cut while still holding: the chip names the newest one.
   await rushes.addCut("tighter still");
   await expect(page.locator(".chipx.go")).toContainText("v3 ready");
-  await expect(versionButton(page)).toHaveAttribute("data-version", "v1");
+  await expect(cutButton(page)).toHaveAttribute("data-version", "v1");
   await page.getByLabel("New note").press("Enter");
   await expect(page.locator(".note")).toHaveCount(1);
   const { notes } = await rushes.api("GET", "/api/notes?stage=picture");
@@ -219,10 +219,10 @@ test("a new cut mid-review waits for a click instead of dropping pending marks",
   expect(notes[0].box.x).toBeCloseTo(0.25, 1);
   expect(notes[0].box.w).toBeCloseTo(0.5, 1);
   // The chip stays up rather than auto-switching once the pending work clears.
-  await expect(versionButton(page)).toHaveAttribute("data-version", "v1");
+  await expect(cutButton(page)).toHaveAttribute("data-version", "v1");
   await expect(page.locator(".chipx.go")).toContainText("v3 ready");
   await page.locator(".chipx.go").click();
-  await expect(versionButton(page)).toHaveAttribute("data-version", "v3");
+  await expect(cutButton(page)).toHaveAttribute("data-version", "v3");
   await expect(page.locator(".chipx.go")).not.toBeVisible();
 });
 
@@ -246,7 +246,7 @@ test("a note fixed in the newer cut shows where it landed and where it came from
   await rushes.addCut("held title");
   await rushes.api("POST", "/api/replies", { replies: [{ id: note.id, reply: "Held 0.6 s longer.", status: "done", fixT: 2.1, fixVersion: "v2" }] });
   await page.goto(rushes.url);
-  await expect(versionButton(page)).toHaveAttribute("data-version", "v2");
+  await expect(cutButton(page)).toHaveAttribute("data-version", "v2");
   await expect(page.locator(".note .t")).toHaveText("0:02.10");
   await expect(page.locator(".note .from")).toHaveText("from v1 at 0:01.50");
 });
@@ -254,7 +254,7 @@ test("a note fixed in the newer cut shows where it landed and where it came from
 test("script edits are saved, marked as changed, and can be reverted", async ({ page, rushes }) => {
   await rushes.api("PUT", "/api/script", { sections: [{ start: 0, end: 13, current: "Your work lives on one laptop." }] });
   await page.goto(rushes.url);
-  await expect(page.getByRole("tab", { name: /Planning/ })).toHaveAttribute("aria-selected", "true");
+  await expect(workspaceTab(page, "Plan")).toHaveAttribute("aria-selected", "true");
   const box = page.getByLabel("Your version of s1");
   await box.fill("Your work lives on one machine.");
   await expect(page.locator(".srow")).toHaveClass(/changed/);
@@ -289,7 +289,7 @@ test("Send to agent sends every tab's open notes, whichever tab it is pressed on
   await videoReady(page);
   // Mix has no notes of its own, and still sends both.
   await page.keyboard.press("6");
-  await expect(page.getByRole("tab", { name: /Mix/ })).toHaveAttribute("aria-selected", "true");
+  await expect(reviewTab(page, "Mix")).toHaveAttribute("aria-selected", "true");
   await expect(page.getByRole("button", { name: /Send to agent/ })).toContainText("2");
   await page.getByRole("button", { name: /Send to agent/ }).click();
   const dialog = page.getByRole("dialog", { name: "Sent to agent" });
@@ -390,15 +390,15 @@ test("a pack shows a pill per film, and each film remembers where you were", asy
   await videoReady(page);
   const pack = page.getByRole("navigation", { name: "Films" });
   await expect(pack.getByRole("button")).toHaveCount(2);
-  await expect(pack.getByRole("button", { name: /Hero/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(currentFilm(page)).toHaveText("Hero");
   for (let i = 0; i < 15; i++) await page.keyboard.press("ArrowRight");
   await expect(page.getByLabel("Timecode")).toContainText("0:00.50");
   await page.keyboard.press("]");
-  await expect(pack.getByRole("button", { name: /Cutdown/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(currentFilm(page)).toHaveText("Cutdown");
   await videoReady(page);
   await expect(page.getByLabel("Timecode")).toContainText("0:00.00");
   await page.keyboard.press("[");
-  await expect(pack.getByRole("button", { name: /Hero/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(currentFilm(page)).toHaveText("Hero");
   await videoReady(page);
   await expect(page.getByLabel("Timecode")).toContainText("0:00.50");
 });
@@ -409,7 +409,7 @@ test("a film's restored playhead is used once on return, not reapplied when you 
   await rushes.addCut("cutdown cut", "Cutdown");
   await page.goto(rushes.url);
   await videoReady(page);
-  await expect(versionButton(page)).toHaveAttribute("data-version", "v2");
+  await expect(cutButton(page)).toHaveAttribute("data-version", "v2");
   for (let i = 0; i < 15; i++) await page.keyboard.press("ArrowRight");
   await expect(page.getByLabel("Timecode")).toContainText("0:00.50");
   await page.keyboard.press("]");
@@ -430,9 +430,9 @@ test("switching films with a note half-typed is refused, and the note is kept", 
   await page.goto(rushes.url);
   await videoReady(page);
   await page.getByLabel("New note").fill("Still deciding what this is about.");
-  await page.getByRole("navigation", { name: "Films" }).getByRole("button", { name: /Cutdown/ }).click();
+  await pickFilm(page, "Cutdown", false);
   await expect(page.getByRole("status")).toHaveText("Add or clear your note on Hero first");
-  await expect(page.getByRole("navigation", { name: "Films" }).getByRole("button", { name: /Hero/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(currentFilm(page)).toHaveText("Hero");
   await expect(page.getByLabel("New note")).toHaveValue("Still deciding what this is about.");
 });
 
@@ -460,7 +460,7 @@ test("a locked picture opens on the locked cut", async ({ page, rushes }) => {
   await rushes.api("PUT", "/api/videos/Hero/lock", { version: v1.id });
   await page.goto(rushes.url);
   await videoReady(page);
-  await expect(versionButton(page)).toHaveAttribute("data-version", "v1");
+  await expect(cutButton(page)).toHaveAttribute("data-version", "v1");
   const lockBtn = page.getByRole("button", { name: "Picture locked at v1 · unlock" });
   await expect(lockBtn).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator(".chipx.go")).toContainText("v2 ready");
@@ -474,10 +474,10 @@ test("choosing the newest cut by hand on a locked film doesn't snap back to the 
   await rushes.api("PUT", "/api/videos/Hero/lock", { version: v1.id });
   await page.goto(rushes.url);
   await videoReady(page);
-  await expect(versionButton(page)).toHaveAttribute("data-version", "v1");
+  await expect(cutButton(page)).toHaveAttribute("data-version", "v1");
   await pickVersion(page, "v2");
   await videoReady(page);
-  await expect(versionButton(page)).toHaveAttribute("data-version", "v2");
+  await expect(cutButton(page)).toHaveAttribute("data-version", "v2");
   const { project } = await rushes.api("GET", "/api/state");
   expect(project.videos[0].lockedVersion).toBe("v1");
 });
@@ -502,11 +502,11 @@ test("a version pin left over from peeking at a cut doesn't block the next one f
   await expect(page.locator(".chipx.go")).toContainText("v2 ready");
   await page.locator(".chipx.go").click(); // peek at v2 without unlocking: a version pin
   await videoReady(page);
-  await expect(versionButton(page)).toHaveAttribute("data-version", "v2");
+  await expect(cutButton(page)).toHaveAttribute("data-version", "v2");
   await page.getByRole("button", { name: /unlock/ }).click();
   await expect.poll(async () => (await rushes.api("GET", "/api/state")).project.videos[0].lockedVersion).toBeNull();
   await rushes.addCut("third cut"); // v3, now unlocked: the stale v2 pin must not swallow this
-  await expect(versionButton(page)).toHaveAttribute("data-version", "v3");
+  await expect(cutButton(page)).toHaveAttribute("data-version", "v3");
 });
 
 test("Space on a button reached by keyboard presses it; after a mouse click it still plays (§19.8)", async ({ page, rushes }) => {
@@ -536,14 +536,13 @@ test("switching films pauses the one playing, and its playhead is remembered eve
   await rushes.addCut("cutdown cut", "Cutdown");
   await page.goto(rushes.url);
   await videoReady(page);
-  const pack = page.getByRole("navigation", { name: "Films" });
   await page.keyboard.press(" ");
   // Played for a while, however long a loaded machine takes to start: not a fixed wait.
   await expect.poll(() => page.locator("video").evaluate((v: HTMLVideoElement) => v.currentTime)).toBeGreaterThan(0.5);
   await page.keyboard.press("]");
-  await expect(pack.getByRole("button", { name: /Cutdown/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(currentFilm(page)).toHaveText("Cutdown");
   await page.keyboard.press("[");
-  await expect(pack.getByRole("button", { name: /Hero/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(currentFilm(page)).toHaveText("Hero");
   await videoReady(page);
   const tc = (await page.getByLabel("Timecode").textContent())!;
   const [mm, ss] = tc.split("/")[0]!.trim().split(":");
@@ -586,7 +585,7 @@ test("appearance switches to light and is remembered", async ({ page, rushes }) 
   const dark = await ground();
   // The box directly behind the picture is the same near-black in both modes.
   await expect(page.locator(".frame").first()).toHaveCSS("background-color", "rgb(13, 13, 13)");
-  await page.getByRole("button", { name: "Film actions" }).click();
+  await openMore(page);
   await page.getByRole("menuitem", { name: "Appearance: Dark" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   await expect(page.getByRole("menuitem", { name: "Appearance: Light" })).toBeVisible(); // the menu stays open
@@ -605,7 +604,7 @@ test("a browser that refuses storage still opens, in dark", async ({ page, rushe
   await page.goto(rushes.url);
   await videoReady(page);
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-  await page.getByRole("button", { name: "Film actions" }).click();
+  await openMore(page);
   await page.getByRole("menuitem", { name: /Appearance/ }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light"); // for this page, though it cannot be kept
 });
@@ -695,7 +694,7 @@ test("a grabbed frame is saved as a screenshot and shows up in Assets with its a
   await page.keyboard.press("g");
   await expect(page.getByRole("status")).toHaveText("Saved to screenshots/hero_v1_00m01.00s_f30.png");
 
-  await expect(page.getByRole("tab", { name: /Assets/ })).not.toHaveAttribute("data-locked");
+  await expect(workspaceTab(page, "Assets")).not.toHaveAttribute("data-locked");
   await page.keyboard.press("8");
   const tile = page.locator(".shot-tile");
   await expect(tile).toHaveCount(1);
@@ -757,11 +756,10 @@ test("a grab alone doesn't stop you switching films", async ({ page, rushes }) =
   await page.keyboard.press("g");
   await expect(page.getByRole("status")).toContainText("Saved to screenshots/");
   await page.keyboard.press("]");
-  const pack = page.getByRole("navigation", { name: "Films" });
-  await expect(pack.getByRole("button", { name: /Cutdown/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(currentFilm(page)).toHaveText("Cutdown");
   await videoReady(page);
   await page.keyboard.press("[");
-  await expect(pack.getByRole("button", { name: /Hero/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(currentFilm(page)).toHaveText("Hero");
   await videoReady(page);
   await page.keyboard.press("n");
   await page.keyboard.type("Kept the grab after switching films.");
@@ -777,8 +775,8 @@ test("a deleted file is marked missing in Assets", async ({ page, rushes }) => {
   await videoReady(page);
   await rm(join(rushes.root, "renders", "hero_v1.mp4"));
   await page.reload();
-  await expect(page.getByRole("tab", { name: /Assets/ })).not.toHaveAttribute("data-locked");
-  await page.getByRole("tab", { name: /Assets/ }).click();
+  await expect(workspaceTab(page, "Assets")).not.toHaveAttribute("data-locked");
+  await openWorkspace(page, "Assets");
   // The library's Cuts folder defaults to a poster-frame grid (§16.1); switch to the list view
   // to get back the plain row this test is about.
   await page.getByRole("button", { name: "List view" }).click();
@@ -820,8 +818,7 @@ test("a late grab doesn't attach to the wrong film", async ({ page, rushes }) =>
   await page.keyboard.press("g");
   // Switch films before the grab's POST resolves.
   await page.keyboard.press("]");
-  const pack = page.getByRole("navigation", { name: "Films" });
-  await expect(pack.getByRole("button", { name: /Cutdown/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(currentFilm(page)).toHaveText("Cutdown");
   await videoReady(page);
 
   release();
@@ -856,7 +853,7 @@ test("a late grab doesn't attach to a newer cut of the same film", async ({ page
   // grab alone doesn't count), so the player follows it straight away -- no held chip, just
   // a new version prop under the same mounted Picture instance.
   await rushes.addCut("tighter cut");
-  await expect(versionButton(page)).toHaveAttribute("data-version", "v2");
+  await expect(cutButton(page)).toHaveAttribute("data-version", "v2");
 
   release();
   await expect(page.getByRole("status")).toContainText("Saved to screenshots/");
@@ -871,11 +868,10 @@ test("a grab belongs to one film, never the next one you switch to", async ({ pa
   await page.goto(rushes.url);
   await videoReady(page);
 
-  const pack = page.getByRole("navigation", { name: "Films" });
   const chip = page.locator(".comp .chipx", { hasText: "Frame" });
-  const goTo = async (key: string, name: RegExp) => {
+  const goTo = async (key: string, name: string) => {
     await page.keyboard.press(key);
-    await expect(pack.getByRole("button", { name })).toHaveAttribute("aria-pressed", "true");
+    await expect(currentFilm(page)).toHaveText(name);
     await videoReady(page);
   };
 
@@ -883,23 +879,23 @@ test("a grab belongs to one film, never the next one you switch to", async ({ pa
   await expect(page.getByRole("status")).toContainText("Saved to screenshots/");
 
   // G on Hero, then ], [, ]: Cutdown never shows Hero's chip, and Hero keeps its own.
-  await goTo("]", /Cutdown/);
+  await goTo("]", "Cutdown");
   await expect(chip).toHaveCount(0);
-  await goTo("[", /Hero/);
+  await goTo("[", "Hero");
   await expect(chip).toHaveCount(1);
-  await goTo("]", /Cutdown/);
+  await goTo("]", "Cutdown");
   await expect(chip).toHaveCount(0);
 
   // Submitting the note on Hero clears its grab; it doesn't come back on a later return.
-  await goTo("[", /Hero/);
+  await goTo("[", "Hero");
   await page.keyboard.press("n");
   await page.keyboard.type("Attached the grab before switching away.");
   await page.keyboard.press("Enter");
   await expect(page.locator(".note")).toHaveCount(1);
   await page.keyboard.press("Escape");
 
-  await goTo("]", /Cutdown/);
-  await goTo("[", /Hero/);
+  await goTo("]", "Cutdown");
+  await goTo("[", "Hero");
   await expect(chip).toHaveCount(0);
 });
 
@@ -913,7 +909,7 @@ test("a grab survives leaving the Picture tab and coming back", async ({ page, r
   await expect(page.getByRole("status")).toContainText("Saved to screenshots/");
 
   await page.keyboard.press("8");
-  await expect(page.getByRole("tab", { name: /Assets/ })).toHaveAttribute("aria-selected", "true");
+  await expect(workspaceTab(page, "Assets")).toHaveAttribute("aria-selected", "true");
   await page.keyboard.press("2");
   await videoReady(page);
   await expect(chip).toHaveCount(1);
@@ -961,7 +957,7 @@ test("the library has a folder sidebar with counts, and ↑/↓ moves between fo
   await rushes.api("POST", "/api/files", { file: "image.png", kind: "image" });
 
   await page.goto(rushes.url);
-  await expect(page.getByRole("tab", { name: /Assets/ })).not.toHaveAttribute("data-locked");
+  await expect(workspaceTab(page, "Assets")).not.toHaveAttribute("data-locked");
   await page.keyboard.press("8");
 
   const sidebar = page.getByRole("navigation", { name: "Folders" });
@@ -1026,7 +1022,7 @@ test("Copy prompt says what happened when the clipboard is refused: the prompt i
   await page.evaluate(() => {
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: () => Promise.reject(new Error("denied")) } });
   });
-  await page.getByRole("tab", { name: /Music/ }).click();
+  await openReviewTab(page, "Music");
   await page.getByRole("button", { name: "Copy prompt for your agent" }).click();
   const mac = await page.evaluate(() => /Mac|iPhone|iPad|iPod/.test(navigator.platform));
   await expect(page.getByRole("status")).toHaveText(`Prompt selected: press ${mac ? "⌘C" : "Ctrl+C"}`);
@@ -1065,7 +1061,7 @@ test("search and the film filter narrow the screenshots", async ({ page, rushes 
 test("a script previews as Markdown, safely", async ({ page, rushes }) => {
   await writeFile(join(rushes.root, "script.md"), "# Title\n\nSome text with <script>alert(1)</script> in it.\n");
   await page.goto(rushes.url);
-  await expect(page.getByRole("tab", { name: /Assets/ })).not.toHaveAttribute("data-locked");
+  await expect(workspaceTab(page, "Assets")).not.toHaveAttribute("data-locked");
   await page.keyboard.press("8");
 
   // The title itself is the select control (I3), not the whole row.
@@ -1084,7 +1080,7 @@ test("keyboard users can trigger a preview row's actions and select it (I3)", as
   await writeFile(join(rushes.root, "notes.md"), "# Notes\n");
 
   await page.goto(rushes.url);
-  await expect(page.getByRole("tab", { name: /Assets/ })).not.toHaveAttribute("data-locked");
+  await expect(workspaceTab(page, "Assets")).not.toHaveAttribute("data-locked");
   await page.keyboard.press("8");
   await expect(page.locator(".aheader h2")).toContainText("Scripts & docs");
 
@@ -1111,7 +1107,7 @@ test("audio plays inline, one at a time, and stops when you leave the folder", a
   await rushes.api("POST", "/api/variants", { stage: "music", name: "Bed B", file: "bed-b.mp4" });
 
   await page.goto(rushes.url);
-  await expect(page.getByRole("tab", { name: /Assets/ })).not.toHaveAttribute("data-locked");
+  await expect(workspaceTab(page, "Assets")).not.toHaveAttribute("data-locked");
   await page.keyboard.press("8");
   await expect(page.locator(".aheader h2")).toContainText("Music");
   // A list-only folder never offers the grid/list toggle (I5) -- Music's tiles would be
@@ -1184,7 +1180,7 @@ test("a rejected play() resets the row and shows a toast, instead of claiming to
   });
 
   await page.goto(rushes.url);
-  await expect(page.getByRole("tab", { name: /Assets/ })).not.toHaveAttribute("data-locked");
+  await expect(workspaceTab(page, "Assets")).not.toHaveAttribute("data-locked");
   await page.keyboard.press("8");
   await expect(page.locator(".aheader h2")).toContainText("Music");
 
@@ -1200,7 +1196,7 @@ test("Open is offered for a doc and not for an unsafe file, and Export notes add
   await rushes.api("POST", "/api/files", { file: "x.command", kind: "edit" });
 
   await page.goto(rushes.url);
-  await expect(page.getByRole("tab", { name: /Assets/ })).not.toHaveAttribute("data-locked");
+  await expect(workspaceTab(page, "Assets")).not.toHaveAttribute("data-locked");
   await page.keyboard.press("8");
 
   // Scripts & docs sorts before Edit files, so it's already selected.
@@ -1228,7 +1224,7 @@ test("Open is offered for a doc and not for an unsafe file, and Export notes add
 test("a file dropped into the project root appears once something refreshes Assets (I7)", async ({ page, rushes }) => {
   await writeFile(join(rushes.root, "existing.md"), "# Existing\n");
   await page.goto(rushes.url);
-  await expect(page.getByRole("tab", { name: /Assets/ })).not.toHaveAttribute("data-locked");
+  await expect(workspaceTab(page, "Assets")).not.toHaveAttribute("data-locked");
   await page.keyboard.press("8");
   await expect(page.locator(".aheader h2")).toContainText("Scripts & docs");
   await expect(page.locator(".arow")).toHaveCount(1);
@@ -1281,7 +1277,7 @@ test("200 screenshots stay usable", async ({ page, rushes }) => {
     Array.from({ length: 200 }, (_, i) => writeFile(join(rushes.root, "screenshots", `hero_v1_00m00.00s_f${i}.png`), TINY_PNG)),
   );
   await page.goto(rushes.url);
-  await expect(page.getByRole("tab", { name: /Assets/ })).not.toHaveAttribute("data-locked");
+  await expect(workspaceTab(page, "Assets")).not.toHaveAttribute("data-locked");
   await page.keyboard.press("8");
   await expect(page.locator(".shot-tile")).toHaveCount(200);
 
@@ -1298,7 +1294,7 @@ test("Cuts posters are lazy: not every tile loads a video before you scroll (I6)
     await rushes.api("POST", "/api/versions", { video: "Hero", file: "renders/hero.mp4" });
   }
   await page.goto(rushes.url);
-  await expect(page.getByRole("tab", { name: /Assets/ })).not.toHaveAttribute("data-locked");
+  await expect(workspaceTab(page, "Assets")).not.toHaveAttribute("data-locked");
   await page.keyboard.press("8");
   await expect(page.locator(".aheader h2")).toContainText("Cuts");
 
@@ -1453,7 +1449,7 @@ test.describe("proxies (§19.5)", () => {
 
     const added = await rushes.addProResCut({ long: true }, "prores cut");
     expect(added.proxyJob?.state).toBe("running");
-    await expect(versionButton(page)).toHaveAttribute("data-version", "v2");
+    await expect(cutButton(page)).toHaveAttribute("data-version", "v2");
     const offer = page.locator(".proxybar");
     await expect(offer).toContainText("Creating proxy");
     await expect(offer.locator(".proxyrow.working .mono")).toHaveText(/^\d+%$/);
@@ -1465,7 +1461,7 @@ test.describe("proxies (§19.5)", () => {
     await rushes.addProResCut();
     await page.goto(rushes.url);
     // Wait for the dashboard to be up before its key: a 7 pressed before then is lost.
-    await expect(page.getByRole("tab", { name: /Assets/ })).not.toHaveAttribute("data-locked");
+    await expect(workspaceTab(page, "Assets")).not.toHaveAttribute("data-locked");
     await page.keyboard.press("8");
     const sidebar = page.getByRole("navigation", { name: "Folders" });
     await expect(sidebar.getByRole("button", { name: /Cuts/ })).toBeVisible();
@@ -1537,7 +1533,7 @@ test.describe("proxies (§19.5)", () => {
     });
     await page.goto(rushes.url);
     const bar = page.locator(".proxybar");
-    await expect(versionButton(page)).toHaveAttribute("data-version", "v2");
+    await expect(cutButton(page)).toHaveAttribute("data-version", "v2");
     await bar.getByRole("button", { name: "Create proxy" }).click();
     await expect(bar).toContainText("Creating proxy");
     await pickVersion(page, "v1");
@@ -1643,7 +1639,7 @@ test.describe("tabs share one live connection (§19.8)", () => {
     const tabs = [page, ...(await Promise.all([1, 2, 3].map(() => context.newPage())))];
     for (const tab of tabs) {
       await tab.goto(rushes.testUrl());
-      await expect(versionButton(tab)).toHaveAttribute("data-version", "v1");
+      await expect(cutButton(tab)).toHaveAttribute("data-version", "v1");
     }
     await expect.poll(() => Promise.all(tabs.map((t) => t.evaluate(() => (window as Live).__rushesLive?.role() ?? null)))).toEqual(
       ["leader", "follower", "follower", "follower"],
@@ -1812,7 +1808,7 @@ test.describe("the Picture waveform (§19.9)", () => {
       await route.continue().catch(() => undefined);
     });
     await page.goto(rushes.url);
-    const versions = versionButton(page);
+    const versions = cutButton(page);
     await pickVersion(page, "v1");
     await expect.poll(() => wavePixels(page)).toBeGreaterThan(50);
     await pickVersion(page, "v2");
@@ -1837,7 +1833,7 @@ test.describe("the Picture waveform (§19.9)", () => {
       await route.continue().catch(() => undefined);
     });
     await page.goto(rushes.url);
-    const versions = versionButton(page);
+    const versions = cutButton(page);
     await expect(versions).toHaveAttribute("data-version", "v2");
     await expect.poll(() => asked).toBeGreaterThan(0);
     const v1Answered = page.waitForResponse((r) => r.url().includes("/versions/v1/peaks") && r.status() === 204);
@@ -1876,7 +1872,7 @@ test.describe("the Picture waveform (§19.9)", () => {
     expect(await peaksSettled(rushes, "v1")).toBe(200);
     expect(await peaksSettled(rushes, "v2")).toBe(204);
     await page.goto(rushes.url);
-    const versions = versionButton(page);
+    const versions = cutButton(page);
     await expect(versions).toHaveAttribute("data-version", "v2");
     await expect(page.locator(".track canvas.pwave")).toHaveCount(0);
     await pickVersion(page, "v1");
@@ -1892,7 +1888,7 @@ test.describe("the Picture waveform (§19.9)", () => {
     await page.goto(rushes.url);
     await videoReady(page);
     await rushes.addProResCut({ codec: "h264", seconds: 3, audio: true });
-    await expect(versionButton(page)).toHaveAttribute("data-version", "v2");
+    await expect(cutButton(page)).toHaveAttribute("data-version", "v2");
     await expect.poll(() => wavePixels(page)).toBeGreaterThan(50);
   });
 

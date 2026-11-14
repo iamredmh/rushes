@@ -1,6 +1,6 @@
 import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { test, expect } from "./fixture.js";
+import { test, expect, openReviewTab, reviewTab, openWorkspace, workspaceTab } from "./fixture.js";
 
 // §24 step 2: Planning is one tab with a menu (Brief, Script); brief.md is the file of record for the Brief page.
 
@@ -22,7 +22,7 @@ test("Planning is one tab with a menu holding Brief and Script", async ({ page, 
   await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
   await rushes.api("PUT", "/api/script", SCRIPT);
   await page.goto(rushes.url);
-  const planning = page.getByRole("tab", { name: /Planning/ });
+  const planning = workspaceTab(page, "Plan");
   await expect(planning).toHaveAttribute("aria-selected", "true");
   await expect(page.getByRole("heading", { name: "Brief" })).toBeVisible();
   await expect(page.getByRole("tab", { name: /Script/ })).toHaveCount(0);
@@ -39,7 +39,7 @@ test("the menu is keyboard-driven: ArrowDown opens it, arrows move, Enter picks,
   await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
   await rushes.api("PUT", "/api/script", SCRIPT);
   await page.goto(rushes.url);
-  const planning = page.getByRole("tab", { name: /Planning/ });
+  const planning = workspaceTab(page, "Plan");
   await planning.focus();
   await page.keyboard.press("ArrowDown");
   await expect(page.getByRole("menuitem", { name: /Brief/ })).toBeFocused();
@@ -100,7 +100,7 @@ test("a change the agent makes to brief.md shows up without a reload, and become
 test("with no brief.md, Brief is a locked page that says what to ask the agent", async ({ page, rushes }) => {
   await rushes.api("PUT", "/api/script", SCRIPT);
   await page.goto(rushes.url);
-  await page.getByRole("tab", { name: /Planning/ }).click();
+  await openWorkspace(page, "Plan");
   const brief = page.getByRole("menuitem", { name: /Brief/ });
   await expect(brief).toHaveAttribute("data-locked", "true");
   await brief.click();
@@ -114,17 +114,17 @@ test("key 1 opens Planning on the page last used, and 2 to 8 stay where they wer
   await rushes.api("PUT", "/api/script", SCRIPT);
   await rushes.addCut();
   await page.goto(rushes.url);
-  await expect(page.getByRole("tab", { name: /Picture/ })).toHaveAttribute("aria-selected", "true");
+  await expect(reviewTab(page, "Timeline")).toHaveAttribute("aria-selected", "true");
   await page.keyboard.press("1");
   await expect(page.getByRole("heading", { name: "Script" })).toBeVisible();
-  await page.getByRole("tab", { name: /Planning/ }).click();
+  await openWorkspace(page, "Plan");
   await page.getByRole("menuitem", { name: /Brief/ }).click();
   await page.keyboard.press("2");
-  await expect(page.getByRole("tab", { name: /Picture/ })).toHaveAttribute("aria-selected", "true");
+  await expect(reviewTab(page, "Timeline")).toHaveAttribute("aria-selected", "true");
   await page.keyboard.press("1");
   await expect(page.getByRole("heading", { name: "Brief" })).toBeVisible();
   await page.keyboard.press("8");
-  await expect(page.getByRole("tab", { name: /Assets/ })).toHaveAttribute("aria-selected", "true");
+  await expect(workspaceTab(page, "Assets")).toHaveAttribute("aria-selected", "true");
 });
 
 test("Send to agent on Brief gives a message that names what changed, and records nothing", async ({ page, rushes }) => {
@@ -178,12 +178,12 @@ test("with the Planning menu open, a digit stays in the menu instead of switchin
   await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
   await rushes.addCut();
   await page.goto(rushes.url);
-  await page.getByRole("tab", { name: /Planning/ }).click();
+  await openWorkspace(page, "Plan");
   await expect(page.getByRole("menu", { name: "Planning" })).toBeVisible();
   // Outside the menu, 3 is Voiceover. Inside it, the key stays put.
   await page.keyboard.press("3");
-  await expect(page.getByRole("tab", { name: /Picture/ })).toHaveAttribute("aria-selected", "true");
-  await expect(page.getByRole("tab", { name: /Voiceover/ })).toHaveAttribute("aria-selected", "false");
+  await expect(reviewTab(page, "Timeline")).toHaveAttribute("aria-selected", "true");
+  await expect(reviewTab(page, "Voice")).toHaveAttribute("aria-selected", "false");
   await expect(page.getByRole("menu", { name: "Planning" })).toBeVisible();
 });
 
@@ -225,7 +225,7 @@ test("key 1 on the Brief page the dashboard opened on stays on Brief", async ({ 
 test("Send to agent on the locked Brief page says there is no brief, not that it is a draft", async ({ page, rushes }) => {
   await rushes.api("PUT", "/api/script", SCRIPT);
   await page.goto(rushes.url);
-  await page.getByRole("tab", { name: /Planning/ }).click();
+  await openWorkspace(page, "Plan");
   await page.getByRole("menuitem", { name: /Brief/ }).click();
   await page.getByRole("button", { name: /Send to agent/ }).click();
   await expect(page.getByRole("dialog", { name: "Sent to agent" })).toHaveCount(0);
@@ -237,7 +237,7 @@ test("with the Planning menu open over Picture, left and right do not step the f
   await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
   await rushes.addCut();
   await page.goto(rushes.url);
-  await page.getByRole("tab", { name: /Picture/ }).click();
+  await openReviewTab(page, "Timeline");
   const tc = page.getByLabel("Timecode");
   await expect(tc).toBeVisible();
   // Outside the menu, the arrow steps a frame (this is what the menu must not let through).
@@ -246,7 +246,7 @@ test("with the Planning menu open over Picture, left and right do not step the f
   await page.keyboard.press("ArrowRight");
   await expect(tc).not.toHaveText(before!);
   const stepped = await tc.textContent();
-  await page.getByRole("tab", { name: /Planning/ }).click();
+  await openWorkspace(page, "Plan");
   await expect(page.getByRole("menu", { name: "Planning" })).toBeVisible();
   await page.keyboard.press("ArrowRight");
   await page.keyboard.press("ArrowRight");
@@ -257,7 +257,7 @@ test("picking a Planning menu item with the keyboard leaves focus on the Plannin
   await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
   await rushes.api("PUT", "/api/script", SCRIPT);
   await page.goto(rushes.url);
-  const planning = page.getByRole("tab", { name: /Planning/ });
+  const planning = workspaceTab(page, "Plan");
   await planning.focus();
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("ArrowDown");

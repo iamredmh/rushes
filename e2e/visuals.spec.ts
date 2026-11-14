@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { deflateSync } from "node:zlib";
-import { test, expect } from "./fixture.js";
+import { test, expect, openWorkspace, workspaceTab } from "./fixture.js";
 
 // §25: the Visuals tab: stills and carousels, one page at a time, marked up region by region.
 
@@ -56,7 +56,7 @@ const notesJson = async (rushes: Rushes) => (await rushes.api("GET", "/api/notes
 
 async function openVisuals(page: import("@playwright/test").Page, rushes: Rushes) {
   await page.goto(rushes.url);
-  await page.getByRole("tab", { name: /Visuals/ }).click();
+  await openWorkspace(page, "Visuals");
   await expect(section(page, "launch-carousel")).toBeVisible();
 }
 
@@ -72,7 +72,7 @@ async function drag(page: import("@playwright/test").Page, id: string, from: [nu
 
 test("Visuals is a locked tab with a prompt until a visual is registered, then opens", async ({ page, rushes }) => {
   await page.goto(rushes.url);
-  const tab = page.getByRole("tab", { name: /Visuals/ });
+  const tab = workspaceTab(page, "Visuals");
   await expect(tab).toHaveAttribute("data-locked", "true");
   await tab.click();
   await expect(page.getByLabel("Prompt for your agent")).toHaveValue(/rushes_add_visual/);
@@ -86,9 +86,9 @@ test("key 7 opens Visuals and key 8 opens Assets", async ({ page, rushes }) => {
   await withVisuals(rushes);
   await page.goto(rushes.url);
   await page.keyboard.press("7");
-  await expect(page.getByRole("tab", { name: /Visuals/ })).toHaveAttribute("aria-selected", "true");
+  await expect(workspaceTab(page, "Visuals")).toHaveAttribute("aria-selected", "true");
   await page.keyboard.press("8");
-  await expect(page.getByRole("tab", { name: /Assets/ })).toHaveAttribute("aria-selected", "true");
+  await expect(workspaceTab(page, "Assets")).toHaveAttribute("aria-selected", "true");
 });
 
 test("scrolling makes the visual in the middle the current one, and the composer and notes column follow", async ({ page, rushes }) => {
@@ -116,7 +116,7 @@ test("the composer always names the visual in the middle of the screen, however 
   for (let i = 1; i <= 8; i++) await rushes.api("POST", "/api/visuals", { name: `Post ${i}`, pages: [{ files: [`visuals/v${i}.png`] }] });
   for (const id of ["post-3", "post-7"]) await rushes.api("POST", "/api/visuals", { visual: id, label: "Newer", pages: [{ n: 1, files: ["visuals/v-new.png"] }] });
   await page.goto(rushes.url);
-  await page.getByRole("tab", { name: /Visuals/ }).click();
+  await openWorkspace(page, "Visuals");
   await expect(section(page, "post-1")).toBeVisible();
   const state = () =>
     page.evaluate(() => {
@@ -198,7 +198,7 @@ test("a version registered while you are looking back at an older one brings you
   await rushes.api("POST", "/api/notes", { stage: "visuals", scope: "whole", version: "v1", on: "scanner/1", format: "4x5", text: "Remove the QR code." });
   await rushes.api("POST", "/api/visuals", { visual: "scanner", label: "QR gone", pages: [{ n: 1, files: ["visuals/s-v2.png"] }] });
   await page.goto(rushes.url);
-  await page.getByRole("tab", { name: /Visuals/ }).click();
+  await openWorkspace(page, "Visuals");
   await expect(section(page, "scanner")).toBeVisible();
   await expect(section(page, "scanner").locator(".vzchip").first()).toHaveText("v2");
   // Open the old note to see where it was: that looks back at v1, and says so.

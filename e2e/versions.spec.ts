@@ -1,6 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { expect, pickVersion, test, versionButton, videoReady } from "./fixture.js";
+import { expect, pickVersion, test, cutButton, videoReady, reviewTab, openWorkspace, currentFilm, pickFilm } from "./fixture.js";
 
 const LONG =
   "v2: the button morphs into a node-sized dot and rides the pull-back onto the globe; labels and bubbles drawn as sharp images so text no longer wobbles; the crowd builds to 22 all round the globe. End line B. 34.2 s, silent.";
@@ -13,7 +13,7 @@ const option = (page: import("@playwright/test").Page, id: string) => page.locat
 test("Assets › Cuts shows a cut's short label, not its whole note (§22.4)", async ({ page, rushes }) => {
   await rushes.addCut("v1: first pass; each zoomed request types itself out; crowd on a wider oval");
   await page.goto(rushes.url);
-  await page.getByRole("tab", { name: /Assets/ }).click();
+  await openWorkspace(page, "Assets");
   await expect(page.locator(".aheader h2")).toContainText("Cuts");
   await expect(page.locator(".shot-meta .asub").first()).toHaveText("first pass");
 });
@@ -24,7 +24,7 @@ test("the version control shows the cut and its short label, and lists every cut
   await rushes.api("PUT", "/api/videos/hero/lock", { version: "v1" });
   await page.goto(rushes.url);
   await videoReady(page);
-  const button = versionButton(page);
+  const button = cutButton(page);
   // Locked at v1: the film opens on it.
   await expect(button).toHaveAttribute("data-version", "v1");
   await expect(button).toHaveAccessibleName("Version: v1 · first pass");
@@ -75,7 +75,7 @@ test("the version list works from the keyboard: arrows, Home, End, type-ahead, E
   for (const note of ["first cut", "second cut", "third cut"]) await rushes.addCut(note);
   await page.goto(rushes.url);
   await videoReady(page);
-  const button = versionButton(page);
+  const button = cutButton(page);
   await expect(button).toHaveAttribute("data-version", "v3");
   await button.focus();
   await page.keyboard.press("Enter");
@@ -111,7 +111,7 @@ test("the version list works from the keyboard: arrows, Home, End, type-ahead, E
   await expect(option(page, "v3")).toBeFocused();
   await page.keyboard.press("1");
   await expect(option(page, "v1")).toBeFocused();
-  await expect(page.getByRole("tab", { name: /Picture/ })).toHaveAttribute("aria-selected", "true");
+  await expect(reviewTab(page, "Timeline")).toHaveAttribute("aria-selected", "true");
   // Other keys stay in the open list too: "?" doesn't open the shortcuts behind it.
   await page.keyboard.press("?");
   await expect(page.getByRole("dialog", { name: "Keyboard shortcuts" })).toHaveCount(0);
@@ -135,7 +135,7 @@ test("type-ahead joins digits typed together: 1 then 1 is v11, and a lone 1 late
   for (let n = 1; n <= 11; n++) await rushes.addCut(`cut ${n}`);
   await page.goto(rushes.url);
   await videoReady(page);
-  await versionButton(page).focus();
+  await cutButton(page).focus();
   await page.keyboard.press("Enter");
   await expect(option(page, "v11")).toBeFocused();
   await page.keyboard.press("End");
@@ -152,7 +152,7 @@ test("the detail beside the list follows the pointer and the keyboard focus (§2
   await page.goto(rushes.url);
   await videoReady(page);
   const detail = page.locator("#vdetail");
-  await versionButton(page).focus();
+  await cutButton(page).focus();
   await page.keyboard.press("Enter");
   await expect(detail.locator("h4")).toHaveText("v3");
   await expect(detail.locator("p")).toHaveText("v3: third cut; end card longer");
@@ -175,16 +175,15 @@ test("picking a cut from the list keeps the page as it was: the film, the tab, t
   await rushes.addCut("teaser second; tighter", "Teaser");
   await rushes.api("PUT", "/api/videos/teaser/lock", { version: "v2" });
   await page.goto(rushes.url);
-  const films = page.getByRole("navigation", { name: "Films" });
-  await films.getByRole("button", { name: /Teaser/ }).click();
+  await pickFilm(page, "Teaser");
   await videoReady(page);
-  await expect(versionButton(page)).toHaveAttribute("data-version", "v2");
+  await expect(cutButton(page)).toHaveAttribute("data-version", "v2");
   await page.getByRole("textbox", { name: "New note" }).fill("a draft about the end card");
   await pickVersion(page, "v1");
   await videoReady(page);
-  await expect(versionButton(page)).toHaveAccessibleName("Version: v1 · teaser first");
-  await expect(films.getByRole("button", { name: /Teaser/ })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("tab", { name: /Picture/ })).toHaveAttribute("aria-selected", "true");
+  await expect(cutButton(page)).toHaveAccessibleName("Version: v1 · teaser first");
+  await expect(currentFilm(page)).toHaveText("Teaser");
+  await expect(reviewTab(page, "Timeline")).toHaveAttribute("aria-selected", "true");
   await expect(page.getByRole("button", { name: "Picture locked at v2 · unlock" })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "New note" })).toHaveValue("a draft about the end card");
   expect((await rushes.api("GET", "/api/state")).project.videos[1].lockedVersion).toBe("v2");
@@ -199,7 +198,7 @@ test("long notes never widen the page or the list, at any window width (§22.8, 
     await page.setViewportSize({ width, height });
     await page.goto(rushes.url);
     await videoReady(page);
-    const button = versionButton(page);
+    const button = cutButton(page);
     await expect(button).toHaveAttribute("data-version", "v4");
     // A narrow window may already scroll sideways for other reasons (the stage tabs): the list adds nothing to it.
     const before = await page.evaluate(() => Math.max(window.innerWidth, document.documentElement.scrollWidth));
@@ -248,11 +247,11 @@ test("opening the list has no motion when the system asks for less (§22.8)", as
   await rushes.addCut("first cut");
   await page.goto(rushes.url);
   await videoReady(page);
-  await versionButton(page).click();
+  await cutButton(page).click();
   await expect(page.locator(".vmenu")).toHaveCSS("animation-name", "vmenu-in");
   await page.keyboard.press("Escape");
   await page.emulateMedia({ reducedMotion: "reduce" });
-  await versionButton(page).click();
+  await cutButton(page).click();
   await expect(page.locator(".vmenu")).toHaveCSS("animation-name", "none");
 });
 
@@ -279,13 +278,13 @@ test("the cut's full note sits under the picture, two lines at most, with More (
     }).observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true });
   });
   await rushes.addCut(HUGE.replace(/^v3:/, "v2:"));
-  await expect(versionButton(page)).toHaveAttribute("data-version", "v2");
+  await expect(cutButton(page)).toHaveAttribute("data-version", "v2");
   await expect(note.locator(".vtext")).toContainText("v2: launch 1.45x slower");
   await expect(note.getByRole("button", { name: "More" })).toHaveAttribute("aria-expanded", "false");
   expect(await page.evaluate(() => (window as unknown as { __flash: boolean }).__flash)).toBe(false);
   // A cut with no note has no line.
   await rushes.addCut();
-  await expect(versionButton(page)).toHaveAttribute("data-version", "v3");
+  await expect(cutButton(page)).toHaveAttribute("data-version", "v3");
   await expect(note).toHaveCount(0);
 });
 
@@ -294,7 +293,7 @@ test("a note of only invisible characters reads as no note, under the picture an
   await page.goto(rushes.url);
   await videoReady(page);
   await expect(page.locator(".vnote")).toHaveCount(0);
-  await versionButton(page).click();
+  await cutButton(page).click();
   await expect(page.locator("#vdetail p")).toHaveText("No note.");
 });
 
@@ -306,7 +305,7 @@ test("a 1,950-character note and a long list scroll inside the window (M1, I2)",
     await page.setViewportSize({ width, height });
     await page.goto(rushes.url);
     await videoReady(page);
-    await versionButton(page).click();
+    await cutButton(page).click();
     await page.keyboard.press("End");
     await expect(option(page, "v1")).toBeFocused();
     await expect(page.locator("#vdetail p")).toContainText("stagger in three waves");
@@ -339,7 +338,7 @@ test("the list stays inside the window when it's resized while open (M7)", async
   await rushes.addCut(HUGE);
   await page.goto(rushes.url);
   await videoReady(page);
-  await versionButton(page).click();
+  await cutButton(page).click();
   const right = () => page.locator(".vmenu").evaluate((el) => el.getBoundingClientRect().right);
   expect(await right()).toBeLessThanOrEqual(1440);
   await page.setViewportSize({ width: 1024, height: 768 });
@@ -352,7 +351,7 @@ test("if the focused cut is deleted by hand while the list is open, the list clo
   for (const note of ["first cut", "second cut", "third cut"]) await rushes.addCut(note);
   await page.goto(rushes.url);
   await videoReady(page);
-  const button = versionButton(page);
+  const button = cutButton(page);
   await button.focus();
   await page.keyboard.press("Enter");
   await page.keyboard.press("End");
@@ -380,13 +379,13 @@ test("an agent's label wins over the derived one, and a hand-edited one over 48 
   await rushes.api("POST", "/api/versions", { video: "Hero", file: "renders/hero_v1.mp4", note: "v2: the long detail", label: "Launch slower" });
   await expect(rushes.api("POST", "/api/versions", { video: "Hero", file: "renders/hero_v1.mp4", label: "x".repeat(49) })).rejects.toThrow(/48 characters at most/);
   await page.goto(rushes.url);
-  await expect(versionButton(page)).toHaveAccessibleName("Version: v2 · Launch slower");
+  await expect(cutButton(page)).toHaveAccessibleName("Version: v2 · Launch slower");
   const path = join(rushes.root, ".rushes", "project.json");
   const p = JSON.parse(await readFile(path, "utf8"));
   p.videos[0].versions[1].label = "A label somebody typed by hand that runs on far past the limit of the list";
   p.rev += 1;
   await writeFile(path, JSON.stringify(p, null, 2));
-  await expect(versionButton(page)).toHaveAccessibleName("Version: v2 · A label somebody typed by hand that runs on far…");
+  await expect(cutButton(page)).toHaveAccessibleName("Version: v2 · A label somebody typed by hand that runs on far…");
 });
 
 test("on a touch screen the first tap shows a cut's note under its row and a second tap picks it (R20)", async ({ page, rushes }) => {
@@ -401,13 +400,13 @@ test("on a touch screen the first tap shows a cut's note under its row and a sec
   await rushes.addCut("v2: tighter; the end card holds longer");
   await page.goto(rushes.url);
   await videoReady(page);
-  await versionButton(page).click();
+  await cutButton(page).click();
   await option(page, "v1").click();
   await expect(option(page, "v1").locator(".vinline")).toContainText("first pass; rough timing");
   await expect(page.locator("#vdetail")).toHaveCount(0);
-  await expect(versionButton(page)).toHaveAttribute("data-version", "v2");
+  await expect(cutButton(page)).toHaveAttribute("data-version", "v2");
   await option(page, "v1").click();
-  await expect(versionButton(page)).toHaveAttribute("data-version", "v1");
+  await expect(cutButton(page)).toHaveAttribute("data-version", "v1");
 });
 
 test("pickVersion pins a cut by hand: the lock and the newest cut still don't move it (§14.2)", async ({ page, rushes }) => {
@@ -418,9 +417,9 @@ test("pickVersion pins a cut by hand: the lock and the newest cut still don't mo
   await videoReady(page);
   await pickVersion(page, "v2");
   await videoReady(page);
-  await expect(versionButton(page)).toHaveAttribute("data-version", "v2");
+  await expect(cutButton(page)).toHaveAttribute("data-version", "v2");
   expect((await rushes.api("GET", "/api/state")).project.videos[0].lockedVersion).toBe("v1");
   await rushes.addCut("third cut");
   await expect(page.getByRole("button", { name: "v3 is ready" })).toBeVisible();
-  await expect(versionButton(page)).toHaveAttribute("data-version", "v2");
+  await expect(cutButton(page)).toHaveAttribute("data-version", "v2");
 });

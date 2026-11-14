@@ -1,7 +1,7 @@
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Page } from "@playwright/test";
-import { expect, hasFfmpeg, pickVersion, test, versionButton, videoReady } from "./fixture.js";
+import { expect, hasFfmpeg, pickVersion, test, cutButton, videoReady, openWorkspace, workspaceTab, pickFilm } from "./fixture.js";
 
 test.skip(!hasFfmpeg, "formats are generated with ffmpeg and measured with ffprobe");
 
@@ -114,7 +114,7 @@ test("a newer cut without a format keeps its chip, greyed: Not in v2", async ({ 
   await rushes.addFormatsCut([WIDE, TALL, SQUARE]);
   await page.goto(rushes.url);
   await videoReady(page);
-  await expect(versionButton(page)).toHaveAttribute("data-version", "v2");
+  await expect(cutButton(page)).toHaveAttribute("data-version", "v2");
   const chip = radio(page, "4:5");
   await expect(chip).toHaveAttribute("aria-disabled", "true");
   await expect(chip).toHaveAttribute("data-tip", "Not in v2");
@@ -162,10 +162,10 @@ test("each film remembers its format for the session; a fresh load shows the pri
   await page.goto(rushes.url);
   await videoReady(page);
   await radio(page, "9:16").click();
-  await page.getByRole("navigation", { name: "Films" }).getByRole("button", { name: /Teaser/ }).click();
+  await pickFilm(page, "Teaser");
   await videoReady(page);
   await expect(radio(page, "16:9")).toHaveAttribute("aria-checked", "true");
-  await page.getByRole("navigation", { name: "Films" }).getByRole("button", { name: /Hero/ }).click();
+  await pickFilm(page, "Hero");
   await videoReady(page);
   await expect(radio(page, "9:16")).toHaveAttribute("aria-checked", "true");
   await expect(page.locator("video")).toHaveAttribute("src", /_180x320\.mp4/);
@@ -384,8 +384,7 @@ test("a remembered format whose file has gone keeps its shape after a film switc
   await expect(page.locator(".frame .msg")).toHaveText("File not found");
   await expect.poll(ratio).toBeCloseTo(180 / 320, 1);
   // Away and back: Picture mounts afresh on 9:16, whose file never loads.
-  const films = page.getByRole("navigation", { name: "Films" });
-  await films.getByRole("button", { name: /Teaser/ }).click();
+  await pickFilm(page, "Teaser");
   await videoReady(page);
   // The very first frame painted after the remount is already 9:16, not 16:9 corrected later.
   const first = await page.evaluate(async () => {
@@ -495,7 +494,7 @@ test("leaving a render that won't play never shows its message on the next one, 
   // To v1's 9:16, which plays: the same shape, so nothing else re-renders the player first.
   // Sampled before each of the next frames is painted, starting with the first after the change.
   // The version list (§22.4) is opened first; the pick itself happens inside the sampling, as the select's change did.
-  await versionButton(page).click();
+  await cutButton(page).click();
   await expect(page.getByRole("listbox", { name: "Versions" })).toBeVisible();
   const frames = await page.evaluate(async () => {
     document.querySelector<HTMLButtonElement>('[role="listbox"][aria-label="Versions"] [role="option"][data-version="v1"]')!.click();
@@ -571,7 +570,7 @@ test("Alt+arrows do nothing off the Picture tab, and the radio group never wraps
   await page.goto(rushes.url);
   await videoReady(page);
   await page.keyboard.press("8");
-  await expect(page.getByRole("tab", { name: /Assets/ })).toHaveAttribute("aria-selected", "true");
+  await expect(workspaceTab(page, "Assets")).toHaveAttribute("aria-selected", "true");
   await page.keyboard.press("Alt+ArrowLeft");
   await page.keyboard.press("2");
   await videoReady(page);
@@ -924,7 +923,7 @@ test("a new cut starts its composer on This format again", async ({ page, rushes
   await scope.getByRole("radio", { name: "All formats" }).click();
   await expect(scope.getByRole("radio", { name: "All formats" })).toHaveAttribute("aria-checked", "true");
   await rushes.addFormatsCut([WIDE, TALL]);
-  await expect(versionButton(page)).toHaveAttribute("data-version", "v2");
+  await expect(cutButton(page)).toHaveAttribute("data-version", "v2");
   await expect(scope.getByRole("radio", { name: /^This format/ })).toHaveAttribute("aria-checked", "true");
 });
 
@@ -964,7 +963,7 @@ test("an older cut's note for a format the newer cut lacks is read only, with no
   await rushes.addFormatsCut([WIDE, SQUARE]);
   await page.goto(rushes.url);
   await videoReady(page);
-  await expect(versionButton(page)).toHaveAttribute("data-version", "v2");
+  await expect(cutButton(page)).toHaveAttribute("data-version", "v2");
   await page.getByRole("button", { name: "Other formats (1)" }).click();
   const row = page.locator(".otherfmts .note", { hasText: "Logo edge on the tall one." });
   await expect(row.locator(".ftag")).toHaveText("9:16");
@@ -1093,7 +1092,7 @@ test("the Other formats row follows the To do and Done filter", async ({ page, r
 test("Assets › Cuts lists a cut's formats under it, each with download, reveal and open", async ({ page, rushes }) => {
   await rushes.addFormatsCut([WIDE, TALL, SQUARE]);
   await page.goto(rushes.url);
-  await page.getByRole("tab", { name: /Assets/ }).click();
+  await openWorkspace(page, "Assets");
   await page.getByRole("navigation", { name: "Folders" }).getByRole("button", { name: /Cuts/ }).click();
   await page.getByRole("button", { name: "List view" }).click();
   const rows = page.locator(".arows .arow");

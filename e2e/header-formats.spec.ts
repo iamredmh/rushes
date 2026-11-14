@@ -4,7 +4,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Page } from "@playwright/test";
-import { expect, test, versionButton, videoReady, type FormatSize } from "./fixture.js";
+import { expect, test, cutButton, videoReady, type FormatSize, openWorkspace, pickFilm, currentFilm } from "./fixture.js";
 
 const logButton = (page: Page) => page.getByRole("button", { name: /^Change Log/ });
 const drawer = (page: Page) => page.getByRole("complementary", { name: "Change Log" });
@@ -67,7 +67,7 @@ for (const width of [1440, 1280, 1150, 1101]) {
     await expect(films).toHaveCount(2);
     await films.nth(1).click(); // the launch film, locked at its long-labelled cut
     await videoReady(page);
-    await expect(versionButton(page)).toContainText("Tighter middle");
+    await expect(cutButton(page)).toContainText("Tighter middle");
     await expect(toggle(page).getByRole("radio")).toHaveCount(4);
     await expect(page.getByRole("button", { name: /^Send to agent/ })).toContainText("8");
     const row = await headerRow(page);
@@ -107,7 +107,7 @@ test("from 1101 to 1600 px the long project's header with four formats never wra
   await longProject(rushes);
   await page.goto(rushes.url);
   await videoReady(page);
-  await page.getByRole("navigation", { name: "Films" }).getByRole("button").nth(1).click();
+  await pickFilm(page, "Lumen launch film");
   await videoReady(page);
   await expect(toggle(page).getByRole("radio")).toHaveCount(4);
   const tall: string[] = [];
@@ -145,7 +145,7 @@ test("the one-format popover is never hidden by the Change Log drawer or the ver
   await expect(pop).toHaveCSS("opacity", "1");
   expect(await onTop(".drawer")).toBe("popover");
   // The version list open as well (it stays open while the pointer moves over the header).
-  await versionButton(page).click();
+  await cutButton(page).click();
   await expect(page.getByRole("listbox", { name: "Versions" })).toBeVisible();
   await toggle(page).getByRole("radio").hover();
   await expect(pop).toHaveCSS("opacity", "1");
@@ -157,7 +157,7 @@ test("Alt+←/→ switch formats with the drawer open and focus in it, but not w
   await rushes.addFormatsCut([WIDE, TALL, SQUARE], { video: "Launch" });
   await page.goto(rushes.url);
   await videoReady(page);
-  await page.getByRole("navigation", { name: "Films" }).getByRole("button").nth(1).click();
+  await pickFilm(page, "Launch");
   await videoReady(page);
   await expect(radio(page, "16:9")).toHaveAttribute("aria-checked", "true");
   await logButton(page).click();
@@ -179,9 +179,9 @@ test("Alt+←/→ switch formats with the drawer open and focus in it, but not w
   // [ and ] are still the films', with the drawer open.
   await drawer(page).getByRole("button", { name: "Close the change log" }).focus();
   await page.keyboard.press("[");
-  await expect(page.getByRole("navigation", { name: "Films" }).getByRole("button").nth(0)).toHaveAttribute("aria-pressed", "true");
+  await expect(currentFilm(page)).toHaveText("Teaser");
   await page.keyboard.press("]");
-  await expect(page.getByRole("navigation", { name: "Films" }).getByRole("button").nth(1)).toHaveAttribute("aria-pressed", "true");
+  await expect(currentFilm(page)).toHaveText("Launch");
 });
 
 test("Alt+←/→ switch formats with the version list open; the list stays open and keeps its keys (merge)", async ({ page, rushes }) => {
@@ -189,7 +189,7 @@ test("Alt+←/→ switch formats with the version list open; the list stays open
   await rushes.addFormatsCut([WIDE, TALL]);
   await page.goto(rushes.url);
   await videoReady(page);
-  await versionButton(page).click();
+  await cutButton(page).click();
   const list = page.getByRole("listbox", { name: "Versions" });
   await expect(list).toBeVisible();
   await page.keyboard.press("Alt+ArrowLeft");
@@ -198,14 +198,14 @@ test("Alt+←/→ switch formats with the version list open; the list stays open
   // The list's own keys still work: down to v1 and Enter picks it; the format on screen carries over when v1 has it.
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Enter");
-  await expect(versionButton(page)).toHaveAttribute("data-version", "v1");
+  await expect(cutButton(page)).toHaveAttribute("data-version", "v1");
   await expect(radio(page, "9:16")).toHaveAttribute("aria-checked", "true");
 });
 
 test("Assets › Cuts: the cut's row carries its short label, its format sub-rows carry none (merge)", async ({ page, rushes }) => {
   await rushes.addFormatsCut([WIDE, TALL, SQUARE], { label: "logo hold", note: "v1: held the logo 0.5 s longer; the detail" });
   await page.goto(rushes.url);
-  await page.getByRole("tab", { name: /Assets/ }).click();
+  await openWorkspace(page, "Assets");
   await page.getByRole("navigation", { name: "Folders" }).getByRole("button", { name: /Cuts/ }).click();
   await page.getByRole("button", { name: "List view" }).click();
   const rows = page.locator(".arows .arow");
