@@ -1,41 +1,13 @@
-// §24 step 2: the Brief page. brief.md is the file of record: each row shows the agent's version of one
-// section beside yours, and a save writes the file. Approving sets its Status line; editing afterwards reopens it.
-import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+// §24 step 2, §27: the Brief page. brief.md is the file of record: each section is a field holding your version, marked
+// "Edited by you" over the agent's wording when they differ, and a save writes the file. Approving sets its Status line;
+// editing afterwards reopens it.
+import { useEffect, useRef, useState } from "preact/hooks";
 import type { BriefSectionView, BriefView } from "../types.js";
 import { useRecordSaves } from "./useRecordSaves.js";
 import { Icon } from "./Icon.js";
+import { EditedMark, PlanField, PlanStatus, useDebounced } from "./Planning.js";
 
 const SAVE_AFTER_MS = 500;
-
-/** Run `fn` once input has paused for `ms`; flush() runs it now. A pending run is flushed, not dropped, on unmount. */
-function useDebounced(fn: () => void, ms: number) {
-  const timer = useRef<number | undefined>(undefined);
-  const latest = useRef(fn);
-  latest.current = fn;
-  useEffect(
-    () => () => {
-      if (timer.current === undefined) return;
-      clearTimeout(timer.current);
-      latest.current();
-    },
-    [],
-  );
-  return {
-    schedule() {
-      clearTimeout(timer.current);
-      timer.current = window.setTimeout(() => {
-        timer.current = undefined;
-        latest.current();
-      }, ms);
-    },
-    flush() {
-      if (timer.current === undefined) return;
-      clearTimeout(timer.current);
-      timer.current = undefined;
-      latest.current();
-    },
-  };
-}
 
 interface Saver {
   section(s: BriefSectionView, text: string): void;
@@ -45,18 +17,11 @@ interface Saver {
 function Row({ section, save }: { section: BriefSectionView; save: Saver }) {
   const [text, setText] = useState(section.yours);
   const editing = useRef(false);
-  const area = useRef<HTMLTextAreaElement>(null);
 
   // The agent changed the section, or another window did: follow it unless you're mid-edit.
   useEffect(() => {
     if (!editing.current) setText(section.yours);
   }, [section.yours]);
-  useLayoutEffect(() => {
-    const el = area.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${el.scrollHeight + 2}px`;
-  }, [text]);
 
   const saveText = useDebounced(() => {
     editing.current = false;
@@ -65,38 +30,30 @@ function Row({ section, save }: { section: BriefSectionView; save: Saver }) {
   const changed = text.trim() !== section.current.trim();
 
   return (
-    <div class={`srow${changed ? " changed" : ""}`} data-section={section.heading}>
-      <div class="sgrid bgrid">
-        <div class="blabel">{section.heading}</div>
-        <div class="cur">{section.current}</div>
-        <div class="byours">
-          <textarea
-            ref={area}
-            class="input"
-            aria-label={`Your version of ${section.heading}`}
-            value={text}
-            onInput={(e) => {
-              editing.current = true;
-              setText((e.target as HTMLTextAreaElement).value);
-              saveText.schedule();
+    <div class={`srow brow${changed ? " changed" : ""}`} data-section={section.heading}>
+      <div class="plabel">{section.heading}</div>
+      <div class="pbody">
+        <PlanField
+          label={`Your version of ${section.heading}`}
+          value={text}
+          onInput={(t) => {
+            editing.current = true;
+            setText(t);
+            saveText.schedule();
+          }}
+          onBlur={() => saveText.flush()}
+        />
+        {changed && (
+          <EditedMark
+            baseline={[{ text: section.current }]}
+            revertLabel={`Revert ${section.heading}`}
+            onRevert={() => {
+              editing.current = false;
+              setText(section.current);
+              save.section(section, section.current);
             }}
-            onBlur={() => saveText.flush()}
           />
-          {changed && (
-            <button
-              class="btn ghost ib"
-              data-tip="Revert to current"
-              aria-label={`Revert ${section.heading}`}
-              onClick={() => {
-                editing.current = false;
-                setText(section.current);
-                save.section(section, section.current);
-              }}
-            >
-              <Icon name="undo" />
-            </button>
-          )}
-        </div>
+        )}
       </div>
     </div>
   );
@@ -106,8 +63,8 @@ function Row({ section, save }: { section: BriefSectionView; save: Saver }) {
 const occurrenceOf = (sections: BriefSectionView[], index: number): number => sections.slice(0, index).filter((x) => x.heading === sections[index].heading).length;
 
 /**
- * brief.md: the agent's current text beside yours, one row per section, and an Approve at the foot.
- * `settle` is how Send to agent waits for what you just typed: it resolves once every queued save has landed,
+ * brief.md: one field per section, your version over the agent's when you've changed it, and an Approve at the foot.
+ * `settle` is how Send waits for what you just typed: it resolves once every queued save has landed,
  * with the brief as the server now has it.
  */
 export function Brief({ brief, toast, onChanged, settle }: { brief: BriefView; toast(message: string): void; onChanged(): void; settle: { current: (() => Promise<unknown>) | null } }) {
@@ -134,26 +91,21 @@ export function Brief({ brief, toast, onChanged, settle }: { brief: BriefView; t
 
   const approved = brief.status === "approved";
   return (
-    <div class="col">
+    <div class="col ppage">
       <div class="shead">
         <h2>Brief</h2>
-        <span class="meta">
-          {brief.title}
-          {brief.title && brief.sections.length > 0 ? " · " : ""}
-          {brief.sections.length > 0 && `${brief.sections.length} section${brief.sections.length === 1 ? "" : "s"} · ${brief.changed} changed`}
-        </span>
+        {brief.title && <span class="meta">{brief.title}</span>}
       </div>
       {brief.sections.length === 0 && <p class="sbnone">brief.md has no ## sections yet. Your agent adds them as `## Purpose`, `## Audience` and so on.</p>}
-      <div class="sgrid bgrid scols"><span /><span>Current</span><span>Yours</span></div>
-      <div style={{ display: "grid", gap: "12px" }}>
+      <div class="prows">
         {brief.sections.map((s) => <Row key={`${s.heading}#${occurrenceOf(brief.sections, s.index)}`} section={s} save={save} />)}
       </div>
-      <div class="bfoot">
+      <PlanStatus counts={brief.sections.length > 0 ? { approved: approved ? "Brief approved" : "Brief not approved yet", edited: brief.changed } : null}>
         <button class={`btn bapprove${approved ? " approved" : ""}`} aria-pressed={approved} onClick={() => save.status(approved ? "draft" : "approved")}>
           <Icon name="check" />
           {approved ? "Approved" : "Approve brief"}
         </button>
-      </div>
+      </PlanStatus>
     </div>
   );
 }

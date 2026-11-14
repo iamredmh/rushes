@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Page } from "@playwright/test";
-import { expect, test, cutButton, videoReady, reviewTab, openWorkspace, workspaceTab, currentFilm, pickFilm, activity, notesPanel, openActivity, panelTab, panelToggle, sendButton, takesList } from "./fixture.js";
+import { expect, test, cutButton, videoReady, reviewTab, openWorkspace, workspaceTab, currentFilm, pickFilm, activity, notesPanel, openActivity, panelTab, panelToggle, sendButton, takesList, openPlanPage } from "./fixture.js";
 
 // §27, 5.7: the Change Log is the notes panel's Activity tab. Choosing the tab opens it; choosing Notes puts it away.
 const logButton = (page: Page) => panelTab(page, "Activity");
@@ -355,8 +355,7 @@ test("Activity isn't modal, and stays open across Plan and Review: tabs and keys
   await page.goto(rushes.url);
   await videoReady(page);
   await logButton(page).click();
-  await openWorkspace(page, "Plan");
-  await page.getByRole("menuitem", { name: /Script/ }).click();
+  await openPlanPage(page, "Script");
   await expect(workspaceTab(page, "Plan")).toHaveAttribute("aria-selected", "true");
   await expect(activity(page)).toBeVisible();
   await page.keyboard.press("2");

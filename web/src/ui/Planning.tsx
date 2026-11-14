@@ -1,179 +1,179 @@
-// §24: Brief and Script live under one Planning tab. It is a tab with a menu: click it and the pages drop down,
-// so planning, which is not a daily habit, costs one tab and the review stages stay where they were. §27: the tab is
-// the desk's Plan workspace, its menu still the way to the three pages until they get a switch of their own.
-import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import type { PlanPage, Progress } from "../lib.js";
+// §24, §27: what the three Plan pages (Brief, Script, Storyboard) share. The switch at the top of the Plan workspace, the
+// field every editable text sits in, the "Edited by you" mark with the baseline struck through beneath it, and the status
+// line at each page's foot. One of each, used by all three pages.
+import type { ComponentChildren } from "preact";
+import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
+import type { PlanPage } from "../lib.js";
 import { Icon } from "./Icon.js";
 
-export interface PlanRow {
+/** Run `fn` once input has paused for `ms`; flush() runs it now. A pending run is flushed, not dropped, on unmount. */
+export function useDebounced(fn: () => void, ms: number) {
+  const timer = useRef<number | undefined>(undefined);
+  const latest = useRef(fn);
+  latest.current = fn;
+  useEffect(
+    () => () => {
+      if (timer.current === undefined) return;
+      clearTimeout(timer.current);
+      latest.current();
+    },
+    [],
+  );
+  return {
+    schedule() {
+      clearTimeout(timer.current);
+      timer.current = window.setTimeout(() => {
+        timer.current = undefined;
+        latest.current();
+      }, ms);
+    },
+    flush() {
+      if (timer.current === undefined) return;
+      clearTimeout(timer.current);
+      timer.current = undefined;
+      latest.current();
+    },
+  };
+}
+
+export interface PlanTabRow {
   page: PlanPage;
   name: string;
   icon: string;
+  /** The page has something in it; a page that doesn't is still listed, and opens its "nothing here yet" page. */
   unlocked: boolean;
-  /** A tick or a half mark while a plan is in progress; null when the row has no mark to show. */
-  progress: Progress | null;
-  /** What a locked row asks your agent for. */
+  /** What a locked page's tooltip asks your agent for. */
   ask: string;
-}
-
-export interface PlanningTabProps {
-  /** The planning page on screen, or null when another tab is. */
-  selected: PlanPage | null;
-  rows: PlanRow[];
-  /** While a plan is in progress the tab carries one mark per page; otherwise just a dot when something is open. */
-  marks: { brief: Progress; script: Progress; storyboard: Progress } | null;
+  /** Brief approved, every script line approved, or every shot approved. */
+  approved: boolean;
+  /** Edits on this page that have not been sent yet. */
   open: number;
-  /** Neither page has anything in it yet. */
-  locked: boolean;
-  /** Brief, script and storyboard are all approved: the menu then says so, with the prompt to build. */
-  ready: boolean;
-  /** §27, 5.3: brief, script and storyboard all approved, whether or not a cut exists: the tab carries a tick. */
-  approved?: boolean;
-  onCopyReady(): void;
-  onPick(page: PlanPage): void;
 }
 
-export function PlanningTab({ selected, rows, marks, open, locked, ready, approved = false, onCopyReady, onPick }: PlanningTabProps) {
-  const [shown, setShown] = useState(false);
-  const [active, setActive] = useState(0);
-  const [at, setAt] = useState({ left: 0, top: 0 });
-  const wrap = useRef<HTMLSpanElement>(null);
-  const button = useRef<HTMLButtonElement>(null);
-  const items = useRef<(HTMLButtonElement | null)[]>([]);
-
-  const show = () => {
-    const r = button.current?.getBoundingClientRect();
-    if (r) setAt({ left: Math.max(8, r.left), top: r.bottom });
-    setActive(Math.max(0, rows.findIndex((x) => x.page === selected)));
-    setShown(true);
+/**
+ * The Plan workspace's three-part switch. Left and right (and Home, End) move along it without opening anything, the way a
+ * tab list does; Enter or a click opens the page. The keys it handles stop here, so nothing behind it hears them.
+ */
+export function PlanSwitch({ rows, selected, onPick }: { rows: PlanTabRow[]; selected: PlanPage | null; onPick(page: PlanPage): void }) {
+  const tabs = useRef<(HTMLButtonElement | null)[]>([]);
+  const at = Math.max(0, rows.findIndex((r) => r.page === selected));
+  const onKey = (e: KeyboardEvent) => {
+    if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+    const from = tabs.current.findIndex((t) => t === document.activeElement);
+    if (from < 0) return;
+    const to = e.key === "ArrowRight" ? Math.min(rows.length - 1, from + 1) : e.key === "ArrowLeft" ? Math.max(0, from - 1) : e.key === "Home" ? 0 : e.key === "End" ? rows.length - 1 : -1;
+    if (to < 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    tabs.current[to]?.focus();
   };
-  const close = (focusButton: boolean) => {
-    setShown(false);
-    if (focusButton) button.current?.focus();
-  };
-  useLayoutEffect(() => {
-    if (shown) items.current[active]?.focus();
-  }, [shown, active]);
-  // A click or focus anywhere else closes the menu.
-  useEffect(() => {
-    if (!shown) return;
-    const away = (e: Event) => {
-      if (!wrap.current?.contains(e.target as Node)) close(false);
-    };
-    document.addEventListener("pointerdown", away, true);
-    document.addEventListener("focusin", away, true);
-    return () => {
-      document.removeEventListener("pointerdown", away, true);
-      document.removeEventListener("focusin", away, true);
-    };
-  }, [shown]);
-
-  // The keys the menu handles stop here, so the digits and arrows don't also switch tabs or step frames behind it.
-  const onMenuKey = (e: KeyboardEvent) => {
-    if (e.key === "Tab") return close(false);
-    if (e.metaKey || e.ctrlKey || e.altKey) return;
-    // The menu is a column: left and right do nothing here, and must not reach Picture and step a frame behind it.
-    if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-      e.preventDefault();
-      e.stopPropagation();
-      return;
-    }
-    const move = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : e.key === "Home" ? -rows.length : e.key === "End" ? rows.length : 0;
-    if (move !== 0) {
-      e.preventDefault();
-      e.stopPropagation();
-      setActive((a) => Math.min(rows.length - 1, Math.max(0, a + move)));
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      e.stopPropagation();
-      close(true);
-    } else if (e.key.length === 1) {
-      // Printable keys stay in the menu: a digit doesn't switch tabs, and ? doesn't open the shortcuts, behind it.
-      e.stopPropagation();
-    }
-  };
-
-  const dot = (p: Progress) => <i class={`pm ${p}`} />;
   return (
-    <span class="plan" ref={wrap}>
-      <button
-        ref={button}
-        class="tab"
-        role="tab"
-        aria-selected={selected !== null}
-        aria-haspopup="menu"
-        aria-expanded={shown}
-        data-locked={locked ? "true" : undefined}
-        onClick={() => (shown ? close(false) : show())}
-        onKeyDown={(e) => {
-          if (e.key === "ArrowDown" && !shown) {
-            e.preventDefault();
-            show();
-          }
-        }}
-      >
-        <Icon name="list" />
-        Plan
-        {marks ? (
-          <span class="pmarks" title={ready ? "Ready to build" : "Brief, script and storyboard"}>
-            {ready ? <Icon name="check" class="pready" /> : <>{dot(marks.brief)}{dot(marks.script)}{dot(marks.storyboard)}</>}
-          </span>
-        ) : locked ? (
-          <Icon name="lock" class="lk" />
-        ) : (
-          <>
-            {approved && <Icon name="check" class="pready" />}
-            {open > 0 && <span class="dot" title={`${open} open`} />}
-          </>
-        )}
-        <Icon name="chev" class="chev" />
-      </button>
-      {shown && (
-        <div class="planmenu" role="menu" aria-label="Planning" style={{ left: `${at.left}px`, top: `${at.top}px` }} onKeyDown={onMenuKey}>
-          {rows.map((r, i) => (
-            <button
-              key={r.page}
-              ref={(el) => {
-                items.current[i] = el;
-              }}
-              role="menuitem"
-              class={`planitem${r.page === selected ? " cur" : ""}`}
-              data-locked={r.unlocked ? undefined : "true"}
-              tabIndex={i === active ? 0 : -1}
-              data-tip={r.unlocked ? undefined : `Locked: ask your agent for ${r.ask}`}
-              onClick={() => {
-                // Focus goes back to the Planning tab, not to nowhere, so the keyboard carries on from where it was.
-                close(true);
-                onPick(r.page);
-              }}
-            >
-              <Icon name={r.icon} />
-              <span>{r.name}</span>
-              {r.unlocked ? r.progress === null ? null : r.progress === "ok" ? <Icon name="check" class="pi" /> : <i class={`pm ${r.progress}`} /> : <Icon name="lock" class="lk" />}
-            </button>
-          ))}
-          {ready && (
-            <div class="planready">
-              <div class="rd">
-                <Icon name="check" />
-                Ready to build
-              </div>
-              <button
-                role="menuitem"
-                class="btn"
-                tabIndex={-1}
-                onClick={() => {
-                  close(false);
-                  onCopyReady();
-                }}
-              >
-                <Icon name="copy" />
-                Copy prompt for your agent
-              </button>
-            </div>
+    <nav class="rtabs ptabs" role="tablist" aria-label="Plan" onKeyDown={onKey}>
+      {rows.map((r, i) => (
+        <button
+          key={r.page}
+          ref={(el) => {
+            tabs.current[i] = el;
+          }}
+          type="button"
+          class="tab"
+          role="tab"
+          aria-selected={selected === r.page}
+          tabIndex={i === at ? 0 : -1}
+          data-locked={r.unlocked ? undefined : "true"}
+          data-tip={r.unlocked ? undefined : `Locked: ask your agent for ${r.ask}`}
+          onClick={() => onPick(r.page)}
+        >
+          <Icon name={r.icon} />
+          {r.name}
+          {r.unlocked ? (
+            <>
+              {r.approved && (
+                <>
+                  <Icon name="check" class="pready" />
+                  <span class="vh"> Approved</span>
+                </>
+              )}
+              {r.open > 0 && <span class="dot" title={`${r.open} not sent`} />}
+            </>
+          ) : (
+            <>
+              <Icon name="lock" class="lk" />
+              {/* Visually hidden, not aria-hidden: an enabled, clickable tab is announced as locked. */}
+              <span class="vh"> Locked</span>
+            </>
           )}
-        </div>
-      )}
-    </span>
+        </button>
+      ))}
+    </nav>
   );
 }
+
+/** A text you can edit on a Plan page: a field with a visible edge at rest, that grows with its text and never hides any. */
+export function PlanField({ value, label, onInput, onBlur }: { value: string; label: string; onInput(text: string): void; onBlur(): void }) {
+  const area = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const el = area.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight + 2}px`;
+  }, [value]);
+  return (
+    <textarea
+      ref={area}
+      class="input pfield"
+      rows={1}
+      aria-label={label}
+      value={value}
+      onInput={(e) => onInput((e.target as HTMLTextAreaElement).value)}
+      onBlur={onBlur}
+    />
+  );
+}
+
+/** One wording an edit replaced, shown struck through: the text, and what it is when the row has more than one ("Direction"). */
+export interface Baseline {
+  label?: string;
+  text: string;
+}
+
+/** Under a row whose wording differs from its baseline: "Edited by you", the baseline struck through, and the way back to it. */
+export function EditedMark({ baseline, revertLabel, onRevert }: { baseline: Baseline[]; revertLabel: string; onRevert(): void }) {
+  return (
+    <div class="edited">
+      <div class="ehead">
+        <span class="etag">Edited by you</span>
+        <button class="btn ghost ib" data-tip={revertLabel} aria-label={revertLabel} onClick={onRevert}>
+          <Icon name="undo" />
+        </button>
+      </div>
+      {baseline.map((b) => (
+        <p key={b.label ?? "text"} class="was">
+          {b.label && <span class="wl">{b.label}: </span>}
+          <del>{b.text || "(none)"}</del>
+        </p>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The line at a page's foot that counts what is approved and what is edited ("1 of 3 lines approved · 2 edited"), with the
+ * page's own action beside it. `counts` is null while the page has nothing to count yet.
+ */
+export function PlanStatus({ counts, children }: { counts: { approved: string; edited: number } | null; children?: ComponentChildren }) {
+  if (!counts && !children) return null;
+  return (
+    <div class="pfoot">
+      {counts && (
+        <p class="pstatus">
+          {counts.approved} · {counts.edited} edited
+        </p>
+      )}
+      {children}
+    </div>
+  );
+}
+
+/** "1 of 3 lines approved": how many of a page's items are approved, in words. */
+export const approvedOf = (approved: number, total: number, noun: string): string => `${approved} of ${total} ${noun}${total === 1 ? "" : "s"} approved`;

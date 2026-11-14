@@ -449,9 +449,47 @@ export async function videoReady(page: Page): Promise<void> {
 export type WorkspaceName = "Plan" | "Review" | "Visuals" | "Assets";
 export type ReviewTabName = "Timeline" | "Voice" | "Music" | "Effects";
 
-/** A workspace's tab in the top bar (Plan's opens the planning pages' menu). */
+/** A workspace's tab in the top bar (Plan's opens the Plan page last used). */
 export function workspaceTab(page: Page, name: WorkspaceName): Locator {
   return page.getByRole("tablist", { name: "Workspaces" }).getByRole("tab", { name: new RegExp(`^${name}`) });
+}
+
+export type PlanPageName = "Brief" | "Script" | "Storyboard";
+
+/** The three-part switch at the top of the Plan workspace: Brief, Script, Storyboard. */
+export function planSwitch(page: Page): Locator {
+  return page.getByRole("tablist", { name: "Plan" });
+}
+
+/** One page's tab on the Plan switch; it carries "Approved" when that page is approved. */
+export function planTab(page: Page, name: PlanPageName): Locator {
+  return planSwitch(page).getByRole("tab", { name: new RegExp(`^${name}`) });
+}
+
+/** Opens a Plan page the way a person would: the Plan workspace first when another is up, then the page on the switch. */
+export async function openPlanPage(page: Page, name: PlanPageName): Promise<void> {
+  const plan = workspaceTab(page, "Plan");
+  await expect(plan).toBeVisible();
+  if ((await plan.getAttribute("aria-selected")) !== "true") await openWorkspace(page, "Plan");
+  const tab = planTab(page, name);
+  await tab.click();
+  await expect(tab).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
+}
+
+/** A Plan page's row (a brief section, a script line or a storyboard shot) is marked "Edited by you" when your wording differs from its baseline. */
+export function editedMark(row: Locator): Locator {
+  return row.locator(".edited");
+}
+
+/** The baseline wording struck through beneath an edited row: the agent's version, which Revert goes back to. */
+export function baselineText(row: Locator): Locator {
+  return editedMark(row).locator("del");
+}
+
+/** The line at the foot of a Plan page that counts what is approved and what is edited. */
+export function planStatus(page: Page): Locator {
+  return page.locator(".pstatus");
 }
 
 /** One of Review's tabs: the timeline and each sound. They show while Review is the workspace. */
@@ -459,11 +497,11 @@ export function reviewTab(page: Page, name: ReviewTabName): Locator {
   return page.getByRole("tablist", { name: "Review" }).getByRole("tab", { name: new RegExp(`^${name}`) });
 }
 
-/** Opens a workspace the way a person would. Plan's tab opens the menu of planning pages and leaves it open. */
+/** Opens a workspace the way a person would (Plan opens on the Plan page last used). */
 export async function openWorkspace(page: Page, name: WorkspaceName): Promise<void> {
   const tab = workspaceTab(page, name);
   await tab.click();
-  if (name !== "Plan") await expect(tab).toHaveAttribute("aria-selected", "true");
+  await expect(tab).toHaveAttribute("aria-selected", "true");
 }
 
 /**
