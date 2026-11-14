@@ -1,34 +1,38 @@
-// Music (§17.3) and Sound effects (§17.4): one lane per variant of the stage's lanes. Clicking a
-// lane auditions it at the playhead; Use sets the pick. Music adds Blind; Sound effects labels
-// each pass's cues and lists them in the On menu.
+// Music (§17.3) and Effects (§17.4; §27, 5.8): every bed or pass for this film, as the tab's takes list shows them. A
+// note is on a whole bed or pass, a point, a range with its marks, or (Effects) one of a pass's cues at its time. Music
+// has Blind; an effects pass labels its cues on its block and opens its layers by sound (§23).
 import { useState } from "preact/hooks";
-import { api } from "../api.js";
-import { assetRev, type Clip } from "../audio/timeline.js";
-import { blindOrder, defaultVersion, filmLanes, filmNotes, filmPicks, otherLanes, STAGE_NAMES, takeInUse, type VariantRow, variantEngineLane, variantNoteRow, variantOnLabel, variantOnOptions, variantRows } from "../lib.js";
+import { takeGroups, type TakeRow } from "../desk.js";
+import { agentPrompt, AUDIO_CHIPS, defaultVersion, filmLanes, filmNotes, filmPicks, otherLanes, variantNoteRow, variantOnLabel, variantOnOptions, variantRows } from "../lib.js";
 import type { Asset, State, Video } from "../types.js";
-import { AudioStage, type Preview } from "./AudioStage.js";
-import { filmsControl, looseRows } from "./FilmsMenu.js";
+import { AudioStage, filmsOf, type Preview, takeList } from "./AudioStage.js";
+import { filmsControl } from "./FilmsMenu.js";
 import { Icon } from "./Icon.js";
-import type { StageRow } from "./Lanes.js";
 
-// The lanes' colours are tokens, so they follow light and dark; the waveform resolves them as it draws.
-const COLOR = { music: "var(--music)", sfx: "var(--sfx)" } as const;
-
-// Blind holds for the session: its shuffle is fixed at page load, and the switch survives a trip
-// to another tab.
+// Blind holds for the session: its shuffle is fixed at page load, and the switch survives a trip to another tab.
 const BLIND_SEED = Math.floor(Math.random() * 2 ** 31);
 let blindSession = false;
 
-// §23: which passes have their layers open, by row key, for the session (like Voiceover's open
-// rounds). Toggling re-renders this tab, so AudioStage re-renders and its layout effect hands the
-// layers' playheads to paint() with the lane's own.
+// §23: which passes have their layers open, by take key, for the session.
 const openLayers = new Set<string>();
+
+const NAMES = { music: { title: "Music", one: "bed", many: "beds", none: "No music beds for this film yet." }, sfx: { title: "Effects", one: "pass", many: "passes", none: "No sound effects passes for this film yet." } } as const;
+
+/** Blind listening: the names (and descriptions) are hidden while it is on. */
+export function BlindButton({ on, onToggle }: { on: boolean; onToggle(): void }) {
+  return (
+    <button type="button" class="btn ghost sm kblind" aria-label="Blind" aria-pressed={on} data-tip={on ? "Show the names" : "Hide the names while you listen"} onClick={onToggle}>
+      <Icon name="eyeoff" />
+      Blind
+    </button>
+  );
+}
 
 export interface VariantTabProps {
   stage: "music" | "sfx";
   state: State;
   assets: Asset[];
-  /** The film whose cut the preview plays. */
+  /** The film whose cut the monitor shows. */
   video: Video | null;
   toast(message: string): void;
   onChanged(): void;
@@ -43,98 +47,55 @@ export function VariantTab({ stage, state, assets, video, toast, onChanged, onPe
     setBlindState(on);
   };
   const [, rerender] = useState(0);
-  const toggleLayers = (key: string) => {
-    if (openLayers.has(key)) openLayers.delete(key);
-    else openLayers.add(key);
-    rerender((n) => n + 1);
-  };
+  const words = NAMES[stage];
 
-  // Only this film's beds or passes; the rest wait, folded, under "Not on this film".
   const filmCount = state.project.videos.length;
-  const all = variantRows(filmLanes(state.project.lanes, video?.id, filmCount), stage);
-  const loose = video ? variantRows(otherLanes(state.project.lanes, video.id, filmCount), stage) : [];
-  const films = (r: VariantRow) => (filmCount > 1 ? filmsControl(r, state.project.videos, video, toast, onChanged) : undefined);
-  const order = blind ? blindOrder(all.map((r) => r.key), BLIND_SEED) : all.map((r) => r.key);
-  const rows = order.map((k) => all.find((r) => r.key === k)!);
-  const nameOf = (r: VariantRow) => (blind ? `Bed ${order.indexOf(r.key) + 1}` : r.name);
+  const lanes = filmLanes(state.project.lanes, video?.id, filmCount);
   const filmState = filmPicks(state.picks, video?.id);
-  const picks = filmState.lanes;
-
-  // null clears the lane's pick (Unpick).
-  const use = async (r: VariantRow, variant: string | null) => {
-    try {
-      await api.put("/api/picks", { video: video?.id, lanes: { [r.lane]: variant } });
-    } catch (e) {
-      toast(`Couldn't ${variant === null ? "clear" : "set"} the pick: ${(e as Error).message}`);
-    }
-    onChanged();
-  };
-
-  const stageRows: StageRow[] = rows.map((r) => {
-    const asset = assets.find((a) => a.path === r.file);
-    const engineLane = variantEngineLane(stage);
-    const clip: Clip = { id: r.key, lane: engineLane, path: r.file, offset: 0, duration: 0, rev: asset ? assetRev(asset) : undefined };
-    // One bed or pass is in use for the film (§27.6); a lane's own pick that isn't it reads as Use.
-    const picked = takeInUse(filmState.use, stage, r);
-    return {
-      key: r.key,
-      name: nameOf(r),
-      meta: blind ? "·····" : r.meta,
-      color: COLOR[stage],
-      clips: [clip],
-      cues: stage === "sfx" ? r.cues : undefined,
-      layers: stage === "sfx" ? { open: openLayers.has(r.key), onToggle: () => toggleLayers(r.key) } : undefined,
-      audition: { lane: engineLane, clip: r.key },
-      picked,
-      // Manifest order: with nothing picked or selected, the first bed plays, Blind or not.
-      order: all.indexOf(r),
-      use: { inUse: picked, onUse: () => void use(r, r.variant), onUnpick: () => void use(r, null) },
-      films: films(r),
-      on: `v:${r.key}`,
-    };
+  const films = (r: { lane: string; variant: string; films: string[] }) => (filmCount > 1 ? filmsControl(r, state.project.videos, video, toast, onChanged) : undefined);
+  const list = takeList({
+    stage,
+    groups: takeGroups(lanes, stage, filmState.use?.[stage], video ?? undefined),
+    assets,
+    blind: blind ? { seed: BLIND_SEED, word: "Bed" } : null,
+    films: (t: TakeRow) => films(filmsOf(t)),
   });
-  stageRows.push(
-    ...looseRows(stage, loose, (r) => ({
-      key: `loose/${r.key}`,
-      name: r.name,
-      meta: r.meta,
-      color: COLOR[stage],
-      clips: [],
-      films: films(r),
-    }), () => rerender((n) => n + 1)),
-  );
+  const loose = video ? variantRows(otherLanes(state.project.lanes, video.id, filmCount), stage) : [];
 
-  const options = variantOnOptions(rows, nameOf, stage === "sfx");
-  const notes = filmNotes(state.notes.notes, stage, video?.id);
+  // What a note is on, and its words: a bed or pass, or a pass's cue ("Cue · Swipe", with the pass's name when two share it).
+  const rows = variantRows(lanes, stage);
+  const options = variantOnOptions(rows, (r) => list.nameOf(r.key) ?? r.name, stage === "sfx");
   const cut = defaultVersion(video ?? undefined);
-  const preview: Preview | null = video && cut ? { video: video.id, version: cut.id, file: cut.file, duration: cut.duration } : null;
-  // ←/→ step one frame of the project's rate (§17.1).
-  const fps = state.project.fps || 30;
+  const preview: Preview | null = video && cut ? { video: video.id, version: cut, locked: video.lockedVersion === cut.id } : null;
 
   return (
     <AudioStage
       stage={stage}
+      title={words.title}
       film={video?.id ?? null}
       readOnly={!!video?.shelved}
-      title={STAGE_NAMES[stage]}
-      headerExtra={stage === "music" && (
-        <button
-          class="btn ghost ib"
-          aria-label="Blind"
-          aria-pressed={blind}
-          data-tip={blind ? "Show names" : "Blind: hide names"}
-          onClick={() => setBlind(!blind)}
-        >
-          <Icon name="eyeoff" />
-        </button>
-      )}
-      rows={stageRows}
+      list={list}
+      loose={{ items: loose.map((r) => ({ key: r.key, name: r.name, meta: r.meta, films: films(r), none: r.films.length === 0 })), what: loose.length === 1 ? words.one : words.many }}
+      headerExtra={stage === "music" ? <BlindButton on={blind} onToggle={() => setBlind(!blind)} /> : undefined}
       preview={preview}
-      fps={fps}
-      notes={notes}
-      onOptions={options}
+      prompt={agentPrompt("picture", state.project.name, video?.name ?? null)}
+      fps={state.project.fps || 30}
+      notes={filmNotes(state.notes.notes, stage, video?.id)}
       noteRow={(n) => variantNoteRow(rows, n.on)}
       onLabel={(n) => variantOnLabel(rows, options, n.on)}
+      targetName={(it, cue) => (cue === null ? it.name : options.find((o) => o.value === `c:${it.key}:${cue}`)?.label ?? it.name)}
+      hasRange
+      chipsFor={() => AUDIO_CHIPS[stage]}
+      wholeLabel={`The whole ${words.one}`}
+      none={words.none}
+      layers={stage === "sfx" ? {
+        open: (key) => openLayers.has(key),
+        toggle: (key) => {
+          if (openLayers.has(key)) openLayers.delete(key);
+          else openLayers.add(key);
+          rerender((n) => n + 1);
+        },
+      } : undefined}
       toast={toast}
       onChanged={onChanged}
       onPendingChange={onPendingChange}

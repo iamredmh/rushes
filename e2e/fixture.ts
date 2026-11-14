@@ -636,6 +636,69 @@ export function loudness(page: Page): Locator {
   return transport(page).getByRole("group", { name: "Loudness" });
 }
 
+/** The transport's Play (Pause while playing). */
+export function playButton(page: Page): Locator {
+  return transport(page).getByRole("button", { name: /^(Play|Pause) · Space$/ });
+}
+
+// ---- a sound's tab (§27, 5.8): Voice, Music and Effects list every take: new, in use, earlier, put away ----
+
+/** The takes list under the ruler and the Picture row: one radio group, a circle per take. */
+export function takesList(page: Page): Locator {
+  return page.locator(".takes");
+}
+
+/** The list's group headings, in order: "New · Round 3", "In use · Round 2", "Earlier · Round 1", "Put away · 2". */
+export function takeHeadings(page: Page): Locator {
+  return takesList(page).getByRole("heading");
+}
+
+/** One take's row (named as shown: Blind names it "Bed 1"): its circle, name, tag, Put away and its block. */
+export function takeRow(page: Page, name: string): Locator {
+  return takesList(page).getByRole("group", { name, exact: true });
+}
+
+/** Every take row in the list, in order. */
+export function takeRows(page: Page): Locator {
+  return takesList(page).locator(".take:not(.loose)");
+}
+
+/** A row's circle: a radio, checked on the take in use ("In use"), else "Use this one". */
+export function takeCircle(page: Page, name: string): Locator {
+  return takeRow(page, name).getByRole("radio");
+}
+
+/** A row's name: a click selects the take and auditions it. */
+export function takeName(page: Page, name: string): Locator {
+  return takeRow(page, name).getByRole("button", { name, exact: true });
+}
+
+/** The tag with the cut a take was made for ("v1"), amber (`.stale`) when the film has moved on. */
+export function takeTag(page: Page, name: string): Locator {
+  return takeRow(page, name).locator(".ktag");
+}
+
+/** A row's block: its waveform, its cues and its notes, under the shared time scale. A click there selects a point. */
+export function takeBlock(page: Page, name: string): Locator {
+  return takeRow(page, name).locator(".tlane");
+}
+
+/** A row's Put away, or Bring back on a put-away take. */
+export function putAwayButton(page: Page, name: string, kind: "Put away" | "Bring back" = "Put away"): Locator {
+  return takeRow(page, name).getByRole("button", { name: kind, exact: true });
+}
+
+/** Show / Hide on a folded group's line: "Put away" or "Not on this film". */
+export function foldToggle(page: Page, group: "Put away" | "Not on this film"): Locator {
+  return takesList(page).locator(`.kfold[data-fold="${group === "Put away" ? "away" : "loose"}"]`).getByRole("button");
+}
+
+/** Clicks a take's block `t` seconds in (on the list's time scale): the take is selected at that point, and the playhead goes there. */
+export async function clickTakeAt(page: Page, name: string, t: number, length: number): Promise<void> {
+  const r = (await takeBlock(page, name).boundingBox())!;
+  await page.mouse.click(r.x + (r.width * t) / length, r.y + r.height / 2);
+}
+
 // ---- the notes panel (§27, 5.7): Notes and Activity, the note box's target line, and Send ----
 
 /** The notes panel: the right-hand column of Review and Plan (a drawer under 1100 px). */
@@ -664,7 +727,15 @@ export function noteTargetLine(page: Page): Locator {
   return notesPanel(page).getByRole("group", { name: "Note target" });
 }
 
-/** The target line's menu, with nothing selected on the Timeline tab: "This frame" or "The whole mix". */
+/** The target line's words alone ("00:00:01:00 · Music · Pulse"), without its menu's options. */
+export function noteTargetLabel(page: Page): Locator {
+  return noteTargetLine(page).locator("[data-target]");
+}
+
+/**
+ * The target line's menu: with nothing selected on the Timeline tab, "This frame" or "The whole mix"; on a sound's tab,
+ * "This moment" (or "This cue") or the whole take ("The whole bed").
+ */
 export function noteTargetMenu(page: Page): Locator {
   return noteTargetLine(page).getByRole("combobox", { name: "Aim the note at" });
 }

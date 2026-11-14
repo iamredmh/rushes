@@ -5,7 +5,8 @@ import { readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { makeWav } from "./fixtures/wav.js";
 import {
-  expect, type Rushes, test, openReviewTab, reviewTab, workspaceTab, currentFilm, pickFilm, videoReady, loudness, rangeChip, notesPanel, panelToggle, noteTargetLine, noteTargetMenu, clearTarget, rulerMarkers, soundBlock, soundButton, soundTrack,
+  expect, type Rushes, test, openReviewTab, reviewTab, workspaceTab, currentFilm, pickFilm, videoReady, loudness, rangeChip, notesPanel, panelToggle, noteTargetLine, noteTargetLabel, noteTargetMenu, clearTarget, rulerMarkers, soundBlock, soundButton, soundTrack,
+  monitor, playButton, toolButton, takesList, takeHeadings, takeRow, takeRows, takeCircle, takeName, takeBlock, putAwayButton, foldToggle, clickTakeAt,
 } from "./fixture.js";
 
 test("the generated WAV fixture decodes in Chromium to the tone it describes", async ({ page }) => {
@@ -55,8 +56,8 @@ async function loaded(page: Page, n: number) {
 }
 
 /**
- * The computed `overflow` of an element and every ancestor up to (and including) its `.lane`: a
- * `[data-tip]` mark's tooltip (an `::after`) is clipped if any box between it and the lane hides
+ * The computed `overflow` of an element and every ancestor up to (and including) its take's row: a
+ * `[data-tip]` mark's tooltip (an `::after`) is clipped if any box between it and the row hides
  * overflow, so every link in the chain must stay `visible`.
  */
 function overflowChain(mark: ReturnType<Page["locator"]>) {
@@ -65,7 +66,7 @@ function overflowChain(mark: ReturnType<Page["locator"]>) {
     let node: HTMLElement | null = el as HTMLElement;
     while (node) {
       chain.push(getComputedStyle(node).overflow);
-      if (node.classList.contains("lane")) break;
+      if (node.classList.contains("take")) break;
       node = node.parentElement;
     }
     return chain;
@@ -78,29 +79,32 @@ async function twoBeds(page: Page, rushes: Rushes) {
   await rushes.addVariant("music", "B · Warm keys", { seconds: 4, freq: 330, meta: { description: "Soft keys, no drums" } });
   await page.goto(rushes.testUrl());
   await openReviewTab(page, "Music");
-  await expect(page.locator(".lane")).toHaveCount(2);
+  await expect(takeRows(page)).toHaveCount(2);
   await loaded(page, 2);
 }
 
-test("Music shows a card per bed, and Use persists the pick", async ({ page, rushes }) => {
+/** A take's row by its key ("<lane>/<variant>"), for the tests that name a take by the `on` its notes save. */
+const rowOf = (page: Page, key: string) => takesList(page).locator(`.take[data-take="${key}"]`);
+
+test("Music shows a row per bed, and its circle persists the pick", async ({ page, rushes }) => {
   await twoBeds(page, rushes);
-  const lanes = page.locator(".lane");
-  await expect(lanes.nth(0).locator("[data-name]")).toHaveText("A · Deep house");
-  await expect(lanes.nth(0).locator("[data-meta]")).toHaveText("120 BPM · A minor");
-  await expect(lanes.nth(1).locator("[data-name]")).toHaveText("B · Warm keys");
-  await expect(lanes.nth(1).locator("[data-meta]")).toHaveText("Soft keys, no drums");
-  const useB = page.getByRole("button", { name: "Use B · Warm keys" });
-  await expect(useB).toHaveAttribute("aria-pressed", "false");
-  await expect(useB).toHaveText("Use");
+  const rows = takeRows(page);
+  await expect(rows.nth(0).locator("[data-name]")).toHaveText("A · Deep house");
+  await expect(rows.nth(0).locator("[data-meta]")).toHaveText("120 BPM · A minor");
+  await expect(rows.nth(1).locator("[data-name]")).toHaveText("B · Warm keys");
+  await expect(rows.nth(1).locator("[data-meta]")).toHaveText("Soft keys, no drums");
+  const useB = takeCircle(page, "B · Warm keys");
+  await expect(useB).toHaveAttribute("aria-checked", "false");
+  await expect(useB).toHaveAccessibleName("Use this one");
   await useB.click();
-  await expect(useB).toHaveAttribute("aria-pressed", "true");
-  await expect(useB).toHaveText("In use");
+  await expect(useB).toHaveAttribute("aria-checked", "true");
+  await expect(useB).toHaveAccessibleName("In use");
   const picks = await rushes.api("GET", "/api/picks");
   expect(picks.lanes).toEqual({ music: "b-warm-keys" });
   // The picked bed is what plays when nothing's selected.
   expect((await inspect(page)).gains).toMatchObject({ "music/a-deep-house": 0, "music/b-warm-keys": 1 });
   await page.reload();
-  await expect(page.getByRole("button", { name: "Use B · Warm keys" })).toHaveAttribute("aria-pressed", "true");
+  await expect(takeCircle(page, "B · Warm keys")).toHaveAttribute("aria-checked", "true");
 });
 
 test("only one bed is in use at a time, across rounds, and the timeline plays that one (§27.6)", async ({ page, rushes }) => {
@@ -109,24 +113,24 @@ test("only one bed is in use at a time, across rounds, and the timeline plays th
   await rushes.addVariant("music", "Drift", { seconds: 4, freq: 330, round: "Round 2" });
   await page.goto(rushes.testUrl());
   await openReviewTab(page, "Music");
-  await expect(page.locator(".lane")).toHaveCount(2);
-  const pulse = page.getByRole("button", { name: "Use Pulse" });
-  const drift = page.getByRole("button", { name: "Use Drift" });
+  await expect(takeRows(page)).toHaveCount(2);
+  const pulse = takeCircle(page, "Pulse");
+  const drift = takeCircle(page, "Drift");
   await pulse.click();
-  await expect(pulse).toHaveText("In use");
+  await expect(pulse).toHaveAttribute("aria-checked", "true");
   await drift.click();
-  await expect(drift).toHaveText("In use");
+  await expect(drift).toHaveAttribute("aria-checked", "true");
   // Round 1 still remembers Pulse as its own pick, but one bed is in use for the film.
-  await expect(pulse).toHaveText("Use");
+  await expect(pulse).toHaveAttribute("aria-checked", "false");
   expect((await rushes.api("GET", "/api/picks?video=hero")).lanes).toEqual({ "round-1": "pulse", "round-2": "drift" });
   // The earlier bed can be brought back, though its round is not the newest.
   await pulse.click();
-  await expect(pulse).toHaveText("In use");
-  await expect(drift).toHaveText("Use");
+  await expect(pulse).toHaveAttribute("aria-checked", "true");
+  await expect(drift).toHaveAttribute("aria-checked", "false");
   expect((await rushes.api("GET", "/api/picks?video=hero")).use.music).toMatchObject({ lane: "round-1", variant: "pulse" });
   await page.reload();
   await openReviewTab(page, "Music");
-  await expect(page.getByRole("button", { name: "Use Pulse" })).toHaveText("In use");
+  await expect(takeCircle(page, "Pulse")).toHaveAttribute("aria-checked", "true");
   await openReviewTab(page, "Timeline");
   await expect(soundBlock(page, "Music")).toHaveText("Pulse");
   await expect(soundTrack(page, "Music")).not.toContainText("Drift");
@@ -136,29 +140,29 @@ test("only one bed is in use at a time, across rounds, and the timeline plays th
 // takes a note on a whole bed, a point on it and a range on it, keeps its In/Out buttons and its Range marks.
 test("Music takes notes on a whole bed, a point and a range, with In/Out and Range marks", async ({ page, rushes }) => {
   await twoBeds(page, rushes);
-  await page.getByRole("button", { name: "B · Warm keys", exact: true }).click();
-  await expect(noteTargetLine(page)).toHaveText("Music · B · Warm keys");
-  await clickLaneAt(page, "music/b-warm-keys", 1);
-  await expect(noteTargetLine(page)).toContainText(/^00:00:01:00 · Music · B · Warm keys/);
-  await expect(page.getByRole("button", { name: "Set in point" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Set out point" })).toBeVisible();
+  await takeName(page, "B · Warm keys").click();
+  await expect(noteTargetLabel(page)).toHaveText("Music · B · Warm keys");
+  await clickLaneAt(page, "B · Warm keys", 1);
+  await expect(noteTargetLabel(page)).toContainText(/^00:00:01:00 · Music · B · Warm keys/);
+  // In and Out: the Range tool, and I and O.
+  await expect(toolButton(page, "Range")).toBeVisible();
   await page.keyboard.press("i");
   for (let i = 0; i < 10; i++) await page.keyboard.press("ArrowRight");
   await page.keyboard.press("o");
-  await expect(noteTargetLine(page)).toContainText("–");
+  await expect(noteTargetLabel(page)).toContainText("–");
   await expect(page.getByRole("group", { name: "Marks" })).toBeVisible();
 });
 
 test("switching beds mid-play doesn't move the playhead", async ({ page, rushes }) => {
   await twoBeds(page, rushes);
-  await page.getByRole("button", { name: "A · Deep house", exact: true }).click();
-  await page.getByRole("button", { name: "Play" }).click();
+  await takeName(page, "A · Deep house").click();
+  await playButton(page).click();
   await expect.poll(async () => (await inspect(page)).time).toBeGreaterThan(0.5);
   const r = await page.evaluate(() => {
     const e = window.__rushesAudio!.engine!;
     const before = e.inspect();
     const p0 = performance.now();
-    (document.querySelector('.lane[data-row="music/b-warm-keys"] .nm') as HTMLButtonElement).click();
+    (document.querySelector('.take[data-take="music/b-warm-keys"] .knm') as HTMLButtonElement).click();
     const after = e.inspect();
     return { before, after, wall: (performance.now() - p0) / 1000 };
   });
@@ -170,23 +174,23 @@ test("switching beds mid-play doesn't move the playhead", async ({ page, rushes 
   expect(r.after.sources).toBe(2);
   expect(r.before.gains).toMatchObject({ "music/a-deep-house": 1, "music/b-warm-keys": 0 });
   expect(r.after.gains).toMatchObject({ "music/a-deep-house": 0, "music/b-warm-keys": 1 });
-  await expect(page.locator('.lane[data-row="music/b-warm-keys"]')).toHaveAttribute("aria-current", "true");
+  await expect(rowOf(page, "music/b-warm-keys")).toHaveAttribute("aria-current", "true");
   // Auditioning doesn't change the pick.
   expect((await rushes.api("GET", "/api/picks")).lanes).toEqual({});
-  // The note's target follows the lane you clicked.
-  await expect(noteTargetLine(page)).toHaveText("Music · B · Warm keys");
+  // The note's target follows the bed you clicked: at the playhead, which has moved on.
+  await expect(noteTargetLabel(page)).toHaveText(/^00:00:\d\d:\d\d · Music · B · Warm keys$/);
 });
 
-test("a range note with Fall and Quieter 3 dB saves its marks and draws on its lane", async ({ page, rushes }) => {
+test("a range note with Fall and Quieter 3 dB saves its marks and draws on its take", async ({ page, rushes }) => {
   await twoBeds(page, rushes);
-  await page.getByRole("button", { name: "B · Warm keys", exact: true }).click();
+  await takeName(page, "B · Warm keys").click();
   for (let i = 0; i < 15; i++) await page.keyboard.press("ArrowRight");
   await page.keyboard.press("i");
   for (let i = 0; i < 30; i++) await page.keyboard.press("ArrowRight");
   await page.keyboard.press("o");
-  await expect(page.locator(".bar .chipx")).toContainText("0:00.50–0:01.50");
-  await expect(noteTargetLine(page)).toContainText("– ");
-  await expect(noteTargetLine(page)).toContainText("Music · B · Warm keys");
+  await expect(rangeChip(page)).toContainText("0:00.50–0:01.50");
+  await expect(noteTargetLabel(page)).toContainText("– ");
+  await expect(noteTargetLabel(page)).toContainText("Music · B · Warm keys");
   const marks = page.getByRole("group", { name: "Marks" });
   await marks.getByRole("button", { name: "Fall" }).click();
   await marks.getByRole("button", { name: "Quieter" }).click();
@@ -204,17 +208,17 @@ test("a range note with Fall and Quieter 3 dB saves its marks and draws on its l
   expect(notes[0]).toMatchObject({ stage: "music", on: "music/b-warm-keys", scope: "range", t: 0.5, tOut: 1.5, marks: [{ kind: "fall" }, { kind: "quieter", db: 3 }] });
   await expect(page.locator(".note .nmarks")).toHaveText("Fall · Quieter 3 dB");
   await expect(page.locator(".note .on")).toHaveText("B · Warm keys");
-  await expect(page.locator(`.lane[data-row="music/b-warm-keys"] .span[data-note="${notes[0].id}"]`)).toHaveCount(1);
-  await expect(page.locator(`.lane[data-row="music/a-deep-house"] [data-note]`)).toHaveCount(0);
-  // The range is used up: the composer is back to the bed, whole, with no marks showing.
+  await expect(rowOf(page, "music/b-warm-keys").locator(`.span[data-note="${notes[0].id}"]`)).toHaveCount(1);
+  await expect(rowOf(page, "music/a-deep-house").locator("[data-note]")).toHaveCount(0);
+  // The range is used up: the composer is back on the bed (at the playhead, a point), with no marks showing.
   await expect(page.getByRole("group", { name: "Marks" })).toHaveCount(0);
-  await expect(noteTargetLine(page)).toHaveText("Music · B · Warm keys");
+  await expect(noteTargetLabel(page)).toHaveText("00:00:01:15 · Music · B · Warm keys");
 });
 
 test("a whole note sends no time and is listed but not drawn", async ({ page, rushes }) => {
   await twoBeds(page, rushes);
   // Nothing clicked: the note is on the first bed, whole.
-  await expect(noteTargetLine(page)).toHaveText("Music · A · Deep house");
+  await expect(noteTargetLabel(page)).toHaveText("Music · A · Deep house");
   await page.getByRole("button", { name: "Tempo" }).click();
   await expect(page.getByRole("textbox", { name: "New note" })).toHaveValue("Tempo: ");
   await page.keyboard.type("110 BPM, keep the bassline.");
@@ -222,7 +226,7 @@ test("a whole note sends no time and is listed but not drawn", async ({ page, ru
   await expect(page.locator(".note .t")).toHaveText("Whole");
   const { notes } = await rushes.api("GET", "/api/notes?stage=music");
   expect(notes[0]).toMatchObject({ scope: "whole", t: null, tOut: null, on: "music/a-deep-house", text: "Tempo: 110 BPM, keep the bassline.", marks: [] });
-  await expect(page.locator(".lane [data-note]")).toHaveCount(0);
+  await expect(takesList(page).locator("[data-note]")).toHaveCount(0);
 });
 
 test("Blind hides the names and reveals them again", async ({ page, rushes }) => {
@@ -230,14 +234,14 @@ test("Blind hides the names and reveals them again", async ({ page, rushes }) =>
   const blind = page.getByRole("button", { name: "Blind" });
   await blind.click();
   await expect(blind).toHaveAttribute("aria-pressed", "true");
-  await expect(page.locator(".lane [data-name]")).toHaveText(["Bed 1", "Bed 2"]);
-  await expect(page.locator(".astage")).not.toContainText("Deep house");
-  await expect(page.locator(".astage")).not.toContainText("Warm keys");
-  await expect(page.locator(".astage")).not.toContainText("120 BPM");
+  await expect(takeRows(page).locator("[data-name]")).toHaveText(["Bed 1", "Bed 2"]);
+  await expect(page.locator(".split")).not.toContainText("Deep house");
+  await expect(page.locator(".split")).not.toContainText("Warm keys");
+  await expect(page.locator(".split")).not.toContainText("120 BPM");
   await blind.click();
   await expect(blind).toHaveAttribute("aria-pressed", "false");
-  await expect(page.locator(".lane [data-name]")).toHaveText(["A · Deep house", "B · Warm keys"]);
-  await expect(page.locator(".lane").nth(0).locator("[data-meta]")).toHaveText("120 BPM · A minor");
+  await expect(takeRows(page).locator("[data-name]")).toHaveText(["A · Deep house", "B · Warm keys"]);
+  await expect(takeRows(page).nth(0).locator("[data-meta]")).toHaveText("120 BPM · A minor");
 });
 
 test("cue labels close together never overlap, even in a narrow window", async ({ page, rushes }) => {
@@ -246,7 +250,7 @@ test("cue labels close together never overlap, even in a narrow window", async (
   await page.goto(rushes.testUrl());
   await openReviewTab(page, "Effects");
   await loaded(page, 1);
-  const cues = page.locator('.lane[data-row="sfx/pass-a"] .cue');
+  const cues = takeRow(page, "Pass A").locator(".cue");
   await expect(cues).toHaveText(["Callout", "Composer", "Order", "Menu"]);
   const boxes = await cues.evaluateAll((els) => els.map((e) => e.getBoundingClientRect()).map((r) => ({ l: r.left, r: r.right })));
   for (let i = 1; i < boxes.length; i++) expect(boxes[i].l).toBeGreaterThanOrEqual(boxes[i - 1].r);
@@ -260,13 +264,13 @@ test("Sound effects labels cues, and a note on a cue saves the cue and its time"
   await rushes.addVariant("sfx", "Pass B", { seconds: 3, freq: 660 });
   await page.goto(rushes.testUrl());
   await openReviewTab(page, "Effects");
-  await expect(page.locator(".lane")).toHaveCount(2);
+  await expect(takeRows(page)).toHaveCount(2);
   await loaded(page, 2);
-  await expect(page.locator('.lane[data-row="sfx/pass-a"] .cue')).toHaveText(["Whoosh", "Swipe"]);
-  await expect(page.locator('.lane[data-row="sfx/pass-a"] [data-meta]')).toHaveText("Subtle · 2 cues");
+  await expect(rowOf(page, "sfx/pass-a").locator(".cue")).toHaveText(["Whoosh", "Swipe"]);
+  await expect(rowOf(page, "sfx/pass-a").locator("[data-meta]")).toHaveText("Subtle · 2 cues");
   // A cue's label aims the note at that cue, at its time.
-  await page.locator('.lane[data-row="sfx/pass-a"] .cue', { hasText: "Swipe" }).click();
-  await expect(noteTargetLine(page)).toHaveText(/^00:00:01:\d\d · Effects · Cue · Swipe$/);
+  await rowOf(page, "sfx/pass-a").locator(".cue", { hasText: "Swipe" }).click();
+  await expect(noteTargetLabel(page)).toHaveText(/^00:00:01:\d\d · Effects · Cue · Swipe$/);
   await page.keyboard.press("n");
   await page.keyboard.type("Lands three frames late.");
   await page.keyboard.press("Enter");
@@ -274,10 +278,10 @@ test("Sound effects labels cues, and a note on a cue saves the cue and its time"
   const { notes } = await rushes.api("GET", "/api/notes?stage=sfx");
   // §17.4: a cue note names its lane and pass, `<lane id>/<pass id>:<cue id>`.
   expect(notes[0]).toMatchObject({ stage: "sfx", on: "sfx/pass-a:swipe", scope: "point", t: 1.5, tOut: null });
-  await expect(page.locator(`.lane[data-row="sfx/pass-a"] .mk[data-note="${notes[0].id}"]`)).toHaveCount(1);
-  // Use works as on Music.
-  await page.getByRole("button", { name: "Use Pass B" }).click();
-  await expect(page.getByRole("button", { name: "Use Pass B" })).toHaveAttribute("aria-pressed", "true");
+  await expect(rowOf(page, "sfx/pass-a").locator(`.mk[data-note="${notes[0].id}"]`)).toHaveCount(1);
+  // The circle picks, as on Music.
+  await takeCircle(page, "Pass B").click();
+  await expect(takeCircle(page, "Pass B")).toHaveAttribute("aria-checked", "true");
   expect((await rushes.api("GET", "/api/picks")).lanes).toEqual({ sfx: "pass-b" });
 });
 
@@ -287,7 +291,7 @@ test("the preview follows the audio clock", async ({ page, rushes }) => {
   await page.goto(rushes.testUrl());
   await openReviewTab(page, "Music");
   await loaded(page, 1);
-  const pv = page.locator(".pv video");
+  const pv = monitor(page).locator("video");
   await expect.poll(() => pv.evaluate((v: HTMLVideoElement) => v.readyState)).toBeGreaterThanOrEqual(1);
   expect(await pv.evaluate((v: HTMLVideoElement) => v.muted)).toBe(true);
   await page.evaluate(() => window.__rushesAudio!.engine!.seek(2));
@@ -295,12 +299,16 @@ test("the preview follows the audio clock", async ({ page, rushes }) => {
   await expect(page.getByLabel("Timecode")).toContainText("0:02.00");
 });
 
-test("with no cut the preview is a quiet empty frame", async ({ page, rushes }) => {
+test("with no cut the monitor shows the no-cut slate, and the takes still play with the engine as the clock", async ({ page, rushes }) => {
   await rushes.addVariant("music", "Bed", { seconds: 2, freq: 220 });
   await page.goto(rushes.testUrl());
   await openReviewTab(page, "Music");
-  await expect(page.locator(".pv .pvempty")).toBeVisible();
-  await expect(page.locator(".pv video")).toHaveCount(0);
+  await expect(monitor(page).getByLabel("No cut yet")).toBeVisible();
+  await expect(monitor(page).getByRole("button", { name: "Copy prompt for your agent" })).toBeVisible();
+  await expect(monitor(page).locator("video")).toHaveCount(0);
+  await loaded(page, 1);
+  await page.keyboard.press(" ");
+  await expect.poll(async () => (await inspect(page)).time).toBeGreaterThan(0.2);
 });
 
 test("leaving the tab stops playback, and coming back doesn't double the sources", async ({ page, rushes }) => {
@@ -366,16 +374,15 @@ test("a file over the stream threshold plays through the streamed fallback", asy
   await openReviewTab(page, "Music");
   await loaded(page, 2);
   expect((await inspect(page)).streamed.length).toBe(2);
-  const streamedMark = page.locator(".lane .smk").first();
+  const streamedMark = takesList(page).locator(".smk").first();
   await expect(streamedMark).toHaveAttribute("data-tip", /switching isn't sample-exact/);
-  // The Task 3 lane-mark tooltip sits in the meta line, which used to clip it with overflow:
-  // hidden (fixed by the same route as the Voiceover stale/missing marks below).
+  // The long-file mark's tooltip sits in the take's meta line on its block, which must not clip it.
   const streamedChain = await overflowChain(streamedMark);
   expect(streamedChain.length).toBeGreaterThan(1);
   expect(streamedChain.every((o) => o === "visible")).toBe(true);
   await page.keyboard.press(" ");
   await expect.poll(async () => (await inspect(page)).time, { timeout: 5000 }).toBeGreaterThan(0.6);
-  await page.getByRole("button", { name: "B · Long", exact: true }).click();
+  await takeName(page, "B · Long").click();
   const s = await inspect(page);
   expect(s.playing).toBe(true);
   expect(s.gains).toMatchObject({ "music/a-long": 0, "music/b-long": 1 });
@@ -387,7 +394,7 @@ test("the engine is never exposed without ?test=1", async ({ page, rushes }) => 
   await rushes.addVariant("music", "Bed", { seconds: 2, freq: 220 });
   await page.goto(rushes.url);
   await openReviewTab(page, "Music");
-  await expect(page.locator(".lane")).toHaveCount(1);
+  await expect(takeRows(page)).toHaveCount(1);
   expect(await page.evaluate(() => "__rushesAudio" in window)).toBe(false);
 });
 
@@ -401,9 +408,9 @@ test("a note on a cue two passes share names its pass, and an old bare cue id st
   await page.goto(rushes.testUrl());
   await openReviewTab(page, "Effects");
   await loaded(page, 2);
-  await expect(page.locator(`.lane[data-row="sfx/pass-a"] .mk[data-note="${old.id}"]`)).toHaveCount(1);
-  await page.locator('.lane[data-row="sfx/pass-b"] .cue', { hasText: "Swipe" }).click();
-  await expect(noteTargetLine(page)).toContainText("Effects · Cue · Swipe · Pass B");
+  await expect(rowOf(page, "sfx/pass-a").locator(`.mk[data-note="${old.id}"]`)).toHaveCount(1);
+  await rowOf(page, "sfx/pass-b").locator(".cue", { hasText: "Swipe" }).click();
+  await expect(noteTargetLabel(page)).toContainText("Effects · Cue · Swipe · Pass B");
   await page.keyboard.press("n");
   await page.keyboard.type("Too bright on B.");
   await page.keyboard.press("Enter");
@@ -411,8 +418,8 @@ test("a note on a cue two passes share names its pass, and an old bare cue id st
   const { notes } = await rushes.api("GET", "/api/notes?stage=sfx");
   const added = notes.find((n: { text: string }) => n.text === "Too bright on B.");
   expect(added).toMatchObject({ on: "sfx/pass-b:swipe", scope: "point", t: 2.2 });
-  await expect(page.locator(`.lane[data-row="sfx/pass-b"] .mk[data-note="${added.id}"]`)).toHaveCount(1);
-  await expect(page.locator(`.lane[data-row="sfx/pass-a"] .mk[data-note="${added.id}"]`)).toHaveCount(0);
+  await expect(rowOf(page, "sfx/pass-b").locator(`.mk[data-note="${added.id}"]`)).toHaveCount(1);
+  await expect(rowOf(page, "sfx/pass-a").locator(`.mk[data-note="${added.id}"]`)).toHaveCount(0);
   await expect(page.locator(`.note[data-note="${added.id}"] .on`)).toHaveText("Cue · Swipe · Pass B");
   await expect(page.locator(`.note[data-note="${old.id}"] .on`)).toHaveText("Cue · Swipe");
 });
@@ -465,10 +472,10 @@ test("Blind never changes the bed being heard", async ({ page, rushes }) => {
   const before = await gains();
   expect(before).toEqual({ "music/a-one": 1, "music/b-two": 0, "music/c-three": 0, "music/d-four": 0 });
   await page.getByRole("button", { name: "Blind" }).click();
-  await expect(page.locator(".lane [data-name]").first()).toHaveText("Bed 1");
+  await expect(takeRows(page).locator("[data-name]").first()).toHaveText("Bed 1");
   expect(await gains()).toEqual(before);
   await page.getByRole("button", { name: "Blind" }).click();
-  await expect(page.locator(".lane [data-name]").first()).toHaveText("A · One");
+  await expect(takeRows(page).locator("[data-name]").first()).toHaveText("A · One");
   expect(await gains()).toEqual(before);
 });
 
@@ -517,7 +524,7 @@ test("the preview keeps up during playback without repeated seeking", async ({ p
   await page.goto(rushes.testUrl());
   await openReviewTab(page, "Music");
   await loaded(page, 1);
-  const pv = page.locator(".pv video");
+  const pv = monitor(page).locator("video");
   await expect.poll(() => pv.evaluate((v: HTMLVideoElement) => v.readyState)).toBeGreaterThanOrEqual(2);
   await pv.evaluate((v: HTMLVideoElement) => {
     (window as unknown as { __seeks: number }).__seeks = 0;
@@ -564,59 +571,48 @@ async function twoRounds(rushes: Rushes, opts: { steadier?: boolean; video?: str
   return { jane, gerald, excited, sombre };
 }
 
-/** Open Voiceover once the current round's `files` have decoded: folded rounds aren't (§19.8). */
+/** Open Voiceover once its `files` have decoded: every read listed (a folded Put away isn't, §19.8). */
 async function openVoice(page: Page, rushes: Rushes, files: number) {
   await page.goto(rushes.testUrl());
   await openReviewTab(page, "Voice");
   await loaded(page, files);
 }
 
-/** §27, 5.7: a click on a lane's track at `t` seconds: its take becomes the note's target, at that point. */
-async function clickLaneAt(page: Page, row: string, t: number) {
-  const track = page.locator(`.lane[data-row="${row}"] .track`);
-  const r = (await track.boundingBox())!;
+/** §27, 5.7: a click on a take's block at `t` seconds: the take becomes the note's target, at that point. */
+async function clickLaneAt(page: Page, name: string, t: number) {
   const length = await page.evaluate(() => window.__rushesAudio!.engine!.length);
-  await page.mouse.click(r.x + (r.width * t) / length, r.y + r.height / 2);
+  await clickTakeAt(page, name, t, length);
 }
 
-test("Voiceover shows the current round open under its name, and an older round folded into one row", async ({ page, rushes }) => {
+test("Voiceover lists every round's reads open: New, In use and Earlier, each under its round", async ({ page, rushes }) => {
   await twoRounds(rushes);
-  await openVoice(page, rushes, 2);
-  await expect(page.locator(".rhead")).toHaveCount(1);
-  await expect(page.locator(".rhead .rname")).toHaveText(R2);
-  await expect(page.locator(".rhead .rtag")).toHaveText("current");
-  await expect(page.locator(".lane")).toHaveCount(2);
-  await expect(page.locator(".lane [data-name]")).toHaveText(["more excited", "more sombre"]);
-  await expect(page.locator(".lane [data-meta]")).toHaveText(["Brighter, quicker", "Slower, lower"]);
-  const fold = page.locator(".fold");
-  await expect(fold).toHaveText("Round 1 · Voices · 3 reads · picked Gerald");
-  await expect(fold).toHaveAttribute("aria-expanded", "false");
+  await openVoice(page, rushes, 5);
+  // Gerald was picked before Round 2 arrived: Round 2's reads wait as new, Round 1's others are earlier.
+  await expect(takeHeadings(page)).toHaveText([`New · ${R2}`, `In use · ${R1}`, `Earlier · ${R1}`]);
+  await expect(takeRows(page)).toHaveCount(5);
+  await expect(takeRows(page).locator("[data-name]")).toHaveText(["more excited", "more sombre", "Gerald", "Jane", "Louise"]);
+  await expect(takeRows(page).locator("[data-meta]")).toHaveText(["Brighter, quicker", "Slower, lower", "Low, measured", "Warm, conversational", "Bright, upbeat"]);
+  await expect(takeCircle(page, "Gerald")).toHaveAttribute("aria-checked", "true");
+  // Nothing folds by itself.
+  await expect(takesList(page).locator(".kfold")).toHaveCount(0);
 
-  await fold.click();
-  await expect(fold).toHaveAttribute("aria-expanded", "true");
-  await expect(page.locator(".lane")).toHaveCount(5);
-  await expect(page.locator(".lane [data-name]")).toHaveText(["more excited", "more sombre", "Jane", "Louise", "Gerald"]);
-  await expect(page.getByRole("button", { name: "Use Gerald" })).toHaveAttribute("aria-pressed", "true");
-  await fold.click();
-  await expect(page.locator(".lane")).toHaveCount(2);
-
-  // (Folding mid-play is covered by "Voiceover decodes only what you can reach".)
-  // A read heard from a round that's then folded away stops being heard: the default read takes over.
-  await fold.click();
-  await page.getByRole("button", { name: "Jane", exact: true }).click();
+  // A read heard that is then put away (and so leaves the list) stops being heard: the read in use takes over.
+  await takeName(page, "Jane").click();
   await expect.poll(() => heard(page)).toEqual(["round-1-voices/jane@0"]);
-  await fold.click();
-  await expect(page.locator(".lane")).toHaveCount(2);
-  await expect.poll(() => heard(page)).toEqual([`${R2_ID}/more-excited@0`]);
-  await expect(noteTargetLine(page)).toHaveText(`Voice · ${R2} · more excited`);
+  await putAwayButton(page, "Jane").click();
+  await expect(takeRow(page, "Jane")).toHaveCount(0);
+  await expect.poll(() => heard(page)).toEqual(["round-1-voices/gerald@0"]);
+  await expect(noteTargetLabel(page)).toHaveText(`Voice · ${R1} · Gerald`);
 });
 
-test("Voiceover decodes only what you can reach; folding mid-play never restarts the heard read (§19.8)", async ({ page, rushes }) => {
+test("Voiceover decodes only what you can reach; folding Put away mid-play never restarts the heard read (§19.8)", async ({ page, rushes }) => {
   // Reads long enough to outlast every wait below.
-  await rushes.addVariant("voice", "Jane", { round: R1, seconds: 30, freq: 220 });
+  const jane = await rushes.addVariant("voice", "Jane", { round: R1, seconds: 30, freq: 220 });
   await rushes.addVariant("voice", "Gerald", { round: R1, seconds: 30, freq: 262 });
   await rushes.addVariant("voice", "more excited", { round: R2, seconds: 30, freq: 294 });
   await rushes.addVariant("voice", "more sombre", { round: R2, seconds: 30, freq: 330 });
+  // Jane is put away: folded under Put away, she isn't decoded.
+  await rushes.api("PUT", `/api/variants/${jane.lane.id}/${jane.variant.id}/put-away`, { away: true });
   const JANE = "audio/voice-1-jane.wav";
   const janeFetches = () => fetched.filter((p) => p === JANE).length;
   const fetched: string[] = [];
@@ -624,7 +620,7 @@ test("Voiceover decodes only what you can reach; folding mid-play never restarts
     const path = new URL(r.url()).searchParams.get("path");
     if (path) fetched.push(path);
   });
-  // Jane's file is held back until released, so her lane can be seen loading.
+  // Jane's file is held back until released, so her row can be seen loading.
   let release!: () => void;
   const held = new Promise<void>((ok) => (release = ok));
   await page.route((url) => url.searchParams.get("path") === JANE, async (route) => {
@@ -632,105 +628,111 @@ test("Voiceover decodes only what you can reach; folding mid-play never restarts
     await route.continue();
   });
 
-  // Only the current round is decoded; the folded one isn't fetched at all.
-  await openVoice(page, rushes, 2);
-  expect((await inspect(page)).media.sort()).toEqual([expect.stringMatching(/more-excited/), expect.stringMatching(/more-sombre/)]);
+  // Only the reads listed are decoded; the folded one isn't fetched at all.
+  await openVoice(page, rushes, 3);
+  expect((await inspect(page)).media.some((k) => k.startsWith(JANE))).toBe(false);
   expect(janeFetches()).toBe(0);
 
+  // Nothing in use: the first read waiting plays, the newest round's first.
   const HEARD = `${R2_ID}/more-excited`;
-  await page.getByRole("button", { name: "Play" }).click();
+  await playButton(page).click();
   await expect.poll(async () => (await inspect(page)).time).toBeGreaterThan(0.3);
   const heardSource = (await inspect(page)).voices[HEARD];
   expect(heardSource).toBeGreaterThan(0);
 
-  // Opening the fold decodes its round: its lanes show at once, and a held file loads late.
-  const fold = page.locator(".fold");
+  // Showing Put away decodes it: its row shows at once, and the held file loads late.
+  const fold = foldToggle(page, "Put away");
   await fold.click();
-  await expect(page.locator(".lane")).toHaveCount(4);
+  await expect(takeRows(page)).toHaveCount(4);
   await loaded(page, 3);
-  expect((await inspect(page)).media.some((k) => k.startsWith(JANE))).toBe(false);
   release();
   await loaded(page, 4);
   expect((await inspect(page)).sources).toBe(4);
   expect((await inspect(page)).voices[HEARD]).toBe(heardSource);
 
-  // Folded again, its files leave play (idle, for a quick return); the heard read runs on untouched.
+  // Folded again, its file leaves play (idle, for a quick return); the heard read runs on untouched.
   await fold.click();
-  await expect(page.locator(".lane")).toHaveCount(2);
-  await loaded(page, 2);
+  await expect(takeRows(page)).toHaveCount(3);
+  await loaded(page, 3);
   let s = await inspect(page);
-  expect(s.idle.filter((k) => /voice-[12]-/.test(k))).toHaveLength(2);
-  expect(s.sources).toBe(2);
+  expect(s.idle.filter((k) => k.startsWith(JANE))).toHaveLength(1);
+  expect(s.sources).toBe(3);
   expect(s.voices[HEARD]).toBe(heardSource);
   expect(s.playing).toBe(true);
 
-  // Opened again, it comes straight back from idle: nothing is fetched twice.
+  // Shown again, it comes straight back from idle: nothing is fetched twice.
   const before = janeFetches();
   await fold.click();
   await loaded(page, 4);
   expect(janeFetches()).toBe(before);
 
-  // Listening to Jane, then folding her round away: the default read takes over, on the source it
-  // has had since Play.
-  await page.getByRole("button", { name: "Jane", exact: true }).click();
+  // Listening to Jane, then folding Put away: the default read takes over, on the source it has had since Play.
+  await takeName(page, "Jane").click();
   await expect.poll(() => heard(page)).toEqual(["round-1-voices/jane@0"]);
   await fold.click();
   await expect.poll(() => heard(page)).toEqual([`${HEARD}@0`]);
-  await loaded(page, 2);
+  await loaded(page, 3);
   s = await inspect(page);
   expect(s.voices[HEARD]).toBe(heardSource);
   expect(s.playing).toBe(true);
 });
 
-test("which rounds are open is kept per film", async ({ page, rushes }) => {
+test("every round is open on every film, and Show on Put away holds for the session across films", async ({ page, rushes }) => {
   await rushes.addCut("hero", "Hero");
   await rushes.addCut("cutdown", "Cutdown");
-  await twoRounds(rushes, { video: ["Hero", "Cutdown"] });
-  await openVoice(page, rushes, 2);
-  const fold = page.locator(".fold");
+  const { jane } = await twoRounds(rushes, { video: ["Hero", "Cutdown"] });
+  await rushes.api("PUT", `/api/variants/${jane.lane.id}/${jane.variant.id}/put-away`, { away: true });
+  await openVoice(page, rushes, 4);
+  await expect(takeRows(page)).toHaveCount(4);
+  const fold = foldToggle(page, "Put away");
   await fold.click();
   await expect(fold).toHaveAttribute("aria-expanded", "true");
+  await expect(takeRows(page)).toHaveCount(5);
   await page.keyboard.press("]");
   await expect(currentFilm(page)).toHaveText("Cutdown");
-  await expect(fold).toHaveAttribute("aria-expanded", "false");
-  await expect(page.locator(".lane")).toHaveCount(2);
+  await expect(fold).toHaveAttribute("aria-expanded", "true");
+  await expect(takeRows(page)).toHaveCount(5);
   await page.keyboard.press("[");
   await expect(currentFilm(page)).toHaveText("Hero");
-  await expect(fold).toHaveAttribute("aria-expanded", "true");
-  await expect(page.locator(".lane")).toHaveCount(5);
+  await expect(takeRows(page)).toHaveCount(5);
 });
 
-test("a folded round shows a dot while one of its reads has an open note", async ({ page, rushes }) => {
+test("Put away shows a dot while one of its reads has an open note; an older round's read is listed by its round", async ({ page, rushes }) => {
   const { jane } = await twoRounds(rushes);
   const key = `${jane.lane.id}/${jane.variant.id}`;
   const { note } = await rushes.api("POST", "/api/notes", { stage: "voice", on: key, scope: "point", t: 1, text: "Lovely warmth here." });
-  await openVoice(page, rushes, 2);
-  await expect(page.locator(".fold .fdot")).toHaveCount(1);
-  // Listed by its round and read, since Round 1 isn't the current round.
+  await openVoice(page, rushes, 5);
+  // Listed by its round and read, since Round 1 isn't the newest round; drawn on Jane's block.
   await expect(page.locator(`.note[data-note="${note.id}"] .on`)).toHaveText("Round 1 · Voices · Jane");
+  await expect(rowOf(page, key).locator(`.mk[data-note="${note.id}"]`)).toHaveCount(1);
+  // Put away, Jane's open note shows as a dot on the folded line.
+  await putAwayButton(page, "Jane").click();
+  await expect(takesList(page).locator('.kfold[data-fold="away"] .fdot')).toHaveCount(1);
   await page.locator(`.note[data-note="${note.id}"] .chk`).click();
-  await expect(page.locator(".fold .fdot")).toHaveCount(0);
-  // Opened, the round draws its point note on Jane's lane.
-  await page.locator(".fold").click();
-  await expect(page.locator(`.lane[data-row="${key}"] .mk[data-note="${note.id}"]`)).toHaveCount(1);
+  await expect(takesList(page).locator('.kfold[data-fold="away"] .fdot')).toHaveCount(0);
+  // Shown, the point note is drawn on her block again.
+  await foldToggle(page, "Put away").click();
+  await expect(rowOf(page, key).locator(`.mk[data-note="${note.id}"]`)).toHaveCount(1);
 });
 
-test("three reads in the current round and a folded round fit above the fold at 1440×900", async ({ page, rushes }) => {
+test("six reads over two rounds fit in the takes list without scrolling at 1440×900", async ({ page, rushes }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await rushes.addCut();
   await twoRounds(rushes, { steadier: true });
-  await openVoice(page, rushes, 3);
-  await expect(page.locator(".lane")).toHaveCount(3);
-  const bottom = await page.locator(".fold").evaluate((el) => el.getBoundingClientRect().bottom);
+  await openVoice(page, rushes, 6);
+  await expect(takeRows(page)).toHaveCount(6);
+  const panel = (await page.locator(".takespanel").boundingBox())!;
+  const bottom = await takeRows(page).last().evaluate((el) => el.getBoundingClientRect().bottom);
+  expect(bottom).toBeLessThanOrEqual(panel.y + panel.height + 0.5);
   expect(bottom).toBeLessThanOrEqual(900);
 });
 
-test("Voiceover plays one read at a time: the current round's first, then a clicked read, without moving the playhead", async ({ page, rushes }) => {
+test("Voiceover plays one read at a time: the read in use, then a clicked read, without moving the playhead", async ({ page, rushes }) => {
   await twoRounds(rushes);
-  await openVoice(page, rushes, 2);
-  // Nothing picked in Round 2: its first read, not Round 1's pick.
-  await expect.poll(() => heard(page)).toEqual([`${R2_ID}/more-excited@0`]);
-  await page.getByRole("button", { name: "Play" }).click();
+  await openVoice(page, rushes, 5);
+  // Nothing selected: the read in use, from whichever round, not the newest round's first.
+  await expect.poll(() => heard(page)).toEqual(["round-1-voices/gerald@0"]);
+  await playButton(page).click();
   await expect.poll(async () => (await inspect(page)).time).toBeGreaterThan(0.5);
 
   // Clicking a read switches to it in the click: a gain swap, the same sources, the playhead running on.
@@ -738,7 +740,7 @@ test("Voiceover plays one read at a time: the current round's first, then a clic
     const e = window.__rushesAudio!.engine!;
     const before = e.inspect();
     const p0 = performance.now();
-    (document.querySelector(`.lane[data-row="${row}"] .nm`) as HTMLButtonElement).click();
+    (document.querySelector(`.take[data-take="${row}"] .knm`) as HTMLButtonElement).click();
     const after = e.inspect();
     return { before, after, wall: (performance.now() - p0) / 1000, heard: window.__rushesAudio!.heard().map((c) => c.id) };
   }, `${R2_ID}/more-sombre`);
@@ -747,14 +749,14 @@ test("Voiceover plays one read at a time: the current round's first, then a clic
   expect(r.after.time).toBeGreaterThanOrEqual(r.before.time);
   expect(r.after.sources).toBe(r.before.sources);
   expect(r.heard).toEqual([`${R2_ID}/more-sombre`]);
-  await expect(page.locator(`.lane[data-row="${R2_ID}/more-sombre"]`)).toHaveAttribute("aria-current", "true");
+  await expect(rowOf(page, `${R2_ID}/more-sombre`)).toHaveAttribute("aria-current", "true");
   // Auditioning isn't picking.
   expect((await rushes.api("GET", "/api/picks")).lanes[R2_ID]).toBeUndefined();
 
-  // Use picks the read for its round, on the same clock.
+  // The circle picks the read, on the same clock.
   const t0 = await page.evaluate(() => ({ t: window.__rushesAudio!.engine!.time, wall: performance.now() / 1000 }));
-  await page.getByRole("button", { name: "Use more sombre" }).click();
-  await expect(page.getByRole("button", { name: "Use more sombre" })).toHaveAttribute("aria-pressed", "true");
+  await takeCircle(page, "more sombre").click();
+  await expect(takeCircle(page, "more sombre")).toHaveAttribute("aria-checked", "true");
   await expect.poll(async () => (await rushes.api("GET", "/api/picks")).lanes[R2_ID]).toBe("more-sombre");
   const t1 = await page.evaluate(() => ({ t: window.__rushesAudio!.engine!.time, wall: performance.now() / 1000, playing: window.__rushesAudio!.engine!.playing }));
   expect(t1.playing).toBe(true);
@@ -764,33 +766,33 @@ test("Voiceover plays one read at a time: the current round's first, then a clic
 
 test("Voiceover notes are on a whole read or a point on it, whole first: no In/Out, no ranges, and chips for each", async ({ page, rushes }) => {
   await twoRounds(rushes);
-  await openVoice(page, rushes, 2);
-  // Nothing clicked: the whole of the current round's first read.
-  await expect(noteTargetLine(page)).toHaveText(`Voice · ${R2} · more excited`);
-  await expect(page.getByRole("button", { name: "Set in point" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Set out point" })).toHaveCount(0);
-  // I and O do nothing here.
+  await openVoice(page, rushes, 5);
+  // Nothing clicked, the playhead at the start: the whole of the read in use.
+  await expect(noteTargetLabel(page)).toHaveText(`Voice · ${R1} · Gerald`);
+  const chips = page.getByRole("group", { name: "Start a note" }).getByRole("button");
+  await expect(chips).toHaveText(["Speaker", "Pacing", "Tone", "Overall"]);
+  // No Range tool here, and I and O do nothing: the note is a point at the playhead, never a range.
+  await expect(toolButton(page, "Range")).toHaveCount(0);
   await page.evaluate(() => window.__rushesAudio!.engine!.seek(1));
   await page.keyboard.press("i");
   await page.evaluate(() => window.__rushesAudio!.engine!.seek(2));
   await page.keyboard.press("o");
-  await expect(page.locator(".bar .chipx")).toHaveCount(0);
-  await expect(page.locator(".lane .span")).toHaveCount(0);
-  await expect(noteTargetLine(page)).toHaveText(`Voice · ${R2} · more excited`);
-  const chips = page.getByRole("group", { name: "Start a note" }).getByRole("button");
-  await expect(chips).toHaveText(["Speaker", "Pacing", "Tone", "Overall"]);
-  // A click on the read's lane: a point on it, with the point's chips.
-  await clickLaneAt(page, `${R2_ID}/more-excited`, 1);
-  await expect(noteTargetLine(page)).toContainText(/^00:00:01:00 · Voice/);
+  await expect(rangeChip(page)).toHaveCount(0);
+  await expect(takesList(page).locator(".span")).toHaveCount(0);
+  await expect(noteTargetLabel(page)).toHaveText(`00:00:02:00 · Voice · ${R1} · Gerald`);
+  await expect(chips).toHaveText(["Fix this", "Keep this"]);
+  // A click on another read's block: a point on it, with the point's chips.
+  await clickLaneAt(page, "more excited", 1);
+  await expect(noteTargetLabel(page)).toContainText(/^00:00:01:00 · Voice/);
   await expect(chips).toHaveText(["Fix this", "Keep this"]);
   await expect(page.getByRole("group", { name: "Marks" })).toHaveCount(0);
 });
 
-test("a point note draws on its read's lane only; a whole note is listed and not drawn", async ({ page, rushes }) => {
+test("a point note draws on its read's block only; a whole note is listed and not drawn", async ({ page, rushes }) => {
   await twoRounds(rushes);
-  await openVoice(page, rushes, 2);
-  await clickLaneAt(page, `${R2_ID}/more-excited`, 1.5);
-  await expect(noteTargetLine(page)).toContainText("Voice");
+  await openVoice(page, rushes, 5);
+  await clickLaneAt(page, "more excited", 1.5);
+  await expect(noteTargetLabel(page)).toContainText("Voice");
   await page.keyboard.press("n");
   await page.keyboard.type("Clipped word here.");
   await page.keyboard.press("Enter");
@@ -798,12 +800,13 @@ test("a point note draws on its read's lane only; a whole note is listed and not
   let { notes } = await rushes.api("GET", "/api/notes?stage=voice");
   expect(notes[0]).toMatchObject({ stage: "voice", scope: "point", on: `${R2_ID}/more-excited` });
   expect(notes[0].t).toBeCloseTo(1.5, 1);
-  await expect(page.locator(`.lane[data-row="${R2_ID}/more-excited"] .mk[data-note="${notes[0].id}"]`)).toHaveCount(1);
-  await expect(page.locator(`.lane [data-note="${notes[0].id}"]`)).toHaveCount(1);
+  await expect(rowOf(page, `${R2_ID}/more-excited`).locator(`.mk[data-note="${notes[0].id}"]`)).toHaveCount(1);
+  await expect(takesList(page).locator(`[data-note="${notes[0].id}"]`)).toHaveCount(1);
   await expect(page.locator(`.note[data-note="${notes[0].id}"] .on`)).toHaveText("more excited");
-  // Its name clicked, a read is the target whole.
-  await page.getByRole("button", { name: "more sombre", exact: true }).click();
-  await expect(noteTargetLine(page)).toHaveText(`Voice · ${R2} · more sombre`);
+  // Its name clicked, and The whole read chosen (the playhead has moved), a read is the target whole.
+  await takeName(page, "more sombre").click();
+  await noteTargetMenu(page).selectOption({ label: "The whole read" });
+  await expect(noteTargetLabel(page)).toHaveText(`Voice · ${R2} · more sombre`);
   await page.keyboard.press("n");
   await page.keyboard.type("A touch slow overall.");
   await page.keyboard.press("Enter");
@@ -811,29 +814,29 @@ test("a point note draws on its read's lane only; a whole note is listed and not
   ({ notes } = await rushes.api("GET", "/api/notes?stage=voice"));
   const whole = notes.find((n: { text: string }) => n.text === "A touch slow overall.");
   expect(whole).toMatchObject({ scope: "whole", t: null, on: `${R2_ID}/more-sombre` });
-  await expect(page.locator(`.lane [data-note="${whole.id}"]`)).toHaveCount(0);
+  await expect(takesList(page).locator(`[data-note="${whole.id}"]`)).toHaveCount(0);
   await expect(page.locator(`.note[data-note="${whole.id}"] .on`)).toHaveText("more sombre");
 });
 
-test("Blind on Voiceover names reads Read 1…n and never reveals an older round's pick", async ({ page, rushes }) => {
+test("Blind on Voiceover names reads Read 1…n and never reveals which read is in use", async ({ page, rushes }) => {
   await twoRounds(rushes);
-  await openVoice(page, rushes, 2);
+  await openVoice(page, rushes, 5);
   await page.getByRole("button", { name: "Blind" }).click();
-  await expect(page.locator(".lane [data-name]")).toHaveText(["Read 1", "Read 2"]);
-  await expect(page.locator(".lane [data-meta]")).toHaveText(["·····", "·····"]);
-  await expect(page.locator(".fold")).toContainText("picked a read");
-  await expect(page.locator(".fold")).not.toContainText("Gerald");
+  await expect(takeRows(page).locator("[data-name]")).toHaveText(["Read 1", "Read 2", "Read 3", "Read 4", "Read 5"]);
+  await expect(takeRows(page).locator("[data-meta]")).toHaveText(["·····", "·····", "·····", "·····", "·····"]);
+  for (const name of ["Jane", "Louise", "excited", "sombre", "Low, measured"]) await expect(takesList(page)).not.toContainText(name);
+  // The read in use is a "Read n" too.
+  await expect(takesList(page).locator('.take:has([aria-checked="true"]) [data-name]')).toHaveText(/^Read \d$/);
   // The note's target names a read's round, so two "Read 1"s are never confused, and never its real name.
-  await expect(noteTargetLine(page)).toHaveText(new RegExp(`^Voice · ${R2} · Read \\d$`));
-  await expect(noteTargetLine(page)).not.toContainText("excited");
-  // Opened, the older round's reads are blind too.
-  await page.locator(".fold").click();
-  await expect(page.locator(".lane [data-name]")).toHaveText(["Read 1", "Read 2", "Read 1", "Read 2", "Read 3"]);
-  await page.locator(".lane [data-name]").nth(2).click();
-  await expect(noteTargetLine(page)).toHaveText(`Voice · ${R1} · Read 1`);
-  await expect(noteTargetLine(page)).not.toContainText("Jane");
+  await expect(noteTargetLabel(page)).toHaveText(new RegExp(`^Voice · ${R1} · Read \\d$`));
+  await expect(noteTargetLabel(page)).not.toContainText("Gerald ");
+  // An older round's read is blind too, and named by its round.
+  await takeRows(page).nth(4).locator(".knm").click();
+  await expect(noteTargetLabel(page)).toHaveText(`Voice · ${R1} · Read 5`);
+  await expect(noteTargetLabel(page)).not.toContainText("Jane");
+  await expect(noteTargetLabel(page)).not.toContainText("Louise");
   await page.getByRole("button", { name: "Blind" }).click();
-  await expect(page.locator(".fold")).toContainText("picked Gerald");
+  await expect(takeCircle(page, "Gerald")).toHaveAttribute("aria-checked", "true");
 });
 
 test("two rounds that both hold a Gerald are told apart by the note's target, each by its own round", async ({ page, rushes }) => {
@@ -841,12 +844,11 @@ test("two rounds that both hold a Gerald are told apart by the note's target, ea
   await rushes.addVariant("voice", "Jane", { round: R1, seconds: 4, freq: 220 });
   await rushes.addVariant("voice", "Gerald", { round: R1, seconds: 4, freq: 262 });
   await rushes.addVariant("voice", "Gerald", { round: R3, seconds: 4, freq: 294 });
-  await openVoice(page, rushes, 1);
-  await expect(noteTargetLine(page)).toHaveText(`Voice · ${R3} · Gerald`);
-  // The older round's Gerald, picked by his lane, files the note on that round's read.
-  await page.locator(".fold").click();
-  await page.locator('.lane[data-row="round-1-voices/gerald"] .nm').click();
-  await expect(noteTargetLine(page)).toHaveText(`Voice · ${R1} · Gerald`);
+  await openVoice(page, rushes, 3);
+  await expect(noteTargetLabel(page)).toHaveText(`Voice · ${R3} · Gerald`);
+  // The older round's Gerald, picked by his row, files the note on that round's read.
+  await rowOf(page, "round-1-voices/gerald").locator(".knm").click();
+  await expect(noteTargetLabel(page)).toHaveText(`Voice · ${R1} · Gerald`);
   await page.keyboard.press("n");
   await page.keyboard.type("Warmer.");
   await page.keyboard.press("Enter");
@@ -855,26 +857,29 @@ test("two rounds that both hold a Gerald are told apart by the note's target, ea
 });
 
 test("a cut-off read description shows in full as a tooltip, and the note's target names the round", async ({ page, rushes }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
+  // Narrow enough that the description is cut short on its block.
+  await page.setViewportSize({ width: 800, height: 900 });
   await twoRounds(rushes, { steadier: true });
-  await openVoice(page, rushes, 3);
-  const long = page.locator(`.lane[data-row="${R2_ID}/steadier-pace"] [data-meta]`);
+  await openVoice(page, rushes, 6);
+  const long = rowOf(page, `${R2_ID}/steadier-pace`).locator("[data-meta]");
   expect(await long.locator("[data-meta-text]").evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
   await expect(long).toHaveAttribute("data-tip", LONG);
-  await expect(page.locator(`.lane[data-row="${R2_ID}/more-sombre"] [data-meta]`)).not.toHaveAttribute("data-tip");
-  await expect(page.locator(`.lane[data-row="${R2_ID}/more-sombre"] [data-name]`).locator("..")).not.toHaveAttribute("data-tip");
-  await page.getByRole("button", { name: "more sombre", exact: true }).click();
-  await expect(noteTargetLine(page)).toHaveText(`Voice · ${R2} · more sombre`);
+  await expect(rowOf(page, `${R2_ID}/more-sombre`).locator("[data-meta]")).not.toHaveAttribute("data-tip");
+  await expect(rowOf(page, `${R2_ID}/more-sombre`).locator(".knm")).not.toHaveAttribute("data-tip");
+  await takeName(page, "more sombre").click();
+  // Under 1100 px the notes panel is a drawer: opened, its target names the round.
+  await panelToggle(page).click();
+  await expect(noteTargetLabel(page)).toHaveText(`Voice · ${R2} · more sombre`);
 });
 
-test("a cut-off description's tooltip isn't clipped by the name column's ellipsis", async ({ page, rushes }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
+test("a cut-off description's tooltip isn't clipped by its block", async ({ page, rushes }) => {
+  await page.setViewportSize({ width: 800, height: 900 });
   await twoRounds(rushes, { steadier: true });
-  await openVoice(page, rushes, 3);
-  const meta = page.locator(`.lane[data-row="${R2_ID}/steadier-pace"] [data-meta]`);
+  await openVoice(page, rushes, 6);
+  const meta = rowOf(page, `${R2_ID}/steadier-pace`).locator("[data-meta]");
   await expect(meta).toHaveAttribute("data-tip", LONG);
   await expect(meta).toHaveCSS("overflow", "visible");
-  // Every box between the tooltip's element and its lane must stay unclipped too, or the tooltip is
+  // Every box between the tooltip's element and its row must stay unclipped too, or the tooltip is
   // cut off even though the element itself is fine.
   const chain = await overflowChain(meta);
   expect(chain.length).toBeGreaterThan(1);
@@ -888,34 +893,34 @@ test("a cut-off description's tooltip isn't clipped by the name column's ellipsi
 test("an older Range note on a read draws on Voiceover as a point at its In, never a span (§18.3)", async ({ page, rushes }) => {
   await twoRounds(rushes);
   const { note } = await rushes.api("POST", "/api/notes", { stage: "voice", on: `${R2_ID}/more-sombre`, scope: "range", t: 1, tOut: 3, text: "From before rounds." });
-  await openVoice(page, rushes, 2);
-  const row = page.locator(`.lane[data-row="${R2_ID}/more-sombre"]`);
+  await openVoice(page, rushes, 5);
+  const row = rowOf(page, `${R2_ID}/more-sombre`);
   await expect(row.locator(`.mk[data-note="${note.id}"]`)).toHaveCount(1);
   await expect(row.locator(`.span[data-note="${note.id}"]`)).toHaveCount(0);
 });
 
-test("a cut-off round heading, fold row and the note's target show in full as tooltips, inside the window", async ({ page, rushes }) => {
+test("a cut-off round heading and the note's target show in full as tooltips, inside the window", async ({ page, rushes }) => {
   // A narrow window, and long round names (64 characters: a lane id, the name slugged, holds no more). Under 1100 px the
-  // notes panel is a drawer, so the lanes have the window's width: 600 px cuts the names short.
-  await page.setViewportSize({ width: 600, height: 900 });
+  // notes panel is a drawer, so the list has the window's width: 480 px cuts the headings short.
+  await page.setViewportSize({ width: 480, height: 900 });
   const OLD = `Round 1 · ${"WARM, MELLOW, MOODY MALE VOICES ".repeat(2)}`.slice(0, 64).trim();
   const NEW = `Round 2 · ${"WOMEN'S VOICES, WARMER, SLOWER, MORE WONDER ".repeat(2)}`.slice(0, 64).trim();
   await rushes.addVariant("voice", "Gerald", { round: OLD, seconds: 4, freq: 262 });
   await rushes.addVariant("voice", "more sombre", { round: NEW, seconds: 4, freq: 330 });
-  await openVoice(page, rushes, 1);
-  const head = page.locator(".rhead");
-  expect(await head.locator(".rname").evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
-  await expect(head).toHaveAttribute("data-tip", NEW);
-  const fold = page.locator(".fold");
-  await expect(fold).toHaveAttribute("data-tip", `${OLD} · 1 read · nothing picked`);
-  for (const el of [head, fold]) {
-    await el.hover();
-    await expect.poll(() => el.evaluate((e) => Number(getComputedStyle(e, "::after").opacity))).toBe(1);
-    expect(await el.evaluate((e) => getComputedStyle(e, "::after").whiteSpace)).toBe("normal");
+  await openVoice(page, rushes, 2);
+  const heads = takeHeadings(page);
+  await expect(heads).toHaveText([`New · ${NEW}`, `New · ${OLD}`]);
+  for (const [i, name] of [NEW, OLD].entries()) {
+    const head = heads.nth(i);
+    expect(await head.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+    await expect(head).toHaveAttribute("data-tip", `New · ${name}`);
+    await head.hover();
+    await expect.poll(() => head.evaluate((e) => Number(getComputedStyle(e, "::after").opacity))).toBe(1);
+    expect(await head.evaluate((e) => getComputedStyle(e, "::after").whiteSpace)).toBe("normal");
   }
-  await page.getByRole("button", { name: "more sombre", exact: true }).click();
+  await takeName(page, "more sombre").click();
   await panelToggle(page).click();
-  const on = noteTargetLine(page).locator(".ntl");
+  const on = noteTargetLabel(page);
   await expect(on).toHaveAttribute("data-tip", `Voice · ${NEW} · more sombre`);
   await on.hover();
   // The target's tooltip wraps and stays inside the window rather than running off its right edge.
@@ -934,7 +939,7 @@ test("a description cut off only once its long-file mark appears still gets its 
   await page.goto(rushes.testUrl("streamOver=1"));
   await openReviewTab(page, "Voice");
   await loaded(page, 1);
-  const probe = page.locator(".lane [data-meta]").first();
+  const probe = takesList(page).locator("[data-meta]").first();
   await expect(probe.locator(".smk")).toHaveCount(1);
   const description = await probe.evaluate((el) => {
     const text = el.querySelector("[data-meta-text]") as HTMLElement;
@@ -958,7 +963,7 @@ test("a description cut off only once its long-file mark appears still gets its 
   await page.reload();
   await openReviewTab(page, "Voice");
   await loaded(page, 2);
-  const meta = page.locator(`.lane[data-row="${read.lane.id}/${read.variant.id}"] [data-meta]`);
+  const meta = rowOf(page, `${read.lane.id}/${read.variant.id}`).locator("[data-meta]");
   await expect(meta.locator(".smk")).toHaveCount(1);
   expect(await meta.locator("[data-meta-text]").evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
   await expect(meta).toHaveAttribute("data-tip", description);
@@ -976,15 +981,15 @@ test("a read added with no round shows under a Voiceover heading, and older note
   const { note: noOn } = await rushes.api("POST", "/api/notes", { stage: "voice", on: null, scope: "whole", text: "No on at all." });
   const { note: gone } = await rushes.api("POST", "/api/notes", { stage: "voice", on: "s1:t9", scope: "point", t: 2, text: "A take that's gone." });
   await openVoice(page, rushes, 1);
-  await expect(page.locator(".rhead .rname")).toHaveText("Voiceover");
-  await expect(page.locator(".lane [data-name]")).toHaveText(["A · Current"]);
-  await expect(page.locator(".fold")).toHaveCount(0);
+  await expect(takeHeadings(page)).toHaveText(["New · Voiceover"]);
+  await expect(takeRows(page).locator("[data-name]")).toHaveText(["A · Current"]);
+  await expect(takesList(page).locator(".kfold")).toHaveCount(0);
   await expect(page.locator(".note")).toHaveCount(4);
   // The same words as export and the CLI: no on is the assembled read, a take that's gone has none.
   await expect(page.locator(`.note[data-note="${noOn.id}"] .on`)).toHaveText("Assembled read");
   await expect(page.locator(`.note[data-note="${gone.id}"] .on`)).toHaveCount(0);
   await expect(page.locator(".note .on")).toHaveText(["Assembled read", "Assembled read", "S1 · Take 1"]);
-  await expect(page.locator(".lane [data-note]")).toHaveCount(0);
+  await expect(takesList(page).locator("[data-note]")).toHaveCount(0);
   expect(errors).toEqual([]);
 });
 
@@ -992,17 +997,20 @@ test("another film starts Voiceover's notes on the whole read again", async ({ p
   await rushes.addCut("hero", "Hero");
   await rushes.addCut("cutdown", "Cutdown");
   await twoRounds(rushes, { video: ["Hero", "Cutdown"] });
-  await openVoice(page, rushes, 2);
-  await clickLaneAt(page, `${R2_ID}/more-sombre`, 1);
-  await expect(noteTargetLine(page)).toContainText(/^00:00:01:00 · Voice · .* · more sombre$/);
+  await openVoice(page, rushes, 5);
+  await clickLaneAt(page, "more sombre", 1);
+  await expect(noteTargetLabel(page)).toContainText(/^00:00:01:00 · Voice · .* · more sombre$/);
   await page.keyboard.press("]");
   await expect(currentFilm(page)).toHaveText("Cutdown");
-  await expect(noteTargetLine(page)).toHaveText(`Voice · ${R2} · more excited`);
+  // From the top, nothing selected: the whole of the read that plays by default there (nothing is in use on Cutdown, so
+  // the first read waiting).
+  expect((await inspect(page)).time).toBe(0);
+  await expect(noteTargetLabel(page)).toHaveText(`Voice · ${R2} · more excited`);
 });
 
 test("another film starts Voiceover's notes on the whole read again, even when neither film has a cut", async ({ page, rushes }) => {
   await twoRounds(rushes);
-  // Two films with no cut yet, as a hand edit of the project file can leave them: no preview at all.
+  // Two films with no cut yet, as a hand edit of the project file can leave them: the no-cut slate.
   const file = join(rushes.root, ".rushes", "project.json");
   const project = JSON.parse(await readFile(file, "utf8"));
   project.videos = [
@@ -1013,14 +1021,16 @@ test("another film starts Voiceover's notes on the whole read again, even when n
   for (const l of project.lanes) for (const v of l.variants) v.videos = ["hero", "cutdown"];
   project.rev += 1;
   await writeFile(file, JSON.stringify(project, null, 2));
-  await openVoice(page, rushes, 2);
+  await openVoice(page, rushes, 5);
   await expect(currentFilm(page)).toHaveText("Hero");
   await expect(page.getByLabel("No cut yet")).toBeVisible();
-  await clickLaneAt(page, `${R2_ID}/more-sombre`, 1);
-  await expect(noteTargetLine(page)).toContainText(/^00:00:01:00 · Voice · .* · more sombre$/);
+  await clickLaneAt(page, "more sombre", 1);
+  await expect(noteTargetLabel(page)).toContainText(/^00:00:01:00 · Voice · .* · more sombre$/);
   await page.keyboard.press("]");
   await expect(currentFilm(page)).toHaveText("Cutdown");
-  await expect(noteTargetLine(page)).toHaveText(`Voice · ${R2} · more excited`);
+  expect((await inspect(page)).time).toBe(0);
+  await expect(noteTargetLabel(page)).not.toContainText("00:00:01:00");
+  await expect(noteTargetLabel(page)).not.toContainText("more sombre");
 });
 
 test("a round whose reads are all missing shows the missing marks and plays silence", async ({ page, rushes }) => {
@@ -1030,35 +1040,33 @@ test("a round whose reads are all missing shows the missing marks and plays sile
     lanes.find((l: { id: string }) => l.id === r.lane.id).variants.find((x: { id: string }) => x.id === r.variant.id).file as string;
   const gone = [fileOf(excited), fileOf(sombre)];
   for (const f of gone) await rm(join(rushes.root, f));
-  await openVoice(page, rushes, 0);
-  await expect(page.locator(`.lane[data-row="${R2_ID}/more-excited"] .amiss`)).toHaveCount(1);
-  await expect(page.locator(`.lane[data-row="${R2_ID}/more-sombre"] .amiss`)).toHaveCount(1);
-  // The current round's first read is what plays, and it isn't there: silence, not another round's read.
-  expect(await heard(page)).toEqual([]);
+  await openVoice(page, rushes, 3);
+  await expect(rowOf(page, `${R2_ID}/more-excited`).locator(".amiss")).toHaveCount(1);
+  await expect(rowOf(page, `${R2_ID}/more-sombre`).locator(".amiss")).toHaveCount(1);
+  await expect(takeBlock(page, "more sombre")).toContainText("File not found");
   expect((await inspect(page)).media.some((k) => gone.some((f) => k.includes(f)))).toBe(false);
-  await page.getByRole("button", { name: "more sombre", exact: true }).click();
+  // A missing read selected is what plays, and it isn't there: silence, not another read.
+  await takeName(page, "more sombre").click();
   expect(await heard(page)).toEqual([]);
-  // The tab still works: the older round opens and plays.
-  await page.locator(".fold").click();
-  await page.getByRole("button", { name: "Gerald", exact: true }).click();
+  // The tab still works: another round's read plays.
+  await takeName(page, "Gerald").click();
   await expect.poll(() => heard(page)).toEqual([`round-1-voices/gerald@0`]);
 });
 
 // ---- Picks can be cleared (Task 5) ----
 
-test("Unpick clears a pick: In use goes back to Use, and the pick is gone from disk", async ({ page, rushes }) => {
+test("Unpick clears a pick: the circle on the take in use, pressed again, and the pick is gone from disk", async ({ page, rushes }) => {
   await twoBeds(page, rushes);
-  const useB = page.getByRole("button", { name: "Use B · Warm keys" });
-  // Nothing picked: no Unpick anywhere.
-  await expect(page.getByRole("button", { name: /^Unpick/ })).toHaveCount(0);
+  const useB = takeCircle(page, "B · Warm keys");
+  // Nothing picked: no circle says it unpicks.
+  await expect(takesList(page).locator('[role="radio"][aria-description]')).toHaveCount(0);
   await useB.click();
-  await expect(useB).toHaveAttribute("aria-pressed", "true");
-  const unpick = page.getByRole("button", { name: "Unpick B · Warm keys" });
-  await expect(unpick).toHaveAttribute("data-tip", "Unpick");
-  await unpick.click();
-  await expect(useB).toHaveAttribute("aria-pressed", "false");
-  await expect(useB).toHaveText("Use");
-  await expect(unpick).toHaveCount(0);
+  await expect(useB).toHaveAttribute("aria-checked", "true");
+  await expect(useB).toHaveAccessibleDescription("Press again to unpick it");
+  await useB.click();
+  await expect(useB).toHaveAttribute("aria-checked", "false");
+  await expect(useB).toHaveAccessibleName("Use this one");
+  await expect(takesList(page).locator('[role="radio"][aria-description]')).toHaveCount(0);
   expect((await rushes.api("GET", "/api/picks")).lanes).toEqual({});
   // With no pick, the first bed in manifest order plays again.
   await expect.poll(async () => (await inspect(page)).gains).toMatchObject({ "music/a-deep-house": 1, "music/b-warm-keys": 0 });
@@ -1082,7 +1090,7 @@ test("marks ticked on a range hold the film, as text and the range do", async ({
   await expect(currentFilm(page)).toHaveText("Hero");
   await expect(page.getByRole("group", { name: "Marks" }).getByRole("button", { name: "Fall" })).toHaveAttribute("aria-pressed", "true");
   // Clear the range (its marks go with it) and the film can go.
-  await page.locator(".bar .chipx").getByRole("button", { name: "Clear range" }).click();
+  await rangeChip(page).getByRole("button", { name: "Clear range" }).click();
   await expect(page.getByRole("group", { name: "Marks" })).toHaveCount(0);
   await page.keyboard.press("]");
   await expect(currentFilm(page)).toHaveText("Cutdown");
@@ -1101,7 +1109,7 @@ test("switching tab, by 1–7 or by a click, refuses to drop a pending audio not
 
   // An In point is pending: the key is refused, and so is a click on a tab, Assets included.
   await page.keyboard.press("i");
-  await expect(page.locator(".bar .chipx")).toHaveCount(1);
+  await expect(rangeChip(page)).toHaveCount(1);
   await page.keyboard.press("2");
   await expect(page.getByRole("status")).toHaveText("Add or clear your note first");
   await expect(reviewTab(page, "Music")).toHaveAttribute("aria-selected", "true");
@@ -1122,7 +1130,7 @@ test("switching tab, by 1–7 or by a click, refuses to drop a pending audio not
   await expect(page.getByRole("status")).toHaveText("Add or clear your note first");
   await expect(reviewTab(page, "Music")).toHaveAttribute("aria-selected", "true");
   await expect(page.getByRole("textbox", { name: "New note" })).toHaveValue("Half a thought");
-  await expect(page.locator(".bar .chipx")).toHaveCount(1);
+  await expect(rangeChip(page)).toHaveCount(1);
   await expect(page.getByRole("group", { name: "Marks" }).getByRole("button", { name: "Fall" })).toHaveAttribute("aria-pressed", "true");
 
   // Clear the note (text, mark and range), and the tab can go.
@@ -1160,7 +1168,7 @@ const VO_READ = "round-1-voices/gerald";
 const VO_READ_2 = "round-2-gerald-tone/more-sombre";
 
 /** The sound rows for the takes (not the cut's own sound). */
-const takeRows = (page: Page) => page.locator(".strack:not(.csound)");
+const soundRows = (page: Page) => page.locator(".strack:not(.csound)");
 
 async function openMix(page: Page, rushes: Rushes, files: number) {
   // Every loudness request the page makes, in order.
@@ -1171,7 +1179,7 @@ async function openMix(page: Page, rushes: Rushes, files: number) {
   await page.goto(rushes.testUrl());
   await openReviewTab(page, "Timeline");
   await videoReady(page);
-  await expect(takeRows(page)).toHaveCount(3);
+  await expect(soundRows(page)).toHaveCount(3);
   await loaded(page, files);
   return asked;
 }
@@ -1183,7 +1191,7 @@ const seekPicture = (page: Page, t: number) => page.locator("video").evaluate((v
 test("the timeline shows a row per sound; mute and solo change the lane gains, and solo wins", async ({ page, rushes }) => {
   await mixProject(page, rushes);
   const asked = await openMix(page, rushes, 3);
-  await expect(takeRows(page).locator(".snm")).toHaveText(["Voice", "Music", "Effects"]);
+  await expect(soundRows(page).locator(".snm")).toHaveText(["Voice", "Music", "Effects"]);
   await expect(soundBlock(page, "Voice")).toHaveText("Gerald");
   await expect(soundBlock(page, "Voice")).toHaveAttribute("title", "Round 1 · Voices · Gerald");
   await expect(soundBlock(page, "Music")).toHaveText("Warm keys");
@@ -1736,7 +1744,7 @@ test("Space on a focused button presses it instead of playing: Measure again on 
 
 test("Space on a focused button presses it on Voiceover too: Blind, not Play (§19.8)", async ({ page, rushes }) => {
   await twoRounds(rushes);
-  await openVoice(page, rushes, 2);
+  await openVoice(page, rushes, 5);
   const blind = page.getByRole("button", { name: "Blind" });
   await tabTo(page, blind);
   await page.keyboard.press(" ");
@@ -1763,8 +1771,8 @@ test("Space plays after a mouse click on a tab, M, S, Blind or a scope chip (§1
   await button("Blind").click();
   await expect(button("Blind")).toHaveAttribute("aria-pressed", "true");
   await spaceToggles(page);
-  // A lane picked as the note's target, then let go of by the target line's own button.
-  await page.locator(".lane .nm").first().click();
+  // A take picked as the note's target, then let go of by the target line's own button.
+  await takeRows(page).first().locator(".knm").click();
   await clearTarget(page).click();
   await spaceToggles(page);
 });
@@ -1780,7 +1788,7 @@ test("Sound effects and Music list only the film you are on, with its own notes"
   await rushes.addVariant("voice", "F2A read", { seconds: 4, freq: 300, round: "Round 1", video: "F2A" });
   await rushes.api("POST", "/api/notes", { stage: "sfx", video: "f2a", scope: "whole", text: "F2A taps are too loud." });
   await page.goto(rushes.url);
-  const names = page.locator(".lane [data-name]");
+  const names = takeRows(page).locator("[data-name]");
   await openReviewTab(page, "Effects");
   await pickFilm(page, "F3A");
   await expect(currentFilm(page)).toHaveText("F3A");
@@ -1794,8 +1802,12 @@ test("Sound effects and Music list only the film you are on, with its own notes"
   await expect(names).toHaveText(["F2A bed", "Any film bed"]);
   await pickFilm(page, "F3A");
   await expect(names).toHaveText(["Any film bed"]);
-  // F2A's read is all there is: F3A's Voiceover says it has none yet.
+  // F2A's read is all there is: F3A's Voice says it has none yet, and keeps F2A's under Not on this film.
   await openReviewTab(page, "Voice");
-  await expect(page.locator(".lane")).toHaveCount(0);
-  await expect(page.locator(".lanesnone")).toHaveText("No voice reads for this film yet.");
+  await expect(takeRows(page)).toHaveCount(0);
+  await expect(takesList(page).locator(".knone")).toHaveText("No voice reads for this film yet.");
+  await expect(takeHeadings(page)).toHaveText(["Not on this film · 1 read"]);
+  await foldToggle(page, "Not on this film").click();
+  await expect(takesList(page).locator(".take.loose")).toHaveCount(1);
+  await expect(takesList(page).getByRole("button", { name: /^Films for Round 1 · F2A read/ })).toBeVisible();
 });

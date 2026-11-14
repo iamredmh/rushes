@@ -41,6 +41,16 @@ export const api = {
   del: <T>(path: string, body: unknown = {}) => call<T>("DELETE", path, body),
 };
 
+/** §27.6: makes a take the one in use for its sound on `video` (its lane's pick), or, with `variant` null, unpicks its lane. */
+export function setPick(video: string | undefined, lane: string, variant: string | null): Promise<unknown> {
+  return api.put("/api/picks", { video, lanes: { [lane]: variant } });
+}
+
+/** §27.6: puts a take away (hidden, never deleted) or brings it back. The server refuses to put away a take in use. */
+export function putAway(lane: string, variant: string, away: boolean): Promise<unknown> {
+  return api.put(`/api/variants/${encodeURIComponent(lane)}/${encodeURIComponent(variant)}/put-away`, { away });
+}
+
 /**
  * §19.5: the exact frame at `t` from a cut's original file, extracted by ffmpeg on the server, as a
  * PNG data URL ready for POST /api/grabs, with the frame number the server actually took. With

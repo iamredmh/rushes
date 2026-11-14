@@ -226,7 +226,6 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 
 /* player */
 .split { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 20px; align-items: stretch; }
-.stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; align-content: start; }
 /* .frame sizes itself to the cut (aspect-ratio set from the video, 16:9 before metadata
    loads), not a fixed 16:9 box: a vertical cut shrinks its width to fit max-height, centred. */
 .frame { position: relative; aspect-ratio: 16 / 9; max-width: 100%; max-height: min(70vh, 640px); margin: 0 auto; border-radius: var(--r-lg); overflow: hidden; background: var(--black); }
@@ -494,65 +493,11 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
   .afolder-root { border-top: 0; }
 }
 
-/* audio tabs (§17.1): tracks on the left, the preview and notes on the right */
-.astage { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 20px; align-items: stretch; }
-.ahead { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-height: 36px; }
-.ahead h2 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
-/* The tab's header sits at the top of the stage, so its tooltips open downwards. */
-.ahead [data-tip]::after { bottom: auto; top: calc(100% + 8px); }
-.lanes { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
-.lanesnone { margin: 8px 0; color: var(--text-2); font-size: 15px; }
-.lane { display: grid; grid-template-columns: 180px minmax(0, 1fr) 136px; gap: 16px; align-items: center; padding: 6px 0; border-radius: var(--r); }
-.lane .nm { display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; min-width: 0; text-align: left; border: 0; background: transparent; color: var(--text); padding: 6px 8px; margin: -6px -8px; border-radius: var(--r); cursor: pointer; }
-.lane .nm:hover { background: var(--raised); }
-.lane .nm b { display: flex; gap: 8px; align-items: center; min-width: 0; font-weight: 600; font-size: 15px; }
-/* Only the name itself ellipsises: a mark beside it (stale, missing) is a sibling span and must
-   stay unclipped, or its [data-tip]::after tooltip gets clipped along with it. */
-.lane .nm b span[data-name] { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lane .nm b i { width: 9px; height: 9px; border-radius: 3px; flex: none; }
-/* The meta line itself stays unclipped (its marks need room for their tooltips); only the text
-   span inside it ellipsises. */
-.lane .nm small { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 15px; color: var(--text-3); white-space: nowrap; }
-.lane .nm small span[data-meta-text] { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* A name or meta line cut off by its column: the full text, left-aligned below it (the line itself stays readable), wrapping
-   if it's longer than the tooltip's width. */
-.lane .nm > [data-tip]::after { left: 0; bottom: auto; top: calc(100% + 6px); transform: translateY(-2px); width: max-content; max-width: min(520px, 80vw); white-space: normal; line-height: 1.3; text-align: left; }
-.lane .nm > [data-tip]:hover::after { transform: none; }
-.lane .track { height: 80px; }
-/* Voiceover rounds (§18.3): the current round's heading, and each older round folded into one row. */
-.rhead { display: flex; align-items: center; gap: 10px; min-width: 0; font-size: 15px; font-weight: 600; color: var(--text-2); }
-.rhead .rname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rtag { flex: none; font-weight: 500; color: var(--accent-2); background: var(--accent-soft); padding: 1px 9px; border-radius: 999px; }
-.fold { display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; text-align: left; border: 0; padding: 12px 14px; border-radius: var(--r); background: var(--raised); color: var(--text-2); font-size: 15px; cursor: pointer; }
-.fold:hover { background: var(--hover); }
-.fold .flabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fold b { color: var(--text); font-weight: 600; }
-.fold .fpk { color: var(--done); }
-.fold svg.ic { width: 14px; height: 14px; color: var(--text-3); transform: rotate(-90deg); transition: transform 0.15s; }
-.fold[aria-expanded="true"] svg.ic { transform: none; }
-.fold .fdot { width: 8px; height: 8px; border-radius: 50%; background: var(--todo); margin-left: auto; flex: none; }
-/* A cut-off round heading or fold row: the full text, left-aligned below it, wrapping if it's long. */
-.rhead[data-tip]::after, .fold[data-tip]::after { left: 0; bottom: auto; top: calc(100% + 6px); transform: translateY(-2px); width: max-content; max-width: min(520px, 80vw); white-space: normal; line-height: 1.3; text-align: left; }
-.rhead[data-tip]:hover::after, .fold[data-tip]:hover::after, .fold[data-tip]:focus-visible::after { transform: none; }
-.lane[aria-current="true"] .track { box-shadow: inset 0 0 0 1.5px var(--accent); }
-.lane .ctl { display: flex; justify-content: flex-end; align-items: center; gap: 4px; }
-/* Unpick: beside In use, quieter than it. */
-.unpick { color: var(--text-3); }
-.unpick svg.ic { width: 15px; height: 15px; }
-.track .wave { position: absolute; left: 0; top: 8px; width: 100%; height: calc(100% - 16px); pointer-events: none; }
 .smk { display: inline-grid; place-items: center; color: var(--todo); flex: none; }
 .smk.bad { color: var(--over); }
 .smk svg.ic { width: 15px; height: 15px; }
-.use { border: 0; height: 32px; padding: 0 14px; border-radius: 999px; background: var(--raised); color: var(--text); font-size: 15px; font-weight: 600; cursor: pointer; display: inline-flex; gap: 6px; align-items: center; white-space: nowrap; }
-.use:hover { background: var(--hover); }
-.use[aria-pressed="true"] { background: var(--done-soft); color: var(--done); }
-.use svg.ic { width: 14px; height: 14px; stroke-width: 2.5; }
 .ms { width: 32px; height: 32px; border: 0; border-radius: 8px; background: var(--raised); color: var(--text-3); font: 600 15px var(--sans); cursor: pointer; }
 .ms[aria-pressed="true"] { background: var(--todo-soft); color: var(--todo); }
-/* Mix levels (§19.6): the control column only widens for a row that carries a level slider, so
-   Voiceover/Music/Sound effects' own M/S-only column (136px) is untouched. Explicit tracks throughout. */
-.lane:has(.level) { grid-template-columns: 180px minmax(0, 1fr) 270px; }
-.lane:has(.level) .ctl { gap: 8px; }
 .level { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0; }
 .level input[type="range"] { flex: 1 1 auto; min-width: 0; accent-color: var(--accent); }
 /* Fixed width, right-aligned and never wrapping: the value never spills out of its column. */
@@ -568,15 +513,6 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .meter.retry > .btn { align-self: center; }
 .cue { position: absolute; bottom: 4px; transform: translateX(-50%); font: 500 15px/1.15 var(--sans); color: var(--sfx); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 1ch; z-index: 2; pointer-events: none; text-shadow: 0 0 4px var(--raised), 0 0 2px var(--raised); }
 .cue-tick { position: absolute; bottom: 25px; transform: translateX(-50%); width: 1px; height: 46px; background: currentColor; opacity: 0.45; z-index: 2; pointer-events: none; }
-/* The mockup's 780px floor for the preview + notes column, less what the header, tabs and body padding
-   (about 162px) take, so on a short window it ends at the window's edge instead of scrolling the page. */
-.acol { display: flex; flex-direction: column; gap: 12px; height: 0; min-height: max(100%, min(780px, calc(100vh - 162px))); }
-.acol .panel.side { flex: 1; height: auto; min-height: 0; }
-/* A tighter notes header than Picture's, so three notes fit above the taller audio composer at 900px. */
-.acol .ph { padding: 10px 16px 6px; }
-.pv .frame { border-radius: var(--r); max-height: none; }
-.pvempty { position: absolute; inset: 0; display: grid; place-items: center; background: var(--app); color: var(--line-2); }
-.pvempty svg.ic { width: 28px; height: 28px; }
 .nt .on { font-size: 15px; color: var(--text-3); }
 .nmarks { grid-column: 2; font-size: 15px; font-weight: 500; color: var(--accent-2); }
 .chip { border: 0; background: var(--app); height: 30px; padding: 0 12px; border-radius: 999px; font-size: 15px; color: var(--text-2); cursor: pointer; white-space: nowrap; }
@@ -595,11 +531,6 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .onwrap[data-tip]:hover::after { transform: none; }
 .sel.onsel, .sel.dbsel { background: var(--app); color: var(--text); padding: 0 30px 0 12px; max-width: 100%; text-overflow: ellipsis; }
 .sel.dbsel { height: 30px; padding: 0 28px 0 10px; }
-@media (max-width: 1000px) {
-  .astage { grid-template-columns: minmax(0, 1fr); }
-  .acol { height: auto; min-height: 0; }
-  .acol .panel.side { min-height: 480px; }
-}
 
 /* lightbox */
 .lightbox { position: fixed; inset: 0; background: var(--scrim); display: grid; place-items: center; z-index: 50; padding: 24px; }
@@ -830,8 +761,6 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 @media (max-width: 900px) { .vzsplit { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) 340px; } .vznotes { border-left: 0; border-top: 1px solid var(--line); } }
 
 /* The Films button on a read, bed or pass, and its checklist. */
-.fold .fnone { color: var(--todo); }
-.lane .ctl .films { margin-right: 2px; }
 .filmsbtn { height: 28px; padding: 0 8px; gap: 5px; font-size: 13px; color: var(--text-2); white-space: nowrap; }
 .filmsbtn .ic { width: 14px; height: 14px; }
 .filmsbtn.none { color: var(--todo); }

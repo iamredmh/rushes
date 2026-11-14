@@ -1,42 +1,28 @@
-// Voiceover (§18): rounds of whole reads. The current (newest) round is open under its name, one
-// lane per read; each older round is folded into one row that opens its lanes beneath it.
-//
-// Every read is an engine lane of its own, holding just that read. One read sounds at a time, by lane
-// gain (voiceListening in lib.ts): the clicked one, else the current round's pick, else its first
-// read. So clicking a read, Use and Unpick are 4 ms ramps on one clock: the playhead never moves.
+// Voiceover (§18; §27, 5.8): every read for this film, in rounds, as the tab's takes list shows them. A note is on a
+// whole read or a point on it (no ranges), and a read in an older round is named by its round.
 import { useState } from "preact/hooks";
-import { api } from "../api.js";
-import { assetRev, type Clip } from "../audio/timeline.js";
+import { takeGroups, type TakeRow } from "../desk.js";
 import {
-  AUDIO_CHIPS, blindOrder, defaultVersion, readLane, type Scope, STAGE_NAMES, type VariantRow, voiceDefaultRead, voiceListening, type VoiceNotes, voiceNoteRows,
-  voiceOnLabel, voiceOnOptions, type VoiceRound, voiceRounds,
-  filmLanes, filmNotes, filmPicks, otherLanes, takeInUse, variantRows,
+  agentPrompt, AUDIO_CHIPS, defaultVersion, filmLanes, filmNotes, filmPicks, otherLanes, type VariantRow, type VoiceNotes, voiceNoteRows, voiceOnLabel, voiceRounds, variantRows,
 } from "../lib.js";
 import type { Asset, State, Video } from "../types.js";
-import { AudioStage, type Preview } from "./AudioStage.js";
-import { filmsControl, looseRows } from "./FilmsMenu.js";
-import { Icon } from "./Icon.js";
-import type { StageRow } from "./Lanes.js";
+import { AudioStage, filmsOf, type Preview, takeList } from "./AudioStage.js";
+import { filmsControl } from "./FilmsMenu.js";
+import { BlindButton } from "./VariantTab.js";
 
-const VO_COLOR = "var(--vo)";
-const SCOPES: Scope[] = ["whole", "point"];
 const CHIPS: Record<"whole" | "point", string[]> = {
   whole: AUDIO_CHIPS.voice,
   point: ["Fix this", "Keep this"],
 };
 
-// Blind holds for the session, as on Music: its shuffle is fixed at page load, and the switch
-// survives a trip to another tab.
+// Blind holds for the session, as on Music: its shuffle is fixed at page load, and the switch survives a trip to another tab.
 const BLIND_SEED = Math.floor(Math.random() * 2 ** 31);
 let blindSession = false;
-// Which older rounds are open, per film, for the session.
-const openRounds = new Map<string, Set<string>>();
-const NONE_OPEN: ReadonlySet<string> = new Set();
 
 export interface VoiceProps {
   state: State;
   assets: Asset[];
-  /** The film whose cut the preview plays. */
+  /** The film whose cut the monitor shows. */
   video: Video | null;
   toast(message: string): void;
   onChanged(): void;
@@ -50,155 +36,48 @@ export function Voice({ state, assets, video, toast, onChanged, onPendingChange 
     blindSession = on;
     setBlindState(on);
   };
-  const film = video?.id ?? "";
-  // The open rounds live in openRounds, per film; this state only re-renders after a toggle.
-  const [, rerender] = useState(0);
-  const opened = openRounds.get(film) ?? NONE_OPEN;
-  const toggle = (round: string) => {
-    const next = new Set(opened);
-    if (next.has(round)) next.delete(round);
-    else next.add(round);
-    openRounds.set(film, next);
-    rerender((n) => n + 1);
-  };
-
-  const asset = (path: string) => assets.find((a) => a.path === path);
-  const rev = (path: string) => {
-    const a = asset(path);
-    return a ? assetRev(a) : undefined;
-  };
-  // A file that isn't on disk is never loaded: its read shows the missing mark and plays silence.
-  const missing = (path: string) => asset(path)?.missing === true;
-
-  // Rounds in creation order, with only this film's reads (and any made for every film); with Blind,
-  // each round's reads shuffled and named Read 1…n.
   const filmCount = state.project.videos.length;
+  const lanes = filmLanes(state.project.lanes, video?.id, filmCount);
   const filmState = filmPicks(state.picks, video?.id);
-  const inUseNow = filmState.use;
-  const rounds = voiceRounds(filmLanes(state.project.lanes, video?.id, filmCount), filmState.lanes);
+  const films = (r: { lane: string; variant: string; films: string[] }) => (filmCount > 1 ? filmsControl(r, state.project.videos, video, toast, onChanged) : undefined);
+  const list = takeList({
+    stage: "voice",
+    groups: takeGroups(lanes, "voice", filmState.use?.voice, video ?? undefined),
+    assets,
+    blind: blind ? { seed: BLIND_SEED, word: "Read" } : null,
+    films: (t: TakeRow) => films(filmsOf(t)),
+  });
+  const nameOf = (r: VariantRow) => list.nameOf(r.key) ?? r.name;
   const loose = video ? variantRows(otherLanes(state.project.lanes, video.id, filmCount), "voice") : [];
-  const films = (r: VariantRow) => (filmCount > 1 ? filmsControl(r, state.project.videos, video, toast, onChanged) : undefined);
-  const shown: VoiceRound[] = rounds.map((round) => {
-    if (!blind) return round;
-    const order = blindOrder(round.reads.map((r) => r.key), BLIND_SEED);
-    return { ...round, reads: order.map((k) => round.reads.find((r) => r.key === k)!) };
-  });
-  const position = new Map<string, number>();
-  for (const round of shown) round.reads.forEach((r, i) => position.set(r.key, i + 1));
-  const nameOf = (r: VariantRow) => (blind ? `Read ${position.get(r.key)}` : r.name);
 
-  // null clears the round's pick (Unpick).
-  const use = async (round: VoiceRound, variant: string | null) => {
-    try {
-      await api.put("/api/picks", { video: video?.id, lanes: { [round.id]: variant } });
-    } catch (e) {
-      toast(`Couldn't ${variant === null ? "clear" : "set"} the pick: ${(e as Error).message}`);
-    }
-    onChanged();
-  };
-
-  // ---- what the engine plays (§19.8): each read in a lane of its own, but only the reads you can
-  // reach: the current round's and those of the rounds you've opened. The selected read is always
-  // one of them, since a read is selected by clicking its lane, and folding a round drops a selection
-  // on it (AudioStage). A folded round's files leave the engine, which keeps them idle for a quick
-  // return; opening it again decodes whatever has been released.
-  const clipOf = (r: VariantRow): Clip => ({ id: r.key, lane: readLane(r), path: r.file, offset: 0, duration: 0, rev: rev(r.file) });
-  const clips: Clip[] = rounds
-    .filter((round) => round.current || opened.has(round.id))
-    .flatMap((round) => round.reads.filter((r) => !missing(r.file)).map(clipOf));
-
-  // ---- the lanes: the current round open, then older rounds newest first, each folded ----
-  const notes = filmNotes(state.notes.notes, "voice", video?.id);
-  const model: VoiceNotes = { rounds, sections: state.script.sections };
-  const lane = (round: VoiceRound, r: VariantRow): StageRow => ({
-    key: r.key,
-    name: nameOf(r),
-    meta: blind ? "·····" : r.meta,
-    color: VO_COLOR,
-    clips: missing(r.file) ? [] : [clipOf(r)],
-    // In use is one read for the film (§27.6), not one per round: a round's own pick that isn't it reads as Use.
-    use: { inUse: takeInUse(inUseNow, "voice", r), onUse: () => void use(round, r.variant), onUnpick: () => void use(round, null) },
-    films: films(r),
-    on: `v:${r.key}`,
-    missing: missing(r.file),
-  });
-  const rows: StageRow[] = [];
-  for (const round of [...shown].reverse()) {
-    if (round.current) {
-      round.reads.forEach((r, i) => rows.push(i === 0 ? { ...lane(round, r), heading: round.name, tag: "current" } : lane(round, r)));
-      continue;
-    }
-    const isOpen = opened.has(round.id);
-    const picked = round.reads.find((r) => r.variant === round.pick);
-    const keys = new Set(round.reads.map((r) => r.key));
-    const n = round.reads.length;
-    rows.push({
-      key: `round:${round.id}`,
-      name: round.name,
-      color: VO_COLOR,
-      clips: [],
-      fold: {
-        label: (
-          <>
-            <b>{round.name}</b> · {n} {n === 1 ? "read" : "reads"} ·{" "}
-            {picked ? <span class="fpk">picked {blind ? "a read" : picked.name}</span> : "nothing picked"}
-          </>
-        ),
-        text: `${round.name} · ${n} ${n === 1 ? "read" : "reads"} · ${picked ? `picked ${blind ? "a read" : picked.name}` : "nothing picked"}`,
-        open: isOpen,
-        dot: notes.some((note) => note.status === "todo" && keys.has(voiceNoteRows(model, note) ?? "")),
-        onToggle: () => toggle(round.id),
-      },
-    });
-    if (isOpen) for (const r of round.reads) rows.push(lane(round, r));
-  }
-  rows.push(
-    ...looseRows("voice", loose, (r) => ({
-      key: `loose/${r.key}`,
-      name: `${r.laneName} · ${r.name}`,
-      meta: r.meta,
-      color: VO_COLOR,
-      clips: [],
-      films: films(r),
-    }), () => rerender((n) => n + 1)),
-  );
-
-  const onOptions = voiceOnOptions(shown, nameOf);
-  const firstRead = voiceDefaultRead(rounds);
+  // Notes resolve against the rounds (an older round's read is named by its round) and the script's takes (older notes).
+  const model: VoiceNotes = { rounds: voiceRounds(lanes, filmState.lanes), sections: state.script.sections };
   const cut = defaultVersion(video ?? undefined);
-  const preview: Preview | null = video && cut ? { video: video.id, version: cut.id, file: cut.file, duration: cut.duration } : null;
-  const fps = state.project.fps || 30;
+  const preview: Preview | null = video && cut ? { video: video.id, version: cut, locked: video.lockedVersion === cut.id } : null;
 
   return (
     <AudioStage
       stage="voice"
+      title="Voice"
       film={video?.id ?? null}
       readOnly={!!video?.shelved}
-      title={STAGE_NAMES.voice}
-      headerExtra={
-        <button
-          class="btn ghost ib"
-          aria-label="Blind"
-          aria-pressed={blind}
-          data-tip={blind ? "Show names" : "Blind: hide names"}
-          onClick={() => setBlind(!blind)}
-        >
-          <Icon name="eyeoff" />
-        </button>
-      }
-      rows={rows}
-      clips={clips}
+      list={list}
+      loose={{
+        items: loose.map((r) => ({ key: r.key, name: `${r.laneName} · ${r.name}`, meta: r.meta, films: films(r), none: r.films.length === 0 })),
+        what: loose.length === 1 ? "read" : "reads",
+      }}
+      headerExtra={<BlindButton on={blind} onToggle={() => setBlind(!blind)} />}
       preview={preview}
-      fps={fps}
-      notes={notes}
-      onOptions={onOptions}
-      defaultOn={firstRead ? `v:${firstRead.key}` : undefined}
-      listen={(selected) => voiceListening(rounds, selected)}
+      prompt={agentPrompt("picture", state.project.name, video?.name ?? null)}
+      fps={state.project.fps || 30}
+      notes={filmNotes(state.notes.notes, "voice", video?.id)}
       noteRow={(n) => voiceNoteRows(model, n)}
       onLabel={(n) => voiceOnLabel(model, n.on, nameOf)}
-      scopes={SCOPES}
+      targetName={(it) => `${it.take.round} · ${it.name}`}
+      hasRange={false}
       chipsFor={(scope) => CHIPS[scope === "point" ? "point" : "whole"]}
-      marks={false}
+      wholeLabel="The whole read"
+      none="No voice reads for this film yet."
       toast={toast}
       onChanged={onChanged}
       onPendingChange={onPendingChange}

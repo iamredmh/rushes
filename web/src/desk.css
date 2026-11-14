@@ -272,12 +272,10 @@
 /* ---- §27, 5.7: the notes panel. The right column of Review and Plan, as tall as the work area and --notes-w wide (300 px
    until its divider is dragged). Hidden (\), the workspace takes the room; under 1100 px it is a drawer over the work area. ---- */
 .split { grid-template-columns: minmax(0, 1fr) var(--notes-w, 300px); gap: 0; }
-.astage { grid-template-columns: minmax(0, 1fr) var(--notes-w, 300px); }
 .nhidden .split { grid-template-columns: minmax(0, 1fr); }
 .deskcols > .wsmain { min-width: 0; height: max(var(--work-h, calc(100vh - 160px)), 360px); overflow: auto; padding-right: 12px; }
 .npanel { position: relative; display: flex; flex-direction: column; min-width: 0; height: max(var(--work-h, calc(100vh - 160px)), 360px); padding-left: 8px; font-size: 13px; }
 .npanel[hidden] { display: none; }
-.acol .npanel { flex: 1; height: auto; min-height: 0; padding-left: 0; }
 .nresize { position: absolute; left: 0; top: 0; bottom: 0; z-index: 2; width: 6px; border-radius: 3px; cursor: col-resize; touch-action: none; }
 .nresize:hover, .nresize:focus-visible { background: var(--accent-soft); outline: none; }
 .npanel > .ntabs, .npanel > .ntabpanel, .npanel > .nfoot { background: var(--raised); }
@@ -356,11 +354,78 @@
 .strack .tlane .mk { z-index: 3; width: 8px; height: 8px; pointer-events: none; }
 .strack .tlane .span { top: 2px; bottom: 2px; z-index: 2; }
 
+/* ---- §27, 5.8: a sound's tab. Its takes under the ruler and the Picture row (which stay at the top as the list scrolls), a
+   heading per group, and a row per take: a circle, the name, the cut it was made for, Films and Put away, then its block. ---- */
+.takespanel { --kh: 320px; }
+.takespanel .trow { grid-template-columns: var(--kh) minmax(0, 1fr); }
+.takespanel .kstick { position: sticky; top: 0; z-index: 6; background: var(--app); }
+.rrow .kttl { font-weight: 600; color: var(--text); }
+.kblind { height: 22px; padding: 0 8px; gap: 4px; font-size: 12.5px; }
+.kblind .ic { width: 13px; height: 13px; }
+.kblind[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-2); }
+.khd { margin: 0; padding: 8px 10px 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-top: 1px solid var(--line); color: var(--text-3); font-size: 12.5px; font-weight: 600; }
+.khd[data-tip]::after { left: 10px; bottom: auto; top: calc(100% + 2px); transform: none; width: max-content; max-width: min(520px, 80vw); white-space: normal; line-height: 1.3; text-align: left; }
+.kfold { display: flex; align-items: center; gap: 8px; padding-right: 10px; border-top: 1px solid var(--line); }
+.kfold .khd { flex: 0 1 auto; min-width: 0; border-top: 0; padding-bottom: 6px; padding-top: 6px; }
+.kfold .btn { flex: none; height: 22px; padding: 0 8px; font-size: 12.5px; }
+.khint { flex: none; margin-left: auto; color: var(--text-3); font-size: 12.5px; white-space: nowrap; }
+.knone { margin: 12px 10px; color: var(--text-2); font-size: 13px; }
+.take .khead { gap: 6px; font-weight: 500; }
+.take .tlane { height: 32px; cursor: pointer; }
+.take:has(.cue) .tlane { height: 46px; }
+.take.loose .tlane { height: 24px; cursor: default; }
+.take .chev { flex: none; width: 20px; height: 20px; border-radius: 5px; }
+.take .chev svg.ic { width: 12px; height: 12px; }
+.kpick { position: relative; flex: none; width: 16px; height: 16px; padding: 0; border: 1.5px solid var(--line-2); border-radius: 50%; background: transparent; cursor: pointer; }
+.kpick:hover { border-color: var(--text-2); }
+.kpick[aria-checked="true"] { border-color: var(--accent); }
+.kpick[aria-checked="true"]::before { content: ""; position: absolute; inset: 2.5px; border-radius: 50%; background: var(--accent); }
+.kpick:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.knm { display: inline-flex; align-items: center; gap: 6px; min-width: 0; padding: 2px 4px; margin: 0 -2px; border: 0; border-radius: 4px; background: none; color: var(--text); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
+.knm [data-name] { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.knm:hover { background: var(--hover); }
+.knm[data-tip]::after { left: 0; transform: none; width: max-content; max-width: min(520px, 80vw); white-space: normal; line-height: 1.3; text-align: left; }
+span.knm, span.knm:hover { cursor: default; background: none; }
+.take.picked .knm { color: var(--accent-2); }
+.take.picked .sblock { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.ktag { flex: none; padding: 0 5px; border-radius: 4px; background: var(--raised); color: var(--text-3); font-size: 12.5px; line-height: 18px; }
+.ktag.stale { background: var(--todo-soft); color: var(--todo); }
+.take .khead { position: relative; }
+/* Put away shows on the row under the pointer, the row with focus inside it and the selected row, over the end of its head,
+   so the name keeps the room the rest of the time. */
+.take .kput { position: absolute; right: 8px; top: 50%; height: 22px; padding: 0 8px; font-size: 12.5px; transform: translateY(-50%); opacity: 0; background: var(--app); box-shadow: -10px 0 8px var(--app); }
+.take .kput:hover { background: var(--hover); }
+.take:hover .kput, .take:focus-within .kput, .take.picked .kput { opacity: 1; }
+.take .filmsbtn { height: 22px; font-size: 12.5px; }
+.take .sblock { border-left: 2px solid var(--c); overflow: visible; }
+.kfold .fdot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--todo); }
+.take .sblock.stale { border-left-style: dashed; }
+.take .slbl { display: flex; flex: 1 1 auto; align-items: center; gap: 4px; min-width: 0; overflow: visible; background: none; color: var(--text-3); }
+.take .slbl [data-meta-text] { min-width: 0; padding: 1px 5px; border-radius: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: var(--raised); }
+.take .slbl [data-meta-text]:empty { display: none; }
+.take .slbl[data-tip] { pointer-events: auto; overflow: visible; }
+.take .slbl[data-tip]::after { left: 0; transform: none; width: max-content; max-width: min(520px, 80vw); white-space: normal; line-height: 1.3; text-align: left; }
+.take .slbl .smk .ic { width: 13px; height: 13px; }
+.take .wave { position: absolute; left: 0; top: 4px; width: 100%; height: calc(100% - 8px); z-index: 0; pointer-events: none; }
+.take .tlane .mk { z-index: 3; width: 8px; height: 8px; }
+.take .tlane .span { top: 2px; bottom: 2px; z-index: 2; }
+.take .cue { top: 3px; bottom: auto; font: 500 12.5px/1.15 var(--sans); }
+.take .cue-tick { top: 19px; bottom: 3px; height: auto; }
+.take:has(.cue) .sblock { align-items: flex-end; padding-bottom: 2px; }
+.takes .clayers { margin: 0 0 4px; }
+.takes .clayer { grid-template-columns: calc(var(--kh) - 136px) 136px minmax(0, 1fr); grid-template-areas: "name file track"; gap: 0; height: 26px; }
+.takes .clname { grid-area: name; padding: 0 10px 0 34px; font-size: 12.5px; }
+.takes .clname em { font-size: 12.5px; }
+.takes .clfile { grid-area: file; }
+.takes .clfile button, .takes .clfile small { height: 24px; font-size: 12.5px; }
+.takes .cltrack { grid-area: track; height: 24px; margin: 0 12px; border-radius: 4px; }
+
 @media (max-width: 1099px) {
-  .split, .astage { grid-template-columns: minmax(0, 1fr); }
+  .split { grid-template-columns: minmax(0, 1fr); }
   /* Under the top bar's tooltips and menus (37 and up) and the monitor's format switch (36), over the rest of the work area. */
   .npanel.drawer { position: fixed; top: 44px; right: 0; bottom: 26px; z-index: 35; width: min(var(--notes-w, 300px), 100vw); height: auto; padding-left: 0; background: var(--raised); border-left: 1px solid var(--line-2); box-shadow: -16px 0 40px var(--shadow); }
   .npanel.drawer > .ntabs, .npanel.drawer > .nfoot { border-radius: 0; }
-  .acol .npanel.drawer { flex: none; }
 }
 @media (max-width: 559px) { .npanel.drawer { width: 100vw; } }
+/* A narrow window gives the takes' blocks more of the width. */
+@media (max-width: 760px) { .takespanel { --kh: 240px; } }

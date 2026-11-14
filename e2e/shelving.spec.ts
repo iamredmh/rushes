@@ -1,4 +1,4 @@
-import { test, expect, videoReady, reviewTab, currentFilm, cutButton, filmButton, pickFilm, openMore, toolButton, transport, sendButton } from "./fixture.js";
+import { test, expect, videoReady, reviewTab, currentFilm, cutButton, filmButton, pickFilm, openMore, toolButton, transport, sendButton, takeRows } from "./fixture.js";
 
 // §26 and §27, 5.2: shelving a film from More, the Film menu with its Shelved group, and what a shelved film does and does not do.
 type Rushes = Parameters<Parameters<typeof test>[2]>[0]["rushes"];
@@ -270,7 +270,7 @@ test("the audio tabs are view-only too while a shelved film is open: a note left
   await expect(music).not.toHaveAttribute("data-locked");
   await music.click();
   await expect(music).toHaveAttribute("aria-selected", "true");
-  await expect(page.locator(".lane")).toHaveCount(1);
+  await expect(takeRows(page)).toHaveCount(1);
   await expect(page.locator(".shbanner")).toContainText("Cutdown");
   await expect(page.getByLabel("New note")).toBeHidden();
   // Back on a film in play, the box is there.

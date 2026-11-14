@@ -1,7 +1,7 @@
 // §23: sound-effects cue layers -- the hover card, the chevron's layers by sound, the keyboard and
 // a cue's own sample. Every page goes to `rushes.testUrl()` (`?test=1`), which exposes the engine.
 import type { Page } from "@playwright/test";
-import { expect, type Rushes, test, reviewTab, openWorkspace, soundTrack, noteTargetLine } from "./fixture.js";
+import { expect, type Rushes, test, reviewTab, openWorkspace, soundTrack, noteTargetLabel, takesList, playButton } from "./fixture.js";
 
 type Hook = {
   inspect(): { playing: boolean; time: number; media: string[] } | null;
@@ -30,7 +30,7 @@ async function openSfx(page: Page, rushes: Rushes, files: number) {
 const PASS = "sfx/effects-for-lumen";
 const THUD = "audio/sfx/samples/thud_low_03.wav";
 const WHOOSH = "audio/sfx/samples/whoosh_long_01.wav";
-const lane = (page: Page) => page.locator(`.lane[data-row="${PASS}"]`);
+const lane = (page: Page) => takesList(page).locator(`.take[data-take="${PASS}"]`);
 const layers = (page: Page) => page.locator(`.clayers[id="cl-${PASS}"]`);
 const card = (page: Page) => page.getByRole("tooltip");
 const chevron = (page: Page, name = "Effects for Lumen") => page.getByRole("button", { name: `Layers for ${name}`, exact: true });
@@ -105,7 +105,7 @@ test("the cue labels are one Tab stop; ←/→ walk them in time without steppin
   await expect.poll(async () => (await hook(page)).time).toBeCloseTo(4.5, 3);
   expect((await hook(page)).playing).toBe(false);
   // §27, 5.7: the note's target is that cue, at its time.
-  await expect(noteTargetLine(page)).toContainText(/^00:00:04:\d\d · Effects · Cue · thud/);
+  await expect(noteTargetLabel(page)).toContainText(/^00:00:04:\d\d · Effects · Cue · thud/);
   await expect(lane(page)).toHaveAttribute("aria-current", "true");
   await expect(cue("thud at 0:04.50")).toHaveAttribute("tabindex", "0");
   await expect(lane(page).locator('.cue[tabindex="0"]')).toHaveCount(1);
@@ -128,7 +128,7 @@ test("the chevron opens one layer per sound, in order of first appearance, with 
   await expect(chevron(page, "Effects, levelled")).toHaveAccessibleDescription("No cues in this pass");
   // Each layer's track lines up with the pass's own.
   const lt = (await layers(page).locator(".cltrack").first().boundingBox())!;
-  const tr = (await lane(page).locator(".track").boundingBox())!;
+  const tr = (await lane(page).locator(".tlane").boundingBox())!;
   expect(Math.abs(lt.x - tr.x)).toBeLessThanOrEqual(1);
   expect(Math.abs(lt.width - tr.width)).toBeLessThanOrEqual(1);
   // Hover a tick for its card; click it to move the playhead there, without playing.
@@ -172,20 +172,20 @@ test("in a layer, ←/→ move between its ticks without stepping frames, Enter 
   await expect(tick("thud at 0:03.00")).toBeFocused();
   await page.keyboard.press("Enter");
   await expect.poll(async () => (await hook(page)).time).toBeCloseTo(3, 3);
-  await expect(noteTargetLine(page)).toContainText(/^00:00:03:00 · Effects · Cue · thud/);
+  await expect(noteTargetLabel(page)).toContainText(/^00:00:03:00 · Effects · Cue · thud/);
   await expect(layers(page).locator('.clayer[data-layer="thud"] .ltick[tabindex="0"]')).toHaveAccessibleName("thud at 0:03.00");
 });
 
 test("layers opened mid-play have playheads that move with the lane's, and nothing re-renders per frame", async ({ page, rushes }) => {
   await lumen(page, rushes);
-  await page.getByRole("button", { name: "Play", exact: true }).click();
+  await playButton(page).click();
   await expect.poll(async () => (await hook(page)).time).toBeGreaterThan(0.3);
   // Opened while playing, so only the toggle's own re-render can hand these playheads to paint().
   await chevron(page).click();
   await expect(layers(page).locator(".playhead")).toHaveCount(3);
   const before = (await hook(page)).renders;
   await page.waitForTimeout(600);
-  const lefts = await page.locator(".astage .playhead").evaluateAll((els) => els.map((e) => (e as HTMLElement).style.left));
+  const lefts = await takesList(page).locator(".playhead").evaluateAll((els) => els.map((e) => (e as HTMLElement).style.left));
   expect(lefts).toHaveLength(5); // two passes, three layers
   expect(new Set(lefts).size).toBe(1);
   expect(lefts[0]).not.toBe("0%");
@@ -210,7 +210,7 @@ test("a pass's layers stay open for the session, across tabs, and start shut aft
 
 test("a layer's file button plays its sample on the one-player bus: it stops the tab, Play stops it, and closing the layers stops it", async ({ page, rushes }) => {
   await lumen(page, rushes);
-  await page.getByRole("button", { name: "Play", exact: true }).click();
+  await playButton(page).click();
   await expect.poll(async () => (await hook(page)).playing).toBe(true);
   await chevron(page).click();
   const thud = layers(page).getByRole("button", { name: `Play ${THUD}`, exact: true });
@@ -220,7 +220,7 @@ test("a layer's file button plays its sample on the one-player bus: it stops the
   await expect(thud).toHaveAttribute("aria-pressed", "true");
   await expect.poll(async () => (await hook(page)).sample).toEqual({ path: THUD, playing: true });
   expect((await hook(page)).playing).toBe(false);
-  await page.getByRole("button", { name: "Play", exact: true }).click();
+  await playButton(page).click();
   await expect.poll(async () => (await hook(page)).sample.playing).toBe(false);
   await expect(thud).toHaveAttribute("aria-pressed", "false");
   await expect.poll(async () => (await hook(page)).playing).toBe(true);
@@ -421,11 +421,11 @@ test("a busy pass: 200 cues over 12 sounds open as 12 layers quickly, scroll aft
 
   // Playing with every layer open: the playheads keep together and nothing re-renders per frame.
   const before = (await hook(page)).renders;
-  await page.getByRole("button", { name: "Play", exact: true }).click();
+  await playButton(page).click();
   await expect.poll(async () => (await hook(page)).time).toBeGreaterThan(0.5);
   await page.waitForTimeout(600);
   expect((await hook(page)).renders - before).toBeLessThan(10);
-  const lefts = await page.locator(".astage .playhead").evaluateAll((els) => els.map((e) => (e as HTMLElement).style.left));
+  const lefts = await takesList(page).locator(".playhead").evaluateAll((els) => els.map((e) => (e as HTMLElement).style.left));
   expect(lefts).toHaveLength(13);
   expect(new Set(lefts).size).toBe(1);
 

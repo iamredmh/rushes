@@ -1,10 +1,9 @@
 // The Films button on a read, bed or pass: which films it is on. Ticking a film puts it there and
 // unticking takes it off (dropping that film's pick of it), saved at once. One bed is often on
-// several films. Every film's tab keeps the ones not on it folded under "Not on this film".
+// several films. Every film's tab keeps the ones not on it folded under "Not on this film" (Takes).
 import { useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api } from "../api.js";
 import { Icon } from "./Icon.js";
-import type { StageRow } from "./Lanes.js";
 import type { Video } from "../types.js";
 import { useDismiss } from "./useDismiss.js";
 
@@ -92,44 +91,4 @@ export function filmsControl(
       onChanged();
     },
   };
-}
-
-// Which tabs have "Not on this film" open, for the session.
-const looseOpen = new Set<string>();
-
-/**
- * The rows for the reads, beds or passes not on this film (on other films or on none): one fold,
- * "Not on this film · n", and when it is open, a lane for each with its Films button (and no Use:
- * put it on this film first).
- */
-export function looseRows<R extends { key: string; name: string; films: string[] }>(
-  stage: string,
-  loose: R[],
-  lane: (r: R) => StageRow,
-  rerender: () => void,
-): StageRow[] {
-  if (loose.length === 0) return [];
-  const open = looseOpen.has(stage);
-  const n = loose.length;
-  const what = stage === "voice" ? (n === 1 ? "read" : "reads") : stage === "music" ? (n === 1 ? "bed" : "beds") : n === 1 ? "pass" : "passes";
-  const none = loose.filter((r) => r.films.length === 0).length;
-  const text = `Not on this film · ${n} ${what}${none ? ` · ${none} on no film` : ""}`;
-  const fold: StageRow = {
-    key: `loose:${stage}`,
-    name: "Not on this film",
-    color: "var(--text-3)",
-    clips: [],
-    fold: {
-      label: <><b>Not on this film</b> · {n} {what}{none ? <> · <span class="fnone">{none} on no film</span></> : null} · use Films to put one on it</>,
-      text,
-      open,
-      dot: false,
-      onToggle: () => {
-        if (open) looseOpen.delete(stage);
-        else looseOpen.add(stage);
-        rerender();
-      },
-    },
-  };
-  return [fold, ...(open ? loose.map(lane) : [])];
 }

@@ -19,6 +19,7 @@ import { Ruler, type RulerMarker } from "./desk/Ruler.js";
 import { LoudnessReadout, type SoundTab, SoundTracks, useMix } from "./desk/SoundTracks.js";
 import { ToolStrip } from "./desk/ToolStrip.js";
 import { Transport } from "./desk/Transport.js";
+import { SplitDivider, splitPanel, useSplit, useVolume } from "./desk/frame.js";
 import { shortLabel } from "../versions.js";
 
 declare global {
@@ -84,41 +85,8 @@ export interface PictureProps {
   onOpenTab?(tab: SoundTab): void;
 }
 
-/** §27, 5.5: the player's level and mute, remembered per browser. */
-const VOLUME_KEY = "rushes:volume";
-/** §27, 5.4: the timeline panel's share of the column once its divider has been dragged, remembered per browser. */
-const SPLIT_KEY = "rushes:split";
-/** The timeline panel never takes more than this share of the column, nor less than the ruler needs. */
-const SPLIT_MAX = 0.55;
-const SPLIT_MIN = 0.08;
-
-function readVolume(): { level: number; muted: boolean } {
-  try {
-    const v = JSON.parse(localStorage.getItem(VOLUME_KEY) ?? "null") as { level?: unknown; muted?: unknown } | null;
-    const level = typeof v?.level === "number" && Number.isFinite(v.level) ? Math.min(1, Math.max(0, v.level)) : 1;
-    return { level, muted: v?.muted === true };
-  } catch {
-    return { level: 1, muted: false };
-  }
-}
-
-function readSplit(): number | null {
-  try {
-    const n = Number(localStorage.getItem(SPLIT_KEY));
-    return localStorage.getItem(SPLIT_KEY) !== null && Number.isFinite(n) ? Math.min(SPLIT_MAX, Math.max(SPLIT_MIN, n)) : null;
-  } catch {
-    return null;
-  }
-}
-
-function remember(key: string, value: string | null): void {
-  try {
-    if (value === null) localStorage.removeItem(key);
-    else localStorage.setItem(key, value);
-  } catch {
-    // Storage refused (a private window): the setting holds for this visit only.
-  }
-}
+/** §27, 5.7: with nothing selected, the note is on this frame or on the whole mix. */
+const AIM_OPTIONS = [{ value: "frame", label: "This frame" }, { value: "mix", label: "The whole mix" }];
 
 const typing = (el: EventTarget | null) => el instanceof HTMLElement && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
 
@@ -183,8 +151,8 @@ export function Picture({
   };
   const openNoteBox = useNoteBox(input);
   // §27, 5.5: the level and mute, remembered per browser; §27, 5.4: the timeline's share of the column, once dragged.
-  const [sound, setSound] = useState(readVolume);
-  const [split, setSplit] = useState(readSplit);
+  const [sound, setSound] = useVolume();
+  const split = useSplit();
   const monitorRef = useRef<HTMLDivElement>(null);
   const columnRef = useRef<HTMLDivElement>(null);
   // The click that ends a box drag shouldn't also start playback.
@@ -491,21 +459,6 @@ export function Picture({
       v.muted = sound.muted || mix.videoMuted;
     }
   }, [sound, mix.videoMuted]);
-  useEffect(() => remember(VOLUME_KEY, JSON.stringify(sound)), [sound]);
-
-  // §27, 5.4: dragging the divider sets the timeline panel's share of the column, from SPLIT_MIN to SPLIT_MAX.
-  const splitDrag = useRef<{ top: number; height: number } | null>(null);
-  const splitAt = (clientY: number): number | null => {
-    const d = splitDrag.current;
-    if (!d || d.height <= 0) return null;
-    const to = Math.min(SPLIT_MAX, Math.max(SPLIT_MIN, (d.top + d.height - clientY) / d.height));
-    setSplit(to);
-    return to;
-  };
-  const keepSplit = (to: number | null) => {
-    setSplit(to);
-    remember(SPLIT_KEY, to === null ? null : String(Math.round(to * 1000) / 1000));
-  };
 
   // Every grab is numbered, and only the latest one's result is shown and attached: an ffmpeg
   // grab can take a moment, so an earlier one finishing late must never replace a later one.
@@ -897,40 +850,9 @@ export function Picture({
           loudness={mix.inUse ? <LoudnessReadout loudness={mix.loudness} /> : null}
         />
 
-        <div
-          class="tlsplit"
-          role="separator"
-          aria-orientation="horizontal"
-          aria-label="Resize the timeline"
-          aria-valuemin={Math.round(SPLIT_MIN * 100)}
-          aria-valuemax={Math.round(SPLIT_MAX * 100)}
-          aria-valuenow={split === null ? undefined : Math.round(split * 100)}
-          tabIndex={0}
-          onPointerDown={(e) => {
-            const col = columnRef.current;
-            if (!col || e.button !== 0) return;
-            const r = col.getBoundingClientRect();
-            splitDrag.current = { top: r.top, height: r.height };
-            (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-          }}
-          onPointerMove={(e) => splitAt(e.clientY)}
-          onPointerUp={(e) => {
-            const to = splitAt(e.clientY);
-            splitDrag.current = null;
-            if (to !== null) keepSplit(to);
-          }}
-          onDblClick={() => keepSplit(null)}
-          onKeyDown={(e) => {
-            if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
-            e.preventDefault();
-            const col = columnRef.current;
-            const panel = col?.querySelector<HTMLElement>(".tlpanel");
-            const from = split ?? (col && panel ? panel.getBoundingClientRect().height / col.getBoundingClientRect().height : SPLIT_MIN);
-            keepSplit(Math.min(SPLIT_MAX, Math.max(SPLIT_MIN, from + (e.key === "ArrowUp" ? 0.03 : -0.03))));
-          }}
-        />
+        <SplitDivider column={columnRef} split={split} />
 
-        <div class={`tlpanel${split === null ? "" : " sized"}`} style={split === null ? undefined : { height: `${split * 100}%` }}>
+        <div {...splitPanel(split.split)}>
           <div class="trow rrow">
             <div class="thead" />
             <Ruler duration={duration} t={t} marks={marks} live={liveRange} onSeek={seek} onMark={(id) => {
@@ -977,7 +899,7 @@ export function Picture({
         onLabel={mix.noteLabel}
         target={{
           label: target.label,
-          menu: !takeSel ? { value: aim, onChange: (v) => setAim(v) } : undefined,
+          menu: !takeSel ? { value: aim, options: AIM_OPTIONS, onChange: (v) => setAim(v === "mix" ? "mix" : "frame") } : undefined,
           onClear: takeSel || aim === "mix" ? clearSelection : undefined,
         }}
         chips={takeSel ? AUDIO_CHIPS[takeSel.stage] : undefined}

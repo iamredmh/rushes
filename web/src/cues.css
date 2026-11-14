@@ -1,9 +1,6 @@
 /* §23: sound-effects cue layers -- the chevron, the cue buttons on a pass's waveform, the layers by
    sound and the hover card. Loaded after styles.css. Explicit grid tracks throughout (Safari). */
 
-/* A pass's name cell: the chevron, then the name button (a button can't hold another, ruling R1). */
-.lane .nmc { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 8px; align-items: center; min-width: 0; }
-.lane .nmc > .nm { margin-left: 0; }
 /* Scoped to the button: Found's turning chevron is an svg with this class, and must stay unboxed. */
 button.chev { width: 26px; height: 26px; display: grid; place-items: center; padding: 0; border: 1px solid var(--line-2); border-radius: 8px; background: transparent; color: var(--text-2); cursor: pointer; }
 button.chev:hover:not(:disabled) { background: var(--hover); color: var(--text); }
@@ -13,13 +10,13 @@ button.chev:disabled { opacity: 0.4; cursor: default; }
 
 /* The cue labels are buttons (§23.5): reachable, and hoverable for the card. These outrank
    styles.css's .cue and .cue-tick, which take no pointer. */
-.track .cue { pointer-events: auto; cursor: pointer; padding: 0; border: 0; background: none; border-radius: 4px; text-align: center; }
-.track .cue > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.track .cue.hot > span { text-decoration: underline; text-underline-offset: 3px; }
-.track .cue:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.track .cue-tick { pointer-events: auto; cursor: pointer; }
-.track .cue-tick::before { content: ""; position: absolute; top: 0; bottom: 0; left: -4px; right: -4px; }
-.track .cue-tick.hot { opacity: 1; width: 2px; }
+.take .cue { pointer-events: auto; cursor: pointer; padding: 0; border: 0; background: none; border-radius: 4px; text-align: center; }
+.take .cue > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.take .cue.hot > span { text-decoration: underline; text-underline-offset: 3px; }
+.take .cue:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.take .cue-tick { pointer-events: auto; cursor: pointer; }
+.take .cue-tick::before { content: ""; position: absolute; top: 0; bottom: 0; left: -4px; right: -4px; }
+.take .cue-tick.hot { opacity: 1; width: 2px; }
 
 /* The layers by sound: the lanes' own three tracks, so each layer's track lines up with the pass's. */
 .clayers { display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; max-height: 261px; overflow-y: auto; overscroll-behavior: contain; }
