@@ -317,9 +317,20 @@ export type Levels = z.infer<typeof LevelsSchema>;
 
 // What one film hears: its own pick per lane and its own Mix levels. Music, sound effects, the
 // voiceover read and the levels belong to a film, so a second film never inherits the first's.
+/**
+ * §27.6: the one read, bed or effects pass in use for a sound, and when it was picked. `seen` is that
+ * sound's per-lane picks as they stood right after the pick: an older Rushes knows only `lanes`, so a
+ * pick it makes shows up as `lanes` no longer matching `seen`, and its own rule then decides (picks.ts).
+ */
+export const UseSchema = fileObject({ lane: id, variant: id, at: z.string(), seen: z.record(z.string(), z.string()).default({}) });
+export type Use = z.infer<typeof UseSchema>;
+export const InUseSchema = fileObject({ voice: UseSchema, music: UseSchema, sfx: UseSchema }).partial();
+export type InUse = z.infer<typeof InUseSchema>;
+
 export const VideoPicksSchema = fileObject({
   lanes: z.record(z.string(), z.string()).default({}),
   levels: LevelsSchema,
+  use: InUseSchema.optional(),
 });
 export type VideoPicks = z.infer<typeof VideoPicksSchema>;
 
@@ -332,6 +343,9 @@ export const PicksSchema = fileObject({
   sections: z.record(z.string(), z.string()).default({}),
   // §19.6: each Mix lane's level in dB, defaulting to 0 (absent). Keyed the same as LaneStage.
   levels: LevelsSchema,
+  // §27.6: the take in use per sound. In this top-level place only for the picks of one film as
+  // picksForVideo hands them out (and a project from before picks were per film).
+  use: InUseSchema.optional(),
   // Each film's own picks and levels, keyed by video id. A film with no entry has picked nothing.
   videos: z.record(z.string(), VideoPicksSchema).default({}),
 });
@@ -341,7 +355,7 @@ export type Picks = z.infer<typeof PicksSchema>;
 export function picksForVideo(picks: Picks, videoId: string | null | undefined): Picks {
   if (!videoId) return picks;
   const own = picks.videos[videoId];
-  return { ...picks, lanes: { ...(own?.lanes ?? {}) }, levels: { ...(own?.levels ?? {}) }, sections: {}, videos: {} };
+  return { ...picks, lanes: { ...(own?.lanes ?? {}) }, levels: { ...(own?.levels ?? {}) }, use: { ...(own?.use ?? {}) }, sections: {}, videos: {} };
 }
 
 /** The films a read, bed or pass is on: its `videos`, or an older project's one `video`, or none. */

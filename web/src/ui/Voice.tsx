@@ -10,7 +10,7 @@ import { assetRev, type Clip } from "../audio/timeline.js";
 import {
   AUDIO_CHIPS, blindOrder, defaultVersion, readLane, type Scope, STAGE_NAMES, type VariantRow, voiceDefaultRead, voiceListening, type VoiceNotes, voiceNoteRows,
   voiceOnLabel, voiceOnOptions, type VoiceRound, voiceRounds,
-  filmLanes, filmNotes, filmPicks, otherLanes, variantRows,
+  filmLanes, filmNotes, filmPicks, otherLanes, takeInUse, variantRows,
 } from "../lib.js";
 import type { Asset, State, Video } from "../types.js";
 import { AudioStage, type Preview } from "./AudioStage.js";
@@ -73,7 +73,9 @@ export function Voice({ state, assets, video, toast, onChanged, onPendingChange 
   // Rounds in creation order, with only this film's reads (and any made for every film); with Blind,
   // each round's reads shuffled and named Read 1…n.
   const filmCount = state.project.videos.length;
-  const rounds = voiceRounds(filmLanes(state.project.lanes, video?.id, filmCount), filmPicks(state.picks, video?.id).lanes);
+  const filmState = filmPicks(state.picks, video?.id);
+  const inUseNow = filmState.use;
+  const rounds = voiceRounds(filmLanes(state.project.lanes, video?.id, filmCount), filmState.lanes);
   const loose = video ? variantRows(otherLanes(state.project.lanes, video.id, filmCount), "voice") : [];
   const films = (r: VariantRow) => (filmCount > 1 ? filmsControl(r, state.project.videos, video, toast, onChanged) : undefined);
   const shown: VoiceRound[] = rounds.map((round) => {
@@ -114,7 +116,8 @@ export function Voice({ state, assets, video, toast, onChanged, onPendingChange 
     meta: blind ? "·····" : r.meta,
     color: VO_COLOR,
     clips: missing(r.file) ? [] : [clipOf(r)],
-    use: { inUse: round.pick === r.variant, onUse: () => void use(round, r.variant), onUnpick: () => void use(round, null) },
+    // In use is one read for the film (§27.6), not one per round: a round's own pick that isn't it reads as Use.
+    use: { inUse: takeInUse(inUseNow, "voice", r), onUse: () => void use(round, r.variant), onUnpick: () => void use(round, null) },
     films: films(r),
     on: `v:${r.key}`,
     missing: missing(r.file),

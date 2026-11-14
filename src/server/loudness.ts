@@ -4,7 +4,8 @@ import { stat } from "node:fs/promises";
 import { RushesError } from "../core/errors.js";
 import { AUDIO_FORMATS, probe } from "../core/media.js";
 import { fromManifestPath } from "../core/paths.js";
-import type { LaneStage, Picks, Project, Variant } from "../core/schema.js";
+import { inUse, inUseVariant } from "../core/picks.js";
+import type { LaneStage, Picks, Project } from "../core/schema.js";
 
 export interface LoudnessRunner {
   (args: string[], signal?: AbortSignal): Promise<{ code: number; stderr: string }>;
@@ -88,58 +89,26 @@ export interface MixInput {
 }
 
 /**
- * What the voice part of the mix is, resolved once for both `mixInputs` and the VO span (§18.4):
- * the pick of the newest `voice` lane (round) that has one, walked from the newest (last in
- * `project.lanes`) to the oldest. Takes are never mixed, however many a script section has.
- */
-type VoiceSource = { kind: "variant"; variant: Variant } | { kind: "none" };
-
-function voiceSource(project: Project, picks: Picks): VoiceSource {
-  // §18.4: the newest round (lane) with a pick; takes are never mixed.
-  const voice = project.lanes.filter((l) => l.stage === "voice");
-  for (let i = voice.length - 1; i >= 0; i--) {
-    const pickedId = picks.lanes[voice[i].id];
-    const variant = pickedId ? voice[i].variants.find((v) => v.id === pickedId) : undefined;
-    if (variant) return { kind: "variant", variant };
-  }
-  return { kind: "none" };
-}
-
-/**
- * The files and offsets a mix of `lanes` is made from (§17.6, §18.4) -- exactly what the Mix tab
- * plays:
- * - voice: the pick of the newest round (voice lane) that has one. With no round picked, there is
- *   no voice input at all -- takes are never mixed, however many a script section has.
- * - music: the picked variant of each music lane, at 0;
- * - sfx: the picked variant of each sfx lane, at 0.
+ * The files and offsets a mix of `lanes` is made from (§17.6, §18.4, §27.6) -- exactly what Mix plays:
+ * for each sound asked for, the one take in use (picks.ts `inUse`), at 0. At most one input per sound.
  *
- * A music or sfx lane with nothing picked is left out, never stood in for by its first variant:
- * Mix plays only explicit picks, so the readout must measure only them. A manifest entry whose
- * file is missing from disk is left out too, rather than handed to ffmpeg.
+ * - voice: a read from a round, never a section's takes, however many a script section has.
+ * - A sound with nothing in use is left out, never stood in for by a lane's first variant: Mix plays
+ *   only what was picked, so the readout must measure only that.
+ * - A project from before §27 with a pick in several lanes of one sound plays the newest lane's.
+ * - A manifest entry whose file is missing from disk is left out too, rather than handed to ffmpeg.
  */
 export function mixInputs(project: Project, picks: Picks, lanes: LaneStage[], root: string): MixInput[] {
-  const want = new Set(lanes);
+  const use = inUse(project, picks);
   const out: MixInput[] = [];
-  const add = (file: string, offset: number, stage: LaneStage) => {
-    const abs = fromManifestPath(root, file);
-    if (existsSync(abs)) out.push({ file: abs, offset, stage, gainDb: picks.levels[stage] ?? 0 });
-  };
-
-  if (want.has("voice")) {
-    const voice = voiceSource(project, picks);
-    if (voice.kind === "variant") add(voice.variant.file, 0, "voice");
+  // Voice first, then music, then effects: the order the readout's inputs have always had.
+  for (const stage of ["voice", "music", "sfx"] as const) {
+    if (!lanes.includes(stage)) continue;
+    const taken = inUseVariant(project, use, stage);
+    if (!taken) continue;
+    const abs = fromManifestPath(root, taken.variant.file);
+    if (existsSync(abs)) out.push({ file: abs, offset: 0, stage, gainDb: picks.levels[stage] ?? 0 });
   }
-
-  for (const stage of ["music", "sfx"] as const) {
-    if (!want.has(stage)) continue;
-    for (const lane of project.lanes) {
-      if (lane.stage !== stage) continue;
-      const pickedId = picks.lanes[lane.id];
-      const variant = pickedId ? lane.variants.find((v) => v.id === pickedId) : undefined;
-      if (variant) add(variant.file, 0, stage);
-    }
-  }
-
   return out;
 }
 
@@ -220,16 +189,15 @@ export type DurationProbe = (absFile: string) => Promise<number | null>;
 const probeDuration: DurationProbe = async (file) => (await probe(file, { formats: AUDIO_FORMATS })).duration;
 
 /**
- * The VO's own span, from the same `voiceSource` the mix uses (§18.4): the picked round's own
+ * The VO's own span, from the same take in use the mix plays (§18.4, §27.6): that read's own
  * file length, probed only on a cache miss -- or `null` with no round picked, so `musicUnderVo`
  * is left unmeasured rather than measured against nothing.
  */
 type VoSpan = { kind: "variant"; file: string } | null;
 
 function voSpan(project: Project, picks: Picks, root: string): VoSpan {
-  const voice = voiceSource(project, picks);
-  if (voice.kind === "variant") return { kind: "variant", file: fromManifestPath(root, voice.variant.file) };
-  return null;
+  const voice = inUseVariant(project, inUse(project, picks), "voice");
+  return voice ? { kind: "variant", file: fromManifestPath(root, voice.variant.file) } : null;
 }
 
 async function voSpanSeconds(span: VoSpan, durationOf: DurationProbe): Promise<number | null> {

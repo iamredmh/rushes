@@ -26,7 +26,8 @@ import { BRING_IN_MAX, FoundScanner, type BringInFailure, type BringInKind, ffpr
 import { candidatePaths, listAssets, fpsFor, screenshotName } from "./assets.js";
 import { osRevealer, osOpener, OPEN_SAFE_EXT, type Revealer, type Opener } from "./reveal.js";
 import type { CorruptEvent } from "./watch.js";
-import { LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, PinSchema, FileKindSchema, MarkSchema, ProjectIdSchema, ShotSchema, LEVEL_MIN, LEVEL_MAX, LEVEL_STEP, lanesForVideo, picksForVideo, variantFilms, type Levels, type Batch, type Note, type VisualsFile } from "../core/schema.js";
+import { inUse, setInUse } from "../core/picks.js";
+import { LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, PinSchema, FileKindSchema, MarkSchema, ProjectIdSchema, ShotSchema, LEVEL_MIN, LEVEL_MAX, LEVEL_STEP, lanesForVideo, picksForVideo, variantFilms, type Levels, type Batch, type Note, type Picks, type Project, type VisualsFile } from "../core/schema.js";
 import { LABEL_MAX, oneLineOf } from "../core/labels.js";
 import { byOf, logBookFor } from "./logbook.js";
 import { BriefService } from "./brief.js";
@@ -743,7 +744,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
         versions: await Promise.all(v.versions.map(async (ver) => ({ ...ver, proxyNeed: await jobs.needNow(fromManifestPath(store.root, ver.file)) }))),
       })),
     );
-    return c.json({ version: VERSION, project: { ...project, videos }, script, notes, picks, batches, tabs, visuals, proxies: { ffmpeg, jobs: jobs.list() }, found: foundSummary, log: logHead, brief: briefView, storyboard: storyboardView, build: buildState({ brief: briefView, script: script.sections, storyboard: storyboardView }) });
+    return c.json({ version: VERSION, project: { ...project, videos }, script, notes, picks: withUse(project, picks), batches, tabs, visuals, proxies: { ffmpeg, jobs: jobs.list() }, found: foundSummary, log: logHead, brief: briefView, storyboard: storyboardView, build: buildState({ brief: briefView, script: script.sections, storyboard: storyboardView }) });
   });
 
   // ---- found: the project's other files (§20) ----
@@ -1224,7 +1225,8 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
       await store.update("picks", (k) => {
         for (const film of result.left) {
           const own = k.videos[film];
-          if (own?.lanes[result.lane.id] === result.variant.id) delete own.lanes[result.lane.id];
+          // Through setInUse, so the take in use for that sound goes with the pick (§27.6).
+          if (own?.lanes[result.lane.id] === result.variant.id) setInUse(own, data.lanes, result.lane, null, new Date());
         }
       });
     }
@@ -1266,10 +1268,21 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
 
   // ---- picks ----
   // ?video=<id> reads one film's picks as a plain picks file (lanes and levels are that film's own).
+  // §27.6: every reader gets the take in use already worked out, per film, so the dashboard, an
+  // agent and the loudness readout can never disagree about it.
+  const withUse = (project: Project, picks: Picks, video?: string): Picks => {
+    if (video) {
+      const own = picksForVideo(picks, video);
+      return { ...own, use: inUse(project, own) };
+    }
+    const videos: Picks["videos"] = {};
+    for (const [id, v] of Object.entries(picks.videos)) videos[id] = { ...v, use: inUse(project, picksForVideo(picks, id)) };
+    return { ...picks, use: inUse(project, picks), videos };
+  };
+
   app.get("/api/picks", async (c) => {
-    const picks = await store.read("picks");
-    const video = c.req.query("video");
-    return c.json(video ? picksForVideo(picks, video) : picks);
+    const [project, picks] = await Promise.all([store.read("project"), store.read("picks")]);
+    return c.json(withUse(project, picks, c.req.query("video")));
   });
 
   app.put("/api/picks", async (c) => {
@@ -1292,30 +1305,43 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
       }
     };
     let before: Record<string, string> = {};
+    // The lanes' sounds come from project.json: a pick in a lane it knows also settles which take
+    // is in use for that sound (§27.6). If it can't be read now, the pick still stands, plainly.
+    const lanes = (await store.read("project").catch(() => null))?.lanes ?? [];
+    const now = new Date();
     const { data } = await store.update("picks", (p) => {
       merge(p.sections, b.sections);
       if (b.video) {
         // A film's picks and levels are its own: another film's are never touched.
         const own = (p.videos[b.video] ??= { lanes: {}, levels: {} });
         before = { ...own.lanes };
-        merge(own.lanes, b.lanes);
+        for (const [k, v] of Object.entries(b.lanes ?? {})) {
+          const lane = lanes.find((l) => l.id === k);
+          if (lane) setInUse(own, lanes, lane, v, now);
+          else merge(own.lanes, { [k]: v });
+        }
         mergeLevels(own.levels);
         return;
       }
+      // No film named: a project with no cut yet (or an older client). The same rule, in the project-wide set.
       before = { ...p.lanes };
-      merge(p.lanes, b.lanes);
+      for (const [k, v] of Object.entries(b.lanes ?? {})) {
+        const lane = lanes.find((l) => l.id === k);
+        if (lane) setInUse(p, lanes, lane, v, now);
+        else merge(p.lanes, { [k]: v });
+      }
       mergeLevels(p.levels);
     });
-    const now = b.video ? (data.videos[b.video]?.lanes ?? {}) : data.lanes;
+    const after = b.video ? (data.videos[b.video]?.lanes ?? {}) : data.lanes;
     // §22.5: a change of what's picked is logged; levels alone aren't (R10).
-    const changed = Object.keys({ ...before, ...now }).some((k) => before[k] !== now[k]);
+    const changed = Object.keys({ ...before, ...after }).some((k) => before[k] !== after[k]);
+    // The names come from project.json; if it can't be read now, the pick still stands (ruling e).
+    const project = await store.read("project").catch(() => null);
     if (changed) {
-      // The names come from project.json; if it can't be read now, the pick still stands (ruling e).
-      const project = await store.read("project").catch(() => null);
-      if (project) await log.add(() => picksEvent(project, now, project.videos.find((v) => v.id === b.video)), by(c));
+      if (project) await log.add(() => picksEvent(project, after, project.videos.find((v) => v.id === b.video)), by(c));
       else log.failures += 1;
     }
-    return c.json(b.video ? picksForVideo(data, b.video) : data);
+    return c.json(project ? withUse(project, data, b.video) : b.video ? picksForVideo(data, b.video) : data);
   });
 
   // ---- mix loudness (§17.6) ----

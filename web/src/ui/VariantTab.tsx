@@ -4,7 +4,7 @@
 import { useState } from "preact/hooks";
 import { api } from "../api.js";
 import { assetRev, type Clip } from "../audio/timeline.js";
-import { blindOrder, defaultVersion, filmLanes, filmNotes, filmPicks, otherLanes, STAGE_NAMES, type VariantRow, variantEngineLane, variantNoteRow, variantOnLabel, variantOnOptions, variantRows } from "../lib.js";
+import { blindOrder, defaultVersion, filmLanes, filmNotes, filmPicks, otherLanes, STAGE_NAMES, takeInUse, type VariantRow, variantEngineLane, variantNoteRow, variantOnLabel, variantOnOptions, variantRows } from "../lib.js";
 import type { Asset, State, Video } from "../types.js";
 import { AudioStage, type Preview } from "./AudioStage.js";
 import { filmsControl, looseRows } from "./FilmsMenu.js";
@@ -57,7 +57,8 @@ export function VariantTab({ stage, state, assets, video, toast, onChanged, onPe
   const order = blind ? blindOrder(all.map((r) => r.key), BLIND_SEED) : all.map((r) => r.key);
   const rows = order.map((k) => all.find((r) => r.key === k)!);
   const nameOf = (r: VariantRow) => (blind ? `Bed ${order.indexOf(r.key) + 1}` : r.name);
-  const picks = filmPicks(state.picks, video?.id).lanes;
+  const filmState = filmPicks(state.picks, video?.id);
+  const picks = filmState.lanes;
 
   // null clears the lane's pick (Unpick).
   const use = async (r: VariantRow, variant: string | null) => {
@@ -73,7 +74,8 @@ export function VariantTab({ stage, state, assets, video, toast, onChanged, onPe
     const asset = assets.find((a) => a.path === r.file);
     const engineLane = variantEngineLane(stage);
     const clip: Clip = { id: r.key, lane: engineLane, path: r.file, offset: 0, duration: 0, rev: asset ? assetRev(asset) : undefined };
-    const picked = picks[r.lane] === r.variant;
+    // One bed or pass is in use for the film (§27.6); a lane's own pick that isn't it reads as Use.
+    const picked = takeInUse(filmState.use, stage, r);
     return {
       key: r.key,
       name: nameOf(r),
