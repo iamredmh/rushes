@@ -1247,8 +1247,8 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     const { result } = await store.update("project", (p) => {
       const stage = p.lanes.find((l) => l.id === laneId)?.stage;
       const isIt = (use: InUse) => stage !== undefined && use[stage]?.lane === laneId && use[stage]?.variant === variantId;
-      const usedOn = p.videos.filter((v) => isIt(inUse(p, picksForVideo(picks, v.id)))).map((v) => v.name);
-      if (p.videos.length === 0 && isIt(inUse(p, picks))) usedOn.push("this film");
+      const usedOn = p.videos.filter((v) => isIt(filmUse(p, picks, v.id))).map((v) => v.name);
+      if (p.videos.length === 0 && isIt(filmUse(p, picks, undefined))) usedOn.push("this film");
       return putAway(p, laneId, variantId, b.away, usedOn);
     });
     return c.json({ variant: result });
@@ -1289,14 +1289,15 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   // ?video=<id> reads one film's picks as a plain picks file (lanes and levels are that film's own).
   // §27.6: every reader gets the take in use already worked out, per film, so the dashboard, an
   // agent and the loudness readout can never disagree about it.
+  // Always among the takes the film hears (lanesForVideo), which is what Mix plays and the readout
+  // measures: a take that has left the film is never its take in use.
+  const filmUse = (project: Project, picks: Picks, video: string | undefined): InUse =>
+    inUse({ lanes: lanesForVideo(project.lanes, video, project.videos.length) }, picksForVideo(picks, video));
   const withUse = (project: Project, picks: Picks, video?: string): Picks => {
-    if (video) {
-      const own = picksForVideo(picks, video);
-      return { ...own, use: inUse(project, own) };
-    }
+    if (video) return { ...picksForVideo(picks, video), use: filmUse(project, picks, video) };
     const videos: Picks["videos"] = {};
-    for (const [id, v] of Object.entries(picks.videos)) videos[id] = { ...v, use: inUse(project, picksForVideo(picks, id)) };
-    return { ...picks, use: inUse(project, picks), videos };
+    for (const [id, v] of Object.entries(picks.videos)) videos[id] = { ...v, use: filmUse(project, picks, id) };
+    return { ...picks, use: filmUse(project, picks, undefined), videos };
   };
 
   app.get("/api/picks", async (c) => {
@@ -1326,9 +1327,12 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     let before: Record<string, string> = {};
     // The lanes' sounds come from project.json: a pick in a lane it knows also settles which take
     // is in use for that sound (§27.6). If it can't be read now, the pick still stands, plainly.
-    const lanes = (await store.read("project").catch(() => null))?.lanes ?? [];
+    const projectBefore = await store.read("project").catch(() => null);
+    const lanes = projectBefore?.lanes ?? [];
     const now = new Date();
+    let usedBefore: InUse = {};
     const { data } = await store.update("picks", (p) => {
+      if (projectBefore) usedBefore = filmUse(projectBefore, p, b.video);
       merge(p.sections, b.sections);
       if (b.video) {
         // A film's picks and levels are its own: another film's are never touched.
@@ -1353,11 +1357,16 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     });
     const after = b.video ? (data.videos[b.video]?.lanes ?? {}) : data.lanes;
     // §22.5: a change of what's picked is logged; levels alone aren't (R10).
-    const changed = Object.keys({ ...before, ...after }).some((k) => before[k] !== after[k]);
     // The names come from project.json; if it can't be read now, the pick still stands (ruling e).
     const project = await store.read("project").catch(() => null);
+    // §27.6: what the log tells is the take in use for each sound, so a pick that changes nothing in
+    // `lanes` (an earlier take brought back) is still a change, and a round's leftover pick is not news.
+    const usedNow = project ? filmUse(project, data, b.video) : {};
+    const sameUse = (["voice", "music", "sfx"] as const).every((s) => usedBefore[s]?.lane === usedNow[s]?.lane && usedBefore[s]?.variant === usedNow[s]?.variant);
+    const changed = Object.keys({ ...before, ...after }).some((k) => before[k] !== after[k]) || !sameUse;
     if (changed) {
-      if (project) await log.add(() => picksEvent(project, after, project.videos.find((v) => v.id === b.video)), by(c));
+      const inUseLanes = Object.fromEntries(Object.values(usedNow).map((u) => [u.lane, u.variant]));
+      if (project) await log.add(() => picksEvent(project, inUseLanes, project.videos.find((v) => v.id === b.video)), by(c));
       else log.failures += 1;
     }
     return c.json(project ? withUse(project, data, b.video) : b.video ? picksForVideo(data, b.video) : data);

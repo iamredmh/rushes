@@ -10,7 +10,7 @@
   --line-2: #4a4a4a;
   --text: #e8e8e8;
   --text-2: #9c9c9c;
-  --text-3: #757575;
+  --text-3: #8a8a8a;
   --text-4: #5c5c5c;
   --accent: #4c8dff;
   --accent-2: #7aa9ff;
@@ -42,6 +42,15 @@
   --tint: rgba(255, 255, 255, 0.03);
   --tip: #000000;
   --on-tip: #ffffff;
+  --k-bg: #1b1b1b;
+  --k-app: #232323;
+  --k-raised: #2e2e2e;
+  --k-hover: #363636;
+  --k-line: #3a3a3a;
+  --k-line-2: #4a4a4a;
+  --k-text: #e8e8e8;
+  --k-text-2: #a8a8a8;
+  --k-text-3: #8a8a8a;
   --shadow: rgba(0, 0, 0, 0.6);
   --sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
@@ -60,8 +69,8 @@
   --line: #cfcfcf;
   --line-2: #bdbdbd;
   --text: #1c1c1c;
-  --text-2: #676767;
-  --text-3: #8a8a8a;
+  --text-2: #4f4f4f;
+  --text-3: #6a6a6a;
   --text-4: #adadad;
   --accent: #1f6feb;
   --accent-2: #1a5fd0;
@@ -69,12 +78,12 @@
   --accent-soft: rgba(31, 111, 235, 0.12);
   --accent-soft-2: rgba(31, 111, 235, 0.22);
   --on-accent-soft: rgba(0, 0, 0, 0.2);
-  --todo: #a8730a;
+  --todo: #8a5f00;
   --todo-soft: rgba(168, 115, 10, 0.12);
   --todo-soft-2: rgba(168, 115, 10, 0.2);
   --todo-line: rgba(168, 115, 10, 0.5);
   --on-todo: #ffffff;
-  --done: #1e8a50;
+  --done: #157347;
   --done-soft: rgba(30, 138, 80, 0.12);
   --done-soft-2: rgba(30, 138, 80, 0.18);
   --done-line: rgba(30, 138, 80, 0.4);
@@ -93,7 +102,25 @@
   --tint: rgba(0, 0, 0, 0.04);
   --tip: #1c1c1c;
   --on-tip: #ffffff;
+  --k-bg: #1b1b1b;
+  --k-app: #232323;
+  --k-raised: #2e2e2e;
+  --k-hover: #363636;
+  --k-line: #3a3a3a;
+  --k-line-2: #4a4a4a;
+  --k-text: #e8e8e8;
+  --k-text-2: #a8a8a8;
+  --k-text-3: #8a8a8a;
   --shadow: rgba(0, 0, 0, 0.2);
+}
+/* §27: surfaces that stay near-black in light mode too (the picture's surround, the Original/Proxy
+   switch over it, the lightboxes, the full-screen viewer). What sits on them reads as on dark: the
+   text, line and ground tokens point at the dark set inside them. */
+.frame, .srcswitch, .sblight, .lightbox, .vzframe, .vzfs {
+  --bg: var(--k-bg); --app: var(--k-app); --raised: var(--k-raised); --hover: var(--k-hover);
+  --line: var(--k-line); --line-2: var(--k-line-2);
+  --text: var(--k-text); --text-2: var(--k-text-2); --text-3: var(--k-text-3);
+  color: var(--k-text);
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }

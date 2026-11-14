@@ -713,6 +713,25 @@ describe("what a take knows about itself (§27.6)", () => {
     expect(addVariant(p, { stage: "music", name: "Drift", file: "audio/drift.mp3", video: "Teaser" }, at).variant.madeFor).toBeUndefined();
     expect(addVariant(p, { stage: "music", name: "Loose", file: "audio/loose.mp3", video: [] }, at).variant.madeFor).toBeUndefined();
   });
+  it("with one film and no film named, a take is on that film and records its cut (the commonest route)", () => {
+    const p = withHero();
+    // "Pulse" does not start with the film's name, so no film is inferred; in a one-film project it is on Hero all the same.
+    const { variant } = addVariant(p, { stage: "music", name: "Pulse", file: "audio/pulse.mp3" }, at);
+    expect(variant.videos).toBeUndefined();
+    expect(variant.madeFor).toEqual({ hero: "v2" });
+  });
+  it("with two films and no film named, a take is on neither and records no cut", () => {
+    const p = withHero();
+    addVersion(p, { video: "Teaser", file: "renders/teaser_v1.mp4" });
+    expect(addVariant(p, { stage: "music", name: "Pulse", file: "audio/pulse.mp3" }, at).variant.madeFor).toBeUndefined();
+  });
+  it("naming the film later keeps the cut the take was made for, not the cut the film has by then", () => {
+    const p = withHero();
+    const { lane, variant } = addVariant(p, { stage: "music", name: "Pulse", file: "audio/pulse.mp3" }, at);
+    addVersion(p, { video: "Hero", file: "renders/hero_v3.mp4" });
+    setVariantFilms(p, lane.id, variant.id, ["Hero"]);
+    expect(variant.madeFor).toEqual({ hero: "v2" });
+  });
   it("a round name makes a lane for music and effects, as it does for voice", () => {
     const p = withHero();
     const music = addVariant(p, { stage: "music", name: "Drift", file: "audio/drift.mp3", round: "Round 2 · softer" });
