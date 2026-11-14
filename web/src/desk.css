@@ -11,9 +11,9 @@
 .tright [data-tip]::after, .tright [data-tip]:hover::after, .tright [data-tip]:focus-visible::after { left: auto; right: 0; transform: none; }
 .top .logo { width: 22px; height: 22px; border-radius: 6px; flex: none; margin-right: 4px; }
 .top .logo svg { width: 11px; height: 11px; }
-.proj { flex: 0 1 auto; min-width: 48px; max-width: 220px; font-weight: 600; margin-right: 6px; }
+.proj { flex: 0 1 auto; min-width: 48px; font-weight: 600; margin-right: 6px; }
 .proj .pname { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* A name that is cut short shows whole in its tooltip, and only then is it worth one: it is never wider than the window. */
+/* The project's full name is always in its tooltip (whole when the name is cut short), anchored left so it never runs off the window. */
 .proj[data-tip]::after { left: 0; transform: none; }
 .proj[data-tip]:hover::after { transform: none; }
 
@@ -27,7 +27,8 @@
 .top .fshelved { flex: none; font-size: 12.5px; color: var(--todo); }
 .filmsel { flex: 0 1 auto; min-width: 72px; position: relative; display: inline-flex; }
 .filmsel.plain[data-tip]::after { left: 0; transform: none; }
-.top .vwrap { flex: 0 1 auto; min-width: 64px; max-width: 340px; }
+/* The cut's label gives way first (its id stays), so the project's and the film's names show whole while there is room. */
+.top .vwrap { flex: 0 1000 auto; min-width: 96px; max-width: 340px; }
 .top .vbtn .vid { font-family: var(--mono); font-size: 12.5px; color: var(--accent-2); flex: none; }
 .top .vbtn .vlbl { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-2); }
 /* A cut newer than the one on screen. */
@@ -67,7 +68,7 @@
 .dmenu .mi .c { flex: none; margin-left: auto; max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 12.5px; color: var(--text-3); }
 .dmenu .mi .c.todo { color: var(--todo); }
 .dmenu .mi .c.fn { font-family: var(--sans); }
-.dmenu .mi kbd { flex: none; font-size: 11px; padding: 1px 5px; }
+.dmenu .mi kbd { flex: none; font-size: 12.5px; padding: 1px 5px; }
 .dmenu .mi .mtick { flex: none; display: grid; place-items: center; width: 15px; height: 15px; border: 1px solid var(--line-2); border-radius: 4px; }
 .dmenu .mi[aria-checked="true"] .mtick { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .dmenu .mi .mtick .ic { width: 12px; height: 12px; color: inherit; }
@@ -241,7 +242,7 @@
 @container (max-width: 820px) { .tloud [data-cell="musicUnderVo"] { display: none; } }
 @container (max-width: 700px) { .tloud [data-cell="truePeak"] { display: none; } }
 /* ---- status bar: one line, 26 px, at the foot. The notes panel's drawer stops above it, so it never covers it. ---- */
-.status { display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 84px 0 10px; border-top: 1px solid var(--line); background: var(--app); color: var(--text-3); font-size: 12.5px; white-space: nowrap; overflow: hidden; }
+.status { display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 84px 0 10px; border-top: 1px solid var(--line); background: var(--app); color: var(--text-3); font-size: 12.5px; white-space: nowrap; overflow-x: clip; overflow-y: visible; }
 .status > .ic { width: 14px; height: 14px; }
 .status .next { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .status .next b { color: var(--text); font-weight: 500; }
@@ -253,8 +254,8 @@
 .status .sshape { display: inline-flex; }
 .status .sfmt { padding: 0 4px; border: 0; border-radius: 4px; background: transparent; color: var(--accent-2); font: inherit; cursor: pointer; }
 .status .sfmt:hover, .status .sfmt[aria-expanded="true"] { background: var(--hover); }
-/* The bar clips what overflows it, so the tooltip is fixed to the window, above the bar's right-hand group. */
-.status .sfmt[data-tip]::after, .status .sfmt[data-tip]:hover::after, .status .sfmt[data-tip]:focus-visible::after { position: fixed; top: auto; left: auto; right: 84px; bottom: 32px; transform: none; font-size: 12.5px; padding: 5px 8px; border-radius: 5px; }
+/* The bar clips only sideways, so the tooltip opens above its own button, lined up with the button's right side. */
+.status .sfmt[data-tip]::after, .status .sfmt[data-tip]:hover::after, .status .sfmt[data-tip]:focus-visible::after { top: auto; left: auto; right: 0; bottom: calc(100% + 6px); transform: none; font-size: 12.5px; padding: 5px 8px; border-radius: 5px; }
 .status .sfmt[aria-expanded="true"]::after { display: none; }
 .fmtpop.spop { position: fixed; top: auto; left: auto; right: 10px; bottom: 32px; white-space: normal; font-size: 13px; color: var(--text); font-family: var(--sans); }
 

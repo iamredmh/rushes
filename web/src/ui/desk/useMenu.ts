@@ -52,7 +52,12 @@ export function useMenu(count: number, find?: (text: string) => number | null): 
     if (e.key === "Tab") return close(false);
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     const focused = rows.current.findIndex((el) => el === document.activeElement);
-    const to = moveActive(e.key, focused < 0 ? active : focused, count);
+    let to = moveActive(e.key, focused < 0 ? active : focused, count);
+    // A disabled row (Shelve film with no film) cannot take focus: the arrows step over it, Home and End to the nearest.
+    const disabled = (i: number) => (rows.current[i] as HTMLButtonElement | null)?.disabled === true;
+    const onward = e.key === "Home" ? "ArrowDown" : e.key === "End" ? "ArrowUp" : e.key;
+    for (let n = 0; to !== null && n < count && disabled(to); n++) to = moveActive(onward, to, count);
+    if (to !== null && disabled(to)) to = null;
     if (to !== null) {
       e.preventDefault();
       e.stopPropagation();

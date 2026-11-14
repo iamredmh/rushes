@@ -293,8 +293,9 @@ test("Send sends every tab's open notes, whichever tab it is pressed on", async 
   await rushes.api("POST", "/api/notes", { stage: "sfx", video: "hero", scope: "whole", text: "Softer taps." });
   await page.goto(rushes.url);
   await videoReady(page);
-  // Voice has no notes of its own (and nothing to review yet), and still sends both.
-  await openReviewTab(page, "Voice");
+  // Voice has no notes of its own (and nothing to review yet: its tab is locked), and still sends both.
+  await reviewTab(page, "Voice").click();
+  await expect(reviewTab(page, "Voice")).toHaveAttribute("aria-selected", "true");
   await expect(sendButton(page)).toContainText("2");
   await sendButton(page).click();
   const dialog = sentDialog(page);
@@ -1040,7 +1041,9 @@ test("Copy prompt says what happened when the clipboard is refused: the prompt i
   await page.evaluate(() => {
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: () => Promise.reject(new Error("denied")) } });
   });
-  await openReviewTab(page, "Music");
+  // Music is locked: its page offers the prompt.
+  await reviewTab(page, "Music").click();
+  await expect(reviewTab(page, "Music")).toHaveAttribute("aria-selected", "true");
   await page.getByRole("button", { name: "Copy prompt for your agent" }).click();
   const mac = await page.evaluate(() => /Mac|iPhone|iPad|iPod/.test(navigator.platform));
   await expect(page.getByRole("status")).toHaveText(`Prompt selected: press ${mac ? "⌘C" : "Ctrl+C"}`);

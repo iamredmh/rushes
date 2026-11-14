@@ -52,8 +52,10 @@ export function viewForTab(tab: ReviewTab): DeskView {
 /** One read, bed or pass as a sound's tab lists it. */
 export interface TakeRow {
   lane: string;
-  /** The round's name (its lane's). */
+  /** The round's name (its lane's, or the short day takes with no round arrived on). */
   round: string;
+  /** Which round it is: its lane, and for takes with no round the full day, so two days that read alike stay apart. */
+  roundKey: string;
   variant: Variant;
   /** The cut it was made for on this film, when it recorded one. */
   madeFor: string | null;
@@ -111,6 +113,7 @@ export function takeGroups(lanes: Lane[], stage: LaneStage, use: Use | undefined
         const row: TakeRow = {
           lane: l.id,
           round: part.round,
+          roundKey: `${l.id}\n${part.key}`,
           variant,
           madeFor: (video && variant.madeFor?.[video.id]) ?? null,
           stale: video ? madeForStale(variant, video) : false,
@@ -155,7 +158,7 @@ export function takeSections(g: TakeGroups, shuffle: (takes: TakeRow[]) => TakeR
   // New is newest round first already; consecutive takes of one round (one lane, one day) share a heading.
   let run: TakeRow[] = [];
   for (const t of g.fresh) {
-    if (run.length > 0 && (run[0].lane !== t.lane || run[0].round !== t.round)) {
+    if (run.length > 0 && run[0].roundKey !== t.roundKey) {
       push("fresh", run[0].round, run);
       run = [];
     }
@@ -177,6 +180,10 @@ export interface NextInput {
   hasCut: boolean;
   /** Notes and edits waiting to be sent (unsentCount). */
   unsent: number;
+  /** Of those, how many are edits rather than notes (unsentEdits): any at all and the line says "changes". */
+  unsentEdits?: number;
+  /** The Plan page last used, where Ready to build is: "ask for cut 1" leads there once there is a plan. */
+  planPage?: "brief" | "script" | "storyboard";
   /** Where Send is (the view whose notes panel to open), when the line should lead there. */
   sendTo?: DeskView | null;
   /** To-do notes on this film, sent or not. */
@@ -198,8 +205,11 @@ const counted = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`
  */
 export function nextHint(i: NextInput): { text: string; go: DeskView | null } {
   // With somewhere to send from, what waits is sent first, cut or no cut (a Visuals note, a plan's edits).
-  if (i.unsent > 0 && (i.hasCut || i.sendTo)) return { text: `send ${counted(i.unsent, "note")}`, go: i.sendTo ?? null };
-  if (!i.hasCut) return i.plan.exists && !i.plan.approved ? { text: "approve the plan", go: "script" } : { text: "ask for cut 1", go: null };
+  if (i.unsent > 0 && (i.hasCut || i.sendTo)) return { text: `send ${counted(i.unsent, (i.unsentEdits ?? 0) > 0 ? "change" : "note")}`, go: i.sendTo ?? null };
+  if (!i.hasCut) {
+    if (i.plan.exists && !i.plan.approved) return { text: "approve the plan", go: "script" };
+    return { text: "ask for cut 1", go: i.plan.exists ? (i.planPage ?? null) : null };
+  }
   if (i.openNotes > 0) return { text: `${counted(i.openNotes, "note")} open`, go: "picture" };
   if (!i.locked) return { text: "lock picture", go: "picture" };
   // One sound at a time: voice is settled before music is asked for.
@@ -278,15 +288,24 @@ export function noteTarget(s: Selection, shot: { n: number; name: string } | nul
   }
 }
 
+type Unsent = { notes: Note[]; inPlay: ReadonlySet<string>; scriptTodo: number; briefChanged: number; storyboardChanged: number };
+const waitingNote = (i: Unsent) => (n: Note) => n.status === "todo" && (!n.video || i.inPlay.has(n.video));
+
+/** Of what waits to be sent, the edits that are not notes: changed script lines, the brief's and the storyboard's changes. */
+export function unsentEdits(i: Unsent): number {
+  const waiting = waitingNote(i);
+  const scriptRows = i.scriptTodo - i.notes.filter((n) => n.stage === "script" && waiting(n)).length;
+  return Math.max(0, scriptRows) + i.briefChanged + i.storyboardChanged;
+}
+
 /**
  * What Send would send that has not been sent yet (§27, 5.7 and 5.9): to-do notes with no batch (on films in play, or on
  * no film), the changed script rows (the script tab's to-do less its own notes), and the brief's and storyboard's
  * changes. Send's count and the status bar's line are this one number.
  */
-export function unsentCount(i: { notes: Note[]; inPlay: ReadonlySet<string>; scriptTodo: number; briefChanged: number; storyboardChanged: number }): number {
-  const waiting = (n: Note) => n.status === "todo" && (!n.video || i.inPlay.has(n.video));
-  const scriptRows = i.scriptTodo - i.notes.filter((n) => n.stage === "script" && waiting(n)).length;
-  return i.notes.filter((n) => waiting(n) && n.batch === null).length + Math.max(0, scriptRows) + i.briefChanged + i.storyboardChanged;
+export function unsentCount(i: Unsent): number {
+  const waiting = waitingNote(i);
+  return i.notes.filter((n) => waiting(n) && n.batch === null).length + unsentEdits(i);
 }
 
 /** A note's marker on the ruler: where it starts and, for a range, how wide, as percentages of the cut. */
@@ -297,14 +316,15 @@ export interface RulerMark {
   status: "todo" | "done";
 }
 
-const clampPct = (s: number, length: number) => (length > 0 ? Math.min(100, Math.max(0, (s / length) * 100)) : 0);
+/** A time as a percentage of `length`, clamped to the timeline (0 to 100), whatever the file on screen reports; 0 with no length. */
+export const pctOf = (s: number, length: number): number => (length > 0 ? Math.min(100, Math.max(0, (s / length) * 100)) : 0);
 
 /** The ruler's markers, one per note with a time (placed on the cut on screen by the caller), clamped to the cut. */
 export function rulerMarks(notes: Note[], length: number): RulerMark[] {
   return notes
     .filter((n) => n.t !== null)
     .map((n) => {
-      const left = clampPct(n.t!, length);
-      return { id: n.id, left, width: n.tOut !== null ? clampPct(n.tOut, length) - left : null, status: n.status };
+      const left = pctOf(n.t!, length);
+      return { id: n.id, left, width: n.tOut !== null ? pctOf(n.tOut, length) - left : null, status: n.status };
     });
 }

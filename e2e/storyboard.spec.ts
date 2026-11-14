@@ -221,6 +221,24 @@ test("the Plan workspace says Ready to build once the brief, the script and ever
   await expect(row).not.toContainText("Ready to build");
 });
 
+test("with the plan approved, the status bar's ask for cut 1 opens the Plan page last used, where Ready to build is", async ({ page, rushes }) => {
+  await withBoard(rushes, BOARD.replaceAll("Status: draft", "Status: approved"));
+  await rushes.writeFiles([{ path: "brief.md", text: BRIEF.replace("Status: draft", "Status: approved") }]);
+  await rushes.api("PUT", "/api/script", SCRIPT);
+  const { script } = await rushes.api("GET", "/api/script");
+  await rushes.api("PATCH", `/api/script/${script.sections[0].id}`, { status: "approved" });
+  await page.goto(rushes.url);
+  await openStoryboard(page);
+  // Away from Plan, the status bar's line is a button back to the page last used.
+  await page.keyboard.press("8");
+  await expect(workspaceTab(page, "Assets")).toHaveAttribute("aria-selected", "true");
+  await page.locator("footer.status").getByRole("button", { name: "ask for cut 1" }).click();
+  await expect(workspaceTab(page, "Plan")).toHaveAttribute("aria-selected", "true");
+  await expect(planTab(page, "Storyboard")).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator(".planrow")).toContainText("Ready to build");
+  await expect(page.locator(".planrow").getByRole("button", { name: "Copy prompt for your agent" })).toBeVisible();
+});
+
 test("a film's first cut starts with the storyboard's shots, and says what the plan is waiting on", async ({ rushes }) => {
   await withBoard(rushes);
   await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);

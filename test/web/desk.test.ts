@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defaultTake, deskPlace, nextHint, type NextInput, noteTarget, rulerMarks, takeCount, takeGroups, takeKey, takeSections, timecode, unsentCount, deskView, viewForKey, viewForTab } from "../../web/src/desk.js";
+import { defaultTake, deskPlace, nextHint, pctOf, type NextInput, noteTarget, rulerMarks, takeCount, takeGroups, takeKey, takeSections, timecode, unsentCount, unsentEdits, deskView, viewForKey, viewForTab } from "../../web/src/desk.js";
 import type { Lane, Note, Variant } from "../../web/src/types.js";
 
 describe("deskPlace", () => {
@@ -134,6 +134,11 @@ describe("takeGroups: takes added with no round", () => {
     expect(g.earlier).toEqual([{ round: "Music", takes: [expect.objectContaining({ variant: expect.objectContaining({ id: "old" }) })] }]);
     expect(takeSections(g).map((s) => s.heading)).toEqual(["New · Round 2", "New · 14 Nov", "New · 12 Nov", "Earlier · Music"]);
   });
+  it("keeps two days with the same short date in different years apart", () => {
+    const years = [lane("music", "Music", "music", [take("x", { addedAt: "2026-11-12T09:00:00.000Z" }), take("y", { addedAt: "2025-11-12T09:00:00.000Z" })])];
+    const s = takeSections(takeGroups(years, "music", undefined, hero, "Europe/London"));
+    expect(s.map((x) => [x.heading, x.takes.map((t) => t.variant.id)])).toEqual([["New · 12 Nov", ["x"]], ["New · 12 Nov", ["y"]]]);
+  });
   it("uses the day where you are", () => {
     const g = takeGroups(lanes, "music", undefined, hero, "America/New_York");
     expect(g.fresh.find((t) => t.variant.id === "c")?.round).toBe("13 Nov");
@@ -208,6 +213,17 @@ describe("nextHint", () => {
   it("says to send what is waiting, counted", () => {
     expect(nextHint({ ...base, unsent: 1, openNotes: 1 })).toEqual({ text: "send 1 note", go: null });
     expect(nextHint({ ...base, unsent: 3, openNotes: 5 })).toEqual({ text: "send 3 notes", go: null });
+  });
+  it("says changes, not notes, when anything waiting is an edit", () => {
+    expect(nextHint({ ...base, unsent: 1, unsentEdits: 1, sendTo: "script" })).toEqual({ text: "send 1 change", go: "script" });
+    expect(nextHint({ ...base, unsent: 3, unsentEdits: 1, sendTo: "picture" })).toEqual({ text: "send 3 changes", go: "picture" });
+    expect(nextHint({ ...base, unsent: 3, unsentEdits: 0, sendTo: "picture" })).toEqual({ text: "send 3 notes", go: "picture" });
+  });
+  it("leads ask for cut 1 to the Plan page last used, where Ready to build is, once there is a plan", () => {
+    expect(nextHint({ ...base, hasCut: false, planPage: "storyboard" })).toEqual({ text: "ask for cut 1", go: "storyboard" });
+    expect(nextHint({ ...base, hasCut: false, planPage: "brief" })).toEqual({ text: "ask for cut 1", go: "brief" });
+    // With no plan at all there is nothing on a Plan page to build from.
+    expect(nextHint({ ...base, hasCut: false, plan: { exists: false, approved: false }, planPage: "brief" })).toEqual({ text: "ask for cut 1", go: null });
   });
   it("leads to Send in the notes panel when told where it is, even before there is a cut", () => {
     expect(nextHint({ ...base, unsent: 2, sendTo: "picture" })).toEqual({ text: "send 2 notes", go: "picture" });
@@ -295,6 +311,15 @@ describe("noteTarget", () => {
   });
 });
 
+describe("pctOf", () => {
+  it("is a time as a percentage of the length, clamped to the timeline, and 0 with no length", () => {
+    expect(pctOf(1, 4)).toBe(25);
+    expect(pctOf(-1, 4)).toBe(0);
+    expect(pctOf(9, 4)).toBe(100);
+    expect(pctOf(1, 0)).toBe(0);
+  });
+});
+
 describe("timecode", () => {
   it("reads hours, minutes, seconds and frames, snapping to the nearest frame", () => {
     expect(timecode(0, 30)).toBe("00:00:00:00");
@@ -324,5 +349,20 @@ describe("unsentCount", () => {
   });
   it("is nothing when nothing waits", () => {
     expect(unsentCount({ ...base, notes: [] })).toBe(0);
+  });
+});
+
+describe("unsentEdits", () => {
+  const n = (over: Partial<Note>): Note => ({
+    id: "n", stage: "script", video: null, version: null, on: "s1", scope: "whole", t: null, tOut: null, frame: null, text: "x",
+    box: null, pin: null, grab: null, shot: null, marks: [], format: null, status: "todo", reply: "", fixT: null, fixVersion: null, batch: null,
+    createdAt: "2026-11-14T10:00:00.000Z", by: "user", ...over,
+  });
+  const base = { notes: [] as Note[], inPlay: new Set<string>(["hero"]), scriptTodo: 0, briefChanged: 0, storyboardChanged: 0 };
+  it("counts what waits that is not a note: edited script lines, the brief's and the storyboard's changes", () => {
+    expect(unsentEdits({ ...base, notes: [n({ id: "a" })], scriptTodo: 3, briefChanged: 1, storyboardChanged: 2 })).toBe(2 + 1 + 2);
+  });
+  it("is nothing when only notes wait", () => {
+    expect(unsentEdits({ ...base, notes: [n({ id: "a" }), n({ id: "b" })], scriptTodo: 2 })).toBe(0);
   });
 });
