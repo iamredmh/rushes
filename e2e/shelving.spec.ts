@@ -1,4 +1,4 @@
-import { test, expect, videoReady, reviewTab, currentFilm, cutButton, filmButton, pickFilm, openMore } from "./fixture.js";
+import { test, expect, videoReady, reviewTab, currentFilm, cutButton, filmButton, pickFilm, openMore, toolButton, transport } from "./fixture.js";
 
 // §26 and §27, 5.2: shelving a film from More, the Film menu with its Shelved group, and what a shelved film does and does not do.
 type Rushes = Parameters<Parameters<typeof test>[2]>[0]["rushes"];
@@ -122,10 +122,12 @@ test("a shelved film opens view-only under a banner, and Restore puts everything
   await expect(banner).toContainText("Shelved");
   await expect(banner).toContainText("Cutdown");
   // Looking and playing are on; marking, noting and locking are off.
-  await expect(page.getByRole("button", { name: "Play" })).toBeEnabled();
-  await expect(page.getByRole("button", { name: "Draw a box" })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Set in point" })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Grab frame" })).toBeDisabled();
+  await expect(transport(page).getByRole("button", { name: "Play" })).toBeEnabled();
+  await expect(toolButton(page, "Select")).toBeEnabled();
+  await expect(toolButton(page, "Note")).toBeDisabled();
+  await expect(toolButton(page, "Box")).toBeDisabled();
+  await expect(toolButton(page, "Range")).toBeDisabled();
+  await expect(toolButton(page, "Grab")).toBeDisabled();
   await expect(page.getByLabel("New note")).toBeHidden();
   await cutButton(page).click();
   await expect(page.getByRole("button", { name: /Lock picture/ })).toBeDisabled();
@@ -138,7 +140,7 @@ test("a shelved film opens view-only under a banner, and Restore puts everything
   await expect(page.locator(".shbanner")).toHaveCount(0);
   await expect(currentFilm(page)).toHaveText("Cutdown");
   await expect(page.getByLabel("New note")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Draw a box" })).toBeEnabled();
+  await expect(toolButton(page, "Box")).toBeEnabled();
 });
 
 test("typing a capital S in the note box does not shelve the film", async ({ page, rushes }) => {

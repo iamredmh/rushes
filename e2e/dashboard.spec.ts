@@ -2,7 +2,8 @@ import { access, copyFile, mkdir, readFile, readdir, rm, writeFile } from "node:
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { BrowserContext, Page } from "@playwright/test";
-import { expect, hasFfmpeg, needsH264, pickVersion, type Rushes, test, cutButton, videoReady, reviewTab, openWorkspace, openMore, workspaceTab, openReviewTab, currentFilm, pickFilm, filmButton } from "./fixture.js";
+import { expect, hasFfmpeg, needsH264, pickVersion, type Rushes, test, cutButton, videoReady, reviewTab, openWorkspace, openMore, workspaceTab, openReviewTab, currentFilm, pickFilm, filmButton,
+  autoProxySetting, rangeChip, ruler, shotBlocks, toolButton, transport } from "./fixture.js";
 
 const CLIP = fileURLToPath(new URL("./fixtures/clip.mp4", import.meta.url));
 // A 1x1 transparent PNG, reused for every screenshot the library tests need on disk: its
@@ -90,7 +91,7 @@ test("In and Out make a range note, with a frame grab and a box attached", async
   await page.keyboard.press("i");
   for (let i = 0; i < 30; i++) await page.keyboard.press("ArrowRight");
   await page.keyboard.press("o");
-  await expect(page.locator(".bar .chipx")).toContainText("0:01.00–0:02.00");
+  await expect(rangeChip(page)).toContainText("0:01.00–0:02.00");
   await page.keyboard.press("g");
   await expect(page.locator(".comp .chipx", { hasText: "Frame 60" })).toBeVisible();
   await page.keyboard.press("b");
@@ -207,7 +208,7 @@ test("a new cut mid-review waits for a click instead of dropping pending marks",
   await expect(cutButton(page)).toHaveAccessibleDescription("v2 is ready");
   await expect(cutButton(page)).toHaveAttribute("data-version", "v1");
   // The marks made before the cut arrived are all still there.
-  await expect(page.locator(".bar .chipx")).toContainText("0:01.00–0:02.00");
+  await expect(rangeChip(page)).toContainText("0:01.00–0:02.00");
   await expect(page.locator(".comp .chipx", { hasText: "Box" })).toBeVisible();
   expect(await page.locator("video").evaluate((v: HTMLVideoElement) => v.currentTime)).toBeCloseTo(2, 2);
   // A second cut while still holding: the Cut button's dot names the newest one.
@@ -525,7 +526,7 @@ test("Space on a button reached by keyboard presses it; after a mouse click it s
   await page.goto(rushes.url);
   await videoReady(page);
   const video = page.locator("video");
-  const box = page.getByRole("button", { name: "Draw a box" });
+  const box = toolButton(page, "Box");
   // Reached by keyboard, the button owns Space.
   // (WebKit, like Safari, skips buttons on Tab unless Option is held.)
   const tab = test.info().project.name === "webkit" ? "Alt+Tab" : "Tab";
@@ -562,7 +563,7 @@ test("switching films pauses the one playing, and its playhead is remembered eve
   expect(await page.locator("video").evaluate((v: HTMLVideoElement) => v.paused)).toBe(true);
 });
 
-test("the shot strip names each shot, follows the playhead, and notes record their shot", async ({ page, rushes }) => {
+test("the Picture track names each shot, follows the playhead, and notes record their shot", async ({ page, rushes }) => {
   await rushes.addCut();
   await rushes.api("PUT", "/api/videos/hero/shots", {
     shots: [
@@ -573,18 +574,18 @@ test("the shot strip names each shot, follows the playhead, and notes record the
   });
   await page.goto(rushes.url);
   await videoReady(page);
-  await expect(page.locator(".shot")).toHaveCount(3);
-  await expect(page.locator(".shot").nth(0)).toHaveAttribute("aria-current", "true");
-  await page.locator(".shot").nth(1).click();
+  await expect(shotBlocks(page)).toHaveText(["01 Title card", "02 Window rises in", "03 Wide, cursor enters"]);
+  await expect(shotBlocks(page).nth(0)).toHaveAttribute("title", "01 Title card · establish");
+  await expect(shotBlocks(page).nth(0)).toHaveAttribute("aria-current", "true");
+  await shotBlocks(page).nth(1).click();
   await expect(page.getByLabel("Timecode")).toContainText("0:01.70");
-  await expect(page.locator(".shot").nth(1)).toHaveAttribute("aria-current", "true");
+  await expect(shotBlocks(page).nth(1)).toHaveAttribute("aria-current", "true");
   await page.keyboard.press("n");
   await page.keyboard.type("Nice reveal here.");
   await page.keyboard.press("Enter");
   await expect(page.locator(".note .shotref")).toHaveText("Shot 02 · Window rises in");
   const { notes } = await rushes.api("GET", "/api/notes?stage=picture");
   expect(notes[0].shot).toEqual({ n: 2, name: "Window rises in" });
-  await expect(page.locator(".track .tick")).toHaveCount(2);
 });
 
 test("appearance switches to light and is remembered", async ({ page, rushes }) => {
@@ -621,7 +622,7 @@ test("a browser that refuses storage still opens, in dark", async ({ page, rushe
 });
 
 test("playing into the next shot never scrolls the page", async ({ page, rushes }) => {
-  // A short window: the player fills it, so the strip of shots sits below the fold.
+  // A short window. §27, 5.6: the Picture track's blocks share its width, so every shot is in view and nothing scrolls.
   await page.setViewportSize({ width: 1440, height: 700 });
   await rushes.addCut();
   await rushes.api("PUT", "/api/videos/hero/shots", {
@@ -629,15 +630,15 @@ test("playing into the next shot never scrolls the page", async ({ page, rushes 
   });
   await page.goto(rushes.url);
   await videoReady(page);
-  await expect(page.locator(".shot")).toHaveCount(12);
+  await expect(shotBlocks(page)).toHaveCount(12);
   expect(await page.evaluate(() => window.scrollY)).toBe(0);
-  await page.getByRole("button", { name: "Play", exact: true }).click();
-  // The last shot starts at 2.2 s and stays current to the end of the 6 s cut, so the wait cannot
-  // miss it. It is far outside the strip's box: reaching it has to scroll the strip.
-  await expect(page.locator(".shot").nth(11)).toHaveAttribute("aria-current", "true", { timeout: 10_000 });
+  await transport(page).getByRole("button", { name: "Play" }).click();
+  // The last shot starts at 2.2 s and stays current to the end of the cut, so the wait cannot miss it.
+  await expect(shotBlocks(page).nth(11)).toHaveAttribute("aria-current", "true", { timeout: 10_000 });
   expect(await page.evaluate(() => window.scrollY)).toBe(0);
   await expect(page.locator("header.top")).toBeInViewport();
-  expect(await page.locator(".shots").evaluate((el) => el.scrollLeft)).toBeGreaterThan(0);
+  await expect(shotBlocks(page).nth(11)).toBeInViewport();
+  expect(await page.locator("main.body").evaluate((el) => el.scrollTop)).toBe(0);
 });
 
 test("clicking a shot that starts between frames lands a note in that shot, not the one before it", async ({ page, rushes }) => {
@@ -645,11 +646,11 @@ test("clicking a shot that starts between frames lands a note in that shot, not 
   await rushes.api("PUT", "/api/videos/hero/shots", { shots: [{ name: "A", start: 0 }, { name: "B", start: 1.71 }] });
   await page.goto(rushes.url);
   await videoReady(page);
-  await page.locator(".shot").nth(1).click();
+  await shotBlocks(page).nth(1).click();
   // 1.71s falls between frames at 30fps; the seek must land in B's frame, not snap back
-  // to the frame before its start, which the strip would still (wrongly) call A's.
+  // to the frame before its start, which the track would still (wrongly) call A's.
   await expect(page.getByLabel("Timecode")).toContainText("0:01.73");
-  await expect(page.locator(".shot").nth(1)).toHaveAttribute("aria-current", "true");
+  await expect(shotBlocks(page).nth(1)).toHaveAttribute("aria-current", "true");
   await page.keyboard.press("n");
   await page.keyboard.type("Landed in B.");
   await page.keyboard.press("Enter");
@@ -658,17 +659,21 @@ test("clicking a shot that starts between frames lands a note in that shot, not 
   expect(notes[0].shot).toEqual({ n: 2, name: "B" });
 });
 
-test("a cut whose first shot starts after a lead-in gets a tick at every shot, and no current shot before it", async ({ page, rushes }) => {
+test("a cut whose first shot starts after a lead-in gets a block at every shot, and no current shot before it", async ({ page, rushes }) => {
   await rushes.addCut();
   await rushes.api("PUT", "/api/videos/hero/shots", { shots: [{ name: "Logo", start: 0.5 }, { name: "Hero", start: 2 }] });
   await page.goto(rushes.url);
   await videoReady(page);
-  await expect(page.locator(".track .tick")).toHaveCount(2);
-  await expect(page.locator(".shot[aria-current='true']")).toHaveCount(0);
+  await expect(shotBlocks(page)).toHaveText(["01 Logo", "02 Hero"]);
+  // The lead-in has no block: the first starts an eighth of the way along.
+  const track = (await page.locator(".ptrack .tlane").boundingBox())!;
+  const first = (await shotBlocks(page).nth(0).boundingBox())!;
+  expect(first.x - track.x).toBeGreaterThan(track.width * 0.1);
+  await expect(page.locator('.ptrack [aria-current="true"]')).toHaveCount(0);
   // Keys still work once the listener is bound only once: N focuses the note box, I sets In.
   for (let i = 0; i < 30; i++) await page.keyboard.press("ArrowRight");
   await expect(page.getByLabel("Timecode")).toContainText("0:01.00");
-  await expect(page.locator(".shot").nth(0)).toHaveAttribute("aria-current", "true");
+  await expect(shotBlocks(page).nth(0)).toHaveAttribute("aria-current", "true");
   await page.keyboard.press("n");
   await expect(page.getByLabel("New note")).toBeFocused();
 });
@@ -1338,7 +1343,7 @@ async function watchForProgress(page: import("@playwright/test").Page): Promise<
 async function expectPlayerOnScreen(page: import("@playwright/test").Page): Promise<void> {
   const b = await page.evaluate(() => ({
     height: innerHeight,
-    track: document.querySelector(".track")!.getBoundingClientRect().bottom,
+    track: document.querySelector('[aria-label="Picture track"]')!.getBoundingClientRect().bottom,
     note: document.querySelector(".comp textarea")!.getBoundingClientRect().bottom,
   }));
   expect(b.height).toBe(900);
@@ -1374,7 +1379,11 @@ test.describe("proxies (§19.5)", () => {
       "data-tip",
       "Makes a lightweight 1080p copy on your drive so this cut previews smoothly. About 10 MB. Your original isn't changed.",
     );
-    await expect(offer.getByRole("checkbox", { name: "Create proxies for new cuts like this automatically" })).not.toBeChecked();
+    // §27: making proxies of new cuts automatically is a setting in the More menu, off to begin with.
+    await openMore(page);
+    await expect(autoProxySetting(page)).toHaveAttribute("aria-checked", "false");
+    await page.keyboard.press("Escape");
+    await expect(autoProxySetting(page)).toHaveCount(0);
 
     await watchForProgress(page);
     await create.click();
@@ -1407,10 +1416,10 @@ test.describe("proxies (§19.5)", () => {
     expect(await video.evaluate((v: HTMLVideoElement) => v.paused)).toBe(true);
     await expect(page.getByLabel("Timecode")).toContainText("0:02.00");
 
-    // Its × folds "✓ Proxy ready" away, leaving the checkbox alone.
+    // Its × folds "✓ Proxy ready" away: with nothing more to say, the bar goes.
     await offer.getByRole("button", { name: "Dismiss" }).click();
     await expect(offer).not.toContainText("Proxy ready");
-    await expect(offer.getByRole("checkbox")).toBeVisible();
+    await expect(offer).toBeHidden();
   });
 
   test("Cancel stops a proxy part-way, returns to the offer and leaves nothing in proxies/", async ({ page, rushes }) => {
@@ -1449,14 +1458,17 @@ test.describe("proxies (§19.5)", () => {
     }
   });
 
-  test("ticking the checkbox saves autoProxy, and a new qualifying cut starts its proxy by itself", async ({ page, rushes }) => {
+  test("ticking the setting saves autoProxy, and a new qualifying cut starts its proxy by itself", async ({ page, rushes }) => {
     await rushes.addCut();
     await page.goto(rushes.url);
     await videoReady(page);
-    const auto = page.getByRole("checkbox", { name: "Create proxies for new cuts like this automatically" });
-    await auto.check();
+    // §27: the setting is in the More menu (the checkbox under the picture is gone).
+    await openMore(page);
+    const auto = autoProxySetting(page);
+    await auto.click();
     await expect.poll(async () => (await rushes.api("GET", "/api/state")).project.autoProxy).toBe(true);
-    await expect(auto).toBeChecked();
+    await expect(auto).toHaveAttribute("aria-checked", "true");
+    await page.keyboard.press("Escape");
 
     const added = await rushes.addProResCut({ long: true }, "prores cut");
     expect(added.proxyJob?.state).toBe("running");
@@ -1529,7 +1541,7 @@ test.describe("proxies (§19.5)", () => {
     await expect(bar).toContainText("✓ Proxy ready");
     await expectPlayerOnScreen(page);
     await expect(bar).not.toContainText("Proxy ready", { timeout: 10_000 });
-    await expect(bar.getByRole("checkbox", { name: "Create proxies for new cuts like this automatically" })).toBeVisible();
+    await expect(bar).toBeHidden();
     await expectPlayerOnScreen(page);
   });
 
@@ -1573,7 +1585,7 @@ test.describe("proxies (§19.5)", () => {
     await videoReady(page);
     for (let i = 0; i < 10; i++) await page.keyboard.press("ArrowRight");
     await page.keyboard.press("g");
-    const camera = page.getByRole("button", { name: "Grab frame" });
+    const camera = toolButton(page, "Grab");
     await expect(camera).toHaveAttribute("aria-busy", "true");
     for (let i = 0; i < 10; i++) await page.keyboard.press("ArrowRight");
     await page.keyboard.press("g");
@@ -1734,7 +1746,9 @@ async function peaksSettled(rushes: Rushes, version: string): Promise<number> {
   return status;
 }
 
-test.describe("the Picture waveform (§19.9)", () => {
+// §27, 5.6: the picture's waveform is not drawn on the Timeline tab while its Picture track has no sound row; the sound rows
+// (the desk plan's Task 4) bring it back, and these with it. Kept, not deleted, so that task has them to pass.
+test.describe.fixme("the Picture waveform (§19.9)", () => {
   test.skip(!hasFfmpeg, "needs ffmpeg and ffprobe");
 
   test("a vertical cut with audio draws its waveform in the timeline, hidden from screen readers, and playback never redraws it", async ({ page, rushes }) => {
@@ -1918,33 +1932,33 @@ test.describe("the Picture waveform (§19.9)", () => {
   });
 });
 
-// ---- a tall cut leaves room for the timeline and the note box (§19.9, fix round 1) ----
+// ---- a tall cut leaves room for the timeline and the note box (§19.9, fix round 1; §27, 5.4: the Timeline tab's column) ----
 
 /**
- * The bottoms of everything that must stay on screen under the picture, and where the work area ends (§27, 5.1: the
+ * The bottoms of everything that must stay on screen with the picture, and where the work area ends (§27, 5.1: the
  * window less the status bar under it), which is the screen's bottom as far as Picture is concerned.
  */
 async function playerBottoms(page: Page) {
   return page.evaluate(() => {
     const bottom = (sel: string) => document.querySelector(sel)!.getBoundingClientRect().bottom;
-    return { height: bottom("main.body"), bar: bottom(".bar"), track: bottom(".track"), ends: bottom(".ends"), composer: bottom(".comp") };
+    return { height: bottom("main.body"), bar: bottom(".transport"), ruler: bottom(".ruler"), track: bottom(".ptrack"), composer: bottom(".comp") };
   });
 }
 
 /** The column ends at the work area's edge less its 24 px padding: the picture gave way only as much as it had to. */
 async function expectColumnFilled(page: Page): Promise<void> {
-  const b = await playerBottoms(page);
-  expect(b.ends).toBeGreaterThanOrEqual(b.height - 24 - 2);
+  const b = await page.evaluate(() => ({ height: document.querySelector("main.body")!.getBoundingClientRect().bottom, column: document.querySelector(".tl")!.getBoundingClientRect().bottom }));
+  expect(b.column).toBeGreaterThanOrEqual(b.height - 24 - 2);
 }
 
 async function expectAllOnScreen(page: Page): Promise<void> {
   // The frame settles to the cut's shape once its metadata loads.
   await expect.poll(async () => {
     const b = await playerBottoms(page);
-    return Math.max(b.bar, b.track, b.ends, b.composer) <= b.height;
+    return Math.max(b.bar, b.ruler, b.track, b.composer) <= b.height;
   }, { timeout: 5000 }).toBe(true);
   const b = await playerBottoms(page);
-  for (const k of ["bar", "track", "ends", "composer"] as const) expect(b[k], k).toBeLessThanOrEqual(b.height);
+  for (const k of ["bar", "ruler", "track", "composer"] as const) expect(b[k], k).toBeLessThanOrEqual(b.height);
 }
 
 const frameBox = async (page: Page) => (await page.locator(".frame").boundingBox())!;
@@ -1973,40 +1987,40 @@ test.describe("a tall cut (fix round 1)", () => {
     await expectColumnFilled(page);
   });
 
-  test("with a shot list, the note box still fits; the shot strip may run below", async ({ page, rushes }) => {
+  test("with a shot list, the note box still fits, and the Picture track sits under the ruler", async ({ page, rushes }) => {
     await rushes.addVerticalCut();
     await rushes.api("PUT", "/api/videos/hero/shots", { shots: [{ name: "Open", start: 0 }, { name: "Turn", start: 1 }] });
     await page.goto(rushes.url);
     await videoReady(page);
-    await expect(page.locator(".shot")).toHaveCount(2);
+    await expect(shotBlocks(page)).toHaveCount(2);
     await expectAllOnScreen(page);
-    // The strip, beside the note box rather than above it, doesn't shrink the picture either.
     await expectColumnFilled(page);
-    // The strip comes straight after the timeline.
-    const shots = (await page.locator(".shots").boundingBox())!;
-    const ends = (await page.locator(".ends").boundingBox())!;
-    expect(shots.y).toBeGreaterThan(ends.y + ends.height);
-    expect(shots.y - (ends.y + ends.height)).toBeLessThan(30);
+    // The track comes straight after the ruler.
+    const track = (await page.locator(".ptrack").boundingBox())!;
+    const r = (await ruler(page).boundingBox())!;
+    expect(track.y).toBeGreaterThanOrEqual(r.y + r.height - 1);
+    expect(track.y - (r.y + r.height)).toBeLessThan(4);
   });
 
-  test("a 16:9 cut looks as it did: the picture is the column's full width at 1440×900", async ({ page, rushes }) => {
+  test("a 16:9 cut looks as it did: the picture is the monitor's full width at 1440×900", async ({ page, rushes }) => {
     await rushes.addCut();
     await page.goto(rushes.url);
     await videoReady(page);
-    // 1440 less the body's padding (2 × 24), the notes column (380) and the gap (20).
-    await expect.poll(async () => Math.round((await frameBox(page)).width)).toBe(992);
+    const fit = (await page.locator(".monitor .fitbox").boundingBox())!;
+    await expect.poll(async () => Math.round((await frameBox(page)).width)).toBe(Math.round(fit.width));
     const f = await frameBox(page);
-    expect(Math.abs(f.height - 992 * (9 / 16))).toBeLessThanOrEqual(2);
+    expect(Math.abs(f.height - f.width * (9 / 16))).toBeLessThanOrEqual(2);
     await expectAllOnScreen(page);
   });
 
-  test("a taller window doesn't shrink a 9:16 cut: at 1440×1100 it keeps its full 640 px", async ({ page, rushes }) => {
+  test("a taller window gives a 9:16 cut more room: at 1440×1100 it is at least its full 640 px", async ({ page, rushes }) => {
     await page.setViewportSize({ width: 1440, height: 1100 });
     await rushes.addVerticalCut();
     await page.goto(rushes.url);
     await videoReady(page);
-    await expect.poll(async () => Math.round((await frameBox(page)).height)).toBe(640);
-    expect((await frameBox(page)).width).toBeCloseTo(360, 0);
+    await expect.poll(async () => Math.round((await frameBox(page)).height)).toBeGreaterThanOrEqual(640);
+    const f = await frameBox(page);
+    expect(f.width / f.height).toBeCloseTo(360 / 640, 1);
     await expectAllOnScreen(page);
   });
 });
@@ -2018,6 +2032,7 @@ test.describe("the player follows the real height of the bars above it (fix roun
     await videoReady(page);
     await expectAllOnScreen(page);
     const before = await playerBottoms(page);
+    const tall = (await frameBox(page)).height;
     // A taller top bar (a late web font, a zoomed page): no state changes, so the app doesn't render.
     await page.addStyleTag({ content: "header.top { height: 114px; }" });
     await expect.poll(async () => (await page.locator("header.top").boundingBox())!.height).toBe(114);
@@ -2025,27 +2040,28 @@ test.describe("the player follows the real height of the bars above it (fix roun
     await expectColumnFilled(page);
     // The picture gave way by what the bar took.
     expect((await playerBottoms(page)).height).toBe(before.height);
-    expect((await frameBox(page)).height).toBeLessThan(640);
+    expect((await frameBox(page)).height).toBeLessThan(tall - 40);
   });
 });
 
 test.describe("a very short window (fix round 3, M2)", () => {
-  for (const height of [520, 440]) test(`at ${height} px high the player stops shrinking and the shot strip sits below the timeline, never over it`, async ({ page, rushes }) => {
+  for (const height of [520, 440]) test(`at ${height} px high the column stops shrinking and the Picture track sits below the ruler, never over it`, async ({ page, rushes }) => {
     await page.setViewportSize({ width: 1440, height });
     await rushes.addVerticalCut();
     await rushes.api("PUT", "/api/videos/hero/shots", { shots: [{ name: "Open", start: 0 }, { name: "Turn", start: 1 }] });
     await page.goto(rushes.url);
     await videoReady(page);
-    await expect(page.locator(".shot")).toHaveCount(2);
+    await expect(shotBlocks(page)).toHaveCount(2);
     const r = await page.evaluate(() => {
       const box = (sel: string) => document.querySelector(sel)!.getBoundingClientRect();
-      return { frame: box(".frame").height, track: box(".track").bottom, ends: box(".ends").bottom, shots: box(".shots").top, stack: box(".split > .stack").bottom };
+      return { monitor: box(".monitor").height, column: box(".tl"), ruler: box(".ruler").bottom, track: box(".ptrack"), frame: box(".frame").height };
     });
-    // The frame keeps its 200 px floor, and the column grows to hold what's in it.
-    expect(r.frame).toBeGreaterThanOrEqual(199);
-    expect(r.stack).toBeGreaterThanOrEqual(r.ends - 1);
-    expect(r.shots).toBeGreaterThanOrEqual(r.ends);
-    expect(r.shots).toBeGreaterThanOrEqual(r.track);
+    // The column keeps its 360 px floor (the work area scrolls instead), and the monitor its 140.
+    expect(r.column.height).toBeGreaterThanOrEqual(359);
+    expect(r.monitor).toBeGreaterThanOrEqual(139);
+    expect(r.frame).toBeGreaterThan(100);
+    expect(r.track.top).toBeGreaterThanOrEqual(r.ruler - 1);
+    expect(r.column.bottom).toBeGreaterThanOrEqual(r.track.bottom - 1);
   });
 });
 

@@ -1,5 +1,5 @@
 // Plan 6 (formats, §21) meets Plan 7 (the Change Log, §22): the one-format popover above the drawer and the Cut menu,
-// and Alt+←/→ while either is open. (§27: the format switch sits in the row under the top bar until it moves to the monitor.)
+// and Alt+←/→ while either is open. (§27, 5.4: the format switch sits at the top right of the monitor.)
 import type { Page } from "@playwright/test";
 import { expect, test, cutButton, videoReady, type FormatSize, openWorkspace, pickFilm, currentFilm } from "./fixture.js";
 
@@ -16,13 +16,14 @@ const SQUARE: FormatSize = { width: 480, height: 480 };
 // line and nothing overlaps", and "from 1100 to 1600 px the desk's bars never wrap and the format switch stays whole".
 
 test("the one-format popover is never hidden by the Change Log drawer, and the Cut menu is never hidden by the row under it (merge)", async ({ page, rushes }) => {
-  await rushes.addCut("first cut");
+  // §27, 5.4: a one-format cut beside an earlier cut's other shapes, so the switch shows with its single chip.
+  await rushes.addFormatsCut([WIDE, TALL, SQUARE]);
   await rushes.addCut("second cut");
   // Narrow enough that the popover, which opens under the toggle, reaches into the drawer.
   await page.setViewportSize({ width: 1000, height: 800 });
   await page.goto(rushes.url);
   await videoReady(page);
-  await expect(toggle(page).getByRole("radio")).toHaveCount(1);
+  await expect(toggle(page).getByRole("radio")).toHaveCount(3);
   const pop = page.locator(".fmtpop");
   /** What is on top at the middle of the popover's overlap with `other`; the overlap must be real. */
   const onTop = async (other: string) =>
@@ -37,11 +38,11 @@ test("the one-format popover is never hidden by the Change Log drawer, and the C
   // The drawer open, the pointer on the single chip.
   await logButton(page).click();
   await expect(drawer(page)).toBeVisible();
-  await toggle(page).getByRole("radio").hover();
+  await radio(page, "16:9").hover();
   await expect(pop).toHaveCSS("opacity", "1");
   expect(await onTop(".drawer")).toBe("popover");
-  // §27: the Cut menu drops from the top bar over the row under it, where the format switch sits until it moves to the
-  // monitor. Open, the list is on top of the switch, not under it.
+  // §27: the Cut menu drops from the top bar over the monitor, where the format switch sits. Open, the list is on top of
+  // the switch, not under it.
   await cutButton(page).click();
   await expect(page.getByRole("listbox", { name: "Versions" })).toBeVisible();
   const over = await page.locator(".vmenu").evaluate((m) => {

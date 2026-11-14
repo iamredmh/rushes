@@ -1,8 +1,10 @@
+import type { ComponentChildren } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, mediaUrl, originalFrame } from "../api.js";
+import { rulerMarks, type Tool } from "../desk.js";
 import {
   BOX_REASON, boxFrom, boxShowsOn, contentRect, fmt, frameAt, noteFormatTag, noteTime, otherFormatNotes, placeNote, RESHAPE_MS, reshapeKeyframes, scopeHint, shotAt,
-  shotLabel, shotSeek, snap, spacePressesButton, stepFrame, stripScrollLeft, testFlags, versionFormats, visibleNotes,
+  shotLabel, shotSeek, snap, spacePressesButton, stepFrame, testFlags, versionFormats, visibleNotes,
   type FormatView, type ProxyProgress,
 } from "../lib.js";
 import type { Note, ProxyJob, Video, Version } from "../types.js";
@@ -11,9 +13,11 @@ import { Icon } from "./Icon.js";
 import { Notes } from "./Notes.js";
 import { OtherFormats } from "./OtherFormats.js";
 import { ProxyBar } from "./ProxyBar.js";
-import { PictureWave, usePictureWave } from "./PictureWave.js";
-import { usePlayerFloor } from "./playerFloor.js";
-import { VersionNote } from "./VersionMenu.js";
+import { PictureTrack } from "./desk/PictureTrack.js";
+import { Ruler, type RulerMarker } from "./desk/Ruler.js";
+import { ToolStrip } from "./desk/ToolStrip.js";
+import { Transport } from "./desk/Transport.js";
+import { shortLabel } from "../versions.js";
 
 declare global {
   interface Window {
@@ -49,18 +53,12 @@ export interface PictureProps {
   playerRef?: { current: HTMLVideoElement | null };
   /** §19.5: the server has ffmpeg (proxies are offered, and Grab Frame takes stills from the original). */
   ffmpeg?: boolean;
-  /** project.autoProxy, for the proxy bar's checkbox. */
-  autoProxy?: boolean;
   /** This cut's proxy job, as this tab last heard of it. */
   proxyJob?: ProxyProgress;
   noteProxyJob?(job: ProxyJob): void;
   /** This film's Proxy/Original choice, remembered by the caller. Proxy unless you've picked Original. */
   source?: Source;
   onSourceChange?(video: string, source: Source): void;
-  /** §19.9: the cut's file size (null when unknown), for the waveform's no-ffmpeg fallback. */
-  fileSize?: number | null;
-  /** The cut's file revision (its modified time), so a file re-rendered in place gets a fresh waveform. */
-  fileRev?: string;
   /** §21.5: this cut's shapes, the primary first (empty when its size isn't known yet). */
   formats?: FormatView[];
   /** §21.5: the format on screen; null on a one-format cut, which plays the version's own file. */
@@ -75,15 +73,56 @@ export interface PictureProps {
   onFormatChange?(id: string): void;
   /** §26: a shelved film is looked at and played, not marked: no In/Out, box or grab, and no note box. */
   readOnly?: boolean;
+  /** §27, 5.4: the format switch, drawn at the top right of the monitor; the caller leaves it out for a one-format cut. */
+  formatSwitch?: ComponentChildren;
+}
+
+/** §27, 5.5: the player's level and mute, remembered per browser. */
+const VOLUME_KEY = "rushes:volume";
+/** §27, 5.4: the timeline panel's share of the column once its divider has been dragged, remembered per browser. */
+const SPLIT_KEY = "rushes:split";
+/** The timeline panel never takes more than this share of the column, nor less than the ruler needs. */
+const SPLIT_MAX = 0.55;
+const SPLIT_MIN = 0.08;
+
+function readVolume(): { level: number; muted: boolean } {
+  try {
+    const v = JSON.parse(localStorage.getItem(VOLUME_KEY) ?? "null") as { level?: unknown; muted?: unknown } | null;
+    const level = typeof v?.level === "number" && Number.isFinite(v.level) ? Math.min(1, Math.max(0, v.level)) : 1;
+    return { level, muted: v?.muted === true };
+  } catch {
+    return { level: 1, muted: false };
+  }
+}
+
+function readSplit(): number | null {
+  try {
+    const n = Number(localStorage.getItem(SPLIT_KEY));
+    return localStorage.getItem(SPLIT_KEY) !== null && Number.isFinite(n) ? Math.min(SPLIT_MAX, Math.max(SPLIT_MIN, n)) : null;
+  } catch {
+    return null;
+  }
+}
+
+function remember(key: string, value: string | null): void {
+  try {
+    if (value === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, value);
+  } catch {
+    // Storage refused (a private window): the setting holds for this visit only.
+  }
 }
 
 const typing = (el: EventTarget | null) => el instanceof HTMLElement && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
 
-/** The cut, with notes down the right: frame stepping, In/Out ranges, a box on the frame and frame grabs. */
+/**
+ * §27, 5.4 to 5.6: the Timeline tab. The monitor (the tool strip and the cut), the transport, the ruler and the Picture
+ * track, with notes down the right: frame stepping, In/Out ranges, a box on the frame and frame grabs.
+ */
 export function Picture({
   video, version, fps, notes, toast, onChanged, onPendingChange, startAt, grab, onGrabChange, playerRef,
-  ffmpeg = false, autoProxy = false, proxyJob, noteProxyJob, source = "proxy", onSourceChange, fileSize = null, fileRev,
-  formats = [], format = null, formatMissing = false, onPrimarySize, onBoxPendingChange, onFormatChange, readOnly = false,
+  ffmpeg = false, proxyJob, noteProxyJob, source = "proxy", onSourceChange,
+  formats = [], format = null, formatMissing = false, onPrimarySize, onBoxPendingChange, onFormatChange, readOnly = false, formatSwitch,
 }: PictureProps) {
   const ref = useRef<HTMLVideoElement>(null);
   const frameRef = useRef<HTMLDivElement>(null);
@@ -91,8 +130,6 @@ export function Picture({
   const input = useRef<HTMLTextAreaElement>(null);
   const [t, setT] = useState(0);
   const [duration, setDuration] = useState(version.duration ?? 0);
-  // Which cut `duration` was read from: until a new cut's metadata loads, it's still the last one's.
-  const [durationOf, setDurationOf] = useState<string | null>(version.duration ? version.file : null);
   // The frame's shape: the video's own aspect ratio once metadata loads, 16:9 before then.
   // §21.5: the format on screen. The primary is the version's own file; any other plays its own
   // render. Proxies belong to the primary only (§21.3), so the switch and the offer go with it.
@@ -125,11 +162,13 @@ export function Picture({
   // across a format switch (the frame shows its box only on the cut it was drawn on).
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [noteHasText, setNoteHasText] = useState(false);
-  // Fix round 3 (M2): in a very short window the player column holds what's in it.
-  const stackRef = useRef<HTMLDivElement>(null);
-  usePlayerFloor(stackRef);
-  // §19.9: the cut's own audio, drawn quietly in the timeline. Always the original's, even with a proxy.
-  const wave = usePictureWave(video.id, version, fileSize, fileRev, durationOf === version.file ? duration : (version.duration ?? 0));
+  // §27, 5.4: whether the note box has focus, so the Note tool shows as the one in use.
+  const [noteFocused, setNoteFocused] = useState(false);
+  // §27, 5.5: the level and mute, remembered per browser; §27, 5.4: the timeline's share of the column, once dragged.
+  const [sound, setSound] = useState(readVolume);
+  const [split, setSplit] = useState(readSplit);
+  const monitorRef = useRef<HTMLDivElement>(null);
+  const columnRef = useRef<HTMLDivElement>(null);
   // The click that ends a box drag shouldn't also start playback.
   const justDrew = useRef(false);
   // startAt restores a film's remembered playhead, but only once: the first metadata load
@@ -137,12 +176,6 @@ export function Picture({
   // id). A later cut within the same film — a new version picked, or a new render arriving —
   // must start at 0, as in Plan 2, not reuse the old restore point forever.
   const startApplied = useRef(false);
-  // The shot strip's cards, keyed by shot number, so the current one can be scrolled into view.
-  const shotRefs = useRef<Record<number, HTMLButtonElement | null>>({});
-  // Read inside an effect instead of added as a dependency, so the strip scrolls only when the
-  // current shot changes, never merely because playback started or stopped.
-  const playingRef = useRef(playing);
-  useEffect(() => { playingRef.current = playing; }, [playing]);
   // True until this Picture instance unmounts (a film switch: Picture is keyed by video id,
   // so each film gets its own instance). Guards a grab whose POST is still in flight when you
   // switch films: the response must never attach to whatever film is now on screen.
@@ -388,6 +421,62 @@ export function Picture({
   };
   const clearRange = () => setRange({ in: null, out: null });
 
+  // §27, 5.4: the tool strip. Note, Range and Box show as the tool in use while their own mode is on, and Select
+  // otherwise; Grab is an action. Select ends box mode and an In still waiting for its Out.
+  const marking = range.in !== null && range.out === null;
+  const tool: Tool = noteFocused ? "note" : boxMode ? "box" : marking ? "range" : "select";
+  const selectTool = () => {
+    setBoxMode(false);
+    if (marking) clearRange();
+    if (input.current && document.activeElement === input.current) input.current.blur();
+  };
+  // As I then O would: the first press sets In, the next sets Out, and one after that starts again.
+  const rangeTool = () => (marking ? setOut() : setIn());
+  useEffect(() => {
+    const onIn = (e: FocusEvent) => setNoteFocused(!!input.current && e.target === input.current);
+    const onOut = (e: FocusEvent) => {
+      if (e.target === input.current) setNoteFocused(false);
+    };
+    document.addEventListener("focusin", onIn);
+    document.addEventListener("focusout", onOut);
+    return () => {
+      document.removeEventListener("focusin", onIn);
+      document.removeEventListener("focusout", onOut);
+    };
+  }, []);
+
+  // §27, 5.4: full screen is the monitor's: the tool strip and the picture.
+  const fullScreen = () => {
+    const el = monitorRef.current;
+    if (!el) return;
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
+    else void el.requestFullscreen?.().catch(() => toast("Couldn't go full screen"));
+  };
+
+  // §27, 5.5: the level and mute live on the element, and are remembered per browser.
+  useEffect(() => {
+    const v = ref.current;
+    if (v) {
+      v.volume = sound.level;
+      v.muted = sound.muted;
+    }
+    remember(VOLUME_KEY, JSON.stringify(sound));
+  }, [sound]);
+
+  // §27, 5.4: dragging the divider sets the timeline panel's share of the column, from SPLIT_MIN to SPLIT_MAX.
+  const splitDrag = useRef<{ top: number; height: number } | null>(null);
+  const splitAt = (clientY: number): number | null => {
+    const d = splitDrag.current;
+    if (!d || d.height <= 0) return null;
+    const to = Math.min(SPLIT_MAX, Math.max(SPLIT_MIN, (d.top + d.height - clientY) / d.height));
+    setSplit(to);
+    return to;
+  };
+  const keepSplit = (to: number | null) => {
+    setSplit(to);
+    remember(SPLIT_KEY, to === null ? null : String(Math.round(to * 1000) / 1000));
+  };
+
   // Every grab is numbered, and only the latest one's result is shown and attached: an ffmpeg
   // grab can take a moment, so an earlier one finishing late must never replace a later one.
   const grabSeq = useRef(0);
@@ -487,6 +576,8 @@ export function Picture({
     }
     else if (e.key === "ArrowLeft") { e.preventDefault(); step(e.shiftKey ? -10 : -1); }
     else if (e.key === "ArrowRight") { e.preventDefault(); step(e.shiftKey ? 10 : 1); }
+    else if (k === "v") selectTool();
+    else if (k === "f") { e.preventDefault(); if (!e.repeat) fullScreen(); }
     // §26: a shelved film is view only: the marking keys do nothing.
     else if (readOnly && /^[iogbn]$/.test(k)) return;
     else if (k === "i") setIn();
@@ -551,8 +642,6 @@ export function Picture({
   const pic = picture(overlaySize.w, overlaySize.h);
   const style = (b: Box) => ({ left: `${b.x * 100}%`, top: `${b.y * 100}%`, width: `${b.w * 100}%`, height: `${b.h * 100}%` });
 
-  // Clamped to the timeline, whatever the file on screen reports (review M6).
-  const pct = (s: number) => `${duration ? Math.min(100, Math.max(0, (s / duration) * 100)) : 0}%`;
   // Belt-and-braces: an inherited shot that runs past a shorter cut's duration is hidden here
   // too, even though the server already trims these on addVersion.
   const shots = duration ? version.shots.filter((s) => s.start < duration) : version.shots;
@@ -560,19 +649,22 @@ export function Picture({
   // same snapped time, so the strip and the timecode must agree with it rather than with `t`.
   const current = shotAt(shots, snap(t, fps));
 
-  // Keeps the current card in view while playing, never merely because the player re-renders.
-  useEffect(() => {
-    if (!playingRef.current || current === null) return;
-    // The strip's own scroll only. scrollIntoView would move every scrolling ancestor, the page
-    // included, and the strip can sit below the window: the header then scrolled away mid-play.
-    const card = shotRefs.current[current.n];
-    const strip = card?.parentElement;
-    if (!card || !strip) return;
-    const left = stripScrollLeft(strip, { offsetLeft: card.offsetLeft - strip.offsetLeft, offsetWidth: card.offsetWidth });
-    if (left !== null) strip.scrollTo({ left });
-  }, [current?.n]);
-
   const placed = visible.map((n) => ({ n, at: placeNote(n, version.id) })).filter(({ at }) => at.t !== null);
+  // The ruler's markers: each note placed on this cut, a ring for an all-format note on a cut with formats (§21.5).
+  const marks: RulerMarker[] = rulerMarks(placed.map(({ n, at }) => ({ ...n, t: at.t, tOut: at.tOut })), duration).map((m, i) => {
+    const n = placed[i].n;
+    const tag = noteFormatTag(n, many);
+    return { ...m, ring: many && n.format === null, title: tag ? `${tag} · ${n.text}` : n.text };
+  });
+  // Clamped to the timeline, whatever the file on screen reports (review M6).
+  const pctOf = (s: number) => (duration ? Math.min(100, Math.max(0, (s / duration) * 100)) : 0);
+  const liveRange = range.in !== null ? { left: pctOf(range.in), width: pctOf(range.out ?? range.in + 0.2) - pctOf(range.in) } : null;
+  /** Seek to a note and select it, as clicking its time in the list does. */
+  const showNote = (n: Note, to: number) => {
+    ref.current?.pause();
+    seek(to);
+    setSelectedId(n.id);
+  };
   // R6: the selected note's box, on the cut and the format it was drawn on (R7).
   const selected = visible.find((n) => n.id === selectedId) ?? null;
   const shownBox = selected?.box && (!selected.version || selected.version === version.id) && boxShowsOn(selected, format, primaryId) ? selected.box : null;
@@ -588,7 +680,6 @@ export function Picture({
   const applyMetadata = (v: HTMLVideoElement) => {
     // R9: the timeline is the cut's length, whatever format plays; nothing is rescaled.
     setDuration(onPrimary ? v.duration || version.duration || 0 : version.duration ?? view?.duration ?? (v.duration || 0));
-    setDurationOf(version.file);
     // R2: a cut stored without its size learns it from the player, for the single chip.
     // The proxy has the cut's shape (review M2), so a cut playing its proxy is measured too.
     if (onPrimary && version.width === null && v.videoWidth && v.videoHeight) onPrimarySize?.(version.file, v.videoWidth, v.videoHeight);
@@ -618,172 +709,190 @@ export function Picture({
 
   return (
     <div class="split">
-      <div class="stack" ref={stackRef}>
-        {/* The box's height is written out in full rather than through a custom property: Chromium
-            doesn't always redo a container-unit height when only the variable inside it changes. */}
-        <div class="framebox" style={{ height: `min(640px, 70vh, calc(100cqw / ${aspect}))` }}>
-          <div class="frame" ref={frameRef} style={{ aspectRatio: String(aspect), "--ar": String(aspect) }}>
-            {/* One message, never two: with ffmpeg, the proxy offer under the player speaks for a
-                file that won't play. Only the original, with a proxy to switch back to, says so here. */}
-            {formatMissing && !onPrimary && <div class="msg">File not found</div>}
-            {broken && !onPrimary && !formatMissing && <div class="msg">This file won't play in a browser. Ask your agent for an H.264 MP4 of this format.</div>}
-            {broken && onPrimary && !ffmpeg && <div class="msg">This file won't play in a browser. Ask your agent for an H.264 MP4 of this cut.</div>}
-            {broken && onPrimary && ffmpeg && version.proxy && !playsProxy && <div class="msg">This file won't play in a browser.</div>}
-            <video
-              hidden={broken || (formatMissing && !onPrimary)}
-              ref={(el) => {
-                ref.current = el;
-                if (playerRef) playerRef.current = el;
-                // Catches up a video that reached HAVE_METADATA (or further) before this ref ran
-                // -- see applyMetadata's comment. Harmless to repeat on every re-render once
-                // that's already happened: setDuration/setAspect bail out on an equal value, and
-                // startApplied guards the once-only seek.
-                if (el && el.readyState >= 1) applyMetadata(el);
-              }}
-              src={src}
-              preload="auto"
-              playsInline
-              onLoadedMetadata={(e) => applyMetadata(e.target as HTMLVideoElement)}
-              onTimeUpdate={(e) => {
-                const v = e.target as HTMLVideoElement;
-                // The playhead loop may not run (a background tab): the cut's end holds here too.
-                holdAtCutEnd(v);
-                if (!playing && !resume.current) setT(v.currentTime);
-              }}
-              onSeeked={(e) => !resume.current && setT((e.target as HTMLVideoElement).currentTime)}
-              onPlay={() => setPlaying(true)}
-              onPause={() => setPlaying(false)}
-              onEnded={() => setPlaying(false)}
-            />
-            <div
-              ref={overlay}
-              class={`overlay${boxMode ? " drawing" : ""}`}
-              onPointerDown={down}
-              onPointerMove={move}
-              onPointerUp={up}
-              onClick={() => {
-                if (justDrew.current) justDrew.current = false;
-                else if (!boxMode) toggle();
-              }}
-            >
-              <div class="pic" style={{ left: `${pic.x}px`, top: `${pic.y}px`, width: `${pic.w}px`, height: `${pic.h}px` }}>
-                {shownBox && <div class="bx saved" style={style(shownBox)} />}
-                {box && <div class="bx" style={style(box)} />}
-                {live && <div class="bx" style={style(live)} />}
+      <div class="tl" ref={columnRef}>
+        <div class="monitor" ref={monitorRef}>
+          <ToolStrip
+            active={tool}
+            readOnly={readOnly}
+            grabbing={grabbing > 0}
+            onSelect={selectTool}
+            onNote={() => input.current?.focus()}
+            onRange={rangeTool}
+            onBox={() => setBoxMode((m) => !m)}
+            onGrab={() => void grabFrame()}
+          />
+          {/* The picture, centred on black, as large as the monitor allows in the cut's own shape. Its width is worked out
+              from the box's size (container units): Safari doesn't narrow a width from a height through aspect-ratio. */}
+          <div class="framebox">
+            <div class="fitbox">
+              <div class="frame" ref={frameRef} style={{ aspectRatio: String(aspect), "--ar": String(aspect) }}>
+                {/* One message, never two: with ffmpeg, the proxy offer over the foot of the monitor speaks
+                    for a file that won't play. Only the original, with a proxy to switch back to, says so here. */}
+                {formatMissing && !onPrimary && <div class="msg">File not found</div>}
+                {broken && !onPrimary && !formatMissing && <div class="msg">This file won't play in a browser. Ask your agent for an H.264 MP4 of this format.</div>}
+                {broken && onPrimary && !ffmpeg && <div class="msg">This file won't play in a browser. Ask your agent for an H.264 MP4 of this cut.</div>}
+                {broken && onPrimary && ffmpeg && version.proxy && !playsProxy && <div class="msg">This file won't play in a browser.</div>}
+                <video
+                  hidden={broken || (formatMissing && !onPrimary)}
+                  ref={(el) => {
+                    ref.current = el;
+                    if (playerRef) playerRef.current = el;
+                    // Catches up a video that reached HAVE_METADATA (or further) before this ref ran
+                    // -- see applyMetadata's comment. Harmless to repeat on every re-render once
+                    // that's already happened: setDuration/setAspect bail out on an equal value, and
+                    // startApplied guards the once-only seek.
+                    if (el && el.readyState >= 1) applyMetadata(el);
+                  }}
+                  src={src}
+                  preload="auto"
+                  playsInline
+                  onLoadedMetadata={(e) => applyMetadata(e.target as HTMLVideoElement)}
+                  onTimeUpdate={(e) => {
+                    const v = e.target as HTMLVideoElement;
+                    // The playhead loop may not run (a background tab): the cut's end holds here too.
+                    holdAtCutEnd(v);
+                    if (!playing && !resume.current) setT(v.currentTime);
+                  }}
+                  onSeeked={(e) => !resume.current && setT((e.target as HTMLVideoElement).currentTime)}
+                  onPlay={() => setPlaying(true)}
+                  onPause={() => setPlaying(false)}
+                  onEnded={() => setPlaying(false)}
+                />
+                <div
+                  ref={overlay}
+                  class={`overlay${boxMode ? " drawing" : ""}`}
+                  onPointerDown={down}
+                  onPointerMove={move}
+                  onPointerUp={up}
+                  onClick={() => {
+                    if (justDrew.current) justDrew.current = false;
+                    else if (!boxMode) toggle();
+                  }}
+                >
+                  <div class="pic" style={{ left: `${pic.x}px`, top: `${pic.y}px`, width: `${pic.w}px`, height: `${pic.h}px` }}>
+                    {shownBox && <div class="bx saved" style={style(shownBox)} />}
+                    {box && <div class="bx" style={style(box)} />}
+                    {live && <div class="bx" style={style(live)} />}
+                  </div>
+                </div>
+                <div class="tcover">f{frameAt(t, fps)}{current && ` · shot ${shotLabel(current.n)}`}</div>
+                {version.proxy && onPrimary && (
+                  <div class="srcswitch" role="group" aria-label="Which file plays">
+                    <button
+                      type="button"
+                      class="tip-below tip-start tip-wrap"
+                      aria-pressed={playsProxy}
+                      aria-label="Proxy"
+                      data-tip="Playing the lightweight copy. Notes and timings are the same."
+                      onClick={(e) => { (e.currentTarget as HTMLElement).blur(); choose("proxy"); }}
+                    >
+                      Proxy
+                    </button>
+                    <button
+                      type="button"
+                      class="tip-below tip-start tip-wrap"
+                      aria-pressed={!playsProxy}
+                      aria-label="Original"
+                      data-tip="Play the full-quality file. It may stutter."
+                      onClick={(e) => { (e.currentTarget as HTMLElement).blur(); choose("original"); }}
+                    >
+                      Original
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
-            <div class="tcover">f{frameAt(t, fps)}{current && ` · shot ${shotLabel(current.n)}`}</div>
-            {version.proxy && onPrimary && (
-              <div class="srcswitch" role="group" aria-label="Which file plays">
-                <button
-                  type="button"
-                  class="tip-below tip-start tip-wrap"
-                  aria-pressed={playsProxy}
-                  aria-label="Proxy"
-                  data-tip="Playing the lightweight copy. Notes and timings are the same."
-                  onClick={(e) => { (e.currentTarget as HTMLElement).blur(); choose("proxy"); }}
-                >
-                  Proxy
-                </button>
-                <button
-                  type="button"
-                  class="tip-below tip-start tip-wrap"
-                  aria-pressed={!playsProxy}
-                  aria-label="Original"
-                  data-tip="Play the full-quality file. It may stutter."
-                  onClick={(e) => { (e.currentTarget as HTMLElement).blur(); choose("original"); }}
-                >
-                  Original
-                </button>
-              </div>
+            {formatSwitch && <div class="monfmt">{formatSwitch}</div>}
+            {noteProxyJob && (
+              // Over the foot of the monitor. Hidden, never unmounted, on another format (review M4): it keeps "✓ Proxy
+              // ready" and its place, so coming back to the primary doesn't lose it.
+              <ProxyBar
+                hidden={!onPrimary}
+                key={version.id}
+                video={video}
+                version={version}
+                ffmpeg={ffmpeg}
+                job={proxyJob}
+                broken={broken && !playsProxy}
+                duration={duration}
+                toast={toast}
+                onChanged={onChanged}
+                noteProxyJob={noteProxyJob}
+              />
             )}
           </div>
         </div>
 
-        {noteProxyJob && (
-          // Hidden, never unmounted, on another format (review M4): it keeps "✓ Proxy ready" and its
-          // place, so coming back to the primary neither loses it nor makes the column jump.
-          <ProxyBar
-            hidden={!onPrimary}
-            key={version.id}
-            video={video}
-            version={version}
-            ffmpeg={ffmpeg}
-            autoProxy={autoProxy}
-            job={proxyJob}
-            broken={broken && !playsProxy}
-            duration={duration}
-            toast={toast}
-            onChanged={onChanged}
-            noteProxyJob={noteProxyJob}
-          />
-        )}
-
-        <div class="bar">
-          <button class="btn ghost ib" data-tip="Back one frame  ←" aria-label="Back one frame" onClick={() => step(-1)}><Icon name="prev" /></button>
-          <button class="btn ib" data-tip="Play  Space" aria-label={playing ? "Pause" : "Play"} onClick={toggle}><Icon name={playing ? "pause" : "play"} /></button>
-          <button class="btn ghost ib" data-tip="Forward one frame  →" aria-label="Forward one frame" onClick={() => step(1)}><Icon name="next" /></button>
-          <span class="tc" aria-label="Timecode">{fmt(t)}<small>/ {fmt(duration)}</small></span>
-          <span class="sp" />
-          {rangeLabel && (
-            <span class="chipx">
-              <span class="mono">{rangeLabel}</span>
-              <button aria-label="Clear range" onClick={clearRange}><Icon name="x" /></button>
-            </span>
-          )}
-          <button class="btn ghost ib" data-tip="Set in  I" aria-label="Set in point" disabled={readOnly} onClick={setIn}><Icon name="in" /></button>
-          <button class="btn ghost ib" data-tip="Set out  O" aria-label="Set out point" disabled={readOnly} onClick={setOut}><Icon name="out" /></button>
-          <span class="vsep" />
-          <button class="btn ghost ib" data-tip="Draw a box  B" aria-label="Draw a box" aria-pressed={boxMode} disabled={readOnly} onClick={() => setBoxMode(!boxMode)}><Icon name="box" /></button>
-          <button class="btn ghost ib" data-tip="Grab frame  G" aria-label="Grab frame" aria-busy={grabbing > 0} disabled={readOnly} onClick={() => void grabFrame()}><Icon name="camera" /></button>
-        </div>
+        <Transport
+          t={t}
+          duration={duration}
+          playing={playing}
+          onToggle={toggle}
+          onStep={step}
+          rangeLabel={rangeLabel}
+          onClearRange={clearRange}
+          volume={sound.level}
+          muted={sound.muted}
+          onVolume={(level) => setSound({ level, muted: level === 0 ? sound.muted : false })}
+          onMute={() => setSound({ ...sound, muted: !sound.muted })}
+          onFullScreen={fullScreen}
+        />
 
         <div
-          class="track"
-          role="slider"
-          aria-label="Timeline"
-          aria-valuemin={0}
-          aria-valuemax={duration}
-          aria-valuenow={t}
-          onClick={(e) => {
-            const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-            seek(((e.clientX - r.left) / r.width) * duration);
+          class="tlsplit"
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Resize the timeline"
+          aria-valuemin={Math.round(SPLIT_MIN * 100)}
+          aria-valuemax={Math.round(SPLIT_MAX * 100)}
+          aria-valuenow={split === null ? undefined : Math.round(split * 100)}
+          tabIndex={0}
+          onPointerDown={(e) => {
+            const col = columnRef.current;
+            if (!col || e.button !== 0) return;
+            const r = col.getBoundingClientRect();
+            splitDrag.current = { top: r.top, height: r.height };
+            (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
           }}
-        >
-          {wave && <PictureWave wave={wave} length={duration} />}
-          {placed.map(({ n, at }) => at.tOut !== null && <div class={`span ${n.status}`} style={{ left: pct(at.t!), width: pct(at.tOut - at.t!) }} />)}
-          {range.in !== null && <div class="span live" style={{ left: pct(range.in), width: pct((range.out ?? range.in + 0.2) - range.in) }} />}
-          {shots.filter((s) => s.start > 0).map((s) => <div class="tick" style={{ left: pct(s.start) }} />)}
-          {/* §21.5: an all-format note's marker is a ring, a format note's a dot. */}
-          {placed.map(({ n, at }) => {
-            const tag = noteFormatTag(n, many);
-            return <div class={`mk ${n.status}${many && n.format === null ? " ring" : ""}`} style={{ left: pct(at.t!) }} title={tag ? `${tag} · ${n.text}` : n.text} />;
-          })}
-          <div class="playhead" style={{ left: pct(t) }} />
-        </div>
-        <div class="ends"><span>0:00</span><span>{fmt(duration)}</span></div>
-        <VersionNote key={version.id} version={version} />
-      </div>
+          onPointerMove={(e) => splitAt(e.clientY)}
+          onPointerUp={(e) => {
+            const to = splitAt(e.clientY);
+            splitDrag.current = null;
+            if (to !== null) keepSplit(to);
+          }}
+          onDblClick={() => keepSplit(null)}
+          onKeyDown={(e) => {
+            if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+            e.preventDefault();
+            const col = columnRef.current;
+            const panel = col?.querySelector<HTMLElement>(".tlpanel");
+            const from = split ?? (col && panel ? panel.getBoundingClientRect().height / col.getBoundingClientRect().height : SPLIT_MIN);
+            keepSplit(Math.min(SPLIT_MAX, Math.max(SPLIT_MIN, from + (e.key === "ArrowUp" ? 0.03 : -0.03))));
+          }}
+        />
 
-      {/* Outside the player's column, so the note box stays level with the timeline: the strip
-          may run below the window on a tall cut (fix round 1). */}
-      {shots.length > 0 && (
-        <div class="shots" data-player>
-          {shots.map((s) => (
-            <button
-              type="button"
-              class="shot"
-              ref={(el) => { shotRefs.current[s.n] = el; }}
-              aria-current={current?.n === s.n ? "true" : undefined}
-              onClick={() => { ref.current?.pause(); seek(shotSeek(s.start, fps)); }}
-            >
-              <span class="mono">{shotLabel(s.n)} · {s.start.toFixed(2)}s</span>
-              <span class="name">{s.name}</span>
-              {s.tag && <span class="tag">{s.tag}</span>}
-            </button>
-          ))}
+        <div class={`tlpanel${split === null ? "" : " sized"}`} style={split === null ? undefined : { height: `${split * 100}%` }}>
+          <div class="trow rrow">
+            <div class="thead" />
+            <Ruler duration={duration} t={t} marks={marks} live={liveRange} onSeek={seek} onMark={(id) => {
+              const p = placed.find(({ n }) => n.id === id);
+              if (p) showNote(p.n, p.at.t!);
+            }} />
+          </div>
+          <PictureTrack
+            shots={shots}
+            duration={duration}
+            t={t}
+            current={current?.n ?? null}
+            cutLabel={shortLabel(version) || version.id}
+            locked={video.lockedVersion === version.id}
+            onSeek={(start) => {
+              ref.current?.pause();
+              seek(shotSeek(start, fps));
+            }}
+          />
         </div>
-      )}
+      </div>
 
       <Notes
         readOnly={readOnly}
@@ -833,11 +942,7 @@ export function Picture({
             />
           ) : null;
         }}
-        onSeek={(to, n) => {
-          ref.current?.pause();
-          seek(to);
-          setSelectedId(n.id);
-        }}
+        onSeek={(to, n) => showNote(n, to)}
         attachments={(box || grab) && (
           <>
             {box && (

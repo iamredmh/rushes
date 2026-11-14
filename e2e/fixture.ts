@@ -513,12 +513,79 @@ export async function openMore(page: Page): Promise<void> {
   await page.getByRole("button", { name: "More", exact: true }).click();
 }
 
+/** The More menu's setting that makes proxies of new cuts automatically (§19.5): a checkbox item. Open the menu first. */
+export function autoProxySetting(page: Page): Locator {
+  return page.getByRole("menuitemcheckbox", { name: "Make lighter copies of new cuts automatically" });
+}
+
 /** Picks a version from the version list, the way a person would, and waits until it's on screen. */
 export async function pickVersion(page: Page, id: string): Promise<void> {
   const button = cutButton(page);
   if ((await button.getAttribute("aria-expanded")) !== "true") await button.click();
   await page.getByRole("listbox", { name: "Versions" }).locator(`[role="option"][data-version="${id}"]`).click();
   await expect(button).toHaveAttribute("data-version", id);
+}
+
+// ---- the Timeline tab (§27, 5.4 to 5.6): the monitor and its tool strip, the transport, the ruler and the Picture track ----
+
+export type ToolName = "Select" | "Note" | "Range" | "Box" | "Grab";
+/** Each tool's tooltip, which is also its accessible name. */
+export const TOOL_TIPS: Record<ToolName, string> = {
+  Select: "Select · V",
+  Note: "Note at the playhead · N",
+  Range: "Mark a range · I and O",
+  Box: "Box on the picture · B",
+  Grab: "Grab this frame · G",
+};
+
+/** The monitor: the tool strip and the picture. It is what goes full screen. */
+export function monitor(page: Page): Locator {
+  return page.locator(".monitor");
+}
+
+/** The tool strip down the monitor's left. */
+export function toolStrip(page: Page): Locator {
+  return page.getByRole("toolbar", { name: "Tools" });
+}
+
+/** One tool on the strip; `aria-pressed` says which is active. */
+export function toolButton(page: Page, name: ToolName): Locator {
+  return toolStrip(page).getByRole("button", { name: TOOL_TIPS[name], exact: true });
+}
+
+/** The row under the monitor: the timecode, play and the frame steps, volume and full screen. */
+export function transport(page: Page): Locator {
+  return page.getByRole("group", { name: "Transport" });
+}
+
+/** The cut's length, beside the timecode. */
+export function cutLength(page: Page): Locator {
+  return page.getByLabel("Timecode").locator(".dur");
+}
+
+/** The In/Out being marked, with its Clear button, in the transport. */
+export function rangeChip(page: Page): Locator {
+  return transport(page).locator(".chipx");
+}
+
+/** The ruler: time ticks, the playhead and a marker per note. Clicking or dragging on it seeks. */
+export function ruler(page: Page): Locator {
+  return page.getByRole("slider", { name: "Timeline" });
+}
+
+/** The notes' markers on the ruler. */
+export function rulerMarkers(page: Page): Locator {
+  return ruler(page).locator(".mk");
+}
+
+/** The Picture track: a block per shot. */
+export function pictureTrack(page: Page): Locator {
+  return page.getByRole("group", { name: "Picture track" });
+}
+
+/** The Picture track's blocks; the one under the playhead has `aria-current`. */
+export function shotBlocks(page: Page): Locator {
+  return pictureTrack(page).getByRole("button");
 }
 
 export { expect };

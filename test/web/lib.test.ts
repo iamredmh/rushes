@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   agentPrompt, boxFrom, contentRect, copyShortcut, cueRoom, defaultVersion, extOf, firstTab, fit, FOLDERS, fmt, folderItems, formatBytes, frameAt, groupByFilm,
-  isChanged, isPreviewable, latest, LOCKED_TAB, metaLine, neighbourVideo, noteTime, OPEN_SAFE_EXT, placeNote, shotAt, shotLabel, shotSeek, snap, stepFrame, stripScrollLeft,
+  isChanged, isPreviewable, latest, LOCKED_TAB, metaLine, neighbourVideo, noteTime, OPEN_SAFE_EXT, placeNote, shotAt, shotLabel, shotSeek, snap, stepFrame,
 } from "../../web/src/lib.js";
 import type { Asset, Note, Section, Shot, TabState, Video } from "../../web/src/types.js";
 import {
@@ -1550,18 +1550,3 @@ describe("one film's audio lists", () => {
   });
 });
 
-describe("stripScrollLeft", () => {
-  const strip = { scrollLeft: 100, clientWidth: 300 }; // shows 100..400
-  it("leaves a fully visible card alone", () => {
-    expect(stripScrollLeft(strip, { offsetLeft: 150, offsetWidth: 100 })).toBeNull();
-  });
-  it("scrolls back to a card cut off on the left", () => {
-    expect(stripScrollLeft(strip, { offsetLeft: 40, offsetWidth: 100 })).toBe(32);
-  });
-  it("scrolls on to a card cut off on the right", () => {
-    expect(stripScrollLeft(strip, { offsetLeft: 380, offsetWidth: 100 })).toBe(188); // 380 + 100 + 8 - 300
-  });
-  it("never returns a negative position", () => {
-    expect(stripScrollLeft({ scrollLeft: 50, clientWidth: 300 }, { offsetLeft: 2, offsetWidth: 60 })).toBe(0);
-  });
-});

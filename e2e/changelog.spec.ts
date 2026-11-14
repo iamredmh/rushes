@@ -644,10 +644,9 @@ test("a label, a note and a log line in a right-to-left script start on their ow
   await page.goto(rushes.url);
   await videoReady(page);
   const direction = (el: Element) => getComputedStyle(el).direction; // for evaluate(); evaluateAll can't see it
-  // The version button and the note under the picture.
+  // The version button. (§27, 5.4: the note no longer sits under the picture; it is the open list's detail, below.)
   await expect(cutButton(page)).toContainText(hebrew.slice(0, 10));
   expect(await page.locator(".vbtn .vlbl").evaluate(direction)).toBe("rtl");
-  expect(await page.locator(".vnote .vtext").evaluate(direction)).toBe("rtl");
   // The open list: each row by its own text, and the note beside it.
   await cutButton(page).click();
   expect(await page.locator(".vrow .vlbl").evaluateAll((els) => els.map((el) => getComputedStyle(el).direction))).toEqual(["rtl", "ltr"]);

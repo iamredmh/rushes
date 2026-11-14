@@ -293,22 +293,6 @@ export function shotAt(shots: Shot[], t: number): { n: number; name: string } | 
   return found ? { n: found.n, name: found.name } : null;
 }
 
-/**
- * Where a horizontal strip must scroll to show `card` whole, with `pad` to spare, or null when it
- * already does. `offsetLeft` is measured from the strip. Only ever the strip's own scroll: bringing
- * a card into view must never move the page (the strip can sit below the window).
- */
-export function stripScrollLeft(
-  strip: { scrollLeft: number; clientWidth: number },
-  card: { offsetLeft: number; offsetWidth: number },
-  pad = 8,
-): number | null {
-  if (card.offsetLeft < strip.scrollLeft) return Math.max(0, card.offsetLeft - pad);
-  const right = card.offsetLeft + card.offsetWidth;
-  if (right > strip.scrollLeft + strip.clientWidth) return Math.max(0, right + pad - strip.clientWidth);
-  return null;
-}
-
 /** "2" -> "02"; widens to 3 digits once n reaches 100. */
 export function shotLabel(n: number): string {
   return String(n).padStart(2, "0");

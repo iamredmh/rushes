@@ -1,7 +1,7 @@
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Page } from "@playwright/test";
-import { expect, hasFfmpeg, pickVersion, test, cutButton, videoReady, openWorkspace, workspaceTab, pickFilm, filmButton } from "./fixture.js";
+import { expect, hasFfmpeg, pickVersion, test, cutButton, videoReady, openWorkspace, workspaceTab, pickFilm, filmButton, cutLength, rangeChip, ruler, rulerMarkers, shotBlocks } from "./fixture.js";
 
 test.skip(!hasFfmpeg, "formats are generated with ffmpeg and measured with ffprobe");
 
@@ -84,13 +84,16 @@ test("switching while paused keeps the time and stays paused", async ({ page, ru
   expect(await video.evaluate((v: HTMLVideoElement) => v.paused)).toBe(true);
 });
 
+// §27, 5.4: a cut with one format and no other shape to explain has no switch on the monitor at all (desk.spec). The single
+// chip and its popover show when an earlier cut had other shapes: this cut is one format beside them.
 test("one format: the chip is greyed and out of the tab order, and the copy prompt is reachable by keyboard (R5)", async ({ page, rushes, context, browserName }) => {
   if (browserName === "chromium") await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await rushes.addFormatsCut(FOUR);
   await rushes.addCut();
   await page.goto(rushes.url);
   await videoReady(page);
-  const chip = page.getByRole("radiogroup", { name: "Format" }).getByRole("radio");
-  await expect(chip).toHaveCount(1);
+  const chip = radio(page, "16:9");
+  await expect(page.getByRole("radiogroup", { name: "Format" }).getByRole("radio")).toHaveCount(4);
   await expect(chip).toHaveText(/^16:9/);
   await expect(chip).toHaveAttribute("aria-disabled", "true");
   await expect(chip).toHaveAttribute("tabindex", "-1");
@@ -105,7 +108,7 @@ test("one format: the chip is greyed and out of the tab order, and the copy prom
   await page.keyboard.press("Enter");
   await expect(page.locator(".toast")).toHaveText(/Prompt copied|Couldn't reach the clipboard/);
   if (browserName === "chromium") {
-    expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('register the other shapes of "Hero" v1');
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('register the other shapes of "Hero" v2');
   }
 });
 
@@ -215,7 +218,7 @@ test("a format whose file has gone warns on its chip and says File not found; a 
   // R9: the timeline stays the cut's length on the longer render.
   await radio(page, "1:1").click();
   await videoReady(page);
-  await expect(page.locator(".ends span").last()).toHaveText("0:04.00");
+  await expect(cutLength(page)).toHaveText("0:04.00");
 });
 
 test("the Proxy/Original switch belongs to the primary: it hides while another format shows", async ({ page, rushes }) => {
@@ -231,27 +234,21 @@ test("the Proxy/Original switch belongs to the primary: it hides while another f
   await expect(page.getByRole("button", { name: "Proxy", exact: true })).toBeVisible();
 });
 
-test("at 1440×900 a 9:16 format keeps the timeline and note box on screen; the shot strip, length and waveform stay the cut's", async ({ page, rushes }) => {
+// §27, 5.4: the proxy bar is a message over the monitor now, so a hidden one can take no room; the picture's waveform
+// comes back with its sound row (the desk plan's Task 4).
+test("at 1440×900 a 9:16 format keeps the timeline and note box on screen; the Picture track and length stay the cut's", async ({ page, rushes }) => {
   await rushes.addFormatsCut([WIDE, TALL], { audio: true });
   await rushes.api("PUT", "/api/videos/hero/shots", { shots: [{ name: "Open", start: 0 }, { name: "Logo", start: 2 }] });
   await page.goto(rushes.url);
   await videoReady(page);
-  await expect(page.locator(".track canvas")).toBeVisible({ timeout: 15_000 });
-  const floor = () => page.locator(".stack").evaluate((el) => parseFloat((el as HTMLElement).style.getPropertyValue("--player-floor")));
-  await expect.poll(floor).toBeGreaterThan(0);
-  const onPrimary = await floor();
   await radio(page, "9:16").click();
   await expect(page.locator(".proxybar")).toBeHidden();
-  // The hidden proxy bar takes no room, so the column's floor shrinks by its height, never grows (review M4).
-  expect(await page.locator(".proxybar").evaluate((el) => { el.hidden = false; const h = el.getBoundingClientRect().height; el.hidden = true; return h; })).toBeGreaterThan(0);
-  await expect.poll(floor).toBeLessThan(onPrimary);
-  await expect(page.locator(".shots .shot")).toHaveCount(2);
-  await expect(page.locator(".ends span").last()).toHaveText("0:04.00");
-  await expect(page.locator(".track canvas")).toBeVisible();
+  await expect(shotBlocks(page)).toHaveText(["01 Open", "02 Logo"]);
+  await expect(cutLength(page)).toHaveText("0:04.00");
   const vp = page.viewportSize()!;
-  for (const sel of [".track", ".comp textarea"]) {
+  for (const sel of ['[aria-label="Picture track"]', ".ruler", ".comp textarea"]) {
     const b = (await page.locator(sel).boundingBox())!;
-    expect(b.y + b.height).toBeLessThanOrEqual(vp.height);
+    expect(b.y + b.height, sel).toBeLessThanOrEqual(vp.height);
   }
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
@@ -282,7 +279,7 @@ test("with a box drawn, switching format is refused; a half-typed note and an In
   await radio(page, "9:16").click();
   await expect(radio(page, "9:16")).toHaveAttribute("aria-checked", "true");
   await expect(page.getByRole("textbox", { name: "New note" })).toHaveValue("Half a thought");
-  await expect(page.locator(".bar .chipx")).toContainText("0:00.00 →");
+  await expect(rangeChip(page)).toContainText("0:00.00 →");
 });
 
 test("switching keeps the selected note (R6)", async ({ page, rushes }) => {
@@ -303,7 +300,8 @@ test("a one-format cut names no format in any request: loading, a note, a grab",
   await rushes.addCut();
   await page.goto(rushes.url);
   await videoReady(page);
-  await expect(page.getByRole("radiogroup", { name: "Format" }).getByRole("radio")).toHaveCount(1);
+  // §27, 5.4: one format, nothing to switch: no switch on the monitor.
+  await expect(page.getByRole("radiogroup", { name: "Format" })).toHaveCount(0);
   await page.keyboard.press("g");
   await expect(page.locator(".toast")).toContainText("Saved to");
   await page.keyboard.press("n");
@@ -323,10 +321,9 @@ test.describe("an older cut with no stored size (no ffprobe on the server)", () 
     expect(state.project.videos[0].versions[0].width).toBeNull();
     await page.goto(rushes.url);
     await videoReady(page);
-    const chip = page.getByRole("radiogroup", { name: "Format" }).getByRole("radio");
-    await expect(chip).toHaveCount(1);
-    await expect(chip).toHaveText(/^16:9/);
-    await expect(chip).toHaveAttribute("aria-disabled", "true");
+    // §27, 5.4: a one-format cut has no switch; the status bar names its shape, as the player measured it.
+    await expect(page.getByRole("radiogroup", { name: "Format" })).toHaveCount(0);
+    await expect(page.locator("footer.status .smeta")).toContainText("16:9");
     await page.keyboard.press("g");
     await expect(page.locator(".toast")).toContainText("Saved to");
     await page.keyboard.press("n");
@@ -410,7 +407,9 @@ test("a remembered format whose file has gone keeps its shape after a film switc
 });
 
 // M2, R2.
-test("a cut stored with no size, playing its proxy, still gets its single chip and the Copy prompt", async ({ page, rushes }) => {
+// §27, 5.4: a one-format cut has no switch on the monitor, so no single chip or Copy prompt either; the shape the player
+// measures from the proxy is the one the status bar names.
+test("a cut stored with no size, playing its proxy, still gets its shape measured", async ({ page, rushes }) => {
   await rushes.addProResCut({ seconds: 2 });
   await rushes.api("POST", "/api/videos/hero/versions/v1/proxy", {});
   await expect.poll(async () => (await rushes.api("GET", "/api/state")).project.videos[0].versions[0].proxy !== null, { timeout: 20_000 }).toBe(true);
@@ -424,10 +423,8 @@ test("a cut stored with no size, playing its proxy, still gets its single chip a
   await expect.poll(async () => (await rushes.api("GET", "/api/state")).project.videos[0].versions[0].width, { timeout: 10_000 }).toBeNull();
   await page.goto(rushes.url);
   await expect(page.getByRole("button", { name: "Proxy", exact: true })).toHaveAttribute("aria-pressed", "true");
-  const chip = page.getByRole("radiogroup", { name: "Format" }).getByRole("radio");
-  await expect(chip).toHaveText(/^16:9/);
-  await expect(chip).toHaveAttribute("aria-disabled", "true");
-  await expect(page.getByRole("button", { name: "Copy a prompt for your agent" })).toHaveCount(1);
+  await expect(page.locator("footer.status .smeta")).toContainText("16:9");
+  await expect(page.getByRole("radiogroup", { name: "Format" })).toHaveCount(0);
 });
 
 // M3.
@@ -520,7 +517,7 @@ test("a format longer than the cut stops at the cut's end, and the playhead neve
   await videoReady(page);
   await radio(page, "1:1").click();
   await videoReady(page);
-  const track = (await page.locator(".track").boundingBox())!;
+  const track = (await ruler(page).boundingBox())!;
   await page.mouse.click(track.x + track.width * 0.9, track.y + track.height / 2);
   await expect(page.getByLabel("Timecode")).toContainText("0:03.6");
   await page.keyboard.press(" ");
@@ -529,7 +526,7 @@ test("a format longer than the cut stops at the cut's end, and the playhead neve
   await page.waitForTimeout(300);
   expect(await video.evaluate((v: HTMLVideoElement) => v.paused && v.currentTime <= 4.0 + 1e-3)).toBe(true);
   await expect(page.getByLabel("Timecode")).toContainText("0:04.00");
-  const left = await page.locator(".playhead").evaluate((el) => parseFloat((el as HTMLElement).style.left));
+  const left = await ruler(page).locator(".playhead").evaluate((el) => parseFloat((el as HTMLElement).style.left));
   expect(left).toBeLessThanOrEqual(100);
   // Play again from the end starts from the top, as the cut itself does.
   await page.keyboard.press(" ");
@@ -630,10 +627,10 @@ test("a note written on 9:16 stays on 9:16; an all-format note shows on every fo
   await expect(radio(page, "9:16")).toHaveAccessibleName("9:16, 2 open notes");
   await expect(radio(page, "16:9")).toHaveAccessibleName("16:9, 1 open note");
   await expect(radio(page, "4:5")).toHaveAccessibleName("4:5, 1 open note");
-  await expect(page.locator(".track .mk")).toHaveCount(2);
-  await expect(page.locator(".track .mk.ring")).toHaveCount(1);
-  await expect(page.locator(".track .mk.ring")).toHaveAttribute("title", "All · Drop the first sound.");
-  await expect(page.locator(".track .mk:not(.ring)")).toHaveAttribute("title", "9:16 · Logo sits too close to the top edge.");
+  await expect(rulerMarkers(page)).toHaveCount(2);
+  await expect(rulerMarkers(page).and(page.locator(".ring"))).toHaveCount(1);
+  await expect(rulerMarkers(page).and(page.locator(".ring"))).toHaveAttribute("title", "All · Drop the first sound.");
+  await expect(rulerMarkers(page).and(page.locator(":not(.ring)"))).toHaveAttribute("title", "9:16 · Logo sits too close to the top edge.");
   // Type is 15 px or larger: the switch, the hint and the tags.
   const sizes = await page.locator(".fscope [role=radio], .fhint, .list .ftag").evaluateAll((els) => els.map((el) => parseFloat(getComputedStyle(el).fontSize)));
   expect(sizes.length).toBeGreaterThanOrEqual(5);
@@ -641,11 +638,11 @@ test("a note written on 9:16 stays on 9:16; an all-format note shows on every fo
   await radio(page, "16:9").click();
   await expect(page.locator(".list > .note .nx")).toHaveText(["Drop the first sound."]);
   await expect(page.locator(".list > .note .ftag.all")).toHaveText("All");
-  await expect(page.locator(".track .mk")).toHaveCount(1);
-  await expect(page.locator(".track .mk.ring")).toHaveCount(1);
+  await expect(rulerMarkers(page)).toHaveCount(1);
+  await expect(rulerMarkers(page).and(page.locator(".ring"))).toHaveCount(1);
   await radio(page, "9:16").click();
-  await expect(page.locator(".track .mk")).toHaveCount(2);
-  await expect(page.locator(".track .mk.ring")).toHaveCount(1);
+  await expect(rulerMarkers(page)).toHaveCount(2);
+  await expect(rulerMarkers(page).and(page.locator(".ring"))).toHaveCount(1);
 });
 
 test("one format: no switch in the composer, notes save for the whole cut, and nothing new shows", async ({ page, rushes }) => {
@@ -666,8 +663,8 @@ test("one format: no switch in the composer, notes save for the whole cut, and n
   await page.keyboard.press("Enter");
   await expect(page.locator(".note")).toHaveCount(1);
   await expect(page.locator(".note .ftag")).toHaveCount(0);
-  await expect(page.locator(".track .mk.ring")).toHaveCount(0);
-  await expect(page.locator(".track .mk")).toHaveAttribute("title", "Hold longer.");
+  await expect(rulerMarkers(page).and(page.locator(".ring"))).toHaveCount(0);
+  await expect(rulerMarkers(page)).toHaveAttribute("title", "Hold longer.");
   await expect(page.locator(".otherrow")).toHaveCount(0);
   await page.locator(".note .t").click();
   await expect(page.locator(".note .fscope")).toHaveCount(0);
@@ -714,7 +711,7 @@ test("a boxed note stays on its format: the composer locks to This format and th
   await cardScope.getByRole("radio", { name: /^This format/ }).click();
   await expect.poll(async () => (await byText("Hold longer.")).format).toBe("16x9");
   await expect(card.locator(".ftag")).toHaveText("16:9");
-  await expect(page.locator(".track .mk.ring")).toHaveCount(0);
+  await expect(rulerMarkers(page).and(page.locator(".ring"))).toHaveCount(0);
   await cardScope.getByRole("radio", { name: "All formats" }).click();
   await expect.poll(async () => (await byText("Hold longer.")).format).toBeNull();
   await expect(card.locator(".ftag.all")).toHaveText("All");
@@ -762,12 +759,12 @@ test("notes of other formats wait in a quiet row, read only, with a button that 
   // Read only: the time doesn't seek, and nothing there selects.
   await ro.filter({ hasText: "Rows land late" }).locator(".t").click();
   await expect(page.getByLabel("Timecode")).toContainText("0:00.00");
-  await expect(page.locator(".track .mk")).toHaveCount(0);
+  await expect(rulerMarkers(page)).toHaveCount(0);
   await ro.filter({ hasText: "End card cropped" }).getByRole("button", { name: "Show on 4:5" }).click();
   await expect(radio(page, "4:5")).toHaveAttribute("aria-checked", "true");
   await expect(page.locator(".list > .note .nx")).toHaveText(["End card cropped at the bottom."]);
   await expect(page.locator(".otherrow")).toContainText("Other formats (2)");
-  await expect(page.locator(".track .mk")).toHaveCount(1);
+  await expect(rulerMarkers(page)).toHaveCount(1);
   await page.getByRole("button", { name: "Other formats (2)" }).click();
   await expect(page.locator(".otherfmts .note")).toHaveCount(0);
 });
@@ -981,10 +978,10 @@ test("an all-format note and a format note at the same moment are both reachable
   await page.goto(rushes.url);
   await videoReady(page);
   await radio(page, "9:16").click();
-  await expect(page.locator(".track .mk")).toHaveCount(2);
+  await expect(rulerMarkers(page)).toHaveCount(2);
   const hits = await page.evaluate(() => {
-    const ring = document.querySelector(".track .mk.ring")!.getBoundingClientRect();
-    const dot = document.querySelector(".track .mk:not(.ring)")!.getBoundingClientRect();
+    const ring = document.querySelector(".ruler .mk.ring")!.getBoundingClientRect();
+    const dot = document.querySelector(".ruler .mk:not(.ring)")!.getBoundingClientRect();
     const at = (x: number, y: number) => (document.elementFromPoint(x, y) as HTMLElement | null)?.title ?? null;
     return { centre: at(dot.x + dot.width / 2, dot.y + dot.height / 2), band: at(ring.x + ring.width / 2 + 6, ring.y + ring.height / 2), ringSize: ring.width };
   });

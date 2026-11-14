@@ -258,37 +258,27 @@ test("opening the list has no motion when the system asks for less (§22.8)", as
   await expect(page.locator(".vmenu")).toHaveCSS("animation-name", "none");
 });
 
-test("the cut's full note sits under the picture, two lines at most, with More (§22.8)", async ({ page, rushes }) => {
+// §27, 5.4: the cut's note no longer sits under the picture (nor its two-line clamp and More); the full note is the Cut
+// menu's detail pane's, and the version's line is in Activity from the notes panel's task.
+test("the cut's full note is in the Cut menu's detail pane, and follows a new cut (§22.8)", async ({ page, rushes }) => {
   await rushes.addCut(HUGE);
   await page.goto(rushes.url);
   await videoReady(page);
-  const note = page.locator(".vnote");
-  await expect(note).toContainText("captions moved up 40 px");
-  const text = note.locator(".vtext");
-  expect(await text.evaluate((el) => el.scrollHeight > el.clientHeight + 1)).toBe(true);
-  const more = note.getByRole("button", { name: "More" });
-  await expect(more).toHaveAttribute("aria-expanded", "false");
-  await more.click();
-  await expect(note.getByRole("button", { name: "Less" })).toHaveAttribute("aria-expanded", "true");
-  expect(await text.evaluate((el) => el.scrollHeight <= el.clientHeight + 1)).toBe(true);
-  // The next cut's note opens clamped, and never shows expanded even for a frame (I2, M5).
-  await page.evaluate(() => {
-    const w = window as unknown as { __flash: boolean };
-    w.__flash = false;
-    new MutationObserver(() => {
-      const t = document.querySelector(".vnote .vtext");
-      if (t && t.textContent!.startsWith("v2:") && !t.classList.contains("vclamp")) w.__flash = true;
-    }).observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true });
-  });
+  await expect(page.locator(".vnote")).toHaveCount(0);
+  await cutButton(page).click();
+  const detail = page.locator("#vdetail p");
+  await expect(detail).toContainText("captions moved up 40 px");
+  await page.keyboard.press("Escape");
   await rushes.addCut(HUGE.replace(/^v3:/, "v2:"));
   await expect(cutButton(page)).toHaveAttribute("data-version", "v2");
-  await expect(note.locator(".vtext")).toContainText("v2: launch 1.45x slower");
-  await expect(note.getByRole("button", { name: "More" })).toHaveAttribute("aria-expanded", "false");
-  expect(await page.evaluate(() => (window as unknown as { __flash: boolean }).__flash)).toBe(false);
-  // A cut with no note has no line.
+  await cutButton(page).click();
+  await expect(detail).toContainText("v2: launch 1.45x slower");
+  await page.keyboard.press("Escape");
+  // A cut with no note says so.
   await rushes.addCut();
   await expect(cutButton(page)).toHaveAttribute("data-version", "v3");
-  await expect(note).toHaveCount(0);
+  await cutButton(page).click();
+  await expect(detail).toHaveText("No note.");
 });
 
 test("a note of only invisible characters reads as no note, under the picture and in the list (M2)", async ({ page, rushes }) => {
@@ -369,12 +359,14 @@ test("if the focused cut is deleted by hand while the list is open, the list clo
   await expect(button).toHaveAttribute("data-version", "v3");
 });
 
-test("a short note under the picture has no More (R23)", async ({ page, rushes }) => {
+// §27, 5.4: with the note gone from under the picture, its More is gone too; a short note reads whole in the Cut menu.
+test("a short note reads whole in the Cut menu's detail pane (R23)", async ({ page, rushes }) => {
   await rushes.addCut("v1: first pass; rough");
   await page.goto(rushes.url);
   await videoReady(page);
-  await expect(page.locator(".vnote")).toHaveText("v1: first pass; rough");
-  await expect(page.locator(".vnote").getByRole("button")).toHaveCount(0);
+  await cutButton(page).click();
+  await expect(page.locator("#vdetail p")).toHaveText("v1: first pass; rough");
+  await expect(page.locator("#vdetail").getByRole("button")).toHaveCount(0);
 });
 
 test("an agent's label wins over the derived one, and a hand-edited one over 48 is shown cut (§22.4, §22.9)", async ({ page, rushes }) => {
