@@ -6,7 +6,7 @@ import {
   filmAfterShelving, inPlay, isPlanPage, labelOfId, latest, lockedFound, neighbourFormat, neighbourVideo, planProgress, planTarget, previousVersion, proxyKey, readyPrompt, snap, storySendPrompt, storyboardPrompt, versionFormats, type PlanPage,
 } from "../lib.js";
 import { onLabel } from "../../../src/core/notes.js";
-import { deskPlace, deskView, nextHint, noteTarget, takeCount, takeGroups, unsentCount, viewForKey, type DeskView } from "../desk.js";
+import { deskPlace, deskView, nextHint, noteTarget, takeCount, takeGroups, unsentCount, unsentEdits, viewForKey, type DeskView } from "../desk.js";
 import type { Batch, BriefView, FoundCounts, FoundKind, Note, Stage, StoryboardView, Video } from "../types.js";
 import { useRushes } from "../useRushes.js";
 import { Assets, type FoundRequest } from "./Assets.js";
@@ -533,7 +533,8 @@ export function App() {
   };
   // What Send would send that has not been sent yet: one number for Send's count and the status bar's line.
   const inPlayIds = new Set(state.project.videos.filter(inPlay).map((v) => v.id));
-  const unsent = unsentCount({ notes: state.notes.notes, inPlay: inPlayIds, scriptTodo: tab("script")?.todo ?? 0, briefChanged: state.brief.changed, storyboardChanged: state.storyboard.changed });
+  const unsentFrom = { notes: state.notes.notes, inPlay: inPlayIds, scriptTodo: tab("script")?.todo ?? 0, briefChanged: state.brief.changed, storyboardChanged: state.storyboard.changed };
+  const unsent = unsentCount(unsentFrom);
   // Where Send is, for the status bar's "send N notes": Plan when only the plan's edits wait, else Review.
   const planOnly = state.notes.notes.every((n) => n.stage === "script" || n.status !== "todo" || n.batch !== null || (!!n.video && !inPlayIds.has(n.video)));
   const sendTo: View = planOnly && unsent > 0 && (state.brief.changed + state.storyboard.changed + (tab("script")?.todo ?? 0)) > 0
@@ -543,6 +544,8 @@ export function App() {
     plan: { exists: state.brief.exists || state.storyboard.exists || state.script.sections.length > 0, approved },
     hasCut: !!version,
     unsent,
+    unsentEdits: unsentEdits(unsentFrom),
+    planPage: isPlanPage(stage) ? stage : planLast,
     sendTo,
     openNotes: video ? openNotes(video.id) : 0,
     locked,

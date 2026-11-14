@@ -2,10 +2,10 @@ import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Page } from "@playwright/test";
 import {
-  expect, test, videoReady, cutButton, currentFilm, filmButton, openWorkspace, pickFilm, reviewTab, workspaceTab, type FormatSize, type Rushes,
+  expect, test, videoReady, cutButton, pickVersion, currentFilm, filmButton, openWorkspace, pickFilm, reviewTab, workspaceTab, type FormatSize, type Rushes,
   monitor, pictureTrack, ruler, rulerMarkers, shotBlocks, TOOL_TIPS, toolButton, toolStrip, transport,
-  hasFfmpeg, loudness, soundBlock, soundButton, soundLevel, soundTakes, soundTrack,
-  notesPanel, noteTargetLine, noteTargetLabel, noteTargetMenu, panelTab, panelToggle, rangeChip, sendButton, sentDialog, statusSend,
+  hasFfmpeg, loudness, playButton, soundBlock, soundButton, soundLevel, soundTakes, soundTrack,
+  activity, openActivity, notesPanel, noteTargetLine, noteTargetLabel, noteTargetMenu, panelTab, panelToggle, rangeChip, sendButton, sentDialog, statusSend,
   openReviewTab, takesList, takeHeadings, takeRow, takeRows, takeCircle, takeName, takeTag, takeBlock, putAwayButton, pressRowButton, foldToggle,
 } from "./fixture.js";
 
@@ -254,6 +254,23 @@ test("from 1100 to 1600 px the desk's bars never wrap and the format switch stay
     if (over.length) bad.push(`${width}: ${over.join(", ")}`);
   }
   expect(bad).toEqual([]);
+});
+
+test("at 1600 px a 24-character film name is shown whole beside the project and the cut", async ({ page, rushes }) => {
+  test.setTimeout(120_000);
+  await longProject(rushes);
+  const name = "Lumen: the long way home"; // 24 characters
+  await rushes.addFormatsCut([WIDE, TALL], { video: name, label: LONG_LABEL, note: "The long way round" });
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await pickFilm(page, name);
+  await videoReady(page);
+  const whole = (el: HTMLElement) => el.scrollWidth <= el.clientWidth + 1;
+  expect(await currentFilm(page).evaluate(whole)).toBe(true);
+  // The project's name is not squeezed to make room either, and nothing overlaps.
+  expect(await topBar(page).locator(".proj .pname").evaluate(whole)).toBe(true);
+  expect(await overlaps(page)).toEqual([]);
 });
 
 test("a half-typed note is not lost by switching workspace", async ({ page, rushes }) => {

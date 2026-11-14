@@ -2,7 +2,7 @@
 // label, how long ago, a lock on the locked one) and the full note beside it. On a touch screen the
 // note shows under the row instead. It replaces the native <select>, which can't truncate. Also the
 // cut's full note under the picture, two lines at most.
-import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { ComponentChildren } from "preact";
 import type { Version } from "../types.js";
 import { ago, agoSpoken, moveActive, oneLineOf, shortLabel, typeAhead, versionMeta } from "../versions.js";
@@ -44,6 +44,8 @@ export function VersionMenu({ versions, shown, lockedVersion, onPick, name = "Ve
   const rowEls = useRef<Record<string, HTMLButtonElement | null>>({});
   const foot = useRef<HTMLDivElement>(null);
   const typed = useRef({ text: "", at: -Infinity });
+  // The dot's words, for the button's description: an id of its own, so two menus never share one.
+  const newerId = useId();
   const now = new Date();
   const label = shortLabel(shown);
 
@@ -110,7 +112,7 @@ export function VersionMenu({ versions, shown, lockedVersion, onPick, name = "Ve
     if (e.key === "Tab") {
       // Tab moves on to the rows under the list when there are any; otherwise (or Alt+Tab in Safari) it closes the list
       // and carries on to the next control.
-      const first = !e.shiftKey ? foot.current?.querySelector("button") : null;
+      const first = !e.shiftKey ? foot.current?.querySelector<HTMLButtonElement>("button:not(:disabled)") : null;
       if (first) {
         e.preventDefault();
         e.stopPropagation();
@@ -184,7 +186,7 @@ export function VersionMenu({ versions, shown, lockedVersion, onPick, name = "Ve
         aria-expanded={open}
         aria-controls={open ? "vlist" : undefined}
         aria-label={`${name}: ${shown.id} · ${label}`}
-        aria-describedby={newer ? "vnewer" : undefined}
+        aria-describedby={newer ? newerId : undefined}
         onClick={() => (open ? close(false) : show(shown.id))}
         onKeyDown={(e) => {
           if (!open && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
@@ -198,7 +200,7 @@ export function VersionMenu({ versions, shown, lockedVersion, onPick, name = "Ve
         <span class="vid">{shown.id}</span>
         <span class="vlbl" dir="auto">{label}</span>
         {newer && (
-          <span class="vnewer" id="vnewer">
+          <span class="vnewer" id={newerId}>
             <span class="vh">{newer} is ready</span>
           </span>
         )}
@@ -274,40 +276,8 @@ export function VersionMenu({ versions, shown, lockedVersion, onPick, name = "Ve
   );
 }
 
-/** §22.8: the full note of the cut on show, under the picture. Two lines at most, with More when it's cut short (R23). */
 /** A row's accessible name, in full words with commas (M4): "v6, launch 1.45x slower, locked, 2 hours ago". */
 function rowName(v: Version, lockedVersion: string | null, now: Date): string {
   return [v.id, shortLabel(v), v.id === lockedVersion ? "locked" : "", agoSpoken(v.addedAt, now)].filter(Boolean).join(", ");
 }
 
-/**
- * Picture keys it by the version's id, so a new cut's note always starts clamped: no frame of the
- * previous cut's More state (M5).
- */
-export function VersionNote({ version }: { version: Version }) {
-  const [more, setMore] = useState(false);
-  const [clamped, setClamped] = useState(false);
-  const text = useRef<HTMLSpanElement>(null);
-  useLayoutEffect(() => {
-    const el = text.current;
-    if (!el) return;
-    const measure = () => setClamped(el.scrollHeight > el.clientHeight + 1);
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [version.id, version.note, more]);
-  const note = oneLineOf(version.note);
-  if (!note) return null;
-  const id = `vnote-${version.id}`;
-  return (
-    <div class="vnote">
-      <span ref={text} id={id} class={more ? "vtext" : "vtext vclamp"} dir="auto">{note}</span>
-      {(clamped || more) && (
-        <button type="button" class="vmore" aria-expanded={more} aria-controls={id} onClick={() => setMore(!more)}>
-          {more ? "Less" : "More"}
-        </button>
-      )}
-    </div>
-  );
-}

@@ -505,14 +505,16 @@ export async function openWorkspace(page: Page, name: WorkspaceName): Promise<vo
 }
 
 /**
- * Opens one of Review's tabs by clicking it (opening Review first when another workspace is up), and waits until it is
- * selected. Focus is then let go, as a number key would leave it, so Space and the arrows reach the page rather than the tab.
+ * Opens one of Review's unlocked tabs by clicking it (opening Review first when another workspace is up), and waits until
+ * it is selected. Focus is then let go, as a number key would leave it, so Space and the arrows reach the page rather than the tab.
  */
 export async function openReviewTab(page: Page, name: ReviewTabName): Promise<void> {
   const review = workspaceTab(page, "Review");
   await expect(review).toBeVisible();
   if ((await review.getAttribute("aria-selected")) !== "true") await openWorkspace(page, "Review");
   const tab = reviewTab(page, name);
+  // A locked tab opens its "nothing here yet" page: a test that means to open one says so by clicking it itself.
+  await expect(tab).not.toHaveAttribute("data-locked", "true");
   await tab.click();
   await expect(tab).toHaveAttribute("aria-selected", "true");
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
@@ -807,9 +809,12 @@ export function panelToggle(page: Page): Locator {
   return page.locator("header.top").getByRole("button", { name: /the notes panel · \\$/ });
 }
 
-/** The status bar's "send N notes": it opens the notes panel with Send in view, from any workspace (Visuals, Assets). */
+/**
+ * The status bar's "send N notes" ("send N changes" when anything waiting is an edit rather than a note): it opens the notes
+ * panel with Send in view, from any workspace (Visuals, Assets).
+ */
 export function statusSend(page: Page): Locator {
-  return page.locator("footer.status").getByRole("button", { name: /^send \d+ notes?$/ });
+  return page.locator("footer.status").getByRole("button", { name: /^send \d+ (notes?|changes?)$/ });
 }
 
 /** Presses Send wherever the person is: in the panel, or by way of the status bar from a workspace with no panel. */
