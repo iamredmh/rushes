@@ -1,7 +1,7 @@
 // §27, 5.6: what the Timeline tab's sound is (moved out of SoundTracks.tsx, unchanged): what each sound plays (the take in
 // use), mute and solo as view state (never saved, reset when you leave the tab), levels saved with the picks (debounced),
 // the cut's own sound, and the loudness of what you hear, measured (debounced) for the transport.
-import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { api, ApiError } from "../../api.js";
 import type { AudioEngine, LoadResult } from "../../audio/engine.js";
 import { assetRev, type Clip, laneGains, mediaKey } from "../../audio/timeline.js";
@@ -130,14 +130,15 @@ export function otherSounds(state: State, assets: Asset[], video: Video | null, 
 export function useMix({ state, assets, video, version, player, duration, monitor, toast, onChanged }: MixInput): Mix {
   const asset = (path: string) => assets.find((a) => a.path === path);
   const filmId = video?.id;
-  const filmState = filmPicks(state.picks, filmId);
+  // Worked out again only when what they come from changes: the Timeline re-renders every frame while it plays.
+  const filmState = useMemo(() => filmPicks(state.picks, filmId), [state.picks, filmId]);
   const use = filmState.use;
   // Only this film's reads, beds and passes (and any made for every film), as the server measures them.
-  const lanes = filmLanes(state.project.lanes, filmId, state.project.videos.length);
+  const lanes = useMemo(() => filmLanes(state.project.lanes, filmId, state.project.videos.length), [state.project.lanes, filmId, state.project.videos.length]);
 
   // ---- what each sound plays: one take, the one in use, as the server worked it out (§27.6) ----
-  const planned = planSounds(state, assets, video);
-  const clips = planned.flatMap((r) => (r.clip ? [r.clip] : []));
+  const planned = useMemo(() => planSounds(state, assets, video), [state.picks, state.project, assets, video]);
+  const clips = useMemo(() => planned.flatMap((r) => (r.clip ? [r.clip] : [])), [planned]);
   const inUse = planned.some((r) => r.take !== null);
 
   // ---- mute and solo: view state only ----
@@ -166,7 +167,7 @@ export function useMix({ state, assets, video, version, player, duration, monito
   const saveTimers = useRef<Partial<Record<MixLane, { id: number; send: (keepalive?: boolean) => void }>>>({});
   // Picked up elsewhere (another tab, the agent, or your own save landing) -- but never for a lane with a save still
   // pending: a refresh racing your own debounce must not snap the slider you're dragging back to the stale value.
-  const savedKey = `${filmId}:${JSON.stringify(pickLevels)}`;
+  const savedKey = useMemo(() => `${filmId}:${JSON.stringify(pickLevels)}`, [filmId, pickLevels]);
   useEffect(() => {
     setLevels((v) => {
       let changed = false;
@@ -270,7 +271,8 @@ export function useMix({ state, assets, video, version, player, duration, monito
   const want = inUse ? loudnessLanes(heard, gains) : [];
   // Anything that changes the mix re-measures: the sounds, what each plays (picks, re-renders) and the saved levels
   // (the server applies them before measuring, so this follows the saved value, not the slider mid-drag).
-  const signature = JSON.stringify({ want, film: filmId, levels: pickLevels, clips: clips.map((c) => [c.path, c.rev ?? ""]) });
+  const wantKey = want.join("\n");
+  const signature = useMemo(() => JSON.stringify({ want, film: filmId, levels: pickLevels, clips: clips.map((c) => [c.path, c.rev ?? ""]) }), [wantKey, filmId, pickLevels, clips]);
   const [loudness, setLoudness] = useState<LoudnessState>({ kind: "waiting" });
   const [measuring, setMeasuring] = useState(false);
   // Bumped by clicking the readout after a timeout or an error: the server caches neither, so it really measures again.
@@ -304,7 +306,7 @@ export function useMix({ state, assets, video, version, player, duration, monito
   useEffect(() => () => void ++asked.current, []);
 
   // ---- notes on the mix: what each is on, as the Mix tab named it ----
-  const variants = { music: variantRows(lanes, "music"), sfx: variantRows(lanes, "sfx") };
+  const variants = useMemo(() => ({ music: variantRows(lanes, "music"), sfx: variantRows(lanes, "sfx") }), [lanes]);
   const heardRows = (stage: "music" | "sfx"): VariantRow[] => variants[stage].filter((r) => takeInUse(use, stage, r) && !asset(r.file)?.missing);
   const model: MixModel = { variants, heard: { vo: heard.vo, music: heardRows("music"), sfx: heardRows("sfx") } };
 
