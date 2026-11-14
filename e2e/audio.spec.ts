@@ -1065,10 +1065,11 @@ test("Unpick clears a pick: In use goes back to Use, and the pick is gone from d
   await useB.click();
   await expect(useB).toHaveAttribute("aria-checked", "true");
   await expect(useB).toHaveAccessibleName("In use: B · Warm keys");
-  // The circle of the take in use, pressed again by click or by Space, keeps the pick.
+  // The circle of the take in use, pressed again by click or by Space, keeps the pick. Reached by Tab (it is the radio
+  // group's Tab stop), so Space presses it rather than playing (§19.8): before Unpick had its own button, this unpicked.
   await useB.click();
   await expect(useB).toHaveAttribute("aria-checked", "true");
-  await useB.focus();
+  await tabTo(page, useB);
   await page.keyboard.press(" ");
   await expect(useB).toHaveAttribute("aria-checked", "true");
   expect((await rushes.api("GET", "/api/picks")).lanes).toEqual({ music: "b-warm-keys" });
