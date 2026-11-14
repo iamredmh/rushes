@@ -2,10 +2,12 @@
 // how a sound's takes are grouped, and the one line that says what to do next.
 import { isNewTake, madeForStale } from "../../src/core/takes.js";
 import type { PlanPage } from "./lib.js";
-import type { InUse, Lane, LaneStage, Stage, Variant, Video } from "./types.js";
+import type { InUse, Lane, LaneStage, Note, Stage, Variant, Video } from "./types.js";
 
 export type Workspace = "plan" | "review" | "visuals" | "assets";
 export type ReviewTab = "timeline" | "voice" | "music" | "sfx";
+/** The monitor's tool strip (§27, 5.4): one is active, Select unless a note, a range or a box is under way. Grab is an action. */
+export type Tool = "select" | "note" | "range" | "box" | "grab";
 /** Everything the desk can show: a stage, Assets, or one of the planning pages. */
 export type DeskView = Stage | "assets" | "brief" | "storyboard";
 type Use = NonNullable<InUse["voice"]>;
@@ -133,4 +135,24 @@ export function nextHint(i: NextInput): { text: string; go: DeskView | null } {
     if (s.inUse && s.stale) return { text: `the ${w.one.replace(/^an? /, "")} in use was made for an older cut`, go: stage };
   }
   return { text: "nothing to do", go: null };
+}
+
+/** A note's marker on the ruler: where it starts and, for a range, how wide, as percentages of the cut. */
+export interface RulerMark {
+  id: string;
+  left: number;
+  width: number | null;
+  status: "todo" | "done";
+}
+
+const clampPct = (s: number, length: number) => (length > 0 ? Math.min(100, Math.max(0, (s / length) * 100)) : 0);
+
+/** The ruler's markers, one per note with a time (placed on the cut on screen by the caller), clamped to the cut. */
+export function rulerMarks(notes: Note[], length: number): RulerMark[] {
+  return notes
+    .filter((n) => n.t !== null)
+    .map((n) => {
+      const left = clampPct(n.t!, length);
+      return { id: n.id, left, width: n.tOut !== null ? clampPct(n.tOut, length) - left : null, status: n.status };
+    });
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { deskPlace, nextHint, type NextInput, takeCount, takeGroups, viewForKey, viewForTab } from "../../web/src/desk.js";
-import type { Lane, Variant } from "../../web/src/types.js";
+import { deskPlace, nextHint, type NextInput, rulerMarks, takeCount, takeGroups, viewForKey, viewForTab } from "../../web/src/desk.js";
+import type { Lane, Note, Variant } from "../../web/src/types.js";
 
 describe("deskPlace", () => {
   it("puts the planning pages in Plan", () => {
@@ -151,5 +151,30 @@ describe("nextHint", () => {
   });
   it("leaves the sounds alone until picture is locked", () => {
     expect(nextHint({ ...sound("voice", { fresh: 2 }), locked: false })).toEqual({ text: "lock picture", go: "picture" });
+  });
+});
+
+describe("rulerMarks", () => {
+  const note = (id: string, t: number, tOut: number | null = null, status: "todo" | "done" = "todo"): Note => ({
+    id, stage: "picture", video: "hero", version: "v1", on: null, scope: tOut === null ? "point" : "range", t, tOut, frame: null, text: "Tighter.",
+    box: null, pin: null, grab: null, shot: null, marks: [], format: null, status, reply: "", fixT: null, fixVersion: null, batch: null,
+    createdAt: "2026-11-14T10:00:00.000Z", by: "user",
+  });
+  it("places a point note as a percentage of the length, with no width", () => {
+    expect(rulerMarks([note("a", 2)], 4)).toEqual([{ id: "a", left: 50, width: null, status: "todo" }]);
+  });
+  it("gives a range note its width", () => {
+    expect(rulerMarks([note("a", 1, 2)], 4)).toEqual([{ id: "a", left: 25, width: 25, status: "todo" }]);
+  });
+  it("clamps a note past the end to 100, and a range to what is left", () => {
+    expect(rulerMarks([note("a", 6)], 4)).toEqual([{ id: "a", left: 100, width: null, status: "todo" }]);
+    expect(rulerMarks([note("b", 3, 6)], 4)).toEqual([{ id: "b", left: 75, width: 25, status: "todo" }]);
+  });
+  it("keeps a done note's status", () => {
+    expect(rulerMarks([note("a", 1, null, "done")], 4)[0].status).toBe("done");
+  });
+  it("leaves out a note with no time, and places nothing on a cut of no length", () => {
+    expect(rulerMarks([{ ...note("a", 1), t: null, scope: "whole" }], 4)).toEqual([]);
+    expect(rulerMarks([note("a", 1)], 0)).toEqual([{ id: "a", left: 0, width: null, status: "todo" }]);
   });
 });

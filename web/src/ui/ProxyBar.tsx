@@ -4,7 +4,7 @@ import { formatBytes, proxyPhase, proxyReason, proxyTip, type ProxyProgress } fr
 import type { ProxyJob, Version, Video } from "../types.js";
 import { Icon } from "./Icon.js";
 
-/** How long "✓ Proxy ready" stays before the bar folds back to the checkbox alone. */
+/** How long "✓ Proxy ready" stays before the bar folds away. */
 export const DONE_SHOWN_MS = 6000;
 
 export interface ProxyBarProps {
@@ -12,8 +12,6 @@ export interface ProxyBarProps {
   version: Version;
   /** The server has ffmpeg and ffprobe. Without them nothing is offered and this renders nothing. */
   ffmpeg: boolean;
-  /** project.autoProxy, for the checkbox. */
-  autoProxy: boolean;
   /** This cut's proxy job, as this tab last heard of it. */
   job: ProxyProgress | undefined;
   /** The browser refused the file that's playing. */
@@ -30,17 +28,14 @@ export interface ProxyBarProps {
 const ensureStop = (s: string) => (/[.!?]$/.test(s) ? s : `${s}.`);
 
 /**
- * §19.5's bar under the player, one row so the timeline and the note box stay on screen: the offer
- * and its reason, "Creating proxy" with progress and Cancel, or "✓ Proxy ready", each followed by
- * the checkbox that makes proxies for new cuts automatically (which wraps after the button, never
- * before it, when there's no room). "✓ Proxy ready" folds away after DONE_SHOWN_MS or on its ×,
- * leaving the checkbox alone. Picture keys this by version, so nothing carries across cuts.
+ * §19.5 and §27, 5.4: a message bar over the foot of the monitor: the offer and its reason, "Creating proxy" with
+ * progress and Cancel, or "✓ Proxy ready", which folds away after DONE_SHOWN_MS or on its ×. With nothing to say it
+ * draws nothing. Making proxies for new cuts automatically is a setting in the More menu. Picture keys this by version,
+ * so nothing carries across cuts.
  */
-export function ProxyBar({ video, version, ffmpeg, autoProxy, job, broken, duration, toast, onChanged, noteProxyJob, hidden = false }: ProxyBarProps) {
+export function ProxyBar({ video, version, ffmpeg, job, broken, duration, toast, onChanged, noteProxyJob, hidden = false }: ProxyBarProps) {
   const [starting, setStarting] = useState(false);
   const [cancelling, setCancelling] = useState(false);
-  const [auto, setAuto] = useState(autoProxy);
-  useEffect(() => setAuto(autoProxy), [autoProxy]);
   // The jobs this view has seen running (or started itself): only those end in "✓ Proxy ready".
   // An existing proxy, met on opening the film, just brings the Proxy/Original switch.
   const watched = useRef(new Set<string>());
@@ -70,6 +65,8 @@ export function ProxyBar({ video, version, ffmpeg, autoProxy, job, broken, durat
   const reason = proxyReason(version.proxyNeed, broken);
   const pct = job?.state === "running" ? job.pct : job?.state === "done" ? 100 : 0;
   const running = job?.state === "running" ? job : null;
+  // Nothing to say: the bar keeps its place in the tree (its state survives) but draws nothing.
+  const empty = shown === "none" || (shown === "offer" && !reason) || (shown === "done" && !version.proxy);
 
   const create = async () => {
     if (starting) return;
@@ -100,36 +97,9 @@ export function ProxyBar({ video, version, ffmpeg, autoProxy, job, broken, durat
     }
   };
 
-  const toggleAuto = async (on: boolean) => {
-    setAuto(on);
-    try {
-      await api.put("/api/project/settings", { autoProxy: on });
-      onChanged();
-    } catch (e) {
-      setAuto(!on);
-      toast((e as Error).message);
-    }
-  };
-
-  const check = (
-    <label class="check">
-      <input
-        type="checkbox"
-        checked={auto}
-        onChange={(e) => {
-          const el = e.currentTarget as HTMLInputElement;
-          // So Space, ←/→ and the other keys go back to the player, as after picking a version.
-          el.blur();
-          void toggleAuto(el.checked);
-        }}
-      />
-      Create proxies for new cuts like this automatically
-    </label>
-  );
-
   return (
-    <div class={`proxybar${shown === "none" ? " quiet" : ""}`} hidden={hidden}>
-      <div class={`proxyrow${shown === "none" ? "" : ` ${shown}`}`}>
+    <div class="proxybar" hidden={hidden || empty}>
+      <div class={`proxyrow ${shown}`}>
         {shown === "offer" && reason && (
           <>
             <span class="why"><b>This cut may play slowly.</b> {ensureStop(reason)}</span>
@@ -153,7 +123,6 @@ export function ProxyBar({ video, version, ffmpeg, autoProxy, job, broken, durat
             <button class="btn ghost ib" aria-label="Dismiss" data-tip="Dismiss" onClick={() => setDismissed(doneJob)}><Icon name="x" /></button>
           </>
         )}
-        {check}
       </div>
     </div>
   );

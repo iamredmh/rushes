@@ -7,7 +7,6 @@ import {
 import { deskPlace, nextHint, takeCount, takeGroups, viewForKey, type DeskView } from "../desk.js";
 import type { Batch, BriefView, FoundCounts, FoundKind, Stage, StoryboardView, Video } from "../types.js";
 import { useRushes } from "../useRushes.js";
-import { assetRev } from "../audio/timeline.js";
 import { Assets, type FoundRequest } from "./Assets.js";
 import { Brief } from "./Brief.js";
 import { FormatToggle } from "./FormatToggle.js";
@@ -197,8 +196,6 @@ export function App() {
   const version = video?.versions.find((v) => v.id === versionId) ?? target;
   const locked = !!video?.lockedVersion;
   const fps = version?.fps ?? state?.project.fps ?? 30;
-  // §19.9: the cut's file as Assets lists it: its size and revision, for the Picture waveform.
-  const cutAsset = version ? assets.find((a) => a.kind === "cut" && a.path === version.file) : undefined;
   // §21: this cut's formats, the chips and the one on screen.
   const filmNotes = state?.notes.notes.filter((n) => n.stage === "picture" && (!n.video || n.video === video?.id)) ?? [];
   const views = version ? versionFormats(version, measured[version.file]) : [];
@@ -656,6 +653,8 @@ export function App() {
             <span><kbd>B</kbd></span><span>Draw a box</span>
             <span><kbd>G</kbd></span><span>Grab frame</span>
             <span><kbd>N</kbd></span><span>New note</span>
+            <span><kbd>V</kbd></span><span>Select</span>
+            <span><kbd>F</kbd></span><span>Full screen</span>
             <span><kbd>1</kbd></span><span>Plan</span>
             <span><kbd>2</kbd>–<kbd>6</kbd></span><span>Review: Timeline, Voice, Music, Effects, Timeline</span>
             <span><kbd>7</kbd> <kbd>8</kbd></span><span>Visuals, Assets</span>
@@ -696,12 +695,9 @@ export function App() {
         {problem && !wrongProject && <div class="banner"><Icon name="alert" />{problem}</div>}
 
         {/* Until the notes panel (§27, 5.7) takes them in, Send to agent and the Change Log sit at the top of the work area,
-            beside Review's tabs and the format switch. */}
+            beside Review's tabs. */}
         <div class="deskbar" ref={barRef}>
           {reviewTabsShown && <ReviewTabs rows={reviewRows} selected={stage} onPick={(v) => show(v as Stage)} />}
-          {stage === "picture" && video && version && chips.length > 0 && (
-            <FormatToggle chips={chips} versionId={version.id} prompt={formatPrompt(state.project.name, video.name, version.id)} onSelect={switchFormat} toast={toast} />
-          )}
           <span class="sp" />
           <ChangeLogButton log={changeLog} buttonRef={changeLogButton} />
           <button class="btn primary sendbtn" data-tip="Every tab's open notes, on every film" onClick={() => void send()}>
@@ -747,19 +743,20 @@ export function App() {
               onGrabChange={setGrabFor}
               playerRef={playerRef}
               ffmpeg={state.proxies?.ffmpeg ?? false}
-              autoProxy={state.project.autoProxy}
               proxyJob={proxyJobs[proxyKey(video.id, version.id)]}
               noteProxyJob={noteProxyJob}
               source={sources[video.id] ?? "proxy"}
               onSourceChange={setSourceFor}
-              fileSize={cutAsset?.size ?? null}
-              fileRev={cutAsset ? assetRev(cutAsset) : undefined}
               formats={views}
               format={format}
               formatMissing={!!format && missingFiles.has(views.find((f) => f.id === format)?.file ?? "")}
               onPrimarySize={(file, width, height) => setMeasured((m) => (m[file] ? m : { ...m, [file]: { width, height } }))}
               onBoxPendingChange={setBoxPending}
               onFormatChange={switchFormat}
+              // §27, 5.4: on the monitor, and only when there is more than one shape to choose between or to explain.
+              formatSwitch={chips.length > 1 ? (
+                <FormatToggle chips={chips} versionId={version.id} prompt={formatPrompt(state.project.name, video.name, version.id)} onSelect={switchFormat} toast={toast} />
+              ) : null}
             />
           ) : stage === "brief" ? (
             <Brief brief={state.brief} toast={toast} onChanged={() => void refresh()} settle={planSettle} />
