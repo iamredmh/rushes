@@ -28,7 +28,7 @@ export function ReviewTabs({ rows, selected, onPick }: { rows: ReviewTabRow[]; s
           role="tab"
           aria-selected={selected === r.view}
           data-locked={r.locked ? "true" : undefined}
-          data-tip={r.locked ? `Locked: ask your agent for ${r.ask}` : undefined}
+          data-tip={r.locked ? `Locked: ask your agent for ${r.ask}` : r.todo > 0 ? `${r.todo} open` : undefined}
           onClick={() => onPick(r.view)}
         >
           <Icon name={r.icon} />
@@ -47,7 +47,7 @@ export function ReviewTabs({ rows, selected, onPick }: { rows: ReviewTabRow[]; s
                   <span class={`tcount mono${r.takes.fresh > 0 ? " new" : ""}`}>{r.takes.fresh > 0 ? `${r.takes.fresh} new` : r.takes.all}</span>
                 </>
               )}
-              {r.todo > 0 && <span class="dot" title={`${r.todo} open`} />}
+              {r.todo > 0 && <span class="dot" aria-hidden="true" />}
             </>
           )}
         </button>

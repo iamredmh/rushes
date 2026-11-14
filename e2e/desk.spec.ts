@@ -398,6 +398,27 @@ test("a note shows as a marker on the ruler, and clicking it selects the note an
   await expect(page.getByLabel("Timecode")).toContainText(/0:00\.9|0:01\.0/);
 });
 
+test("an all-format note's ring on the ruler answers on its band; its middle lets the pointer through to the ruler", async ({ page, rushes }) => {
+  test.skip(!hasFfmpeg, "needs ffmpeg and ffprobe");
+  const cut = await rushes.addFormatsCut([WIDE, TALL]);
+  await rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: cut.version.id, format: null, scope: "point", t: 1, text: "Drop the first sound." });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  const ring = rulerMarkers(page).and(page.locator(".ring"));
+  await expect(ring).toHaveCount(1);
+  const r = (await ring.boundingBox())!;
+  const at = (x: number, y: number) => page.evaluate(([x, y]) => {
+    const el = document.elementFromPoint(x, y);
+    return el?.closest(".mk") ? "ring" : el?.closest(".ruler") ? "ruler" : el?.tagName ?? null;
+  }, [x, y]);
+  expect(await at(r.x + r.width / 2, r.y + r.height / 2)).toBe("ruler");
+  expect(await at(r.x + 1, r.y + r.height / 2)).toBe("ring");
+  // Its tooltip is whole on hover: the cut-out never clips it.
+  await page.mouse.move(r.x + 1, r.y + r.height / 2);
+  await expect.poll(() => ring.evaluate((el) => Number(getComputedStyle(el, "::after").opacity))).toBe(1);
+  expect(await ring.evaluate((el) => getComputedStyle(el).clipPath)).toBe("none");
+});
+
 test("F puts the monitor full screen", async ({ page, rushes, browserName }) => {
   await rushes.addCut();
   await page.goto(rushes.url);
@@ -441,6 +462,26 @@ test("the timeline's divider drags, and the split is remembered", async ({ page,
   await page.reload();
   await videoReady(page);
   expect(Math.abs((await monitor(page).boundingBox())!.height - after)).toBeLessThanOrEqual(3);
+});
+
+test("a drag on the timeline's divider that the browser cancels leaves it at rest: a later move does not resize", async ({ page, rushes }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await rushes.addCut();
+  await page.goto(rushes.url);
+  await videoReady(page);
+  const divider = page.getByRole("separator", { name: "Resize the timeline" });
+  const d = (await divider.boundingBox())!;
+  const x = d.x + d.width / 2;
+  const y = d.y + d.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x, y - 40, { steps: 3 });
+  // The browser takes the pointer away (a system gesture, a touch turned into a scroll).
+  await divider.dispatchEvent("pointercancel", { pointerId: 1, pointerType: "mouse", clientX: x, clientY: y - 40 });
+  const held = (await monitor(page).boundingBox())!.height;
+  await divider.dispatchEvent("pointermove", { pointerId: 1, pointerType: "mouse", clientX: x, clientY: y - 200 });
+  expect(Math.abs((await monitor(page).boundingBox())!.height - held)).toBeLessThanOrEqual(1);
+  await page.mouse.up();
 });
 
 test("volume and mute are remembered", async ({ page, rushes }) => {
@@ -621,6 +662,43 @@ test("a cut with no sound of its own and no takes has no sound to follow and no 
   expect(await videoMuted(page)).toBe(false);
 });
 
+test("playing, the takes are re-seated on the picture when they drift, and hold while the picture stalls", async ({ page, rushes }) => {
+  await threeInUse(rushes);
+  await openTimeline(page, rushes, 3);
+  type Hooked = { __rushesAudio: { engine: { time: number; playing: boolean; seek(t: number): void } } };
+  const engine = () => page.evaluate(() => { const e = (window as unknown as Hooked).__rushesAudio.engine; return { time: e.time, playing: e.playing }; });
+  const videoTime = () => page.locator("video").evaluate((v: HTMLVideoElement) => v.currentTime);
+  await playButton(page).click();
+  await expect.poll(async () => (await engine()).playing).toBe(true);
+  // Knocked a second off the picture, the takes are put back on it by the picture's own timeupdates.
+  await page.evaluate(() => { const e = (window as unknown as Hooked).__rushesAudio.engine; e.seek(e.time + 1); });
+  await expect.poll(async () => Math.abs((await engine()).time - (await videoTime())), { timeout: 2000 }).toBeLessThan(0.2);
+  // The picture stalls, waiting for data: the takes hold where they are until it moves again.
+  await page.locator("video").evaluate((v: HTMLVideoElement) => {
+    Object.defineProperty(v, "readyState", { configurable: true, get: () => 2 });
+    v.dispatchEvent(new Event("waiting"));
+  });
+  expect((await engine()).playing).toBe(false);
+  // While it stalls the takes never run on: they stay stopped, kept on the picture's time.
+  await page.waitForTimeout(300);
+  expect((await engine()).playing).toBe(false);
+  expect((await engine()).time).toBeLessThanOrEqual((await videoTime()) + 0.06);
+  await page.locator("video").evaluate((v: HTMLVideoElement) => {
+    delete (v as unknown as { readyState?: number }).readyState;
+    v.dispatchEvent(new Event("playing"));
+  });
+  await expect.poll(async () => (await engine()).playing).toBe(true);
+});
+
+test("with no take in use, playing the cut never starts the audio engine", async ({ page, rushes }) => {
+  await rushes.addCut();
+  await openTimeline(page, rushes, 0);
+  await playButton(page).click();
+  await expect.poll(() => page.locator("video").evaluate((v: HTMLVideoElement) => v.currentTime)).toBeGreaterThan(0.3);
+  expect(await page.evaluate(() => (window as unknown as { __rushesAudio: AudioHook }).__rushesAudio.engine?.playing ?? false)).toBe(false);
+  expect(await page.evaluate(() => (window as unknown as { __rushesAudio: { liveContexts(): number } }).__rushesAudio.liveContexts())).toBe(0);
+});
+
 test("a solo on a sound whose take goes stops counting, and a take picked again starts unsoloed (fix round 1)", async ({ page, rushes }) => {
   const { bed } = await threeInUse(rushes);
   const asked: string[][] = [];
@@ -707,6 +785,23 @@ test.describe("the cut's own sound", () => {
     await expect.poll(() => videoMuted(page)).toBe(true);
     await rushes.api("PUT", "/api/picks", { video: "hero", lanes: { [bed.lane.id]: null } });
     await expect(soundBlock(page, "Music")).toHaveText("Nothing chosen yet");
+    await expect.poll(() => videoMuted(page)).toBe(false);
+  });
+
+  test("a Cut sound M pressed before its row goes does not keep the video muted with no M to undo it", async ({ page, rushes }) => {
+    await rushes.addProResCut({ codec: "h264", seconds: 3, audio: true });
+    await openTimeline(page, rushes, 0);
+    const m = soundButton(page, "Cut sound", "Mute");
+    await expect(m).toHaveAttribute("aria-pressed", "false");
+    await m.click();
+    await expect.poll(() => videoMuted(page)).toBe(true);
+    // A new cut whose own sound is still being worked out: with nothing in use its row waits for the answer.
+    await page.route("**/api/videos/*/versions/v2/peaks", () => undefined);
+    await rushes.addProResCut({ codec: "h264", seconds: 3, audio: true });
+    await pickVersion(page, "v2");
+    await videoReady(page);
+    await expect(soundTrack(page, "Cut sound")).toHaveCount(0);
+    // The M pressed on v1's row went with it: v2 plays its own sound.
     await expect.poll(() => videoMuted(page)).toBe(false);
   });
 

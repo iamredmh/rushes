@@ -14,7 +14,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { LoadResult } from "../../audio/engine.js";
 import { type Clip, mediaKey } from "../../audio/timeline.js";
 import { cueKeys, cueLabel, cueName, cuesInTime } from "../../cues.js";
-import type { TakeRow } from "../../desk.js";
+import { pctOf, type TakeRow } from "../../desk.js";
 import { cueRoom } from "../../lib.js";
 import type { Cue } from "../../types.js";
 import { Missing } from "../AssetViews.js";
@@ -112,7 +112,7 @@ const sameCut = (a: Cut, b: Cut) => Object.keys(a).length === Object.keys(b).len
 
 export function Takes(props: TakesProps) {
   const { label, color, sections, away, loose, none, length, media, selected, marks, range, layers, onSelect, onPick, onUnpick, onPutAway, toast } = props;
-  const pct = (s: number) => (length > 0 ? Math.min(100, Math.max(0, (s / length) * 100)) : 0);
+  const pct = (s: number) => pctOf(s, length);
   const root = useRef<HTMLDivElement>(null);
 
   // A name, meta line or heading cut off by its column shows in full as a tooltip. Measured when the text changes or the

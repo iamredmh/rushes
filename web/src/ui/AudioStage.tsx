@@ -16,7 +16,7 @@ import { type AudioEngine, type EngineSnapshot, liveContexts } from "../audio/en
 import { type SampleState, samples } from "../audio/sample.js";
 import { assetRev, type Clip, needsVideoSync, setStreamThreshold } from "../audio/timeline.js";
 import { useAudioStage } from "../audio/useAudioStage.js";
-import { defaultTake, noteTarget, rulerMarks, type TakeGroups, takeKey, type TakeRow, takeSections, timecode, type Tool } from "../desk.js";
+import { defaultTake, noteTarget, pctOf as pctOfLength, rulerMarks, type TakeGroups, takeKey, type TakeRow, takeSections, timecode, type Tool } from "../desk.js";
 import {
   blindOrder, fmt, frameAt, noteTime, notePending, type Scope, shotAt, shotLabel, shotSeek, snap, spacePressesButton, stepFrame, testFlags, variantFilms, variantMeta,
 } from "../lib.js";
@@ -540,8 +540,9 @@ export function AudioStage(props: AudioStageProps) {
     (drawn[key] ??= []).push({ id: n.id, t: n.t, tOut: hasRange ? n.tOut : null, status: n.status, text: n.text });
     timed.push({ ...n, tOut: hasRange ? n.tOut : null });
   }
-  const rulerMarkers: RulerMarker[] = rulerMarks(timed, length).map((m, i) => ({ ...m, ring: false, title: timed[i].text }));
-  const pctOf = (s: number) => (length ? Math.min(100, Math.max(0, (s / length) * 100)) : 0);
+  const timedText = new Map(timed.map((n) => [n.id, n.text]));
+  const rulerMarkers: RulerMarker[] = rulerMarks(timed, length).map((m) => ({ ...m, ring: false, title: timedText.get(m.id) ?? "" }));
+  const pctOf = (s: number) => pctOfLength(s, length);
   const liveRange = range.in !== null ? { left: pctOf(range.in), width: pctOf(range.out ?? range.in + 0.2) - pctOf(range.in) } : null;
   const rangeLabel = range.in === null ? null : range.out === null ? `${fmt(range.in)} →` : noteTime(range.in, range.out);
   const shots = preview ? preview.version.shots.filter((s) => !length || s.start < length) : [];

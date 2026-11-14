@@ -577,10 +577,17 @@ test("the Picture track names each shot, follows the playhead, and notes record 
   await page.goto(rushes.url);
   await videoReady(page);
   await expect(shotBlocks(page)).toHaveText(["01 Title card", "02 Window rises in", "03 Wide, cursor enters"]);
-  await expect(shotBlocks(page).nth(0)).toHaveAttribute("title", "01 Title card · establish");
+  await expect(shotBlocks(page).nth(0)).toHaveAttribute("data-tip", "01 Title card · establish");
   await expect(shotBlocks(page).nth(0)).toHaveAttribute("aria-current", "true");
   await shotBlocks(page).nth(1).click();
   await expect(page.getByLabel("Timecode")).toContainText("0:01.70");
+  await expect(shotBlocks(page).nth(1)).toHaveAttribute("aria-current", "true");
+  // A block is reached by the keyboard too: Enter on it seeks there, and focus stays on it.
+  await shotBlocks(page).nth(2).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByLabel("Timecode")).toContainText("0:02.80");
+  await expect(shotBlocks(page).nth(2)).toBeFocused();
+  await shotBlocks(page).nth(1).click();
   await expect(shotBlocks(page).nth(1)).toHaveAttribute("aria-current", "true");
   await page.keyboard.press("n");
   await page.keyboard.type("Nice reveal here.");

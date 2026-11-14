@@ -59,6 +59,9 @@ export function useFollower(video: { current: HTMLVideoElement | null }, clips: 
       const at = v.currentTime;
       const action = followerAction(at, engine.time, playing, engine.playing);
       if (action === "play") {
+        // With nothing to play, the engine stays asleep: no audio context outside a gesture, no frame loop over silence.
+        // A take picked while the picture plays is started by the next timeupdate.
+        if (!hasClips.current) return;
         // At (or past) the cut's end there's nothing left to play: the engine would start again from the top.
         if (engine.length > 0 && at >= engine.length) return;
         engine.play(at);
