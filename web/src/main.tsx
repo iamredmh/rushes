@@ -8,6 +8,7 @@ import "@fontsource/geist-mono/500.css";
 import "./styles.css";
 import "./changes.css";
 import "./cues.css";
+import "./desk.css";
 import { watchFocusOrigin } from "./lib.js";
 import { applyTheme, readTheme, safeStorage } from "./theme.js";
 import { App } from "./ui/App.js";

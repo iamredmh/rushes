@@ -3,6 +3,7 @@
 // note shows under the row instead. It replaces the native <select>, which can't truncate. Also the
 // cut's full note under the picture, two lines at most.
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import type { ComponentChildren } from "preact";
 import type { Version } from "../types.js";
 import { ago, agoSpoken, moveActive, oneLineOf, shortLabel, typeAhead, versionMeta } from "../versions.js";
 import { Icon } from "./Icon.js";
@@ -14,6 +15,12 @@ export interface VersionMenuProps {
   shown: Version;
   lockedVersion: string | null;
   onPick(id: string): void;
+  /** §27, 5.2: the word the button and its accessible name start with ("Version" when left out; the top bar's is "Cut"). */
+  name?: string;
+  /** A cut newer than the one on screen: the button carries a dot, and says so to a screen reader. */
+  newer?: string | null;
+  /** Rows under the list (the Cut menu's lock row). `close(true)` closes the menu and puts focus back on its button. */
+  footer?: (close: (focusButton: boolean) => void) => ComponentChildren;
 }
 
 /** Digits typed within this long of each other make one version number (type-ahead). */
@@ -22,7 +29,7 @@ const TYPE_AHEAD_MS = 700;
 const EDGE = 16;
 const touchScreen = () => typeof matchMedia === "function" && matchMedia("(hover: none)").matches;
 
-export function VersionMenu({ versions, shown, lockedVersion, onPick }: VersionMenuProps) {
+export function VersionMenu({ versions, shown, lockedVersion, onPick, name = "Version", newer = null, footer }: VersionMenuProps) {
   const rows = [...versions].reverse(); // newest at the top, as before
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(shown.id);
@@ -35,6 +42,7 @@ export function VersionMenu({ versions, shown, lockedVersion, onPick }: VersionM
   const button = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
   const rowEls = useRef<Record<string, HTMLButtonElement | null>>({});
+  const foot = useRef<HTMLDivElement>(null);
   const typed = useRef({ text: "", at: -Infinity });
   const now = new Date();
   const label = shortLabel(shown);
@@ -64,17 +72,20 @@ export function VersionMenu({ versions, shown, lockedVersion, onPick }: VersionM
     if (activeGone) close(true);
     else if (open) rowEls.current[active]?.focus();
   }, [open, active, activeGone]);
-  // Keep the list inside the window: measured once as it opens, and again if the window is resized.
+  // Keep the list inside the window: measured as it opens, after every render while it is open (the button can move
+  // when what is beside it changes), and again if the window is resized.
+  const place = () => {
+    const w = wrap.current?.getBoundingClientRect();
+    const m = menu.current?.getBoundingClientRect();
+    if (!w || !m) return;
+    const room = document.documentElement.clientWidth - EDGE;
+    setShift(Math.max(0, Math.min(w.left + m.width - room, w.left - EDGE)));
+  };
+  useLayoutEffect(() => {
+    if (open) place();
+  });
   useLayoutEffect(() => {
     if (!open) return;
-    const place = () => {
-      const w = wrap.current?.getBoundingClientRect();
-      const m = menu.current?.getBoundingClientRect();
-      if (!w || !m) return;
-      const room = document.documentElement.clientWidth - EDGE;
-      setShift(Math.max(0, Math.min(w.left + m.width - room, w.left - EDGE)));
-    };
-    place();
     window.addEventListener("resize", place);
     return () => window.removeEventListener("resize", place);
   }, [open]);
@@ -97,7 +108,15 @@ export function VersionMenu({ versions, shown, lockedVersion, onPick }: VersionM
   // here too while the list is open (G would grab a frame behind it).
   const onListKey = (e: KeyboardEvent) => {
     if (e.key === "Tab") {
-      // Tab (or Alt+Tab in Safari) closes the list and carries on to the next control.
+      // Tab moves on to the rows under the list when there are any; otherwise (or Alt+Tab in Safari) it closes the list
+      // and carries on to the next control.
+      const first = !e.shiftKey ? foot.current?.querySelector("button") : null;
+      if (first) {
+        e.preventDefault();
+        e.stopPropagation();
+        first.focus();
+        return;
+      }
       close(false);
       return;
     }
@@ -164,7 +183,8 @@ export function VersionMenu({ versions, shown, lockedVersion, onPick }: VersionM
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={open ? "vlist" : undefined}
-        aria-label={`Version: ${shown.id} · ${label}`}
+        aria-label={`${name}: ${shown.id} · ${label}`}
+        aria-describedby={newer ? "vnewer" : undefined}
         onClick={() => (open ? close(false) : show(shown.id))}
         onKeyDown={(e) => {
           if (!open && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
@@ -174,8 +194,14 @@ export function VersionMenu({ versions, shown, lockedVersion, onPick }: VersionM
           }
         }}
       >
+        {name !== "Version" && <small>{name}</small>}
         <span class="vid">{shown.id}</span>
         <span class="vlbl" dir="auto">{label}</span>
+        {newer && (
+          <span class="vnewer" id="vnewer">
+            <span class="vh">{newer} is ready</span>
+          </span>
+        )}
         <Icon name="chev" />
       </button>
       {open && (
@@ -211,6 +237,30 @@ export function VersionMenu({ versions, shown, lockedVersion, onPick }: VersionM
               </button>
             ))}
           </div>
+          {footer && (
+            <div
+              ref={foot}
+              class="vfoot"
+              onKeyDown={(e) => {
+                if (e.metaKey || e.ctrlKey || e.altKey) return;
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  close(true);
+                } else if (e.key === "Tab") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (e.shiftKey) rowEls.current[active]?.focus();
+                  else close(false);
+                } else if (e.key.length === 1 || e.key === "Enter" || e.key.startsWith("Arrow")) {
+                  // Printable keys, Enter and the arrows stay here: nothing behind the menu hears them.
+                  e.stopPropagation();
+                }
+              }}
+            >
+              {footer(close)}
+            </div>
+          )}
           {!touch && (
             <div class="vdetail" id="vdetail">
               <h4>{detail.id}</h4>

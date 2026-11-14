@@ -1,5 +1,6 @@
 // §24: Brief and Script live under one Planning tab. It is a tab with a menu: click it and the pages drop down,
-// so planning, which is not a daily habit, costs one tab and the review stages stay where they were.
+// so planning, which is not a daily habit, costs one tab and the review stages stay where they were. §27: the tab is
+// the desk's Plan workspace, its menu still the way to the three pages until they get a switch of their own.
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { PlanPage, Progress } from "../lib.js";
 import { Icon } from "./Icon.js";
@@ -26,11 +27,13 @@ export interface PlanningTabProps {
   locked: boolean;
   /** Brief, script and storyboard are all approved: the menu then says so, with the prompt to build. */
   ready: boolean;
+  /** §27, 5.3: brief, script and storyboard all approved, whether or not a cut exists: the tab carries a tick. */
+  approved?: boolean;
   onCopyReady(): void;
   onPick(page: PlanPage): void;
 }
 
-export function PlanningTab({ selected, rows, marks, open, locked, ready, onCopyReady, onPick }: PlanningTabProps) {
+export function PlanningTab({ selected, rows, marks, open, locked, ready, approved = false, onCopyReady, onPick }: PlanningTabProps) {
   const [shown, setShown] = useState(false);
   const [active, setActive] = useState(0);
   const [at, setAt] = useState({ left: 0, top: 0 });
@@ -110,7 +113,7 @@ export function PlanningTab({ selected, rows, marks, open, locked, ready, onCopy
         }}
       >
         <Icon name="list" />
-        Planning
+        Plan
         {marks ? (
           <span class="pmarks" title={ready ? "Ready to build" : "Brief, script and storyboard"}>
             {ready ? <Icon name="check" class="pready" /> : <>{dot(marks.brief)}{dot(marks.script)}{dot(marks.storyboard)}</>}
@@ -118,7 +121,10 @@ export function PlanningTab({ selected, rows, marks, open, locked, ready, onCopy
         ) : locked ? (
           <Icon name="lock" class="lk" />
         ) : (
-          open > 0 && <span class="dot" title={`${open} open`} />
+          <>
+            {approved && <Icon name="check" class="pready" />}
+            {open > 0 && <span class="dot" title={`${open} open`} />}
+          </>
         )}
         <Icon name="chev" class="chev" />
       </button>

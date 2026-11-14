@@ -1,16 +1,15 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, ApiError, projectId } from "../api.js";
 import {
-  LOCKED_BRIEF, LOCKED_STORYBOARD, LOCKED_TAB, testFlags, STAGE_NAMES, agentPrompt, briefPrompt, briefSendPrompt, copyShortcut, currentFormat, defaultVersion, firstView, formatChips, formatPrompt, foundChip, foundSignature,
-  filmAfterShelving, inPlay, isPlanPage, labelOfId, latest, lockedFound, neighbourFormat, neighbourVideo, openToSend, packShown, planProgress, planTarget, previousVersion, proxyKey, readyPrompt, snap, storySendPrompt, storyboardPrompt, versionFormats, type PlanPage,
+  LOCKED_BRIEF, LOCKED_STORYBOARD, LOCKED_TAB, testFlags, STAGE_NAMES, agentPrompt, briefPrompt, briefSendPrompt, copyShortcut, currentFormat, defaultVersion, filmLanes, filmPicks, firstView, formatChips, formatPrompt, foundChip, foundSignature, foundTotal,
+  filmAfterShelving, inPlay, isPlanPage, labelOfId, latest, lockedFound, neighbourFormat, neighbourVideo, openToSend, planProgress, planTarget, previousVersion, proxyKey, readyPrompt, snap, storySendPrompt, storyboardPrompt, versionFormats, type PlanPage,
 } from "../lib.js";
+import { deskPlace, nextHint, takeCount, takeGroups, viewForKey, type DeskView } from "../desk.js";
 import type { Batch, BriefView, FoundCounts, FoundKind, Stage, StoryboardView, Video } from "../types.js";
 import { useRushes } from "../useRushes.js";
 import { assetRev } from "../audio/timeline.js";
 import { Assets, type FoundRequest } from "./Assets.js";
 import { Brief } from "./Brief.js";
-import { FilmMenu } from "./FilmMenu.js";
-import { AllShelved, FilmPack, ShelvedBanner } from "./FilmPack.js";
 import { FormatToggle } from "./FormatToggle.js";
 import { Icon, STAGE_ICONS } from "./Icon.js";
 import { Mix } from "./Mix.js";
@@ -21,9 +20,15 @@ import { Script } from "./Script.js";
 import { VariantTab } from "./VariantTab.js";
 import { Voice } from "./Voice.js";
 import { Visuals } from "./Visuals.js";
-import { VersionMenu } from "./VersionMenu.js";
 import { ChangeLogButton, ChangeLogDrawer, focusRow, useChangeLog } from "./ChangeLog.js";
 import type { JumpTarget } from "../changelog.js";
+import { CutMenu } from "./desk/CutMenu.js";
+import { AllShelved, FilmSelect, ShelvedBanner } from "./desk/FilmSelect.js";
+import { MoreMenu } from "./desk/MoreMenu.js";
+import { ReviewTabs, type ReviewTabRow } from "./desk/ReviewTabs.js";
+import { StatusBar } from "./desk/StatusBar.js";
+import { TopBar } from "./desk/TopBar.js";
+import { Workspaces } from "./desk/Workspaces.js";
 
 declare global {
   interface Window {
@@ -32,12 +37,18 @@ declare global {
   }
 }
 
-const ORDER: Stage[] = ["script", "picture", "voice", "music", "sfx", "mix", "visuals"];
 // §26: the tabs that look at a film, and so are view-only while it is shelved (the others are not about one film).
 const SHELVED_VIEW_ONLY: ReadonlySet<string> = new Set(["picture", "voice", "music", "sfx", "mix"]);
-// Assets isn't a review stage (§15.3): it's a dashboard-only tab after the six stages, so it's
-// kept out of Stage and ORDER entirely and handled as its own case throughout this file.
-type View = Stage | "assets" | "brief" | "storyboard";
+// §27, 5.4: Review's tabs, in order, with their names on the desk. Mix keeps a tab of its own until sound joins the timeline.
+const REVIEW_TABS: { view: Exclude<Stage, "script" | "visuals">; label: string }[] = [
+  { view: "picture", label: "Timeline" },
+  { view: "voice", label: "Voice" },
+  { view: "music", label: "Music" },
+  { view: "sfx", label: "Effects" },
+  { view: "mix", label: "Mix" },
+];
+// Assets isn't a review stage (§15.3): it's a dashboard-only view, kept out of Stage and handled as its own case throughout this file.
+type View = DeskView;
 /** What Send to agent shows: a batch, or (from the Brief page) a message that is not recorded anywhere. */
 type Sent = Pick<Batch, "id" | "prompt"> & { title?: string };
 const typing = (el: EventTarget | null) => el instanceof HTMLElement && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
@@ -96,6 +107,8 @@ export function App() {
   const [sent, setSent] = useState<Sent | null>(null);
   // §24: the planning page you were last on, which key 1 returns to (Script, the old key 1, until you open Brief).
   const [planLast, setPlanLast] = useState<PlanPage>("script");
+  // §27, 5.3: the Review tab you were last on, which the Review workspace opens on.
+  const [reviewLast, setReviewLast] = useState<View>("picture");
   // The Brief and Storyboard pages register how to wait for their saves here, for Send to agent.
   const planSettle = useRef<(() => Promise<unknown>) | null>(null);
   const [keysOpen, setKeysOpen] = useState(false);
@@ -225,14 +238,9 @@ export function App() {
   useEffect(() => {
     if (!held && versionId !== null && versionId === target?.id) setVersionId(null);
   }, [target?.id, held, versionId]);
-  // The chip shows whenever a newer cut than the one on screen exists, and either the video is
+  // §27, 5.2: the Cut button carries a dot whenever a newer cut than the one on screen exists, and either the video is
   // locked (so nothing would otherwise tell you a newer one arrived) or the cut is held.
   const readyVersionId = newest && version && newest.id !== version.id && (locked || held) ? newest.id : null;
-  const jumpToReady = () => {
-    // Always the newest, even when locked: this views it without touching the lock.
-    if (newest) setVersionId(newest.id);
-    setHeld(false);
-  };
 
   /** Switches to another film, remembering this one's place and restoring the other's. Refused while marks are pending. */
   const switchFilm = (newId: string) => {
@@ -308,6 +316,7 @@ export function App() {
       setHeld(false);
     }
     setStage(to.tab);
+    if (deskPlace(to.tab).workspace === "review") setReviewLast(to.tab);
     setSent(null);
     if (to.row) focusRow(to.row);
   };
@@ -315,16 +324,17 @@ export function App() {
   const tabs = state?.tabs ?? [];
   const tab = (s: Stage) => tabs.find((t) => t.stage === s);
   const chip = foundChip(state?.found);
-  // Found files are worth opening Assets for even before anything is registered: the chip leads there.
+  // Found files are worth opening Assets for even before anything is registered: More's Bring in leads there.
   const assetsUnlocked = assets.length > 0 || chip !== null;
-  // Leaving a tab unmounts it, so a note in the making there (the same `pending` that holds the
-  // film and New take) would be lost: refuse the switch instead, by click or by 1–7. A locked
+  // Leaving a view unmounts it, so a note in the making there (the same `pending` that holds the
+  // film and New take) would be lost: refuse the switch instead, by click or by number key. A locked
   // tab always opens (§19.1): it shows its own page rather than a toast.
   const show = (s: Stage | "brief" | "storyboard") => {
     if (pending && s !== stage) return toast("Add or clear your note first");
     setStage(s);
     setSent(null);
     if (isPlanPage(s)) setPlanLast(s);
+    if (deskPlace(s).workspace === "review") setReviewLast(s);
   };
   /** Key 1: the planning page last used if it has something in it, else the first that does. */
   const planKey = () => {
@@ -366,11 +376,11 @@ export function App() {
         return;
       }
       if (typing(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
-      const n = Number(e.key);
-      // 1 is Planning (Brief and Script); 2 to 6 are Picture to Mix, 7 is Visuals and 8 is Assets.
-      if (n === 1) planKey();
-      else if (n >= 2 && n <= 7) show(ORDER[n - 1]);
-      else if (n === 8) showAssets();
+      // §27, 5.3: the number keys keep their places. 1 Plan (the page last used), 2 and 6 the timeline, 3 to 5 the sounds, 7 Visuals, 8 Assets.
+      const to = viewForKey(e.key, planLast);
+      if (e.key === "1") planKey();
+      else if (to === "assets") showAssets();
+      else if (to) show(to);
       // Not on key repeat: a held key would shelve the next film too, and the next.
       if (e.key === "S" && e.shiftKey && !e.repeat) toggleShelved();
       if ((e.key === "[" || e.key === "]") && state) {
@@ -387,38 +397,26 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   });
 
-  // Where the page body starts (below the header, tabs and any banner), as --body-top, so Picture
-  // can cap its player at the window's height (fix round 1: a tall cut leaves room for the timeline
-  // and the note box). Read after every render (a banner moves it), on resize, whenever the header
-  // or the tabs change size without a render (a wrapped crumb, say), and once the web fonts have
-  // loaded; written only when it changes.
-  const bodyRef = useRef<HTMLElement>(null);
+  // The top bar, and the row under it that holds the Change Log button: the drawer sits under that row, so the button
+  // that closes it stays in view.
   const headRef = useRef<HTMLElement>(null);
-  const tabsRef = useRef<HTMLElement>(null);
-  const placeBody = () => {
+  const barRef = useRef<HTMLDivElement>(null);
+  // §27, 5.1: the room inside the work area, as --work-h on it, so Picture can cap its player at it (the timeline and the
+  // note box stay on screen with a tall cut) and Visuals can fill it. It follows the work area's own size: a banner, a
+  // taller top bar or a resized window all change it without a render.
+  const bodyRef = useRef<HTMLElement>(null);
+  const shellUp = !!state && !!stage;
+  useLayoutEffect(() => {
     const el = bodyRef.current;
     if (!el) return;
-    const top = `${Math.round(el.getBoundingClientRect().top + window.scrollY)}px`;
-    const root = document.documentElement.style;
-    if (root.getPropertyValue("--body-top") !== top) root.setProperty("--body-top", top);
-  };
-  useLayoutEffect(placeBody);
-  useEffect(() => {
-    const onResize = () => placeBody();
-    window.addEventListener("resize", onResize);
-    let live = true;
-    void document.fonts?.ready.then(() => { if (live) placeBody(); });
-    return () => {
-      live = false;
-      window.removeEventListener("resize", onResize);
+    const place = () => {
+      const cs = getComputedStyle(el);
+      const h = `${Math.max(0, Math.round(el.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom)))}px`;
+      if (el.style.getPropertyValue("--work-h") !== h) el.style.setProperty("--work-h", h);
     };
-  }, []);
-  // The header and tabs exist once the project has loaded, so they're observed from then on.
-  const shellUp = !!state && !!stage;
-  useEffect(() => {
-    if (!shellUp) return;
-    const ro = new ResizeObserver(() => placeBody());
-    for (const el of [headRef.current, tabsRef.current]) if (el) ro.observe(el, { box: "border-box" });
+    place();
+    const ro = new ResizeObserver(place);
+    ro.observe(el);
     return () => ro.disconnect();
   }, [shellUp]);
 
@@ -471,13 +469,15 @@ export function App() {
   }
 
   const pictureNotes = state.notes.notes.filter((n) => n.stage === "picture" && (!n.video || n.video === video?.id));
-  const hasTodo = (vid: string) => state.notes.notes.some((n) => n.stage === "picture" && n.status === "todo" && (!n.video || n.video === vid));
+  /** A film's open notes on the tabs that look at it, for the Film menu and the status bar. */
+  const openNotes = (vid: string) => state.notes.notes.filter((n) => n.status === "todo" && SHELVED_VIEW_ONLY.has(n.stage) && (!n.video || n.video === vid)).length;
   const unlocked = stage === "assets" ? assetsUnlocked : stage === "brief" ? state.brief.exists : stage === "storyboard" ? state.storyboard.exists : (tab(stage)?.unlocked ?? false);
   // What Send to agent would send: the same from every tab.
   const open = openToSend(tabs, state.brief, state.storyboard);
   // §24: the Planning tab's menu, its marks while a plan is in progress (a brief and no cut yet), and its open count.
   const hasCut = !!tab("picture")?.unlocked;
   const progress = planProgress(state.brief, state.script.sections, state.storyboard);
+  const approved = progress.brief === "ok" && progress.script === "ok" && progress.storyboard === "ok";
   // Marks show while planning has begun (a brief or a storyboard) and no cut exists yet.
   const planning = state.build.started && !hasCut;
   const planRows: PlanRow[] = [
@@ -495,90 +495,127 @@ export function App() {
     }
   };
 
+  // §27: where the view sits on the desk, and each sound's takes on this film.
+  const place = deskPlace(stage);
+  const lanes = filmLanes(state.project.lanes, video?.id, state.project.videos.length);
+  const use = filmPicks(state.picks, video?.id).use;
+  const sounds = {
+    voice: takeGroups(lanes, "voice", use?.voice, video),
+    music: takeGroups(lanes, "music", use?.music, video),
+    sfx: takeGroups(lanes, "sfx", use?.sfx, video),
+  };
+  const soundState = (g: (typeof sounds)["voice"]) => {
+    const c = takeCount(g);
+    return { started: c.all > 0, fresh: c.fresh, inUse: g.inUse !== null, stale: !!g.inUse?.stale };
+  };
+  // What Send would send that has not been sent yet: to-do notes with no batch (on films in play), changed script rows,
+  // and the brief's and storyboard's changes. Send's own count (`open`) also counts notes already sent and still open.
+  const inPlayIds = new Set(state.project.videos.filter(inPlay).map((v) => v.id));
+  const todoInPlay = (n: (typeof state.notes.notes)[number]) => n.status === "todo" && (!n.video || inPlayIds.has(n.video));
+  const scriptRows = (tab("script")?.todo ?? 0) - state.notes.notes.filter((n) => n.stage === "script" && todoInPlay(n)).length;
+  const unsent = state.notes.notes.filter((n) => todoInPlay(n) && n.batch === null).length + Math.max(0, scriptRows) + state.brief.changed + state.storyboard.changed;
+  const next = nextHint({
+    plan: { exists: state.brief.exists || state.storyboard.exists || state.script.sections.length > 0, approved },
+    hasCut: !!version,
+    unsent,
+    openNotes: video ? openNotes(video.id) : 0,
+    locked,
+    sound: { voice: soundState(sounds.voice), music: soundState(sounds.music), sfx: soundState(sounds.sfx) },
+  });
+  /** Where the status bar's line leads: a plan page opens as key 1 would. */
+  const goNext = (to: View) => {
+    if (isPlanPage(to)) return planKey();
+    show(to as Stage);
+  };
+  const reviewRows: ReviewTabRow[] = REVIEW_TABS.map(({ view, label }) => ({
+    view,
+    label,
+    icon: STAGE_ICONS[view],
+    locked: !tab(view)?.unlocked,
+    ask: LOCKED_TAB[view].ask,
+    takes: view === "voice" || view === "music" || view === "sfx" ? takeCount(sounds[view]) : null,
+    todo: tab(view)?.todo ?? 0,
+  }));
+  // §27, 5.3: before there is anything to review (no cut, no takes), Review is the page that asks for cut 1, with no tabs.
+  const reviewTabsShown = place.workspace === "review" && reviewRows.some((r) => !r.locked);
+  // The format on screen; with one format, that one.
+  const formatLabel = (views.find((f) => f.id === format) ?? views.find((f) => f.primary) ?? views[0])?.label ?? null;
+  const foundUnseen = chip !== null && foundSignature(state.found) !== foundSeen && foundTotal(state.found?.counts) > 0;
+
   return (
     <div class="shell">
-      <header class="head" ref={headRef}>
-        <span class="logo"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg></span>
-        <nav class="crumb" aria-label="Project">
-          <span>{state.project.name}</span>
-          {state.project.id && <span class="pid mono">{state.project.id}</span>}
-          {video && !packShown(state.project.videos, video.id) && (
-            <>
-              <span class="slash">/</span>
-              <span class="sel">{video.name}</span>
-            </>
-          )}
-        </nav>
-        {chip !== null && foundSignature(state.found) !== foundSeen && (
-          <button type="button" class="foundchip" data-tip="Open the other files found in this project" onClick={() => openFound()}>
-            <span class="dot" />
-            <span class="ftext">{chip}</span>
-          </button>
-        )}
-        {state.project.videos.length > 0 && (
-          <FilmPack
-            films={state.project.videos}
-            currentId={video?.id ?? null}
-            headRef={headRef}
-            hasTodo={hasTodo}
-            onSwitch={switchFilm}
-            onRestore={(id) => {
-              const film = state.project.videos.find((v) => v.id === id);
-              if (film) void setShelved(film, false);
+      <TopBar
+        barRef={headRef}
+        project={state.project.name}
+        projectId={state.project.id ?? null}
+        film={
+          state.project.videos.length > 0 ? (
+            <FilmSelect
+              films={state.project.videos}
+              currentId={video?.id ?? null}
+              openNotes={openNotes}
+              onSwitch={switchFilm}
+              onRestore={(id) => {
+                const film = state.project.videos.find((v) => v.id === id);
+                if (film) void setShelved(film, false);
+              }}
+              shelvedRequest={shelvedRequest}
+            />
+          ) : null
+        }
+        cut={
+          video && version ? (
+            <CutMenu
+              video={video}
+              shown={version}
+              newer={readyVersionId}
+              onPick={(id) => {
+                // Picking the version the film would follow anyway collapses back to "follow"
+                // (null); picking anything else pins it explicitly — including the newest, on a
+                // locked film, which must show what you asked for rather than snap back to the lock.
+                setVersionId(id === target?.id ? null : id);
+                setHeld(false);
+              }}
+              onToggleLock={() => void toggleLock()}
+            />
+          ) : null
+        }
+        workspaces={
+          <Workspaces
+            current={place.workspace}
+            plan={{
+              selected: isPlanPage(stage) ? stage : null,
+              rows: planRows,
+              marks: planning ? progress : null,
+              open: planOpen,
+              locked: planRows.every((r) => !r.unlocked),
+              ready: planning && state.build.ready,
+              approved,
+              onCopyReady: () => void copyReady(),
+              onPick: (p) => show(p),
             }}
-            shelvedRequest={shelvedRequest}
+            hasVisuals={!!tab("visuals")?.unlocked}
+            assetsUnlocked={assetsUnlocked}
+            found={foundUnseen ? { count: foundTotal(state.found?.counts), text: chip! } : null}
+            onPick={(ws) => (ws === "assets" ? showAssets() : ws === "visuals" ? show("visuals") : show(reviewLast as Stage))}
           />
-        )}
-        {video && (
-          <>
-            <span class="plabel">Picture</span>
-            {version && (
-              <VersionMenu
-                versions={video.versions}
-                shown={version}
-                lockedVersion={video.lockedVersion}
-                onPick={(id) => {
-                  // Picking the version the film would follow anyway collapses back to "follow"
-                  // (null); picking anything else pins it explicitly — including the newest, on a
-                  // locked film, which must show what you asked for rather than snap back to the lock.
-                  setVersionId(id === target?.id ? null : id);
-                  setHeld(false);
-                }}
-              />
-            )}
-            {version && (
-              <button
-                class="btn ib lockbtn"
-                aria-pressed={locked}
-                disabled={!!video.shelved}
-                aria-label={locked ? `Picture locked at ${video.lockedVersion} · unlock` : `Lock picture at ${version.id}`}
-                data-tip={locked ? `Picture locked at ${video.lockedVersion} · unlock` : `Lock picture at ${version.id}`}
-                onClick={() => void toggleLock()}
-              >
-                <Icon name={locked ? "lock" : "unlock"} />
-              </button>
-            )}
-            {readyVersionId && (
-              <button class="chipx go" aria-label={`${readyVersionId} is ready`} data-tip="Switch to the newest cut" onClick={jumpToReady}>
-                <Icon name="new" />
-                {readyVersionId} ready
-              </button>
-            )}
-            {stage === "picture" && version && chips.length > 0 && (
-              <FormatToggle chips={chips} versionId={version.id} prompt={formatPrompt(state.project.name, video.name, version.id)} onSelect={switchFormat} toast={toast} />
-            )}
-          </>
-        )}
-        <span class="sp" />
-        <FilmMenu video={video} onToggleShelved={toggleShelved} />
-        <button class="btn ghost ib tip-below" data-tip="Shortcuts  ?" aria-label="Keyboard shortcuts" onClick={() => { setSent(null); setKeysOpen(!keysOpen); }}>
-          <Icon name="kbd" />
-        </button>
-        <ChangeLogButton log={changeLog} buttonRef={changeLogButton} />
-        <button class="btn primary tip-below" data-tip="Every tab's open notes, on every film" onClick={() => void send()}>
-          Send to agent{open > 0 && <span class="count">{open}</span>}
-        </button>
-      </header>
+        }
+        more={
+          <MoreMenu
+            found={chip}
+            onBringIn={() => openFound()}
+            video={video}
+            onToggleShelved={toggleShelved}
+            autoProxy={state.project.autoProxy}
+            onKeys={() => {
+              setSent(null);
+              setKeysOpen(true);
+            }}
+            toast={toast}
+            onChanged={() => void refresh()}
+          />
+        }
+      />
       <ChangeLogDrawer
         log={changeLog}
         projectId={projectId() ?? ""}
@@ -586,7 +623,7 @@ export function App() {
         project={state.project}
         // The Change Log has no Brief or Storyboard area: a line added from either goes under Script, its neighbour in Planning.
         stage={stage === "brief" || stage === "storyboard" ? "script" : stage}
-        header={headRef}
+        header={barRef}
         buttonRef={changeLogButton}
         toast={toast}
         onJump={jump}
@@ -597,7 +634,7 @@ export function App() {
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
             <h3>{sent.title ?? `Batch ${sent.id} is ready`}</h3>
             <span class="sp" />
-            <button class="btn ghost ib sm" aria-label="Close" onClick={() => setSent(null)}><Icon name="x" /></button>
+            <button class="btn ghost ib sm" aria-label="Close" data-tip="Close" onClick={() => setSent(null)}><Icon name="x" /></button>
           </div>
           <pre>{sent.prompt}</pre>
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
@@ -606,11 +643,11 @@ export function App() {
         </div>
       )}
       {keysOpen && (
-        <div class="pop" role="dialog" aria-label="Keyboard shortcuts" style={{ width: "300px" }}>
+        <div class="pop" role="dialog" aria-label="Keyboard shortcuts" style={{ width: "320px" }}>
           <div style={{ display: "flex", alignItems: "center" }}>
             <h3>Shortcuts</h3>
             <span class="sp" />
-            <button class="btn ghost ib sm" aria-label="Close" onClick={() => setKeysOpen(false)}><Icon name="x" /></button>
+            <button class="btn ghost ib sm" aria-label="Close" data-tip="Close" onClick={() => setKeysOpen(false)}><Icon name="x" /></button>
           </div>
           <div class="keys">
             <span><kbd>Space</kbd></span><span>Play or pause</span>
@@ -619,8 +656,11 @@ export function App() {
             <span><kbd>B</kbd></span><span>Draw a box</span>
             <span><kbd>G</kbd></span><span>Grab frame</span>
             <span><kbd>N</kbd></span><span>New note</span>
-            <span><kbd>1</kbd>–<kbd>7</kbd></span><span>Switch tab</span>
+            <span><kbd>1</kbd></span><span>Plan</span>
+            <span><kbd>2</kbd>–<kbd>6</kbd></span><span>Review: Timeline, Voice, Music, Effects, Timeline</span>
+            <span><kbd>7</kbd> <kbd>8</kbd></span><span>Visuals, Assets</span>
             <span><kbd>[</kbd> <kbd>]</kbd></span><span>Previous or next film</span>
+            <span><kbd>Shift</kbd> <kbd>S</kbd></span><span>Shelve or restore the film</span>
             <span><kbd>Alt</kbd> <kbd>←</kbd> <kbd>→</kbd></span><span>Previous or next format</span>
             <span><kbd>?</kbd></span><span>Shortcuts</span>
             <span><kbd>Esc</kbd></span><span>Close</span>
@@ -646,168 +686,131 @@ export function App() {
         </div>
       )}
 
-      {wrongProject && (
-        <div class="banner lost" role="alert">
-          <Icon name="alert" />
-          {`This tab is for ${state.project.name}, which isn't running here any more. Ask your agent to open it again.`}
-        </div>
-      )}
+      <div class="work">
+        {wrongProject && (
+          <div class="banner lost" role="alert">
+            <Icon name="alert" />
+            {`This tab is for ${state.project.name}, which isn't running here any more. Ask your agent to open it again.`}
+          </div>
+        )}
+        {problem && !wrongProject && <div class="banner"><Icon name="alert" />{problem}</div>}
 
-      <nav class="tabs" ref={tabsRef} role="tablist" aria-label="Stages">
-        <PlanningTab
-          selected={isPlanPage(stage) ? stage : null}
-          rows={planRows}
-          marks={planning ? progress : null}
-          open={planOpen}
-          locked={planRows.every((r) => !r.unlocked)}
-          ready={planning && state.build.ready}
-          onCopyReady={() => void copyReady()}
-          onPick={(p) => show(p)}
-        />
-        {ORDER.filter((s) => s !== "script").map((s) => {
-          const t = tab(s);
-          return (
-            <button
-              class="tab"
-              role="tab"
-              aria-selected={stage === s}
-              data-locked={t?.unlocked ? undefined : "true"}
-              data-tip={t?.unlocked ? undefined : `Locked: ask your agent for ${LOCKED_TAB[s].ask}`}
-              onClick={() => show(s)}
-            >
-              <Icon name={STAGE_ICONS[s]} />
-              {STAGE_NAMES[s]}
-              {t?.unlocked ? (
-                t.todo > 0 && <span class="dot" title={`${t.todo} open`} />
-              ) : (
-                <>
-                  <Icon name="lock" class="lk" />
-                  {/* Visually hidden, not aria-hidden: an enabled, clickable tab is announced as
-                      locked (Safari's aria-description support is patchy, so a hidden span instead). */}
-                  <span class="vh"> Locked</span>
-                </>
-              )}
-            </button>
-          );
-        })}
-        {/* Assets: the last tab, after Mix. Not a review stage, so it's never counted in ORDER
-            and never shows a to-do dot — just locked, or not. */}
-        <button
-          class="tab"
-          role="tab"
-          aria-selected={stage === "assets"}
-          data-locked={assetsUnlocked ? undefined : "true"}
-          data-tip={assetsUnlocked ? undefined : `Locked: ask your agent for ${LOCKED_TAB.assets.ask}`}
-          onClick={() => showAssets()}
-        >
-          <Icon name="grid" />
-          Assets
-          {!assetsUnlocked && (
-            <>
-              <Icon name="lock" class="lk" />
-              <span class="vh"> Locked</span>
-            </>
+        {/* Until the notes panel (§27, 5.7) takes them in, Send to agent and the Change Log sit at the top of the work area,
+            beside Review's tabs and the format switch. */}
+        <div class="deskbar" ref={barRef}>
+          {reviewTabsShown && <ReviewTabs rows={reviewRows} selected={stage} onPick={(v) => show(v as Stage)} />}
+          {stage === "picture" && video && version && chips.length > 0 && (
+            <FormatToggle chips={chips} versionId={version.id} prompt={formatPrompt(state.project.name, video.name, version.id)} onSelect={switchFormat} toast={toast} />
           )}
-        </button>
-      </nav>
-      {problem && !wrongProject && <div class="banner"><Icon name="alert" />{problem}</div>}
+          <span class="sp" />
+          <ChangeLogButton log={changeLog} buttonRef={changeLogButton} />
+          <button class="btn primary sendbtn" data-tip="Every tab's open notes, on every film" onClick={() => void send()}>
+            Send to agent{open > 0 && <span class="count">{open}</span>}
+          </button>
+        </div>
 
-      {video?.shelved && SHELVED_VIEW_ONLY.has(stage) && <ShelvedBanner video={video} onRestore={() => void setShelved(video, false)} />}
+        {video?.shelved && SHELVED_VIEW_ONLY.has(stage) && <ShelvedBanner video={video} onRestore={() => void setShelved(video, false)} />}
 
-      <main class={`body${video?.shelved ? " fshelved" : ""}`} ref={bodyRef}>
-        {stage === "assets" ? (
-          unlocked ? (
-            <Assets
-              assets={assets}
-              videos={state.project.videos}
-              state={state}
-              foundRequest={foundRequest}
-              onFoundRequestUsed={() => setFoundRequest((r) => (r.pending ? { n: r.n, pending: false } : r))}
-              onFoundSeen={setFoundSeen}
+        <main class={`body${video?.shelved ? " fshelved" : ""}`} ref={bodyRef}>
+          {stage === "assets" ? (
+            unlocked ? (
+              <Assets
+                assets={assets}
+                videos={state.project.videos}
+                state={state}
+                foundRequest={foundRequest}
+                onFoundRequestUsed={() => setFoundRequest((r) => (r.pending ? { n: r.n, pending: false } : r))}
+                onFoundSeen={setFoundSeen}
+                toast={toast}
+                onChanged={() => void refresh()}
+              />
+            ) : (
+              <Locked tab="assets" projectName={state.project.name} filmName={video?.name ?? null} found={state.found?.counts} onReview={openFound} toast={toast} />
+            )
+          ) : !unlocked ? (
+            <Locked tab={stage} projectName={state.project.name} filmName={video?.name ?? null} found={state.found?.counts} onReview={openFound} toast={toast} />
+          ) : stage === "picture" && !video ? (
+            <AllShelved onOpen={() => setShelvedRequest((n) => n + 1)} />
+          ) : stage === "picture" && video && version ? (
+            <Picture
+              key={video.id}
+              readOnly={!!video.shelved}
+              video={video}
+              version={version}
+              fps={fps}
+              notes={pictureNotes}
               toast={toast}
               onChanged={() => void refresh()}
+              onPendingChange={setPending}
+              startAt={startAt}
+              grab={grabs[video.id] ?? null}
+              onGrabChange={setGrabFor}
+              playerRef={playerRef}
+              ffmpeg={state.proxies?.ffmpeg ?? false}
+              autoProxy={state.project.autoProxy}
+              proxyJob={proxyJobs[proxyKey(video.id, version.id)]}
+              noteProxyJob={noteProxyJob}
+              source={sources[video.id] ?? "proxy"}
+              onSourceChange={setSourceFor}
+              fileSize={cutAsset?.size ?? null}
+              fileRev={cutAsset ? assetRev(cutAsset) : undefined}
+              formats={views}
+              format={format}
+              formatMissing={!!format && missingFiles.has(views.find((f) => f.id === format)?.file ?? "")}
+              onPrimarySize={(file, width, height) => setMeasured((m) => (m[file] ? m : { ...m, [file]: { width, height } }))}
+              onBoxPendingChange={setBoxPending}
+              onFormatChange={switchFormat}
             />
-          ) : (
-            <Locked tab="assets" projectName={state.project.name} filmName={video?.name ?? null} found={state.found?.counts} onReview={openFound} toast={toast} />
-          )
-        ) : !unlocked ? (
-          <Locked tab={stage} projectName={state.project.name} filmName={video?.name ?? null} found={state.found?.counts} onReview={openFound} toast={toast} />
-        ) : stage === "picture" && !video ? (
-          <AllShelved onOpen={() => setShelvedRequest((n) => n + 1)} />
-        ) : stage === "picture" && video && version ? (
-          <Picture
-            key={video.id}
-            readOnly={!!video.shelved}
-            video={video}
-            version={version}
-            fps={fps}
-            notes={pictureNotes}
-            toast={toast}
-            onChanged={() => void refresh()}
-            onPendingChange={setPending}
-            startAt={startAt}
-            grab={grabs[video.id] ?? null}
-            onGrabChange={setGrabFor}
-            playerRef={playerRef}
-            ffmpeg={state.proxies?.ffmpeg ?? false}
-            autoProxy={state.project.autoProxy}
-            proxyJob={proxyJobs[proxyKey(video.id, version.id)]}
-            noteProxyJob={noteProxyJob}
-            source={sources[video.id] ?? "proxy"}
-            onSourceChange={setSourceFor}
-            fileSize={cutAsset?.size ?? null}
-            fileRev={cutAsset ? assetRev(cutAsset) : undefined}
-            formats={views}
-            format={format}
-            formatMissing={!!format && missingFiles.has(views.find((f) => f.id === format)?.file ?? "")}
-            onPrimarySize={(file, width, height) => setMeasured((m) => (m[file] ? m : { ...m, [file]: { width, height } }))}
-            onBoxPendingChange={setBoxPending}
-            onFormatChange={switchFormat}
-          />
-        ) : stage === "brief" ? (
-          <Brief brief={state.brief} toast={toast} onChanged={() => void refresh()} settle={planSettle} />
-        ) : stage === "storyboard" ? (
-          <Storyboard board={state.storyboard} brief={state.brief} toast={toast} onChanged={() => void refresh()} settle={planSettle} />
-        ) : stage === "visuals" ? (
-          <Visuals state={state} toast={toast} onChanged={() => void refresh()} onPendingChange={setPending} />
-        ) : stage === "script" ? (
-          <Script script={state.script} toast={toast} onChanged={() => void refresh()} />
-        ) : stage === "voice" ? (
-          // Its own engine, disposed (and stopped) when you leave, like the other audio tabs.
-          <Voice
-            key="voice"
-            state={state}
-            assets={assets}
-            video={video ?? null}
-            toast={toast}
-            onChanged={() => void refresh()}
-            onPendingChange={setPending}
-          />
-        ) : stage === "mix" ? (
-          // Mute and solo live here: leaving the tab resets them, and stops and releases its engine.
-          <Mix
-            key="mix"
-            state={state}
-            assets={assets}
-            video={video ?? null}
-            toast={toast}
-            onChanged={() => void refresh()}
-            onPendingChange={setPending}
-          />
-        ) : stage === "music" || stage === "sfx" ? (
-          // Keyed by stage: each audio tab gets its own engine, disposed (and stopped) when you leave.
-          <VariantTab
-            key={stage}
-            stage={stage}
-            state={state}
-            assets={assets}
-            video={video ?? null}
-            toast={toast}
-            onChanged={() => void refresh()}
-            onPendingChange={setPending}
-          />
-        ) : null}
-      </main>
+          ) : stage === "brief" ? (
+            <Brief brief={state.brief} toast={toast} onChanged={() => void refresh()} settle={planSettle} />
+          ) : stage === "storyboard" ? (
+            <Storyboard board={state.storyboard} brief={state.brief} toast={toast} onChanged={() => void refresh()} settle={planSettle} />
+          ) : stage === "visuals" ? (
+            <Visuals state={state} toast={toast} onChanged={() => void refresh()} onPendingChange={setPending} />
+          ) : stage === "script" ? (
+            <Script script={state.script} toast={toast} onChanged={() => void refresh()} />
+          ) : stage === "voice" ? (
+            // Its own engine, disposed (and stopped) when you leave, like the other audio tabs.
+            <Voice
+              key="voice"
+              state={state}
+              assets={assets}
+              video={video ?? null}
+              toast={toast}
+              onChanged={() => void refresh()}
+              onPendingChange={setPending}
+            />
+          ) : stage === "mix" ? (
+            // Mute and solo live here: leaving the tab resets them, and stops and releases its engine.
+            <Mix
+              key="mix"
+              state={state}
+              assets={assets}
+              video={video ?? null}
+              toast={toast}
+              onChanged={() => void refresh()}
+              onPendingChange={setPending}
+            />
+          ) : stage === "music" || stage === "sfx" ? (
+            // Keyed by stage: each audio tab gets its own engine, disposed (and stopped) when you leave.
+            <VariantTab
+              key={stage}
+              stage={stage}
+              state={state}
+              assets={assets}
+              video={video ?? null}
+              toast={toast}
+              onChanged={() => void refresh()}
+              onPendingChange={setPending}
+            />
+          ) : null}
+        </main>
+      </div>
+      <StatusBar
+        next={next}
+        onGo={goNext}
+        cut={video && version ? { format: formatLabel, fps, id: version.id, lockedAt: video.lockedVersion } : null}
+      />
       {state.version && <span class="ver" aria-label={`Rushes version ${state.version}`}>v{state.version}</span>}
     </div>
   );

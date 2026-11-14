@@ -1,8 +1,5 @@
-// Plan 6 (formats, §21) meets Plan 7 (the Change Log, §22) in Picture's header: the format toggle
-// beside the version control on a long project, the one-format popover above the drawer and the
-// version list, and Alt+←/→ while either is open.
-import { readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+// Plan 6 (formats, §21) meets Plan 7 (the Change Log, §22): the one-format popover above the drawer and the Cut menu,
+// and Alt+←/→ while either is open. (§27: the format switch sits in the row under the top bar until it moves to the monitor.)
 import type { Page } from "@playwright/test";
 import { expect, test, cutButton, videoReady, type FormatSize, openWorkspace, pickFilm, currentFilm } from "./fixture.js";
 
@@ -14,112 +11,11 @@ const radio = (page: Page, label: string) => toggle(page).getByRole("radio", { n
 const WIDE: FormatSize = { width: 640, height: 360 };
 const TALL: FormatSize = { width: 360, height: 640 };
 const SQUARE: FormatSize = { width: 480, height: 480 };
-const FOUR_FIVE: FormatSize = { width: 384, height: 480 };
-const LONG_LABEL = "Tighter middle 35, logo lands on the first beat!"; // 48 characters
+// The width checks that lived here (the header one row at 1101 to 1600 px with the format toggle beside the version
+// control, every chip whole) are desk.spec's: "at 1100 px / at 1440 px with eleven long-named films the top bar is one
+// line and nothing overlaps", and "from 1100 to 1600 px the desk's bars never wrap and the format switch stays whole".
 
-/**
- * Task 7's long project, with formats: a long project name, two films with long names, 59 found
- * files, a locked cut with a 48-character label and four shapes, and eight open notes on it.
- */
-async function longProject(rushes: any) {
-  await rushes.addCut("Opening titles: the logo lands on the first beat", "Lumen teaser");
-  await rushes.addFormatsCut([WIDE, TALL, SQUARE], { video: "Lumen launch film", note: "First pass; rough timing" });
-  await rushes.addFormatsCut([WIDE, TALL, SQUARE, FOUR_FIVE], { video: "Lumen launch film", label: LONG_LABEL, note: "Trimmed the opening two seconds" });
-  await rushes.api("PUT", "/api/videos/lumen-launch-film/lock", { version: "v2" });
-  for (let i = 1; i <= 8; i++) await rushes.api("POST", "/api/notes", { stage: "picture", video: "lumen-launch-film", version: "v2", scope: "point", t: i * 0.3, text: `Note ${i}: hold the end card longer` });
-  await rushes.writeFiles(Array.from({ length: 59 }, (_, i) => ({ path: `auditions/try-${String(i + 1).padStart(2, "0")}.wav`, seconds: 0.5 + (i % 5) * 0.25, freq: 200 + i * 5 })));
-  await rushes.scan();
-  const file = join(rushes.root, ".rushes", "project.json");
-  const p = JSON.parse(await readFile(file, "utf8"));
-  await writeFile(file, JSON.stringify({ ...p, name: "Lumen launch film" }, null, 2));
-}
-
-/** The header's visible children, with their boxes. */
-const headerRow = (page: Page) =>
-  page.locator("header.head").evaluate((h) =>
-    [...h.children].filter((c) => (c as HTMLElement).offsetParent !== null && c.getBoundingClientRect().width > 0).map((c) => {
-      const r = c.getBoundingClientRect();
-      return { name: `${c.tagName.toLowerCase()}.${c.className}`.slice(0, 40), top: Math.round(r.top), bottom: Math.round(r.bottom), left: Math.round(r.left), right: Math.round(r.right), mid: Math.round((r.top + r.bottom) / 2) };
-    }));
-
-/** Each chip's label and count are whole: nothing in the toggle is cut short or squeezed. */
-const toggleWhole = (page: Page) =>
-  toggle(page).evaluate((g) => {
-    const out: string[] = [];
-    if (g.scrollWidth > g.clientWidth + 1) out.push(`group ${g.scrollWidth} > ${g.clientWidth}`);
-    for (const c of g.querySelectorAll<HTMLElement>("[role=radio]")) {
-      if (c.scrollWidth > c.clientWidth + 1) out.push(`chip ${c.dataset.format} ${c.scrollWidth} > ${c.clientWidth}`);
-      if (c.getBoundingClientRect().height > 40) out.push(`chip ${c.dataset.format} wrapped`);
-      for (const part of c.querySelectorAll<HTMLElement>(".lbl, .n:not(.none)")) if (part.scrollWidth > part.clientWidth + 1) out.push(`${c.dataset.format} ${part.className}`);
-    }
-    return out;
-  });
-
-for (const width of [1440, 1280, 1150, 1101]) {
-  test(`at ${width} px a long project's header stays one row with the format toggle beside the version control (merge)`, async ({ page, rushes }) => {
-    test.setTimeout(90_000);
-    await longProject(rushes);
-    await page.setViewportSize({ width, height: 900 });
-    await page.goto(rushes.url);
-    await videoReady(page);
-    await expect(page.locator(".foundchip")).toContainText("59");
-    const films = page.getByRole("navigation", { name: "Films" }).getByRole("button");
-    await expect(films).toHaveCount(2);
-    await films.nth(1).click(); // the launch film, locked at its long-labelled cut
-    await videoReady(page);
-    await expect(cutButton(page)).toContainText("Tighter middle");
-    await expect(toggle(page).getByRole("radio")).toHaveCount(4);
-    await expect(page.getByRole("button", { name: /^Send to agent/ })).toContainText("8");
-    const row = await headerRow(page);
-    console.log(width, JSON.stringify(row));
-    const mids = row.map((c) => c.mid);
-    expect(Math.max(...mids) - Math.min(...mids), JSON.stringify(row)).toBeLessThanOrEqual(2);
-    const head = (await page.locator("header.head").boundingBox())!;
-    expect(head.height, `header ${head.height} px`).toBeLessThan(80);
-    expect(await page.locator("header.head").evaluate((h) => h.scrollWidth <= h.clientWidth)).toBe(true);
-    // The toggle sits beside the version control (after it and the lock, before the buttons on the right) and keeps its natural size.
-    const at = (cls: string) => row.findIndex((c) => c.name.includes(cls));
-    expect(at("fmtwrap")).toBeGreaterThan(at("vwrap"));
-    expect(at("fmtwrap")).toBeLessThan(at("btn ghost ib")); // the shortcuts button, first after the spacer
-    expect(await toggleWhole(page)).toEqual([]);
-    for (const label of ["16:9", "9:16", "1:1", "4:5"]) await expect(radio(page, label)).toBeVisible();
-    // Every chip shows the count of the eight all-format notes.
-    await expect(toggle(page).locator(".n:not(.none)")).toHaveCount(4);
-    // Names truncate on one line before anything wraps; nothing spills out of its own box.
-    const spills = await page.locator("header.head").evaluate((h) =>
-      [...h.querySelectorAll(".vwrap > .vbtn, .vbtn > *, .pack > .pill, .pill > *, .crumb > *")]
-        .filter((c) => c.getBoundingClientRect().right > c.parentElement!.getBoundingClientRect().right + 1)
-        .map((c) => `${c.parentElement!.className} > ${c.className || c.tagName}`));
-    expect(spills).toEqual([]);
-    const wrapped = await page.locator("header.head").evaluate((h) =>
-      [...h.querySelectorAll(".crumb > span, .pill .pname, .vbtn .vlbl")].filter((el) => el.getBoundingClientRect().height > 26).map((el) => el.textContent));
-    expect(wrapped).toEqual([]);
-    // Send to agent and the Change Log share the row, on the right.
-    const send = (await page.getByRole("button", { name: /^Send to agent/ }).boundingBox())!;
-    const log = (await logButton(page).boundingBox())!;
-    expect(Math.abs(send.y - log.y)).toBeLessThanOrEqual(1);
-    expect(send.x + send.width).toBeLessThanOrEqual(width - 13);
-  });
-}
-
-test("from 1101 to 1600 px the long project's header with four formats never wraps (merge)", async ({ page, rushes }) => {
-  test.setTimeout(120_000);
-  await longProject(rushes);
-  await page.goto(rushes.url);
-  await videoReady(page);
-  await pickFilm(page, "Lumen launch film");
-  await videoReady(page);
-  await expect(toggle(page).getByRole("radio")).toHaveCount(4);
-  const tall: string[] = [];
-  for (let width = 1101; width <= 1601; width += 20) {
-    await page.setViewportSize({ width, height: 900 });
-    const h = await page.locator("header.head").evaluate((el) => el.getBoundingClientRect().height);
-    if (h >= 80) tall.push(`${width}: ${Math.round(h)} px`);
-  }
-  expect(tall).toEqual([]);
-});
-
-test("the one-format popover is never hidden by the Change Log drawer or the version list (merge)", async ({ page, rushes }) => {
+test("the one-format popover is never hidden by the Change Log drawer, and the Cut menu is never hidden by the row under it (merge)", async ({ page, rushes }) => {
   await rushes.addCut("first cut");
   await rushes.addCut("second cut");
   // Narrow enough that the popover, which opens under the toggle, reaches into the drawer.
@@ -144,12 +40,19 @@ test("the one-format popover is never hidden by the Change Log drawer or the ver
   await toggle(page).getByRole("radio").hover();
   await expect(pop).toHaveCSS("opacity", "1");
   expect(await onTop(".drawer")).toBe("popover");
-  // The version list open as well (it stays open while the pointer moves over the header).
+  // §27: the Cut menu drops from the top bar over the row under it, where the format switch sits until it moves to the
+  // monitor. Open, the list is on top of the switch, not under it.
   await cutButton(page).click();
   await expect(page.getByRole("listbox", { name: "Versions" })).toBeVisible();
-  await toggle(page).getByRole("radio").hover();
-  await expect(pop).toHaveCSS("opacity", "1");
-  expect(await onTop(".vmenu")).toBe("popover");
+  const over = await page.locator(".vmenu").evaluate((m) => {
+    const a = m.getBoundingClientRect();
+    const b = document.querySelector(".fmtwrap")!.getBoundingClientRect();
+    const x0 = Math.max(a.left, b.left), x1 = Math.min(a.right, b.right), y0 = Math.max(a.top, b.top), y1 = Math.min(a.bottom, b.bottom);
+    if (x1 - x0 < 4 || y1 - y0 < 4) return "no overlap with the format switch";
+    const hit = document.elementFromPoint((x0 + x1) / 2, (y0 + y1) / 2);
+    return hit && m.contains(hit) ? "list" : `${hit?.className}`;
+  });
+  expect(over).toBe("list");
 });
 
 test("Alt+←/→ switch formats with the drawer open and focus in it, but not while typing a line; [ and ] still switch films (merge)", async ({ page, rushes }) => {

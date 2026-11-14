@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Page } from "@playwright/test";
-import { expect, test, cutButton, videoReady, reviewTab, openWorkspace, workspaceTab, currentFilm } from "./fixture.js";
+import { expect, test, cutButton, videoReady, reviewTab, openWorkspace, workspaceTab, currentFilm, pickFilm } from "./fixture.js";
 
 const logButton = (page: Page) => page.getByRole("button", { name: /^Change Log/ });
 const drawer = (page: Page) => page.getByRole("complementary", { name: "Change Log" });
@@ -31,7 +31,7 @@ function bigLog(n: number, dropped = 0) {
   return JSON.stringify({ schema: 1, rev: n, backfilled: true, undated: [], dropped, entries });
 }
 
-test("Change Log opens a drawer under the header, newest first by day, and Esc gives focus back (§22.8)", async ({ page, rushes }) => {
+test("Change Log opens a drawer under its row, newest first by day, and Esc gives focus back (§22.8)", async ({ page, rushes }) => {
   await rushes.addCut("v1: first pass; rough timing");
   await rushes.addVariant("music", "Night drive", { seconds: 2, freq: 220, lane: "night-drive" });
   await page.goto(rushes.url);
@@ -47,12 +47,14 @@ test("Change Log opens a drawer under the header, newest first by day, and Esc g
   await expect(rows(page).nth(0).locator(".ltag")).toHaveText("Music");
   await expect(rows(page).nth(0)).toHaveAccessibleName(/^Music: “Night drive” added to night-drive \(Music, \d\d:\d\d, by the agent\)$/);
   await settled(page);
-  const head = (await page.locator("header.head").boundingBox())!;
+  const head = (await page.locator(".deskbar").boundingBox())!;
   const box = (await d.boundingBox())!;
   expect(box.y).toBeGreaterThanOrEqual(Math.floor(head.y + head.height) - 1);
   expect(Math.round(box.width)).toBe(440);
   expect(Math.round(box.x + box.width)).toBe(1440);
-  await expect(button).toBeInViewport(); // under the header, so the button stays to close it
+  await expect(button).toBeInViewport(); // under its row, so the button stays to close it
+  const b = (await button.boundingBox())!;
+  expect(await page.evaluate(([x, y]) => !!document.elementFromPoint(x, y)?.closest(".clog"), [b.x + b.width / 2, b.y + b.height / 2])).toBe(true);
   await expect(d.getByLabel("Add a line to the log")).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(d).toHaveCount(0);
@@ -503,7 +505,7 @@ test("a line the drawer has shown is seen, even when the page hears of it after 
   await expect(logButton(page).locator(".cdot")).toHaveCount(0);
 });
 
-test("the drawer stays under the header as the page scrolls (I2)", async ({ page, rushes }) => {
+test("the drawer stays under its row while the work area scrolls, and the page itself never does (I2)", async ({ page, rushes }) => {
   await rushes.addCut("first cut");
   await page.setViewportSize({ width: 1000, height: 420 });
   await page.goto(rushes.url);
@@ -511,19 +513,19 @@ test("the drawer stays under the header as the page scrolls (I2)", async ({ page
   await logButton(page).click();
   await settled(page);
   const under = () => page.evaluate(() => {
-    const head = document.querySelector("header.head")!.getBoundingClientRect().bottom;
+    const head = document.querySelector(".deskbar")!.getBoundingClientRect().bottom;
     return [Math.round(document.getElementById("changelog")!.getBoundingClientRect().top), Math.max(0, Math.round(head))];
   });
   const [top0, head0] = await under();
   expect(top0).toBe(head0);
-  expect(await page.evaluate(() => document.documentElement.scrollHeight > window.innerHeight)).toBe(true);
+  // The window is short: the work area has more than it shows, and scrolls inside the frame.
+  expect(await page.locator("main.body").evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
   await page.mouse.move(300, 300);
   await page.mouse.wheel(0, 40);
-  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
-  // The scroll event comes a frame after the scroll (WebKit): the drawer follows it there.
-  await expect.poll(async () => { const [top, head] = await under(); return top - head; }).toBe(0);
-  const [, head1] = await under();
-  expect(head1).toBeLessThan(head0);
+  await expect.poll(() => page.locator("main.body").evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+  expect(await page.evaluate(() => window.scrollY)).toBe(0);
+  const [top1, head1] = await under();
+  expect([top1, head1]).toEqual([top0, head0]);
 });
 
 test("a line that arrives while the drawer is open counts as seen, even when its filter hides it (R19)", async ({ page, rushes }) => {
@@ -558,25 +560,23 @@ async function longProject(rushes: any) {
   await writeFile(file, JSON.stringify({ ...p, name: "Lumen launch film" }, null, 2));
 }
 
-/** The header's visible children, as [name, top, bottom, left, right]. */
-const headerRow = (page: Page) =>
-  page.locator("header.head").evaluate((h) =>
+/** The row under the top bar: its visible children, with their boxes. */
+const barRow = (page: Page) =>
+  page.locator(".deskbar").evaluate((h) =>
     [...h.children].filter((c) => (c as HTMLElement).offsetParent !== null && c.getBoundingClientRect().width > 0).map((c) => {
       const r = c.getBoundingClientRect();
       return { name: `${c.tagName.toLowerCase()}.${c.className}`.slice(0, 40), top: Math.round(r.top), bottom: Math.round(r.bottom), left: Math.round(r.left), right: Math.round(r.right), mid: Math.round((r.top + r.bottom) / 2) };
     }));
 
 for (const width of [1440, 1280, 1100]) {
-  test(`at ${width} px a long project's header stays one row: Change Log and Send to agent share it (Task 7)`, async ({ page, rushes }) => {
+  test(`at ${width} px a long project's top bar stays one line, and Change Log and Send to agent share the row under it (Task 7)`, async ({ page, rushes }) => {
     await longProject(rushes);
     await page.setViewportSize({ width, height: 900 });
     await page.goto(rushes.url);
     await videoReady(page);
-    await expect(page.locator("header.head .crumb")).toContainText("Lumen launch film");
-    await expect(page.locator(".foundchip")).toContainText("59");
-    const films = page.getByRole("navigation", { name: "Films" }).getByRole("button");
-    await expect(films).toHaveCount(2);
-    await films.nth(1).click(); // the launch film, locked at its long-labelled cut
+    await expect(page.locator("header.top .proj")).toContainText("Lumen launch film");
+    await expect(workspaceTab(page, "Assets").locator(".wcount")).toHaveText("59");
+    await pickFilm(page, "Lumen launch film"); // locked at its long-labelled cut
     await videoReady(page);
     await expect(cutButton(page)).toContainText("Tighter middle 35");
     const send = page.getByRole("button", { name: /^Send to agent/ });
@@ -585,42 +585,41 @@ for (const width of [1440, 1280, 1100]) {
     const w = (await logButton(page).boundingBox())!.width;
     if (width > 1100) expect(w).toBeGreaterThan(100);
     else expect(w).toBeLessThan(48);
-    const row = await headerRow(page);
-    console.log(width, JSON.stringify(row));
+    const row = await barRow(page);
     const mids = row.map((c) => c.mid);
     expect(Math.max(...mids) - Math.min(...mids), JSON.stringify(row)).toBeLessThanOrEqual(2);
     const [s, l] = [(await send.boundingBox())!, (await logButton(page).boundingBox())!];
     expect(Math.abs(s.y - l.y)).toBeLessThanOrEqual(1);
-    expect(s.x + s.width).toBeLessThanOrEqual(width - 19); // on the right, inside the padding
-    const head = (await page.locator("header.head").boundingBox())!;
-    expect(head.height).toBeLessThan(80);
-    // Nothing in the header spills out of it, and nothing in it spills out of its own box (a version
-    // button wider than its slot, a film's name past its pill).
-    expect(await page.locator("header.head").evaluate((h) => h.scrollWidth <= h.clientWidth)).toBe(true);
-    const spills = await page.locator("header.head").evaluate((h) =>
-      [...h.querySelectorAll(".vwrap > .vbtn, .vbtn > *, .pack > .pill, .pill > *, .crumb > *")]
-        .filter((c) => c.getBoundingClientRect().right > c.parentElement!.getBoundingClientRect().right + 1)
+    expect(s.x + s.width).toBeLessThanOrEqual(width - 9); // on the right, inside the padding
+    expect((await page.locator(".deskbar").boundingBox())!.height).toBeLessThan(50);
+    expect((await page.locator("header.top").boundingBox())!.height).toBeLessThan(50);
+    // Nothing in the top bar spills out of it, and nothing in it spills out of its own box (a cut
+    // button wider than its slot, a film's name past its button).
+    expect(await page.locator("header.top").evaluate((h) => h.scrollWidth <= h.clientWidth)).toBe(true);
+    const spills = await page.locator("header.top").evaluate((h) =>
+      [...h.querySelectorAll(".tleft > *, .vwrap > .vbtn, .vbtn > *, .pick > *, .proj > *")]
+        .filter((c) => c.getBoundingClientRect().width > 1 && c.getBoundingClientRect().right > c.parentElement!.getBoundingClientRect().right + 1)
         .map((c) => `${c.parentElement!.className} > ${c.className || c.tagName}`));
     expect(spills).toEqual([]);
     // Names that don't fit are cut short on one line, never wrapped onto a second.
-    const wrapped = await page.locator("header.head").evaluate((h) =>
-      [...h.querySelectorAll(".crumb > span, .pill .pname, .vbtn .vlbl")].filter((el) => el.getBoundingClientRect().height > 26).map((el) => el.textContent));
+    const wrapped = await page.locator("header.top").evaluate((h) =>
+      [...h.querySelectorAll(".proj .pname, .pick .filmname, .vbtn .vlbl")].filter((el) => el.getBoundingClientRect().height > 26).map((el) => el.textContent));
     expect(wrapped).toEqual([]);
     if (width === 1440) {
-      // At 1440 the films' names, what you switch between, are whole (the project's name gives up the few pixels).
-      expect(await page.locator("header.head .pill .pname").evaluateAll((els) => els.every((el) => el.scrollWidth <= el.clientWidth))).toBe(true);
+      // At 1440 the film's name, what you switch between, is whole.
+      expect(await page.locator("header.top .pick .filmname").evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
     }
   });
 }
 
-test("the header's right-hand buttons sit at the right edge when there's room to spare (Task 7)", async ({ page, rushes }) => {
+test("the Change Log and Send to agent sit at the right edge of their row when there's room to spare (Task 7)", async ({ page, rushes }) => {
   await rushes.addCut("first cut");
   await page.goto(rushes.url);
   await videoReady(page);
   const send = (await page.getByRole("button", { name: /^Send to agent/ }).boundingBox())!;
-  expect(Math.round(send.x + send.width)).toBe(1420);
+  expect(Math.round(send.x + send.width)).toBe(1430);
   const log = (await logButton(page).boundingBox())!;
-  expect(Math.round(log.x + log.width)).toBe(Math.round(send.x) - 14);
+  expect(Math.round(log.x + log.width)).toBe(Math.round(send.x) - 8);
 });
 
 test("under 1100 px the Change Log button is its icon, named for screen readers and by a tooltip (Task 7)", async ({ page, rushes }) => {
@@ -664,7 +663,7 @@ test("a label, a note and a log line in a right-to-left script start on their ow
   ]);
 });
 
-test("the header's tooltips stay above the open drawer, so Shortcuts can still be read (final review)", async ({ page, rushes }) => {
+test("the top bar's tooltips stay above the open drawer, so More's can still be read (final review)", async ({ page, rushes }) => {
   await rushes.addCut("first cut");
   await page.goto(rushes.url);
   await videoReady(page);
@@ -672,22 +671,21 @@ test("the header's tooltips stay above the open drawer, so Shortcuts can still b
   await settled(page);
   // A tooltip is a pseudo-element with pointer-events none, so a test can't hit it; with the events
   // on, the element under a point inside it is the button's own, unless the drawer covers it.
-  await page.addStyleTag({ content: ".head [data-tip]::after { pointer-events: auto !important; }" });
-  const keys = page.getByRole("button", { name: "Keyboard shortcuts" });
-  await keys.hover();
-  await expect(keys).toHaveCSS("position", "relative");
-  const box = (await keys.boundingBox())!;
-  const head = (await page.locator("header.head").boundingBox())!;
+  await page.addStyleTag({ content: ".top [data-tip]::after { pointer-events: auto !important; }" });
+  const more = page.getByRole("button", { name: "More", exact: true });
+  await more.hover();
+  await expect(more).toHaveCSS("position", "relative");
+  const box = (await more.boundingBox())!;
+  const head = (await page.locator("header.top").boundingBox())!;
   const d = (await drawer(page).boundingBox())!;
-  // A point of the tooltip that lies below the header, and so over the drawer when it covers it.
-  const x = box.x + box.width / 2;
-  const y = head.y + head.height + 4;
-  expect(y).toBeGreaterThan(box.y + box.height + 8);
-  expect(y).toBeLessThan(box.y + box.height + 8 + 20);
+  // A point of the tooltip that lies below the top bar, over the row the drawer hangs from.
+  const x = box.x + box.width / 2 - 4;
+  const y = head.y + head.height + 6;
+  expect(y).toBeGreaterThan(box.y + box.height + 6);
   expect(x).toBeGreaterThan(d.x);
   const hit = await page.evaluate(([px, py]) => {
     const el = document.elementFromPoint(px, py);
-    return { inDrawer: !!el?.closest(".drawer"), tip: el?.closest("[data-tip]")?.getAttribute("aria-label") ?? null };
+    return { inDrawer: !!el?.closest(".drawer"), inBar: !!el?.closest(".deskbar"), tip: el?.closest("[data-tip]")?.getAttribute("aria-label") ?? null };
   }, [x, y]);
-  expect(hit).toEqual({ inDrawer: false, tip: "Keyboard shortcuts" });
+  expect(hit).toEqual({ inDrawer: false, inBar: false, tip: "More" });
 });

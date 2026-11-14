@@ -1,5 +1,5 @@
 import type { Locator, Page } from "@playwright/test";
-import { expect, hasFfmpeg, test, type Rushes, openReviewTab, reviewTab, openWorkspace, workspaceTab } from "./fixture.js";
+import { expect, hasFfmpeg, test, type Rushes, openReviewTab, reviewTab, openWorkspace, workspaceTab, foundBadge, openMore } from "./fixture.js";
 
 declare global {
   interface Window {
@@ -35,7 +35,7 @@ const SOME: Parameters<Rushes["writeFiles"]>[0] = [
   { path: "old/draft.mp4", video: true },
 ];
 
-test("Found is first in the Assets sidebar with its count; groups, reasons, the card and the header chip show", async ({ page, rushes }) => {
+test("Found is first in the Assets sidebar with its count; groups, reasons, the card and the count on Assets show", async ({ page, rushes }) => {
   test.skip(!hasFfmpeg, "the card needs ffprobe: the read is picked by its length");
   await rushes.addCut();
   await rushes.writeFiles([
@@ -50,16 +50,20 @@ test("Found is first in the Assets sidebar with its count; groups, reasons, the 
   expect(added.map((a) => a.path)).toEqual(["vo/take-read.wav"]);
 
   await page.goto(rushes.url);
-  // The chip: one brought in, five left. It is there before Found has been opened.
-  const chip = page.locator(".foundchip");
-  await expect(chip).toHaveText("1 brought in · 5 more found");
+  // §27, 5.2: Assets carries the five left to look at, and More's Bring in says the whole of it. Both are there before
+  // Found has been opened.
+  const chip = foundBadge(page);
+  await expect(chip).toHaveText("5");
+  await openMore(page);
+  await expect(page.getByRole("menuitem", { name: /^Bring in new files/ })).toContainText("1 brought in · 5 more found");
+  await page.keyboard.press("Escape");
 
   await openWorkspace(page, "Assets");
   const folders = page.getByRole("navigation", { name: "Folders" }).locator(".afolder-btn");
   await expect(folders.first()).toHaveText(/^Found\s*5$/);
   await foundButton(page).click();
 
-  // The chip has done its job once Found is open.
+  // The count has done its job once Found is open.
   await expect(chip).toHaveCount(0);
 
   // The card of what came in with the cut, with its reasons (the read's description).
@@ -100,14 +104,17 @@ test("Found is first in the Assets sidebar with its count; groups, reasons, the 
   await expect(page.getByText(FOOTER)).toBeVisible();
   await expect(bringIn(page)).toBeDisabled();
 
-  // Away from Found and back: nothing has changed, so the chip stays away. A new change brings it back.
+  // Away from Found and back: nothing has changed, so the count stays away. A new change brings it back.
   await openReviewTab(page, "Timeline");
   await expect(chip).toHaveCount(0);
   await rushes.writeFiles([{ path: "bed/loop-new.wav", seconds: 11, freq: 110 }]);
   await rushes.scan();
-  await expect(chip).toHaveText("1 brought in · 6 more found");
-  // The chip opens Assets › Found.
-  await chip.click();
+  await expect(chip).toHaveText("6");
+  // More's Bring in new files says what is waiting, and opens Assets › Found.
+  await openMore(page);
+  const bring = page.getByRole("menuitem", { name: /^Bring in new files/ });
+  await expect(bring).toContainText("1 brought in · 6 more found");
+  await bring.click();
   await expect(workspaceTab(page, "Assets")).toHaveAttribute("aria-selected", "true");
   await expect(page.getByRole("heading", { name: "Found" })).toBeVisible();
   await expect(row(page, "loop-new.wav")).toBeVisible();
@@ -120,9 +127,12 @@ test("ticked files come in as unpicked reads: the rows leave, the tabs unlock, a
   await rushes.scan();
   const picksBefore = await rushes.api("GET", "/api/picks");
 
-  await openFound(page, rushes);
+  await page.goto(rushes.url);
   await expect(reviewTab(page, "Voice")).toHaveAttribute("data-locked", "true");
   await expect(reviewTab(page, "Music")).toHaveAttribute("data-locked", "true");
+  await openWorkspace(page, "Assets");
+  await foundButton(page).click();
+  await expect(page.getByRole("heading", { name: "Found" })).toBeVisible();
 
   await row(page, "take-one.wav").getByRole("checkbox").check();
   await expect(bringIn(page)).toHaveText("Bring in 1");
@@ -139,7 +149,8 @@ test("ticked files come in as unpicked reads: the rows leave, the tabs unlock, a
   await expect(page.locator(".fcard.in .frow")).toHaveCount(2);
   await expect(foundButton(page)).toHaveText(/4$/);
 
-  // The Voiceover and Music tabs unlock and show those files; nothing is picked.
+  // The Voice and Music tabs unlock and show those files; nothing is picked.
+  await openWorkspace(page, "Review");
   await expect(reviewTab(page, "Voice")).not.toHaveAttribute("data-locked");
   await expect(reviewTab(page, "Music")).not.toHaveAttribute("data-locked");
   expect(await rushes.api("GET", "/api/picks")).toEqual(picksBefore);
@@ -330,7 +341,7 @@ test("a 13th ticked file of one kind is held back with the cap line, and 12 come
   await rushes.scan();
 
   await page.goto(rushes.url);
-  await expect(page.locator(".foundchip")).toHaveText("13 found");
+  await expect(foundBadge(page)).toHaveText("13");
   await expect(workspaceTab(page, "Assets")).not.toHaveAttribute("data-locked");
   await openWorkspace(page, "Assets");
   // With nothing else in Assets, Found is what opens.
@@ -481,7 +492,8 @@ test("the request to open Found is used once: a later plain visit to Assets open
   await rushes.scan();
   await page.goto(rushes.testUrl());
   await openReviewTab(page, "Timeline");
-  await page.locator(".foundchip").click();
+  await openMore(page);
+  await page.getByRole("menuitem", { name: /^Bring in new files/ }).click();
   await expect(page.getByRole("heading", { name: /^Found/ })).toBeVisible();
   // Away and back, plain: Cuts, as ever; and with a kind asked for, it is used once too.
   await openReviewTab(page, "Timeline");
@@ -749,7 +761,7 @@ test("the chip returns when one file is swapped for another, even if the counts 
   await rushes.writeFiles(SOME);
   await rushes.scan();
   await openFound(page, rushes);
-  const chip = page.locator(".foundchip");
+  const chip = foundBadge(page);
   await expect(chip).toHaveCount(0);
   await openReviewTab(page, "Timeline");
   await expect(chip).toHaveCount(0);
@@ -759,7 +771,7 @@ test("the chip returns when one file is swapped for another, even if the counts 
   await rushes.scan();
   const counts = (await rushes.api("GET", "/api/state")).found.counts;
   expect(counts).toMatchObject({ voice: 2, music: 1, other: 2, cut: 1 });
-  await expect(chip).toHaveText("6 found");
+  await expect(chip).toHaveText("6");
 });
 
 // Plan 5, Task 6: a locked tab says when files of its kind were found (§20.5), and Review opens Found on that kind.
@@ -798,7 +810,7 @@ test("a locked tab says how many files of its kind were found, with a Review but
   await expect(foundLine(page)).toHaveCount(0);
 
   // Review opens Assets > Found, filtered to the kind the tab is for.
-  await reviewTab(page, "Music").click();
+  await openReviewTab(page, "Music");
   await page.locator(".locked").getByRole("button", { name: /^Review/ }).click();
   await expect(page.getByRole("heading", { name: /^Found/ })).toBeVisible();
   await expect(page.getByRole("group", { name: "Kind" }).getByRole("button", { name: /^Music/ })).toHaveAttribute("aria-pressed", "true");
@@ -806,7 +818,7 @@ test("a locked tab says how many files of its kind were found, with a Review but
   await expect(row(page, "theme-a.wav")).toBeVisible();
 
   // And the sound-effects tab's Review lands on sound effects.
-  await reviewTab(page, "Effects").click();
+  await openReviewTab(page, "Effects");
   await page.locator(".locked").getByRole("button", { name: /^Review/ }).click();
   await expect(page.getByRole("group", { name: "Kind" }).getByRole("button", { name: /^Sound effects/ })).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator(".frow")).toHaveCount(1);

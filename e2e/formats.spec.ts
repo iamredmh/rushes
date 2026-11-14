@@ -1,7 +1,7 @@
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Page } from "@playwright/test";
-import { expect, hasFfmpeg, pickVersion, test, cutButton, videoReady, openWorkspace, workspaceTab, pickFilm } from "./fixture.js";
+import { expect, hasFfmpeg, pickVersion, test, cutButton, videoReady, openWorkspace, workspaceTab, pickFilm, filmButton } from "./fixture.js";
 
 test.skip(!hasFfmpeg, "formats are generated with ffmpeg and measured with ffprobe");
 
@@ -387,8 +387,9 @@ test("a remembered format whose file has gone keeps its shape after a film switc
   await pickFilm(page, "Teaser");
   await videoReady(page);
   // The very first frame painted after the remount is already 9:16, not 16:9 corrected later.
+  await filmButton(page).click();
   const first = await page.evaluate(async () => {
-    const hero = [...document.querySelectorAll<HTMLButtonElement>('nav[aria-label="Films"] button')].find((b) => /Hero/.test(b.textContent ?? ""))!;
+    const hero = [...document.querySelectorAll<HTMLButtonElement>('[role="menu"][aria-label="Films"] [role="menuitem"]')].find((b) => /Hero/.test(b.textContent ?? ""))!;
     hero.click();
     await new Promise((r) => requestAnimationFrame(r));
     const b = document.querySelector(".frame")!.getBoundingClientRect();
