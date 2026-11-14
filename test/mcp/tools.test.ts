@@ -956,6 +956,14 @@ describe("rushes_add_visual (§25.5)", () => {
     await t.close();
   });
 
+  it("names the button the user presses as the dashboard does: Send, at the foot of the notes panel", async () => {
+    const t = await connect();
+    const { tools } = await t.client.listTools();
+    for (const x of tools) expect(x.description ?? "").not.toMatch(/Send to agent/);
+    expect(tools.find((x) => x.name === "rushes_get_batch")!.description).toMatch(/pressing Send, at the foot of the notes panel/);
+    await t.close();
+  });
+
   it("says in its description what to send for a new visual and for a new version, and that a fixed note is marked done", async () => {
     const t = await connect();
     const { tools } = await t.client.listTools();

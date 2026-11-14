@@ -390,7 +390,7 @@ export function lanesForVideo(lanes: Lane[], videoId: string | null | undefined,
 
 export const BatchSchema = fileObject({
   id,
-  // The tab the batch's items all come from, or null when it spans tabs (Send to agent sends every tab).
+  // The tab the batch's items all come from, or null when it spans tabs (Send sends every tab).
   stage: StageSchema.nullable(),
   noteIds: z.array(z.string()).default([]),
   sectionIds: z.array(z.string()).default([]),

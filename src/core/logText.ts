@@ -155,7 +155,7 @@ export function logMarkdown(i: LogMarkdownInput): string {
   return lines.join("\n") + "\n";
 }
 
-/** §22.7: Send to agent's "Recent changes" block. The last `max` lines, newest first; empty when there are none. */
+/** §22.7: the "Recent changes" block of the prompt Send gives. The last `max` lines, newest first; empty when there are none. */
 export function recentChanges(entries: Pick<LogLine, "at" | "text">[], max = 5): string {
   const top = entries.slice(0, max);
   if (top.length === 0) return "";

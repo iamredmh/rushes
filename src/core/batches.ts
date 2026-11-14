@@ -17,7 +17,7 @@ const STAGE_NAMES: Record<Stage, string> = {
 
 /**
  * Gather open, unsent items into a batch: to-do notes with no batch yet, and changed or flagged
- * script sections. With a stage, only that tab's; with none (Send to agent), every tab's, on every
+ * script sections. With a stage, only that tab's; with none (Send), every tab's, on every
  * film in play. A batch whose items all come from one tab is that tab's batch; one that spans tabs
  * has no stage.
  */

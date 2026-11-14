@@ -188,7 +188,7 @@ const LevelValue = z.number().min(LEVEL_MIN).max(LEVEL_MAX).multipleOf(LEVEL_STE
 const LevelsBody = z.object({ voice: LevelValue.nullable(), music: LevelValue.nullable(), sfx: LevelValue.nullable() }).partial();
 const PutAwayBody = z.object({ away: z.boolean() });
 const PicksBody = z.object({ video: z.string().min(1).max(200).optional(), lanes: PickMap.optional(), sections: PickMap.optional(), levels: LevelsBody.optional() });
-// No stage: every tab's open notes (Send to agent). A stage: that tab's only.
+// No stage: every tab's open notes (Send). A stage: that tab's only.
 const BatchBody = z.object({ stage: StageSchema.optional() });
 
 const NoteQuery = z.object({
