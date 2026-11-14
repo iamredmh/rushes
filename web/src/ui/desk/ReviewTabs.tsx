@@ -1,5 +1,5 @@
 // §27, 5.4 to 5.6: Review's tabs. The timeline, then a tab per sound carrying its count of takes (a quiet number, or
-// "N new" on the accent while takes wait to be chosen), and, until sound joins the timeline, the Mix.
+// "N new" on the accent while takes wait to be chosen). The mix plays on the timeline, so it has no tab (5.6).
 import type { DeskView } from "../../desk.js";
 import { Icon } from "../Icon.js";
 
@@ -11,7 +11,7 @@ export interface ReviewTabRow {
   locked: boolean;
   /** What a locked tab's tooltip asks your agent for. */
   ask: string;
-  /** Takes on this film: all of them, and how many are new. Null for the timeline and the mix. */
+  /** Takes on this film: all of them, and how many are new. Null for the timeline. */
   takes: { all: number; fresh: number } | null;
   /** Open notes on this tab. */
   todo: number;

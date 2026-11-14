@@ -48,7 +48,7 @@ describe("styles.css", () => {
     expect(names(dark)).toContain("--black");
   });
   it("the lanes take their colours from the tokens, so they follow the mode", () => {
-    for (const file of ["Mix.tsx", "VariantTab.tsx", "Voice.tsx"]) {
+    for (const file of ["desk/SoundTracks.tsx", "VariantTab.tsx", "Voice.tsx"]) {
       const text = readFileSync(new URL(`../../web/src/ui/${file}`, import.meta.url), "utf8");
       expect(text.match(/"#[0-9a-fA-F]{6}"/g) ?? [], file).toEqual([]);
     }

@@ -4,14 +4,13 @@ import {
   LOCKED_BRIEF, LOCKED_STORYBOARD, LOCKED_TAB, testFlags, STAGE_NAMES, agentPrompt, briefPrompt, briefSendPrompt, copyShortcut, currentFormat, defaultVersion, filmLanes, filmPicks, firstView, formatChips, formatPrompt, foundChip, foundSignature, foundTotal,
   filmAfterShelving, inPlay, isPlanPage, labelOfId, latest, lockedFound, neighbourFormat, neighbourVideo, openToSend, planProgress, planTarget, previousVersion, proxyKey, readyPrompt, snap, storySendPrompt, storyboardPrompt, versionFormats, type PlanPage,
 } from "../lib.js";
-import { deskPlace, nextHint, takeCount, takeGroups, viewForKey, type DeskView } from "../desk.js";
+import { deskPlace, deskView, nextHint, takeCount, takeGroups, viewForKey, type DeskView } from "../desk.js";
 import type { Batch, BriefView, FoundCounts, FoundKind, Stage, StoryboardView, Video } from "../types.js";
 import { useRushes } from "../useRushes.js";
 import { Assets, type FoundRequest } from "./Assets.js";
 import { Brief } from "./Brief.js";
 import { FormatToggle } from "./FormatToggle.js";
 import { Icon, STAGE_ICONS } from "./Icon.js";
-import { Mix } from "./Mix.js";
 import { Picture, type Source } from "./Picture.js";
 import { Storyboard } from "./Storyboard.js";
 import { PlanningTab, type PlanRow } from "./Planning.js";
@@ -38,13 +37,12 @@ declare global {
 
 // §26: the tabs that look at a film, and so are view-only while it is shelved (the others are not about one film).
 const SHELVED_VIEW_ONLY: ReadonlySet<string> = new Set(["picture", "voice", "music", "sfx", "mix"]);
-// §27, 5.4: Review's tabs, in order, with their names on the desk. Mix keeps a tab of its own until sound joins the timeline.
-const REVIEW_TABS: { view: Exclude<Stage, "script" | "visuals">; label: string }[] = [
+// §27, 5.4: Review's tabs, in order, with their names on the desk. The mix plays on the timeline (5.6): it has no tab.
+const REVIEW_TABS: { view: Exclude<Stage, "script" | "visuals" | "mix">; label: string }[] = [
   { view: "picture", label: "Timeline" },
   { view: "voice", label: "Voice" },
   { view: "music", label: "Music" },
   { view: "sfx", label: "Effects" },
-  { view: "mix", label: "Mix" },
 ];
 // Assets isn't a review stage (§15.3): it's a dashboard-only view, kept out of Stage and handled as its own case throughout this file.
 type View = DeskView;
@@ -173,7 +171,7 @@ export function App() {
   useEffect(() => {
     if (!state) return;
     if (stage === null) {
-      const first = firstView(state.tabs, state.brief);
+      const first = deskView(firstView(state.tabs, state.brief)) as Stage | "brief";
       setStage(first);
       // Opened on a planning page, so key 1 comes back to it rather than to Script.
       if (isPlanPage(first)) setPlanLast(first);
@@ -312,8 +310,9 @@ export function App() {
       setVersionId(to.version === defaultVersion(film)?.id ? null : to.version);
       setHeld(false);
     }
-    setStage(to.tab);
-    if (deskPlace(to.tab).workspace === "review") setReviewLast(to.tab);
+    const view = deskView(to.tab);
+    setStage(view);
+    if (deskPlace(view).workspace === "review") setReviewLast(view);
     setSent(null);
     if (to.row) focusRow(to.row);
   };
@@ -326,7 +325,8 @@ export function App() {
   // Leaving a view unmounts it, so a note in the making there (the same `pending` that holds the
   // film and New take) would be lost: refuse the switch instead, by click or by number key. A locked
   // tab always opens (§19.1): it shows its own page rather than a toast.
-  const show = (s: Stage | "brief" | "storyboard") => {
+  const show = (asked: Stage | "brief" | "storyboard") => {
+    const s = deskView(asked) as Stage | "brief" | "storyboard";
     if (pending && s !== stage) return toast("Add or clear your note first");
     setStage(s);
     setSent(null);
@@ -465,7 +465,8 @@ export function App() {
     );
   }
 
-  const pictureNotes = state.notes.notes.filter((n) => n.stage === "picture" && (!n.video || n.video === video?.id));
+  // §27, 5.6: the Timeline tab lists the notes on the mix with the picture's.
+  const pictureNotes = state.notes.notes.filter((n) => (n.stage === "picture" || n.stage === "mix") && (!n.video || n.video === video?.id));
   /** A film's open notes on the tabs that look at it, for the Film menu and the status bar. */
   const openNotes = (vid: string) => state.notes.notes.filter((n) => n.status === "todo" && SHELVED_VIEW_ONLY.has(n.stage) && (!n.video || n.video === vid)).length;
   const unlocked = stage === "assets" ? assetsUnlocked : stage === "brief" ? state.brief.exists : stage === "storyboard" ? state.storyboard.exists : (tab(stage)?.unlocked ?? false);
@@ -531,7 +532,8 @@ export function App() {
     locked: !tab(view)?.unlocked,
     ask: LOCKED_TAB[view].ask,
     takes: view === "voice" || view === "music" || view === "sfx" ? takeCount(sounds[view]) : null,
-    todo: tab(view)?.todo ?? 0,
+    // The timeline holds the mix's notes too (§27, 5.6).
+    todo: (tab(view)?.todo ?? 0) + (view === "picture" ? (tab("mix")?.todo ?? 0) : 0),
   }));
   // §27, 5.3: before there is anything to review (no cut, no takes), Review is the page that asks for cut 1, with no tabs.
   const reviewTabsShown = place.workspace === "review" && reviewRows.some((r) => !r.locked);
@@ -757,6 +759,9 @@ export function App() {
               formatSwitch={chips.length > 1 ? (
                 <FormatToggle chips={chips} versionId={version.id} prompt={formatPrompt(state.project.name, video.name, version.id)} onSelect={switchFormat} toast={toast} />
               ) : null}
+              state={state}
+              assets={assets}
+              onOpenTab={(tab) => show(tab)}
             />
           ) : stage === "brief" ? (
             <Brief brief={state.brief} toast={toast} onChanged={() => void refresh()} settle={planSettle} />
@@ -770,17 +775,6 @@ export function App() {
             // Its own engine, disposed (and stopped) when you leave, like the other audio tabs.
             <Voice
               key="voice"
-              state={state}
-              assets={assets}
-              video={video ?? null}
-              toast={toast}
-              onChanged={() => void refresh()}
-              onPendingChange={setPending}
-            />
-          ) : stage === "mix" ? (
-            // Mute and solo live here: leaving the tab resets them, and stops and releases its engine.
-            <Mix
-              key="mix"
               state={state}
               assets={assets}
               video={video ?? null}

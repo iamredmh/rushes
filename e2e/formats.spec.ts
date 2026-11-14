@@ -1,7 +1,7 @@
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Page } from "@playwright/test";
-import { expect, hasFfmpeg, pickVersion, test, cutButton, videoReady, openWorkspace, workspaceTab, pickFilm, filmButton, cutLength, rangeChip, ruler, rulerMarkers, shotBlocks, shapeButton } from "./fixture.js";
+import { expect, hasFfmpeg, pickVersion, test, cutButton, videoReady, openWorkspace, workspaceTab, pickFilm, filmButton, cutLength, rangeChip, ruler, rulerMarkers, shotBlocks, shapeButton, CUT_SOUND_LANE, CUT_SOUND_WAVE } from "./fixture.js";
 
 test.skip(!hasFfmpeg, "formats are generated with ffmpeg and measured with ffprobe");
 
@@ -275,19 +275,21 @@ test("the Proxy/Original switch belongs to the primary: it hides while another f
   await expect(page.getByRole("button", { name: "Proxy", exact: true })).toBeVisible();
 });
 
-// §27, 5.4: the proxy bar is a message over the monitor now, so a hidden one can take no room; the picture's waveform
-// comes back with its sound row (the desk plan's Task 4).
-test("at 1440×900 a 9:16 format keeps the timeline and note box on screen; the Picture track and length stay the cut's", async ({ page, rushes }) => {
+// §27, 5.4: the proxy bar is a message over the monitor now, so a hidden one can take no room. §27, 5.6: the picture's
+// waveform is drawn on the Cut sound row.
+test("at 1440×900 a 9:16 format keeps the timeline and note box on screen; the Picture track, length and waveform stay the cut's", async ({ page, rushes }) => {
   await rushes.addFormatsCut([WIDE, TALL], { audio: true });
   await rushes.api("PUT", "/api/videos/hero/shots", { shots: [{ name: "Open", start: 0 }, { name: "Logo", start: 2 }] });
   await page.goto(rushes.url);
   await videoReady(page);
+  await expect(page.locator(CUT_SOUND_WAVE)).toBeVisible({ timeout: 15_000 });
   await radio(page, "9:16").click();
   await expect(page.locator(".proxybar")).toBeHidden();
   await expect(shotBlocks(page)).toHaveText(["01 Open", "02 Logo"]);
   await expect(cutLength(page)).toHaveText("0:04.00");
+  await expect(page.locator(CUT_SOUND_WAVE)).toBeVisible();
   const vp = page.viewportSize()!;
-  for (const sel of ['[aria-label="Picture track"]', ".ruler", ".comp textarea"]) {
+  for (const sel of ['[aria-label="Picture track"]', ".ruler", CUT_SOUND_LANE, ".comp textarea"]) {
     const b = (await page.locator(sel).boundingBox())!;
     expect(b.y + b.height, sel).toBeLessThanOrEqual(vp.height);
   }

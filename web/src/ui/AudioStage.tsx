@@ -26,7 +26,7 @@ const FLAGS = typeof location === "undefined" ? { test: false, streamOver: false
 if (FLAGS.streamOver) setStreamThreshold(1);
 
 export interface AudioTestHook {
-  /** The mounted tab's engine, or null when no audio tab is showing. */
+  /** The mounted tab's engine (an audio tab's, or the Timeline tab's), or null when neither is showing. */
   engine: AudioEngine | null;
   inspect(): EngineSnapshot | null;
   /** AudioStage renders since the page loaded. */
@@ -66,6 +66,8 @@ const hook: AudioTestHook | null = FLAGS.test
     }
   : null;
 if (hook) window.__rushesAudio = hook;
+/** The same hook, for the Timeline tab's sound (§27, 5.6), whose engine follows the picture. */
+export const audioTestHook = hook;
 
 /** The cut the preview plays: the film's locked cut, or its newest. */
 export interface Preview {

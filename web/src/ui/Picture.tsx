@@ -7,7 +7,7 @@ import {
   shotLabel, shotSeek, snap, spacePressesButton, stepFrame, testFlags, versionFormats, visibleNotes,
   type FormatView, type ProxyProgress,
 } from "../lib.js";
-import type { Note, ProxyJob, Video, Version } from "../types.js";
+import type { Asset, Note, ProxyJob, State, Video, Version } from "../types.js";
 import { FormatScope } from "./FormatScope.js";
 import { Icon } from "./Icon.js";
 import { Notes } from "./Notes.js";
@@ -15,6 +15,7 @@ import { OtherFormats } from "./OtherFormats.js";
 import { ProxyBar } from "./ProxyBar.js";
 import { PictureTrack } from "./desk/PictureTrack.js";
 import { Ruler, type RulerMarker } from "./desk/Ruler.js";
+import { LoudnessReadout, type SoundTab, SoundTracks, useMix } from "./desk/SoundTracks.js";
 import { ToolStrip } from "./desk/ToolStrip.js";
 import { Transport } from "./desk/Transport.js";
 import { shortLabel } from "../versions.js";
@@ -75,6 +76,11 @@ export interface PictureProps {
   readOnly?: boolean;
   /** §27, 5.4: the format switch, drawn at the top right of the monitor; the caller leaves it out for a one-format cut. */
   formatSwitch?: ComponentChildren;
+  /** §27, 5.6: the project and its files, for the sound rows under the Picture track. */
+  state: State;
+  assets: Asset[];
+  /** A sound row's take count was clicked: open that sound's tab. */
+  onOpenTab?(tab: SoundTab): void;
 }
 
 /** §27, 5.5: the player's level and mute, remembered per browser. */
@@ -123,6 +129,7 @@ export function Picture({
   video, version, fps, notes, toast, onChanged, onPendingChange, startAt, grab, onGrabChange, playerRef,
   ffmpeg = false, proxyJob, noteProxyJob, source = "proxy", onSourceChange,
   formats = [], format = null, formatMissing = false, onPrimarySize, onBoxPendingChange, onFormatChange, readOnly = false, formatSwitch,
+  state, assets, onOpenTab,
 }: PictureProps) {
   const ref = useRef<HTMLVideoElement>(null);
   const frameRef = useRef<HTMLDivElement>(null);
@@ -453,15 +460,19 @@ export function Picture({
     else void el.requestFullscreen?.().catch(() => toast("Couldn't go full screen"));
   };
 
-  // §27, 5.5: the level and mute live on the element, and are remembered per browser.
+  // §27, 5.6: the takes in use, played in step with the picture, and the cut's own sound.
+  const mix = useMix({ state, assets, video, version, player: ref, duration, monitor: sound, toast, onChanged });
+
+  // §27, 5.5: the level and mute live on the element, and are remembered per browser. With a take in use the takes are
+  // heard instead (through the engine, at the same level), and the cut's own sound only when its row says so.
   useEffect(() => {
     const v = ref.current;
     if (v) {
       v.volume = sound.level;
-      v.muted = sound.muted;
+      v.muted = sound.muted || mix.videoMuted;
     }
-    remember(VOLUME_KEY, JSON.stringify(sound));
-  }, [sound]);
+  }, [sound, mix.videoMuted]);
+  useEffect(() => remember(VOLUME_KEY, JSON.stringify(sound)), [sound]);
 
   // §27, 5.4: dragging the divider sets the timeline panel's share of the column, from SPLIT_MIN to SPLIT_MAX.
   const splitDrag = useRef<{ top: number; height: number } | null>(null);
@@ -558,6 +569,25 @@ export function Picture({
     setNoteScope("this");
     setBox(null);
     onGrabChange(video.id, null);
+    onChanged();
+  };
+
+  // §27, 5.6: until the notes panel's target line, a second button sends what is typed as a note on the whole mix:
+  // at the playhead, or on the range marked.
+  const addMix = async (text: string) => {
+    const isRange = range.in !== null && range.out !== null;
+    await api.post("/api/notes", {
+      stage: "mix",
+      video: video.id,
+      version: version.id,
+      on: null,
+      scope: isRange ? "range" : "point",
+      t: isRange ? range.in : now(),
+      tOut: isRange ? range.out : null,
+      text,
+      marks: [],
+    });
+    clearRange();
     onChanged();
   };
 
@@ -836,6 +866,7 @@ export function Picture({
           onVolume={(level) => setSound({ level, muted: level === 0 ? sound.muted : false })}
           onMute={() => setSound({ ...sound, muted: !sound.muted })}
           onFullScreen={fullScreen}
+          loudness={mix.inUse ? <LoudnessReadout loudness={mix.loudness} /> : null}
         />
 
         <div
@@ -891,6 +922,7 @@ export function Picture({
               seek(shotSeek(start, fps));
             }}
           />
+          <SoundTracks mix={mix} duration={duration} t={t} onSeek={seek} onOpenTab={onOpenTab} />
         </div>
       </div>
 
@@ -905,6 +937,8 @@ export function Picture({
         onAdd={add}
         onChanged={onChanged}
         onTextChange={setNoteHasText}
+        onLabel={mix.noteLabel}
+        altAdd={mix.inUse && !readOnly ? { label: "Note on the mix", onAdd: addMix } : undefined}
         formatTag={(n) => noteFormatTag(n, many)}
         cardExtra={many && view ? (n) => (
           <FormatScope

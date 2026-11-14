@@ -40,6 +40,11 @@ export function viewForKey(key: string, planLast: PlanPage): DeskView | null {
   return KEY_VIEWS[key] ?? null;
 }
 
+/** The view the desk opens for one asked for: the mix plays on the Timeline tab now, so "mix" (a key, a Change Log row) opens that. */
+export function deskView(view: DeskView): DeskView {
+  return view === "mix" ? "picture" : view;
+}
+
 export function viewForTab(tab: ReviewTab): DeskView {
   return tab === "timeline" ? "picture" : tab;
 }
