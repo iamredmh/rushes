@@ -1269,11 +1269,17 @@ test("the timeline shows a row per sound; mute and solo change the lane gains, a
   await soundButton(page, "Effects", "Solo").click();
   await expect.poll(() => laneGainsOf(page)).toEqual({ vo: 0, music: 0, sfx: 1 });
 
-  // View state only: nothing is saved, and leaving the tab resets it.
+  // View state only: nothing is saved. A trip to another Review tab keeps it for the film (final review I3: one
+  // timeline, whose tabs are views of it); a fresh page starts with none.
   const picks = await rushes.api("GET", "/api/picks");
   // (`use` is the take in use per sound, §27.6: worked out by the server, not mute or solo.)
   expect(Object.keys(picks).sort()).toEqual(["lanes", "levels", "rev", "schema", "sections", "use", "videos"]);
   await page.keyboard.press("4");
+  await openReviewTab(page, "Timeline");
+  await loaded(page, 3);
+  await expect(page.locator('.ms[aria-pressed="true"]')).toHaveCount(2);
+  await expect.poll(() => laneGainsOf(page)).toEqual({ vo: 0, music: 0, sfx: 1 });
+  await page.reload();
   await openReviewTab(page, "Timeline");
   await loaded(page, 3);
   await expect(page.locator('.ms[aria-pressed="true"]')).toHaveCount(0);

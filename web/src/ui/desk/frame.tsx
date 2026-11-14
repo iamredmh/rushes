@@ -1,7 +1,29 @@
 // §27, 5.4 and 5.5: what the Timeline tab and each sound's tab share around the monitor: the player's level and mute,
 // remembered per browser, and the divider that sets the timeline panel's share of the column (moved here from Picture).
 import type { RefObject } from "preact";
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+
+/**
+ * §27, 5.5 (final review I3): the film's one playhead across the Review tabs (Timeline, Voice, Music, Effects). The desk
+ * keeps where each film's playhead is; a tab starts there when it mounts, and leaves its own time there when it goes.
+ */
+export interface ReviewClock {
+  /** Where `film`'s playhead is, in seconds ("" for a project with no film). */
+  at(film: string): number;
+  /** The mounted tab's live time for `film`, for the desk to read at a film switch. Returns the detach, which leaves the
+   *  tab's time as the film's playhead. */
+  attach(film: string, read: () => number): () => void;
+}
+
+/**
+ * Hands the desk this tab's live time while it is mounted on `film`, and leaves it behind when the tab goes or the film
+ * changes. Call it before the hook that owns the clock (its cleanup must read the time before the clock is disposed).
+ */
+export function useReviewClock(clock: ReviewClock | undefined, film: string, read: () => number): void {
+  const latest = useRef(read);
+  latest.current = read;
+  useLayoutEffect(() => clock?.attach(film, () => latest.current()), [clock, film]);
+}
 
 /** §27, 5.5: the player's level and mute, remembered per browser. */
 const VOLUME_KEY = "rushes:volume";

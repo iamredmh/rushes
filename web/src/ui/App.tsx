@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, ApiError, projectId } from "../api.js";
 import {
   LOCKED_BRIEF, LOCKED_STORYBOARD, LOCKED_TAB, testFlags, STAGE_NAMES, agentPrompt, briefPrompt, briefSendPrompt, copyShortcut, currentFormat, defaultVersion, filmLanes, filmPicks, firstView, formatChips, formatPrompt, foundChip, foundSignature, foundTotal,
-  filmAfterShelving, inPlay, isPlanPage, labelOfId, latest, lockedFound, neighbourFormat, neighbourVideo, planProgress, planTarget, previousVersion, proxyKey, readyPrompt, snap, storySendPrompt, storyboardPrompt, versionFormats, type PlanPage,
+  filmAfterShelving, inPlay, isPlanPage, labelOfId, latest, lockedFound, neighbourFormat, neighbourVideo, planProgress, planTarget, previousVersion, proxyKey, readyPrompt, storySendPrompt, storyboardPrompt, versionFormats, type PlanPage,
 } from "../lib.js";
 import { onLabel } from "../../../src/core/notes.js";
 import { deskPlace, deskView, nextHint, noteTarget, takeCount, takeGroups, unsentCount, unsentEdits, viewForKey, type DeskView } from "../desk.js";
@@ -31,6 +31,8 @@ import { ReviewTabs, type ReviewTabRow } from "./desk/ReviewTabs.js";
 import { StatusBar } from "./desk/StatusBar.js";
 import { TopBar } from "./desk/TopBar.js";
 import { Workspaces } from "./desk/Workspaces.js";
+import type { ReviewClock } from "./desk/frame.js";
+import type { MixView } from "./desk/useMix.js";
 
 declare global {
   interface Window {
@@ -126,19 +128,33 @@ export function App() {
   const [pending, setPending] = useState(false);
   // True while Rushes, not you, is holding the cut on screen because marks are pending.
   const [held, setHeld] = useState(false);
-  // Where the next film's player should seek to once loaded, restoring that film's playhead.
-  const [startAt, setStartAt] = useState(0);
+  // §27, 5.5 (final review I3): each film's one playhead across the Review tabs, keyed by video id ("" with no film). The
+  // mounted Review tab hands over its live time (liveClock) and leaves it here when it goes; the next tab starts here.
+  const reviewTimes = useRef(new Map<string, number>());
+  const liveClock = useRef<{ film: string; read: () => number } | null>(null);
+  const reviewClock = useRef<ReviewClock>({
+    at: (film) => reviewTimes.current.get(film) ?? 0,
+    attach: (film, read) => {
+      const mine = { film, read };
+      liveClock.current = mine;
+      return () => {
+        reviewTimes.current.set(film, read());
+        if (liveClock.current === mine) liveClock.current = null;
+      };
+    },
+  }).current;
+  // The Timeline's mute and solo for the film on screen: kept across the Review tabs, let go by a film switch.
+  const mixView = useRef<MixView | null>(null);
   // Each film's pending grab (a screenshot waiting to be attached to its next note), keyed by
   // video id. This is the single source of truth: Picture holds no copy of its own, so there's
   // nothing for a remount to get stale against, and a film's entry survives a switch away and
   // back, or a trip to another tab, without needing to be threaded through per-switch memory.
   const [grabs, setGrabs] = useState<Record<string, string | null>>({});
   const toastTimer = useRef<number | undefined>(undefined);
-  // Per-film memory: playhead, version choice and hold state, so switching films and coming
-  // back doesn't lose your place. Keyed by video id.
-  const memory = useRef(new Map<string, { versionId: string | null; held: boolean; t: number }>());
-  // The playing <video> element, forwarded up from Picture, so a switch can read its live
-  // currentTime directly (never stale) and pause it before it unmounts.
+  // Per-film memory: version choice and hold state, so switching films and coming back doesn't
+  // lose your place (the playhead is reviewTimes'). Keyed by video id.
+  const memory = useRef(new Map<string, { versionId: string | null; held: boolean }>());
+  // The playing <video> element, forwarded up from Picture, so a switch can pause it before it unmounts.
   const playerRef = useRef<HTMLVideoElement | null>(null);
   // Tells Picture whenever its pending grab changes, so App can remember it per film.
   const setGrabFor = (forVideo: string, grab: string | null) => setGrabs((g) => ({ ...g, [forVideo]: grab }));
@@ -268,20 +284,20 @@ export function App() {
   const switchFilm = (newId: string) => {
     if (newId === video?.id) return;
     if (video && pending) return toast(`Add or clear your note on ${video.name} first`);
-    // Read the live element directly, and pause it before it unmounts: React state for the
-    // playhead can lag behind what's actually on screen (e.g. mid-play, or a burst of seeks),
-    // so this is the only way to be sure what's saved matches what was really showing.
+    // Read the mounted Review tab's live time directly, and pause the picture before it unmounts: React state for the
+    // playhead can lag behind what's actually on screen (e.g. mid-play, or a burst of seeks), so this is the only way
+    // to be sure what's saved matches what was really showing. The other film's tabs start at its own playhead.
     if (video) {
-      const el = playerRef.current;
-      el?.pause();
-      const t = el ? snap(el.currentTime, fps) : (memory.current.get(video.id)?.t ?? 0);
-      memory.current.set(video.id, { versionId, held, t });
+      playerRef.current?.pause();
+      const live = liveClock.current;
+      if (live && live.film === video.id) reviewTimes.current.set(video.id, live.read());
+      memory.current.set(video.id, { versionId, held });
     }
     const saved = memory.current.get(newId);
+    mixView.current = null;
     setVideoId(newId);
     setVersionId(saved?.versionId ?? null);
     setHeld(saved?.held ?? false);
-    setStartAt(saved?.t ?? 0);
   };
 
   const toggleLock = async () => {
@@ -855,6 +871,8 @@ export function App() {
               onChanged={() => void refresh()}
               onPendingChange={setPending}
               onOpenTab={(tab) => show(tab)}
+              clock={reviewClock}
+              mixView={mixView}
             />
           ) : stage === "picture" && !video ? (
             withPanel(<AllShelved onOpen={() => setShelvedRequest((n) => n + 1)} />)
@@ -869,7 +887,8 @@ export function App() {
               toast={toast}
               onChanged={() => void refresh()}
               onPendingChange={setPending}
-              startAt={startAt}
+              clock={reviewClock}
+              mixView={mixView}
               grab={grabs[video.id] ?? null}
               onGrabChange={setGrabFor}
               playerRef={playerRef}
@@ -910,6 +929,7 @@ export function App() {
               toast={toast}
               onChanged={() => void refresh()}
               onPendingChange={setPending}
+              clock={reviewClock}
             />
           ) : stage === "music" || stage === "sfx" ? (
             // Keyed by stage: each audio tab gets its own engine, disposed (and stopped) when you leave.
@@ -922,6 +942,7 @@ export function App() {
               toast={toast}
               onChanged={() => void refresh()}
               onPendingChange={setPending}
+              clock={reviewClock}
             />
           ) : null}
         </main>

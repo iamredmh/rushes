@@ -24,7 +24,7 @@ import type { Asset, Mark, Note, Version } from "../types.js";
 import { shortLabel } from "../versions.js";
 import { waveDraws } from "./Lanes.js";
 import type { FilmsControl } from "./FilmsMenu.js";
-import { SplitDivider, splitPanel, useSplit, useVolume } from "./desk/frame.js";
+import { type ReviewClock, SplitDivider, splitPanel, useReviewClock, useSplit, useVolume } from "./desk/frame.js";
 import { NoCutSlate } from "./desk/NoCut.js";
 import { escapeIsFree, NotesPanel, useNoteBox } from "./desk/NotesPanel.js";
 import { PictureTrack } from "./desk/PictureTrack.js";
@@ -195,6 +195,9 @@ export interface AudioStageProps {
   onChanged(): void;
   /** A half-typed note, a range or ticked marks wait: the caller refuses a film or tab switch meanwhile. */
   onPendingChange?(pending: boolean): void;
+  /** §27, 5.5 (final review I3): the film's one playhead across the Review tabs: the tab starts there, and leaves its
+   *  time there when it goes. */
+  clock?: ReviewClock;
 }
 
 const typing = (el: EventTarget | null) => el instanceof HTMLElement && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
@@ -289,7 +292,16 @@ export function AudioStage(props: AudioStageProps) {
     setAspect(16 / 9);
   }, [file]);
   const videoDuration = preview ? (preview.version.duration ?? loadedDuration) : null;
+  // Before the engine's own hook, so leaving reads the time before the engine is disposed.
+  const engineRef = useRef<AudioEngine | null>(null);
+  useReviewClock(props.clock, props.film ?? "", () => snap(engineRef.current?.time ?? 0, fps));
   const { engine, playing, length, media } = useAudioStage(clips, videoDuration);
+  engineRef.current = engine;
+  // The tab opens where the film's playhead is (clamped to the tab's length once that is known).
+  useLayoutEffect(() => {
+    const at = props.clock?.at(props.film ?? "") ?? 0;
+    if (at > 0) engine.seek(at);
+  }, []);
 
   // ---- the selection: the take auditioned and the note's target ----
   const [picked, setPicked] = useState<Picked | null>(null);
@@ -339,8 +351,8 @@ export function AudioStage(props: AudioStageProps) {
     };
   }, []);
 
-  // Another film starts from the top with nothing selected. A pending note refuses the switch, so nothing in progress
-  // is dropped here.
+  // Another film starts at its own playhead with nothing selected. A pending note refuses the switch, so nothing in
+  // progress is dropped here.
   const seenFilm = useRef(props.film);
   useLayoutEffect(() => {
     if (seenFilm.current === props.film) return;
@@ -348,7 +360,7 @@ export function AudioStage(props: AudioStageProps) {
     setPicked(null);
     setWhole(null);
     engine.pause();
-    engine.seek(0);
+    engine.seek(props.clock?.at(props.film ?? "") ?? 0);
   }, [props.film]);
 
   // Nothing pending is dropped: a half-typed note, a range or ticked marks hold the film and the tab. A layout effect,

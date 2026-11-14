@@ -8,6 +8,7 @@ import type { Asset, State, Video } from "../types.js";
 import { AudioStage, filmsOf, type Preview, takeList } from "./AudioStage.js";
 import { filmsControl } from "./FilmsMenu.js";
 import { otherSounds } from "./desk/useMix.js";
+import type { ReviewClock } from "./desk/frame.js";
 import { Icon } from "./Icon.js";
 
 // Blind holds for the session: its shuffle is fixed at page load, and the switch survives a trip to another tab.
@@ -39,9 +40,11 @@ export interface VariantTabProps {
   onChanged(): void;
   /** A half-typed note or a range is waiting: the caller refuses a film switch meanwhile. */
   onPendingChange?(pending: boolean): void;
+  /** The film's one playhead across the Review tabs (final review I3). */
+  clock?: ReviewClock;
 }
 
-export function VariantTab({ stage, state, assets, video, toast, onChanged, onPendingChange }: VariantTabProps) {
+export function VariantTab({ stage, state, assets, video, toast, onChanged, onPendingChange, clock }: VariantTabProps) {
   const [blind, setBlindState] = useState(stage === "music" && blindSession);
   const setBlind = (on: boolean) => {
     blindSession = on;
@@ -101,6 +104,7 @@ export function VariantTab({ stage, state, assets, video, toast, onChanged, onPe
       toast={toast}
       onChanged={onChanged}
       onPendingChange={onPendingChange}
+      clock={clock}
     />
   );
 }

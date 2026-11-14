@@ -17,10 +17,10 @@ import { ProxyBar } from "./ProxyBar.js";
 import { PictureTrack } from "./desk/PictureTrack.js";
 import { Ruler, type RulerMarker } from "./desk/Ruler.js";
 import { LoudnessReadout, type SoundTab, SoundTracks } from "./desk/SoundTracks.js";
-import { useMix } from "./desk/useMix.js";
+import { type MixView, useMix } from "./desk/useMix.js";
 import { ToolStrip } from "./desk/ToolStrip.js";
 import { Transport } from "./desk/Transport.js";
-import { SplitDivider, splitPanel, useSplit, useVolume } from "./desk/frame.js";
+import { type ReviewClock, SplitDivider, splitPanel, useReviewClock, useSplit, useVolume } from "./desk/frame.js";
 import { shortLabel } from "../versions.js";
 
 declare global {
@@ -45,15 +45,18 @@ export interface PictureProps {
   /** Whether an In/Out, box or half-typed note is waiting to be submitted. A grab alone
    *  doesn't count: the file is already saved, so there's nothing left to lose. */
   onPendingChange?(pending: boolean): void;
-  /** Where to seek to once this cut's metadata has loaded (restoring a film's playhead on return). */
-  startAt?: number;
+  /** §27, 5.5 (final review I3): the film's one playhead across the Review tabs. The cut starts there once its metadata
+   *  has loaded, and this tab's time is left there when it goes. */
+  clock?: ReviewClock;
+  /** Where the desk keeps the Timeline's mute and solo for the film (useMix). */
+  mixView?: { current: MixView | null };
   /** This film's pending grab, owned by the caller: the single source of truth, so a remount
    *  (switching films, or leaving and returning to this tab) never has a stale copy to drift
    *  against. */
   grab: string | null;
   /** Tells the caller whenever the pending grab changes, so it can remember it per film. */
   onGrabChange(video: string, grab: string | null): void;
-  /** Forwards the underlying <video> element up, so a caller can read its live time or pause it directly. */
+  /** Forwards the underlying <video> element up, so a caller can pause it directly. */
   playerRef?: { current: HTMLVideoElement | null };
   /** §19.5: the server has ffmpeg (proxies are offered, and Grab Frame takes stills from the original). */
   ffmpeg?: boolean;
@@ -96,12 +99,19 @@ const typing = (el: EventTarget | null) => el instanceof HTMLElement && (el.isCo
  * track, with notes down the right: frame stepping, In/Out ranges, a box on the frame and frame grabs.
  */
 export function Picture({
-  video, version, fps, notes, toast, onChanged, onPendingChange, startAt, grab, onGrabChange, playerRef,
+  video, version, fps, notes, toast, onChanged, onPendingChange, clock, mixView, grab, onGrabChange, playerRef,
   ffmpeg = false, proxyJob, noteProxyJob, source = "proxy", onSourceChange,
   formats = [], format = null, formatMissing = false, onPrimarySize, onBoxPendingChange, onFormatChange, readOnly = false, formatSwitch,
   state, assets, onOpenTab,
 }: PictureProps) {
   const ref = useRef<HTMLVideoElement>(null);
+  // The film's playhead, read once as the tab mounts (after the tab it replaces has left its time), for applyMetadata.
+  const startAt = useRef(0);
+  useLayoutEffect(() => {
+    startAt.current = clock?.at(video.id) ?? 0;
+  }, []);
+  // Until the cut has loaded and been sent there, the playhead is still where the film's was.
+  useReviewClock(clock, video.id, () => (ref.current && startApplied.current ? snap(ref.current.currentTime, fps) : startAt.current));
   const frameRef = useRef<HTMLDivElement>(null);
   const overlay = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
@@ -158,10 +168,10 @@ export function Picture({
   const columnRef = useRef<HTMLDivElement>(null);
   // The click that ends a box drag shouldn't also start playback.
   const justDrew = useRef(false);
-  // startAt restores a film's remembered playhead, but only once: the first metadata load
-  // after this component mounts (i.e. after a film switch, since Picture is keyed by video
-  // id). A later cut within the same film — a new version picked, or a new render arriving —
-  // must start at 0, as in Plan 2, not reuse the old restore point forever.
+  // startAt restores the film's playhead, but only once: the first metadata load after this
+  // component mounts (a film switch, since Picture is keyed by video id, or coming back from
+  // another Review tab). A later cut within the same film — a new version picked, or a new
+  // render arriving — must start at 0, as in Plan 2, not reuse the old restore point forever.
   const startApplied = useRef(false);
   // True until this Picture instance unmounts (a film switch: Picture is keyed by video id,
   // so each film gets its own instance). Guards a grab whose POST is still in flight when you
@@ -442,7 +452,7 @@ export function Picture({
   };
 
   // §27, 5.6: the takes in use, played in step with the picture, and the cut's own sound.
-  const mix = useMix({ state, assets, video, version, player: ref, duration, monitor: sound, toast, onChanged });
+  const mix = useMix({ state, assets, video, version, player: ref, duration, monitor: sound, toast, onChanged, keep: mixView });
   // A take picked as the target that is no longer in use (unpicked here, by the agent or in another tab) lets go.
   // The notes on the takes in use are this tab's too: listed, and marked on their rows.
   const takes = useTakeSelection(mix, state.notes.notes, video, fps, (to) => {
@@ -706,8 +716,8 @@ export function Picture({
     if (v.videoWidth && v.videoHeight) setAspect(v.videoWidth / v.videoHeight);
     if (!startApplied.current) {
       startApplied.current = true;
-      if (startAt) {
-        v.currentTime = Math.min(startAt, v.duration || startAt);
+      if (startAt.current) {
+        v.currentTime = Math.min(startAt.current, v.duration || startAt.current);
         setT(v.currentTime);
       }
     }

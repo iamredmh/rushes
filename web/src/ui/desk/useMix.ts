@@ -1,6 +1,7 @@
 // §27, 5.6: what the Timeline tab's sound is (moved out of SoundTracks.tsx, unchanged): what each sound plays (the take in
-// use), mute and solo as view state (never saved, reset when you leave the tab), levels saved with the picks (debounced),
-// the cut's own sound, and the loudness of what you hear, measured (debounced) for the transport.
+// use), mute and solo as view state (never saved; kept by the desk across the Review tabs, reset by a film switch), levels
+// saved with the picks (debounced), the cut's own sound, and the loudness of what you hear, measured (debounced) for the
+// transport.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { api, ApiError } from "../../api.js";
 import type { AudioEngine, LoadResult } from "../../audio/engine.js";
@@ -25,6 +26,8 @@ export const LEVEL_SAVE_DEBOUNCE_MS = 300;
 export const NAME: Record<MixLane, string> = { vo: "Voice", music: "Music", sfx: "Effects" };
 
 type LaneView = { muted: boolean; solo: boolean };
+/** Each sound's mute and solo on the Timeline tab. */
+export type MixView = Record<MixLane, LaneView>;
 const UNTOUCHED: Record<MixLane, LaneView> = { vo: { muted: false, solo: false }, music: { muted: false, solo: false }, sfx: { muted: false, solo: false } };
 
 /** One sound's row: its takes, the one in use, and what its block says. */
@@ -54,6 +57,8 @@ export interface MixInput {
   monitor: { level: number; muted: boolean };
   toast(message: string): void;
   onChanged(): void;
+  /** Final review I3: where the desk keeps the mute and solo for the film, so they outlast a trip to another tab. */
+  keep?: { current: MixView | null };
 }
 
 export interface Mix {
@@ -127,7 +132,7 @@ export function otherSounds(state: State, assets: Asset[], video: Video | null, 
 }
 
 /** Everything the Timeline tab's sound needs: what plays, how loud, what is heard and what it measures. */
-export function useMix({ state, assets, video, version, player, duration, monitor, toast, onChanged }: MixInput): Mix {
+export function useMix({ state, assets, video, version, player, duration, monitor, toast, onChanged, keep }: MixInput): Mix {
   const asset = (path: string) => assets.find((a) => a.path === path);
   const filmId = video?.id;
   // Worked out again only when what they come from changes: the Timeline re-renders every frame while it plays.
@@ -142,7 +147,11 @@ export function useMix({ state, assets, video, version, player, duration, monito
   const inUse = planned.some((r) => r.take !== null);
 
   // ---- mute and solo: view state only ----
-  const [view, setView] = useState(UNTOUCHED);
+  const [view, setView] = useState<MixView>(() => keep?.current ?? UNTOUCHED);
+  // A layout effect: a tab switch straight after a click must not unmount this before a passive effect would have run.
+  useLayoutEffect(() => {
+    if (keep) keep.current = view;
+  }, [view]);
   const toggle = (lane: MixLane, key: keyof LaneView) => setView((v) => ({ ...v, [lane]: { ...v[lane], [key]: !v[lane][key] } }));
   // A sound whose take goes (unpicked here, by the agent or in another tab) lets go of its mute and solo: there is no M
   // or S left to undo them, and a take picked later starts as any take does.
