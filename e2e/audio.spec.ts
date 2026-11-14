@@ -38,6 +38,7 @@ declare global {
       engine: { time: number; playing: boolean; seek(t: number): void; inspect(): Snapshot } | null;
       inspect(): Snapshot | null;
       renders: number;
+      panelRenders: number;
       draws(): number;
       liveContexts(): number;
       heard(): { id: string; lane: string; path: string; offset: number }[];
@@ -365,6 +366,22 @@ test("playback never re-renders the stage per frame or redraws the waveforms", a
   expect(after.draws).toBe(before.draws);
   // The playhead and timecode still moved.
   await expect(page.getByLabel("Timecode")).not.toContainText("0:00.00/");
+});
+
+test("playing, a sound's notes panel re-renders only when its target line changes, not on every frame", async ({ page, rushes }) => {
+  await twoBeds(page, rushes);
+  // A take chosen whole: its target line has no time in it, so nothing it shows moves with the clock.
+  await takeName(page, "B · Warm keys").click();
+  await noteTargetMenu(page).selectOption("whole");
+  await expect(noteTargetLabel(page)).toContainText("Warm keys");
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.waitForTimeout(200);
+  const before = await page.evaluate(() => window.__rushesAudio!.panelRenders);
+  await page.keyboard.press(" ");
+  await expect.poll(async () => (await inspect(page)).playing).toBe(true);
+  await page.waitForTimeout(1000);
+  expect(await page.evaluate(() => window.__rushesAudio!.engine!.time)).toBeGreaterThan(0.5);
+  expect((await page.evaluate(() => window.__rushesAudio!.panelRenders)) - before).toBeLessThan(10);
 });
 
 test("a file over the stream threshold plays through the streamed fallback", async ({ page, rushes }) => {
@@ -1055,13 +1072,31 @@ test("a round whose reads are all missing shows the missing marks and plays sile
   await expect.poll(() => heard(page)).toEqual([`round-1-voices/gerald@0`]);
 });
 
+test("when the take in use has lost its file, its tab is silent rather than playing another take in its place", async ({ page, rushes }) => {
+  await rushes.addVariant("music", "A · Deep house", { seconds: 4, freq: 220 });
+  const b = await rushes.addVariant("music", "B · Warm keys", { seconds: 4, freq: 330 });
+  await rushes.api("PUT", "/api/picks", { lanes: { [b.lane.id]: b.variant.id } });
+  await rm(join(rushes.root, (b.variant as unknown as { file: string }).file));
+  await rushes.scan();
+  await page.goto(rushes.testUrl());
+  await openReviewTab(page, "Music");
+  await expect(takeRows(page)).toHaveCount(2);
+  await expect(takeCircle(page, "B · Warm keys")).toHaveAttribute("aria-checked", "true");
+  await expect(takeRow(page, "B · Warm keys")).toContainText("File not found");
+  await loaded(page, 1);
+  await expect.poll(() => heard(page)).toEqual([]);
+});
+
 // ---- Picks can be cleared (Task 5) ----
+
+/** Every Unpick in the list, read from the DOM: a hidden one (visibility: hidden in its slot) is counted too. */
+const unpickButtons = (page: Page) => takesList(page).locator("button.kput", { hasText: /^Unpick$/ });
 
 test("Unpick clears a pick: In use goes back to Use, and the pick is gone from disk; the circle in use pressed again changes nothing", async ({ page, rushes }) => {
   await twoBeds(page, rushes);
   const useB = takeCircle(page, "B · Warm keys");
   // Nothing picked: no Unpick anywhere.
-  await expect(takesList(page).getByRole("button", { name: "Unpick", exact: true })).toHaveCount(0);
+  await expect(unpickButtons(page)).toHaveCount(0);
   await useB.click();
   await expect(useB).toHaveAttribute("aria-checked", "true");
   await expect(useB).toHaveAccessibleName("In use: B · Warm keys");
@@ -1074,11 +1109,11 @@ test("Unpick clears a pick: In use goes back to Use, and the pick is gone from d
   await expect(useB).toHaveAttribute("aria-checked", "true");
   expect((await rushes.api("GET", "/api/picks")).lanes).toEqual({ music: "b-warm-keys" });
   // Unpick is its own button, on the take in use only.
-  await expect(takesList(page).getByRole("button", { name: "Unpick", exact: true })).toHaveCount(1);
+  await expect(unpickButtons(page)).toHaveCount(1);
   await pressRowButton(page, "B · Warm keys", "Unpick");
   await expect(useB).toHaveAttribute("aria-checked", "false");
   await expect(useB).toHaveAccessibleName("Use this one: B · Warm keys");
-  await expect(takesList(page).getByRole("button", { name: "Unpick", exact: true })).toHaveCount(0);
+  await expect(unpickButtons(page)).toHaveCount(0);
   expect((await rushes.api("GET", "/api/picks")).lanes).toEqual({});
   // With no pick, the first bed in manifest order plays again.
   await expect.poll(async () => (await inspect(page)).gains).toMatchObject({ "music/a-deep-house": 1, "music/b-warm-keys": 0 });
@@ -1789,6 +1824,26 @@ test("Space plays after a mouse click on a tab, M, S, Blind or a scope chip (§1
   await takeRows(page).first().locator(".knm").click();
   await clearTarget(page).click();
   await spaceToggles(page);
+});
+
+test("a take on another film whose name is cut off shows it in full as a tooltip, as does its fold line", async ({ page, rushes }) => {
+  await page.setViewportSize({ width: 480, height: 900 });
+  await rushes.addCut("f2a", "F2A");
+  await rushes.addCut("f3a", "F3A");
+  const LONG_READ = "Gerald, slower and warmer, with the long pause kept";
+  await rushes.addVariant("voice", LONG_READ, { seconds: 4, freq: 300, round: "Round 1", video: "F2A" });
+  await rushes.addVariant("voice", "F3A read", { seconds: 4, freq: 320, round: "Round 2", video: "F3A" });
+  await page.goto(rushes.url);
+  await pickFilm(page, "F3A");
+  await openReviewTab(page, "Voice");
+  const fold = takesList(page).locator('.kfold[data-fold="loose"] .khd');
+  await expect(fold).toContainText("Not on this film · 1 read");
+  if (await fold.evaluate((el) => el.scrollWidth > el.clientWidth)) await expect(fold).toHaveAttribute("data-tip", /^Not on this film · 1 read/);
+  await foldToggle(page, "Not on this film").click();
+  const name = takesList(page).locator(".take.loose .knm");
+  await expect(name).toHaveCount(1);
+  expect(await name.locator("[data-name]").evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+  await expect(name).toHaveAttribute("data-tip", `Round 1 · ${LONG_READ}`);
 });
 
 test("Sound effects and Music list only the film you are on, with its own notes", async ({ page, rushes }) => {

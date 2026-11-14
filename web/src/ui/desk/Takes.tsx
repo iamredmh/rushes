@@ -95,7 +95,10 @@ export interface TakesProps {
   toast(message: string): void;
 }
 
-/** What's cut off by its column: "n" a take's name, "m" its meta line, "h" a heading. By row key, or "h:<heading>". */
+/**
+ * What's cut off by its column: "n" a take's name, "m" its meta line, "h" a heading (a fold line's too). By row key,
+ * "l:<key>" for a take on another film, or "h:<heading>".
+ */
 type Cut = Record<string, string>;
 
 function measureCut(root: HTMLElement): Cut {
@@ -104,6 +107,10 @@ function measureCut(root: HTMLElement): Cut {
   for (const row of root.querySelectorAll<HTMLElement>(".take[data-take]")) {
     const flags = (over(row.querySelector("[data-name]")) ? "n" : "") + (over(row.querySelector("[data-meta-text]")) ? "m" : "");
     if (flags) out[row.dataset.take!] = flags;
+  }
+  for (const row of root.querySelectorAll<HTMLElement>(".take[data-loose]")) {
+    const flags = (over(row.querySelector("[data-name]")) ? "n" : "") + (over(row.querySelector("[data-meta-text]")) ? "m" : "");
+    if (flags) out[`l:${row.dataset.loose!}`] = flags;
   }
   for (const h of root.querySelectorAll<HTMLElement>(".khd[data-h]")) if (over(h)) out[`h:${h.dataset.h}`] = "h";
   return out;
@@ -129,7 +136,11 @@ export function Takes(props: TakesProps) {
     const r = it.clip ? media[mediaKey(it.clip)] : undefined;
     return (r !== undefined && r !== "error" ? `${r.duration}${r.streamed ? "s" : ""}` : "") + (r === "error" ? "b" : "");
   };
-  const shape = JSON.stringify([length, sections.map((s) => s.heading), shown.map((it) => [it.key, it.name, it.meta ?? "", it.missing, marksOf(it), it.take.madeFor ?? ""]), loose.open ? loose.items.map((l) => l.key) : null]);
+  const shape = JSON.stringify([
+    length, sections.map((s) => s.heading), shown.map((it) => [it.key, it.name, it.meta ?? "", it.missing, marksOf(it), it.take.madeFor ?? ""]),
+    // The fold lines' headings carry their counts, and an open fold's rows their names and meta lines.
+    away.items.length, loose.items.length, loose.open ? loose.items.map((l) => [l.key, l.name, l.meta ?? ""]) : null,
+  ]);
   useLayoutEffect(measure, [shape]);
   useEffect(() => {
     // The list narrows with the window, the notes panel and its divider.
@@ -357,13 +368,13 @@ export function Takes(props: TakesProps) {
           {loose.open && loose.items.map((l) => (
             <div key={l.key} class="trow take loose" role="group" aria-label={l.name} data-loose={l.key}>
               <div class="thead khead">
-                <span class="knm"><span data-name>{l.name}</span></span>
+                <span class="knm tip-wrap" data-tip={cut[`l:${l.key}`]?.includes("n") ? l.name : undefined}><span data-name>{l.name}</span></span>
                 <span class="sp" />
                 {l.films && <FilmsMenu name={l.name} control={l.films} />}
               </div>
               <div class="tlane">
                 <div class="sblock empty" style={{ left: "0%", width: "100%" }}>
-                  <span class="slbl">{l.meta ?? ""}</span>
+                  <span class="slbl tip-wrap" data-tip={l.meta && cut[`l:${l.key}`]?.includes("m") ? l.meta : undefined}><span data-meta-text>{l.meta ?? ""}</span></span>
                 </div>
               </div>
             </div>

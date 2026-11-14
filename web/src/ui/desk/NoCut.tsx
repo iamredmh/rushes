@@ -151,7 +151,7 @@ export function NoCutSlate({ prompt, toast, then }: { prompt: string; toast(mess
     }
   };
   return (
-    <div class="noslate" aria-label="No cut yet">
+    <div class="noslate" role="region" aria-label="No cut yet">
       <Icon name="film" />
       <h3>No cut yet</h3>
       <p>{LOCKED_TAB.picture.unlocks} {then}</p>
