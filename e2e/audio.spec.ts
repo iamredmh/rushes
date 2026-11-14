@@ -4,7 +4,7 @@ import type { Page } from "@playwright/test";
 import { readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { makeWav } from "./fixtures/wav.js";
-import { expect, type Rushes, test } from "./fixture.js";
+import { expect, type Rushes, test, openReviewTab, reviewTab, workspaceTab, currentFilm, pickFilm } from "./fixture.js";
 
 test("the generated WAV fixture decodes in Chromium to the tone it describes", async ({ page }) => {
   const wav = makeWav({ seconds: 1.5, freq: 440 }).toString("base64");
@@ -70,20 +70,12 @@ function overflowChain(mark: ReturnType<Page["locator"]>) {
   });
 }
 
-/** Open an audio tab once it has unlocked. */
-async function openTab(page: Page, name: RegExp, key: string) {
-  const tab = page.getByRole("tab", { name });
-  await expect(tab).not.toHaveAttribute("data-locked");
-  await page.keyboard.press(key);
-  await expect(tab).toHaveAttribute("aria-selected", "true");
-}
-
 /** Two beds on Music, loaded, nothing picked. */
 async function twoBeds(page: Page, rushes: Rushes) {
   await rushes.addVariant("music", "A · Deep house", { seconds: 4, freq: 220, meta: { bpm: 120, key: "A minor" } });
   await rushes.addVariant("music", "B · Warm keys", { seconds: 4, freq: 330, meta: { description: "Soft keys, no drums" } });
   await page.goto(rushes.testUrl());
-  await openTab(page, /Music/, "4");
+  await openReviewTab(page, "Music");
   await expect(page.locator(".lane")).toHaveCount(2);
   await loaded(page, 2);
 }
@@ -114,7 +106,7 @@ test("only one bed is in use at a time, across rounds, and Mix plays that one (�
   await rushes.addVariant("music", "Pulse", { seconds: 4, freq: 220, round: "Round 1" });
   await rushes.addVariant("music", "Drift", { seconds: 4, freq: 330, round: "Round 2" });
   await page.goto(rushes.testUrl());
-  await openTab(page, /Music/, "4");
+  await openReviewTab(page, "Music");
   await expect(page.locator(".lane")).toHaveCount(2);
   const pulse = page.getByRole("button", { name: "Use Pulse" });
   const drift = page.getByRole("button", { name: "Use Drift" });
@@ -131,9 +123,9 @@ test("only one bed is in use at a time, across rounds, and Mix plays that one (�
   await expect(drift).toHaveText("Use");
   expect((await rushes.api("GET", "/api/picks?video=hero")).use.music).toMatchObject({ lane: "round-1", variant: "pulse" });
   await page.reload();
-  await openTab(page, /Music/, "4");
+  await openReviewTab(page, "Music");
   await expect(page.getByRole("button", { name: "Use Pulse" })).toHaveText("In use");
-  await openTab(page, /Mix/, "6");
+  await openReviewTab(page, "Mix");
   await expect(page.locator(".lane").filter({ hasText: "Music" })).toContainText("Pulse");
   await expect(page.locator(".lane").filter({ hasText: "Music" })).not.toContainText("Drift");
 });
@@ -244,7 +236,7 @@ test("cue labels close together never overlap, even in a narrow window", async (
   await page.setViewportSize({ width: 1000, height: 800 });
   await rushes.addVariant("sfx", "Pass A", { seconds: 10, freq: 880, cues: [{ name: "Callout", t: 3 }, { name: "Composer", t: 3.6 }, { name: "Order", t: 4.2 }, { name: "Menu", t: 8 }] });
   await page.goto(rushes.testUrl());
-  await openTab(page, /Sound effects/, "5");
+  await openReviewTab(page, "Effects");
   await loaded(page, 1);
   const cues = page.locator('.lane[data-row="sfx/pass-a"] .cue');
   await expect(cues).toHaveText(["Callout", "Composer", "Order", "Menu"]);
@@ -259,7 +251,7 @@ test("Sound effects labels cues, and a note on a cue saves the cue and its time"
   await rushes.addVariant("sfx", "Pass A", { seconds: 3, freq: 880, meta: { description: "Subtle" }, cues: [{ name: "Whoosh", t: 0.4 }, { name: "Swipe", t: 1.5 }] });
   await rushes.addVariant("sfx", "Pass B", { seconds: 3, freq: 660 });
   await page.goto(rushes.testUrl());
-  await openTab(page, /Sound effects/, "5");
+  await openReviewTab(page, "Effects");
   await expect(page.locator(".lane")).toHaveCount(2);
   await loaded(page, 2);
   await expect(page.locator('.lane[data-row="sfx/pass-a"] .cue')).toHaveText(["Whoosh", "Swipe"]);
@@ -283,7 +275,7 @@ test("the preview follows the audio clock", async ({ page, rushes }) => {
   await rushes.addCut();
   await rushes.addVariant("music", "Bed", { seconds: 4, freq: 220 });
   await page.goto(rushes.testUrl());
-  await openTab(page, /Music/, "4");
+  await openReviewTab(page, "Music");
   await loaded(page, 1);
   const pv = page.locator(".pv video");
   await expect.poll(() => pv.evaluate((v: HTMLVideoElement) => v.readyState)).toBeGreaterThanOrEqual(1);
@@ -296,7 +288,7 @@ test("the preview follows the audio clock", async ({ page, rushes }) => {
 test("with no cut the preview is a quiet empty frame", async ({ page, rushes }) => {
   await rushes.addVariant("music", "Bed", { seconds: 2, freq: 220 });
   await page.goto(rushes.testUrl());
-  await openTab(page, /Music/, "4");
+  await openReviewTab(page, "Music");
   await expect(page.locator(".pv .pvempty")).toBeVisible();
   await expect(page.locator(".pv video")).toHaveCount(0);
 });
@@ -361,7 +353,7 @@ test("a file over the stream threshold plays through the streamed fallback", asy
   await rushes.addVariant("music", "A · Long", { seconds: 3, freq: 220 });
   await rushes.addVariant("music", "B · Long", { seconds: 3, freq: 330 });
   await page.goto(rushes.testUrl("streamOver=1"));
-  await openTab(page, /Music/, "4");
+  await openReviewTab(page, "Music");
   await loaded(page, 2);
   expect((await inspect(page)).streamed.length).toBe(2);
   const streamedMark = page.locator(".lane .smk").first();
@@ -384,7 +376,7 @@ test("a file over the stream threshold plays through the streamed fallback", asy
 test("the engine is never exposed without ?test=1", async ({ page, rushes }) => {
   await rushes.addVariant("music", "Bed", { seconds: 2, freq: 220 });
   await page.goto(rushes.url);
-  await openTab(page, /Music/, "4");
+  await openReviewTab(page, "Music");
   await expect(page.locator(".lane")).toHaveCount(1);
   expect(await page.evaluate(() => "__rushesAudio" in window)).toBe(false);
 });
@@ -397,7 +389,7 @@ test("a note on a cue two passes share names its pass, and an old bare cue id st
   // A note from before the amendment: a bare cue id, drawn on the first pass holding it.
   const old = (await rushes.api("POST", "/api/notes", { stage: "sfx", on: "swipe", scope: "point", t: 1.5, text: "Old style." })).note;
   await page.goto(rushes.testUrl());
-  await openTab(page, /Sound effects/, "5");
+  await openReviewTab(page, "Effects");
   await loaded(page, 2);
   await expect(page.locator(`.lane[data-row="sfx/pass-a"] .mk[data-note="${old.id}"]`)).toHaveCount(1);
   await page.getByRole("combobox", { name: "Note on" }).selectOption({ label: "Cue · Swipe · Pass B" });
@@ -427,7 +419,7 @@ test("the notes column shows three marked notes in full above the composer, at 1
     });
   }
   await page.goto(rushes.testUrl());
-  await openTab(page, /Music/, "4");
+  await openReviewTab(page, "Music");
   await expect(page.locator(".note")).toHaveCount(3);
   const comp = page.locator(".comp");
   const pointHeight = (await comp.boundingBox())!.height;
@@ -454,7 +446,7 @@ test("Blind never changes the bed being heard", async ({ page, rushes }) => {
     await rushes.addVariant("music", name, { seconds: 2, freq: 200 + i * 50 });
   }
   await page.goto(rushes.testUrl());
-  await openTab(page, /Music/, "4");
+  await openReviewTab(page, "Music");
   await loaded(page, 4);
   const gains = async () => (await inspect(page)).gains;
   const before = await gains();
@@ -472,28 +464,27 @@ test("a half-typed music note holds the film", async ({ page, rushes }) => {
   await rushes.addCut("cutdown", "Cutdown");
   await rushes.addVariant("music", "Bed", { seconds: 2, freq: 220, video: ["Hero", "Cutdown"] });
   await page.goto(rushes.testUrl());
-  await openTab(page, /Music/, "4");
+  await openReviewTab(page, "Music");
   await loaded(page, 1);
-  const films = page.getByRole("navigation", { name: "Films" });
-  await expect(films.getByRole("button", { name: /Hero/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(currentFilm(page)).toHaveText("Hero");
   await page.keyboard.press("n");
   await page.keyboard.type("Half a thought");
   await page.keyboard.press("Escape");
   await page.keyboard.press("]");
   await expect(page.getByRole("status")).toHaveText("Add or clear your note on Hero first");
-  await expect(films.getByRole("button", { name: /Hero/ })).toHaveAttribute("aria-pressed", "true");
-  await films.getByRole("button", { name: /Cutdown/ }).click();
-  await expect(films.getByRole("button", { name: /Hero/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(currentFilm(page)).toHaveText("Hero");
+  await pickFilm(page, "Cutdown", false);
+  await expect(currentFilm(page)).toHaveText("Hero");
   await expect(page.getByRole("textbox", { name: "New note" })).toHaveValue("Half a thought");
   // A range alone holds it too; clearing both lets the film go.
   await page.getByRole("textbox", { name: "New note" }).fill("");
   await page.getByRole("textbox", { name: "New note" }).blur();
   await page.keyboard.press("i");
   await page.keyboard.press("]");
-  await expect(films.getByRole("button", { name: /Hero/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(currentFilm(page)).toHaveText("Hero");
   await page.getByRole("button", { name: "Clear range" }).click();
   await page.keyboard.press("]");
-  await expect(films.getByRole("button", { name: /Cutdown/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(currentFilm(page)).toHaveText("Cutdown");
 });
 
 test("an audio note never says it came from another cut", async ({ page, rushes }) => {
@@ -502,7 +493,7 @@ test("an audio note never says it came from another cut", async ({ page, rushes 
   await rushes.api("POST", "/api/notes", { stage: "music", video: "hero", version: "v1", on: bed.variant.id, scope: "point", t: 1.25, text: "On v1." });
   await rushes.addCut();
   await page.goto(rushes.testUrl());
-  await openTab(page, /Music/, "4");
+  await openReviewTab(page, "Music");
   await expect(page.locator(".note .t")).toHaveText("0:01.25");
   await expect(page.locator(".note .from")).toHaveCount(0);
 });
@@ -511,7 +502,7 @@ test("the preview keeps up during playback without repeated seeking", async ({ p
   await rushes.addCut();
   await rushes.addVariant("music", "Bed", { seconds: 4, freq: 220 });
   await page.goto(rushes.testUrl());
-  await openTab(page, /Music/, "4");
+  await openReviewTab(page, "Music");
   await loaded(page, 1);
   const pv = page.locator(".pv video");
   await expect.poll(() => pv.evaluate((v: HTMLVideoElement) => v.readyState)).toBeGreaterThanOrEqual(2);
@@ -563,7 +554,7 @@ async function twoRounds(rushes: Rushes, opts: { steadier?: boolean; video?: str
 /** Open Voiceover once the current round's `files` have decoded: folded rounds aren't (§19.8). */
 async function openVoice(page: Page, rushes: Rushes, files: number) {
   await page.goto(rushes.testUrl());
-  await openTab(page, /Voiceover/, "3");
+  await openReviewTab(page, "Voice");
   await loaded(page, files);
 }
 
@@ -678,15 +669,14 @@ test("which rounds are open is kept per film", async ({ page, rushes }) => {
   await twoRounds(rushes, { video: ["Hero", "Cutdown"] });
   await openVoice(page, rushes, 2);
   const fold = page.locator(".fold");
-  const film = (name: RegExp) => page.getByRole("navigation", { name: "Films" }).getByRole("button", { name });
   await fold.click();
   await expect(fold).toHaveAttribute("aria-expanded", "true");
   await page.keyboard.press("]");
-  await expect(film(/Cutdown/)).toHaveAttribute("aria-pressed", "true");
+  await expect(currentFilm(page)).toHaveText("Cutdown");
   await expect(fold).toHaveAttribute("aria-expanded", "false");
   await expect(page.locator(".lane")).toHaveCount(2);
   await page.keyboard.press("[");
-  await expect(film(/Hero/)).toHaveAttribute("aria-pressed", "true");
+  await expect(currentFilm(page)).toHaveText("Hero");
   await expect(fold).toHaveAttribute("aria-expanded", "true");
   await expect(page.locator(".lane")).toHaveCount(5);
 });
@@ -918,7 +908,7 @@ test("a description cut off only once its long-file mark appears still gets its 
   // Probe the meta line's room with and without the mark, then pick a description that fits only without it.
   await rushes.addVariant("voice", "Probe", { round: R1, seconds: 3, freq: 220, meta: { description: "x" } });
   await page.goto(rushes.testUrl("streamOver=1"));
-  await openTab(page, /Voiceover/, "3");
+  await openReviewTab(page, "Voice");
   await loaded(page, 1);
   const probe = page.locator(".lane [data-meta]").first();
   await expect(probe.locator(".smk")).toHaveCount(1);
@@ -942,7 +932,7 @@ test("a description cut off only once its long-file mark appears still gets its 
   expect(description.length).toBeGreaterThan(0);
   const read = await rushes.addVariant("voice", "Fits", { round: R1, seconds: 3, freq: 247, meta: { description } });
   await page.reload();
-  await openTab(page, /Voiceover/, "3");
+  await openReviewTab(page, "Voice");
   await loaded(page, 2);
   const meta = page.locator(`.lane[data-row="${read.lane.id}/${read.variant.id}"] [data-meta]`);
   await expect(meta.locator(".smk")).toHaveCount(1);
@@ -983,7 +973,7 @@ test("another film starts Voiceover's notes on Whole again", async ({ page, rush
   await scope.getByRole("button", { name: "Point" }).click();
   await expect(scope.getByRole("button", { name: "Point" })).toHaveAttribute("aria-pressed", "true");
   await page.keyboard.press("]");
-  await expect(page.getByRole("navigation", { name: "Films" }).getByRole("button", { name: /Cutdown/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(currentFilm(page)).toHaveText("Cutdown");
   await expect(scope.getByRole("button", { name: "Whole" })).toHaveAttribute("aria-pressed", "true");
 });
 
@@ -1001,14 +991,13 @@ test("another film starts Voiceover's notes on Whole again, even when neither fi
   project.rev += 1;
   await writeFile(file, JSON.stringify(project, null, 2));
   await openVoice(page, rushes, 2);
-  const films = page.getByRole("navigation", { name: "Films" });
-  await expect(films.getByRole("button", { name: /Hero/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(currentFilm(page)).toHaveText("Hero");
   await expect(page.getByLabel("No cut yet")).toBeVisible();
   const scope = page.getByRole("group", { name: "Scope" });
   await scope.getByRole("button", { name: "Point" }).click();
   await expect(scope.getByRole("button", { name: "Point" })).toHaveAttribute("aria-pressed", "true");
   await page.keyboard.press("]");
-  await expect(films.getByRole("button", { name: /Cutdown/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(currentFilm(page)).toHaveText("Cutdown");
   await expect(scope.getByRole("button", { name: "Whole" })).toHaveAttribute("aria-pressed", "true");
 });
 
@@ -1060,32 +1049,30 @@ test("marks ticked without a range hold the film, as text and a range do", async
   await rushes.addCut("cutdown", "Cutdown");
   await rushes.addVariant("music", "Bed", { seconds: 2, freq: 220, video: ["Hero", "Cutdown"] });
   await page.goto(rushes.testUrl());
-  await openTab(page, /Music/, "4");
+  await openReviewTab(page, "Music");
   await loaded(page, 1);
-  const films = page.getByRole("navigation", { name: "Films" });
   await page.getByRole("group", { name: "Scope" }).getByRole("button", { name: "Range" }).click();
   await page.getByRole("group", { name: "Marks" }).getByRole("button", { name: "Fall" }).click();
   await expect(page.locator(".bar .chipx")).toHaveCount(0);
   await page.keyboard.press("]");
   await expect(page.getByRole("status")).toHaveText("Add or clear your note on Hero first");
-  await expect(films.getByRole("button", { name: /Hero/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(currentFilm(page)).toHaveText("Hero");
   await expect(page.getByRole("group", { name: "Marks" }).getByRole("button", { name: "Fall" })).toHaveAttribute("aria-pressed", "true");
   // Untick it and the film can go.
   await page.getByRole("group", { name: "Marks" }).getByRole("button", { name: "Fall" }).click();
   await page.keyboard.press("]");
-  await expect(films.getByRole("button", { name: /Cutdown/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(currentFilm(page)).toHaveText("Cutdown");
 });
 
 test("switching tab, by 1–7 or by a click, refuses to drop a pending audio note", async ({ page, rushes }) => {
   await rushes.addCut();
   await rushes.addVariant("music", "Bed", { seconds: 2, freq: 220 });
   await page.goto(rushes.testUrl());
-  await openTab(page, /Music/, "4");
+  await openReviewTab(page, "Music");
   await loaded(page, 1);
-  const tab = (name: RegExp) => page.getByRole("tab", { name });
   // Nothing pending: the tabs switch freely.
-  await openTab(page, /Picture/, "2");
-  await openTab(page, /Music/, "4");
+  await openReviewTab(page, "Timeline");
+  await openReviewTab(page, "Music");
   await loaded(page, 1);
 
   // An In point is pending: the key is refused, and so is a click on a tab, Assets included.
@@ -1093,22 +1080,22 @@ test("switching tab, by 1–7 or by a click, refuses to drop a pending audio not
   await expect(page.locator(".bar .chipx")).toHaveCount(1);
   await page.keyboard.press("2");
   await expect(page.getByRole("status")).toHaveText("Add or clear your note first");
-  await expect(tab(/Music/)).toHaveAttribute("aria-selected", "true");
+  await expect(reviewTab(page, "Music")).toHaveAttribute("aria-selected", "true");
   await page.keyboard.press("8");
-  await expect(tab(/Music/)).toHaveAttribute("aria-selected", "true");
-  await tab(/Mix/).click();
-  await expect(tab(/Music/)).toHaveAttribute("aria-selected", "true");
-  await tab(/Assets/).click();
-  await expect(tab(/Music/)).toHaveAttribute("aria-selected", "true");
+  await expect(reviewTab(page, "Music")).toHaveAttribute("aria-selected", "true");
+  await reviewTab(page, "Mix").click();
+  await expect(reviewTab(page, "Music")).toHaveAttribute("aria-selected", "true");
+  await workspaceTab(page, "Assets").click();
+  await expect(reviewTab(page, "Music")).toHaveAttribute("aria-selected", "true");
 
   // Marks and half-typed text survive the refused switch, exactly as they were.
   await page.getByRole("group", { name: "Scope" }).getByRole("button", { name: "Range" }).click();
   await page.getByRole("group", { name: "Marks" }).getByRole("button", { name: "Fall" }).click();
   await page.keyboard.press("n");
   await page.keyboard.type("Half a thought");
-  await tab(/Picture/).click();
+  await reviewTab(page, "Timeline").click();
   await expect(page.getByRole("status")).toHaveText("Add or clear your note first");
-  await expect(tab(/Music/)).toHaveAttribute("aria-selected", "true");
+  await expect(reviewTab(page, "Music")).toHaveAttribute("aria-selected", "true");
   await expect(page.getByRole("textbox", { name: "New note" })).toHaveValue("Half a thought");
   await expect(page.locator(".bar .chipx")).toHaveCount(1);
   await expect(page.getByRole("group", { name: "Marks" }).getByRole("button", { name: "Fall" })).toHaveAttribute("aria-pressed", "true");
@@ -1117,8 +1104,8 @@ test("switching tab, by 1–7 or by a click, refuses to drop a pending audio not
   await page.getByRole("textbox", { name: "New note" }).fill("");
   await page.getByRole("group", { name: "Marks" }).getByRole("button", { name: "Fall" }).click();
   await page.getByRole("button", { name: "Clear range" }).click();
-  await tab(/Picture/).click();
-  await expect(tab(/Picture/)).toHaveAttribute("aria-selected", "true");
+  await reviewTab(page, "Timeline").click();
+  await expect(reviewTab(page, "Timeline")).toHaveAttribute("aria-selected", "true");
 });
 
 // ---- Mix (Task 5) ----
@@ -1154,7 +1141,7 @@ async function openMix(page: Page, rushes: Rushes, files: number) {
     if (r.url().endsWith("/api/mix/loudness") && r.method() === "POST") asked.push(r.postDataJSON().lanes);
   });
   await page.goto(rushes.testUrl());
-  await openTab(page, /Mix/, "6");
+  await openReviewTab(page, "Mix");
   await expect(page.locator(".lane")).toHaveCount(3);
   await loaded(page, files);
   return asked;
@@ -1199,7 +1186,7 @@ test("Mix shows three lanes; mute and solo change the lane gains, and solo wins"
   // (`use` is the take in use per sound, §27.6: worked out by the server, not mute or solo.)
   expect(Object.keys(picks).sort()).toEqual(["lanes", "levels", "rev", "schema", "sections", "use", "videos"]);
   await page.keyboard.press("4");
-  await openTab(page, /Mix/, "6");
+  await openReviewTab(page, "Mix");
   await loaded(page, 3);
   await expect(page.locator('.ms[aria-pressed="true"]')).toHaveCount(0);
   await expect.poll(() => laneGainsOf(page)).toEqual({ vo: 1, music: 1, sfx: 1 });
@@ -1393,7 +1380,7 @@ test("a Mix note on an SFX pass named like the music bed lands on Sound effects,
   // A note saved before `on` was lane-qualified: drawn on Music, the first lane heard with that id.
   const old = (await rushes.api("POST", "/api/notes", { stage: "mix", on: "option-a", scope: "point", t: 1, text: "Old style." })).note;
   await page.goto(rushes.testUrl());
-  await openTab(page, /Mix/, "6");
+  await openReviewTab(page, "Mix");
   await loaded(page, 2);
   await expect(page.locator(`.lane[data-row="music"] .mk[data-note="${old.id}"]`)).toHaveCount(1);
   await expect(page.locator(`.lane[data-row="sfx"] .mk[data-note="${old.id}"]`)).toHaveCount(0);
@@ -1442,7 +1429,7 @@ test("a Mix level: drags live, saves on reload, resets on double-click, and re-m
   // so it tests the saved value rather than racing the 300 ms debounce.
   expect((await saved).ok()).toBe(true);
   await page.reload();
-  await openTab(page, /Mix/, "6");
+  await openReviewTab(page, "Mix");
   await loaded(page, 3);
   await expect(page.locator('.lane[data-row="music"] .level .db')).toHaveText("−14.0 dB");
   const picks = await rushes.api("GET", "/api/picks?video=hero");
@@ -1552,9 +1539,9 @@ test("a level dragged just before leaving Mix is still saved (Minor 6)", async (
   // Drag, then press 1 (Planning, which opens Script) straight away, inside the 300 ms debounce: leaving Mix unmounts it.
   await dragLevel(page, "Music level", -14);
   await page.keyboard.press("1");
-  await expect(page.getByRole("tab", { name: /Planning/ })).toHaveAttribute("aria-selected", "true");
+  await expect(workspaceTab(page, "Plan")).toHaveAttribute("aria-selected", "true");
   await expect.poll(async () => (await rushes.api("GET", "/api/picks?video=hero")).levels).toEqual({ music: -14 });
-  await openTab(page, /Mix/, "6");
+  await openReviewTab(page, "Mix");
   await expect(page.locator('.lane[data-row="music"] .level .db')).toHaveText("−14.0 dB");
 });
 
@@ -1574,7 +1561,7 @@ test("leaving Mix stops playback and releases its engine", async ({ page, rushes
   await expect.poll(async () => (await inspect(page)).playing).toBe(true);
   await page.evaluate(() => { (window as unknown as { __old: unknown }).__old = window.__rushesAudio!.engine; });
   await page.keyboard.press("4");
-  await expect(page.getByRole("tab", { name: /Music/ })).toHaveAttribute("aria-selected", "true");
+  await expect(reviewTab(page, "Music")).toHaveAttribute("aria-selected", "true");
   await loaded(page, 1);
   const old = await page.evaluate(() => {
     const e = (window as unknown as { __old: { playing: boolean; inspect(): Snapshot } }).__old;
@@ -1607,7 +1594,7 @@ async function spaceToggles(page: Page) {
 test("re-rendering the only clip mid-play keeps playing: its lane rejoins on the clock once decoded (§19.8)", async ({ page, rushes }) => {
   const bed = await rushes.addVariant("music", "A · Deep house", { seconds: 30, freq: 220 });
   await page.goto(rushes.testUrl());
-  await openTab(page, /Music/, "4");
+  await openReviewTab(page, "Music");
   await loaded(page, 1);
   const [first] = (await inspect(page)).media;
   // Counts every time the engine stops from here on.
@@ -1698,7 +1685,7 @@ test("Space plays after a mouse click on a tab, M, S, Blind or a scope chip (§1
   await mixProject(page, rushes);
   await page.goto(rushes.testUrl());
   const button = (name: string) => page.getByRole("button", { name, exact: true });
-  await page.getByRole("tab", { name: /Mix/ }).click();
+  await openReviewTab(page, "Mix");
   await loaded(page, 3);
   await spaceToggles(page);
   await spaceToggles(page);
@@ -1707,7 +1694,7 @@ test("Space plays after a mouse click on a tab, M, S, Blind or a scope chip (§1
   await button("Solo Voiceover").click();
   await spaceToggles(page);
 
-  await page.getByRole("tab", { name: /Music/ }).click();
+  await openReviewTab(page, "Music");
   await loaded(page, 1);
   await spaceToggles(page);
   await button("Blind").click();
@@ -1728,23 +1715,22 @@ test("Sound effects and Music list only the film you are on, with its own notes"
   await rushes.addVariant("voice", "F2A read", { seconds: 4, freq: 300, round: "Round 1", video: "F2A" });
   await rushes.api("POST", "/api/notes", { stage: "sfx", video: "f2a", scope: "whole", text: "F2A taps are too loud." });
   await page.goto(rushes.url);
-  const film = (name: RegExp) => page.getByRole("navigation", { name: "Films" }).getByRole("button", { name });
   const names = page.locator(".lane [data-name]");
-  await page.getByRole("tab", { name: /Sound effects/ }).click();
-  await film(/F3A/).click();
-  await expect(film(/F3A/)).toHaveAttribute("aria-pressed", "true");
+  await openReviewTab(page, "Effects");
+  await pickFilm(page, "F3A");
+  await expect(currentFilm(page)).toHaveText("F3A");
   await expect(names).toHaveText(["F3A pass 1", "F3A pass 2"]);
   await expect(page.locator(".note", { hasText: "F2A taps are too loud." })).toHaveCount(0);
-  await film(/F2A/).click();
+  await pickFilm(page, "F2A");
   await expect(names).toHaveText(["F2A pass"]);
   await expect(page.locator(".note", { hasText: "F2A taps are too loud." })).toHaveCount(1);
   // A bed on both films is listed on each.
-  await page.getByRole("tab", { name: /Music/ }).click();
+  await openReviewTab(page, "Music");
   await expect(names).toHaveText(["F2A bed", "Any film bed"]);
-  await film(/F3A/).click();
+  await pickFilm(page, "F3A");
   await expect(names).toHaveText(["Any film bed"]);
   // F2A's read is all there is: F3A's Voiceover says it has none yet.
-  await page.getByRole("tab", { name: /Voiceover/ }).click();
+  await openReviewTab(page, "Voice");
   await expect(page.locator(".lane")).toHaveCount(0);
   await expect(page.locator(".lanesnone")).toHaveText("No voice reads for this film yet.");
 });

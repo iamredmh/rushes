@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { test, expect } from "./fixture.js";
+import { test, expect, reviewTab, openWorkspace } from "./fixture.js";
 
 // §24.12: the Storyboard page over storyboard.md, and the plan's gate.
 
@@ -38,7 +38,7 @@ async function withBoard(rushes: { root: string; writeFiles(f: { path: string; t
 }
 
 async function openStoryboard(page: import("@playwright/test").Page) {
-  await page.getByRole("tab", { name: /Planning/ }).click();
+  await openWorkspace(page, "Plan");
   await page.getByRole("menuitem", { name: /Storyboard/ }).click();
   await expect(page.getByRole("heading", { name: "Storyboard" })).toBeVisible();
 }
@@ -46,7 +46,7 @@ async function openStoryboard(page: import("@playwright/test").Page) {
 test("with no storyboard.md, Storyboard is a locked page that says what to ask the agent", async ({ page, rushes }) => {
   await rushes.api("PUT", "/api/script", SCRIPT);
   await page.goto(rushes.url);
-  await page.getByRole("tab", { name: /Planning/ }).click();
+  await openWorkspace(page, "Plan");
   const item = page.getByRole("menuitem", { name: /Storyboard/ });
   await expect(item).toHaveAttribute("data-locked", "true");
   await item.click();
@@ -203,7 +203,7 @@ test("the Planning tab says Ready to build once the brief, the script and every 
   await rushes.api("PATCH", `/api/script/${script.sections[0].id}`, { status: "approved" });
   await page.goto(rushes.url);
   await expect(page.locator(".pmarks .pready")).toBeVisible();
-  await page.getByRole("tab", { name: /Planning/ }).click();
+  await openWorkspace(page, "Plan");
   const menu = page.getByRole("menu", { name: "Planning" });
   await expect(menu).toContainText("Ready to build");
   await expect(menu.getByRole("menuitem", { name: "Copy prompt for your agent" })).toBeVisible();
@@ -229,7 +229,7 @@ test("key 1 comes back to the Storyboard when it was the page last used", async 
   await page.goto(rushes.url);
   await openStoryboard(page);
   await page.keyboard.press("2");
-  await expect(page.getByRole("tab", { name: /Picture/ })).toHaveAttribute("aria-selected", "true");
+  await expect(reviewTab(page, "Timeline")).toHaveAttribute("aria-selected", "true");
   await page.keyboard.press("1");
   await expect(page.getByRole("heading", { name: "Storyboard" })).toBeVisible();
 });
@@ -253,7 +253,7 @@ test("the tick is not tried again against a shot the agent has rewritten since y
 test("a storyboard.md with no shots yet says so instead of '0 shots'", async ({ page, rushes }) => {
   await rushes.writeFiles([{ path: "storyboard.md", text: "# Storyboard: Lumen\n\nNotes only, no shots.\n" }]);
   await page.goto(rushes.url);
-  await page.getByRole("tab", { name: /Planning/ }).click();
+  await openWorkspace(page, "Plan");
   await page.getByRole("menuitem", { name: /Storyboard/ }).click();
   await expect(page.getByText("storyboard.md has no shots yet")).toBeVisible();
 });

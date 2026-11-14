@@ -1,7 +1,7 @@
 // §23: sound-effects cue layers -- the hover card, the chevron's layers by sound, the keyboard and
 // a cue's own sample. Every page goes to `rushes.testUrl()` (`?test=1`), which exposes the engine.
 import type { Page } from "@playwright/test";
-import { expect, type Rushes, test } from "./fixture.js";
+import { expect, type Rushes, test, reviewTab, openWorkspace } from "./fixture.js";
 
 type Hook = {
   inspect(): { playing: boolean; time: number; media: string[] } | null;
@@ -20,7 +20,7 @@ const hook = (page: Page) =>
 /** Open Sound effects once it has unlocked, and wait until its engine holds `files` files. */
 async function openSfx(page: Page, rushes: Rushes, files: number) {
   await page.goto(rushes.testUrl());
-  const tab = page.getByRole("tab", { name: /Sound effects/ });
+  const tab = reviewTab(page, "Effects");
   await expect(tab).not.toHaveAttribute("data-locked");
   await page.keyboard.press("5");
   await expect(tab).toHaveAttribute("aria-selected", "true");
@@ -195,13 +195,13 @@ test("a pass's layers stay open for the session, across tabs, and start shut aft
   await lumen(page, rushes, { music: true });
   await chevron(page).click();
   await page.keyboard.press("4");
-  await expect(page.getByRole("tab", { name: /Music/ })).toHaveAttribute("aria-selected", "true");
+  await expect(reviewTab(page, "Music")).toHaveAttribute("aria-selected", "true");
   await page.keyboard.press("5");
   await expect(chevron(page)).toHaveAttribute("aria-expanded", "true");
   await expect(layers(page).locator(".clayer")).toHaveCount(3);
   await expect(chevron(page, "Effects, levelled")).toHaveAttribute("aria-expanded", "false");
   await page.reload();
-  await expect(page.getByRole("tab", { name: /Sound effects/ })).toBeVisible();
+  await expect(reviewTab(page, "Effects")).toBeVisible();
   await page.keyboard.press("5");
   await expect(chevron(page)).toHaveAttribute("aria-expanded", "false");
   await expect(layers(page)).toHaveCount(0);
@@ -247,7 +247,7 @@ test("Mix's Sound effects lane shows the card and walks its cues; it has no laye
   const pass = await rushes.addVariant("sfx", "Effects for Lumen", { seconds: 4, freq: 880, cues: [{ name: "whoosh", t: 0.5 }, { name: "thud", t: 2, file: THUD }] });
   await rushes.api("PUT", "/api/picks", { video: "hero", lanes: { [pass.lane.id]: pass.variant.id } });
   await page.goto(rushes.testUrl());
-  const tab = page.getByRole("tab", { name: /Mix/ });
+  const tab = reviewTab(page, "Mix");
   await expect(tab).not.toHaveAttribute("data-locked");
   await page.keyboard.press("6");
   await expect(page.locator(".lane")).toHaveCount(3);
@@ -339,7 +339,7 @@ test("Assets › Found keeps its plain turning chevrons: the pass row's boxed ch
   ]);
   await rushes.scan();
   await page.goto(rushes.url);
-  await page.getByRole("tab", { name: /Assets/ }).click();
+  await openWorkspace(page, "Assets");
   await page.getByRole("navigation", { name: "Folders" }).getByRole("button", { name: /^Found/ }).click();
   await expect(page.getByRole("heading", { name: "Found" })).toBeVisible();
   const chev = page.locator(".fgroup > .gh svg.chev").first();

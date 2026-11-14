@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Page } from "@playwright/test";
-import { expect, test, versionButton, videoReady } from "./fixture.js";
+import { expect, test, cutButton, videoReady, reviewTab, openWorkspace, workspaceTab, currentFilm } from "./fixture.js";
 
 const logButton = (page: Page) => page.getByRole("button", { name: /^Change Log/ });
 const drawer = (page: Page) => page.getByRole("complementary", { name: "Change Log" });
@@ -75,7 +75,7 @@ test("from the keyboard: the button opens and closes it, and typing in the input
   const t0 = await page.getByLabel("Timecode").textContent();
   await input.pressSequentially("2 4 [ ] i o n ?");
   await expect(input).toHaveValue("2 4 [ ] i o n ?");
-  await expect(page.getByRole("tab", { name: /Picture/ })).toHaveAttribute("aria-selected", "true");
+  await expect(reviewTab(page, "Timeline")).toHaveAttribute("aria-selected", "true");
   await expect(page.getByRole("dialog", { name: "Keyboard shortcuts" })).toHaveCount(0);
   await expect(page.getByLabel("Timecode")).toHaveText(t0!);
   // Esc from the input closes the drawer (R13) and focus returns to the button; Enter opens it again.
@@ -227,19 +227,19 @@ test("a row with somewhere to go opens it: a line on v1 opens Picture at v1, a v
   await rushes.api("POST", "/api/log", { text: "The end card on v1 read better", video: "hero", version: "v1" });
   await page.goto(rushes.url);
   await videoReady(page);
-  await expect(versionButton(page)).toHaveAttribute("data-version", "v2");
+  await expect(cutButton(page)).toHaveAttribute("data-version", "v2");
   await logButton(page).click();
   await expect(rows(page)).toHaveText([/The end card on v1/, /Music: “Night drive”/, /2 cuts added, the latest v2: second cut/]);
   await expect(rows(page).locator(".lgo")).toHaveText(["›", "›", "›"]);
   await drawer(page).getByRole("button", { name: /The end card on v1 read better/ }).click();
-  await expect(versionButton(page)).toHaveAttribute("data-version", "v1");
+  await expect(cutButton(page)).toHaveAttribute("data-version", "v1");
   await expect(drawer(page)).toBeVisible();
   await drawer(page).getByRole("button", { name: /Music: “Night drive” added/ }).click();
-  await expect(page.getByRole("tab", { name: /Music/ })).toHaveAttribute("aria-selected", "true");
+  await expect(reviewTab(page, "Music")).toHaveAttribute("aria-selected", "true");
   await expect(page.locator('.lane[data-row="night-drive/night-drive"] .nm')).toBeFocused();
   // And back to the cut, from the Music tab.
   await drawer(page).getByRole("button", { name: /2 cuts added/ }).click();
-  await expect(page.getByRole("tab", { name: /Picture/ })).toHaveAttribute("aria-selected", "true");
+  await expect(reviewTab(page, "Timeline")).toHaveAttribute("aria-selected", "true");
 });
 
 test("an empty log says so; audio from before the log is listed undated; Export as Markdown writes the file (§22.6–§22.8)", async ({ page, rushes }) => {
@@ -339,12 +339,12 @@ test("the drawer isn't modal: tabs and keys still work with it open (§22.8)", a
   await page.goto(rushes.url);
   await videoReady(page);
   await logButton(page).click();
-  await page.getByRole("tab", { name: /Planning/ }).click();
+  await openWorkspace(page, "Plan");
   await page.getByRole("menuitem", { name: /Script/ }).click();
-  await expect(page.getByRole("tab", { name: /Planning/ })).toHaveAttribute("aria-selected", "true");
+  await expect(workspaceTab(page, "Plan")).toHaveAttribute("aria-selected", "true");
   await expect(drawer(page)).toBeVisible();
   await page.keyboard.press("2");
-  await expect(page.getByRole("tab", { name: /Picture/ })).toHaveAttribute("aria-selected", "true");
+  await expect(reviewTab(page, "Timeline")).toHaveAttribute("aria-selected", "true");
 });
 
 // ---- fix round 1 ----
@@ -438,12 +438,11 @@ test("a row about another film switches to that film (R18, I3)", async ({ page, 
   await rushes.api("POST", "/api/log", { text: "The cutdown's first ending was better", video: "cutdown", version: "v1" });
   await page.goto(rushes.url);
   await videoReady(page);
-  const pack = page.getByRole("navigation", { name: "Films" });
-  await expect(pack.getByRole("button", { name: /Hero/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(currentFilm(page)).toHaveText("Hero");
   await logButton(page).click();
   await drawer(page).getByRole("button", { name: /The cutdown's first ending was better/ }).click();
-  await expect(pack.getByRole("button", { name: /Cutdown/ })).toHaveAttribute("aria-pressed", "true");
-  await expect(versionButton(page)).toHaveAttribute("data-version", "v1");
+  await expect(currentFilm(page)).toHaveText("Cutdown");
+  await expect(cutButton(page)).toHaveAttribute("data-version", "v1");
 });
 
 test("a line added under a filter that leaves it out says where it went (M1)", async ({ page, rushes }) => {
@@ -579,7 +578,7 @@ for (const width of [1440, 1280, 1100]) {
     await expect(films).toHaveCount(2);
     await films.nth(1).click(); // the launch film, locked at its long-labelled cut
     await videoReady(page);
-    await expect(versionButton(page)).toContainText("Tighter middle 35");
+    await expect(cutButton(page)).toContainText("Tighter middle 35");
     const send = page.getByRole("button", { name: /^Send to agent/ });
     await expect(send).toContainText("8");
     // The label shows above 1100 px; at 1100 the button is its icon.
@@ -647,11 +646,11 @@ test("a label, a note and a log line in a right-to-left script start on their ow
   await videoReady(page);
   const direction = (el: Element) => getComputedStyle(el).direction; // for evaluate(); evaluateAll can't see it
   // The version button and the note under the picture.
-  await expect(versionButton(page)).toContainText(hebrew.slice(0, 10));
+  await expect(cutButton(page)).toContainText(hebrew.slice(0, 10));
   expect(await page.locator(".vbtn .vlbl").evaluate(direction)).toBe("rtl");
   expect(await page.locator(".vnote .vtext").evaluate(direction)).toBe("rtl");
   // The open list: each row by its own text, and the note beside it.
-  await versionButton(page).click();
+  await cutButton(page).click();
   expect(await page.locator(".vrow .vlbl").evaluateAll((els) => els.map((el) => getComputedStyle(el).direction))).toEqual(["rtl", "ltr"]);
   await expect(page.locator(".vdetail p")).toContainText(hebrew.slice(0, 10));
   expect(await page.locator(".vdetail p").evaluate(direction)).toBe("rtl");

@@ -1,5 +1,5 @@
 import type { Locator, Page } from "@playwright/test";
-import { expect, hasFfmpeg, test, type Rushes } from "./fixture.js";
+import { expect, hasFfmpeg, test, type Rushes, openReviewTab, reviewTab, openWorkspace, workspaceTab } from "./fixture.js";
 
 declare global {
   interface Window {
@@ -21,7 +21,7 @@ const foundButton = (page: Page): Locator => page.getByRole("navigation", { name
 /** Opens the dashboard on Assets › Found. */
 async function openFound(page: Page, rushes: Rushes): Promise<void> {
   await page.goto(rushes.url);
-  await page.getByRole("tab", { name: /Assets/ }).click();
+  await openWorkspace(page, "Assets");
   await foundButton(page).click();
   await expect(page.getByRole("heading", { name: "Found" })).toBeVisible();
 }
@@ -54,7 +54,7 @@ test("Found is first in the Assets sidebar with its count; groups, reasons, the 
   const chip = page.locator(".foundchip");
   await expect(chip).toHaveText("1 brought in · 5 more found");
 
-  await page.getByRole("tab", { name: /Assets/ }).click();
+  await openWorkspace(page, "Assets");
   const folders = page.getByRole("navigation", { name: "Folders" }).locator(".afolder-btn");
   await expect(folders.first()).toHaveText(/^Found\s*5$/);
   await foundButton(page).click();
@@ -101,14 +101,14 @@ test("Found is first in the Assets sidebar with its count; groups, reasons, the 
   await expect(bringIn(page)).toBeDisabled();
 
   // Away from Found and back: nothing has changed, so the chip stays away. A new change brings it back.
-  await page.getByRole("tab", { name: /Picture/ }).click();
+  await openReviewTab(page, "Timeline");
   await expect(chip).toHaveCount(0);
   await rushes.writeFiles([{ path: "bed/loop-new.wav", seconds: 11, freq: 110 }]);
   await rushes.scan();
   await expect(chip).toHaveText("1 brought in · 6 more found");
   // The chip opens Assets › Found.
   await chip.click();
-  await expect(page.getByRole("tab", { name: /Assets/ })).toHaveAttribute("aria-selected", "true");
+  await expect(workspaceTab(page, "Assets")).toHaveAttribute("aria-selected", "true");
   await expect(page.getByRole("heading", { name: "Found" })).toBeVisible();
   await expect(row(page, "loop-new.wav")).toBeVisible();
   await expect(chip).toHaveCount(0);
@@ -121,8 +121,8 @@ test("ticked files come in as unpicked reads: the rows leave, the tabs unlock, a
   const picksBefore = await rushes.api("GET", "/api/picks");
 
   await openFound(page, rushes);
-  await expect(page.getByRole("tab", { name: /Voiceover/ })).toHaveAttribute("data-locked", "true");
-  await expect(page.getByRole("tab", { name: /Music/ })).toHaveAttribute("data-locked", "true");
+  await expect(reviewTab(page, "Voice")).toHaveAttribute("data-locked", "true");
+  await expect(reviewTab(page, "Music")).toHaveAttribute("data-locked", "true");
 
   await row(page, "take-one.wav").getByRole("checkbox").check();
   await expect(bringIn(page)).toHaveText("Bring in 1");
@@ -140,15 +140,15 @@ test("ticked files come in as unpicked reads: the rows leave, the tabs unlock, a
   await expect(foundButton(page)).toHaveText(/4$/);
 
   // The Voiceover and Music tabs unlock and show those files; nothing is picked.
-  await expect(page.getByRole("tab", { name: /Voiceover/ })).not.toHaveAttribute("data-locked");
-  await expect(page.getByRole("tab", { name: /Music/ })).not.toHaveAttribute("data-locked");
+  await expect(reviewTab(page, "Voice")).not.toHaveAttribute("data-locked");
+  await expect(reviewTab(page, "Music")).not.toHaveAttribute("data-locked");
   expect(await rushes.api("GET", "/api/picks")).toEqual(picksBefore);
   const { project } = await rushes.api("GET", "/api/state");
   const variants = project.lanes.flatMap((l: { stage: string; name: string; variants: { file: string }[] }) => l.variants.map((v) => [l.stage, l.name, v.file]));
   expect(variants.sort()).toEqual([["music", "Music", "bed/loop-low.wav"], ["voice", "Vo", "vo/take-one.wav"]]);
-  await page.getByRole("tab", { name: /Voiceover/ }).click();
+  await openReviewTab(page, "Voice");
   await expect(page.getByText("take-one", { exact: false }).first()).toBeVisible();
-  await page.getByRole("tab", { name: /Music/ }).click();
+  await openReviewTab(page, "Music");
   await expect(page.getByText("loop-low", { exact: false }).first()).toBeVisible();
 });
 
@@ -169,7 +169,7 @@ test("Not these hides a file for good, and Hidden lists it with a Restore", asyn
 
   // Hidden for good: it is still hidden after a reload.
   await page.reload();
-  await page.getByRole("tab", { name: /Assets/ }).click();
+  await openWorkspace(page, "Assets");
   await foundButton(page).click();
   await expect(row(page, "try-a.wav")).toHaveCount(0);
   await page.getByRole("button", { name: "Hidden (1)" }).click();
@@ -202,7 +202,7 @@ test("changing a row's kind, then bringing it in, lands it in the right tab", as
   await bringIn(page).click();
   await expect(page.getByRole("status")).toHaveText("Brought in 1 file");
 
-  await page.getByRole("tab", { name: /Music/ }).click();
+  await openReviewTab(page, "Music");
   await expect(page.getByText("try-a", { exact: false }).first()).toBeVisible();
   const { project } = await rushes.api("GET", "/api/state");
   const music = project.lanes.find((l: { stage: string }) => l.stage === "music");
@@ -331,8 +331,8 @@ test("a 13th ticked file of one kind is held back with the cap line, and 12 come
 
   await page.goto(rushes.url);
   await expect(page.locator(".foundchip")).toHaveText("13 found");
-  await expect(page.getByRole("tab", { name: /Assets/ })).not.toHaveAttribute("data-locked");
-  await page.getByRole("tab", { name: /Assets/ }).click();
+  await expect(workspaceTab(page, "Assets")).not.toHaveAttribute("data-locked");
+  await openWorkspace(page, "Assets");
   // With nothing else in Assets, Found is what opens.
   await expect(page.getByRole("heading", { name: "Found" })).toBeVisible();
   for (const l of lines) await row(page, l.path.slice(3)).getByRole("checkbox").check();
@@ -480,19 +480,19 @@ test("the request to open Found is used once: a later plain visit to Assets open
   await rushes.writeFiles(SOME);
   await rushes.scan();
   await page.goto(rushes.testUrl());
-  await page.getByRole("tab", { name: /Picture/ }).click();
+  await openReviewTab(page, "Timeline");
   await page.locator(".foundchip").click();
   await expect(page.getByRole("heading", { name: /^Found/ })).toBeVisible();
   // Away and back, plain: Cuts, as ever; and with a kind asked for, it is used once too.
-  await page.getByRole("tab", { name: /Picture/ }).click();
-  await page.getByRole("tab", { name: /Assets/ }).click();
+  await openReviewTab(page, "Timeline");
+  await openWorkspace(page, "Assets");
   await expect(page.getByRole("heading", { name: /^Cuts/ })).toBeVisible();
   await page.evaluate(() => window.__rushesOpenFound!("music"));
   await expect(page.getByRole("heading", { name: /^Found/ })).toBeVisible();
   await expect(page.getByRole("group", { name: "Kind" }).getByRole("button", { name: /^Music/ })).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator(".frow")).toHaveCount(1);
-  await page.getByRole("tab", { name: /Picture/ }).click();
-  await page.getByRole("tab", { name: /Assets/ }).click();
+  await openReviewTab(page, "Timeline");
+  await openWorkspace(page, "Assets");
   await expect(page.getByRole("heading", { name: /^Cuts/ })).toBeVisible();
   // Open Found by hand again: no kind is held over.
   await foundButton(page).click();
@@ -702,7 +702,7 @@ test("a kind asked for is kept while the folder is still being looked through, a
     await route.fulfill({ response: res, json });
   });
   await page.goto(rushes.testUrl());
-  await page.getByRole("tab", { name: /Assets/ }).click();
+  await openWorkspace(page, "Assets");
   // No sound effects in the list yet: while it fills, the filter waits for them.
   await page.evaluate(() => window.__rushesOpenFound!("sfx"));
   await expect(page.getByText("Looking through the folder…")).toBeVisible();
@@ -751,7 +751,7 @@ test("the chip returns when one file is swapped for another, even if the counts 
   await openFound(page, rushes);
   const chip = page.locator(".foundchip");
   await expect(chip).toHaveCount(0);
-  await page.getByRole("tab", { name: /Picture/ }).click();
+  await openReviewTab(page, "Timeline");
   await expect(chip).toHaveCount(0);
   const { rm } = await import("node:fs/promises");
   await rm(`${rushes.root}/vo/take-two.wav`);
@@ -772,7 +772,6 @@ const LOCKED_LINES: Parameters<Rushes["writeFiles"]>[0] = [
   { path: "vo/take-two.wav", seconds: 9, freq: 247 },
   { path: "fx/whoosh-a.wav", seconds: 1.5, freq: 330 },
 ];
-const tab = (page: Page, name: RegExp): Locator => page.getByRole("tab", { name });
 const foundLine = (page: Page): Locator => page.locator(".locked .foundline");
 
 test("a locked tab says how many files of its kind were found, with a Review button that opens Found on that kind", async ({ page, rushes }) => {
@@ -781,25 +780,25 @@ test("a locked tab says how many files of its kind were found, with a Review but
   await rushes.scan();
   await page.goto(rushes.url);
 
-  await tab(page, /^Music/).click();
+  await reviewTab(page, "Music").click();
   await expect(page.getByRole("heading", { name: "Music" })).toBeVisible();
   await expect(foundLine(page)).toHaveText(/^3 music files found in this project/);
-  await tab(page, /^Voiceover/).click();
+  await reviewTab(page, "Voice").click();
   await expect(foundLine(page)).toHaveText(/^2 voiceover files found in this project/);
   // One file: singular. The noun for effects is "sound effect".
-  await tab(page, /^Sound effects/).click();
+  await reviewTab(page, "Effects").click();
   await expect(foundLine(page)).toHaveText(/^1 sound effect file found in this project/);
   // Tabs that take no files of their own have no line.
-  await tab(page, /^Mix/).click();
+  await reviewTab(page, "Mix").click();
   await expect(page.locator(".locked")).toBeVisible();
   await expect(foundLine(page)).toHaveCount(0);
   // Script lives in the Planning menu now.
-  await tab(page, /^Planning/).click();
+  await workspaceTab(page, "Plan").click();
   await page.getByRole("menuitem", { name: /^Script/ }).click();
   await expect(foundLine(page)).toHaveCount(0);
 
   // Review opens Assets > Found, filtered to the kind the tab is for.
-  await tab(page, /^Music/).click();
+  await reviewTab(page, "Music").click();
   await page.locator(".locked").getByRole("button", { name: /^Review/ }).click();
   await expect(page.getByRole("heading", { name: /^Found/ })).toBeVisible();
   await expect(page.getByRole("group", { name: "Kind" }).getByRole("button", { name: /^Music/ })).toHaveAttribute("aria-pressed", "true");
@@ -807,7 +806,7 @@ test("a locked tab says how many files of its kind were found, with a Review but
   await expect(row(page, "theme-a.wav")).toBeVisible();
 
   // And the sound-effects tab's Review lands on sound effects.
-  await tab(page, /^Sound effects/).click();
+  await reviewTab(page, "Effects").click();
   await page.locator(".locked").getByRole("button", { name: /^Review/ }).click();
   await expect(page.getByRole("group", { name: "Kind" }).getByRole("button", { name: /^Sound effects/ })).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator(".frow")).toHaveCount(1);
@@ -818,7 +817,7 @@ test("one music file reads in the singular", async ({ page, rushes }) => {
   await rushes.writeFiles([{ path: "bed/loop-low.wav", seconds: 10, freq: 131 }]);
   await rushes.scan();
   await page.goto(rushes.url);
-  await tab(page, /^Music/).click();
+  await reviewTab(page, "Music").click();
   await expect(foundLine(page)).toHaveText(/^1 music file found in this project/);
   await expect(page.getByText("1 music files")).toHaveCount(0);
 });
@@ -831,11 +830,11 @@ test("with no files of that kind found, the locked tab has no line and no Review
   ]);
   await rushes.scan();
   await page.goto(rushes.url);
-  await tab(page, /^Music/).click();
+  await reviewTab(page, "Music").click();
   await expect(page.locator(".locked")).toBeVisible();
   await expect(foundLine(page)).toHaveCount(0);
   await expect(page.locator(".locked").getByRole("button", { name: /^Review/ })).toHaveCount(0);
-  await tab(page, /^Voiceover/).click();
+  await reviewTab(page, "Voice").click();
   await expect(foundLine(page)).toHaveText(/^1 voiceover file found in this project/);
 });
 
@@ -844,7 +843,7 @@ test("the line follows the live count: hiding, finding and bringing in change it
   await rushes.writeFiles(LOCKED_LINES.slice(0, 3));
   await rushes.scan();
   await page.goto(rushes.url);
-  await tab(page, /^Music/).click();
+  await reviewTab(page, "Music").click();
   await expect(foundLine(page)).toHaveText(/^3 music files found/);
 
   // Hidden with Not these: two left.
@@ -884,7 +883,7 @@ test.describe("a project with 2,000 files", () => {
     await expect.poll(async () => (await rushes.api("GET", "/api/found")).files.length, { timeout: 20_000 }).toBe(2000);
 
     await page.goto(rushes.url);
-    await page.getByRole("tab", { name: /Assets/ }).click();
+    await openWorkspace(page, "Assets");
     const opened = await page.evaluate(async () => {
       const t0 = performance.now();
       const button = [...document.querySelectorAll<HTMLButtonElement>(".asidebar .afolder-btn")].find((b) => b.textContent!.startsWith("Found"))!;

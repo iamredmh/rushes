@@ -1,6 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { test, expect, videoReady } from "./fixture.js";
+import { test, expect, videoReady, reviewTab, currentFilm, pickFilm, openMore } from "./fixture.js";
 
 // §26: shelving a film from the Film menu, the +N list, the Shelved list, and what a shelved film does and does not do.
 type Rushes = Parameters<Parameters<typeof test>[2]>[0]["rushes"];
@@ -17,7 +17,7 @@ async function films(rushes: Rushes, names: string[]) {
 }
 const note = (rushes: Rushes, video: string, text: string, t = 0.5) => rushes.api("POST", "/api/notes", { stage: "picture", video, version: "v1", scope: "point", t, text });
 async function shelveCurrent(page: Page) {
-  await filmMenuButton(page).click();
+  await openMore(page);
   await page.getByRole("menuitem", { name: /Shelve film/ }).click();
 }
 
@@ -26,11 +26,11 @@ test("the Film menu is headed by the film you are in, and shelving it closes the
   await page.goto(rushes.url);
   await videoReady(page);
   await expect(pack(page).getByRole("button")).toHaveCount(3);
-  await filmMenuButton(page).click();
+  await openMore(page);
   await expect(page.getByRole("menu")).toContainText("Hero");
   await page.getByRole("menuitem", { name: /Shelve film/ }).click();
   await expect(pack(page).getByRole("button", { name: /Hero/ })).toHaveCount(0);
-  await expect(pack(page).getByRole("button", { name: /Cutdown/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(currentFilm(page)).toHaveText("Cutdown");
   await expect(shelvedButton(page)).toHaveText(/Shelved \(1\)/);
   await expect(page.getByRole("status").filter({ hasText: "shelved" })).toBeVisible();
   await page.getByRole("status").getByRole("button", { name: "Undo" }).click();
@@ -85,11 +85,11 @@ test("[ and ] step through the films in play and skip a shelved one", async ({ p
   await rushes.api("PUT", "/api/videos/cutdown/shelve", { shelved: true });
   await page.goto(rushes.url);
   await videoReady(page);
-  await expect(pack(page).getByRole("button", { name: /Hero/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(currentFilm(page)).toHaveText("Hero");
   await page.keyboard.press("]");
-  await expect(pack(page).getByRole("button", { name: /Teaser/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(currentFilm(page)).toHaveText("Teaser");
   await page.keyboard.press("[");
-  await expect(pack(page).getByRole("button", { name: /Hero/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(currentFilm(page)).toHaveText("Hero");
 });
 
 test("a shelved film opens view-only under a banner, and Restore puts everything back", async ({ page, rushes }) => {
@@ -118,7 +118,7 @@ test("a shelved film opens view-only under a banner, and Restore puts everything
   await banner.getByRole("button", { name: "Restore film" }).click();
   await expect.poll(() => page.locator(".framebox").evaluate((el) => getComputedStyle(el).filter)).toBe("none");
   await expect(page.locator(".shbanner")).toHaveCount(0);
-  await expect(pack(page).getByRole("button", { name: /Cutdown/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(currentFilm(page)).toHaveText("Cutdown");
   await expect(page.getByLabel("New note")).toBeVisible();
   await expect(page.getByRole("button", { name: "Draw a box" })).toBeEnabled();
 });
@@ -217,7 +217,7 @@ test("Escape closes the Film menu and the lists and puts focus back on their but
   await rushes.api("PUT", "/api/videos/teaser/shelve", { shelved: true });
   await page.goto(rushes.url);
   await videoReady(page);
-  await filmMenuButton(page).click();
+  await openMore(page);
   await expect(page.getByRole("menu")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("menu")).toHaveCount(0);
@@ -243,7 +243,7 @@ test("the audio tabs are view-only too while a shelved film is open: a note left
   await shelvedButton(page).click();
   await page.getByRole("button", { name: "Open Cutdown" }).click();
   await videoReady(page);
-  const music = page.getByRole("tab", { name: /Music/ });
+  const music = reviewTab(page, "Music");
   await expect(music).not.toHaveAttribute("data-locked");
   await music.click();
   await expect(music).toHaveAttribute("aria-selected", "true");
@@ -283,12 +283,12 @@ test("Undo goes back to the film only when the restore worked", async ({ page, r
     return route.continue();
   });
   await shelveCurrent(page);
-  await expect(pack(page).getByRole("button", { name: /Cutdown/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(currentFilm(page)).toHaveText("Cutdown");
   await page.getByRole("button", { name: "Undo" }).click();
   // The restore failed: Hero is still shelved, and you are still on the film you were moved to, not on a view-only Hero.
   await expect(page.getByText("Could not restore")).toBeVisible();
   await expect(page.locator(".shbanner")).toHaveCount(0);
-  await expect(pack(page).getByRole("button", { name: /Cutdown/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(currentFilm(page)).toHaveText("Cutdown");
   expect(((await rushes.api("GET", "/api/state")).project.videos as any[]).find((v) => v.id === "hero").shelved).toBeTruthy();
 });
 
@@ -317,8 +317,8 @@ test("a film shelved from another window does not strand the note you were typin
   await rushes.api("PUT", "/api/videos/hero/shelve", { shelved: true });
   await expect(page.locator(".shbanner")).toBeVisible();
   // The box is hidden on a shelved film, so it no longer holds you here: switching films works.
-  await pack(page).getByRole("button", { name: /Cutdown/ }).click();
-  await expect(pack(page).getByRole("button", { name: /Cutdown/ })).toHaveAttribute("aria-pressed", "true");
+  await pickFilm(page, "Cutdown");
+  await expect(currentFilm(page)).toHaveText("Cutdown");
   await expect(page.locator(".shbanner")).toHaveCount(0);
 });
 
