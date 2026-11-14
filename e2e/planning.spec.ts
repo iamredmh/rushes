@@ -1,6 +1,6 @@
 import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { test, expect, openReviewTab, reviewTab, openWorkspace, workspaceTab } from "./fixture.js";
+import { test, expect, openReviewTab, reviewTab, openWorkspace, workspaceTab, notesPanel, sendButton, sentDialog } from "./fixture.js";
 
 // §24 step 2: Planning is one tab with a menu (Brief, Script); brief.md is the file of record for the Brief page.
 
@@ -73,7 +73,7 @@ test("two edits in a row both land, and the tab count follows", async ({ page, r
   await page.getByLabel("Your version of Purpose").fill("One.");
   await page.getByLabel("Your version of Tone").fill("Two.");
   await expect.poll(() => read(rushes.root)).toContain("## Purpose\nOne.\n\n## Tone\nTwo.\n");
-  await expect(page.getByRole("button", { name: /Send to agent/ })).toContainText("2");
+  await expect(sendButton(page)).toContainText("2");
 });
 
 test("approving sets the status line, and editing an approved brief reopens it", async ({ page, rushes }) => {
@@ -127,13 +127,13 @@ test("key 1 opens Planning on the page last used, and 2 to 8 stay where they wer
   await expect(workspaceTab(page, "Assets")).toHaveAttribute("aria-selected", "true");
 });
 
-test("Send to agent on Brief gives a message that names what changed, and records nothing", async ({ page, rushes }) => {
+test("Send on Brief gives a message that names what changed, and records nothing", async ({ page, rushes }) => {
   await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
   await page.goto(rushes.url);
   await page.getByLabel("Your version of Purpose").fill("Mine.");
-  await expect(page.getByRole("button", { name: /Send to agent/ })).toContainText("1");
-  await page.getByRole("button", { name: /Send to agent/ }).click();
-  const dialog = page.getByRole("dialog", { name: "Sent to agent" });
+  await expect(sendButton(page)).toContainText("1");
+  await sendButton(page).click();
+  const dialog = sentDialog(page);
   await expect(dialog).toContainText("Message for your agent");
   await expect(dialog).toContainText("this section in brief.md: Purpose");
   expect((await rushes.api("GET", "/api/state")).batches.batches).toHaveLength(0);
@@ -204,12 +204,12 @@ test("text typed in a row survives the agent adding a section above it", async (
   await expect(tone).toHaveValue("Warm.");
 });
 
-test("Send to agent straight after typing names the section just edited", async ({ page, rushes }) => {
+test("Send straight after typing names the section just edited", async ({ page, rushes }) => {
   await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
   await page.goto(rushes.url);
   await page.getByLabel("Your version of Purpose").fill("Mine.");
-  await page.getByRole("button", { name: /Send to agent/ }).click();
-  await expect(page.getByRole("dialog", { name: "Sent to agent" })).toContainText("this section in brief.md: Purpose");
+  await sendButton(page).click();
+  await expect(sentDialog(page)).toContainText("this section in brief.md: Purpose");
 });
 
 test("key 1 on the Brief page the dashboard opened on stays on Brief", async ({ page, rushes }) => {
@@ -222,14 +222,15 @@ test("key 1 on the Brief page the dashboard opened on stays on Brief", async ({ 
   await expect(page.getByRole("heading", { name: "Script" })).toHaveCount(0);
 });
 
-test("Send to agent on the locked Brief page says there is no brief, not that it is a draft", async ({ page, rushes }) => {
+test("the locked Brief page offers its own prompt, and no Send, since there is no brief to send", async ({ page, rushes }) => {
   await rushes.api("PUT", "/api/script", SCRIPT);
   await page.goto(rushes.url);
   await openWorkspace(page, "Plan");
   await page.getByRole("menuitem", { name: /Brief/ }).click();
-  await page.getByRole("button", { name: /Send to agent/ }).click();
-  await expect(page.getByRole("dialog", { name: "Sent to agent" })).toHaveCount(0);
-  await expect(page.locator(".toast")).toContainText("no brief yet");
+  await expect(page.getByLabel("Prompt for your agent")).toHaveValue(/brief\.md/);
+  await expect(notesPanel(page)).toBeVisible();
+  await expect(sendButton(page)).toHaveCount(0);
+  await expect(sentDialog(page)).toHaveCount(0);
 });
 
 // Deferred minors from the step 2 review.

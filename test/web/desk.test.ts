@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deskPlace, nextHint, type NextInput, rulerMarks, takeCount, takeGroups, deskView, viewForKey, viewForTab } from "../../web/src/desk.js";
+import { deskPlace, nextHint, type NextInput, noteTarget, rulerMarks, takeCount, takeGroups, timecode, unsentCount, deskView, viewForKey, viewForTab } from "../../web/src/desk.js";
 import type { Lane, Note, Variant } from "../../web/src/types.js";
 
 describe("deskPlace", () => {
@@ -134,6 +134,11 @@ describe("nextHint", () => {
     expect(nextHint({ ...base, unsent: 1, openNotes: 1 })).toEqual({ text: "send 1 note", go: null });
     expect(nextHint({ ...base, unsent: 3, openNotes: 5 })).toEqual({ text: "send 3 notes", go: null });
   });
+  it("leads to Send in the notes panel when told where it is, even before there is a cut", () => {
+    expect(nextHint({ ...base, unsent: 2, sendTo: "picture" })).toEqual({ text: "send 2 notes", go: "picture" });
+    expect(nextHint({ ...base, hasCut: false, unsent: 1, sendTo: "brief" })).toEqual({ text: "send 1 note", go: "brief" });
+    expect(nextHint({ ...base, hasCut: false, unsent: 1 })).toEqual({ text: "ask for cut 1", go: null });
+  });
   it("says notes are open once they are sent", () => {
     expect(nextHint({ ...base, openNotes: 1 })).toEqual({ text: "1 note open", go: "picture" });
     expect(nextHint({ ...base, openNotes: 4, locked: false })).toEqual({ text: "4 notes open", go: "picture" });
@@ -183,5 +188,66 @@ describe("rulerMarks", () => {
   it("leaves out a note with no time, and places nothing on a cut of no length", () => {
     expect(rulerMarks([{ ...note("a", 1), t: null, scope: "whole" }], 4)).toEqual([]);
     expect(rulerMarks([note("a", 1)], 0)).toEqual([{ id: "a", left: 0, width: null, status: "todo" }]);
+  });
+});
+
+describe("noteTarget", () => {
+  const scan = { n: 3, name: "The scan" };
+  it("aims at this frame: picture, a point at the playhead, named by its timecode and shot", () => {
+    expect(noteTarget({ kind: "frame", t: 11 }, scan, 25)).toEqual({ stage: "picture", on: null, scope: "point", t: 11, tOut: null, label: "00:00:11:00 · 03 The scan" });
+    expect(noteTarget({ kind: "frame", t: 61.48 }, null, 25).label).toBe("00:01:01:12");
+  });
+  it("aims at a range marked: picture, from In to Out", () => {
+    expect(noteTarget({ kind: "range", t: 11, tOut: 12.5 }, scan, 24)).toEqual({ stage: "picture", on: null, scope: "range", t: 11, tOut: 12.5, label: "00:00:11:00–00:00:12:12 · 03 The scan" });
+  });
+  it("aims at a shot: picture, a point where it starts, named by the shot", () => {
+    expect(noteTarget({ kind: "shot", n: 4, name: "The door", t: 14 }, scan, 30)).toEqual({ stage: "picture", on: null, scope: "point", t: 14, tOut: null, label: "00:00:14:00 · 04 The door" });
+  });
+  it("aims at a whole take: its sound's stage and on, no time", () => {
+    expect(noteTarget({ kind: "take", stage: "voice", on: "r2/george", name: "George · retimed", t: null }, scan, 30)).toEqual({ stage: "voice", on: "r2/george", scope: "whole", t: null, tOut: null, label: "Voice · George · retimed" });
+  });
+  it("aims at a point on a take when its block was clicked, and a range on it when one is marked", () => {
+    expect(noteTarget({ kind: "take", stage: "music", on: "b/warm", name: "Warm keys", t: 2 }, null, 30)).toEqual({ stage: "music", on: "b/warm", scope: "point", t: 2, tOut: null, label: "00:00:02:00 · Music · Warm keys" });
+    expect(noteTarget({ kind: "take", stage: "sfx", on: "p/a", name: "Pass A", t: 1, tOut: 2 }, null, 30)).toEqual({ stage: "sfx", on: "p/a", scope: "range", t: 1, tOut: 2, label: "00:00:01:00–00:00:02:00 · Effects · Pass A" });
+  });
+  it("aims at the whole mix: stage mix, on null, as a whole-mix note is stored", () => {
+    expect(noteTarget({ kind: "mix" }, scan, 30)).toEqual({ stage: "mix", on: null, scope: "whole", t: null, tOut: null, label: "The whole mix" });
+    expect(noteTarget({ kind: "mix", t: 3 }, scan, 30)).toEqual({ stage: "mix", on: null, scope: "point", t: 3, tOut: null, label: "00:00:03:00 · The whole mix" });
+    expect(noteTarget({ kind: "mix", t: 3, tOut: 4 }, scan, 30).scope).toBe("range");
+  });
+  it("aims at a script line: stage script, on its id, the whole line", () => {
+    expect(noteTarget({ kind: "line", id: "s2", label: "S2 · The scan finds it" }, scan, 30)).toEqual({ stage: "script", on: "s2", scope: "whole", t: null, tOut: null, label: "S2 · The scan finds it" });
+  });
+});
+
+describe("timecode", () => {
+  it("reads hours, minutes, seconds and frames, snapping to the nearest frame", () => {
+    expect(timecode(0, 30)).toBe("00:00:00:00");
+    expect(timecode(3725.5, 24)).toBe("01:02:05:12");
+    expect(timecode(1.999, 30)).toBe("00:00:02:00");
+  });
+});
+
+describe("unsentCount", () => {
+  const n = (over: Partial<Note>): Note => ({
+    id: "n", stage: "picture", video: "hero", version: "v1", on: null, scope: "point", t: 1, tOut: null, frame: null, text: "x",
+    box: null, pin: null, grab: null, shot: null, marks: [], format: null, status: "todo", reply: "", fixT: null, fixVersion: null, batch: null,
+    createdAt: "2026-11-14T10:00:00.000Z", by: "user", ...over,
+  });
+  const base = { inPlay: new Set(["hero"]), scriptTodo: 0, briefChanged: 0, storyboardChanged: 0 };
+  it("counts to-do notes not yet in a batch, on films in play or on no film", () => {
+    const notes = [n({ id: "a" }), n({ id: "b", video: null }), n({ id: "c", batch: "b_1" }), n({ id: "d", status: "done" }), n({ id: "e", video: "cutdown" })];
+    expect(unsentCount({ ...base, notes })).toBe(2);
+  });
+  it("adds changed script rows (the script tab's to-do less its own notes) and the brief's and storyboard's changes", () => {
+    const notes = [n({ id: "a", stage: "script", on: "s1", scope: "whole", t: null })];
+    expect(unsentCount({ ...base, notes, scriptTodo: 3, briefChanged: 1, storyboardChanged: 2 })).toBe(1 + 2 + 1 + 2);
+  });
+  it("never counts fewer than no script rows", () => {
+    const notes = [n({ id: "a", stage: "script", scope: "whole", t: null }), n({ id: "b", stage: "script", scope: "whole", t: null })];
+    expect(unsentCount({ ...base, notes, scriptTodo: 1 })).toBe(2);
+  });
+  it("is nothing when nothing waits", () => {
+    expect(unsentCount({ ...base, notes: [] })).toBe(0);
   });
 });

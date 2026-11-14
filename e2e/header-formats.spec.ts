@@ -1,10 +1,9 @@
-// Plan 6 (formats, §21) meets Plan 7 (the Change Log, §22): the one-format popover above the drawer and the Cut menu,
-// and Alt+←/→ while either is open. (§27, 5.4: the format switch sits at the top right of the monitor.)
+// Plan 6 (formats, §21) meets Plan 7 (the Change Log, §22): the one-format popover above the notes panel's drawer and the
+// Cut menu, and Alt+←/→ while either is open. (§27, 5.4: the format switch sits at the top right of the monitor; §27, 5.7:
+// the Change Log is the notes panel's Activity tab, and under 1100 px the panel is a drawer.)
 import type { Page } from "@playwright/test";
-import { expect, test, cutButton, videoReady, type FormatSize, openWorkspace, pickFilm, currentFilm } from "./fixture.js";
+import { expect, test, cutButton, videoReady, type FormatSize, openWorkspace, pickFilm, currentFilm, activity, openActivity, panelToggle } from "./fixture.js";
 
-const logButton = (page: Page) => page.getByRole("button", { name: /^Change Log/ });
-const drawer = (page: Page) => page.getByRole("complementary", { name: "Change Log" });
 const toggle = (page: Page) => page.getByRole("radiogroup", { name: "Format" });
 const radio = (page: Page, label: string) => toggle(page).getByRole("radio", { name: new RegExp(`^${label}(,|$)`) });
 
@@ -15,7 +14,7 @@ const SQUARE: FormatSize = { width: 480, height: 480 };
 // control, every chip whole) are desk.spec's: "at 1100 px / at 1440 px with eleven long-named films the top bar is one
 // line and nothing overlaps", and "from 1100 to 1600 px the desk's bars never wrap and the format switch stays whole".
 
-test("the one-format popover is never hidden by the Change Log drawer, and the Cut menu is never hidden by the row under it (merge)", async ({ page, rushes }) => {
+test("the one-format popover is never hidden by the notes panel's drawer, and the Cut menu is never hidden by the row under it (merge)", async ({ page, rushes }) => {
   // §27, 5.4: a one-format cut beside an earlier cut's other shapes, so the switch shows with its single chip.
   await rushes.addFormatsCut([WIDE, TALL, SQUARE]);
   await rushes.addCut("second cut");
@@ -35,12 +34,12 @@ test("the one-format popover is never hidden by the Change Log drawer, and the C
       const hit = document.elementFromPoint((x0 + x1) / 2, (y0 + y1) / 2);
       return hit && p.contains(hit) ? "popover" : `${hit?.className}`;
     }, other);
-  // The drawer open, the pointer on the single chip.
-  await logButton(page).click();
-  await expect(drawer(page)).toBeVisible();
+  // The drawer open on Activity, the pointer on the single chip.
+  await panelToggle(page).click();
+  await openActivity(page);
   await radio(page, "16:9").hover();
   await expect(pop).toHaveCSS("opacity", "1");
-  expect(await onTop(".drawer")).toBe("popover");
+  expect(await onTop(".npanel")).toBe("popover");
   // §27: the Cut menu drops from the top bar over the monitor, where the format switch sits. Open, the list is on top of
   // the switch, not under it.
   await cutButton(page).click();
@@ -56,7 +55,7 @@ test("the one-format popover is never hidden by the Change Log drawer, and the C
   expect(over).toBe("list");
 });
 
-test("Alt+←/→ switch formats with the drawer open and focus in it, but not while typing a line; [ and ] still switch films (merge)", async ({ page, rushes }) => {
+test("Alt+←/→ switch formats with Activity open and focus in it, but not while typing a line; [ and ] still switch films (merge)", async ({ page, rushes }) => {
   await rushes.addCut("teaser cut", "Teaser");
   await rushes.addFormatsCut([WIDE, TALL, SQUARE], { video: "Launch" });
   await page.goto(rushes.url);
@@ -64,24 +63,23 @@ test("Alt+←/→ switch formats with the drawer open and focus in it, but not w
   await pickFilm(page, "Launch");
   await videoReady(page);
   await expect(radio(page, "16:9")).toHaveAttribute("aria-checked", "true");
-  await logButton(page).click();
-  await expect(drawer(page)).toBeVisible();
-  // Focus on a drawer control (its Close button), not a text field.
-  await drawer(page).getByRole("button", { name: "Close the change log" }).focus();
+  await openActivity(page);
+  // Focus on one of its controls (Export as Markdown), not a text field.
+  await activity(page).getByRole("button", { name: "Export as Markdown" }).focus();
   await page.keyboard.press("Alt+ArrowLeft");
   await expect(radio(page, "1:1")).toHaveAttribute("aria-checked", "true");
   await page.keyboard.press("Alt+ArrowRight");
   await expect(radio(page, "16:9")).toHaveAttribute("aria-checked", "true");
-  await expect(drawer(page)).toBeVisible();
-  // In the drawer's own text field Alt+arrows are the field's (word jumps on macOS).
-  const field = drawer(page).getByRole("textbox");
+  await expect(activity(page)).toBeVisible();
+  // In its own text field Alt+arrows are the field's (word jumps on macOS).
+  const field = activity(page).getByRole("textbox");
   await field.fill("held the logo");
   await field.focus();
   await page.keyboard.press("Alt+ArrowLeft");
   await expect(radio(page, "16:9")).toHaveAttribute("aria-checked", "true");
   await expect(field).toHaveValue("held the logo");
-  // [ and ] are still the films', with the drawer open.
-  await drawer(page).getByRole("button", { name: "Close the change log" }).focus();
+  // [ and ] are still the films', with Activity open.
+  await activity(page).getByRole("button", { name: "Export as Markdown" }).focus();
   await page.keyboard.press("[");
   await expect(currentFilm(page)).toHaveText("Teaser");
   await page.keyboard.press("]");

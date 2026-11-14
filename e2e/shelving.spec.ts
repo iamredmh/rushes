@@ -1,4 +1,4 @@
-import { test, expect, videoReady, reviewTab, currentFilm, cutButton, filmButton, pickFilm, openMore, toolButton, transport } from "./fixture.js";
+import { test, expect, videoReady, reviewTab, currentFilm, cutButton, filmButton, pickFilm, openMore, toolButton, transport, sendButton } from "./fixture.js";
 
 // §26 and §27, 5.2: shelving a film from More, the Film menu with its Shelved group, and what a shelved film does and does not do.
 type Rushes = Parameters<Parameters<typeof test>[2]>[0]["rushes"];
@@ -8,7 +8,6 @@ const filmMenu = (page: Page) => page.getByRole("menu", { name: "Films" });
 /** The Film menu's films in play (the shelved ones sit in their own group, each with Open and Restore). */
 const inPlayRows = (page: Page) => filmMenu(page).locator(":scope > [role=menuitem]");
 const moreButton = (page: Page) => page.getByRole("button", { name: "More", exact: true });
-const sendButton = (page: Page) => page.getByRole("button", { name: /Send to agent/ });
 async function openFilms(page: Page) {
   if ((await filmMenu(page).count()) === 0) await filmButton(page).click();
   await expect(filmMenu(page)).toBeVisible();
@@ -65,7 +64,7 @@ test("a film's row in the Film menu only switches films: there is no button on a
   expect((await row.boundingBox())!.width).toBe(before); // hovering does not change a row's width
 });
 
-test("a shelved film's open notes stop counting in Send to agent, and come back on restore", async ({ page, rushes }) => {
+test("a shelved film's open notes stop counting in Send, and come back on restore", async ({ page, rushes }) => {
   await films(rushes, ["Hero", "Cutdown"]);
   await note(rushes, "hero", "Hero fix.");
   await note(rushes, "cutdown", "Cutdown fix one.", 0.4);

@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { test, expect, reviewTab, openWorkspace } from "./fixture.js";
+import { test, expect, reviewTab, openWorkspace, notesPanel, sendButton, sentDialog } from "./fixture.js";
 
 // §24.12: the Storyboard page over storyboard.md, and the plan's gate.
 
@@ -52,8 +52,9 @@ test("with no storyboard.md, Storyboard is a locked page that says what to ask t
   await item.click();
   await expect(page.getByRole("heading", { name: "Storyboard" })).toBeVisible();
   await expect(page.getByLabel("Prompt for your agent")).toHaveValue(/storyboard\.md/);
-  await page.getByRole("button", { name: /Send to agent/ }).click();
-  await expect(page.locator(".toast")).toContainText("no storyboard yet");
+  // There is no storyboard to send: the panel has no Send, and the page's prompt is the way to get one.
+  await expect(notesPanel(page)).toBeVisible();
+  await expect(sendButton(page)).toHaveCount(0);
 });
 
 test("shows a row per shot with its still, and an empty frame for a still that is missing", async ({ page, rushes }) => {
@@ -170,13 +171,13 @@ test("the page keeps working when the agent deletes the last shot while another 
   expect(errors).toEqual([]);
 });
 
-test("Send to agent straight after typing names the shot just edited", async ({ page, rushes }) => {
+test("Send straight after typing names the shot just edited", async ({ page, rushes }) => {
   await withBoard(rushes);
   await page.goto(rushes.url);
   await openStoryboard(page);
   await page.getByLabel("Your version of shot 2").fill("Mine.");
-  await page.getByRole("button", { name: /Send to agent/ }).click();
-  const dialog = page.getByRole("dialog", { name: "Sent to agent" });
+  await sendButton(page).click();
+  const dialog = sentDialog(page);
   await expect(dialog).toContainText("this shot: Shot 02 · Drop a folder");
   await expect(dialog).toContainText("0 of 2 shots in storyboard.md are approved");
   expect((await rushes.api("GET", "/api/state")).batches.batches).toHaveLength(0);

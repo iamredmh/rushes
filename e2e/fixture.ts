@@ -636,9 +636,68 @@ export function loudness(page: Page): Locator {
   return transport(page).getByRole("group", { name: "Loudness" });
 }
 
-/** Beside the note box until the notes panel's target line (Task 5): sends what is typed as a note on the whole mix. */
-export function mixNoteButton(page: Page): Locator {
-  return page.getByRole("button", { name: "Note on the mix", exact: true });
+// ---- the notes panel (§27, 5.7): Notes and Activity, the note box's target line, and Send ----
+
+/** The notes panel: the right-hand column of Review and Plan (a drawer under 1100 px). */
+export function notesPanel(page: Page): Locator {
+  return page.getByRole("complementary", { name: "Notes panel" });
+}
+
+/** One of the panel's two tabs: Notes (with its count) or Activity (with a dot for entries not yet seen). */
+export function panelTab(page: Page, name: "Notes" | "Activity"): Locator {
+  return notesPanel(page).getByRole("tab", { name: new RegExp(`^${name}`) });
+}
+
+/** The Activity tab's list: the Change Log, with its "add a line" box. Open the tab first (openActivity). */
+export function activity(page: Page): Locator {
+  return page.getByRole("tabpanel", { name: "Activity" });
+}
+
+/** Opens the panel's Activity tab. */
+export async function openActivity(page: Page): Promise<void> {
+  await panelTab(page, "Activity").click();
+  await expect(activity(page)).toBeVisible();
+}
+
+/** The line above the note box that names what the next note is about. */
+export function noteTargetLine(page: Page): Locator {
+  return notesPanel(page).getByRole("group", { name: "Note target" });
+}
+
+/** The target line's menu, with nothing selected on the Timeline tab: "This frame" or "The whole mix". */
+export function noteTargetMenu(page: Page): Locator {
+  return noteTargetLine(page).getByRole("combobox", { name: "Aim the note at" });
+}
+
+/** Lets go of the selection (a take picked on its row), back to the default target. */
+export function clearTarget(page: Page): Locator {
+  return noteTargetLine(page).getByRole("button", { name: "Clear the selection · Esc" });
+}
+
+/** The panel's Send, "Send 3", shown only while something waits to be sent. */
+export function sendButton(page: Page): Locator {
+  return notesPanel(page).getByRole("button", { name: /^Send \d+$/ });
+}
+
+/** What Send opens: the batch's prompt, with Copy. */
+export function sentDialog(page: Page): Locator {
+  return page.getByRole("dialog", { name: "Sent to agent" });
+}
+
+/** The top bar's button that hides and shows the panel (opens and closes the drawer under 1100 px). */
+export function panelToggle(page: Page): Locator {
+  return page.locator("header.top").getByRole("button", { name: /the notes panel · \\$/ });
+}
+
+/** The status bar's "send N notes": it opens the notes panel with Send in view, from any workspace (Visuals, Assets). */
+export function statusSend(page: Page): Locator {
+  return page.locator("footer.status").getByRole("button", { name: /^send \d+ notes?$/ });
+}
+
+/** Presses Send wherever the person is: in the panel, or by way of the status bar from a workspace with no panel. */
+export async function sendNotes(page: Page): Promise<void> {
+  if (!(await sendButton(page).isVisible())) await statusSend(page).click();
+  await sendButton(page).click();
 }
 
 export { expect };

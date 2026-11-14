@@ -1,5 +1,5 @@
 // §27, 5.2: the top bar, one line of 44 px. Left to right: the logo and the project's name, the Film menu, the Cut menu;
-// the workspaces centred; More at the right. Nothing else (Share waits for review links).
+// the workspaces centred; the notes panel's toggle and More at the right. Nothing else (Share waits for review links).
 import type { ComponentChildren, RefObject } from "preact";
 
 export interface TopBarProps {
@@ -10,10 +10,12 @@ export interface TopBarProps {
   film: ComponentChildren;
   cut: ComponentChildren;
   workspaces: ComponentChildren;
+  /** §27, 5.7: hides and shows the notes panel, in the workspaces that have one. */
+  notesToggle?: ComponentChildren;
   more: ComponentChildren;
 }
 
-export function TopBar({ barRef, project, projectId, film, cut, workspaces, more }: TopBarProps) {
+export function TopBar({ barRef, project, projectId, film, cut, workspaces, notesToggle, more }: TopBarProps) {
   return (
     <header class="top" ref={barRef}>
       <div class="tleft">
@@ -26,7 +28,7 @@ export function TopBar({ barRef, project, projectId, film, cut, workspaces, more
         {cut}
       </div>
       {workspaces}
-      <div class="tright">{more}</div>
+      <div class="tright">{notesToggle}{more}</div>
     </header>
   );
 }
