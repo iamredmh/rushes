@@ -77,6 +77,38 @@ test("the cut menu locks and unlocks picture", async ({ page, rushes }) => {
   await expect(page.getByRole("button", { name: "Lock picture at v2" })).toBeVisible();
 });
 
+test("the More menu's arrows step over a disabled row instead of sticking on it", async ({ page, rushes }) => {
+  // No film yet: Shelve film is there but disabled.
+  await page.goto(rushes.url);
+  await page.getByRole("button", { name: "More", exact: true }).click();
+  const menu = page.getByRole("menu", { name: "More" });
+  await expect(menu.getByRole("menuitem", { name: /Shelve film/ })).toBeDisabled();
+  await expect(menu.getByRole("menuitem", { name: /Bring in new files/ })).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(menu.getByRole("menuitem", { name: /Export notes/ })).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(menu.getByRole("menuitemcheckbox", { name: /lighter copies/ })).toBeFocused();
+  await page.keyboard.press("ArrowUp");
+  await expect(menu.getByRole("menuitem", { name: /Export notes/ })).toBeFocused();
+});
+
+test("Tab from the Cut menu's list on a shelved film skips its disabled lock row and closes the menu", async ({ page, rushes }) => {
+  await rushes.addCut("hero cut");
+  await rushes.addCut("cutdown cut", "Cutdown");
+  await rushes.api("PUT", "/api/videos/cutdown/shelve", { shelved: true });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await filmButton(page).click();
+  await page.getByRole("menu", { name: "Films" }).getByRole("menuitem", { name: "Open Cutdown" }).click();
+  await expect(currentFilm(page)).toHaveText("Cutdown");
+  await cutButton(page).click();
+  const list = page.getByRole("listbox", { name: "Versions" });
+  await expect(list).toBeVisible();
+  await expect(page.locator(".vfoot .mi")).toBeDisabled();
+  await page.keyboard.press("Tab");
+  await expect(list).toHaveCount(0);
+});
+
 test("number keys keep their places", async ({ page, rushes }) => {
   await rushes.addCut();
   await rushes.addVariant("voice", "Read A", { seconds: 2, freq: 220 });
