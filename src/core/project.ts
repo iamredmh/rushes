@@ -195,6 +195,8 @@ export function addVariant(p: Project, input: AddVariantInput, now = new Date())
   };
   if (videos.length > 0) variant.videos = videos;
   for (const film of videos) recordMadeFor(p, variant, film);
+  // On no named film, it is still on the film of a one-film project (schema.ts onFilm): the commonest route.
+  if (videos.length === 0 && p.videos.length === 1) recordMadeFor(p, variant, p.videos[0].id);
   lane.variants.push(variant);
   return { lane, variant };
 }

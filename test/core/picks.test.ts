@@ -22,10 +22,35 @@ describe("inUse", () => {
     const picks = { lanes: { "beds-a": "pulse" }, use: { music: { lane: "beds-b", variant: "gone", at: "x", seen: { "beds-a": "pulse" } } } };
     expect(inUse(project, picks).music).toEqual({ lane: "beds-a", variant: "pulse", at: "", seen: {} });
   });
-  it("lets a pick made by an older Rushes win", () => {
-    // 0.9 had brought George back from round 1; then 0.8.1 picked "eliza" in round 1 and knows nothing of `use`.
+  it("lets a pick made by an older Rushes win, whichever round it is in (§27.6)", () => {
+    // This version had brought George back from round 1; then 0.8.1, which knows nothing of `use`, picked Eliza there.
     const picks = { lanes: { "round-1": "eliza", "round-2": "george-slow" }, use: { voice: { lane: "round-1", variant: "george", at: "x", seen: { "round-1": "george", "round-2": "george-slow" } } } };
-    expect(inUse(project, picks).voice).toEqual({ lane: "round-2", variant: "george-slow", at: "", seen: {} }); // 0.8's own rule: newest picked round
+    expect(inUse(project, picks).voice).toEqual({ lane: "round-1", variant: "eliza", at: "", seen: {} });
+    // And a bed it picks in an OLDER lane than the one in use.
+    const beds = { lanes: { "beds-a": "pulse", "beds-b": "drift" }, use: { music: { lane: "beds-b", variant: "drift", at: "x", seen: { "beds-b": "drift" } } } };
+    expect(inUse(project, beds).music).toEqual({ lane: "beds-a", variant: "pulse", at: "", seen: {} });
+  });
+  it("an older Rushes unpicking another round leaves the take in use standing", () => {
+    const stored = { lane: "round-1", variant: "george", at: "x", seen: { "round-1": "george", "round-2": "george-slow" } };
+    expect(inUse(project, { lanes: { "round-1": "george" }, use: { voice: stored } }).voice).toEqual(stored);
+  });
+  it("an older Rushes unpicking the take in use falls back to another picked round", () => {
+    const stored = { lane: "round-1", variant: "george", at: "x", seen: { "round-1": "george", "round-2": "george-slow" } };
+    expect(inUse(project, { lanes: { "round-2": "george-slow" }, use: { voice: stored } }).voice).toEqual({ lane: "round-2", variant: "george-slow", at: "", seen: {} });
+  });
+  it("is worked out among the takes this film hears: one taken off the film is never in use", () => {
+    // The film's view of the lanes (lanesForVideo) no longer has round 1's read; its picks still name it.
+    const view = { lanes: [project.lanes[1], project.lanes[2], project.lanes[3]] };
+    const lanes = { "round-1": "george", "round-2": "george-slow" };
+    const picks = { lanes, use: { voice: { lane: "round-1", variant: "george", at: "x", seen: lanes } } };
+    expect(inUse(view, picks).voice).toEqual({ lane: "round-2", variant: "george-slow", at: "", seen: {} });
+  });
+  it("gives the same answer when asked again with its own answer", () => {
+    const lanes = { "round-1": "george", "round-2": "george-slow" };
+    const once = inUse(project, { lanes, use: {} });
+    expect(inUse(project, { lanes, use: once })).toEqual(once);
+    const stored = { voice: { lane: "round-1", variant: "george", at: "x", seen: lanes } };
+    expect(inUse(project, { lanes, use: inUse(project, { lanes, use: stored }) })).toEqual(stored);
   });
   it("has nothing in use for a sound with no pick", () => {
     expect(inUse(project, { lanes: {}, use: {} })).toEqual({});

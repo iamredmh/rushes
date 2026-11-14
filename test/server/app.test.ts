@@ -401,6 +401,42 @@ describe("API", () => {
       expect(v.addedAt).toMatch(/^\d{4}-\d\d-\d\dT/);
       expect(v.madeFor).toEqual({ hero: "v1" });
     });
+    it("the dashboard, the agent, the readout and put-away agree when the take in use has left the film", async () => {
+      // One film; two reads added with no film named, round 1 brought back as the one in use.
+      const { call, root } = await setup();
+      await call("POST", "/api/versions", { video: "Hero", file: `${root}/renders/a.mp4` });
+      await call("POST", "/api/variants", { stage: "voice", name: "Read one", file: "audio/one.wav", round: "Round 1" });
+      await call("POST", "/api/variants", { stage: "voice", name: "Read two", file: "audio/two.wav", round: "Round 2" });
+      await call("PUT", "/api/picks", { video: "hero", lanes: { "round-2": "read-two" } });
+      await call("PUT", "/api/picks", { video: "hero", lanes: { "round-1": "read-one" } });
+      // A second film arrives, so both reads are on no film; round 2's is put back on Hero.
+      await call("POST", "/api/versions", { video: "Teaser", file: `${root}/renders/b.mp4` });
+      await call("PUT", "/api/variants/round-2/read-two/films", { videos: ["Hero"] });
+      const picks = (await call("GET", "/api/picks?video=hero")).json;
+      expect(picks.use.voice).toMatchObject({ lane: "round-2", variant: "read-two" });
+      expect((await call("GET", "/api/state")).json.picks.videos.hero.use.voice).toMatchObject({ lane: "round-2", variant: "read-two" });
+      // Read one is not in use on Hero any more, so it can be put away; read two cannot.
+      expect((await call("PUT", "/api/variants/round-1/read-one/put-away", { away: true })).status).toBe(200);
+      expect((await call("PUT", "/api/variants/round-2/read-two/put-away", { away: true })).status).toBe(400);
+    });
+    it("a pick made the old way, in an older round, is the one in use (an older Rushes on the same project)", async () => {
+      const { call, store } = await two();
+      await call("PUT", "/api/picks", { video: "hero", lanes: { "round-2": "george-slow" } });
+      // 0.8.1 writes `lanes` only and leaves `use` as it found it.
+      await store.update("picks", (p) => { p.videos.hero.lanes["round-1"] = "george"; });
+      expect((await call("GET", "/api/picks?video=hero")).json.use.voice).toMatchObject({ lane: "round-1", variant: "george" });
+    });
+    it("bringing an earlier take back is written to the Change Log, naming what is in use", async () => {
+      const { call } = await two();
+      await call("PUT", "/api/picks", { video: "hero", lanes: { "round-1": "george" } });
+      await call("PUT", "/api/picks", { video: "hero", lanes: { "round-2": "george-slow" } });
+      const text = async () => JSON.stringify((await call("GET", "/api/log")).json);
+      expect(await text()).toMatch(/Picks[^"]*: voice “George slow”/);
+      expect(await text()).not.toMatch(/voice “George”, voice “George slow”/);
+      // The same pick again in round 1: `lanes` does not change, what is in use does.
+      await call("PUT", "/api/picks", { video: "hero", lanes: { "round-1": "george" } });
+      expect(await text()).toMatch(/Picks[^"]*: voice “George”(?!,? voice)/);
+    });
     it("a lane the project does not know is still merged plainly, as before", async () => {
       const { call } = await two();
       const put = await call("PUT", "/api/picks", { video: "hero", lanes: { "not-a-lane": "x" } });

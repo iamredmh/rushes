@@ -89,6 +89,34 @@ describe("styles.css", () => {
     // The plain mark keeps the to-do colour on the unselected chip, which sits on the dark ground.
     expect(ratio(token("todo"), token("bg"))).toBeGreaterThanOrEqual(4.5);
   });
+  it("small text and status marks keep their contrast in both modes (§27 review)", () => {
+    const block = (sel: RegExp) => css.match(sel)![1];
+    const dark = block(/:root\s*\{([^}]*)\}/);
+    const light = block(/:root\[data-theme="light"\]\s*\{([^}]*)\}/);
+    const tok = (b: string, name: string) => b.match(new RegExp(`--${name}: (#[0-9a-f]{6});`))![1];
+    const lum = (hex: string) => {
+      const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((s) => (s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4));
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    const ratio = (a: string, b: string) => (Math.max(lum(a), lum(b)) + 0.05) / (Math.min(lum(a), lum(b)) + 0.05);
+    // The quietest text that is still meant to be read.
+    expect(ratio(tok(dark, "text-3"), tok(dark, "bg"))).toBeGreaterThanOrEqual(4.5);
+    expect(ratio(tok(light, "text-3"), tok(light, "app"))).toBeGreaterThanOrEqual(4.5);
+    expect(ratio(tok(light, "text-2"), tok(light, "bg"))).toBeGreaterThanOrEqual(4.5);
+    // Status words (To do, Fixed) on a panel.
+    for (const name of ["todo", "done"]) {
+      expect(ratio(tok(light, name), tok(light, "raised")), `light ${name}`).toBeGreaterThanOrEqual(4.5);
+      expect(ratio(tok(dark, name), tok(dark, "app")), `dark ${name}`).toBeGreaterThanOrEqual(4.5);
+    }
+    // Text on the surfaces that stay dark.
+    expect(ratio(tok(light, "k-text-2"), tok(light, "black"))).toBeGreaterThanOrEqual(4.5);
+  });
+  it("what sits on a surface that stays dark reads as on dark in both modes (§27 review)", () => {
+    // The picture's surround, the lightboxes and the full-screen viewer are near-black in light mode
+    // too, so the text and line tokens inside them point at the dark set.
+    const rule = css.match(/\n\.frame, \.srcswitch, \.sblight, \.lightbox, \.vzframe, \.vzfs \{([^}]*)\}/)?.[1] ?? "";
+    for (const t of ["text", "text-2", "text-3", "line", "line-2", "hover", "raised", "app", "bg"]) expect(rule, t).toContain(`--${t}: var(--k-${t});`);
+  });
   it("the chips reserve their count slot and their bold label, so no chip moves (review I1)", () => {
     expect(css).toMatch(/\.fmts \.n \{[^}]*min-width: calc\(2ch \+ 14px\)/);
     expect(css).toMatch(/\.fmts \.n\.none \{[^}]*visibility: hidden/);

@@ -13,38 +13,42 @@ function stagePicks(lanes: Pick<Lane, "id" | "stage">[], picks: Record<string, s
   return out;
 }
 
-function same(a: Record<string, string>, b: Record<string, string>): boolean {
-  const ka = Object.keys(a);
-  return ka.length === Object.keys(b).length && ka.every((k) => a[k] === b[k]);
-}
-
 /**
- * The take in use for each sound.
- * 1. The stored one stands while its take exists and the sound's per-lane picks are as it last saw them.
- * 2. Otherwise (nothing stored, the take gone, or an older Rushes changed a pick underneath) the
- *    newest lane of that sound with a pick that exists: the rule from before `use`. Its `at` is "".
- * 3. Otherwise nothing.
+ * The take in use for each sound, among the takes `project.lanes` holds: hand it the lanes ONE FILM
+ * hears (lanesForVideo), with that film's picks, and a take that is not on the film is never in use.
+ *
+ * 1. Nothing stored, or the stored take is gone from these lanes: the newest lane of that sound with
+ *    a pick that exists (the rule from before `use`). Its `at` is "".
+ * 2. Stored, and since it last saw them a pick in one of these lanes was set to another take that
+ *    exists: an older Rushes did that (it knows only `lanes`), and the pick it made is the one in use.
+ *    Of several, the newest lane's.
+ * 3. Stored, and its own lane still picks it: it stands, whatever was unpicked elsewhere.
+ * 4. Otherwise (its own lane's pick was cleared underneath it): rule 1.
  */
 export function inUse(project: Lanes, picks: { lanes: Record<string, string>; use?: InUse }): InUse {
   const out: InUse = {};
   for (const stage of STAGES) {
+    const lanes = project.lanes.filter((l) => l.stage === stage);
+    const exists = (laneId: string, variantId: string | undefined) =>
+      variantId !== undefined && lanes.some((l) => l.id === laneId && l.variants.some((v) => v.id === variantId));
+    const newest = (wanted: (lane: (typeof lanes)[number]) => boolean): Use | undefined => {
+      for (let i = lanes.length - 1; i >= 0; i--) {
+        const picked = picks.lanes[lanes[i].id];
+        if (exists(lanes[i].id, picked) && wanted(lanes[i])) return { lane: lanes[i].id, variant: picked, at: "", seen: {} };
+      }
+      return undefined;
+    };
     const stored = picks.use?.[stage];
-    if (stored) {
-      const lane = project.lanes.find((l) => l.id === stored.lane && l.stage === stage);
-      if (lane?.variants.some((v) => v.id === stored.variant) && same(stagePicks(project.lanes, picks.lanes, stage), stored.seen ?? {})) {
-        out[stage] = stored;
-        continue;
-      }
+    let use: Use | undefined;
+    // One with no time was only worked out (rule 1), never picked here: work it out again.
+    if (stored && stored.at !== "" && exists(stored.lane, stored.variant)) {
+      const seen = stored.seen ?? {};
+      use =
+        newest((l) => picks.lanes[l.id] !== seen[l.id] && !(l.id === stored.lane && picks.lanes[l.id] === stored.variant)) ??
+        (picks.lanes[stored.lane] === stored.variant ? stored : undefined);
     }
-    for (let i = project.lanes.length - 1; i >= 0; i--) {
-      const lane = project.lanes[i];
-      if (lane.stage !== stage) continue;
-      const picked = picks.lanes[lane.id];
-      if (picked !== undefined && lane.variants.some((v) => v.id === picked)) {
-        out[stage] = { lane: lane.id, variant: picked, at: "", seen: {} };
-        break;
-      }
-    }
+    use ??= newest(() => true);
+    if (use) out[stage] = use;
   }
   return out;
 }
