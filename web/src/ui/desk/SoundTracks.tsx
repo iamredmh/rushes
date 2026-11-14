@@ -6,7 +6,7 @@
 // are saved with the picks, debounced; and the loudness of what you hear is measured, debounced, for the transport.
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, ApiError } from "../../api.js";
-import { type LoadResult } from "../../audio/engine.js";
+import type { AudioEngine, LoadResult } from "../../audio/engine.js";
 import { assetRev, type Clip, laneGains, mediaKey } from "../../audio/timeline.js";
 import { useFollower } from "../../audio/useFollower.js";
 import { cueKeys, cueLabel, cueName, cuesInTime } from "../../cues.js";
@@ -22,6 +22,7 @@ import { rovingKeyDown } from "../CueLayers.js";
 import { Icon } from "../Icon.js";
 import { Wave } from "../Lanes.js";
 import { PictureWave, usePictureWave } from "../PictureWave.js";
+import type { Wave as Peaks } from "../../peaks.js";
 
 /** The readout waits this long after the last change before measuring (§17.6). */
 export const LOUDNESS_DEBOUNCE_MS = 500;
@@ -53,9 +54,10 @@ export interface SoundRow {
 export interface MixInput {
   state: State;
   assets: Asset[];
-  video: Video;
-  /** The cut on screen: its own sound is the Cut sound row. */
-  version: Version;
+  /** The film, or null in a project with takes and no film yet. */
+  video: Video | null;
+  /** The cut on screen: its own sound is the Cut sound row. Null with no cut: the engine is then its own clock. */
+  version: Version | null;
   /** The <video> on the monitor: the clock the takes follow. */
   player: { current: HTMLVideoElement | null };
   /** The cut's length as the player knows it, for a waveform the browser has to make itself. */
@@ -75,14 +77,17 @@ export interface Mix {
   setLevel(lane: MixLane, db: number): void;
   /** Any take in use: the video is muted, the readout shows, and notes can be on the mix. */
   inUse: boolean;
-  /** The cut's own sound, when it has one (null while it isn't known, and for a silent cut). */
-  cutWave: ReturnType<typeof usePictureWave>;
+  /** The cut's own sound: its row shows unless the cut is known to have none; its waveform once it has one. */
+  cut: { shown: boolean; wave: Peaks | null; known: boolean };
   /** The Cut sound row's M: muted while any take is in use, until pressed. */
   cutMuted: boolean;
   toggleCut(): void;
   /** Whether the <video> plays its own sound muted. */
   videoMuted: boolean;
   loudness: { state: LoudnessState; measuring: boolean; retry(): void };
+  /** The engine and its length: the clock itself when there is no cut to follow. */
+  engine: AudioEngine;
+  length: number;
   /** What a note on the mix is on, for the notes list ("Whole mix", "Music · Warm keys"); null for any other note. */
   noteLabel(n: Note): string | null;
 }
@@ -90,7 +95,7 @@ export interface Mix {
 /** Everything the Timeline tab's sound needs: what plays, how loud, what is heard and what it measures. */
 export function useMix({ state, assets, video, version, player, duration, monitor, toast, onChanged }: MixInput): Mix {
   const asset = (path: string) => assets.find((a) => a.path === path);
-  const filmId = video.id;
+  const filmId = video?.id;
   const filmState = filmPicks(state.picks, filmId);
   const use = filmState.use;
   // Only this film's reads, beds and passes (and any made for every film), as the server measures them.
@@ -98,7 +103,7 @@ export function useMix({ state, assets, video, version, player, duration, monito
 
   // ---- what each sound plays: one take, the one in use, as the server worked it out (§27.6) ----
   const planned: SoundRow[] = MIX_LANES.map((lane) => {
-    const groups = takeGroups(lanes, MIX_STAGE[lane], use?.[MIX_STAGE[lane]], video);
+    const groups = takeGroups(lanes, MIX_STAGE[lane], use?.[MIX_STAGE[lane]], video ?? undefined);
     const take = groups.inUse;
     if (!take) return { lane, groups, take, clip: null, block: takeCount(groups).all > 0 ? "waiting" : "none" };
     const file = take.variant.file;
@@ -113,6 +118,17 @@ export function useMix({ state, assets, video, version, player, duration, monito
   // ---- mute and solo: view state only ----
   const [view, setView] = useState(UNTOUCHED);
   const toggle = (lane: MixLane, key: keyof LaneView) => setView((v) => ({ ...v, [lane]: { ...v[lane], [key]: !v[lane][key] } }));
+  // A sound whose take goes (unpicked here, by the agent or in another tab) lets go of its mute and solo: there is no M
+  // or S left to undo them, and a take picked later starts as any take does.
+  const live: Record<MixLane, boolean> = { vo: false, music: false, sfx: false };
+  for (const r of planned) live[r.lane] = r.take !== null;
+  const liveKey = MIX_LANES.map((l) => (live[l] ? "1" : "0")).join("");
+  useLayoutEffect(() => {
+    setView((v) => {
+      const gone = MIX_LANES.filter((l) => !live[l] && (v[l].muted || v[l].solo));
+      return gone.length === 0 ? v : { ...v, ...Object.fromEntries(gone.map((l) => [l, { muted: false, solo: false }])) };
+    });
+  }, [liveKey]);
   const [cutChoice, setCutChoice] = useState<boolean | null>(null);
   const cutMuted = cutChoice ?? inUse;
 
@@ -187,13 +203,14 @@ export function useMix({ state, assets, video, version, player, duration, monito
   };
 
   // What the mix is (mute, solo, levels), and what you hear of it (the transport's volume and mute on top).
-  const gains = laneGains(MIX_LANES.map((id) => ({ id, ...view[id], level: levels[id] })));
+  // Only a sound with a take in use can mute or solo anything, even before the view state above has let go.
+  const gains = laneGains(MIX_LANES.map((id) => (live[id] ? { id, ...view[id], level: levels[id] } : { id, level: levels[id] })));
   const master = monitor.muted ? 0 : monitor.level;
   const heardGains = Object.fromEntries(Object.entries(gains).map(([lane, g]) => [lane, g * master]));
-  const { media, engine } = useFollower(player, clips, heardGains);
+  const { media, engine, length } = useFollower(player, clips, heardGains);
   // A file that won't play at all says so on its block; the others play on.
   const rows = planned.map((r): SoundRow => (r.clip && media[mediaKey(r.clip)] === "error" ? { ...r, block: "broken" } : r));
-  const anySolo = MIX_LANES.some((l) => view[l].solo);
+  const anySolo = MIX_LANES.some((l) => live[l] && view[l].solo);
 
   // ---- the test hook (only with ?test=1) ----
   useLayoutEffect(() => {
@@ -209,8 +226,12 @@ export function useMix({ state, assets, video, version, player, duration, monito
   }, [engine]);
 
   // ---- the cut's own sound: its waveform answers whether it has one (§19.9). Always the original's, even with a proxy. ----
-  const cutAsset = asset(version.file);
-  const cutWave = usePictureWave(video.id, version, cutAsset?.size ?? null, cutAsset ? assetRev(cutAsset) : undefined, version.duration ?? duration);
+  // Only the server's "no audio" counts as silent: a waveform that couldn't be had (a failed request, no ffmpeg and too
+  // big to decode here) still leaves the row and its M, so the sound can always be heard. While the answer is still on
+  // its way and nothing is in use, the cut plays its own sound anyway, so the row waits for it rather than come and go.
+  const cutAsset = version ? asset(version.file) : undefined;
+  const cutWave = usePictureWave(video?.id ?? null, version, cutAsset?.size ?? null, cutAsset ? assetRev(cutAsset) : undefined, version?.duration ?? duration);
+  const cutShown = version !== null && !cutWave.silent && (cutWave.known || inUse);
 
   // ---- loudness (§17.6): the sounds you hear, debounced, never blocking ----
   const heard: Record<MixLane, boolean> = { vo: false, music: false, sfx: false };
@@ -264,12 +285,14 @@ export function useMix({ state, assets, video, version, player, duration, monito
     levels,
     setLevel,
     inUse,
-    cutWave,
+    cut: { shown: cutShown, wave: cutWave.wave, known: cutWave.known },
     cutMuted,
     toggleCut: () => setCutChoice(!cutMuted),
     videoMuted: cutMuted || anySolo,
     loudness: { state: loudness, measuring, retry: () => setRetries((n) => n + 1) },
     noteLabel: (n) => (n.stage === "mix" ? mixOnLabel(model, n.on) : null),
+    engine,
+    length,
   };
 }
 
@@ -405,7 +428,7 @@ export function SoundTracks({ mix, duration, t, onSeek, onOpenTab }: SoundTracks
           </div>
         );
       })}
-      {mix.cutWave && (
+      {mix.cut.shown && (
         <div class="trow strack csound" role="group" aria-label="Cut sound track" style={{ "--c": "var(--pic)" }}>
           <div class="thead shead">
             <i class="sw" aria-hidden="true" />
@@ -414,8 +437,16 @@ export function SoundTracks({ mix, duration, t, onSeek, onOpenTab }: SoundTracks
             <button type="button" class="ms" aria-pressed={mix.cutMuted} aria-label="Mute Cut sound" data-tip="Mute Cut sound" onClick={mix.toggleCut}>M</button>
           </div>
           <div class="tlane" onClick={seekAt}>
-            <div class="sblock cut" style={{ left: "0%", width: "100%" }} />
-            <PictureWave wave={mix.cutWave} length={duration} />
+            {mix.cut.wave ? (
+              <>
+                <div class="sblock cut" style={{ left: "0%", width: "100%" }} />
+                <PictureWave wave={mix.cut.wave} length={duration} />
+              </>
+            ) : (
+              <div class="sblock empty" style={{ left: "0%", width: "100%" }}>
+                <span class="slbl">{mix.cut.known ? "No waveform" : ""}</span>
+              </div>
+            )}
             <span class="playhead" style={{ left: `${pct(t)}%` }} />
           </div>
         </div>

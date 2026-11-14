@@ -601,8 +601,92 @@ test("a cut with no sound of its own and no takes has no sound to follow and no 
   expect(await videoMuted(page)).toBe(false);
 });
 
+test("a solo on a sound whose take goes stops counting, and a take picked again starts unsoloed (fix round 1)", async ({ page, rushes }) => {
+  const { bed } = await threeInUse(rushes);
+  const asked: string[][] = [];
+  page.on("request", (r) => {
+    if (r.url().endsWith("/api/mix/loudness") && r.method() === "POST") asked.push(r.postDataJSON().lanes);
+  });
+  await openTimeline(page, rushes, 3);
+  await soundButton(page, "Music", "Solo").click();
+  await expect.poll(async () => (await audio(page))!.lanes).toEqual({ vo: 0, music: 1, sfx: 0 });
+  // The bed is unpicked from elsewhere (the agent, another tab) while the timeline stays open.
+  await rushes.api("PUT", "/api/picks", { video: "hero", lanes: { [bed.lane.id]: null } });
+  await expect(soundBlock(page, "Music")).toHaveText("Nothing chosen yet");
+  await expect.poll(async () => (await audio(page))!.lanes).toEqual({ vo: 1, music: 1, sfx: 1 });
+  expect(await heardNow(page)).toEqual(["round-1-voices/gerald", "sfx/pass-a"]);
+  await expect.poll(() => asked.at(-1)).toEqual(["voice", "sfx"]);
+  // Picked again, it starts as any take does: not soloed.
+  await rushes.api("PUT", "/api/picks", { video: "hero", lanes: { [bed.lane.id]: bed.variant.id } });
+  await expect(soundButton(page, "Music", "Solo")).toHaveAttribute("aria-pressed", "false");
+  await expect.poll(async () => (await audio(page))!.lanes).toEqual({ vo: 1, music: 1, sfx: 1 });
+});
+
+test("while the cut's own sound can't be worked out, its row is there with an M that unmutes the video (fix round 1)", async ({ page, rushes }) => {
+  await rushes.addCut();
+  const bed = await rushes.addVariant("music", "Warm keys", { seconds: 4, freq: 330 });
+  await rushes.api("PUT", "/api/picks", { video: "hero", lanes: { [bed.lane.id]: bed.variant.id } });
+  // The peaks can't be had, and nothing falls back to decoding in the browser.
+  await page.route("**/api/videos/*/versions/*/peaks", (route) => route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "x", message: "x" }) }));
+  await openTimeline(page, rushes, 1);
+  await expect(soundTrack(page, "Cut sound")).toBeVisible();
+  await expect(soundButton(page, "Cut sound", "Mute")).toHaveAttribute("aria-pressed", "true");
+  await expect.poll(() => videoMuted(page)).toBe(true);
+  await soundButton(page, "Cut sound", "Mute").click();
+  await expect.poll(() => videoMuted(page)).toBe(false);
+});
+
+test("a project with takes in use and no cut plays them on the Timeline tab, with notes on the mix (fix round 1)", async ({ page, rushes }) => {
+  const read = await rushes.addVariant("voice", "Gerald", { round: "Round 1 · Voices", seconds: 4, freq: 220 });
+  const bed = await rushes.addVariant("music", "Warm keys", { seconds: 4, freq: 330 });
+  await rushes.api("PUT", "/api/picks", { lanes: { [read.lane.id]: read.variant.id, [bed.lane.id]: bed.variant.id } });
+  await page.goto(rushes.testUrl());
+  await page.keyboard.press("6");
+  await expect(reviewTab(page, "Timeline")).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator(".noslate")).toContainText("No cut yet");
+  await expect(soundBlock(page, "Voice")).toHaveText("Gerald");
+  await expect(soundBlock(page, "Music")).toHaveText("Warm keys");
+  await expect.poll(async () => (await audio(page))?.media.length ?? 0, { timeout: 10_000 }).toBe(2);
+  expect(await heardNow(page)).toEqual(["round-1-voices/gerald", "music/warm-keys"]);
+  await transport(page).getByRole("button", { name: "Play · Space" }).click();
+  await expect.poll(async () => (await audio(page))!.time).toBeGreaterThan(0.3);
+  await soundButton(page, "Music", "Mute").click();
+  await expect.poll(async () => (await audio(page))!.lanes).toEqual({ vo: 1, music: 0, sfx: 1 });
+  await transport(page).getByRole("button", { name: "Pause · Space" }).click();
+  await page.getByRole("textbox", { name: "New note" }).fill("Music fights the read.");
+  await mixNoteButton(page).click();
+  await expect(page.locator(".note .nx")).toHaveText(["Music fights the read."]);
+  expect((await rushes.api("GET", "/api/notes?stage=mix")).notes).toHaveLength(1);
+  // The tab is open by its tab too.
+  await reviewTab(page, "Music").click();
+  await reviewTab(page, "Timeline").click();
+  await expect(page.locator(".noslate")).toBeVisible();
+});
+
+test("with no cut and nothing in use, the Timeline tab stays locked (fix round 1)", async ({ page, rushes }) => {
+  await rushes.addVariant("music", "Warm keys", { seconds: 4, freq: 330 });
+  await page.goto(rushes.testUrl());
+  await page.keyboard.press("6");
+  await expect(page.locator(".locked")).toBeVisible();
+  await expect(page.locator(".strack")).toHaveCount(0);
+});
+
 test.describe("the cut's own sound", () => {
   test.skip(!hasFfmpeg, "needs ffmpeg and ffprobe");
+
+  test("a solo silences the cut's own sound only while its sound has a take (fix round 1)", async ({ page, rushes }) => {
+    await rushes.addProResCut({ codec: "h264", seconds: 3, audio: true });
+    const bed = await rushes.addVariant("music", "Warm keys", { seconds: 3, freq: 330 });
+    await rushes.api("PUT", "/api/picks", { video: "hero", lanes: { [bed.lane.id]: bed.variant.id } });
+    await openTimeline(page, rushes, 1);
+    await soundButton(page, "Cut sound", "Mute").click();
+    await expect.poll(() => videoMuted(page)).toBe(false);
+    await soundButton(page, "Music", "Solo").click();
+    await expect.poll(() => videoMuted(page)).toBe(true);
+    await rushes.api("PUT", "/api/picks", { video: "hero", lanes: { [bed.lane.id]: null } });
+    await expect(soundBlock(page, "Music")).toHaveText("Nothing chosen yet");
+    await expect.poll(() => videoMuted(page)).toBe(false);
+  });
 
   test("a cut with its own sound and no takes plays unmuted and shows a Cut sound row that is not muted", async ({ page, rushes }) => {
     await rushes.addProResCut({ codec: "h264", seconds: 3, audio: true });

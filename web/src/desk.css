@@ -229,6 +229,12 @@
 .strack .cue > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .strack .cue:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
+/* §27, 5.6: before there is a cut, a slate where the picture would be. */
+.noslate { margin: auto; display: grid; justify-items: center; gap: 8px; padding: 16px; max-width: 360px; text-align: center; color: var(--k-text-2); font-size: 13px; }
+.noslate h3 { margin: 0; font-size: 15px; font-weight: 600; color: var(--k-text); }
+.noslate p { margin: 0; }
+.noslate > .ic { width: 28px; height: 28px; color: var(--k-text-3); }
+
 /* §27, 5.6: the loudness of what you hear, in the transport beside the volume. */
 .tloud { display: flex; align-items: baseline; gap: 10px; margin-right: 8px; font-size: 12.5px; color: var(--text-3); white-space: nowrap; }
 .tloud .lcell { display: inline-flex; align-items: baseline; gap: 4px; }

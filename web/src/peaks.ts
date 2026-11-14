@@ -20,7 +20,8 @@ export interface Wave {
 }
 
 /** What a load came to: a waveform, nothing to draw (no audio, too big, or it failed), or not ready yet. */
-export type WaveLoad = { kind: "wave"; wave: Wave } | { kind: "none" } | { kind: "pending" };
+/** `silent` only on the server's own "this cut has no audio" (204): every other "none" is a waveform that couldn't be had. */
+export type WaveLoad = { kind: "wave"; wave: Wave } | { kind: "none"; silent?: true } | { kind: "pending" };
 
 export interface WaveDeps {
   fetch(url: string, init: { signal: AbortSignal }): Promise<Response>;
@@ -39,6 +40,7 @@ export interface WaveCut {
 
 const NONE: WaveLoad = { kind: "none" };
 const PENDING: WaveLoad = { kind: "pending" };
+const SILENT: WaveLoad = { kind: "none", silent: true };
 
 /**
  * Asks the server for a cut's peaks: 200 is the waveform, 202 is "ask again soon", 501 (no ffmpeg)
@@ -55,6 +57,7 @@ export async function loadWave(cut: WaveCut, deps: WaveDeps, signal: AbortSignal
   }
   if (res.status === 202) return PENDING;
   if (res.status === 501) return fallback(cut, deps, signal);
+  if (res.status === 204) return SILENT;
   if (res.status !== 200) return NONE;
   try {
     const j = (await res.json()) as { duration?: unknown; peaks?: unknown };
@@ -99,6 +102,8 @@ export function normalisePeaks(peaks: Float32Array): Float32Array {
 
 const CACHE_LIMIT = 40;
 const cache = new Map<string, Wave | null>();
+/** Of the cached "no waveform" answers, the cuts known to have no audio at all. */
+const silentCuts = new Set<string>();
 
 /** A cut's cache key: its film, version and file, plus the file's revision (re-rendered in place, it's new). */
 export function waveKey(video: string, version: string, file: string, rev: string | undefined): string {
@@ -113,10 +118,21 @@ export function cachedWave(key: string): Wave | null {
   return cache.get(key) ?? null;
 }
 
-export function rememberWave(key: string, wave: Wave | null): void {
+/** Whether a cached cut is known to have no audio (not merely no waveform). */
+export function cachedSilent(key: string): boolean {
+  return silentCuts.has(key);
+}
+
+export function rememberWave(key: string, wave: Wave | null, silent = false): void {
   cache.delete(key);
   cache.set(key, wave);
-  while (cache.size > CACHE_LIMIT) cache.delete(cache.keys().next().value!);
+  if (silent && wave === null) silentCuts.add(key);
+  else silentCuts.delete(key);
+  while (cache.size > CACHE_LIMIT) {
+    const old = cache.keys().next().value!;
+    cache.delete(old);
+    silentCuts.delete(old);
+  }
 }
 
 // ---- the screen's pixel ratio ----

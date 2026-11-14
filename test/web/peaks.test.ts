@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FALLBACK_MAX_BYTES, FALLBACK_MAX_SECONDS, cachedWave, hasCachedWave, loadWave, normalisePeaks, rememberWave, watchPixelRatio, waveKey, type WaveDeps } from "../../web/src/peaks.js";
+import { FALLBACK_MAX_BYTES, FALLBACK_MAX_SECONDS, cachedSilent, cachedWave, hasCachedWave, loadWave, normalisePeaks, rememberWave, watchPixelRatio, waveKey, type WaveDeps } from "../../web/src/peaks.js";
 
 const CUT = { peaksUrl: "/api/videos/hero/versions/v1/peaks", mediaUrl: "/media?path=renders%2Fhero.mp4", size: 1_000_000, duration: async () => 2 };
 
@@ -119,6 +119,20 @@ describe("the waveform cache", () => {
     rememberWave(b, null);
     expect(hasCachedWave(b)).toBe(true);
     expect(cachedWave(b)).toBeNull();
+  });
+
+  it("only the server's 204 says the cut has no audio; a waveform that couldn't be had is not silence (Task 4 fix round 1)", async () => {
+    const silent = await loadWave(CUT, deps(() => new Response(null, { status: 204 })).d, signal());
+    expect(silent).toEqual({ kind: "none", silent: true });
+    for (const status of [404, 422, 500]) {
+      const out = await loadWave(CUT, deps(() => json(status, { error: "x" })).d, signal());
+      expect(out).toEqual({ kind: "none" });
+    }
+    const a = waveKey("hero", "v7", "renders/hero.mp4", undefined);
+    const b = waveKey("hero", "v8", "renders/hero.mp4", undefined);
+    rememberWave(a, null, true);
+    rememberWave(b, null);
+    expect([cachedSilent(a), cachedSilent(b)]).toEqual([true, false]);
   });
 
   it("normalisePeaks scales the loudest to 1, leaving silence at 0", () => {
