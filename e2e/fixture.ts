@@ -823,4 +823,19 @@ export async function sendNotes(page: Page): Promise<void> {
   await sendButton(page).click();
 }
 
+// ---- fixtures shared by more than one spec ----
+
+/**
+ * Eleven long film names for the width tests: episodes of an invented documentary series. Seven carry a colon and three
+ * parentheses, as the names they replaced did, and each is within two characters of its old length, because the tests
+ * measure how these names fit and fold. The first's id is "salt-the-marsh-keeps-its-own-tide".
+ */
+export const ELEVEN_FILMS = [
+  "Salt: the marsh keeps its own tide", "Herons: the birds that don't leave the estuary", "Ferry: the crossing runs every hour on the hour",
+  "Mud: what the low tide leaves us", "Night fishing: the boats out past the light", "Lantern: the keeper who stayed on the island",
+  "Flood year: the town, the river, and the wall", "Seals on the sandbar", "Oyster beds (the old ways)", "Harbour (one winter week)", "Storms (the longest night)",
+];
+/** The long project name that goes with them (33 characters, as before). */
+export const ELEVEN_FILMS_PROJECT = "2026-10-12-tidewater-rough-review";
+
 export { expect };

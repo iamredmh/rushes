@@ -3,7 +3,7 @@ import { join } from "node:path";
 import type { Page } from "@playwright/test";
 import {
   expect, test, videoReady, cutButton, pickVersion, currentFilm, filmButton, openWorkspace, pickFilm, reviewTab, workspaceTab, type FormatSize, type Rushes,
-  monitor, pictureTrack, ruler, rulerMarkers, shotBlocks, TOOL_TIPS, toolButton, toolStrip, transport,
+  ELEVEN_FILMS, ELEVEN_FILMS_PROJECT, monitor, pictureTrack, ruler, rulerMarkers, shotBlocks, TOOL_TIPS, toolButton, toolStrip, transport,
   hasFfmpeg, loudness, playButton, soundBlock, soundButton, soundLevel, soundTakes, soundTrack,
   activity, openActivity, notesPanel, noteTargetLine, noteTargetLabel, noteTargetMenu, panelTab, panelToggle, rangeChip, sendButton, sentDialog, statusSend,
   openReviewTab, takesList, takeHeadings, takeRow, takeRows, takeCircle, takeName, takeTag, takeBlock, putAwayButton, pressRowButton, foldToggle,
@@ -135,18 +135,14 @@ test("the status bar says what is next and goes there", async ({ page, rushes })
   await expect(reviewTab(page, "Voice")).toHaveAttribute("aria-selected", "true");
 });
 
-// The eleven-film project from shelving.spec: long names, four formats on the first, four shelved, a long project name.
-const NAMES = [
-  "Key: nobody holds your whole key", "Pointer: your assets don't live at one address", "Signed: the network signs every page you open",
-  "Pay: you choose what to pay with", "Every network: all your assets in one place", "Unlock: sign in the way you unlock your phone",
-  "One chain: see everything, or just one network", "Wrong address caught", "Hide balance (privacy mode)", "Contacts (send to a name)", "Notes (share a note once)",
-];
+// The eleven-film project (once shelving.spec's): long names, four formats on the first, four shelved, a long project name.
+const NAMES = ELEVEN_FILMS;
 async function elevenFilms(rushes: Rushes) {
   const SIZES = [{ width: 640, height: 360 }, { width: 360, height: 640 }, { width: 480, height: 480 }, { width: 384, height: 480 }];
   const first = await rushes.addFormatsCut(SIZES, { video: NAMES[0] });
-  for (const f of first.version.formats) await rushes.api("POST", "/api/notes", { stage: "picture", video: "key-nobody-holds-your-whole-key", version: first.version.id, format: f.id, scope: "point", t: 0.4, text: `Note on ${f.label}` });
+  for (const f of first.version.formats) await rushes.api("POST", "/api/notes", { stage: "picture", video: "salt-the-marsh-keeps-its-own-tide", version: first.version.id, format: f.id, scope: "point", t: 0.4, text: `Note on ${f.label}` });
   const file = join(rushes.root, ".rushes", "project.json");
-  await writeFile(file, JSON.stringify({ ...JSON.parse(await readFile(file, "utf8")), name: "2026-10-12-lumen-protected-review" }, null, 2));
+  await writeFile(file, JSON.stringify({ ...JSON.parse(await readFile(file, "utf8")), name: ELEVEN_FILMS_PROJECT }, null, 2));
   for (const name of NAMES.slice(1)) await rushes.addCut(`${name} cut`, name);
   for (const i of [1, 7, 8, 9]) {
     const id = ((await rushes.api("GET", "/api/state")).project.videos as { id: string }[])[i].id;
