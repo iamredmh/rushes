@@ -1,6 +1,6 @@
 // §27, 5.2: the More menu, the top bar's last control. What is not about one place on the desk: bringing in the files found,
 // Export notes, shelving the film you are in, lighter copies of new cuts, the keyboard shortcuts and Appearance. It takes in
-// the Film actions menu (§26.6).
+// what the old film-actions menu held (§26.6).
 import { useState } from "preact/hooks";
 import { api } from "../../api.js";
 import { applyTheme, nextTheme, readTheme, safeStorage, saveTheme, THEME_LABEL } from "../../theme.js";
