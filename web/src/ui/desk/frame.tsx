@@ -74,6 +74,11 @@ export function SplitDivider({ column, split }: { column: RefObject<HTMLElement>
     split.set(to);
     return to;
   };
+  const end = () => {
+    if (!drag.current) return;
+    drag.current = null;
+    if (split.split !== null) split.keep(split.split);
+  };
   return (
     <div
       class="tlsplit"
@@ -97,6 +102,9 @@ export function SplitDivider({ column, split }: { column: RefObject<HTMLElement>
         drag.current = null;
         if (to !== null) split.keep(to);
       }}
+      // A drag the browser takes away ends where it was, remembered as a drag let go there would be; never left armed.
+      onPointerCancel={() => end()}
+      onLostPointerCapture={() => end()}
       onDblClick={() => split.keep(null)}
       onKeyDown={(e) => {
         if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;

@@ -167,9 +167,13 @@
 .rlbl { position: absolute; bottom: 10px; left: 3px; font: 11px var(--mono); color: var(--text-3); white-space: nowrap; }
 .ruler .mk { top: auto; bottom: 1px; padding: 0; transform: translateX(-50%); cursor: pointer; }
 .ruler .mk:not(.ring) { border: 0; box-shadow: 0 0 0 2px var(--app); }
-.ruler .mk.ring { bottom: -1px; clip-path: none; }
-/* A dot sits over a ring at the same moment, so the ring's band and the dot's centre are both reachable (§21.5); the ring
-   needs no cut-out centre, which would also clip its tooltip. */
+/* A dot sits over a ring at the same moment, so the ring's band and the dot's centre are both reachable (§21.5). The ring is
+   drawn by its ::before, cut out in the middle so the pointer goes through to the ruler there; the button itself takes no
+   pointer, so the cut-out never clips its tooltip (its ::after). */
+.ruler .mk.ring { bottom: -1px; clip-path: none; border: 0; pointer-events: none; }
+.ruler .mk.ring::before { content: ""; position: absolute; inset: 0; border: 2px solid var(--accent-2); border-radius: 50%; pointer-events: auto;
+  clip-path: path(evenodd, "M0,7 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0 Z M2.5,7 a4.5,4.5 0 1,0 9,0 a4.5,4.5 0 1,0 -9,0 Z"); }
+.ruler .mk.ring.done::before { border-color: var(--done); }
 .ruler .mk:not(.ring) { z-index: 5; }
 /* A marker's tooltip opens under it, over the Picture track and inside the timeline panel, never over the marker itself.
    Near either end it lines up with the marker's side instead of centring. */
@@ -183,10 +187,13 @@
 
 /* The Picture track: a block per shot. */
 .ptrack .tlane { height: 40px; }
-.pblock { position: absolute; top: 6px; bottom: 6px; display: flex; align-items: center; min-width: 0; padding: 0 8px; border: 1px solid var(--line-2); border-left-width: 2px; border-left-color: var(--pic); border-radius: 4px; background: var(--raised); color: var(--text-2); font: 12.5px/1 var(--sans); text-align: left; overflow: hidden; cursor: pointer; }
+.pblock { position: absolute; top: 6px; bottom: 6px; display: flex; align-items: center; min-width: 0; padding: 0 8px; border: 1px solid var(--line-2); border-left-width: 2px; border-left-color: var(--pic); border-radius: 4px; background: var(--raised); color: var(--text-2); font: 12.5px/1 var(--sans); text-align: left; cursor: pointer; }
 .pblock:hover { background: var(--hover); color: var(--text); }
 .pblock[aria-current="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
-.pblock .plbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pblock .plbl { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A block's full name and tag, in its tooltip (the block itself does not clip, so the tooltip is whole). */
+.pblock[data-tip]::after { left: 0; transform: translateY(2px); font-size: 12.5px; padding: 5px 8px; border-radius: 5px; }
+.pblock[data-tip]:hover::after, .pblock[data-tip]:focus-visible::after { transform: none; }
 
 /* §27, 5.6: the sound rows. A swatch in the sound's colour, its name and take count, then M, S and the level. */
 .strack .tlane { height: 28px; cursor: pointer; }
@@ -204,7 +211,7 @@
 .shead .ms { flex: none; width: 20px; height: 20px; border-radius: 4px; font: 600 12.5px/1 var(--sans); }
 .shead .slvl { display: flex; align-items: center; gap: 4px; flex: none; }
 .shead .slvl input { width: 48px; margin: 0; accent-color: var(--c); }
-.shead .db { width: 50px; font-size: 12px; font-weight: 500; color: var(--text-3); text-align: right; white-space: nowrap; }
+.shead .db { width: 50px; font-size: 12.5px; font-weight: 500; color: var(--text-3); text-align: right; white-space: nowrap; }
 /* One block: the take in use, its name over its waveform; dashed and empty when nothing plays. */
 .sblock { position: absolute; top: 3px; bottom: 3px; display: flex; align-items: center; min-width: 0; padding: 0 8px; border: 1px solid var(--line-2); border-left: 2px solid var(--c); border-radius: 4px; background: var(--raised); color: var(--text-2); font: 12.5px/1 var(--sans); overflow: hidden; pointer-events: none; }
 .sblock .slbl { position: relative; z-index: 1; padding: 2px 5px; border-radius: 3px; background: var(--raised); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -10,7 +10,7 @@ import type { AudioEngine, LoadResult } from "../../audio/engine.js";
 import { assetRev, type Clip, laneGains, mediaKey } from "../../audio/timeline.js";
 import { useFollower } from "../../audio/useFollower.js";
 import { cueKeys, cueLabel, cueName, cuesInTime } from "../../cues.js";
-import { takeCount, takeGroups, type TakeGroups, type TakeRow } from "../../desk.js";
+import { pctOf, takeCount, takeGroups, type TakeGroups, type TakeRow } from "../../desk.js";
 import {
   clampLevel, filmLanes, filmPicks, LEVEL_MAX, LEVEL_MIN, LEVEL_STEP, levelText, loudnessLanes, type LoudnessState, loudnessReadout, MIX_LANES,
   type MixLane, type MixModel, mixNoteTarget, mixOnLabel, MIX_STAGE, takeInUse, variantRows, type VariantRow, WHOLE_MIX,
@@ -269,6 +269,12 @@ export function useMix({ state, assets, video, version, player, duration, monito
   const cutAsset = version ? asset(version.file) : undefined;
   const cutWave = usePictureWave(video?.id ?? null, version, cutAsset?.size ?? null, cutAsset ? assetRev(cutAsset) : undefined, version?.duration ?? duration);
   const cutShown = version !== null && !cutWave.silent && (cutWave.known || inUse);
+  // An M pressed on the row lasts only while the row is there, on its cut: with no M left to undo it, the video never
+  // stays muted (or unmuted) by a choice made on a row that has gone.
+  useLayoutEffect(() => {
+    if (!cutShown) setCutChoice(null);
+  }, [cutShown]);
+  useLayoutEffect(() => setCutChoice(null), [version?.id]);
 
   // ---- loudness (§17.6): the sounds you hear, debounced, never blocking ----
   const heard: Record<MixLane, boolean> = { vo: false, music: false, sfx: false };
@@ -372,7 +378,7 @@ const TAB: Record<MixLane, SoundTab> = { vo: "voice", music: "music", sfx: "sfx"
 
 /** The rows under the Picture track. */
 export function SoundTracks({ mix, duration, t, onSeek, onOpenTab, onPick, selected = null, notes = [] }: SoundTracksProps) {
-  const pct = (s: number) => (duration > 0 ? Math.min(100, Math.max(0, (s / duration) * 100)) : 0);
+  const pct = (s: number) => pctOf(s, duration);
   const timeAt = (e: MouseEvent): number | null => {
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
     return r.width > 0 ? Math.min(duration, Math.max(0, ((e.clientX - r.left) / r.width) * duration)) : null;

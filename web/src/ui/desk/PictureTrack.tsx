@@ -1,3 +1,4 @@
+import { pctOf } from "../../desk.js";
 import { shotLabel } from "../../lib.js";
 import type { Shot } from "../../types.js";
 import { Icon } from "../Icon.js";
@@ -18,7 +19,7 @@ export interface PictureTrackProps {
 
 /** §27, 5.6: the Picture row. One block per shot, from its start to the next shot's; a cut with no shots is one block. */
 export function PictureTrack({ shots, duration, t, current, cutLabel, locked, onSeek }: PictureTrackProps) {
-  const pct = (s: number) => (duration ? Math.min(100, Math.max(0, (s / duration) * 100)) : 0);
+  const pct = (s: number) => pctOf(s, duration);
   const blocks = shots.length > 0
     ? shots.map((s, i) => ({ key: String(s.n), start: s.start, end: shots[i + 1]?.start ?? duration, label: `${shotLabel(s.n)} ${s.name}`, tag: s.tag, current: current === s.n }))
     : [{ key: "cut", start: 0, end: duration, label: cutLabel, tag: "", current: true }];
@@ -35,7 +36,7 @@ export function PictureTrack({ shots, duration, t, current, cutLabel, locked, on
             type="button"
             class="pblock"
             aria-current={b.current ? "true" : undefined}
-            title={b.tag ? `${b.label} · ${b.tag}` : b.label}
+            data-tip={b.tag ? `${b.label} · ${b.tag}` : b.label}
             style={{ left: `${pct(b.start)}%`, width: `${Math.max(0, pct(b.end) - pct(b.start))}%` }}
             onClick={(e) => {
               // A mouse click hands the keys back to the player; a key press keeps focus here.

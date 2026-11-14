@@ -1,7 +1,7 @@
 import type { ComponentChildren } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, mediaUrl, originalFrame } from "../api.js";
-import { noteTarget, rulerMarks, type Selection, type Tool } from "../desk.js";
+import { noteTarget, pctOf as pctOfLength, rulerMarks, type Selection, type Tool } from "../desk.js";
 import {
   AUDIO_CHIPS, BOX_REASON, boxFrom, boxShowsOn, contentRect, fmt, frameAt, noteFormatTag, noteTime, otherFormatNotes, placeNote, RESHAPE_MS, reshapeKeyframes, scopeHint, shotAt,
   shotLabel, shotSeek, snap, spacePressesButton, stepFrame, testFlags, versionFormats, visibleNotes,
@@ -658,13 +658,14 @@ export function Picture({
   // The ruler marks every note this tab lists that has a time: the picture's, the mix's and those on the takes in use.
   const placed = [...visible, ...takeNotes].map((n) => ({ n, at: placeNote(n, version.id) })).filter(({ at }) => at.t !== null);
   // The ruler's markers: each note placed on this cut, a ring for an all-format note on a cut with formats (§21.5).
-  const marks: RulerMarker[] = rulerMarks(placed.map(({ n, at }) => ({ ...n, t: at.t, tOut: at.tOut })), duration).map((m, i) => {
-    const n = placed[i].n;
+  const placedById = new Map(placed.map(({ n }) => [n.id, n]));
+  const marks: RulerMarker[] = rulerMarks(placed.map(({ n, at }) => ({ ...n, t: at.t, tOut: at.tOut })), duration).map((m) => {
+    const n = placedById.get(m.id)!;
     const tag = noteFormatTag(n, many);
     return { ...m, ring: many && n.format === null, title: tag ? `${tag} · ${n.text}` : n.text };
   });
   // Clamped to the timeline, whatever the file on screen reports (review M6).
-  const pctOf = (s: number) => (duration ? Math.min(100, Math.max(0, (s / duration) * 100)) : 0);
+  const pctOf = (s: number) => pctOfLength(s, duration);
   const liveRange = range.in !== null ? { left: pctOf(range.in), width: pctOf(range.out ?? range.in + 0.2) - pctOf(range.in) } : null;
   /** Seek to a note and select it, as clicking its time in the list does. */
   const showNote = (n: Note, to: number) => {

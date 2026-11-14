@@ -1,4 +1,4 @@
-import type { RulerMark } from "../../desk.js";
+import { pctOf, type RulerMark } from "../../desk.js";
 
 export interface RulerMarker extends RulerMark {
   /** §21.5: an all-format note on a cut with formats is a ring, a format's note a dot. */
@@ -23,7 +23,7 @@ const label = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60))
 
 /** §27, 5.6: time ticks and labels, the playhead, and a marker per note. A click or a drag along it seeks. */
 export function Ruler({ duration, t, marks, live, onSeek, onMark }: RulerProps) {
-  const pct = (s: number) => (duration ? Math.min(100, Math.max(0, (s / duration) * 100)) : 0);
+  const pct = (s: number) => pctOf(s, duration);
   const step = STEPS.find((s) => duration / s <= 8) ?? STEPS[STEPS.length - 1];
   const ticks: number[] = [];
   if (duration > 0) for (let s = 0; s < duration - 1e-6; s += step / 2) ticks.push(s);
