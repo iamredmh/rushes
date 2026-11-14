@@ -352,6 +352,22 @@ test("a note shows as a marker on the ruler, and clicking it selects the note an
   await page.goto(rushes.url);
   await videoReady(page);
   await expect(rulerMarkers(page)).toHaveCount(2);
+  // Each marker's tooltip is its name, the note's text; no native title shows a second one beside it.
+  for (const [i, text] of ["Hold the logo.", "Tighter here."].entries()) {
+    await expect(rulerMarkers(page).nth(i)).toHaveAttribute("aria-label", text);
+    await expect(rulerMarkers(page).nth(i)).toHaveAttribute("data-tip", text);
+    await expect(rulerMarkers(page).nth(i)).not.toHaveAttribute("title");
+  }
+  // Shown under the ruler, inside the timeline panel, clear of the marker it names.
+  await rulerMarkers(page).nth(0).hover();
+  await expect.poll(() => rulerMarkers(page).nth(0).evaluate((el) => getComputedStyle(el, "::after").opacity)).toBe("1");
+  const tip = await rulerMarkers(page).nth(0).evaluate((el) => {
+    const s = getComputedStyle(el, "::after");
+    const m = el.getBoundingClientRect();
+    return { top: m.top + parseFloat(s.top), bottom: m.top + parseFloat(s.top) + parseFloat(s.height), marker: m.bottom, panel: el.closest(".tlpanel")!.getBoundingClientRect().bottom };
+  });
+  expect(tip.top).toBeGreaterThan(tip.marker); // below the marker, never over it
+  expect(tip.bottom).toBeLessThanOrEqual(tip.panel); // not cut off by the panel
   await rulerMarkers(page).nth(1).click();
   await expect(page.getByLabel("Timecode")).toContainText("0:02.00");
   await expect(page.locator(".list > .note", { hasText: "Tighter here." })).toHaveAttribute("aria-current", "true");

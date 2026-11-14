@@ -513,6 +513,14 @@ export async function openMore(page: Page): Promise<void> {
   await page.getByRole("button", { name: "More", exact: true }).click();
 }
 
+/**
+ * §27, 5.9: the status bar's shape, a button on a cut with one format (no switch on the monitor): it opens the popover with
+ * the prompt that asks your agent for the other shapes.
+ */
+export function shapeButton(page: Page): Locator {
+  return page.locator("footer.status").getByRole("button", { name: / · other shapes$/ });
+}
+
 /** The More menu's setting that makes proxies of new cuts automatically (§19.5): a checkbox item. Open the menu first. */
 export function autoProxySetting(page: Page): Locator {
   return page.getByRole("menuitemcheckbox", { name: "Make lighter copies of new cuts automatically" });

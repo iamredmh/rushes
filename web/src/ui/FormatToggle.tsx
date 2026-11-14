@@ -1,3 +1,4 @@
+import type { RefObject } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { chipLabel, fmtColumns, shapeBox, type FormatChip } from "../lib.js";
 import { Icon } from "./Icon.js";
@@ -80,14 +81,6 @@ export function FormatToggle({ chips, versionId, prompt, onSelect, toast }: Form
     if (onSelect(enabled[to].id) === false) return;
     group.current?.querySelector<HTMLButtonElement>(`[data-format="${enabled[to].id}"]`)?.focus();
   };
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(prompt);
-      toast("Prompt copied");
-    } catch {
-      toast("Couldn't reach the clipboard. Ask your agent to register the other shapes with rushes_add_format.");
-    }
-  };
   return (
     <div class="fmtwrap">
       <div ref={group} class="fmts" role="radiogroup" aria-label="Format" style={{ gridTemplateColumns: fmtColumns(chips.length) }} onKeyDown={(e) => onKeyDown(e)}>
@@ -129,10 +122,9 @@ export function FormatToggle({ chips, versionId, prompt, onSelect, toast }: Form
       {single && (
         // R5: the chip itself is out of the tab order; this button is always in it, and focusing it shows the popover.
         <div class={`fmtpop${open ? " open" : ""}`} onMouseEnter={enter} onMouseLeave={leave}>
-          <p>One format. Your agent can add more with <code>rushes_add_format</code>.</p>
-          <button
-            type="button"
-            class="btn ghost"
+          <FormatPrompt
+            prompt={prompt}
+            toast={toast}
             onPointerDown={() => { pointerDown.current = true; }}
             onFocus={() => {
               // Focus from a click doesn't open it; focus from the keyboard (or a script) does.
@@ -148,14 +140,58 @@ export function FormatToggle({ chips, versionId, prompt, onSelect, toast }: Form
               pointerDown.current = false;
               // A mouse click lets go of the popover once the pointer leaves it (review M3).
               if (e.detail > 0) (e.currentTarget as HTMLElement).blur();
-              void copy();
             }}
-          >
-            <Icon name="copy" />
-            Copy a prompt for your agent
-          </button>
+          />
         </div>
       )}
     </div>
+  );
+}
+
+export interface FormatPromptProps {
+  /** The ready-made request (formatPrompt). */
+  prompt: string;
+  toast(message: string): void;
+  /** Its Copy button's focus, for whoever needs to know (the single chip's popover opens on keyboard focus). */
+  copyRef?: RefObject<HTMLButtonElement>;
+  onPointerDown?(): void;
+  onFocus?(): void;
+  onBlur?(): void;
+  /** Runs before the copy. */
+  onClick?(e: MouseEvent): void;
+}
+
+/**
+ * §21.5 (R5): what a one-format cut offers: one line saying so, and a button that copies the request for the other shapes.
+ * The single chip's popover holds it, and so does the status bar's shape (§27, 5.9) on a cut with no switch on the monitor.
+ */
+export function FormatPrompt({ prompt, toast, copyRef, onPointerDown, onFocus, onBlur, onClick }: FormatPromptProps) {
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(prompt);
+      toast("Prompt copied");
+    } catch {
+      toast("Couldn't reach the clipboard. Ask your agent to register the other shapes with rushes_add_format.");
+    }
+  };
+  return (
+    <>
+      <p>One format. Your agent can add more with <code>rushes_add_format</code>.</p>
+      <button
+        ref={copyRef}
+        type="button"
+        class="btn ghost"
+        onPointerDown={onPointerDown}
+        onFocus={onFocus}
+        onBlur={onBlur}
+        onClick={(e) => {
+          onClick?.(e);
+          void copy();
+        }}
+      >
+        <Icon name="copy" />
+        Copy a prompt for your agent
+      </button>
+    </>
   );
 }

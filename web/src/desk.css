@@ -173,7 +173,15 @@
 .rlbl { position: absolute; bottom: 10px; left: 3px; font: 11px var(--mono); color: var(--text-3); white-space: nowrap; }
 .ruler .mk { top: auto; bottom: 1px; padding: 0; transform: translateX(-50%); cursor: pointer; }
 .ruler .mk:not(.ring) { border: 0; box-shadow: 0 0 0 2px var(--app); }
-.ruler .mk.ring { bottom: -1px; }
+.ruler .mk.ring { bottom: -1px; clip-path: none; }
+/* A dot sits over a ring at the same moment, so the ring's band and the dot's centre are both reachable (§21.5); the ring
+   needs no cut-out centre, which would also clip its tooltip. */
+.ruler .mk:not(.ring) { z-index: 5; }
+/* A marker's tooltip opens under it, over the Picture track and inside the timeline panel, never over the marker itself.
+   Near either end it lines up with the marker's side instead of centring. */
+.ruler .mk[data-tip]::after { top: calc(100% + 8px); bottom: auto; max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
+.ruler .mk.tstart[data-tip]::after, .ruler .mk.tstart[data-tip]:hover::after, .ruler .mk.tstart[data-tip]:focus-visible::after { left: 0; transform: none; }
+.ruler .mk.tend[data-tip]::after, .ruler .mk.tend[data-tip]:hover::after, .ruler .mk.tend[data-tip]:focus-visible::after { left: auto; right: 0; transform: none; }
 .ruler .span { top: auto; bottom: 0; height: 12px; border-radius: 3px; }
 .tl .playhead { top: 0; bottom: 0; transform: translateX(-1px); }
 .ruler .playhead::before { top: auto; bottom: -4px; }
@@ -195,6 +203,15 @@
 .status .nextgo { padding: 0; border: 0; background: none; color: var(--accent-2); font: inherit; font-weight: 500; cursor: pointer; }
 .status .nextgo:hover { text-decoration: underline; }
 .status .smeta { display: flex; gap: 12px; font-size: 12.5px; color: var(--text-2); }
+/* On a one-format cut the shape is a button; its popover (the request for the other shapes) opens above the bar, at the
+   window's right, fixed so the bar's own clipping never cuts it. */
+.status .sshape { display: inline-flex; }
+.status .sfmt { padding: 0 4px; border: 0; border-radius: 4px; background: transparent; color: var(--accent-2); font: inherit; cursor: pointer; }
+.status .sfmt:hover, .status .sfmt[aria-expanded="true"] { background: var(--hover); }
+/* The bar clips what overflows it, so the tooltip is fixed to the window, above the bar's right-hand group. */
+.status .sfmt[data-tip]::after, .status .sfmt[data-tip]:hover::after, .status .sfmt[data-tip]:focus-visible::after { position: fixed; top: auto; left: auto; right: 84px; bottom: 32px; transform: none; font-size: 12.5px; padding: 5px 8px; border-radius: 5px; }
+.status .sfmt[aria-expanded="true"]::after { display: none; }
+.fmtpop.spop { position: fixed; top: auto; left: auto; right: 10px; bottom: 32px; white-space: normal; font-size: 13px; color: var(--text); font-family: var(--sans); }
 
 /* Narrow windows (under the 1100 px the desk is made for): the project's name and the small labels go first, so the
    Film and Cut buttons keep to their side of the centred workspaces. */

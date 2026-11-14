@@ -3,6 +3,7 @@ import type { RulerMark } from "../../desk.js";
 export interface RulerMarker extends RulerMark {
   /** §21.5: an all-format note on a cut with formats is a ring, a format's note a dot. */
   ring: boolean;
+  /** The marker's name and tooltip: the note's text, with its format first on a cut with formats. */
   title: string;
 }
 
@@ -56,10 +57,11 @@ export function Ruler({ duration, t, marks, live, onSeek, onMark }: RulerProps) 
         <button
           key={m.id}
           type="button"
-          class={`mk ${m.status}${m.ring ? " ring" : ""}`}
+          // Its tooltip opens under the ruler, lined up with the marker's side near either end so the panel never cuts it off.
+          class={`mk ${m.status}${m.ring ? " ring" : ""}${m.left < 25 ? " tstart" : m.left > 75 ? " tend" : ""}`}
           data-note={m.id}
           style={{ left: `${m.left}%` }}
-          title={m.title}
+          data-tip={m.title}
           aria-label={m.title}
           tabIndex={-1}
           // The ruler's own seek waits for the ruler: a marker seeks to its note and selects it.
