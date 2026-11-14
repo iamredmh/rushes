@@ -46,6 +46,8 @@ export interface AudioTestHook {
   inspect(): EngineSnapshot | null;
   /** Renders of a sound's tab since the page loaded (its takes list; the clocked parts are not counted). */
   renders: number;
+  /** Renders of a sound's tab's notes panel since the page loaded: only when its target line or placeholder changes. */
+  panelRenders: number;
   /** Waveform draws since the page loaded. */
   draws(): number;
   liveContexts(): number;
@@ -67,6 +69,7 @@ const hook: AudioTestHook | null = FLAGS.test
         return this.engine ? this.engine.inspect() : null;
       },
       renders: 0,
+      panelRenders: 0,
       draws: waveDraws,
       liveContexts,
       sample: () => samples.state(),
@@ -228,6 +231,28 @@ function Clocked({ engine, children }: { engine: AudioEngine; children: (t: numb
     return engine.subscribe(setT);
   }, [engine]);
   return <>{children(t)}</>;
+}
+
+/**
+ * Re-renders its children as the engine's clock moves, but only on a tick that changes `by(t)`: the notes panel follows
+ * the clock through its target line and placeholder, so it re-renders when those read differently, never on every frame.
+ */
+function ClockedBy({ engine, by, children }: { engine: AudioEngine; by: (t: number) => string; children: (t: number) => ComponentChildren }) {
+  const [, tick] = useState(0);
+  const byRef = useRef(by);
+  byRef.current = by;
+  useEffect(() => {
+    let last = byRef.current(engine.time);
+    tick((n) => n + 1);
+    return engine.subscribe((t) => {
+      const now = byRef.current(t);
+      if (now === last) return;
+      last = now;
+      tick((n) => n + 1);
+    });
+  }, [engine]);
+  // Read at render, so a render the parent asks for (a new selection) is never a tick behind.
+  return <>{children(engine.time)}</>;
 }
 
 /** What the note is on: a take selected (by its name, a point on its block or one of its cues), or nothing (the default take). */
@@ -687,9 +712,10 @@ export function AudioStage(props: AudioStageProps) {
         </div>
       </div>
 
-      <Clocked engine={engine}>
+      <ClockedBy engine={engine} by={(t) => `${targetAt(t).label}\n${placeholderAt(t)}`}>
         {(t) => {
           const target = targetAt(t);
+          if (hook) hook.panelRenders++;
           return (
             <NotesPanel
               notes={notes}
@@ -714,7 +740,7 @@ export function AudioStage(props: AudioStageProps) {
             />
           );
         }}
-      </Clocked>
+      </ClockedBy>
     </div>
   );
 }
