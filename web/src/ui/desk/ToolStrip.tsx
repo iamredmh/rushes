@@ -13,6 +13,8 @@ export interface ToolStripProps {
   onRange(): void;
   onBox(): void;
   onGrab(): void;
+  /** The tools this view offers (a sound's tab has no Box or Grab, Voice no Range). Defaults to all five. */
+  tools?: Tool[];
 }
 
 const TOOLS: { tool: Tool; icon: string; tip: string; marks: boolean }[] = [
@@ -24,11 +26,11 @@ const TOOLS: { tool: Tool; icon: string; tip: string; marks: boolean }[] = [
 ];
 
 /** §27, 5.4: the monitor's tools, down its left edge. Each runs the player's own handler for its key. */
-export function ToolStrip({ active, readOnly, grabbing, onSelect, onNote, onRange, onBox, onGrab }: ToolStripProps) {
+export function ToolStrip({ active, readOnly, grabbing, onSelect, onNote, onRange, onBox, onGrab, tools }: ToolStripProps) {
   const run: Record<Tool, () => void> = { select: onSelect, note: onNote, range: onRange, box: onBox, grab: onGrab };
   return (
     <div class="tools" role="toolbar" aria-label="Tools" aria-orientation="vertical">
-      {TOOLS.map(({ tool, icon, tip, marks }) => (
+      {TOOLS.filter(({ tool }) => !tools || tools.includes(tool)).map(({ tool, icon, tip, marks }) => (
         <button
           key={tool}
           type="button"

@@ -99,6 +99,46 @@ export function takeGroups(lanes: Lane[], stage: LaneStage, use: Use | undefined
   return out;
 }
 
+/** A take's key on its tab and its clip id in the engine: "<lane>/<variant>", the `on` a note on it saves. */
+export const takeKey = (row: Pick<TakeRow, "lane" | "variant">): string => `${row.lane}/${row.variant.id}`;
+
+/** What a sound's tab plays with nothing selected: the take in use, else the first take waiting, else the newest earlier one. */
+export function defaultTake(g: TakeGroups): TakeRow | null {
+  return g.inUse ?? g.fresh[0] ?? g.earlier[0]?.takes[0] ?? null;
+}
+
+/** One heading on a sound's tab and the takes under it. */
+export interface TakeSection {
+  kind: "fresh" | "inUse" | "earlier";
+  /** "New · Round 3", "In use · Round 2", "Earlier · Round 1". */
+  heading: string;
+  takes: TakeRow[];
+}
+
+const SECTION_WORD: Record<TakeSection["kind"], string> = { fresh: "New", inUse: "In use", earlier: "Earlier" };
+
+/**
+ * The headings a sound's tab shows above Put away, in order: New (a heading per round, newest first), In use, then
+ * Earlier (a heading per round). `shuffle` reorders each heading's takes (Blind); it never moves a take between headings.
+ */
+export function takeSections(g: TakeGroups, shuffle: (takes: TakeRow[]) => TakeRow[] = (t) => t): TakeSection[] {
+  const out: TakeSection[] = [];
+  const push = (kind: TakeSection["kind"], round: string, takes: TakeRow[]) => out.push({ kind, heading: `${SECTION_WORD[kind]} · ${round}`, takes: shuffle(takes) });
+  // New is newest round first already; consecutive takes of one round share a heading.
+  let run: TakeRow[] = [];
+  for (const t of g.fresh) {
+    if (run.length > 0 && run[0].lane !== t.lane) {
+      push("fresh", run[0].round, run);
+      run = [];
+    }
+    run.push(t);
+  }
+  if (run.length > 0) push("fresh", run[0].round, run);
+  if (g.inUse) push("inUse", g.inUse.round, [g.inUse]);
+  for (const r of g.earlier) push("earlier", r.round, r.takes);
+  return out;
+}
+
 export function takeCount(g: TakeGroups): { all: number; fresh: number } {
   const earlier = g.earlier.reduce((n, r) => n + r.takes.length, 0);
   return { all: g.fresh.length + (g.inUse ? 1 : 0) + earlier + g.away.length, fresh: g.fresh.length };

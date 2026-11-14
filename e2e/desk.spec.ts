@@ -5,7 +5,8 @@ import {
   expect, test, videoReady, cutButton, currentFilm, filmButton, openWorkspace, pickFilm, reviewTab, workspaceTab, type FormatSize, type Rushes,
   monitor, pictureTrack, ruler, rulerMarkers, shotBlocks, TOOL_TIPS, toolButton, toolStrip, transport,
   hasFfmpeg, loudness, soundBlock, soundButton, soundLevel, soundTakes, soundTrack,
-  notesPanel, noteTargetLine, noteTargetMenu, panelTab, panelToggle, rangeChip, sendButton, sentDialog, statusSend,
+  notesPanel, noteTargetLine, noteTargetLabel, noteTargetMenu, panelTab, panelToggle, rangeChip, sendButton, sentDialog, statusSend,
+  openReviewTab, takesList, takeHeadings, takeRow, takeRows, takeCircle, takeName, takeTag, takeBlock, putAwayButton, foldToggle,
 } from "./fixture.js";
 
 // §27, 5.1 to 5.3 and 5.9: the desk's frame. A top bar and a status bar that never move, the Film and Cut menus,
@@ -108,7 +109,7 @@ test("a sound with new takes says so on its tab", async ({ page, rushes }) => {
   await videoReady(page);
   await expect(reviewTab(page, "Music")).toHaveText("Music 2 new");
   await reviewTab(page, "Music").click();
-  await page.getByRole("button", { name: "Use Drift" }).click();
+  await takeCircle(page, "Drift").click();
   await expect(reviewTab(page, "Music")).toHaveText("Music 3");
 });
 
@@ -958,5 +959,179 @@ test.describe("the notes panel", () => {
     await statusSend(page).click();
     await expect(workspaceTab(page, "Review")).toHaveAttribute("aria-selected", "true");
     await expect(sendButton(page)).toBeFocused();
+  });
+});
+
+// §27, 5.8: a tab per sound. Voice, Music and Effects list every take: new, in use, earlier and put away, under the
+// same ruler as the timeline, with the Picture row at the top. The circle picks; the row auditions.
+test.describe("a tab per sound", () => {
+  const heardOn = (page: Page) => page.evaluate(() => (window as unknown as { __rushesAudio: AudioHook }).__rushesAudio.heard().map((c) => c.id));
+  const loadedOn = async (page: Page, n: number) => expect.poll(async () => (await audio(page))?.media.length ?? 0, { timeout: 10_000 }).toBe(n);
+
+  test("three rounds of reads with the second in use list New, In use and Earlier, each under its round", async ({ page, rushes }) => {
+    await rushes.addCut();
+    await rushes.addVariant("voice", "Jane", { round: "Round 1 · Voices", seconds: 2, freq: 220 });
+    const gerald = await rushes.addVariant("voice", "Gerald", { round: "Round 2 · Gerald", seconds: 2, freq: 262 });
+    await rushes.addVariant("voice", "Gerald, slower", { round: "Round 2 · Gerald", seconds: 2, freq: 294 });
+    await rushes.api("PUT", "/api/picks", { video: "hero", lanes: { [gerald.lane.id]: gerald.variant.id } });
+    await rushes.addVariant("voice", "Gerald, warmer", { round: "Round 3 · Gerald, fixes", seconds: 2, freq: 330 });
+    await page.goto(rushes.url);
+    await videoReady(page);
+    await expect(reviewTab(page, "Voice")).toHaveText("Voice 1 new");
+    await openReviewTab(page, "Voice");
+    await expect(takeHeadings(page)).toHaveText(["New · Round 3 · Gerald, fixes", "In use · Round 2 · Gerald", "Earlier · Round 2 · Gerald", "Earlier · Round 1 · Voices"]);
+    await expect(takeRows(page)).toHaveCount(4);
+    await expect(takeRows(page).locator(".knm")).toHaveText(["Gerald, warmer", "Gerald", "Gerald, slower", "Jane"]);
+    await expect(takeCircle(page, "Gerald")).toHaveAttribute("aria-checked", "true");
+    await expect(takeCircle(page, "Gerald")).toHaveAccessibleName("In use");
+    await expect(takeCircle(page, "Jane")).toHaveAttribute("aria-checked", "false");
+    await expect(takeCircle(page, "Jane")).toHaveAccessibleName("Use this one");
+    // The same frame as the timeline: the monitor, the transport, the ruler and the Picture row above the list.
+    await expect(monitor(page)).toBeVisible();
+    await expect(transport(page)).toBeVisible();
+    await expect(ruler(page)).toBeVisible();
+    await expect(pictureTrack(page)).toBeVisible();
+  });
+
+  test("a take made for an older cut has an amber tag naming that cut; one made for this cut a quiet one", async ({ page, rushes }) => {
+    await rushes.addCut();
+    await rushes.addVariant("music", "Pulse", { seconds: 2, freq: 220, round: "Round 1" });
+    await rushes.addCut();
+    await rushes.addVariant("music", "Drift", { seconds: 2, freq: 330, round: "Round 2" });
+    await page.goto(rushes.url);
+    await videoReady(page);
+    await openReviewTab(page, "Music");
+    await expect(takeTag(page, "Pulse")).toHaveText("v1");
+    await expect(takeTag(page, "Pulse")).toHaveClass(/\bstale\b/);
+    await expect(takeBlock(page, "Pulse").locator(".sblock")).toHaveClass(/\bstale\b/);
+    await expect(takeTag(page, "Drift")).toHaveText("v2");
+    await expect(takeTag(page, "Drift")).not.toHaveClass(/\bstale\b/);
+    await expect(takeBlock(page, "Drift").locator(".sblock")).not.toHaveClass(/\bstale\b/);
+  });
+
+  test("the circle on a New take makes it In use, the tab's count drops to a plain number, and the circle again unpicks it", async ({ page, rushes }) => {
+    await rushes.addCut();
+    await rushes.addVariant("music", "Pulse", { seconds: 2, freq: 220, round: "Round 1" });
+    await rushes.addVariant("music", "Drift", { seconds: 2, freq: 330, round: "Round 2" });
+    await page.goto(rushes.url);
+    await videoReady(page);
+    await expect(reviewTab(page, "Music")).toHaveText("Music 2 new");
+    await openReviewTab(page, "Music");
+    await expect(takeHeadings(page)).toHaveText(["New · Round 2", "New · Round 1"]);
+    await takeCircle(page, "Drift").click();
+    await expect(takeCircle(page, "Drift")).toHaveAttribute("aria-checked", "true");
+    await expect(takeHeadings(page)).toHaveText(["In use · Round 2", "Earlier · Round 1"]);
+    await expect(reviewTab(page, "Music")).toHaveText("Music 2");
+    expect((await rushes.api("GET", "/api/picks?video=hero")).use.music).toMatchObject({ lane: "round-2", variant: "drift" });
+    // Pressed again, the circle on the take in use unpicks it: nothing is in use, so both wait to be chosen again.
+    await takeCircle(page, "Drift").click();
+    await expect(takeCircle(page, "Drift")).toHaveAttribute("aria-checked", "false");
+    await expect(reviewTab(page, "Music")).toHaveText("Music 2 new");
+    expect((await rushes.api("GET", "/api/picks?video=hero")).use.music).toBeUndefined();
+  });
+
+  test("Put away moves a take under Put away, Bring back returns it to Earlier, and the take in use has no Put away", async ({ page, rushes }) => {
+    await rushes.addCut();
+    await rushes.addVariant("music", "Pulse", { seconds: 2, freq: 220, round: "Round 1" });
+    const drift = await rushes.addVariant("music", "Drift", { seconds: 2, freq: 330, round: "Round 2" });
+    await rushes.api("PUT", "/api/picks", { video: "hero", lanes: { [drift.lane.id]: drift.variant.id } });
+    await page.goto(rushes.url);
+    await videoReady(page);
+    await openReviewTab(page, "Music");
+    await expect(takeHeadings(page)).toHaveText(["In use · Round 2", "Earlier · Round 1"]);
+    await expect(putAwayButton(page, "Drift")).toHaveCount(0);
+    await putAwayButton(page, "Pulse").click();
+    await expect(takeHeadings(page)).toHaveText(["In use · Round 2", "Put away · 1"]);
+    await expect(takeRow(page, "Pulse")).toHaveCount(0);
+    const lane = (await rushes.api("GET", "/api/state")).project.lanes.find((l: { id: string }) => l.id === "round-1");
+    expect(lane.variants[0].putAway).toEqual(expect.any(String));
+    await foldToggle(page, "Put away").click();
+    await expect(foldToggle(page, "Put away")).toHaveAttribute("aria-expanded", "true");
+    await putAwayButton(page, "Pulse", "Bring back").click();
+    await expect(takeHeadings(page)).toHaveText(["In use · Round 2", "Earlier · Round 1"]);
+    await expect(putAwayButton(page, "Pulse")).toBeVisible();
+    expect((await rushes.api("GET", "/api/state")).project.lanes.find((l: { id: string }) => l.id === "round-1").variants[0].putAway).toBeUndefined();
+  });
+
+  test("selecting an Earlier take plays it in place of the one in use, without changing the pick", async ({ page, rushes }) => {
+    await rushes.addCut();
+    await rushes.addVariant("music", "Pulse", { seconds: 2, freq: 220, round: "Round 1" });
+    const drift = await rushes.addVariant("music", "Drift", { seconds: 2, freq: 330, round: "Round 2" });
+    await rushes.api("PUT", "/api/picks", { video: "hero", lanes: { [drift.lane.id]: drift.variant.id } });
+    await page.goto(rushes.testUrl());
+    await videoReady(page);
+    await openReviewTab(page, "Music");
+    await loadedOn(page, 2);
+    // Nothing selected: the take in use plays.
+    await expect.poll(() => heardOn(page)).toEqual(["round-2/drift"]);
+    await takeName(page, "Pulse").click();
+    await expect.poll(() => heardOn(page)).toEqual(["round-1/pulse"]);
+    await expect(takeRow(page, "Pulse")).toHaveAttribute("aria-current", "true");
+    await expect(takeCircle(page, "Drift")).toHaveAttribute("aria-checked", "true");
+    expect((await rushes.api("GET", "/api/picks?video=hero")).use.music).toMatchObject({ lane: "round-2", variant: "drift" });
+    // Let go of, the take in use plays again.
+    await page.keyboard.press("Escape");
+    await expect.poll(() => heardOn(page)).toEqual(["round-2/drift"]);
+  });
+
+  test("Music with three new beds lists them under New, and the Timeline tab still has the old bed", async ({ page, rushes }) => {
+    await rushes.addCut();
+    const old = await rushes.addVariant("music", "Old bed", { seconds: 2, freq: 220, round: "Round 1" });
+    await rushes.api("PUT", "/api/picks", { video: "hero", lanes: { [old.lane.id]: old.variant.id } });
+    for (const [i, name] of ["Pulse", "Drift", "Glow"].entries()) await rushes.addVariant("music", name, { seconds: 2, freq: 260 + i * 40, round: "Round 2" });
+    await page.goto(rushes.url);
+    await videoReady(page);
+    await expect(reviewTab(page, "Music")).toHaveText("Music 3 new");
+    await openReviewTab(page, "Music");
+    await expect(takeHeadings(page)).toHaveText(["New · Round 2", "In use · Round 1"]);
+    await expect(takeRows(page).locator(".knm")).toHaveText(["Pulse", "Drift", "Glow", "Old bed"]);
+    await openReviewTab(page, "Timeline");
+    await expect(soundBlock(page, "Music")).toHaveText("Old bed");
+  });
+
+  test("the circles are one Tab stop moved by the arrows, Enter on a name selects it, and Space still plays", async ({ page, rushes }) => {
+    await rushes.addCut();
+    for (const [i, name] of ["Pulse", "Drift", "Glow"].entries()) await rushes.addVariant("music", name, { seconds: 2, freq: 260 + i * 40, round: "Round 1" });
+    await page.goto(rushes.testUrl());
+    await videoReady(page);
+    await openReviewTab(page, "Music");
+    await loadedOn(page, 3);
+    await expect(takesList(page).locator('[role="radio"][tabindex="0"]')).toHaveCount(1);
+    await takeCircle(page, "Pulse").focus();
+    await page.keyboard.press("ArrowDown");
+    await expect(takeCircle(page, "Drift")).toBeFocused();
+    // The arrows move between circles: no frame step, and nothing picked.
+    expect((await audio(page))!.time).toBe(0);
+    await expect(takeCircle(page, "Drift")).toHaveAttribute("aria-checked", "false");
+    await page.keyboard.press("Enter");
+    await expect(takeCircle(page, "Drift")).toHaveAttribute("aria-checked", "true");
+    await takeName(page, "Glow").focus();
+    await page.keyboard.press("Enter");
+    await expect(takeRow(page, "Glow")).toHaveAttribute("aria-current", "true");
+    await expect.poll(() => heardOn(page)).toEqual(["round-1/glow"]);
+    await page.keyboard.press(" ");
+    await expect.poll(async () => (await audio(page))!.playing).toBe(true);
+  });
+
+  test("with a take selected a note is a point at the playhead once it has moved, and the target's menu offers the whole take", async ({ page, rushes }) => {
+    await rushes.addCut();
+    await rushes.addVariant("music", "Pulse", { seconds: 2, freq: 220, round: "Round 1" });
+    await page.goto(rushes.testUrl());
+    await videoReady(page);
+    await openReviewTab(page, "Music");
+    await loadedOn(page, 1);
+    await takeName(page, "Pulse").click();
+    await expect(noteTargetLabel(page)).toHaveText(/Music · Pulse$/);
+    await expect(noteTargetMenu(page)).toHaveValue("whole");
+    for (let i = 0; i < 30; i++) await page.keyboard.press("ArrowRight");
+    await expect(noteTargetLabel(page)).toContainText("00:00:01:00 · Music · Pulse");
+    await expect(noteTargetMenu(page)).toHaveValue("point");
+    await noteTargetMenu(page).selectOption({ label: "The whole bed" });
+    await expect(noteTargetLabel(page)).not.toContainText("00:00:01:00");
+    const box = notesPanel(page).getByRole("textbox", { name: "New note" });
+    await box.fill("Too busy overall.");
+    await box.press("Enter");
+    await expect.poll(async () => (await rushes.api("GET", "/api/notes?stage=music")).notes.length).toBe(1);
+    expect((await rushes.api("GET", "/api/notes?stage=music")).notes[0]).toMatchObject({ on: "round-1/pulse", scope: "whole", t: null });
   });
 });

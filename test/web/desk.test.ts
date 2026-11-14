@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deskPlace, nextHint, type NextInput, noteTarget, rulerMarks, takeCount, takeGroups, timecode, unsentCount, deskView, viewForKey, viewForTab } from "../../web/src/desk.js";
+import { defaultTake, deskPlace, nextHint, type NextInput, noteTarget, rulerMarks, takeCount, takeGroups, takeKey, takeSections, timecode, unsentCount, deskView, viewForKey, viewForTab } from "../../web/src/desk.js";
 import type { Lane, Note, Variant } from "../../web/src/types.js";
 
 describe("deskPlace", () => {
@@ -111,6 +111,49 @@ describe("takeGroups", () => {
   });
   it("works with no film", () => {
     expect(takeGroups(lanes, "voice", use, undefined).inUse).toMatchObject({ madeFor: null, stale: false });
+  });
+});
+
+describe("takeSections", () => {
+  const lanes = [
+    lane("round-1", "Round 1", "voice", [take("a", { addedAt: "2026-11-10T09:00:00.000Z" }), take("b", { addedAt: "2026-11-10T09:00:00.000Z" })]),
+    lane("round-2", "Round 2", "voice", [take("c", { addedAt: "2026-11-11T09:00:00.000Z" }), take("d", { addedAt: "2026-11-11T09:00:00.000Z" })]),
+    lane("round-3", "Round 3", "voice", [take("e", { addedAt: "2026-11-13T09:00:00.000Z" })]),
+    lane("round-4", "Round 4", "voice", [take("f", { addedAt: "2026-11-14T09:00:00.000Z" }), take("g", { addedAt: "2026-11-14T09:00:00.000Z", putAway: "2026-11-14T10:00:00.000Z" })]),
+  ];
+  const use = { lane: "round-2", variant: "c", at: "2026-11-12T09:00:00.000Z", seen: {} };
+  const g = takeGroups(lanes, "voice", use, hero);
+  const ids = (s: { takes: { variant: { id: string } }[] }) => s.takes.map((t) => t.variant.id);
+
+  it("heads New per round newest first, then In use, then Earlier per round, and leaves Put away out", () => {
+    const s = takeSections(g);
+    expect(s.map((x) => x.heading)).toEqual(["New · Round 4", "New · Round 3", "In use · Round 2", "Earlier · Round 2", "Earlier · Round 1"]);
+    expect(s.map((x) => x.kind)).toEqual(["fresh", "fresh", "inUse", "earlier", "earlier"]);
+    expect(s.map(ids)).toEqual([["f"], ["e"], ["c"], ["d"], ["a", "b"]]);
+  });
+  it("shuffles inside a heading only (Blind)", () => {
+    const s = takeSections(g, (t) => [...t].reverse());
+    expect(s.map(ids)).toEqual([["f"], ["e"], ["c"], ["d"], ["b", "a"]]);
+  });
+  it("has nothing to head for a sound with no takes", () => {
+    expect(takeSections(takeGroups([], "music", undefined, hero))).toEqual([]);
+  });
+});
+
+describe("defaultTake", () => {
+  const lanes = [
+    lane("round-1", "Round 1", "music", [take("old")]),
+    lane("round-2", "Round 2", "music", [take("x", { addedAt: "2026-11-11T09:00:00.000Z" }), take("y", { addedAt: "2026-11-11T09:00:00.000Z" })]),
+  ];
+  it("is the take in use when there is one", () => {
+    const g = takeGroups(lanes, "music", { lane: "round-1", variant: "old", at: "2026-11-12T09:00:00.000Z", seen: {} }, hero);
+    expect(defaultTake(g)?.variant.id).toBe("old");
+    expect(takeKey(defaultTake(g)!)).toBe("round-1/old");
+  });
+  it("is the first take waiting when nothing is in use, else the newest earlier one, else none", () => {
+    expect(defaultTake(takeGroups(lanes, "music", undefined, hero))?.variant.id).toBe("x");
+    expect(defaultTake(takeGroups([lanes[0]], "music", undefined, hero))?.variant.id).toBe("old");
+    expect(defaultTake(takeGroups([], "music", undefined, hero))).toBeNull();
   });
 });
 

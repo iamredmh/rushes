@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Page } from "@playwright/test";
-import { expect, test, cutButton, videoReady, reviewTab, openWorkspace, workspaceTab, currentFilm, pickFilm, activity, notesPanel, openActivity, panelTab, panelToggle, sendButton } from "./fixture.js";
+import { expect, test, cutButton, videoReady, reviewTab, openWorkspace, workspaceTab, currentFilm, pickFilm, activity, notesPanel, openActivity, panelTab, panelToggle, sendButton, takesList } from "./fixture.js";
 
 // §27, 5.7: the Change Log is the notes panel's Activity tab. Choosing the tab opens it; choosing Notes puts it away.
 const logButton = (page: Page) => panelTab(page, "Activity");
@@ -255,7 +255,7 @@ test("a row with somewhere to go opens it: a line on v1 opens Picture at v1, a v
   await expect(activity(page)).toBeVisible();
   await activity(page).getByRole("button", { name: /Music: “Night drive” added/ }).click();
   await expect(reviewTab(page, "Music")).toHaveAttribute("aria-selected", "true");
-  await expect(page.locator('.lane[data-row="night-drive/night-drive"] .nm')).toBeFocused();
+  await expect(takesList(page).locator('.take[data-take="night-drive/night-drive"] .knm')).toBeFocused();
   // And back to the cut, from the Music tab.
   await activity(page).getByRole("button", { name: /2 cuts added/ }).click();
   await expect(reviewTab(page, "Timeline")).toHaveAttribute("aria-selected", "true");

@@ -54,8 +54,12 @@ export interface NotesProps {
 /** §27, 5.7: what the next note is about, named on the line above the box. */
 export interface NoteTargetLine {
   label: string;
-  /** With nothing selected on the Timeline tab: "This frame" or "The whole mix". */
-  menu?: { value: "frame" | "mix"; onChange(value: "frame" | "mix"): void };
+  /**
+   * The other thing the note could be on, as a two-item menu: "This frame" or "The whole mix" with nothing selected on
+   * the Timeline tab; "This moment" or "The whole read" with a take selected on its own tab. The line hides its label
+   * while it only repeats the menu's choice.
+   */
+  menu?: { value: string; options: { value: string; label: string }[]; onChange(value: string): void };
   /** Lets go of the selection, back to the default target (also Esc in an empty note box). */
   onClear?(): void;
 }
@@ -193,18 +197,17 @@ export function Notes({
                   value={target.menu.value}
                   onChange={(e) => {
                     const el = e.target as HTMLSelectElement;
-                    target.menu!.onChange(el.value === "mix" ? "mix" : "frame");
+                    target.menu!.onChange(el.value);
                     // So the keys go back to the transport rather than the menu.
                     el.blur();
                   }}
                 >
-                  <option value="frame">This frame</option>
-                  <option value="mix">The whole mix</option>
+                  {target.menu.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
                 <Icon name="chev" />
               </span>
             ) : null}
-            {!(target.menu && target.menu.value === "mix" && target.label === "The whole mix") && <span class="ntl tip-wrap" data-target="" data-tip={target.label}>{target.label}</span>}
+            {target.label !== target.menu?.options.find((o) => o.value === target.menu!.value)?.label && <span class="ntl tip-wrap" data-target="" data-tip={target.label}>{target.label}</span>}
             {target.onClear && (
               <button type="button" class="btn ghost ib sm ntclear" aria-label="Clear the selection · Esc" data-tip="Clear the selection · Esc" onClick={target.onClear}>
                 <Icon name="x" />

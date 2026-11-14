@@ -83,25 +83,11 @@ export function NoCutTimeline({ state, assets, video, notes, prompt, readOnly = 
     await api.post("/api/notes", { stage: at.stage, video: video?.id ?? null, version: null, on: at.on, scope: at.scope, t: at.t, tOut: at.tOut, text, marks: [] });
     onChanged();
   };
-  const copyPrompt = async () => {
-    try {
-      await navigator.clipboard.writeText(prompt);
-      toast("Prompt copied");
-    } catch {
-      toast(`Couldn't reach the clipboard: press ${copyShortcut(navigator.platform)} in the prompt instead`);
-    }
-  };
-
   return (
     <div class="split">
       <div class="tl">
         <div class="monitor">
-          <div class="noslate">
-            <Icon name="film" />
-            <h3>No cut yet</h3>
-            <p>{LOCKED_TAB.picture.unlocks} Until then the takes in use play here together.</p>
-            <button type="button" class="btn sm" onClick={() => void copyPrompt()}><Icon name="copy" />Copy prompt for your agent</button>
-          </div>
+          <NoCutSlate prompt={prompt} toast={toast} then="Until then the takes in use play here together." />
         </div>
         <Transport
           t={t}
@@ -150,6 +136,26 @@ export function NoCutTimeline({ state, assets, video, notes, prompt, readOnly = 
         target={{ label: target.label, onClear: takeSel ? takes.clear : undefined }}
         chips={takeSel ? AUDIO_CHIPS[takeSel.stage] : undefined}
       />
+    </div>
+  );
+}
+
+/** Where the picture would be before there is a cut: what unlocks it, what plays meanwhile (`then`), and the prompt for your agent. */
+export function NoCutSlate({ prompt, toast, then }: { prompt: string; toast(message: string): void; then: string }) {
+  const copyPrompt = async () => {
+    try {
+      await navigator.clipboard.writeText(prompt);
+      toast("Prompt copied");
+    } catch {
+      toast(`Couldn't reach the clipboard: press ${copyShortcut(navigator.platform)} in the prompt instead`);
+    }
+  };
+  return (
+    <div class="noslate" aria-label="No cut yet">
+      <Icon name="film" />
+      <h3>No cut yet</h3>
+      <p>{LOCKED_TAB.picture.unlocks} {then}</p>
+      <button type="button" class="btn sm" onClick={() => void copyPrompt()}><Icon name="copy" />Copy prompt for your agent</button>
     </div>
   );
 }

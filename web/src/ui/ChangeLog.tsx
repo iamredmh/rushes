@@ -77,7 +77,7 @@ export function useChangeLog(projectId: string, head: LogHead | null | undefined
 export function focusRow(row: string): void {
   let tries = 0;
   const attempt = () => {
-    const el = document.querySelector<HTMLElement>(`.lane[data-row="${CSS.escape(row)}"] .nm`);
+    const el = document.querySelector<HTMLElement>(`.take[data-take="${CSS.escape(row)}"] .knm`);
     if (el) {
       el.scrollIntoView({ block: "nearest" });
       el.focus({ preventScroll: true });
