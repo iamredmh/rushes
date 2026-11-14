@@ -10,6 +10,7 @@ import { AudioStage, filmsOf, type Preview, takeList } from "./AudioStage.js";
 import { filmsControl } from "./FilmsMenu.js";
 import { otherSounds } from "./desk/useMix.js";
 import { BlindButton } from "./VariantTab.js";
+import type { ReviewClock } from "./desk/frame.js";
 
 const CHIPS: Record<"whole" | "point", string[]> = {
   whole: AUDIO_CHIPS.voice,
@@ -29,9 +30,11 @@ export interface VoiceProps {
   onChanged(): void;
   /** A half-typed note is waiting: the caller refuses a film switch meanwhile. */
   onPendingChange?(pending: boolean): void;
+  /** The film's one playhead across the Review tabs (final review I3). */
+  clock?: ReviewClock;
 }
 
-export function Voice({ state, assets, video, toast, onChanged, onPendingChange }: VoiceProps) {
+export function Voice({ state, assets, video, toast, onChanged, onPendingChange, clock }: VoiceProps) {
   const [blind, setBlindState] = useState(blindSession);
   const setBlind = (on: boolean) => {
     blindSession = on;
@@ -83,6 +86,7 @@ export function Voice({ state, assets, video, toast, onChanged, onPendingChange 
       toast={toast}
       onChanged={onChanged}
       onPendingChange={onPendingChange}
+      clock={clock}
     />
   );
 }

@@ -817,6 +817,101 @@ test("with no cut and nothing in use, the Timeline tab stays locked (fix round 1
   await expect(page.locator(".strack")).toHaveCount(0);
 });
 
+// ---- final review I3: one playhead per film across the Review tabs ----
+
+/** The transport's time, without the length after it: "0:01.50". */
+const timecodeNow = async (page: Page) => (await page.getByLabel("Timecode").textContent())!.split("/")[0]!.trim();
+/** Where the ruler's playhead is, in seconds. */
+const rulerAt = async (page: Page) => Number(await ruler(page).getAttribute("aria-valuenow"));
+const videoAt = (page: Page) => page.locator("video").evaluate((v: HTMLVideoElement) => v.currentTime);
+
+test("one playhead across the Review tabs: Music opens where the Timeline is, the Timeline where Voice is, and the Timeline keeps its mute and solo", async ({ page, rushes }) => {
+  await threeInUse(rushes);
+  await openTimeline(page, rushes, 3);
+  await page.locator("video").evaluate((v: HTMLVideoElement) => { v.currentTime = 1.5; });
+  await expect.poll(() => timecodeNow(page)).toBe("0:01.50");
+  await soundButton(page, "Music", "Mute").click();
+  await soundButton(page, "Voice", "Solo").click();
+
+  await page.keyboard.press("4");
+  await expect(reviewTab(page, "Music")).toHaveAttribute("aria-selected", "true");
+  await expect.poll(() => timecodeNow(page)).toBe("0:01.50");
+  await expect.poll(async () => Math.abs((await audio(page))!.time - 1.5)).toBeLessThan(0.01);
+  await expect.poll(async () => Math.abs((await rulerAt(page)) - 1.5)).toBeLessThan(0.01);
+  await expect.poll(async () => Math.abs((await videoAt(page)) - 1.5)).toBeLessThan(0.05);
+
+  // Moved on Voice, the Timeline opens at the new place.
+  await page.keyboard.press("3");
+  await expect(reviewTab(page, "Voice")).toHaveAttribute("aria-selected", "true");
+  await expect.poll(() => timecodeNow(page)).toBe("0:01.50");
+  await transport(page).getByRole("button", { name: "Forward one frame · →" }).click();
+  await transport(page).getByRole("button", { name: "Forward one frame · →" }).click();
+  const there = await timecodeNow(page);
+  expect(there).not.toBe("0:01.50");
+  const thereT = (await audio(page))!.time;
+  await page.keyboard.press("2");
+  await expect(reviewTab(page, "Timeline")).toHaveAttribute("aria-selected", "true");
+  await videoReady(page);
+  await expect.poll(() => timecodeNow(page)).toBe(there);
+  await expect.poll(async () => Math.abs((await videoAt(page)) - thereT)).toBeLessThan(0.02);
+  await expect.poll(async () => Math.abs((await rulerAt(page)) - thereT)).toBeLessThan(0.02);
+  await expect(soundButton(page, "Music", "Mute")).toHaveAttribute("aria-pressed", "true");
+  await expect(soundButton(page, "Voice", "Solo")).toHaveAttribute("aria-pressed", "true");
+  await expect.poll(async () => (await audio(page))!.lanes).toEqual({ vo: 1, music: 0, sfx: 0 });
+});
+
+test("a film switch restores that film's playhead on the Timeline and on a sound's tab, and clears the Timeline's mute", async ({ page, rushes }) => {
+  await rushes.addCut();
+  await rushes.addCut(undefined, "Cutdown");
+  const bed = await rushes.addVariant("music", "Warm keys", { seconds: 4, freq: 330, video: "hero" });
+  await rushes.api("PUT", "/api/picks", { video: "hero", lanes: { [bed.lane.id]: bed.variant.id } });
+  await page.goto(rushes.testUrl());
+  await videoReady(page);
+  await expect(currentFilm(page)).toHaveText("Hero");
+  await page.locator("video").evaluate((v: HTMLVideoElement) => { v.currentTime = 1.5; });
+  await expect.poll(() => timecodeNow(page)).toBe("0:01.50");
+  await soundButton(page, "Music", "Mute").click();
+  // Another film starts at its own place (the top), on the Timeline and on Music.
+  await page.keyboard.press("]");
+  await expect(currentFilm(page)).toHaveText("Cutdown");
+  await expect.poll(() => timecodeNow(page)).toBe("0:00.00");
+  await page.keyboard.press("4");
+  await expect(reviewTab(page, "Music")).toHaveAttribute("aria-selected", "true");
+  await expect.poll(() => timecodeNow(page)).toBe("0:00.00");
+  // Back on Hero, still on Music: Hero's place.
+  await page.keyboard.press("[");
+  await expect(currentFilm(page)).toHaveText("Hero");
+  await expect.poll(() => timecodeNow(page)).toBe("0:01.50");
+  await page.keyboard.press("2");
+  await videoReady(page);
+  await expect.poll(() => timecodeNow(page)).toBe("0:01.50");
+  await expect(soundButton(page, "Music", "Mute")).toHaveAttribute("aria-pressed", "false");
+});
+
+test("with no cut, the Timeline and the sound tabs share the playhead and the Timeline keeps its mute", async ({ page, rushes }) => {
+  const read = await rushes.addVariant("voice", "Gerald", { round: "Round 1 · Voices", seconds: 4, freq: 220 });
+  const bed = await rushes.addVariant("music", "Warm keys", { seconds: 4, freq: 330 });
+  await rushes.api("PUT", "/api/picks", { lanes: { [read.lane.id]: read.variant.id, [bed.lane.id]: bed.variant.id } });
+  await page.goto(rushes.testUrl());
+  await page.keyboard.press("6");
+  await expect(page.locator(".noslate")).toBeVisible();
+  await expect.poll(async () => (await audio(page))?.media.length ?? 0, { timeout: 10_000 }).toBe(2);
+  for (let i = 0; i < 6; i++) await transport(page).getByRole("button", { name: "Forward one frame · →" }).click();
+  const there = await timecodeNow(page);
+  expect(there).not.toBe("0:00.00");
+  const thereT = (await audio(page))!.time;
+  await soundButton(page, "Music", "Mute").click();
+  await page.keyboard.press("4");
+  await expect(reviewTab(page, "Music")).toHaveAttribute("aria-selected", "true");
+  await expect.poll(() => timecodeNow(page)).toBe(there);
+  await expect.poll(async () => Math.abs((await audio(page))!.time - thereT)).toBeLessThan(0.01);
+  await page.keyboard.press("6");
+  await expect(page.locator(".noslate")).toBeVisible();
+  await expect.poll(() => timecodeNow(page)).toBe(there);
+  await expect.poll(async () => Math.abs(((await audio(page))?.time ?? -1) - thereT)).toBeLessThan(0.01);
+  await expect(soundButton(page, "Music", "Mute")).toHaveAttribute("aria-pressed", "true");
+});
+
 test.describe("the cut's own sound", () => {
   test.skip(!hasFfmpeg, "needs ffmpeg and ffprobe");
 

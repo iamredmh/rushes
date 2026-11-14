@@ -11,7 +11,8 @@ import { escapeIsFree, NotesPanel, useNoteBox } from "./NotesPanel.js";
 import { useTakeSelection } from "./useTakeSelection.js";
 import { Ruler } from "./Ruler.js";
 import { LoudnessReadout, type SoundTab, SoundTracks } from "./SoundTracks.js";
-import { useMix } from "./useMix.js";
+import { type MixView, useMix } from "./useMix.js";
+import { type ReviewClock, useReviewClock } from "./frame.js";
 import { Transport } from "./Transport.js";
 
 const NO_PLAYER = { current: null };
@@ -30,15 +31,27 @@ export interface NoCutProps {
   onChanged(): void;
   onPendingChange?(pending: boolean): void;
   onOpenTab?(tab: SoundTab): void;
+  /** §27, 5.5 (final review I3): the film's one playhead across the Review tabs, and where its mute and solo are kept. */
+  clock?: ReviewClock;
+  mixView?: { current: MixView | null };
 }
 
 /** The Timeline tab with no cut: a slate where the picture would be, then the transport, the ruler and the sound rows. */
-export function NoCutTimeline({ state, assets, video, notes, prompt, readOnly = false, toast, onChanged, onPendingChange, onOpenTab }: NoCutProps) {
+export function NoCutTimeline({ state, assets, video, notes, prompt, readOnly = false, toast, onChanged, onPendingChange, onOpenTab, clock, mixView }: NoCutProps) {
   const [sound, setSound] = useState({ level: 1, muted: false });
-  const mix = useMix({ state, assets, video, version: null, player: NO_PLAYER, duration: 0, monitor: sound, toast, onChanged });
-  const { engine, length } = mix;
   const fps = state.project.fps || 30;
-  const [t, setT] = useState(0);
+  // Before useMix (which owns the engine), so leaving reads the time before the engine is disposed.
+  const engineRef = useRef<{ time: number } | null>(null);
+  useReviewClock(clock, video?.id ?? "", () => snap(engineRef.current?.time ?? 0, fps));
+  const mix = useMix({ state, assets, video, version: null, player: NO_PLAYER, duration: 0, monitor: sound, toast, onChanged, keep: mixView });
+  const { engine, length } = mix;
+  engineRef.current = engine;
+  // The tab opens where the film's playhead is.
+  useLayoutEffect(() => {
+    const at = clock?.at(video?.id ?? "") ?? 0;
+    if (at > 0) engine.seek(at);
+  }, []);
+  const [t, setT] = useState(() => clock?.at(video?.id ?? "") ?? 0);
   const [playing, setPlaying] = useState(false);
   useEffect(() => engine.subscribe((now) => setT(now)), [engine]);
   useEffect(() => engine.onChange(() => setPlaying(engine.playing)), [engine]);
