@@ -319,6 +319,8 @@
 .npanel .row[aria-label="Marks"] .chip { padding: 0 8px; }
 .npanel .row[aria-label="Marks"] .onwrap svg.ic { right: 6px; }
 .npanel .comp { font-size: 13px; }
+/* m7: where the note box would be on the Brief and Storyboard pages, the one line that says where notes are written. */
+.npanel .ninstead { margin: 0; padding: 12px; border-top: 1px solid var(--line); color: var(--text-3); font-size: 12.5px; line-height: 1.4; }
 .npanel .comp .input { font-size: 13px; }
 /* The target line: what the next note is about. */
 .comp .ntarget { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; height: 26px; min-width: 0; font-size: 12.5px; color: var(--text-2); }

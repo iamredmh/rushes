@@ -1,6 +1,6 @@
 import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { test, expect, reviewTab, openWorkspace, workspaceTab, notesPanel, sendButton, sentDialog, planSwitch, planTab, openPlanPage, editedMark, baselineText, planStatus } from "./fixture.js";
+import { test, expect, reviewTab, openWorkspace, workspaceTab, notesPanel, sendButton, sentDialog, planSwitch, planTab, openPlanPage, editedMark, baselineText, planStatus, noteTargetLabel, currentFilm } from "./fixture.js";
 
 // §24 step 2, §27: Plan is a workspace with a three-part switch (Brief, Script, Storyboard); brief.md is the file of record for the Brief page.
 
@@ -523,4 +523,61 @@ test("a Plan field that wraps onto more lines when the window narrows still show
   await page.setViewportSize({ width: 720, height: 900 });
   await expect.poll(async () => (await fits()).scroll).toBeGreaterThan(wide.scroll);
   await expect.poll(async () => { const f = await fits(); return f.client >= f.scroll; }).toBe(true);
+});
+
+// Final review I2: the Plan workspace's note box is behind the same guard as Review's. Leaving the page would unmount the
+// box and lose what was typed; another Plan page would quietly aim it at "The script" instead of its line.
+test("a half-typed note on the Script page holds the page: Review, Assets, Brief and another film all wait for it", async ({ page, rushes }) => {
+  await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
+  await rushes.api("PUT", "/api/script", SCRIPT);
+  await rushes.addCut();
+  await rushes.addCut(undefined, "Cutdown");
+  await page.goto(rushes.url);
+  await openPlanPage(page, "Script");
+  await page.locator(".srow").first().click();
+  const target = await noteTargetLabel(page).textContent();
+  expect(target).not.toBe("The script");
+  const box = notesPanel(page).getByRole("textbox", { name: "New note" });
+  await box.fill("Half a thought");
+  const film = await currentFilm(page).textContent();
+  const refused = async () => {
+    await expect(page.getByRole("status")).toHaveText("Add or clear your note first");
+    await expect(planTab(page, "Script")).toHaveAttribute("aria-selected", "true");
+    await expect(box).toHaveValue("Half a thought");
+    await expect(noteTargetLabel(page)).toHaveText(target!);
+  };
+  await workspaceTab(page, "Review").click();
+  await refused();
+  await workspaceTab(page, "Assets").click();
+  await refused();
+  await planTab(page, "Brief").click();
+  await refused();
+  await box.blur();
+  await page.keyboard.press("]");
+  await expect(page.getByRole("status")).toHaveText(`Add or clear your note on ${film} first`);
+  await expect(currentFilm(page)).toHaveText(film!);
+  await expect(box).toHaveValue("Half a thought");
+  // Cleared, the way is open again.
+  await box.fill("");
+  await planTab(page, "Brief").click();
+  await expect(planTab(page, "Brief")).toHaveAttribute("aria-selected", "true");
+});
+
+// Final review m7 (ruling): neither the Brief nor the Storyboard page took notes before the desk, and a note typed there
+// was filed as a script note. Their panel lists the script's notes and says where to write one; Send stays.
+test("the Brief and Storyboard pages have no note box: their panel lists the script's notes and points to the Script page", async ({ page, rushes }) => {
+  await rushes.writeFiles([{ path: "brief.md", text: BRIEF }, { path: "storyboard.md", text: "# Storyboard: Lumen\n\n## Shot 01 · Cold open\nTag: ESTABLISH\nLength: 3\nStatus: draft\nDirection:\n\nA laptop on a desk.\n" }]);
+  await rushes.api("PUT", "/api/script", SCRIPT);
+  await rushes.api("POST", "/api/notes", { stage: "script", video: null, version: null, on: null, scope: "whole", t: null, tOut: null, text: "Shorter overall" });
+  await page.goto(rushes.url);
+  for (const name of ["Brief", "Storyboard"] as const) {
+    await openPlanPage(page, name);
+    await expect(notesPanel(page).getByRole("textbox", { name: "New note" })).toHaveCount(0);
+    await expect(notesPanel(page)).toContainText("Notes on the plan are written on the Script page.");
+    await expect(notesPanel(page).locator(".note")).toHaveText([/Shorter overall/]);
+    await expect(sendButton(page)).toBeVisible();
+  }
+  await openPlanPage(page, "Script");
+  await expect(notesPanel(page).getByRole("textbox", { name: "New note" })).toBeVisible();
+  await expect(notesPanel(page)).not.toContainText("Notes on the plan are written on the Script page.");
 });

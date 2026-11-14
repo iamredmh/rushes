@@ -49,6 +49,8 @@ export interface NotesProps {
   listFooter?(filter: Filter): ComponentChildren;
   /** §26: a shelved film is looked at, not marked: the note box is hidden. */
   readOnly?: boolean;
+  /** One line where the hidden note box would be, saying where notes are written instead (the Brief and Storyboard pages). */
+  instead?: string;
 }
 
 /** §27, 5.7: what the next note is about, named on the line above the box. */
@@ -87,7 +89,7 @@ const MARK_KINDS: { kind: MarkKind; label: string }[] = [
 /** The notes column used on every tab: list, filter, done circles and the note box. */
 export function Notes({
   notes, version, placeholder, attachments, inputRef, toast, onAdd, onSeek, onChanged, onTextChange, target, chips, marks, onLabel, fixedTimes, selectedId,
-  formatTag, cardExtra, formatScope, listFooter, readOnly,
+  formatTag, cardExtra, formatScope, listFooter, readOnly, instead,
 }: NotesProps) {
   const [filter, setFilter] = useState<Filter>("all");
   const ownInput = useRef<HTMLTextAreaElement>(null);
@@ -295,6 +297,7 @@ export function Notes({
         </div>
         {formatScope && <p class="fhint">{formatScope.hint}</p>}
       </div>
+      {readOnly && instead && <p class="ninstead">{instead}</p>}
     </div>
   );
 }
