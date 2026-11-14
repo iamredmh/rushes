@@ -32,7 +32,7 @@ describe("shipped docs: Visuals (§25)", () => {
     expect(text).toContain("### Visuals: mark up stills and carousels");
     expect(text).toContain("whichever visual crosses the middle");
     expect(text).toContain("Drag");
-    expect(text).toContain("**1–8** switch tab (1: Planning, which opens the page you used last; 7: Visuals; 8: Assets)");
+    expect(text).toContain("**1–8** switch place (1: Plan, which opens the page you used last; 2 and 6: Timeline; 3, 4, 5: Voice, Music, Effects; 7: Visuals; 8: Assets)");
     expect(text).toContain("The **Assets** tab (key `8`)");
     expect(text).not.toContain("**1–7** switch tab");
   });
