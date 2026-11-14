@@ -3,6 +3,7 @@
 import { useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { Video } from "../types.js";
 import { Icon } from "./Icon.js";
+import { applyTheme, nextTheme, readTheme, safeStorage, saveTheme, THEME_LABEL } from "../theme.js";
 import { useDismiss } from "./useDismiss.js";
 
 export function FilmMenu({ video, onToggleShelved }: { video: Video | undefined; onToggleShelved(): void }) {
@@ -20,6 +21,14 @@ export function FilmMenu({ video, onToggleShelved }: { video: Video | undefined;
     if (open) first.current?.focus();
   }, [open]);
   const shelved = !!video?.shelved;
+  // The browser's own setting, not the film's: it lives here until the desk has a menu of its own (§27, 5.2).
+  const [theme, setTheme] = useState(() => readTheme(safeStorage()));
+  const cycleTheme = () => {
+    const next = nextTheme(theme);
+    saveTheme(next);
+    applyTheme(next);
+    setTheme(next);
+  };
 
   return (
     <span class="fmwrap" ref={wrap}>
@@ -55,6 +64,11 @@ export function FilmMenu({ video, onToggleShelved }: { video: Video | undefined;
             <Icon name={shelved ? "undo" : "shelve"} />
             {shelved ? "Restore film" : "Shelve film"}
             <kbd>Shift+S</kbd>
+          </button>
+          {/* Stays open, so one more press tries the next setting. */}
+          <button type="button" role="menuitem" class="fmitem" onClick={cycleTheme}>
+            <Icon name="circle" />
+            Appearance: {THEME_LABEL[theme]}
           </button>
         </div>
       )}

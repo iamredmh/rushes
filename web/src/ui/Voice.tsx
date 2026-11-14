@@ -18,7 +18,7 @@ import { filmsControl, looseRows } from "./FilmsMenu.js";
 import { Icon } from "./Icon.js";
 import type { StageRow } from "./Lanes.js";
 
-const VO_COLOR = "#4FD1C5";
+const VO_COLOR = "var(--vo)";
 const SCOPES: Scope[] = ["whole", "point"];
 const CHIPS: Record<"whole" | "point", string[]> = {
   whole: AUDIO_CHIPS.voice,

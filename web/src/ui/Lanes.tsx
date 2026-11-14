@@ -18,6 +18,7 @@ import { type CardCue, CUE_CARD_ID, CueCard, cardHover, useCueCard } from "./Cue
 import { CueLayers, rovingKeyDown } from "./CueLayers.js";
 import { FilmsMenu, type FilmsControl } from "./FilmsMenu.js";
 import { Icon } from "./Icon.js";
+import { THEME_EVENT, tokenColor } from "../theme.js";
 
 /** One lane on an audio tab. */
 export interface StageRow {
@@ -107,8 +108,16 @@ function Wave({ segments, length, color }: { segments: WaveSegment[]; length: nu
     return () => ro.disconnect();
   }, []);
 
-  // Redraws only when the peaks, the size, the length or the colour change: never per frame.
-  const deps: unknown[] = [size, length, color];
+  // A token's value changes with light and dark, and a canvas cannot read `var()`: redraw when the page's theme does.
+  const [theme, setTheme] = useState(0);
+  useEffect(() => {
+    const on = () => setTheme((n) => n + 1);
+    window.addEventListener(THEME_EVENT, on);
+    return () => window.removeEventListener(THEME_EVENT, on);
+  }, []);
+
+  // Redraws only when the peaks, the size, the length, the colour or the theme change: never per frame.
+  const deps: unknown[] = [size, length, color, theme];
   for (const s of segments) deps.push(s.offset, s.duration, s.peaks);
   useEffect(() => {
     const c = ref.current;
@@ -121,7 +130,7 @@ function Wave({ segments, length, color }: { segments: WaveSegment[]; length: nu
     x.setTransform(size.dpr, 0, 0, size.dpr, 0, 0);
     x.clearRect(0, 0, size.w, size.h);
     if (!(length > 0)) return;
-    x.fillStyle = color;
+    x.fillStyle = tokenColor(c, color);
     const bars = Math.floor(size.w / BAR);
     const secondsPerBar = (length * BAR) / size.w;
     for (let i = 0; i < bars; i++) {

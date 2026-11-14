@@ -42,7 +42,7 @@ button.chev:disabled { opacity: 0.4; cursor: default; }
 
 /* The hover card: a tooltip, so it never takes the pointer (ruling R6). It sits above the Change Log
    drawer (35), its header (36), the version menu (45) and the format pop (46). */
-.cuecard { position: fixed; z-index: 47; pointer-events: none; display: grid; width: max-content; gap: 2px; min-width: 200px; max-width: min(420px, calc(100vw - 32px)); padding: 8px 12px; background: #000; border: 1px solid var(--line-2); border-radius: 10px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5); color: var(--text); font-size: 15px; line-height: 1.4; }
+.cuecard { position: fixed; z-index: 47; pointer-events: none; display: grid; width: max-content; gap: 2px; min-width: 200px; max-width: min(420px, calc(100vw - 32px)); padding: 8px 12px; background: var(--raised); border: 1px solid var(--line-2); border-radius: 10px; box-shadow: 0 12px 32px var(--shadow); color: var(--text); font-size: 15px; line-height: 1.4; }
 .cuecard b { font-weight: 600; overflow-wrap: anywhere; }
 .cuecard .m { font: 15px var(--mono); color: var(--text-2); }
 .cuecard .f { font: 15px var(--mono); overflow-wrap: anywhere; }

@@ -11,7 +11,8 @@ import { filmsControl, looseRows } from "./FilmsMenu.js";
 import { Icon } from "./Icon.js";
 import type { StageRow } from "./Lanes.js";
 
-const COLOR = { music: "#A78BFA", sfx: "#FB923C" } as const;
+// The lanes' colours are tokens, so they follow light and dark; the waveform resolves them as it draws.
+const COLOR = { music: "var(--music)", sfx: "var(--sfx)" } as const;
 
 // Blind holds for the session: its shuffle is fixed at page load, and the switch survives a trip
 // to another tab.

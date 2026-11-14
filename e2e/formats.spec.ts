@@ -758,7 +758,7 @@ test("notes of other formats wait in a quiet row, read only, with a button that 
   expect(Math.min(...sizes)).toBeGreaterThanOrEqual(15);
   // Review I1: a read-only time doesn't look like the list's clickable one.
   const colour = (sel: string) => page.locator(sel).first().evaluate((el) => getComputedStyle(el).color);
-  expect(await colour(".otherfmts .t")).toBe("rgb(163, 166, 173)");
+  expect(await colour(".otherfmts .t")).toBe("rgb(156, 156, 156)"); // --text-2
   // Read only: the time doesn't seek, and nothing there selects.
   await ro.filter({ hasText: "Rows land late" }).locator(".t").click();
   await expect(page.getByLabel("Timecode")).toContainText("0:00.00");

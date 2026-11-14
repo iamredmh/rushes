@@ -20,7 +20,7 @@ import { AudioStage, type Preview } from "./AudioStage.js";
 import { Icon } from "./Icon.js";
 import type { StageRow } from "./Lanes.js";
 
-const COLOR: Record<MixLane, string> = { vo: "#4FD1C5", music: "#A78BFA", sfx: "#FB923C" };
+const COLOR: Record<MixLane, string> = { vo: "var(--vo)", music: "var(--music)", sfx: "var(--sfx)" };
 const NAME: Record<MixLane, string> = { vo: "Voiceover", music: "Music", sfx: "Sound effects" };
 /** The readout waits this long after the last change before measuring (§17.6). */
 export const LOUDNESS_DEBOUNCE_MS = 500;
