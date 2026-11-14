@@ -52,6 +52,8 @@ export interface NotesProps {
   listFooter?(filter: Filter): ComponentChildren;
   /** §26: a shelved film is looked at, not marked: the note box is hidden. */
   readOnly?: boolean;
+  /** §27, 5.6: a second way to send what is typed, under the box ("Note on the mix"), until the notes panel's target line. */
+  altAdd?: { label: string; onAdd(text: string): Promise<void> };
 }
 
 /** §21.2 (4), §21.5: the composer's switch, for the format on screen. */
@@ -78,7 +80,7 @@ const onFull = (on: NonNullable<NotesProps["on"]>): string | undefined => on.opt
 /** The notes column used on every tab: list, filter, done circles and the note box. */
 export function Notes({
   notes, version, placeholder, attachments, inputRef, toast, onAdd, onSeek, onChanged, onTextChange, on, scope, chips, marks, onLabel, fixedTimes, selectedId,
-  formatTag, cardExtra, formatScope, listFooter, readOnly,
+  formatTag, cardExtra, formatScope, listFooter, readOnly, altAdd,
 }: NotesProps) {
   const [filter, setFilter] = useState<Filter>("all");
   const ownInput = useRef<HTMLTextAreaElement>(null);
@@ -101,12 +103,12 @@ export function Notes({
     onChanged();
   };
 
-  const submit = async () => {
+  const submit = async (add: (text: string) => Promise<void> = onAdd) => {
     const value = text.trim();
     if (!value || busy) return;
     setBusy(true);
     try {
-      await onAdd(value);
+      await add(value);
       setText("");
       onTextChange?.(false);
     } catch (e) {
@@ -291,6 +293,11 @@ export function Notes({
             <Icon name="send" />
           </button>
         </div>
+        {altAdd && (
+          <div class="row altadd">
+            <button type="button" class="btn sm" disabled={busy} onClick={() => void submit(altAdd.onAdd)}>{altAdd.label}</button>
+          </div>
+        )}
         {formatScope && <p class="fhint">{formatScope.hint}</p>}
       </div>
     </aside>

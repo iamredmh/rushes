@@ -1,7 +1,7 @@
 // §23: sound-effects cue layers -- the hover card, the chevron's layers by sound, the keyboard and
 // a cue's own sample. Every page goes to `rushes.testUrl()` (`?test=1`), which exposes the engine.
 import type { Page } from "@playwright/test";
-import { expect, type Rushes, test, reviewTab, openWorkspace, openReviewTab } from "./fixture.js";
+import { expect, type Rushes, test, reviewTab, openWorkspace, soundTrack } from "./fixture.js";
 
 type Hook = {
   inspect(): { playing: boolean; time: number; media: string[] } | null;
@@ -241,18 +241,17 @@ test("a sample that isn't there says so, and nothing is left playing", async ({ 
   expect((await hook(page)).sample.playing).toBe(false);
 });
 
-test("Mix's Sound effects lane shows the card and walks its cues; it has no layers", async ({ page, rushes }) => {
+test("the timeline's Effects row shows the card and walks its cues; it has no layers", async ({ page, rushes }) => {
   await rushes.addCut();
   await rushes.writeFiles([{ path: THUD, seconds: 0.4, freq: 110 }]);
   const pass = await rushes.addVariant("sfx", "Effects for Lumen", { seconds: 4, freq: 880, cues: [{ name: "whoosh", t: 0.5 }, { name: "thud", t: 2, file: THUD }] });
   await rushes.api("PUT", "/api/picks", { video: "hero", lanes: { [pass.lane.id]: pass.variant.id } });
   await page.goto(rushes.testUrl());
-  const tab = reviewTab(page, "Mix");
-  await expect(tab).not.toHaveAttribute("data-locked");
-  // 6, once Mix's key, is the timeline now (§27, 5.3): Mix is opened by its tab until sound joins the timeline.
-  await openReviewTab(page, "Mix");
-  await expect(page.locator(".lane")).toHaveCount(3);
-  const sfx = page.locator('.lane[data-row="sfx"]');
+  // §27, 5.6: the mix plays on the timeline; 6, once Mix's key, opens it.
+  await page.keyboard.press("6");
+  await expect(reviewTab(page, "Timeline")).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator(".strack:not(.csound)")).toHaveCount(3);
+  const sfx = soundTrack(page, "Effects");
   await expect(sfx.locator(".cue")).toHaveCount(2);
   await expect(sfx.locator(".chev")).toHaveCount(0);
   await sfx.locator('.cue[data-cue="thud"]').hover();

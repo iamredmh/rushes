@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { BrowserContext, Page } from "@playwright/test";
 import { expect, hasFfmpeg, needsH264, pickVersion, type Rushes, test, cutButton, videoReady, reviewTab, openWorkspace, openMore, workspaceTab, openReviewTab, currentFilm, pickFilm, filmButton,
-  autoProxySetting, rangeChip, ruler, shotBlocks, toolButton, transport } from "./fixture.js";
+  autoProxySetting, rangeChip, ruler, shotBlocks, toolButton, transport, pictureTrack, CUT_SOUND_LANE, CUT_SOUND_WAVE } from "./fixture.js";
 
 const CLIP = fileURLToPath(new URL("./fixtures/clip.mp4", import.meta.url));
 // A 1x1 transparent PNG, reused for every screenshot the library tests need on disk: its
@@ -291,8 +291,8 @@ test("Send to agent sends every tab's open notes, whichever tab it is pressed on
   await rushes.api("POST", "/api/notes", { stage: "sfx", video: "hero", scope: "whole", text: "Softer taps." });
   await page.goto(rushes.url);
   await videoReady(page);
-  // Mix has no notes of its own, and still sends both.
-  await openReviewTab(page, "Mix");
+  // Voice has no notes of its own (and nothing to review yet), and still sends both.
+  await openReviewTab(page, "Voice");
   await expect(page.getByRole("button", { name: /Send to agent/ })).toContainText("2");
   await page.getByRole("button", { name: /Send to agent/ }).click();
   const dialog = page.getByRole("dialog", { name: "Sent to agent" });
@@ -1714,14 +1714,14 @@ test.describe("tabs share one live connection (§19.8)", () => {
 
 /** How many of the waveform canvas's pixels are drawn on (alpha above 0); 0 when there's no canvas. */
 function wavePixels(page: Page): Promise<number> {
-  return page.evaluate(() => {
-    const c = document.querySelector<HTMLCanvasElement>(".track canvas.pwave");
+  return page.evaluate((sel) => {
+    const c = document.querySelector<HTMLCanvasElement>(sel);
     if (!c || !c.width || !c.height) return 0;
     const data = c.getContext("2d")!.getImageData(0, 0, c.width, c.height).data;
     let n = 0;
     for (let i = 3; i < data.length; i += 4) if (data[i] > 0) n++;
     return n;
-  });
+  }, CUT_SOUND_WAVE);
 }
 
 /** Two animation frames, then a few checks over half a second: long enough for an answer the page
@@ -1729,7 +1729,7 @@ function wavePixels(page: Page): Promise<number> {
 async function settledNoWave(page: Page): Promise<void> {
   await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
   for (let i = 0; i < 5; i++) {
-    await expect(page.locator(".track canvas.pwave")).toHaveCount(0);
+    await expect(page.locator(CUT_SOUND_WAVE)).toHaveCount(0);
     await page.waitForTimeout(100);
   }
 }
@@ -1746,25 +1746,24 @@ async function peaksSettled(rushes: Rushes, version: string): Promise<number> {
   return status;
 }
 
-// §27, 5.6: the picture's waveform is not drawn on the Timeline tab while its Picture track has no sound row; the sound rows
-// (the desk plan's Task 4) bring it back, and these with it. Kept, not deleted, so that task has them to pass.
-test.describe.fixme("the Picture waveform (§19.9)", () => {
+// §27, 5.6: the picture's waveform is drawn on the Cut sound row, under the Picture track, whenever the cut has a sound of its own.
+test.describe("the Picture waveform (§19.9)", () => {
   test.skip(!hasFfmpeg, "needs ffmpeg and ffprobe");
 
   test("a vertical cut with audio draws its waveform in the timeline, hidden from screen readers, and playback never redraws it", async ({ page, rushes }) => {
     await rushes.addProResCut({ codec: "h264", width: 360, height: 640, seconds: 3, audio: true });
     await page.goto(rushes.testUrl());
-    const wave = page.locator(".track canvas.pwave");
+    const wave = page.locator(CUT_SOUND_WAVE);
     await expect(wave).toBeVisible();
     await expect(wave).toHaveAttribute("aria-hidden", "true");
     await expect.poll(() => wavePixels(page)).toBeGreaterThan(50);
     // It sits inside the bar, under the playhead.
-    const box = await page.evaluate(() => {
-      const t = document.querySelector(".track")!.getBoundingClientRect();
-      const c = document.querySelector(".track canvas.pwave")!.getBoundingClientRect();
+    const box = await page.evaluate(([lane, canvas]) => {
+      const t = document.querySelector(lane)!.getBoundingClientRect();
+      const c = document.querySelector(canvas)!.getBoundingClientRect();
       const z = (sel: string) => Number(getComputedStyle(document.querySelector(sel)!).zIndex);
-      return { th: t.height, inside: c.top >= t.top && c.bottom <= t.bottom && c.left >= t.left && c.right <= t.right, wave: z(".track canvas.pwave"), head: z(".track .playhead") };
-    });
+      return { th: t.height, inside: c.top >= t.top && c.bottom <= t.bottom && c.left >= t.left && c.right <= t.right, wave: z(canvas), head: z(`${lane} .playhead`) };
+    }, [CUT_SOUND_LANE, CUT_SOUND_WAVE]);
     expect(box.th).toBe(40);
     expect(box.inside).toBe(true);
     expect(box.wave).toBeLessThan(box.head);
@@ -1772,9 +1771,9 @@ test.describe.fixme("the Picture waveform (§19.9)", () => {
     await videoReady(page);
     const draws = () => page.evaluate(() => window.__rushesPicture!.waveDraws());
     const before = await draws();
-    await page.getByRole("button", { name: "Play" }).click();
+    await transport(page).getByRole("button", { name: "Play · Space" }).click();
     await expect.poll(() => page.locator("video").evaluate((v: HTMLVideoElement) => v.currentTime)).toBeGreaterThan(0.5);
-    await page.getByRole("button", { name: "Pause" }).click();
+    await transport(page).getByRole("button", { name: "Pause · Space" }).click();
     expect(await draws()).toBe(before);
   });
 
@@ -1807,7 +1806,7 @@ test.describe.fixme("the Picture waveform (§19.9)", () => {
     await rushes.addProResCut({ codec: "h264", seconds: 3, audio: true });
     await page.goto(rushes.url);
     await expect.poll(() => wavePixels(page)).toBeGreaterThan(50);
-    const backing = () => page.evaluate(() => { const c = document.querySelector<HTMLCanvasElement>(".track canvas.pwave")!; return { w: c.width, css: c.getBoundingClientRect().width }; });
+    const backing = () => page.evaluate((sel) => { const c = document.querySelector<HTMLCanvasElement>(sel)!; return { w: c.width, css: c.getBoundingClientRect().width }; }, CUT_SOUND_WAVE);
     const one = await backing();
     expect(one.w).toBe(Math.round(one.css));
     const move = (n: number) => page.evaluate((x) => (window as unknown as { __moveToScreen(n: number): void }).__moveToScreen(x), n);
@@ -1877,7 +1876,7 @@ test.describe.fixme("the Picture waveform (§19.9)", () => {
     await page.goto(rushes.url);
     await answered;
     await videoReady(page);
-    await expect(page.locator(".track")).toBeVisible();
+    await expect(pictureTrack(page)).toBeVisible();
     // Checked once the answer has had time to be drawn, not straight after it arrives.
     await settledNoWave(page);
   });
@@ -1888,7 +1887,7 @@ test.describe.fixme("the Picture waveform (§19.9)", () => {
     await expect(page.locator(".proxybar").getByRole("button", { name: "Create proxy" })).toBeVisible();
     await expect.poll(() => wavePixels(page)).toBeGreaterThan(50);
     await expectPlayerOnScreen(page);
-    expect(await page.evaluate(() => document.querySelector(".track")!.getBoundingClientRect().height)).toBe(40);
+    expect(await page.evaluate((lane) => document.querySelector(lane)!.getBoundingClientRect().height, CUT_SOUND_LANE)).toBe(40);
   });
 
   test("switching to another cut never shows the last one's waveform", async ({ page, rushes }) => {
@@ -1899,13 +1898,13 @@ test.describe.fixme("the Picture waveform (§19.9)", () => {
     await page.goto(rushes.url);
     const versions = cutButton(page);
     await expect(versions).toHaveAttribute("data-version", "v2");
-    await expect(page.locator(".track canvas.pwave")).toHaveCount(0);
+    await expect(page.locator(CUT_SOUND_WAVE)).toHaveCount(0);
     await pickVersion(page, "v1");
     await expect.poll(() => wavePixels(page)).toBeGreaterThan(50);
     await pickVersion(page, "v2");
-    await expect(page.locator(".track canvas.pwave")).toHaveCount(0);
+    await expect(page.locator(CUT_SOUND_WAVE)).toHaveCount(0);
     await pickVersion(page, "v1");
-    await expect(page.locator(".track canvas.pwave")).toHaveCount(1);
+    await expect(page.locator(CUT_SOUND_WAVE)).toHaveCount(1);
   });
 
   test("a cut added while you watch gets its waveform once the server has made it", async ({ page, rushes }) => {

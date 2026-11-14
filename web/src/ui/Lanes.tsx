@@ -80,7 +80,7 @@ export function waveDraws(): number {
   return draws;
 }
 
-interface WaveSegment {
+export interface WaveSegment {
   offset: number;
   duration: number;
   peaks: Float32Array | null;
@@ -89,8 +89,8 @@ interface WaveSegment {
 const BAR = 3;
 const BAR_WIDTH = 2;
 
-/** A lane's waveform: bars across the timeline where its clips sit. */
-function Wave({ segments, length, color }: { segments: WaveSegment[]; length: number; color: string }) {
+/** A lane's waveform: bars across the timeline where its clips sit. The Timeline tab's sound rows draw one too. */
+export function Wave({ segments, length, color }: { segments: WaveSegment[]; length: number; color: string }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0, dpr: 1 });
 

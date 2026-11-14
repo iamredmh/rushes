@@ -1,3 +1,4 @@
+import type { ComponentChildren } from "preact";
 import { fmt } from "../../lib.js";
 import { Icon } from "../Icon.js";
 
@@ -15,10 +16,12 @@ export interface TransportProps {
   onVolume(level: number): void;
   onMute(): void;
   onFullScreen(): void;
+  /** §27, 5.6: the loudness of what you hear, beside the volume while a take is in use. */
+  loudness?: ComponentChildren;
 }
 
 /** §27, 5.5: the row under the monitor. Where you are at the left, play in the middle, how it sounds and full screen at the right. */
-export function Transport({ t, duration, playing, onToggle, onStep, rangeLabel, onClearRange, volume, muted, onVolume, onMute, onFullScreen }: TransportProps) {
+export function Transport({ t, duration, playing, onToggle, onStep, rangeLabel, onClearRange, volume, muted, onVolume, onMute, onFullScreen, loudness }: TransportProps) {
   const silent = muted || volume === 0;
   return (
     <div class="transport" role="group" aria-label="Transport">
@@ -39,6 +42,7 @@ export function Transport({ t, duration, playing, onToggle, onStep, rangeLabel, 
         <button class="btn ghost ib" data-tip="Forward one frame · →" aria-label="Forward one frame · →" onClick={() => onStep(1)}><Icon name="next" /></button>
       </div>
       <div class="tright">
+        {loudness}
         <button class="btn ghost ib" data-tip={muted ? "Unmute" : "Mute"} aria-label={muted ? "Unmute" : "Mute"} aria-pressed={muted} onClick={(e) => { if (e.detail > 0) (e.currentTarget as HTMLElement).blur(); onMute(); }}>
           <Icon name={silent ? "mute" : "volume"} />
         </button>

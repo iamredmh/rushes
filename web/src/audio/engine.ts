@@ -468,6 +468,14 @@ export class AudioEngine {
     this.emitChange();
   }
 
+  /** Readies the context to make sound, from inside a click or a key press: a browser lets a context start only
+   *  in a user gesture, and an engine that follows a video is started from the video's `play` event, which is not one. */
+  resume(): void {
+    if (this.disposed) return;
+    const ctx = this.ensureContext();
+    if (ctx.state === "suspended") ctx.resume().catch(() => {});
+  }
+
   pause(): void {
     if (!this._playing) return;
     this.startOffset = this.time;

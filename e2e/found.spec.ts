@@ -800,9 +800,12 @@ test("a locked tab says how many files of its kind were found, with a Review but
   // One file: singular. The noun for effects is "sound effect".
   await reviewTab(page, "Effects").click();
   await expect(foundLine(page)).toHaveText(/^1 sound effect file found in this project/);
-  // Tabs that take no files of their own have no line.
-  await reviewTab(page, "Mix").click();
-  await expect(page.locator(".locked")).toBeVisible();
+  // Tabs that take no files of their own have no line. The mix was one; it plays on the timeline now (§27, 5.6), which
+  // is never locked behind found files.
+  await expect(reviewTab(page, "Timeline")).toBeVisible();
+  await expect(page.getByRole("tablist", { name: "Review" }).getByRole("tab", { name: /^Mix/ })).toHaveCount(0);
+  await reviewTab(page, "Timeline").click();
+  await expect(page.locator(".locked")).toHaveCount(0);
   await expect(foundLine(page)).toHaveCount(0);
   // Script lives in the Planning menu now.
   await workspaceTab(page, "Plan").click();

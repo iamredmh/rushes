@@ -447,7 +447,7 @@ export async function videoReady(page: Page): Promise<void> {
 // ---- the desk's places (§27): workspaces, Review's tabs, the film and the cut ----
 
 export type WorkspaceName = "Plan" | "Review" | "Visuals" | "Assets";
-export type ReviewTabName = "Timeline" | "Voice" | "Music" | "Effects" | "Mix";
+export type ReviewTabName = "Timeline" | "Voice" | "Music" | "Effects";
 
 /** A workspace's tab in the top bar (Plan's opens the planning pages' menu). */
 export function workspaceTab(page: Page, name: WorkspaceName): Locator {
@@ -594,6 +594,51 @@ export function pictureTrack(page: Page): Locator {
 /** The Picture track's blocks; the one under the playhead has `aria-current`. */
 export function shotBlocks(page: Page): Locator {
   return pictureTrack(page).getByRole("button");
+}
+
+// ---- sound on the timeline (§27, 5.6) ----
+
+/** A sound row's name on the Timeline tab; "Cut sound" is the cut file's own audio. */
+export type SoundName = "Voice" | "Music" | "Effects" | "Cut sound";
+
+/** A sound row under the Picture track: its head (swatch, name, take count, M, S, level) and its block. */
+export function soundTrack(page: Page, name: SoundName): Locator {
+  return page.getByRole("group", { name: `${name} track`, exact: true });
+}
+
+/** The one block on a sound row: the take in use with its waveform, or the dashed empty one. */
+export function soundBlock(page: Page, name: SoundName): Locator {
+  return soundTrack(page, name).locator(".sblock");
+}
+
+/** A sound row's M or S. */
+export function soundButton(page: Page, name: SoundName, kind: "Mute" | "Solo"): Locator {
+  return soundTrack(page, name).getByRole("button", { name: `${kind} ${name}`, exact: true });
+}
+
+/** A sound row's level slider, in dB. */
+export function soundLevel(page: Page, name: Exclude<SoundName, "Cut sound">): Locator {
+  return soundTrack(page, name).getByRole("slider", { name: `${name} level`, exact: true });
+}
+
+/** A sound row's take count chip, which opens that sound's tab. */
+export function soundTakes(page: Page, name: Exclude<SoundName, "Cut sound">): Locator {
+  return soundTrack(page, name).locator(".tcount");
+}
+
+/** The lane of the Cut sound row, where the picture's own waveform is drawn. */
+export const CUT_SOUND_LANE = '[role="group"][aria-label="Cut sound track"] .tlane';
+/** The picture's own waveform, on the Cut sound row. */
+export const CUT_SOUND_WAVE = `${CUT_SOUND_LANE} canvas.pwave`;
+
+/** The loudness readout, in the transport while a take is in use. */
+export function loudness(page: Page): Locator {
+  return transport(page).getByRole("group", { name: "Loudness" });
+}
+
+/** Beside the note box until the notes panel's target line (Task 5): sends what is typed as a note on the whole mix. */
+export function mixNoteButton(page: Page): Locator {
+  return page.getByRole("button", { name: "Note on the mix", exact: true });
 }
 
 export { expect };

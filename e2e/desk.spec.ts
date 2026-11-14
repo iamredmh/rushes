@@ -1,9 +1,10 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Page } from "@playwright/test";
 import {
   expect, test, videoReady, cutButton, currentFilm, filmButton, openWorkspace, pickFilm, reviewTab, workspaceTab, type FormatSize, type Rushes,
   monitor, pictureTrack, ruler, rulerMarkers, shotBlocks, TOOL_TIPS, toolButton, toolStrip, transport,
+  hasFfmpeg, loudness, mixNoteButton, soundBlock, soundButton, soundLevel, soundTakes, soundTrack,
 } from "./fixture.js";
 
 // §27, 5.1 to 5.3 and 5.9: the desk's frame. A top bar and a status bar that never move, the Film and Cut menus,
@@ -467,4 +468,175 @@ test("a 9:16 cut sits whole in the monitor, centred on black", async ({ page, ru
   expect(f.y).toBeGreaterThanOrEqual(box.y - 1);
   expect(f.y + f.height).toBeLessThanOrEqual(box.y + box.height + 1);
   expect(Math.abs(f.x + f.width / 2 - (box.x + box.width / 2))).toBeLessThanOrEqual(2);
+});
+
+// ---- §27, 5.6: sound on the timeline. The takes in use play in step with the picture; the Mix tab is gone. ----
+
+type Heard = { id: string; lane: string; path: string; offset: number };
+type Snapshot = { playing: boolean; time: number; lanes: Record<string, number>; media: string[] };
+// The test hook (web/src/ui/AudioStage.tsx, `?test=1`), typed loosely: the e2e build never imports web code.
+type AudioHook = { engine: { time: number; playing: boolean } | null; inspect(): Snapshot | null; heard(): Heard[] };
+const audio = (page: Page) => page.evaluate(() => (window as unknown as { __rushesAudio: AudioHook }).__rushesAudio.inspect());
+const heardNow = (page: Page) => page.evaluate(() => (window as unknown as { __rushesAudio: AudioHook }).__rushesAudio.heard().map((c) => c.id));
+const videoMuted = (page: Page) => page.locator("video").evaluate((v: HTMLVideoElement) => v.muted);
+
+/** A cut and a read, a bed and a pass, each in use (4 s tones). */
+async function threeInUse(rushes: Rushes) {
+  await rushes.addCut();
+  const read = await rushes.addVariant("voice", "Gerald", { round: "Round 1 · Voices", seconds: 4, freq: 220 });
+  const bed = await rushes.addVariant("music", "Warm keys", { seconds: 4, freq: 330 });
+  const pass = await rushes.addVariant("sfx", "Pass A", { seconds: 4, freq: 880 });
+  await rushes.api("PUT", "/api/picks", { video: "hero", lanes: { [read.lane.id]: read.variant.id, [bed.lane.id]: bed.variant.id, [pass.lane.id]: pass.variant.id } });
+  return { read, bed, pass };
+}
+
+/** Opens the Timeline tab with the test hook, once the engine holds `files` files. */
+async function openTimeline(page: Page, rushes: Rushes, files: number) {
+  await page.goto(rushes.testUrl());
+  await videoReady(page);
+  await expect.poll(async () => (await audio(page))?.media.length ?? 0, { timeout: 10_000 }).toBe(files);
+}
+
+test("with a read, a bed and a pass in use, the timeline shows a row each, named for its take, and plays all three with the picture", async ({ page, rushes }) => {
+  await threeInUse(rushes);
+  await openTimeline(page, rushes, 3);
+  await expect(soundBlock(page, "Voice")).toHaveText("Gerald");
+  await expect(soundBlock(page, "Music")).toHaveText("Warm keys");
+  await expect(soundBlock(page, "Effects")).toHaveText("Pass A");
+  for (const name of ["Voice", "Music", "Effects"] as const) {
+    await expect(soundTrack(page, name).locator(".thead")).toContainText(name);
+    await expect(soundTakes(page, name)).toHaveText("1");
+    await expect(soundTrack(page, name).locator("canvas.wave")).toHaveCount(1);
+  }
+  // Under the Picture track, in this order.
+  const rows = await page.locator(".tlpanel .trow").evaluateAll((els) => els.map((e) => e.getAttribute("aria-label")));
+  expect(rows).toEqual([null, "Picture track", "Voice track", "Music track", "Effects track"]);
+  expect(await heardNow(page)).toEqual(["round-1-voices/gerald", "music/warm-keys", "sfx/pass-a"]);
+  // The video is the clock: Play starts it, and the engine follows.
+  await transport(page).getByRole("button", { name: "Play · Space" }).click();
+  await expect.poll(async () => (await audio(page))!.playing).toBe(true);
+  await expect.poll(async () => (await audio(page))!.time).toBeGreaterThan(0.3);
+  await transport(page).getByRole("button", { name: "Pause · Space" }).click();
+  await expect.poll(async () => (await audio(page))!.playing).toBe(false);
+  // A seek while paused moves the engine to the picture.
+  await page.locator("video").evaluate((v: HTMLVideoElement) => { v.currentTime = 1.5; });
+  await expect.poll(async () => Math.abs((await audio(page))!.time - 1.5)).toBeLessThan(0.06);
+  // The take count opens that sound's tab.
+  await soundTakes(page, "Music").click();
+  await expect(reviewTab(page, "Music")).toHaveAttribute("aria-selected", "true");
+});
+
+test("Mute Music silences only music, solo wins, and the level slider saves levels.music", async ({ page, rushes }) => {
+  await threeInUse(rushes);
+  await openTimeline(page, rushes, 3);
+  await expect.poll(async () => (await audio(page))!.lanes).toEqual({ vo: 1, music: 1, sfx: 1 });
+  await soundButton(page, "Music", "Mute").click();
+  await expect(soundButton(page, "Music", "Mute")).toHaveAttribute("aria-pressed", "true");
+  await expect.poll(async () => (await audio(page))!.lanes).toEqual({ vo: 1, music: 0, sfx: 1 });
+  expect(await heardNow(page)).toEqual(["round-1-voices/gerald", "sfx/pass-a"]);
+  await soundButton(page, "Voice", "Solo").click();
+  await expect.poll(async () => (await audio(page))!.lanes).toEqual({ vo: 1, music: 0, sfx: 0 });
+  await soundButton(page, "Voice", "Solo").click();
+  const saved = page.waitForResponse((r) => r.url().endsWith("/api/picks") && r.request().method() === "PUT" && r.request().postDataJSON()?.levels?.music === -6);
+  await soundLevel(page, "Music").fill("-6");
+  await expect(soundTrack(page, "Music").locator(".db")).toHaveText("−6.0 dB");
+  expect((await saved).ok()).toBe(true);
+  expect((await rushes.api("GET", "/api/picks?video=hero")).levels).toEqual({ music: -6 });
+});
+
+test("the loudness readout sits in the transport while a take is in use, and not otherwise", async ({ page, rushes }) => {
+  await threeInUse(rushes);
+  await page.route("**/api/mix/loudness", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ available: true, integrated: -16.2, truePeak: -1.5, musicUnderVo: -18, silent: false }) }));
+  await openTimeline(page, rushes, 3);
+  await expect(loudness(page).locator("[data-value]")).toHaveText(["−16.2", "−1.5", "−18 dB"]);
+  await rushes.api("PUT", "/api/picks", { video: "hero", lanes: { "round-1-voices": null, music: null, sfx: null } });
+  await expect(loudness(page)).toHaveCount(0);
+});
+
+test("unpicking the bed leaves Music empty and the rest playing; a sound with no takes says Not started", async ({ page, rushes }) => {
+  await rushes.addCut();
+  const read = await rushes.addVariant("voice", "Gerald", { round: "Round 1 · Voices", seconds: 4, freq: 220 });
+  const bed = await rushes.addVariant("music", "Warm keys", { seconds: 4, freq: 330 });
+  await rushes.api("PUT", "/api/picks", { video: "hero", lanes: { [read.lane.id]: read.variant.id, [bed.lane.id]: bed.variant.id } });
+  await openTimeline(page, rushes, 2);
+  await expect(soundBlock(page, "Effects")).toHaveText("Not started");
+  await expect(soundBlock(page, "Effects")).toHaveClass(/empty/);
+  await rushes.api("PUT", "/api/picks", { video: "hero", lanes: { [bed.lane.id]: null } });
+  // The bed is still there, waiting to be chosen again.
+  await expect(soundBlock(page, "Music")).toHaveText("Nothing chosen yet");
+  await expect.poll(() => heardNow(page)).toEqual(["round-1-voices/gerald"]);
+  await transport(page).getByRole("button", { name: "Play · Space" }).click();
+  await expect.poll(async () => (await audio(page))!.time).toBeGreaterThan(0.3);
+});
+
+test("a take whose file is missing says File not found, and the others still play", async ({ page, rushes }) => {
+  const { pass } = await threeInUse(rushes);
+  const file = (await rushes.api("GET", "/api/state")).project.lanes.find((l: { id: string }) => l.id === pass.lane.id).variants[0].file;
+  await rm(join(rushes.root, file));
+  await openTimeline(page, rushes, 2);
+  await expect(soundBlock(page, "Effects")).toHaveText("File not found");
+  expect(await heardNow(page)).toEqual(["round-1-voices/gerald", "music/warm-keys"]);
+  await transport(page).getByRole("button", { name: "Play · Space" }).click();
+  await expect.poll(async () => (await audio(page))!.time).toBeGreaterThan(0.3);
+});
+
+test("a take made for an older cut has a dashed amber outline", async ({ page, rushes }) => {
+  await rushes.addCut();
+  const bed = await rushes.addVariant("music", "Warm keys", { seconds: 4, freq: 330 });
+  await rushes.api("PUT", "/api/picks", { video: "hero", lanes: { [bed.lane.id]: bed.variant.id } });
+  await openTimeline(page, rushes, 1);
+  await expect(soundBlock(page, "Music")).not.toHaveClass(/stale/);
+  await rushes.addCut();
+  await expect(cutButton(page)).toHaveAttribute("data-version", "v2");
+  await expect(soundBlock(page, "Music")).toHaveClass(/stale/);
+  expect(await soundBlock(page, "Music").evaluate((el) => getComputedStyle(el).borderTopStyle)).toBe("dashed");
+});
+
+test("a cut with no sound of its own and no takes has no sound to follow and no Cut sound row", async ({ page, rushes }) => {
+  await rushes.addCut();
+  await openTimeline(page, rushes, 0);
+  for (const name of ["Voice", "Music", "Effects"] as const) await expect(soundBlock(page, name)).toHaveText("Not started");
+  await expect(soundTrack(page, "Cut sound")).toHaveCount(0);
+  expect(await videoMuted(page)).toBe(false);
+});
+
+test.describe("the cut's own sound", () => {
+  test.skip(!hasFfmpeg, "needs ffmpeg and ffprobe");
+
+  test("a cut with its own sound and no takes plays unmuted and shows a Cut sound row that is not muted", async ({ page, rushes }) => {
+    await rushes.addProResCut({ codec: "h264", seconds: 3, audio: true });
+    await openTimeline(page, rushes, 0);
+    await expect(soundTrack(page, "Cut sound")).toBeVisible();
+    await expect(soundButton(page, "Cut sound", "Mute")).toHaveAttribute("aria-pressed", "false");
+    expect(await videoMuted(page)).toBe(false);
+  });
+
+  test("with a take in use the video is muted, and the Cut sound row's own M lets you hear it", async ({ page, rushes }) => {
+    await rushes.addProResCut({ codec: "h264", seconds: 3, audio: true });
+    const bed = await rushes.addVariant("music", "Warm keys", { seconds: 3, freq: 330 });
+    await rushes.api("PUT", "/api/picks", { video: "hero", lanes: { [bed.lane.id]: bed.variant.id } });
+    await openTimeline(page, rushes, 1);
+    await expect(soundTrack(page, "Cut sound")).toBeVisible();
+    await expect(soundButton(page, "Cut sound", "Mute")).toHaveAttribute("aria-pressed", "true");
+    await expect.poll(() => videoMuted(page)).toBe(true);
+    await soundButton(page, "Cut sound", "Mute").click();
+    await expect(soundButton(page, "Cut sound", "Mute")).toHaveAttribute("aria-pressed", "false");
+    await expect.poll(() => videoMuted(page)).toBe(false);
+  });
+});
+
+test("notes on the mix are listed on the Timeline tab, and Note on the mix saves one on the whole mix", async ({ page, rushes }) => {
+  await threeInUse(rushes);
+  await rushes.api("POST", "/api/notes", { stage: "mix", video: "hero", on: null, scope: "point", t: 1, text: "Music a touch loud." });
+  await openTimeline(page, rushes, 3);
+  await expect(page.locator(".note .nx")).toHaveText(["Music a touch loud."]);
+  await expect(page.locator(".note .on")).toHaveText(["Whole mix"]);
+  await page.getByRole("textbox", { name: "New note" }).fill("Voice sits under the bed.");
+  await mixNoteButton(page).click();
+  await expect(page.locator(".note")).toHaveCount(2);
+  const { notes } = await rushes.api("GET", "/api/notes?stage=mix");
+  expect(notes.find((n: { text: string }) => n.text === "Voice sits under the bed.")).toMatchObject({ stage: "mix", on: null, video: "hero" });
+  // The mix tab is gone: Review has the timeline and a tab per sound.
+  await expect(page.getByRole("tablist", { name: "Review" }).getByRole("tab")).toHaveText([/^Timeline/, /^Voice/, /^Music/, /^Effects/]);
 });

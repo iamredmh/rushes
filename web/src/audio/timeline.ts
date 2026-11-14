@@ -191,6 +191,18 @@ export function streamStep(
   return Math.abs(el.time - expected) > tolerance ? "seek" : "none";
 }
 
+/**
+ * §27, 5.6: what the audio engine does to keep up with the picture, which is the clock on the Timeline tab. A video
+ * that plays starts a stopped engine and a paused one stops it (both at the video's time); otherwise the engine is
+ * re-seated only once it is further than STREAM_DRIFT_SECONDS from the video, playing or not.
+ */
+export function followerAction(videoTime: number, engineTime: number, videoPlaying: boolean, enginePlaying: boolean): "play" | "pause" | "seek" | null {
+  if (videoPlaying && !enginePlaying) return "play";
+  if (!videoPlaying && enginePlaying) return "pause";
+  // A hair of tolerance, as with needsVideoSync, so float error at exactly the allowance doesn't count.
+  return Math.abs(videoTime - engineTime) > STREAM_DRIFT_SECONDS + 1e-9 ? "seek" : null;
+}
+
 /** Clips with an unknown length take their file's decoded length (0 while it isn't known), by `mediaKey`. */
 export function resolveDurations(clips: Clip[], durations: Record<string, number | undefined>): Clip[] {
   return clips.map((c) => (c.duration > 0 ? c : { ...c, duration: durations[mediaKey(c)] ?? 0 }));

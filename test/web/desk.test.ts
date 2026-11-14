@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deskPlace, nextHint, type NextInput, rulerMarks, takeCount, takeGroups, viewForKey, viewForTab } from "../../web/src/desk.js";
+import { deskPlace, nextHint, type NextInput, rulerMarks, takeCount, takeGroups, deskView, viewForKey, viewForTab } from "../../web/src/desk.js";
 import type { Lane, Note, Variant } from "../../web/src/types.js";
 
 describe("deskPlace", () => {
@@ -37,6 +37,13 @@ describe("viewForKey", () => {
   });
   it("ignores every other key", () => {
     for (const k of ["0", "9", "a", "", "12"]) expect(viewForKey(k, "script")).toBeNull();
+  });
+});
+
+describe("deskView", () => {
+  it("opens the mix as the Timeline tab, which plays it now, and leaves every other view as it is", () => {
+    expect(deskView("mix")).toBe("picture");
+    for (const v of ["picture", "voice", "music", "sfx", "visuals", "assets", "brief", "script", "storyboard"] as const) expect(deskView(v)).toBe(v);
   });
 });
 
