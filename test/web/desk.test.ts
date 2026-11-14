@@ -195,7 +195,7 @@ describe("defaultTake", () => {
 });
 
 describe("nextHint", () => {
-  const settled = { started: true, fresh: 0, inUse: true, stale: false };
+  const settled: { started: boolean; fresh: number; inUse: boolean; stale: boolean; madeFor?: string | null } = { started: true, fresh: 0, inUse: true, stale: false };
   const base: NextInput = { plan: { exists: true, approved: true }, hasCut: true, unsent: 0, openNotes: 0, locked: true, sound: { voice: settled, music: settled, sfx: settled } };
   const sound = (stage: "voice" | "music" | "sfx", change: Partial<typeof settled>) => ({ ...base, sound: { ...base.sound, [stage]: { ...settled, ...change } } });
 
@@ -234,8 +234,8 @@ describe("nextHint", () => {
     expect(nextHint({ ...base, openNotes: 1 })).toEqual({ text: "1 note open", go: "picture" });
     expect(nextHint({ ...base, openNotes: 4, locked: false })).toEqual({ text: "4 notes open", go: "picture" });
   });
-  it("says to lock picture when no note is open", () => {
-    expect(nextHint({ ...base, locked: false })).toEqual({ text: "lock picture", go: "picture" });
+  it("says to lock picture when no note is open, and opens the Cut menu, where the lock is (m6)", () => {
+    expect(nextHint({ ...base, locked: false })).toEqual({ text: "lock picture", go: "picture", menu: "cut" });
   });
   it("takes the sounds one at a time: voice, then music, then effects", () => {
     expect(nextHint(sound("voice", { started: false, inUse: false }))).toEqual({ text: "ask for a voiceover", go: null });
@@ -244,8 +244,10 @@ describe("nextHint", () => {
     expect(nextHint(sound("voice", { fresh: 2 }))).toEqual({ text: "choose a read", go: "voice" });
     expect(nextHint(sound("music", { fresh: 3 }))).toEqual({ text: "choose a bed", go: "music" });
     expect(nextHint(sound("sfx", { fresh: 1 }))).toEqual({ text: "choose an effects pass", go: "sfx" });
-    expect(nextHint(sound("voice", { stale: true }))).toEqual({ text: "the read in use was made for an older cut", go: "voice" });
-    expect(nextHint(sound("music", { stale: true }))).toEqual({ text: "the bed in use was made for an older cut", go: "music" });
+    // m5 (spec 5.9's table): the cut it was made for, by name.
+    expect(nextHint(sound("voice", { stale: true, madeFor: "v1" }))).toEqual({ text: "the read in use was made for v1", go: "voice" });
+    expect(nextHint(sound("music", { stale: true, madeFor: "v2" }))).toEqual({ text: "the bed in use was made for v2", go: "music" });
+    expect(nextHint(sound("sfx", { stale: true, madeFor: "v1" }))).toEqual({ text: "the effects pass in use was made for v1", go: "sfx" });
     expect(nextHint(sound("sfx", { stale: true }))).toEqual({ text: "the effects pass in use was made for an older cut", go: "sfx" });
   });
   it("settles voice before it asks for music", () => {
@@ -253,7 +255,7 @@ describe("nextHint", () => {
     expect(nextHint(i)).toEqual({ text: "choose a read", go: "voice" });
   });
   it("leaves the sounds alone until picture is locked", () => {
-    expect(nextHint({ ...sound("voice", { fresh: 2 }), locked: false })).toEqual({ text: "lock picture", go: "picture" });
+    expect(nextHint({ ...sound("voice", { fresh: 2 }), locked: false })).toEqual({ text: "lock picture", go: "picture", menu: "cut" });
   });
 });
 

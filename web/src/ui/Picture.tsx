@@ -45,6 +45,8 @@ export interface PictureProps {
   /** Whether an In/Out, box or half-typed note is waiting to be submitted. A grab alone
    *  doesn't count: the file is already saved, so there's nothing left to lose. */
   onPendingChange?(pending: boolean): void;
+  /** m2: whether an In, a range or a box is marked, which a new cut would drop (a half-typed note it keeps). */
+  onMarksPendingChange?(pending: boolean): void;
   /** §27, 5.5 (final review I3): the film's one playhead across the Review tabs. The cut starts there once its metadata
    *  has loaded, and this tab's time is left there when it goes. */
   clock?: ReviewClock;
@@ -99,7 +101,7 @@ const typing = (el: EventTarget | null) => el instanceof HTMLElement && (el.isCo
  * track, with notes down the right: frame stepping, In/Out ranges, a box on the frame and frame grabs.
  */
 export function Picture({
-  video, version, fps, notes, toast, onChanged, onPendingChange, clock, mixView, grab, onGrabChange, playerRef,
+  video, version, fps, notes, toast, onChanged, onPendingChange, onMarksPendingChange, clock, mixView, grab, onGrabChange, playerRef,
   ffmpeg = false, proxyJob, noteProxyJob, source = "proxy", onSourceChange,
   formats = [], format = null, formatMissing = false, onPrimarySize, onBoxPendingChange, onFormatChange, readOnly = false, formatSwitch,
   state, assets, onOpenTab,
@@ -194,6 +196,11 @@ export function Picture({
     onPendingChange?.(pending);
     return () => onPendingChange?.(false);
   }, [range.in, box, noteHasText, readOnly]);
+  // m2: the marks alone, for the Cut menu; a layout effect, so a click straight after I finds the hold in place.
+  useLayoutEffect(() => {
+    onMarksPendingChange?.(!readOnly && (range.in !== null || box !== null));
+    return () => onMarksPendingChange?.(false);
+  }, [range.in, box, readOnly]);
   // R7: tell the caller while a drawn box waits, so a format switch can wait for it.
   useEffect(() => {
     // As in the mockup, drawing a box puts the note back on This format, and it stays there.
@@ -552,6 +559,8 @@ export function Picture({
       });
       clearRange();
       setNoteMarks([]);
+      // m4: a note on the whole mix is not a setting: the next note is on this frame again (a take picked stays picked).
+      if (target.stage === "mix") setAim("frame");
       // A box, a grabbed frame and the format scope belong to a picture note: this note used the box up, so none is left
       // waiting to land on the next picture note by surprise.
       setNoteScope("this");
