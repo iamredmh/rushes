@@ -577,6 +577,39 @@ test("the shot strip names each shot, follows the playhead, and notes record the
   await expect(page.locator(".track .tick")).toHaveCount(2);
 });
 
+test("appearance switches to light and is remembered", async ({ page, rushes }) => {
+  await rushes.addCut();
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  const ground = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  const dark = await ground();
+  // The box directly behind the picture is the same near-black in both modes.
+  await expect(page.locator(".frame").first()).toHaveCSS("background-color", "rgb(13, 13, 13)");
+  await page.getByRole("button", { name: "Film actions" }).click();
+  await page.getByRole("menuitem", { name: "Appearance: Dark" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await expect(page.getByRole("menuitem", { name: "Appearance: Light" })).toBeVisible(); // the menu stays open
+  expect(await ground()).not.toBe(dark);
+  await expect(page.locator(".frame").first()).toHaveCSS("background-color", "rgb(13, 13, 13)");
+  await page.reload();
+  await videoReady(page);
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+});
+
+test("a browser that refuses storage still opens, in dark", async ({ page, rushes }) => {
+  await rushes.addCut();
+  await page.addInitScript(() => {
+    Object.defineProperty(window, "localStorage", { get() { throw new Error("blocked"); } });
+  });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await page.getByRole("button", { name: "Film actions" }).click();
+  await page.getByRole("menuitem", { name: /Appearance/ }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light"); // for this page, though it cannot be kept
+});
+
 test("playing into the next shot never scrolls the page", async ({ page, rushes }) => {
   // A short window: the player fills it, so the strip of shots sits below the fold.
   await page.setViewportSize({ width: 1440, height: 700 });

@@ -30,6 +30,29 @@ describe("styles.css", () => {
     expect(css).toMatch(/--mono:\s*"Geist Mono",/);
     expect(css).not.toMatch(/Figtree|JetBrains/);
   });
+  it("keeps every colour in the two token blocks", () => {
+    for (const file of ["styles.css", "changes.css", "cues.css"]) {
+      const text = readFileSync(new URL(`../../web/src/${file}`, import.meta.url), "utf8")
+        .replace(/:root\s*\{[^}]*\}/g, "")
+        .replace(/:root\[data-theme="light"\]\s*\{[^}]*\}/g, "")
+        .replace(/\/\*[\s\S]*?\*\//g, "");
+      expect(text.match(/#[0-9a-fA-F]{3,8}\b|rgba?\(/g) ?? [], file).toEqual([]);
+    }
+  });
+  it("defines every token in both modes", () => {
+    const names = (block: string) =>
+      [...block.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1]).filter((n) => !/^--(sans|mono|r|r-lg|body-pad)$/.test(n)).sort();
+    const dark = css.match(/:root\s*\{([^}]*)\}/)![1];
+    const light = css.match(/:root\[data-theme="light"\]\s*\{([^}]*)\}/)?.[1] ?? "";
+    expect(names(light)).toEqual(names(dark));
+    expect(names(dark)).toContain("--black");
+  });
+  it("the lanes take their colours from the tokens, so they follow the mode", () => {
+    for (const file of ["Mix.tsx", "VariantTab.tsx", "Voice.tsx"]) {
+      const text = readFileSync(new URL(`../../web/src/ui/${file}`, import.meta.url), "utf8");
+      expect(text.match(/"#[0-9a-fA-F]{6}"/g) ?? [], file).toEqual([]);
+    }
+  });
   it("bundles its fonts and fetches none", () => {
     const main = readFileSync(new URL("../../web/src/main.tsx", import.meta.url), "utf8");
     expect(main).toMatch(/@fontsource\/geist\/400\.css/);
@@ -58,6 +81,11 @@ describe("styles.css", () => {
     expect(css).toMatch(/\.fmts \[aria-checked="true"\] \.warn \{[^}]*color: var\(--on-accent\)/);
     expect(css).toMatch(/\.fmts \[role="radio"\]\[aria-checked="true"\] \{[^}]*background: var\(--accent\)/);
     expect(ratio(token("on-accent"), token("accent"))).toBeGreaterThanOrEqual(4.5);
+    // §27: the light mode's pair holds the same line.
+    const light = css.match(/:root\[data-theme="light"\]\s*\{([^}]*)\}/)![1];
+    const lightToken = (name: string) => light.match(new RegExp(`--${name}: (#[0-9a-f]{6});`))![1];
+    expect(ratio(lightToken("on-accent"), lightToken("accent"))).toBeGreaterThanOrEqual(4.5);
+    expect(ratio(lightToken("todo"), lightToken("bg"))).toBeGreaterThanOrEqual(3);
     // The plain mark keeps the to-do colour on the unselected chip, which sits on the dark ground.
     expect(ratio(token("todo"), token("bg"))).toBeGreaterThanOrEqual(4.5);
   });
