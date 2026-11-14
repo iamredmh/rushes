@@ -262,7 +262,12 @@ test("at 1600 px a 24-character film name is shown whole beside the project and 
   await videoReady(page);
   await pickFilm(page, name);
   await videoReady(page);
-  const whole = (el: HTMLElement) => el.scrollWidth <= el.clientWidth + 1;
+  // Whole to the subpixel: an ellipsis shows as soon as a name loses even a fraction of a pixel.
+  const whole = (el: HTMLElement) => {
+    const r = document.createRange();
+    r.selectNodeContents(el);
+    return r.getBoundingClientRect().width <= el.getBoundingClientRect().width + 0.01;
+  };
   expect(await currentFilm(page).evaluate(whole)).toBe(true);
   // The project's name is not squeezed to make room either, and nothing overlaps.
   expect(await topBar(page).locator(".proj .pname").evaluate(whole)).toBe(true);

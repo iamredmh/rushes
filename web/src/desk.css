@@ -27,8 +27,10 @@
 .top .fshelved { flex: none; font-size: 12.5px; color: var(--todo); }
 .filmsel { flex: 0 1 auto; min-width: 72px; position: relative; display: inline-flex; }
 .filmsel.plain[data-tip]::after { left: 0; transform: none; }
-/* The cut's label gives way first (its id stays), so the project's and the film's names show whole while there is room. */
-.top .vwrap { flex: 0 1000 auto; min-width: 96px; max-width: 340px; }
+/* The cut's label gives way first (its id stays): the project's and the film's names keep their width until even the Cut
+   menu at its narrowest leaves no room for them whole, and only then (.tight, TopBar's useTight) do they shrink too. */
+.top .vwrap { flex: 0 1 auto; min-width: 96px; max-width: 340px; }
+.tleft:not(.tight) > .proj, .tleft:not(.tight) > .filmsel { flex-shrink: 0; }
 .top .vbtn .vid { font-family: var(--mono); font-size: 12.5px; color: var(--accent-2); flex: none; }
 .top .vbtn .vlbl { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-2); }
 /* A cut newer than the one on screen. */
