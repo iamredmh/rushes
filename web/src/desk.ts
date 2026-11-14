@@ -243,6 +243,10 @@ export interface NoteTarget {
   tOut: number | null;
   /** The note box's target line: "00:00:11:00 · 03 The scan", "Voice · George · retimed", "The whole mix". */
   label: string;
+  /** The label's two parts (final review I6): its time ("00:00:11:00", a range "00:00:01:00–00:00:02:00"), beside the
+   *  target menu, or null; and what the note is on, by name ("03 The scan", "Voice · George · retimed"), on its own line. */
+  when: string | null;
+  name: string;
 }
 
 const two = (n: number) => String(n).padStart(2, "0");
@@ -267,24 +271,22 @@ export function noteTarget(s: Selection, shot: { n: number; name: string } | nul
     t: t ?? null,
     tOut: t == null ? null : (tOut ?? null),
   });
-  const named = (shotHere: { n: number; name: string } | null) => (shotHere ? ` · ${two(shotHere.n)} ${shotHere.name}` : "");
+  const named = (shotHere: { n: number; name: string } | null) => (shotHere ? `${two(shotHere.n)} ${shotHere.name}` : "");
+  /** The label from its time and its name, " · " between them when it has both. */
+  const parts = (at: string | null, name: string) => ({ label: at && name ? `${at} · ${name}` : (at ?? name), when: at, name });
   switch (s.kind) {
     case "frame":
-      return { stage: "picture", on: null, scope: "point", t: s.t, tOut: null, label: `${tc(s.t)}${named(shot)}` };
+      return { stage: "picture", on: null, scope: "point", t: s.t, tOut: null, ...parts(tc(s.t), named(shot)) };
     case "range":
-      return { stage: "picture", on: null, scope: "range", t: s.t, tOut: s.tOut, label: `${when(s.t, s.tOut)}${named(shot)}` };
+      return { stage: "picture", on: null, scope: "range", t: s.t, tOut: s.tOut, ...parts(when(s.t, s.tOut), named(shot)) };
     case "shot":
-      return { stage: "picture", on: null, scope: "point", t: s.t, tOut: null, label: `${tc(s.t)}${named(s)}` };
-    case "take": {
-      const at = when(s.t, s.tOut);
-      return { stage: s.stage, on: s.on, ...timed(s.t, s.tOut), label: `${at ? `${at} · ` : ""}${SOUND_NAMES[s.stage]} · ${s.name}` };
-    }
-    case "mix": {
-      const at = when(s.t, s.tOut);
-      return { stage: "mix", on: null, ...timed(s.t, s.tOut), label: `${at ? `${at} · ` : ""}The whole mix` };
-    }
+      return { stage: "picture", on: null, scope: "point", t: s.t, tOut: null, ...parts(tc(s.t), named(s)) };
+    case "take":
+      return { stage: s.stage, on: s.on, ...timed(s.t, s.tOut), ...parts(when(s.t, s.tOut), `${SOUND_NAMES[s.stage]} · ${s.name}`) };
+    case "mix":
+      return { stage: "mix", on: null, ...timed(s.t, s.tOut), ...parts(when(s.t, s.tOut), "The whole mix") };
     case "line":
-      return { stage: "script", on: s.id, scope: "whole", t: null, tOut: null, label: s.label };
+      return { stage: "script", on: s.id, scope: "whole", t: null, tOut: null, ...parts(null, s.label) };
   }
 }
 

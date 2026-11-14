@@ -812,7 +812,8 @@ export function noteTargetLine(page: Page): Locator {
   return notesPanel(page).getByRole("group", { name: "Note target" });
 }
 
-/** The target line's words alone ("00:00:01:00 · Music · Pulse"), without its menu's options. */
+/** The target line's words alone, read as one label ("00:00:01:00 · Music · Pulse"), without its menu's options: the time
+ *  on the first line and the name on the second (noteTargetWhen, noteTargetName). */
 export function noteTargetLabel(page: Page): Locator {
   return noteTargetLine(page).locator("[data-target]");
 }
@@ -821,6 +822,16 @@ export function noteTargetLabel(page: Page): Locator {
  * The target line's menu: with nothing selected on the Timeline tab, "This frame" or "The whole mix"; on a sound's tab,
  * "This moment" (or "This cue") or the whole take ("The whole bed").
  */
+/** The target line's second line: what the note is on, by name (the shot, the take with its sound, the script line). */
+export function noteTargetName(page: Page): Locator {
+  return noteTargetLine(page).locator(".ntname");
+}
+
+/** The time on the target line's first line, beside the menu ("00:00:01:00"), when the target has one. */
+export function noteTargetWhen(page: Page): Locator {
+  return noteTargetLine(page).locator(".ntwhen");
+}
+
 export function noteTargetMenu(page: Page): Locator {
   return noteTargetLine(page).getByRole("combobox", { name: "Aim the note at" });
 }

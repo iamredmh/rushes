@@ -380,7 +380,7 @@ export function AudioStage(props: AudioStageProps) {
   const targetAt = (at: number) => {
     if (!targetItem) {
       const when = marked ? noteTime(marked.t, marked.tOut) : timecode(snap(at, fps), fps);
-      return { stage, on: null, scope: (marked ? "range" : "point") as Scope, t: marked?.t ?? snap(at, fps), tOut: marked?.tOut ?? null, label: `${when} · ${title}` };
+      return { stage, on: null, scope: (marked ? "range" : "point") as Scope, t: marked?.t ?? snap(at, fps), tOut: marked?.tOut ?? null, label: `${when} · ${title}`, when, name: title };
     }
     // A cue is a point at its own time; chosen whole, the note is on the pass, not the cue.
     const point = marked !== null || pointAt(at);
@@ -742,6 +742,8 @@ export function AudioStage(props: AudioStageProps) {
               onSeek={(to) => engine.seek(to)}
               target={{
                 label: target.label,
+                when: target.when,
+                name: target.name,
                 menu: targetItem && !marked ? { value: target.scope === "whole" ? "whole" : "point", options: menuLabels, onChange: (v) => setWhole(v === "whole") } : undefined,
                 onClear: selectedItem || whole !== null ? clearAim : undefined,
               }}

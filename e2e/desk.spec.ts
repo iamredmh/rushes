@@ -5,7 +5,7 @@ import {
   expect, test, videoReady, cutButton, pickVersion, currentFilm, filmButton, openWorkspace, pickFilm, reviewTab, workspaceTab, type FormatSize, type Rushes,
   ELEVEN_FILMS, ELEVEN_FILMS_PROJECT, monitor, pictureTrack, ruler, rulerMarkers, shotBlocks, TOOL_TIPS, toolButton, toolStrip, transport,
   hasFfmpeg, loudness, playButton, soundBlock, soundButton, soundLabel, soundLevel, soundTakes, soundTrack, expectReadableInRow, timelinePanel,
-  activity, openActivity, notesPanel, noteTargetLine, noteTargetLabel, noteTargetMenu, panelTab, panelToggle, rangeChip, sendButton, sentDialog, statusSend,
+  activity, openActivity, notesPanel, noteTargetLine, noteTargetLabel, noteTargetMenu, noteTargetName, noteTargetWhen, panelTab, panelToggle, rangeChip, sendButton, sentDialog, statusSend,
   openReviewTab, takesList, takeHeadings, takeRow, takeRows, takeCircle, takeName, takeTag, takeBlock, putAwayButton, pressRowButton, foldToggle,
 } from "./fixture.js";
 
@@ -1610,5 +1610,52 @@ test.describe("a tab per sound", () => {
     const day = (iso: string) => page.evaluate((d) => new Date(d).toLocaleDateString("en-GB", { day: "numeric", month: "short" }), iso);
     await expect(takeHeadings(page)).toHaveText([`New · ${await day("2026-11-10T12:00:00.000Z")}`, `New · ${await day("2026-11-09T12:00:00.000Z")}`]);
     await expect(takeRows(page).locator(".knm")).toHaveText(["Tuesday bed", "Monday bed"]);
+  });
+});
+
+// ---- final review I6: the target line names its target, on a line of its own ----
+test.describe("the note's target line", () => {
+  test("at the panel's default width it names a take with its sound, and a shot, in full on their own line", async ({ page, rushes }) => {
+    await rushes.addCut();
+    await rushes.api("PUT", "/api/videos/hero/shots", { shots: [{ name: "Opening wide", start: 0 }, { name: "The laptop lid", start: 2 }] });
+    await rushes.addVariant("music", "B · Warm keys", { seconds: 4, freq: 330 });
+    await page.goto(rushes.testUrl());
+    await videoReady(page);
+    expect(Math.round((await notesPanel(page).boundingBox())!.width)).toBe(300);
+    // This frame: the menu and the timecode on the first line, the shot on the second.
+    await expect(noteTargetWhen(page)).toHaveText("00:00:00:00");
+    await expect(noteTargetName(page)).toHaveText("01 Opening wide");
+    await expectReadableInRow(noteTargetName(page), noteTargetLine(page));
+    expect((await noteTargetName(page).boundingBox())!.y).toBeGreaterThan((await noteTargetMenu(page).boundingBox())!.y + 10);
+    // A take on its tab, at a moment: "This moment" and the time, then the take with its sound.
+    await openReviewTab(page, "Music");
+    await takeName(page, "B · Warm keys").click();
+    await transport(page).getByRole("button", { name: "Forward one frame · →" }).click();
+    await expect(noteTargetMenu(page)).toHaveValue("point");
+    await expect(noteTargetWhen(page)).toHaveText("00:00:00:01");
+    await expect(noteTargetName(page)).toHaveText("Music · B · Warm keys");
+    await expectReadableInRow(noteTargetName(page), noteTargetLine(page));
+  });
+
+  test("a long name wraps to a second line, then ends in an ellipsis with the whole name in its tooltip", async ({ page, rushes }) => {
+    // A read is named with its round: two long names make one name of three lines and more.
+    const round = "Round 4 · The director's second pass, slower and warmer";
+    const read = "Gerald, retimed to the new cut with every breath kept";
+    await rushes.addCut();
+    await rushes.addVariant("voice", read, { seconds: 4, freq: 220, round });
+    await page.goto(rushes.testUrl());
+    await videoReady(page);
+    await openReviewTab(page, "Voice");
+    await takeName(page, read).click();
+    const name = noteTargetName(page);
+    await expect(name).toHaveAttribute("data-tip", `Voice · ${round} · ${read}`);
+    const lines = await name.locator(".ntclamp").evaluate((el) => {
+      const lh = parseFloat(getComputedStyle(el).lineHeight);
+      return { lines: Math.round(el.clientHeight / lh), cut: el.scrollHeight > el.clientHeight };
+    });
+    expect(lines).toEqual({ lines: 2, cut: true });
+    // Inside the panel, whatever it holds.
+    const [n, p] = [(await name.boundingBox())!, (await notesPanel(page).boundingBox())!];
+    expect(n.x + n.width).toBeLessThanOrEqual(p.x + p.width);
   });
 });
