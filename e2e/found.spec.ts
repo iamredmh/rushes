@@ -811,16 +811,20 @@ test("a locked tab says how many files of its kind were found, with a Review but
   await openPlanPage(page, "Script");
   await expect(foundLine(page)).toHaveCount(0);
 
-  // Review opens Assets > Found, filtered to the kind the tab is for.
-  await openReviewTab(page, "Music");
+  // Review opens Assets > Found, filtered to the kind the tab is for. Music is locked, so its tab is clicked as it is.
+  await openWorkspace(page, "Review");
+  await reviewTab(page, "Music").click();
+  await expect(reviewTab(page, "Music")).toHaveAttribute("aria-selected", "true");
   await page.locator(".locked").getByRole("button", { name: /^Review/ }).click();
   await expect(page.getByRole("heading", { name: /^Found/ })).toBeVisible();
   await expect(page.getByRole("group", { name: "Kind" }).getByRole("button", { name: /^Music/ })).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator(".frow")).toHaveCount(3);
   await expect(row(page, "theme-a.wav")).toBeVisible();
 
-  // And the sound-effects tab's Review lands on sound effects.
-  await openReviewTab(page, "Effects");
+  // And the sound-effects tab's Review lands on sound effects (its tab locked too).
+  await openWorkspace(page, "Review");
+  await reviewTab(page, "Effects").click();
+  await expect(reviewTab(page, "Effects")).toHaveAttribute("aria-selected", "true");
   await page.locator(".locked").getByRole("button", { name: /^Review/ }).click();
   await expect(page.getByRole("group", { name: "Kind" }).getByRole("button", { name: /^Sound effects/ })).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator(".frow")).toHaveCount(1);
