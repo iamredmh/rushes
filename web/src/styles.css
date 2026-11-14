@@ -650,6 +650,8 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .vz { height: 100%; min-height: 520px; scroll-snap-align: start; scroll-snap-stop: always; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 10px; padding: 14px 22px 12px; border-bottom: 1px solid var(--line); transition: opacity 0.25s; }
 .vz:not(.cur) { opacity: 0.5; }
 .vz:not(.cur):hover { opacity: 0.75; }
+/* The type the current visual took from the shared .cur rule the Plan pages once used (its own padding wins over that rule's). */
+.vz.cur { font-size: 16px; line-height: 1.6; color: var(--text-2); white-space: pre-wrap; }
 .vzhead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .vzhead h2 { margin: 0; font-size: 17px; font-weight: 600; }
 .vzkind { font-family: var(--mono); font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); }
@@ -710,7 +712,7 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .vzgrp { border-radius: var(--r); margin-bottom: 10px; border: 1.5px solid transparent; transition: opacity 0.25s; }
 .vzgrp:not(.cur) { opacity: 0.45; }
 .vzgrp:not(.cur):hover { opacity: 0.8; }
-.vzgrp.cur { border-color: var(--accent); background: var(--accent-soft); }
+.vzgrp.cur { border-color: var(--accent); background: var(--accent-soft); font-size: 16px; line-height: 1.6; color: var(--text-2); padding-top: 9px; white-space: pre-wrap; }
 .vzghead { display: flex; align-items: center; gap: 8px; padding: 8px 12px; font-weight: 600; width: 100%; text-align: left; }
 .vzghead .cnt { margin-left: auto; font-weight: 400; color: var(--text-2); }
 .vzghead .here { font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent-2); font-weight: 600; }

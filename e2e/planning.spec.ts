@@ -467,3 +467,20 @@ test("typing in a section and pressing Approve straight away saves the text and 
   expect(await read(rushes.root)).toContain("## Tone\nWarm.\n");
   await expect(page.locator(".toast")).toHaveCount(0);
 });
+
+// Task 7a fix round 1: a field sized to its text must size again when it gets narrower, or the lines that wrap are hidden.
+test("a Plan field that wraps onto more lines when the window narrows still shows all its text", async ({ page, rushes }) => {
+  const long = "Your work lives on one laptop, and every take you have ever recorded sits in a folder nobody has opened since the shoot, waiting.";
+  await rushes.api("PUT", "/api/script", { sections: [{ start: 0, end: 13, current: long }] });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(rushes.url);
+  await openPlanPage(page, "Script");
+  const box = page.locator(".srow").first().getByRole("textbox", { name: /^Your version of/ });
+  await expect(box).toHaveValue(long);
+  const fits = () => box.evaluate((el) => ({ client: el.clientHeight, scroll: el.scrollHeight }));
+  const wide = await fits();
+  expect(wide.client).toBeGreaterThanOrEqual(wide.scroll);
+  await page.setViewportSize({ width: 720, height: 900 });
+  await expect.poll(async () => (await fits()).scroll).toBeGreaterThan(wide.scroll);
+  await expect.poll(async () => { const f = await fits(); return f.client >= f.scroll; }).toBe(true);
+});

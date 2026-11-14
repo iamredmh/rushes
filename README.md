@@ -23,7 +23,7 @@
 <p align="center">
   <a href="#get-started">Get started</a> &nbsp;·&nbsp;
   <a href="#how-it-works">How it works</a> &nbsp;·&nbsp;
-  <a href="#every-stage-in-one-place">The tabs</a> &nbsp;·&nbsp;
+  <a href="#every-stage-in-one-place">The desk</a> &nbsp;·&nbsp;
   <a href="#your-notes-are-plain-files">Plain files</a> &nbsp;·&nbsp;
   <a href="#faq">FAQ</a> &nbsp;·&nbsp;
   <a href="#for-agents-set-yourself-up">For agents</a>
@@ -107,9 +107,9 @@ Switch beds instantly while the picture plays. Mark a range as **Rise**, **Fall*
 
 ### Visuals: mark up stills and carousels
 
-The **Visuals** workspace (key `7`) is for the stills, standalone images and carousels your agent makes next to a video. Each is a visual: one post, in the aspect ratios it comes in, shown one page at a time in a large frame. It scrolls from one visual to the next, and whichever visual crosses the middle of the view is the current one: it gets the outline, and it is the only one you can add a note to. A carousel has Previous and Next, a count, **Full screen** (for looking closely; you mark in the tab) and a strip of its pages with the open notes on each.
+The **Visuals** workspace (key `7`) is for the stills, standalone images and carousels your agent makes next to a video. Each is a visual: one post, in the aspect ratios it comes in, shown one page at a time in a large frame. It scrolls from one visual to the next, and whichever visual crosses the middle of the view is the current one: it gets the outline, and it is the only one you can add a note to. A carousel has Previous and Next, a count, **Full screen** (for looking closely; you mark in the workspace) and a strip of its pages with the open notes on each.
 
-**Drag** on the picture to mark a region, click to drop a point, or press **Whole image** for a note about all of it. The composer always says where the note will go ("Adding to: Launch carousel · page 3 · 4:5 · v2"), and a draft stays with the visual you began it on. Notes belong to a page, a ratio and a version, never to where you have scrolled, so every mark is still there when you come back. The notes column lists the whole tab, grouped by visual and page, with the visual you are looking at highlighted and the rest faded; click a note to jump to it. When your agent registers a new version, your old notes stay with the version they were made on ("from v1"), marked until you tick them done.
+**Drag** on the picture to mark a region, click to drop a point, or press **Whole image** for a note about all of it. The composer always says where the note will go ("Adding to: Launch carousel · page 3 · 4:5 · v2"), and a draft stays with the visual you began it on. Notes belong to a page, a ratio and a version, never to where you have scrolled, so every mark is still there when you come back. The notes column lists the whole workspace, grouped by visual and page, with the visual you are looking at highlighted and the rest faded; click a note to jump to it. When your agent registers a new version, your old notes stay with the version they were made on ("from v1"), marked until you tick them done.
 
 ### Shelve a film
 
@@ -378,13 +378,13 @@ A new note belongs to the format on screen: the switch above the note box reads 
 
 A format's file can sit outside the project folder, like any registered cut, and plays by the same rules. A second render of a shape the cut already has is refused: a re-render is a new version.
 
-The format keys never fire while you're typing a note. In a text field, Alt+←/→ keeps its usual meaning: on macOS it jumps a word, and on Windows and Linux the browser may take it as Back, so click outside the note box first (or use the toggle) to switch format.
+The format keys never fire while you're typing a note. In a text field, Alt+←/→ keeps its usual meaning: on macOS it jumps a word, and on Windows and Linux the browser may take it as Back, so click outside the note box first (or use the switch on the monitor) to switch format.
 
 ## Proxies
 
 Some cuts play badly in a browser: 4K or larger, over 1.5 GB, a codec browsers can't play reliably (ProRes, DNx, HEVC 10-bit — anything that isn't H.264, VP9 or AV1), or one that threw a playback error. Rushes checks with ffprobe as the cut is added, and if it's likely to struggle, a bar appears under the player saying why in a few words, with a **Create proxy** button. It makes a lightweight 1080p H.264 copy on your drive — your original file is never changed — with visible progress and **Cancel**. Notes, timecodes and frame numbers are identical on the proxy and the original.
 
-Once it's ready, a **Proxy / Original** switch appears on the player (defaults to Proxy, remembered per film). **Grab Frame** always takes the still from the original at full quality, whichever one you're watching. Tick "Create proxies for new cuts like this automatically" (off by default, saved per project) to skip the offer next time. The **Assets** tab has a **Proxies** folder listing each one with its size and a **Delete proxy** button; deleting removes only the proxy file, never the original.
+Once it's ready, a **Proxy / Original** switch appears on the player (defaults to Proxy, remembered per film). **Grab this frame** (**G**) always takes the still from the original at full quality, whichever one you're watching. Turn on **Make lighter copies of new cuts automatically** in the More menu (off by default, saved per project) to skip the offer next time. The **Assets** tab has a **Proxies** folder listing each one with its size and a **Delete proxy** button; deleting removes only the proxy file, never the original.
 
 Without ffmpeg, no proxy is ever offered.
 

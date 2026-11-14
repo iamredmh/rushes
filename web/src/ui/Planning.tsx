@@ -109,15 +109,35 @@ export function PlanSwitch({ rows, selected, onPick }: { rows: PlanTabRow[]; sel
   );
 }
 
-/** A text you can edit on a Plan page: a field with a visible edge at rest, that grows with its text and never hides any. */
+/** Sets a field's height to its text's: as many lines as the text takes at the field's width now. */
+function fitHeight(el: HTMLTextAreaElement) {
+  el.style.height = "auto";
+  el.style.height = `${el.scrollHeight + 2}px`;
+}
+
+/**
+ * A text you can edit on a Plan page: a field with a visible edge at rest, that grows with its text and never hides any.
+ * It sizes again when its text changes and when its width does (a narrower window, the notes panel shown, the one-column
+ * layout), since the same text then wraps onto a different number of lines.
+ */
 export function PlanField({ value, label, onInput, onBlur }: { value: string; label: string; onInput(text: string): void; onBlur(): void }) {
   const area = useRef<HTMLTextAreaElement>(null);
   useLayoutEffect(() => {
-    const el = area.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${el.scrollHeight + 2}px`;
+    if (area.current) fitHeight(area.current);
   }, [value]);
+  useEffect(() => {
+    const el = area.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    // Only a change of width re-measures: setting the height is itself a resize, and must not start another.
+    let width = el.clientWidth;
+    const ro = new ResizeObserver(() => {
+      if (el.clientWidth === width) return;
+      width = el.clientWidth;
+      fitHeight(el);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   return (
     <textarea
       ref={area}

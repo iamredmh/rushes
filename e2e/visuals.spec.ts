@@ -542,3 +542,21 @@ test("the empty notes column says only that there are none, and the controls fol
     expect(px, sel).toBeGreaterThanOrEqual(13);
   }
 });
+
+// Task 7a fix round 1: the Plan pages' sweep must not restyle Visuals. The current visual and its notes group keep the
+// type and spacing they had from the shared .cur rule before it went.
+test("the current visual and its notes group keep their type and spacing", async ({ page, rushes }) => {
+  await withVisuals(rushes);
+  await rushes.api("POST", "/api/notes", { stage: "visuals", scope: "whole", version: "v2", on: "launch-carousel/3", format: "4x5", box: { x: 0.1, y: 0.1, w: 0.3, h: 0.2 }, text: "Headline too long." });
+  await openVisuals(page, rushes);
+  const look = (el: Element) => {
+    const s = getComputedStyle(el);
+    return { paddingTop: s.paddingTop, fontSize: s.fontSize, lineHeight: s.lineHeight, whiteSpace: s.whiteSpace };
+  };
+  const visual = section(page, "launch-carousel");
+  const group = page.locator('.vzgrp[data-grp="launch-carousel"]');
+  await expect(visual).toHaveClass(/cur/);
+  await expect(group).toHaveClass(/cur/);
+  expect(await visual.evaluate(look)).toEqual({ paddingTop: "14px", fontSize: "16px", lineHeight: "25.6px", whiteSpace: "pre-wrap" });
+  expect(await group.evaluate(look)).toEqual({ paddingTop: "9px", fontSize: "16px", lineHeight: "25.6px", whiteSpace: "pre-wrap" });
+});
