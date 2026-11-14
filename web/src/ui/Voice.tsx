@@ -5,7 +5,7 @@ import { takeGroups, type TakeRow } from "../desk.js";
 import {
   agentPrompt, AUDIO_CHIPS, defaultVersion, filmLanes, filmNotes, filmPicks, otherLanes, type VariantRow, type VoiceNotes, voiceNoteRows, voiceOnLabel, voiceRounds, variantRows,
 } from "../lib.js";
-import type { Asset, State, Video } from "../types.js";
+import type { Asset, State, Version, Video } from "../types.js";
 import { AudioStage, filmsOf, type Preview, takeList } from "./AudioStage.js";
 import { filmsControl } from "./FilmsMenu.js";
 import { otherSounds } from "./desk/useMix.js";
@@ -32,9 +32,11 @@ export interface VoiceProps {
   onPendingChange?(pending: boolean): void;
   /** The film's one playhead across the Review tabs (final review I3). */
   clock?: ReviewClock;
+  /** The cut chosen in the Cut menu, which the monitor shows (final review I5); the film's default cut without one. */
+  version?: Version | null;
 }
 
-export function Voice({ state, assets, video, toast, onChanged, onPendingChange, clock }: VoiceProps) {
+export function Voice({ state, assets, video, toast, onChanged, onPendingChange, clock, version }: VoiceProps) {
   const [blind, setBlindState] = useState(blindSession);
   const setBlind = (on: boolean) => {
     blindSession = on;
@@ -56,7 +58,9 @@ export function Voice({ state, assets, video, toast, onChanged, onPendingChange,
 
   // Notes resolve against the rounds (an older round's read is named by its round) and the script's takes (older notes).
   const model: VoiceNotes = { rounds: voiceRounds(lanes, filmState.lanes), sections: state.script.sections };
-  const cut = defaultVersion(video ?? undefined);
+  // The monitor shows the cut chosen in the Cut menu, as the Timeline does; the take tags are still measured against the
+  // film's current cut (takeGroups).
+  const cut = version ?? defaultVersion(video ?? undefined);
   const preview: Preview | null = video && cut ? { video: video.id, version: cut, locked: video.lockedVersion === cut.id } : null;
 
   return (
@@ -74,7 +78,8 @@ export function Voice({ state, assets, video, toast, onChanged, onPendingChange,
       headerExtra={<BlindButton on={blind} onToggle={() => setBlind(!blind)} />}
       preview={preview}
       prompt={agentPrompt("picture", state.project.name, video?.name ?? null)}
-      fps={state.project.fps || 30}
+      // Frames are counted at the cut's rate, as on the Timeline (m1).
+      fps={cut?.fps ?? (state.project.fps || 30)}
       notes={filmNotes(state.notes.notes, "voice", video?.id)}
       noteRow={(n) => voiceNoteRows(model, n)}
       onLabel={(n) => voiceOnLabel(model, n.on, nameOf)}

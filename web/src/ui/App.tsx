@@ -930,6 +930,7 @@ export function App() {
               onChanged={() => void refresh()}
               onPendingChange={setPending}
               clock={reviewClock}
+              version={version ?? null}
             />
           ) : stage === "music" || stage === "sfx" ? (
             // Keyed by stage: each audio tab gets its own engine, disposed (and stopped) when you leave.
@@ -943,6 +944,7 @@ export function App() {
               onChanged={() => void refresh()}
               onPendingChange={setPending}
               clock={reviewClock}
+              version={version ?? null}
             />
           ) : null}
         </main>

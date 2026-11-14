@@ -1613,6 +1613,52 @@ test.describe("a tab per sound", () => {
   });
 });
 
+// ---- final review I5 and m1: a sound's tab shows the cut chosen in the Cut menu, counted at that cut's frame rate ----
+test("a sound's tab shows the cut chosen in the Cut menu, as the Timeline does", async ({ page, rushes }) => {
+  await rushes.addCut();
+  await rushes.addCut();
+  await rushes.addVariant("voice", "Gerald", { round: "Round 1 · Voices", seconds: 4, freq: 220 });
+  await page.goto(rushes.testUrl());
+  await videoReady(page);
+  const src = () => page.locator("video").evaluate((v: HTMLVideoElement) => decodeURIComponent(v.currentSrc || v.src));
+  await expect.poll(src).toContain("hero_v2");
+  await pickVersion(page, "v1");
+  await expect.poll(src).toContain("hero_v1");
+  await page.keyboard.press("3");
+  await expect(reviewTab(page, "Voice")).toHaveAttribute("aria-selected", "true");
+  await expect.poll(src).toContain("hero_v1");
+  await expect(cutButton(page)).toHaveAttribute("data-version", "v1");
+  await expect(statusBar(page)).toContainText("v1");
+  // Picked here, the next cut shows here and on the Timeline.
+  await pickVersion(page, "v2");
+  await expect.poll(src).toContain("hero_v2");
+  await page.keyboard.press("2");
+  await expect.poll(src).toContain("hero_v2");
+});
+
+test("a sound's tab counts frames at the cut's frame rate, as the Timeline does", async ({ page, rushes }) => {
+  await rushes.addCut();
+  await rushes.addVariant("voice", "Gerald", { round: "Round 1 · Voices", seconds: 4, freq: 220 });
+  // A 25 fps cut in a project that says 30 (as the demo did before the final review).
+  const file = join(rushes.root, ".rushes", "project.json");
+  const project = JSON.parse(await readFile(file, "utf8"));
+  project.fps = 30;
+  project.videos[0].versions[0].fps = 25;
+  await writeFile(file, JSON.stringify(project, null, 2));
+  await page.goto(rushes.testUrl());
+  await videoReady(page);
+  await expect(statusBar(page)).toContainText("25 fps");
+  const step = transport(page).getByRole("button", { name: "Forward one frame · →" });
+  await step.click();
+  await expect.poll(() => page.getByLabel("Timecode").textContent()).toMatch(/^0:00\.04/);
+  await page.keyboard.press("3");
+  await expect(reviewTab(page, "Voice")).toHaveAttribute("aria-selected", "true");
+  await expect.poll(() => page.getByLabel("Timecode").textContent()).toMatch(/^0:00\.04/);
+  await step.click();
+  await expect.poll(() => page.getByLabel("Timecode").textContent()).toMatch(/^0:00\.08/);
+  await expect(page.locator(".tcover")).toContainText("f2");
+});
+
 // ---- final review I6: the target line names its target, on a line of its own ----
 test.describe("the note's target line", () => {
   test("at the panel's default width it names a take with its sound, and a shot, in full on their own line", async ({ page, rushes }) => {
