@@ -85,7 +85,7 @@ export function NoCutTimeline({ state, assets, video, notes, prompt, readOnly = 
     onChanged();
   };
   return (
-    <div class="split">
+    <div class="split deskcols">
       <div class="tl">
         <div class="monitor">
           <NoCutSlate prompt={prompt} toast={toast} then="Until then the takes in use play here together." />

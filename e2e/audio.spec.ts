@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { makeWav } from "./fixtures/wav.js";
 import {
   expect, type Rushes, test, openReviewTab, reviewTab, workspaceTab, currentFilm, pickFilm, videoReady, loudness, rangeChip, notesPanel, panelToggle, noteTargetLine, noteTargetLabel, noteTargetMenu, clearTarget, rulerMarkers, soundBlock, soundButton, soundTrack,
-  monitor, playButton, toolButton, takesList, takeHeadings, takeRow, takeRows, takeCircle, takeName, takeBlock, pressRowButton, foldToggle, clickTakeAt,
+  monitor, playButton, toolButton, takesList, takeHeadings, takeRow, takeRows, takeCircle, takeName, takeBlock, pressRowButton, foldToggle, clickTakeAt, expectReadableInRow,
 } from "./fixture.js";
 
 test("the generated WAV fixture decodes in Chromium to the tone it describes", async ({ page }) => {
@@ -1063,6 +1063,7 @@ test("a round whose reads are all missing shows the missing marks and plays sile
   await expect(rowOf(page, `${R2_ID}/more-excited`).locator(".amiss")).toHaveCount(1);
   await expect(rowOf(page, `${R2_ID}/more-sombre`).locator(".amiss")).toHaveCount(1);
   await expect(takeBlock(page, "more sombre")).toContainText("File not found");
+  await expectReadableInRow(takeBlock(page, "more sombre").locator(".slbl"), takeRow(page, "more sombre"));
   expect((await inspect(page)).media.some((k) => gone.some((f) => k.includes(f)))).toBe(false);
   // A missing read selected is what plays, and it isn't there: silence, not another read.
   await takeName(page, "more sombre").click();
@@ -1083,6 +1084,7 @@ test("when the take in use has lost its file, its tab is silent rather than play
   await expect(takeRows(page)).toHaveCount(2);
   await expect(takeCircle(page, "B · Warm keys")).toHaveAttribute("aria-checked", "true");
   await expect(takeRow(page, "B · Warm keys")).toContainText("File not found");
+  await expectReadableInRow(takeBlock(page, "B · Warm keys").locator(".slbl"), takeRow(page, "B · Warm keys"));
   await loaded(page, 1);
   await expect.poll(() => heard(page)).toEqual([]);
 });
@@ -1392,6 +1394,7 @@ test("a sound with nothing in use, or a missing file, is empty and left out of t
   const asked = await openMix(page, rushes, 1);
   await expect(soundBlock(page, "Music")).toHaveText("Nothing chosen yet");
   await expect(soundBlock(page, "Effects")).toHaveText("File not found");
+  for (const name of ["Music", "Effects"] as const) await expectReadableInRow(soundBlock(page, name).locator(".slbl"), soundTrack(page, name));
   await expect(soundBlock(page, "Voice")).toHaveText("Gerald");
   expect(await heard(page)).toEqual([`${VO_READ}@0`]);
   await expect.poll(() => asked.at(-1)).toEqual(["voice"]);

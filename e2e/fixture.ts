@@ -1,4 +1,4 @@
-import { test as base, expect, type Locator, type Page } from "@playwright/test";
+import { test as base, expect, type ElementHandle, type Locator, type Page } from "@playwright/test";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -649,6 +649,42 @@ export function soundTrack(page: Page, name: SoundName): Locator {
 /** The one block on a sound row: the take in use with its waveform, or the dashed empty one. */
 export function soundBlock(page: Page, name: SoundName): Locator {
   return soundTrack(page, name).locator(".sblock");
+}
+
+/** A sound row's label: the take's name, or the state in its place ("Not started", "Nothing chosen yet", "File not found"). */
+export function soundLabel(page: Page, name: SoundName): Locator {
+  return soundBlock(page, name).locator(".slbl");
+}
+
+/** The timeline panel under the transport: the ruler, the Picture track and the sound or take rows. */
+export function timelinePanel(page: Page): Locator {
+  return page.locator(".tlpanel");
+}
+
+/**
+ * A state shown as a label on a row is only shown if a person can read it: the label's box lies inside its row's
+ * box, it is at least `minHeight` px tall, its text is not cut off, and no box between it and the row clips it.
+ * `toHaveText` alone reads the DOM, where a 2 px box thrown out of its row still "has" its text (final review I1).
+ */
+export async function expectReadableInRow(label: Locator, row: Locator, minHeight = 12): Promise<void> {
+  await expect(label).toBeVisible();
+  await expect.poll(async () => {
+    const rowEl = (await row.elementHandle()) as ElementHandle<Element> | null;
+    if (!rowEl) return "no row";
+    return label.evaluate((el, { rowEl, minHeight }) => {
+      const b = el.getBoundingClientRect();
+      const inside = (r: DOMRect) => b.left >= r.left - 0.5 && b.top >= r.top - 0.5 && b.right <= r.right + 0.5 && b.bottom <= r.bottom + 0.5;
+      const problems: string[] = [];
+      if (!inside(rowEl.getBoundingClientRect())) problems.push(`label at y ${Math.round(b.top)}, h ${Math.round(b.height)} is outside its row`);
+      if (b.height < minHeight) problems.push(`label is ${Math.round(b.height)} px tall`);
+      if (el.scrollWidth > el.clientWidth || el.scrollHeight > el.clientHeight) problems.push("its text is cut off");
+      for (let p = el.parentElement; p && p !== rowEl; p = p.parentElement) {
+        const s = getComputedStyle(p);
+        if ((s.overflowX !== "visible" || s.overflowY !== "visible") && !inside(p.getBoundingClientRect())) problems.push(`clipped by .${p.className}`);
+      }
+      return problems.join("; ") || "ok";
+    }, { rowEl, minHeight });
+  }, { message: "the label is readable inside its row" }).toBe("ok");
 }
 
 /** A sound row's M or S. */

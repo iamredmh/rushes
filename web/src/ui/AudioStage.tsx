@@ -574,7 +574,7 @@ export function AudioStage(props: AudioStageProps) {
   const menuLabels = [{ value: "point", label: cue ? "This cue" : "This moment" }, { value: "whole", label: props.wholeLabel }];
 
   return (
-    <div class="split">
+    <div class="split deskcols">
       <div class="tl soundtab" ref={column}>
         <div class="monitor" ref={monitorRef}>
           <ToolStrip

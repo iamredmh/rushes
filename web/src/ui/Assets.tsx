@@ -529,7 +529,7 @@ export function Assets({ assets, videos, state, foundRequest, onFoundRequestUsed
           </div>
         </div>
       ) : (
-        <div class="empty">
+        <div class="emptypage">
           <Icon name="grid" />
           <h2>Nothing to review in Assets yet</h2>
         </div>

@@ -164,7 +164,7 @@ export function ShelvedBanner({ video, onRestore }: { video: Video; onRestore():
 /** §26.6: Review with every film shelved. */
 export function AllShelved({ onOpen }: { onOpen(): void }) {
   return (
-    <div class="empty shempty">
+    <div class="emptypage shempty">
       <p><b>All films are shelved</b></p>
       <p>Nothing is in play. Restore a film to carry on.</p>
       <button type="button" class="btn" onClick={onOpen}>Open the Shelved list</button>
