@@ -817,6 +817,67 @@ test("with no cut and nothing in use, the Timeline tab stays locked (fix round 1
   await expect(page.locator(".strack")).toHaveCount(0);
 });
 
+// ---- final review I4: amber to do, blue while the agent has it, green done (spec 5.5, 5.7) ----
+
+/** A colour token as the page computes it ("rgb(76, 141, 255)"), to compare with a computed style. */
+const tokenColor = (page: Page, token: string) => page.evaluate((t) => {
+  const d = document.createElement("div");
+  d.style.color = `var(${t})`;
+  document.body.append(d);
+  const c = getComputedStyle(d).color;
+  d.remove();
+  return c;
+}, token);
+const bg = (l: import("@playwright/test").Locator) => l.evaluate((el) => getComputedStyle(el).backgroundColor);
+const ring = (l: import("@playwright/test").Locator) => l.evaluate((el) => getComputedStyle(el).borderTopColor);
+
+test("a note is amber to do, blue once sent, green when done: on the ruler, its sound row, its take row and its dot", async ({ page, rushes }) => {
+  await rushes.addCut();
+  const bed = await rushes.addVariant("music", "Warm keys", { seconds: 4, freq: 330 });
+  await rushes.api("PUT", "/api/picks", { video: "hero", lanes: { [bed.lane.id]: bed.variant.id } });
+  const { note: pic } = await rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 1, text: "Hold the frame." });
+  const { note: mus } = await rushes.api("POST", "/api/notes", { stage: "music", video: "hero", on: `${bed.lane.id}/${bed.variant.id}`, scope: "point", t: 2, text: "Pad in late." });
+  await openTimeline(page, rushes, 1);
+  const marker = ruler(page).locator(`.mk[data-note="${pic.id}"]`);
+  const rowMark = soundTrack(page, "Music").locator(`.mk[data-note="${mus.id}"]`);
+  const dot = notesPanel(page).locator(`.note[data-note="${pic.id}"] .chk`);
+  const [todo, sent, done] = [await tokenColor(page, "--todo"), await tokenColor(page, "--accent"), await tokenColor(page, "--done")];
+
+  expect(await bg(marker)).toBe(todo);
+  expect(await bg(rowMark)).toBe(todo);
+  expect(await ring(dot)).toBe(todo);
+  await expect(marker).toHaveAccessibleName("Hold the frame.");
+  await expect(dot).toHaveAccessibleName("Mark done");
+
+  await sendButton(page).click();
+  await sentDialog(page).getByRole("button", { name: "Close" }).click();
+  await expect.poll(() => bg(marker)).toBe(sent);
+  expect(await bg(rowMark)).toBe(sent);
+  expect(await ring(dot)).toBe(sent);
+  await expect(marker).toHaveAccessibleName("With your agent · Hold the frame.");
+  await expect(marker).toHaveAttribute("data-tip", "With your agent · Hold the frame.");
+  await expect(rowMark).toHaveAttribute("title", "With your agent · Pad in late.");
+  await expect(dot).toHaveAccessibleName("With your agent · Mark done");
+  await expect(dot).toHaveAttribute("data-tip", "With your agent · Mark done");
+  // Still to do: the To do filter lists it.
+  await notesPanel(page).getByRole("button", { name: /^To do/ }).click();
+  await expect(notesPanel(page).locator(`.note[data-note="${pic.id}"]`)).toBeVisible();
+  await notesPanel(page).getByRole("button", { name: /^All/ }).click();
+  // The take's own row, on its tab.
+  await page.keyboard.press("4");
+  const takeMark = takeBlock(page, "Warm keys").locator(`.mk[data-note="${mus.id}"]`);
+  expect(await bg(takeMark)).toBe(sent);
+  await expect(takeMark).toHaveAttribute("title", "With your agent · Pad in late.");
+
+  await rushes.api("POST", "/api/replies", { replies: [{ id: pic.id, status: "done", reply: "Held." }, { id: mus.id, status: "done", reply: "Earlier." }] });
+  await expect.poll(() => bg(takeMark)).toBe(done);
+  await page.keyboard.press("2");
+  await videoReady(page);
+  await expect.poll(() => bg(marker)).toBe(done);
+  expect(await bg(rowMark)).toBe(done);
+  await expect(dot).toHaveAccessibleName("Reopen");
+});
+
 // ---- final review I3: one playhead per film across the Review tabs ----
 
 /** The transport's time, without the length after it: "0:01.50". */

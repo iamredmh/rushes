@@ -254,9 +254,12 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .mk { position: absolute; top: 50%; width: 10px; height: 10px; border-radius: 50%; transform: translate(-50%, -50%); z-index: 3; box-shadow: 0 0 0 2px var(--raised); }
 .mk.todo { background: var(--todo); }
 .mk.done { background: var(--done); }
+/* §27, 5.5 (final review I4): a note the agent has (sent in a batch, not yet done) is blue. */
+.mk.sent { background: var(--accent); }
 .span { position: absolute; top: 4px; bottom: 4px; border-radius: 7px; z-index: 2; pointer-events: none; }
 .span.todo { background: var(--todo-soft); box-shadow: inset 0 0 0 1px var(--todo-line); }
 .span.done { background: var(--done-soft); box-shadow: inset 0 0 0 1px var(--done-line); }
+.span.sent { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent-soft-2); }
 .span.live { background: var(--accent-soft); box-shadow: inset 0 0 0 1.5px var(--accent); }
 /* §19.9: the cut's own audio, quiet, under the spans, ticks, markers and playhead. */
 .pwave { position: absolute; left: 0; top: 6px; width: 100%; height: calc(100% - 12px); z-index: 0; pointer-events: none; color: var(--text-3); opacity: 0.35; }
@@ -297,6 +300,7 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .chk { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--todo); background: transparent; cursor: pointer; margin-top: 1px; display: grid; place-items: center; padding: 0; }
 .chk svg.ic { width: 12px; height: 12px; stroke: var(--app); stroke-width: 3; opacity: 0; }
 .note.done .chk { background: var(--done); border-color: var(--done); }
+.note.sent .chk { border-color: var(--accent); }
 .note.done .chk svg.ic { opacity: 1; }
 .nt { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 .nt .t { font: 500 13px var(--mono); color: var(--accent-2); cursor: pointer; background: none; border: 0; padding: 0; }

@@ -16,7 +16,7 @@ import { type AudioEngine, type EngineSnapshot, liveContexts } from "../audio/en
 import { type SampleState, samples } from "../audio/sample.js";
 import { assetRev, type Clip, needsVideoSync, setStreamThreshold } from "../audio/timeline.js";
 import { useAudioStage } from "../audio/useAudioStage.js";
-import { defaultTake, noteTarget, pctOf as pctOfLength, rulerMarks, type TakeGroups, takeKey, type TakeRow, takeSections, timecode, type Tool } from "../desk.js";
+import { defaultTake, noteState, noteTarget, pctOf as pctOfLength, rulerMarks, type TakeGroups, takeKey, type TakeRow, takeSections, timecode, type Tool } from "../desk.js";
 import {
   blindOrder, fmt, frameAt, noteTime, notePending, type Scope, shotAt, shotLabel, shotSeek, snap, spacePressesButton, stepFrame, testFlags, variantFilms, variantMeta,
 } from "../lib.js";
@@ -574,7 +574,7 @@ export function AudioStage(props: AudioStageProps) {
     if (n.scope === "whole" || n.t === null) continue;
     const key = noteRow(n);
     if (key === null) continue;
-    (drawn[key] ??= []).push({ id: n.id, t: n.t, tOut: hasRange ? n.tOut : null, status: n.status, text: n.text });
+    (drawn[key] ??= []).push({ id: n.id, t: n.t, tOut: hasRange ? n.tOut : null, status: noteState(n), text: n.text });
     timed.push({ ...n, tOut: hasRange ? n.tOut : null });
   }
   const timedText = new Map(timed.map((n) => [n.id, n.text]));

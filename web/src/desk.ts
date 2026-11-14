@@ -308,12 +308,25 @@ export function unsentCount(i: Unsent): number {
   return i.notes.filter((n) => waiting(n) && n.batch === null).length + unsentEdits(i);
 }
 
+/**
+ * §27, 5.5 and 5.7 (ruled in the final review, I4): a note is to do (amber), sent (blue: a to-do note in a batch Send
+ * made, so the agent has it) or done (green). A sent note is still to do: the To do filter keeps it.
+ */
+export type NoteState = "todo" | "sent" | "done";
+export function noteState(n: Pick<Note, "status" | "batch">): NoteState {
+  return n.status === "done" ? "done" : n.batch !== null ? "sent" : "todo";
+}
+/** Each state in words, for a marker's or a dot's name and tooltip. */
+export const NOTE_STATE_LABEL: Record<NoteState, string> = { todo: "To do", sent: "With your agent", done: "Done" };
+/** A marker's name and tooltip: the note's text, after "With your agent · " while the agent has it. */
+export const markTitle = (state: NoteState, text: string): string => (state === "sent" ? `${NOTE_STATE_LABEL.sent} · ${text}` : text);
+
 /** A note's marker on the ruler: where it starts and, for a range, how wide, as percentages of the cut. */
 export interface RulerMark {
   id: string;
   left: number;
   width: number | null;
-  status: "todo" | "done";
+  status: NoteState;
 }
 
 /** A time as a percentage of `length`, clamped to the timeline (0 to 100), whatever the file on screen reports; 0 with no length. */
@@ -325,6 +338,6 @@ export function rulerMarks(notes: Note[], length: number): RulerMark[] {
     .filter((n) => n.t !== null)
     .map((n) => {
       const left = pctOf(n.t!, length);
-      return { id: n.id, left, width: n.tOut !== null ? pctOf(n.tOut, length) - left : null, status: n.status };
+      return { id: n.id, left, width: n.tOut !== null ? pctOf(n.tOut, length) - left : null, status: noteState(n) };
     });
 }

@@ -5,7 +5,7 @@
 import { useState } from "preact/hooks";
 import { mediaKey } from "../../audio/timeline.js";
 import { cueKeys, cueLabel, cueName, cuesInTime } from "../../cues.js";
-import { pctOf, takeCount } from "../../desk.js";
+import { markTitle, noteState, pctOf, takeCount } from "../../desk.js";
 import { LEVEL_MAX, LEVEL_MIN, LEVEL_STEP, levelText, loudnessReadout, type MixLane } from "../../lib.js";
 import type { Note } from "../../types.js";
 import { CUE_CARD_ID, CueCard, cardHover, useCueCard } from "../CueCard.js";
@@ -174,9 +174,9 @@ export function SoundTracks({ mix, duration, t, onSeek, onOpenTab, onPick, selec
                 );
               })}
               {here.map((n) => n.tOut !== null ? (
-                <span key={n.id} class={`span ${n.status}`} data-note={n.id} title={n.text} style={{ left: `${pct(n.t!)}%`, width: `${pct(n.tOut) - pct(n.t!)}%` }} />
+                <span key={n.id} class={`span ${noteState(n)}`} data-note={n.id} title={markTitle(noteState(n), n.text)} style={{ left: `${pct(n.t!)}%`, width: `${pct(n.tOut) - pct(n.t!)}%` }} />
               ) : (
-                <span key={n.id} class={`mk ${n.status}`} data-note={n.id} title={n.text} style={{ left: `${pct(n.t!)}%` }} />
+                <span key={n.id} class={`mk ${noteState(n)}`} data-note={n.id} title={markTitle(noteState(n), n.text)} style={{ left: `${pct(n.t!)}%` }} />
               ))}
               <span class="playhead" style={{ left: `${pct(t)}%` }} />
             </div>
