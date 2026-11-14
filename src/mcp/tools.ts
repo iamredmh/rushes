@@ -442,7 +442,7 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     {
       title: "Get a batch",
       description:
-        "The batch the user sent by pressing Send, at the foot of the notes panel (latest by default), with its notes and script sections. It holds every open note from every tab and every film in play: `stage` is the tab when they all came from one, or null when it spans tabs, and each note carries its own `stage` and `video`. A note's `on` says what it's about: null on Picture or for the whole mix, \"<lane>/<variant>\" for a music bed, SFX pass or voice variant, \"<lane>/<variant>:<cue>\" for an SFX cue, \"vo\" for the VO lane on Mix. Older notes may carry a bare variant id, \"vo\" for the assembled read, \"<section>:<take>\" for a take, or a section id.",
+        "The batch the user sent by pressing Send, at the foot of the notes panel (latest by default), with its notes and script sections. It holds every open note from every tab and every film in play: `stage` is the tab when they all came from one, or null when it spans tabs, and each note carries its own `stage` and `video`. A note's `on` says what it's about: null on Picture or for the whole mix, \"<lane>/<variant>\" for a music bed, SFX pass or voice variant, \"<lane>/<variant>:<cue>\" for an SFX cue, \"vo\" for the VO lane on Mix, and on a Script note, the section id of its line (null: the script as a whole). Older notes may carry a bare variant id, \"vo\" for the assembled read, \"<section>:<take>\" for a take, or a section id.",
       inputSchema: { project, id: z.string().optional() },
     },
     safe(async ({ project, id }) => (await ctx.client(project)).get(`/api/batches/${encodeURIComponent(id ?? "latest")}`)),

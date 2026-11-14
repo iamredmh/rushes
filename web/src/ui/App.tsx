@@ -167,6 +167,8 @@ export function App() {
   const [measured, setMeasured] = useState<Record<string, { width: number; height: number }>>({});
   // R7: a drawn box belongs to the format on screen, so a switch waits for it.
   const [boxPending, setBoxPending] = useState(false);
+  // m2: an In, a range or a box marked on the Timeline, which another cut would drop: the Cut menu waits for them.
+  const [marksPending, setMarksPending] = useState(false);
   // Proxy jobs whose failure has already been toasted, so each is said once.
   const toastedFailures = useRef(new Set<string>());
 
@@ -312,6 +314,8 @@ export function App() {
 
   // §26: shelve a film, or restore it. The Film menu acts on the film you are in; the Shelved list can restore any.
   const [shelvedRequest, setShelvedRequest] = useState(0);
+  // m6: a request to open the Cut menu on its lock row (the status bar's "lock picture").
+  const [cutRequest, setCutRequest] = useState(0);
   // The latest switchFilm, for the Undo on a toast made a render ago (its own closure would still see the old film).
   const switchFilmRef = useRef(switchFilm);
   switchFilmRef.current = switchFilm;
@@ -554,7 +558,7 @@ export function App() {
   };
   const soundState = (g: (typeof sounds)["voice"]) => {
     const c = takeCount(g);
-    return { started: c.all > 0, fresh: c.fresh, inUse: g.inUse !== null, stale: !!g.inUse?.stale };
+    return { started: c.all > 0, fresh: c.fresh, inUse: g.inUse !== null, stale: !!g.inUse?.stale, madeFor: g.inUse?.madeFor ?? null };
   };
   // What Send would send that has not been sent yet: one number for Send's count and the status bar's line.
   const inPlayIds = new Set(state.project.videos.filter(inPlay).map((v) => v.id));
@@ -578,6 +582,8 @@ export function App() {
   });
   /** Where the status bar's line leads: a plan page opens as key 1 would. */
   const goNext = (to: View) => {
+    // m6: "lock picture" opens the Cut menu on its lock row, where the lock is.
+    if (next.menu === "cut") return setCutRequest((n) => n + 1);
     if (unsent > 0 && to === sendTo) {
       // Send, in the notes panel: the panel shown on its Notes tab, and Send brought into view.
       if (pending && to !== stage) return toast("Add or clear your note first");
@@ -707,7 +713,11 @@ export function App() {
               video={video}
               shown={version}
               newer={readyVersionId}
+              openLock={cutRequest}
               onPick={(id) => {
+                // m2: another cut would drop a marked In, range or box on the Timeline: it waits for them, as the Film menu
+                // does. A half-typed note is kept across a cut, so it does not hold the menu.
+                if (marksPending) return toast("Add or clear your note first");
                 // Picking the version the film would follow anyway collapses back to "follow"
                 // (null); picking anything else pins it explicitly — including the newest, on a
                 // locked film, which must show what you asked for rather than snap back to the lock.
@@ -902,6 +912,7 @@ export function App() {
               formatMissing={!!format && missingFiles.has(views.find((f) => f.id === format)?.file ?? "")}
               onPrimarySize={(file, width, height) => setMeasured((m) => (m[file] ? m : { ...m, [file]: { width, height } }))}
               onBoxPendingChange={setBoxPending}
+              onMarksPendingChange={setMarksPending}
               onFormatChange={switchFormat}
               // §27, 5.4: on the monitor, and only when there is more than one shape to choose between or to explain.
               formatSwitch={chips.length > 1 ? (

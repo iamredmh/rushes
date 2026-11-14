@@ -1659,6 +1659,52 @@ test("a sound's tab counts frames at the cut's frame rate, as the Timeline does"
   await expect(page.locator(".tcover")).toContainText("f2");
 });
 
+// ---- small things from the final review ----
+test("m2: picking another cut waits for a marked In, as switching films does", async ({ page, rushes }) => {
+  await rushes.addCut();
+  await rushes.addCut();
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await expect(cutButton(page)).toHaveAttribute("data-version", "v2");
+  await page.keyboard.press("i");
+  await expect(rangeChip(page)).toBeVisible();
+  await cutButton(page).click();
+  await page.getByRole("listbox", { name: "Versions" }).locator('[role="option"][data-version="v1"]').click();
+  await expect(page.getByRole("status")).toHaveText("Add or clear your note first");
+  await expect(cutButton(page)).toHaveAttribute("data-version", "v2");
+  await expect(rangeChip(page)).toBeVisible();
+  // Cleared, the cut can be picked.
+  await rangeChip(page).getByRole("button", { name: "Clear range" }).click();
+  await pickVersion(page, "v1");
+});
+
+test("m4: after a note on the whole mix, the next note is on this frame again", async ({ page, rushes }) => {
+  await rushes.addCut();
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await noteTargetMenu(page).selectOption({ label: "The whole mix" });
+  const box = notesPanel(page).getByRole("textbox", { name: "New note" });
+  await box.fill("Too loud overall.");
+  await box.press("Enter");
+  await expect.poll(async () => (await rushes.api("GET", "/api/notes?stage=mix")).notes.length).toBe(1);
+  await expect(noteTargetMenu(page)).toHaveValue("frame");
+  await box.fill("Hold this frame.");
+  await box.press("Enter");
+  await expect.poll(async () => (await rushes.api("GET", "/api/notes?stage=picture")).notes.length).toBe(1);
+});
+
+test("m6: the status bar's lock picture opens the Cut menu on its lock row", async ({ page, rushes }) => {
+  await rushes.addCut();
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await expect(statusBar(page)).toContainText("Next: lock picture");
+  await statusBar(page).getByRole("button", { name: "lock picture" }).click();
+  await expect(page.getByRole("listbox", { name: "Versions" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Lock picture at v1" })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect.poll(async () => (await rushes.api("GET", "/api/state")).project.videos[0].lockedVersion).toBe("v1");
+});
+
 // ---- final review I6: the target line names its target, on a line of its own ----
 test.describe("the note's target line", () => {
   test("at the panel's default width it names a take with its sound, and a shot, in full on their own line", async ({ page, rushes }) => {

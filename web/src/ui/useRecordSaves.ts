@@ -17,7 +17,7 @@ export type Request<V> = (view: V, fresh: boolean) => { path: string; body: Reco
 export interface SaveOptions {
   toast(message: string): void;
   onChanged(): void;
-  /** Where Send to agent finds how to wait for these saves: it resolves once every queued save has landed, with the record as the server then has it. */
+  /** Where Send finds how to wait for these saves: it resolves once every queued save has landed, with the record as the server then has it. */
   settle: { current: (() => Promise<unknown>) | null };
 }
 

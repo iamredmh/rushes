@@ -21,6 +21,8 @@ export interface VersionMenuProps {
   newer?: string | null;
   /** Rows under the list (the Cut menu's lock row). `close(true)` closes the menu and puts focus back on its button. */
   footer?: (close: (focusButton: boolean) => void) => ComponentChildren;
+  /** Changed (a count above 0) to open the list with focus on the first row under it (m6: the lock row). */
+  openFooter?: number;
 }
 
 /** Digits typed within this long of each other make one version number (type-ahead). */
@@ -29,7 +31,7 @@ const TYPE_AHEAD_MS = 700;
 const EDGE = 16;
 const touchScreen = () => typeof matchMedia === "function" && matchMedia("(hover: none)").matches;
 
-export function VersionMenu({ versions, shown, lockedVersion, onPick, name = "Version", newer = null, footer }: VersionMenuProps) {
+export function VersionMenu({ versions, shown, lockedVersion, onPick, name = "Version", newer = null, footer, openFooter = 0 }: VersionMenuProps) {
   const rows = [...versions].reverse(); // newest at the top, as before
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(shown.id);
@@ -70,10 +72,20 @@ export function VersionMenu({ versions, shown, lockedVersion, onPick, name = "Ve
   // hand while the list was open), the list closes and focus goes back to the button, rather than
   // falling to the page where the shortcuts would work behind the open list.
   const activeGone = open && !versions.some((v) => v.id === active);
+  // Opened for the rows under the list (openFooter): focus goes there instead of to the active row, once.
+  const toFooter = useRef(false);
   useLayoutEffect(() => {
     if (activeGone) close(true);
-    else if (open) rowEls.current[active]?.focus();
+    else if (open && toFooter.current) {
+      toFooter.current = false;
+      foot.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
+    } else if (open) rowEls.current[active]?.focus();
   }, [open, active, activeGone]);
+  useLayoutEffect(() => {
+    if (openFooter <= 0 || !footer) return;
+    toFooter.current = true;
+    show(shown.id);
+  }, [openFooter]);
   // Keep the list inside the window: measured as it opens, after every render while it is open (the button can move
   // when what is beside it changes), and again if the window is resized.
   const place = () => {

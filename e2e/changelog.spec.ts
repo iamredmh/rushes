@@ -134,7 +134,7 @@ test("a line added in Activity is by you, about the tab on screen; the filters a
   expect(entries[0]).toMatchObject({ by: "user", area: "picture", kind: "entry" });
 
   const chips = activity(page).getByRole("radiogroup", { name: "Show" });
-  await expect(chips.getByRole("radio")).toHaveText(["All", "Picture", "Voice", "Music", "Sound effects", "Mix", "Visuals", "Notes", "Files"]);
+  await expect(chips.getByRole("radio")).toHaveText(["All", "Picture", "Voice", "Music", "Effects", "Mix", "Visuals", "Notes", "Files"]);
   await chips.getByRole("radio", { name: "All" }).focus();
   const t0 = await page.getByLabel("Timecode").textContent();
   for (let i = 0; i < 3; i++) await page.keyboard.press("ArrowRight");
@@ -148,7 +148,7 @@ test("a line added in Activity is by you, about the tab on screen; the filters a
   await videoReady(page);
   await expect(activity(page)).toBeVisible();
   await expect(chips.getByRole("radio", { name: "Music" })).toHaveAttribute("aria-checked", "true");
-  await chips.getByRole("radio", { name: "Sound effects" }).click();
+  await chips.getByRole("radio", { name: "Effects" }).click();
   await expect(activity(page).getByText("Nothing for this filter.")).toBeVisible();
 });
 

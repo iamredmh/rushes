@@ -50,14 +50,14 @@ export interface PlanTabRow {
   open: number;
 }
 
-/**
- * The Plan workspace's three-part switch. Left and right (and Home, End) move along it without opening anything, the way a
- * tab list does; Enter or a click opens the page. The keys it handles stop here, so nothing behind it hears them.
- */
 /** The Plan page on show is the switch's tab panel: its id, and each tab's. */
 export const PLAN_PANEL_ID = "plan-page";
 export const planTabId = (page: PlanPage) => `ptab-${page}`;
 
+/**
+ * The Plan workspace's three-part switch. Left and right (and Home, End) move along it without opening anything, the way a
+ * tab list does; Enter or a click opens the page. The keys it handles stop here, so nothing behind it hears them.
+ */
 export function PlanSwitch({ rows, selected, onPick }: { rows: PlanTabRow[]; selected: PlanPage | null; onPick(page: PlanPage): void }) {
   const tabs = useRef<(HTMLButtonElement | null)[]>([]);
   const at = Math.max(0, rows.findIndex((r) => r.page === selected));

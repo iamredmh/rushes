@@ -964,6 +964,14 @@ describe("rushes_add_visual (§25.5)", () => {
     await t.close();
   });
 
+  // m13: a note on a script line (made on the Script page) names the line by its section id.
+  it("says rushes_get_batch's script notes are on their line's section id, or the whole script", async () => {
+    const t = await connect();
+    const { tools } = await t.client.listTools();
+    expect(tools.find((x) => x.name === "rushes_get_batch")!.description).toMatch(/on a Script note, the section id of its line \(null: the script as a whole\)/);
+    await t.close();
+  });
+
   it("says in its description what to send for a new visual and for a new version, and that a fixed note is marked done", async () => {
     const t = await connect();
     const { tools } = await t.client.listTools();

@@ -189,7 +189,9 @@ export interface NextInput {
   /** To-do notes on this film, sent or not. */
   openNotes: number;
   locked: boolean;
-  sound: Record<LaneStage, { started: boolean; fresh: number; inUse: boolean; stale: boolean }>;
+  /** Each sound: whether it has takes, how many are new, whether one is in use, and whether that one was made for an older
+   *  cut (`madeFor`: the cut it was made for). */
+  sound: Record<LaneStage, { started: boolean; fresh: number; inUse: boolean; stale: boolean; madeFor?: string | null }>;
 }
 
 const SOUND_WORDS: Record<LaneStage, { ask: string; one: string }> = {
@@ -203,7 +205,7 @@ const counted = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`
  * The status bar's one line (§27, 5.9): the first of these that applies. `go` is where clicking it
  * leads (for Send, the view whose notes panel holds it), or null when the step is not somewhere on the desk (asking the agent).
  */
-export function nextHint(i: NextInput): { text: string; go: DeskView | null } {
+export function nextHint(i: NextInput): { text: string; go: DeskView | null; menu?: "cut" } {
   // With somewhere to send from, what waits is sent first, cut or no cut (a Visuals note, a plan's edits).
   if (i.unsent > 0 && (i.hasCut || i.sendTo)) return { text: `send ${counted(i.unsent, (i.unsentEdits ?? 0) > 0 ? "change" : "note")}`, go: i.sendTo ?? null };
   if (!i.hasCut) {
@@ -211,14 +213,15 @@ export function nextHint(i: NextInput): { text: string; go: DeskView | null } {
     return { text: "ask for cut 1", go: i.plan.exists ? (i.planPage ?? null) : null };
   }
   if (i.openNotes > 0) return { text: `${counted(i.openNotes, "note")} open`, go: "picture" };
-  if (!i.locked) return { text: "lock picture", go: "picture" };
+  // m6: the lock is in the Cut menu: the line opens it on its lock row.
+  if (!i.locked) return { text: "lock picture", go: "picture", menu: "cut" };
   // One sound at a time: voice is settled before music is asked for.
   for (const stage of ["voice", "music", "sfx"] as const) {
     const s = i.sound[stage];
     const w = SOUND_WORDS[stage];
     if (!s.started) return { text: w.ask, go: null };
     if (s.fresh > 0) return { text: `choose ${w.one}`, go: stage };
-    if (s.inUse && s.stale) return { text: `the ${w.one.replace(/^an? /, "")} in use was made for an older cut`, go: stage };
+    if (s.inUse && s.stale) return { text: `the ${w.one.replace(/^an? /, "")} in use was made for ${s.madeFor ?? "an older cut"}`, go: stage };
   }
   return { text: "nothing to do", go: null };
 }
