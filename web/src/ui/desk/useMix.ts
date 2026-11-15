@@ -92,7 +92,7 @@ export const takeOn = (take: TakeRow) => `${take.lane}/${take.variant.id}`;
 
 /**
  * What each sound plays on a film: one take, the one in use, as the server worked it out (§27.6), on the engine lane named
- * for the sound ("vo", "music", "sfx"). The Timeline tab plays all three; a sound's tab plays the other two under its own.
+ * for the sound ("vo", "music", "sfx"). The Timeline tab plays all three.
  */
 export function planSounds(state: State, assets: Asset[], video: Video | null): SoundRow[] {
   const asset = (path: string) => assets.find((a) => a.path === path);
@@ -108,27 +108,6 @@ export function planSounds(state: State, assets: Asset[], video: Video | null): 
     const clip: Clip = { id: `${take.lane}/${take.variant.id}`, lane, path: file, offset: 0, duration: 0, rev: a ? assetRev(a) : undefined };
     return { lane, groups, take, clip, block: "take" };
   });
-}
-
-/** Each sound's saved level (§19.6) as a gain, as the Timeline tab plays it with nothing muted or soloed. */
-export function savedGains(state: State, video: Video | null): Record<MixLane, number> {
-  const levels = filmPicks(state.picks, video?.id).levels;
-  return laneGains(MIX_LANES.map((id) => ({ id, level: levels[MIX_STAGE[id]] ?? 0 }))) as Record<MixLane, number>;
-}
-
-/** What a sound's tab plays under its own takes: the other sounds' takes in use and every sound's saved level, as a gain. */
-export interface OtherSounds {
-  clips: Clip[];
-  /** By engine lane: "vo", "music", "sfx". */
-  gains: Record<MixLane, number>;
-}
-
-/** The other two sounds' takes in use on this film, for `stage`'s tab (§27, 5.8: a take is auditioned against the mix). */
-export function otherSounds(state: State, assets: Asset[], video: Video | null, stage: "voice" | "music" | "sfx"): OtherSounds {
-  return {
-    clips: planSounds(state, assets, video).flatMap((r) => (MIX_STAGE[r.lane] !== stage && r.clip ? [r.clip] : [])),
-    gains: savedGains(state, video),
-  };
 }
 
 /** Everything the Timeline tab's sound needs: what plays, how loud, what is heard and what it measures. */

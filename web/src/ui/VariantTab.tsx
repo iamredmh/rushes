@@ -7,7 +7,6 @@ import { agentPrompt, AUDIO_CHIPS, defaultVersion, filmLanes, filmNotes, filmPic
 import type { Asset, State, Version, Video } from "../types.js";
 import { AudioStage, filmsOf, type Preview, takeList } from "./AudioStage.js";
 import { filmsControl } from "./FilmsMenu.js";
-import { otherSounds } from "./desk/useMix.js";
 import type { ReviewClock } from "./desk/frame.js";
 import { Icon } from "./Icon.js";
 
@@ -83,7 +82,6 @@ export function VariantTab({ stage, state, assets, video, toast, onChanged, onPe
       film={video?.id ?? null}
       readOnly={!!video?.shelved}
       list={list}
-      others={otherSounds(state, assets, video ?? null, stage)}
       loose={{ items: loose.map((r) => ({ key: r.key, name: r.name, meta: r.meta, films: films(r), none: r.films.length === 0 })), what: loose.length === 1 ? words.one : words.many }}
       headerExtra={stage === "music" ? <BlindButton on={blind} onToggle={() => setBlind(!blind)} /> : undefined}
       preview={preview}
@@ -94,7 +92,7 @@ export function VariantTab({ stage, state, assets, video, toast, onChanged, onPe
       noteRow={(n) => variantNoteRow(rows, n.on)}
       onLabel={(n) => variantOnLabel(rows, options, n.on)}
       targetName={(it, cue) => (cue === null ? it.name : options.find((o) => o.value === `c:${it.key}:${cue}`)?.label ?? it.name)}
-      hasRange
+      rangeMarks
       chipsFor={() => AUDIO_CHIPS[stage]}
       wholeLabel={`The whole ${words.one}`}
       none={words.none}

@@ -1,5 +1,6 @@
 // Voiceover (§18; §27, 5.8): every read for this film, in rounds, as the tab's takes list shows them. A note is on a
-// whole read or a point on it (no ranges), and a read in an older round is named by its round.
+// whole read, a point on it or a range of it (round 1: to replace a stretch of a read, or note a section), never with
+// marks; a read in an older round is named by its round.
 import { useState } from "preact/hooks";
 import { takeGroups, type TakeRow } from "../desk.js";
 import {
@@ -8,7 +9,6 @@ import {
 import type { Asset, State, Version, Video } from "../types.js";
 import { AudioStage, filmsOf, type Preview, takeList } from "./AudioStage.js";
 import { filmsControl } from "./FilmsMenu.js";
-import { otherSounds } from "./desk/useMix.js";
 import { BlindButton } from "./VariantTab.js";
 import type { ReviewClock } from "./desk/frame.js";
 
@@ -70,7 +70,6 @@ export function Voice({ state, assets, video, toast, onChanged, onPendingChange,
       film={video?.id ?? null}
       readOnly={!!video?.shelved}
       list={list}
-      others={otherSounds(state, assets, video ?? null, "voice")}
       loose={{
         items: loose.map((r) => ({ key: r.key, name: `${r.laneName} · ${r.name}`, meta: r.meta, films: films(r), none: r.films.length === 0 })),
         what: loose.length === 1 ? "read" : "reads",
@@ -84,8 +83,9 @@ export function Voice({ state, assets, video, toast, onChanged, onPendingChange,
       noteRow={(n) => voiceNoteRows(model, n)}
       onLabel={(n) => voiceOnLabel(model, n.on, nameOf)}
       targetName={(it) => `${it.take.round} · ${it.name}`}
-      hasRange={false}
-      chipsFor={(scope) => CHIPS[scope === "point" ? "point" : "whole"]}
+      rangeMarks={false}
+      // A range takes the point chips: "Fix this" and "Keep this" read as well for a stretch of a read as for a moment.
+      chipsFor={(scope) => CHIPS[scope === "whole" ? "whole" : "point"]}
       wholeLabel="The whole read"
       none="No voice reads for this film yet."
       toast={toast}

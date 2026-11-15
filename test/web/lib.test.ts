@@ -13,7 +13,7 @@ import {
 import { OPEN_SAFE_EXT as SERVER_OPEN_SAFE_EXT } from "../../src/server/reveal.js";
 import { markLabel as serverMarkLabel, type Mark } from "../../src/core/schema.js";
 import {
-  AUDIO_CHIPS, BUILT, blindOrder, markLabel, marksLabel, scopeOptions, noteFocus, setMarkDb, spacePressesButton, testFlags, toggleMark, watchFocusOrigin, variantMeta,
+  AUDIO_CHIPS, BUILT, blindOrder, markLabel, marksLabel, scopeOptions, noteFocus, setMarkDb, spacePressesButton, testFlags, toggleMark, watchFocusOrigin, variantMeta, takeDetails,
   variantNoteRow, variantNoteTarget, variantOnLabel, variantOnOptions, variantRows,
 } from "../../web/src/lib.js";
 import type { Lane } from "../../web/src/types.js";
@@ -541,6 +541,17 @@ describe("audio tabs: lanes", () => {
     expect(rows.map((r) => r.meta)).toEqual(["120 BPM · A minor", "Soft and warm"]);
     expect(variantRows(lanes, "sfx").map((r) => r.meta)).toEqual(["Subtle · 2 cues", "1 cue"]);
     expect(variantMeta(undefined)).toBeNull();
+  });
+  it("lists a take's details for its name's tooltip and its details line: description, BPM, key, loudness, cues (round 1)", () => {
+    // Every detail known, BPM and key beside the description (variantMeta keeps one or the other).
+    expect(takeDetails({ description: " Warm pad ", bpm: 120, key: "A minor", lufs: -14.2 })).toEqual(["Warm pad", "120 BPM", "A minor", "−14.2 LUFS"]);
+    expect(takeDetails({ bpm: 96 })).toEqual(["96 BPM"]);
+    // Loudness given as words is shown as given; blank values are left out.
+    expect(takeDetails({ loudness: "-16 LUFS", description: "  ", key: "" })).toEqual(["-16 LUFS"]);
+    // An effects pass's cue count is a detail, never drawn over its waveform.
+    expect(takeDetails({ description: "Subtle" }, 2)).toEqual(["Subtle", "2 cues"]);
+    expect(takeDetails(undefined, 1)).toEqual(["1 cue"]);
+    expect(takeDetails(undefined)).toEqual([]);
   });
   it("lists passes then cues in the On menu, telling same-named cues apart", () => {
     const rows = variantRows(lanes, "sfx");

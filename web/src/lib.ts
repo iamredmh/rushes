@@ -604,6 +604,29 @@ export function variantMeta(meta: Record<string, string | number> | undefined, c
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
+/**
+ * A take's details, for its name's tooltip and its details line on a sound's tab (round 1: nothing is drawn over a
+ * waveform): its description, then BPM, key and loudness (`lufs`, a number, or `loudness` in words) when known, and an
+ * effects pass's cue count. Unlike variantMeta, BPM and key are listed beside a description, not in place of one.
+ */
+export function takeDetails(meta: Record<string, string | number> | undefined, cues = 0): string[] {
+  const given = (v: string | number | undefined) => (v !== undefined && String(v).trim() ? String(v).trim() : null);
+  const parts: string[] = [];
+  const description = given(meta?.description);
+  if (description) parts.push(description);
+  const bpm = given(meta?.bpm);
+  if (bpm) parts.push(`${bpm} BPM`);
+  const key = given(meta?.key);
+  if (key) parts.push(key);
+  if (typeof meta?.lufs === "number" && Number.isFinite(meta.lufs)) parts.push(`${String(meta.lufs).replace("-", "−")} LUFS`);
+  else {
+    const loudness = given(meta?.lufs ?? meta?.loudness);
+    if (loudness) parts.push(loudness);
+  }
+  if (cues > 0) parts.push(`${cues} cue${cues === 1 ? "" : "s"}`);
+  return parts;
+}
+
 /** One lane on Music or Sound effects: a variant of one of the stage's lanes (§17.3, §17.4). */
 export interface VariantRow {
   /** `<lane id>/<variant id>`: unique, and the engine clip id. */
