@@ -366,9 +366,16 @@ test("a script edit still waiting to save is kept when the agent replaces the sc
   await rushes.api("PUT", "/api/script", { sections: [{ id: "s1", start: 0, end: 13, current: "First line." }] });
   await page.goto(rushes.url);
   const box = page.getByLabel("Your version of s1");
+  // The save is held until the agent's replace is in, so the order never depends on the machine's speed: on a slow CI
+  // runner the 500 ms save could otherwise land before the replace, and then nothing fails (it did, on WebKit).
+  let release!: () => void;
+  const held = new Promise<void>((r) => { release = r; });
+  await page.route("**/api/script/s1", async (route) => { await held; await route.continue(); });
   await box.fill("First line, edited.");
   // Within the save delay, the agent replaces the whole script, so the row disappears.
   await rushes.api("PUT", "/api/script", { replace: true, sections: [{ id: "s9", start: 0, end: 13, current: "Brand new script." }] });
+  await expect(page.getByLabel("Your version of s1")).toHaveCount(0);
+  release();
   // The pending save is flushed, and since s1 is gone it fails visibly instead of silently.
   await expect(page.getByRole("status")).toContainText("Couldn't save S1");
 });
