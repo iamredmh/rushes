@@ -1,11 +1,12 @@
 // §27, 5.6: sound on the timeline. Under the Picture track, one row each for Voice, Music and Effects (a swatch, the
-// name, its take count, M, S and the level, then one block: the take in use with its waveform), and a Cut sound row
+// name, M, S and the level, then one block: the take in use with its waveform), and a Cut sound row
 // when the cut file has a sound of its own. The takes in use play through one engine that follows the picture.
 // What they play, how loud and what is heard is useMix's (useMix.ts); these are its rows and its loudness readout.
+// Red, round 2: no take counts here (what is new is on the sound's tab), and a row is never a note's target.
 import { useState } from "preact/hooks";
 import { mediaKey } from "../../audio/timeline.js";
 import { cueKeys, cueLabel, cueName, cuesInTime } from "../../cues.js";
-import { markTitle, noteState, pctOf, takeCount } from "../../desk.js";
+import { markTitle, noteState, pctOf } from "../../desk.js";
 import { LEVEL_MAX, LEVEL_MIN, LEVEL_STEP, levelText, loudnessReadout, type MixLane } from "../../lib.js";
 import type { Note } from "../../types.js";
 import { CUE_CARD_ID, CueCard, cardHover, useCueCard } from "../CueCard.js";
@@ -13,13 +14,9 @@ import { rovingKeyDown } from "../CueLayers.js";
 import { Icon } from "../Icon.js";
 import { Wave } from "../Lanes.js";
 import { PictureWave } from "../PictureWave.js";
-import { type Mix, NAME, type SoundRow } from "./useMix.js";
+import { type Mix, NAME } from "./useMix.js";
 
 const COLOR: Record<MixLane, string> = { vo: "var(--vo)", music: "var(--music)", sfx: "var(--sfx)" };
-/** What a sound's takes are called, for its count's tooltip. */
-const NOUN: Record<MixLane, string> = { vo: "read", music: "bed", sfx: "pass" };
-/** The tab each sound's count opens. */
-export type SoundTab = "voice" | "music" | "sfx";
 
 export interface SoundTracksProps {
   mix: Mix;
@@ -27,21 +24,12 @@ export interface SoundTracksProps {
   duration: number;
   t: number;
   onSeek(t: number): void;
-  /** A take count was clicked: open that sound's tab. */
-  onOpenTab?(tab: SoundTab): void;
-  /** §27, 5.7: a row with a take in use was picked: its block clicked at `t` (the note is at that point, and the playhead
-   *  goes there too), or its name clicked (`t` null: the whole take). Its take becomes the note's target. */
-  onPick?(row: SoundRow, t: number | null): void;
-  /** The row whose take is the note's target. */
-  selected?: MixLane | null;
   /** The notes marked on the rows (each on the row `mix.noteRow` names). */
   notes?: Note[];
 }
 
-const TAB: Record<MixLane, SoundTab> = { vo: "voice", music: "music", sfx: "sfx" };
-
 /** The rows under the Picture track. */
-export function SoundTracks({ mix, duration, t, onSeek, onOpenTab, onPick, selected = null, notes = [] }: SoundTracksProps) {
+export function SoundTracks({ mix, duration, t, onSeek, notes = [] }: SoundTracksProps) {
   const pct = (s: number) => pctOf(s, duration);
   const timeAt = (e: MouseEvent): number | null => {
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -59,7 +47,6 @@ export function SoundTracks({ mix, duration, t, onSeek, onOpenTab, onPick, selec
     <>
       {mix.rows.map((row) => {
         const name = NAME[row.lane];
-        const count = takeCount(row.groups);
         const take = row.take;
         const result = row.clip ? mix.media[mediaKey(row.clip)] : undefined;
         const loaded = result !== undefined && result !== "error" ? result : null;
@@ -72,29 +59,12 @@ export function SoundTracks({ mix, duration, t, onSeek, onOpenTab, onPick, selec
           : "Not started";
         const timed = row.lane === "sfx" && row.block === "take" ? cuesInTime(take!.variant.cues) : [];
         const ckeys = cueKeys(timed);
-        const chip = count.fresh > 0 ? `${count.fresh} new` : String(count.all);
         const here = notes.filter((n) => n.t !== null && mix.noteRow(n) === row.lane);
-        const picked = selected === row.lane && take !== null;
         return (
-          <div key={row.lane} class={`trow strack${take ? "" : " idle"}${picked ? " picked" : ""}`} role="group" aria-label={`${name} track`} data-sound={row.lane} aria-current={picked ? "true" : undefined} style={{ "--c": COLOR[row.lane] }}>
+          <div key={row.lane} class={`trow strack${take ? "" : " idle"}`} role="group" aria-label={`${name} track`} data-sound={row.lane} style={{ "--c": COLOR[row.lane] }}>
             <div class="thead shead">
               <i class="sw" aria-hidden="true" />
-              {take && onPick ? (
-                <button type="button" class="snm" aria-pressed={picked} aria-label={`${name}: note on the whole take`} data-tip={`Note on the whole of ${take.variant.name}`} onClick={() => onPick(row, null)}>{name}</button>
-              ) : (
-                <span class="snm">{name}</span>
-              )}
-              {count.all > 0 && (
-                <button
-                  type="button"
-                  class={`tcount mono${count.fresh > 0 ? " new" : ""}`}
-                  aria-label={`${chip}: see every ${NOUN[row.lane]}`}
-                  data-tip={`See every ${NOUN[row.lane]}`}
-                  onClick={() => onOpenTab?.(TAB[row.lane])}
-                >
-                  {chip}
-                </button>
-              )}
+              <span class="snm">{name}</span>
               <span class="sp" />
               {take && (
                 <>
@@ -119,15 +89,7 @@ export function SoundTracks({ mix, duration, t, onSeek, onOpenTab, onPick, selec
                 </>
               )}
             </div>
-            <div
-              class="tlane"
-              onClick={(e) => {
-                const at = timeAt(e);
-                if (at === null) return;
-                if (take && onPick) onPick(row, at);
-                else onSeek(at);
-              }}
-            >
+            <div class="tlane" onClick={seekAt}>
               {row.block === "take" ? (
                 <>
                   <div

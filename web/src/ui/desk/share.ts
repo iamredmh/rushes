@@ -6,6 +6,8 @@
 export const PREVIEW_KEY = "rushes:preview";
 export const PREVIEW_MIN = 0.12;
 export const PREVIEW_MAX = 0.75;
+/** What the preview always leaves for the notes panel under it, in px (desk.css's --notes-room): about two notes of list. */
+export const NOTES_ROOM = 448;
 
 /** A remembered share, held between `min` and `max`; null when none is kept, it is not a number, or storage is refused. */
 export function readShare(key: string, min: number, max: number): number | null {

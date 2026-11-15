@@ -13,7 +13,7 @@ import {
 import { OPEN_SAFE_EXT as SERVER_OPEN_SAFE_EXT } from "../../src/server/reveal.js";
 import { markLabel as serverMarkLabel, type Mark } from "../../src/core/schema.js";
 import {
-  AUDIO_CHIPS, BUILT, blindOrder, markLabel, marksLabel, scopeOptions, noteFocus, setMarkDb, spacePressesButton, testFlags, toggleMark, watchFocusOrigin, variantMeta, takeDetails,
+  BUILT, blindOrder, markLabel, marksLabel, scopeOptions, noteFocus, setMarkDb, spacePressesButton, testFlags, toggleMark, watchFocusOrigin, variantMeta, takeDetails,
   variantNoteRow, variantNoteTarget, variantOnLabel, variantOnOptions, variantRows,
 } from "../../web/src/lib.js";
 import type { Lane } from "../../web/src/types.js";
@@ -532,8 +532,6 @@ describe("audio tabs: lanes", () => {
   it("turns on Music and Sound effects", () => {
     expect(BUILT.music).toBe(true);
     expect(BUILT.sfx).toBe(true);
-    expect(AUDIO_CHIPS.music).toEqual(["Tempo", "Key", "Energy", "Ending"]);
-    expect(AUDIO_CHIPS.sfx).toEqual(["Timing", "Level", "Swap sound", "Remove"]);
   });
   it("makes one row per variant in manifest order, with description or BPM · key", () => {
     const rows = variantRows(lanes, "music");
@@ -669,9 +667,6 @@ describe("Voiceover", () => {
   it("turns on Voiceover", () => {
     expect(BUILT.voice).toBe(true);
   });
-  it("keeps Voiceover's chips as the Whole chips Voice shows (§18.3), not the old §17.1 set", () => {
-    expect(AUDIO_CHIPS.voice).toEqual(["Speaker", "Pacing", "Tone", "Overall"]);
-  });
   it("names sections, for older notes", () => {
     expect(sectionLabel("s2")).toBe("S2");
   });
@@ -803,7 +798,6 @@ describe("Mix", () => {
 
   it("turns on Mix", () => {
     expect(BUILT.mix).toBe(true);
-    expect(AUDIO_CHIPS.mix).toEqual(["Level", "Balance", "Loudness"]);
   });
 
   describe("which lanes are measured", () => {

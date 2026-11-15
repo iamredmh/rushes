@@ -3,8 +3,8 @@
 
 /* ---- top bar: one line, 44 px. The left part gives way (names cut short with an ellipsis); the workspaces stay whole
    and centred; More sits at the right. ---- */
-.top { position: relative; z-index: 37; display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 12px; height: 44px; padding: 0 10px; border-bottom: 1px solid var(--line); background: var(--app); font-size: 13px; }
-.top [data-tip]::after { bottom: auto; top: calc(100% + 6px); font-size: 12.5px; padding: 5px 8px; border-radius: 5px; }
+.top { position: relative; z-index: 37; display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 12px; height: 44px; padding: 0 10px; border-bottom: 1px solid var(--line); background: var(--app); font-size: var(--t-ui); }
+.top [data-tip]::after { bottom: auto; top: calc(100% + 6px); font-size: var(--t-small); padding: 5px 8px; border-radius: 5px; }
 .tleft { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .tright { display: flex; align-items: center; justify-content: flex-end; gap: 4px; min-width: 0; }
 /* The last control's tooltip is anchored to the right, so it never widens the page. */
@@ -18,20 +18,20 @@
 .proj[data-tip]:hover::after { transform: none; }
 
 /* The Film and Cut buttons: a small label and the name, cut short before anything else gives way. */
-.top .pick, .top .vbtn, .filmsel.plain { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; height: 30px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--text); font-size: 13px; cursor: pointer; white-space: nowrap; }
+.top .pick, .top .vbtn, .filmsel.plain { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; height: 30px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--text); font-size: var(--t-ui); cursor: pointer; white-space: nowrap; }
 .filmsel.plain { cursor: default; }
 .top .pick:hover, .top .pick[aria-expanded="true"], .top .vbtn:hover, .top .vbtn[aria-expanded="true"] { background: var(--hover); }
-.top .pick small, .top .vbtn small, .filmsel.plain small { color: var(--text-3); font-size: 12.5px; flex: none; }
+.top .pick small, .top .vbtn small, .filmsel.plain small { color: var(--text-3); font-size: var(--t-small); flex: none; }
 .top .pick .filmname, .filmsel.plain .filmname { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
 .top .pick .ic, .top .vbtn .ic { width: 14px; height: 14px; flex: none; color: var(--text-3); }
-.top .fshelved { flex: none; font-size: 12.5px; color: var(--todo); }
+.top .fshelved { flex: none; font-size: var(--t-small); color: var(--todo); }
 .filmsel { flex: 0 1 auto; min-width: 72px; position: relative; display: inline-flex; }
 .filmsel.plain[data-tip]::after { left: 0; transform: none; }
 /* The cut's label gives way first (its id stays): the project's and the film's names keep their width until even the Cut
    menu at its narrowest leaves no room for them whole, and only then (.tight, TopBar's useTight) do they shrink too. */
 .top .vwrap { flex: 0 1 auto; min-width: 96px; max-width: 340px; }
 .tleft:not(.tight) > .proj, .tleft:not(.tight) > .filmsel { flex-shrink: 0; }
-.top .vbtn .vid { font-family: var(--mono); font-size: 12.5px; color: var(--accent-2); flex: none; }
+.top .vbtn .vid { font-family: var(--mono); font-size: var(--t-small); color: var(--accent-2); flex: none; }
 .top .vbtn .vlbl { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-2); }
 /* A cut newer than the one on screen. */
 .vnewer { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
@@ -40,37 +40,37 @@
 .vfoot { grid-column: 1; display: grid; gap: 2px; padding: 4px 6px 6px; border-top: 1px solid var(--line); }
 .vmenu.touch .vfoot { grid-column: auto; }
 .vfoot .mi .nm { flex: 1; min-width: 0; }
-.vfoot .mi .c { flex: none; font-family: var(--mono); font-size: 12.5px; color: var(--text-3); }
+.vfoot .mi .c { flex: none; font-family: var(--mono); font-size: var(--t-small); color: var(--text-3); }
 @media (max-width: 640px) { .top .vdetail { grid-column: auto; grid-row: auto; } }
 
 /* ---- the workspaces: one segmented control in the middle of the bar ---- */
 .ws { display: flex; align-items: center; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
-.ws .tab { gap: 6px; height: 28px; padding: 0 10px; margin: 0; border: 0; border-radius: 6px; color: var(--text-2); font-size: 13px; font-weight: 500; }
+.ws .tab { gap: 6px; height: 28px; padding: 0 10px; margin: 0; border: 0; border-radius: 6px; color: var(--text-2); font-size: var(--t-ui); font-weight: 500; }
 .ws .tab .ic { width: 15px; height: 15px; }
 .ws .tab:hover { background: var(--hover); color: var(--text); }
 .ws .tab[aria-selected="true"] { background: var(--raised); color: var(--text); font-weight: 600; border-bottom-color: transparent; }
 .ws .tab[data-locked="true"] { color: var(--text-4); }
 .ws .tab .pready { width: 14px; height: 14px; color: var(--done); }
-.wcount { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-2); font: 600 12.5px/18px var(--mono); text-align: center; }
-.ws [data-tip]::after { font-size: 12.5px; }
+.wcount { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-2); font: 600 var(--t-small)/20px var(--mono); text-align: center; }
+.ws [data-tip]::after { font-size: var(--t-small); }
 
 /* ---- the menus the bar opens ---- */
 .mwrap { position: relative; display: inline-flex; min-width: 0; }
-.dmenu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 45; display: grid; gap: 1px; min-width: 260px; max-width: min(440px, calc(100vw - 20px)); max-height: min(70vh, 560px); overflow: auto; padding: 5px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--raised); box-shadow: 0 14px 30px var(--shadow); font-size: 13px; }
+.dmenu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 45; display: grid; gap: 1px; min-width: 260px; max-width: min(440px, calc(100vw - 20px)); max-height: min(70vh, 560px); overflow: auto; padding: 5px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--raised); box-shadow: 0 14px 30px var(--shadow); font-size: var(--t-ui); }
 .more .dmenu { left: auto; right: 0; min-width: 300px; }
 .dmenu hr { margin: 4px 0; border: 0; border-top: 1px solid var(--line); }
-.dmenu .hd { padding: 6px 8px 2px; color: var(--text-3); font-size: 12.5px; font-weight: 600; }
-.dmenu .mi, .vfoot .mi { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 30px; padding: 5px 8px; border: 0; border-radius: 5px; background: transparent; color: var(--text); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.dmenu .hd { padding: 6px 8px 2px; color: var(--text-3); font-size: var(--t-small); font-weight: 600; }
+.dmenu .mi, .vfoot .mi { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 30px; padding: 5px 8px; border: 0; border-radius: 5px; background: transparent; color: var(--text); font: inherit; font-size: var(--t-ui); text-align: left; cursor: pointer; }
 .dmenu .mi:hover, .dmenu .mi:focus-visible, .vfoot .mi:hover, .vfoot .mi:focus-visible { background: var(--hover); outline: none; }
 .dmenu .mi:disabled, .vfoot .mi:disabled { color: var(--text-4); cursor: default; background: transparent; }
 .dmenu .mi[aria-current="true"] { background: var(--accent-soft); }
 .dmenu .mi .ic { width: 15px; height: 15px; color: var(--text-2); }
-.dmenu .mi .k { flex: none; min-width: 18px; font-family: var(--mono); font-size: 12.5px; color: var(--text-3); }
+.dmenu .mi .k { flex: none; min-width: 18px; font-family: var(--mono); font-size: var(--t-small); color: var(--text-3); }
 .dmenu .mi .nm { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.dmenu .mi .c { flex: none; margin-left: auto; max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 12.5px; color: var(--text-3); }
+.dmenu .mi .c { flex: none; margin-left: auto; max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: var(--t-small); color: var(--text-3); }
 .dmenu .mi .c.todo { color: var(--todo); }
 .dmenu .mi .c.fn { font-family: var(--sans); }
-.dmenu .mi kbd { flex: none; font-size: 12.5px; padding: 1px 5px; }
+.dmenu .mi kbd { flex: none; font-size: var(--t-small); padding: 1px 5px; }
 .dmenu .mi .mtick { flex: none; display: grid; place-items: center; width: 15px; height: 15px; border: 1px solid var(--line-2); border-radius: 4px; }
 .dmenu .mi[aria-checked="true"] .mtick { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .dmenu .mi .mtick .ic { width: 12px; height: 12px; color: inherit; }
@@ -79,26 +79,24 @@
 .top .ibtn, .dmenu .ibtn { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--text-2); cursor: pointer; }
 .top .ibtn:hover, .top .ibtn[aria-expanded="true"], .dmenu .ibtn:hover, .dmenu .ibtn:focus-visible { background: var(--hover); color: var(--text); outline: none; }
 .top .ibtn .ic, .dmenu .ibtn .ic { width: 16px; height: 16px; }
-.dmenu .ibtn[data-tip]::after { left: auto; right: 0; transform: none; bottom: auto; top: calc(100% + 4px); font-size: 12.5px; }
+.dmenu .ibtn[data-tip]::after { left: auto; right: 0; transform: none; bottom: auto; top: calc(100% + 4px); font-size: var(--t-small); }
 
 /* ---- the work area's top row in Review: its tabs ---- */
-.rtabrow { position: relative; z-index: 34; display: flex; align-items: center; gap: 8px; min-height: 42px; padding: 4px 10px; border-bottom: 1px solid var(--line); font-size: 13px; }
-.rtabrow [data-tip]::after { bottom: auto; top: calc(100% + 6px); font-size: 12.5px; }
+.rtabrow { position: relative; z-index: 34; display: flex; align-items: center; gap: 8px; min-height: 42px; padding: 4px 10px; border-bottom: 1px solid var(--line); font-size: var(--t-ui); }
+.rtabrow [data-tip]::after { bottom: auto; top: calc(100% + 6px); font-size: var(--t-small); }
 .rtabs { display: flex; align-items: center; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
-.rtabs .tab { gap: 6px; height: 30px; padding: 0 10px; margin: 0; border: 0; border-radius: 6px; font-size: 13px; }
+.rtabs .tab { gap: 6px; height: 30px; padding: 0 10px; margin: 0; border: 0; border-radius: 6px; font-size: var(--t-ui); }
 .rtabs .tab .ic { width: 15px; height: 15px; }
 .rtabs .tab[aria-selected="true"] { background: var(--raised); color: var(--text); font-weight: 600; }
 /* A tab's open-notes dot sits on its corner and takes no room, so nothing after the tabs (the format switch) moves when a note arrives. */
 .rtabs .tab { position: relative; }
 .rtabs .tab .dot { position: absolute; top: 5px; right: 3px; width: 6px; height: 6px; }
-.tcount { font-size: 12.5px; color: var(--text-3); font-weight: 500; }
-.tcount.new { padding: 0 6px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-2); font-weight: 600; }
 
 /* ---- the Timeline tab (5.4 to 5.6): a column the height of the work area. The monitor takes what is left; the
    transport is one row; the timeline panel is as tall as its rows, at most 55% of the column, and scrolls inside
    itself. The divider between them sets the panel's share once dragged. ---- */
-.deskcols > .tl { display: flex; flex-direction: column; min-width: 0; height: max(var(--work-h, calc(100vh - 160px)), 360px); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--app); font-size: 13px; }
-.tl [data-tip]::after { font-size: 12.5px; padding: 5px 8px; border-radius: 5px; }
+.deskcols > .tl { display: flex; flex-direction: column; min-width: 0; height: max(var(--work-h, calc(100vh - 160px)), 360px); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--app); font-size: var(--t-ui); }
+.tl [data-tip]::after { font-size: var(--t-small); padding: 5px 8px; border-radius: 5px; }
 
 .monitor { position: relative; flex: 1 1 0; min-height: 140px; display: flex; background: var(--black); }
 .monitor:fullscreen { width: 100%; height: 100%; }
@@ -113,36 +111,36 @@
    units (styles.css, behind @supports); without them it takes the box's height and its ratio gives the width. */
 .monitor .frame { height: 100%; max-width: 100%; max-height: 100%; margin: 0; border-radius: 4px; }
 
-/* The tool strip: 40 px down the monitor's left. Its tooltips open to the right. */
-.tools { flex: none; width: 40px; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 0; background: var(--app); border-right: 1px solid var(--line); }
-.tool { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--text-2); cursor: pointer; }
+/* The tool strip: 48 px down the monitor's left. Its tooltips open to the right. */
+.tools { flex: none; width: 48px; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 0; background: var(--app); border-right: 1px solid var(--line); }
+.tool { display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--text-2); cursor: pointer; }
 .tool:hover { background: var(--hover); color: var(--text); }
 .tool[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-2); }
 .tool:disabled { color: var(--text-4); cursor: default; background: transparent; }
 .tool[aria-busy="true"] { color: var(--accent-2); }
-.tool .ic { width: 17px; height: 17px; }
+.tool .ic { width: 20px; height: 20px; }
 .tools [data-tip]::after, .tools [data-tip]:hover::after, .tools [data-tip]:focus-visible::after { left: calc(100% + 8px); bottom: auto; top: 50%; transform: translateY(-50%); }
 
 /* The format switch at the monitor's top right; its one-format popover opens under it, against the right edge. */
 /* Above the notes panel's drawer (35), so it stays reachable with the drawer open. */
 .monfmt { position: absolute; top: 10px; right: 10px; z-index: 36; }
-.monfmt .fmts [role="radio"] { min-height: 26px; padding: 2px 10px; font-size: 13px; }
-.monfmt .fmts .n { font-size: 12.5px; line-height: 18px; }
-.monfmt .fmtpop { left: auto; right: 0; font-size: 13px; }
+.monfmt .fmts [role="radio"] { min-height: 26px; padding: 2px 10px; font-size: var(--t-ui); }
+.monfmt .fmts .n { font-size: var(--t-small); line-height: 18px; }
+.monfmt .fmtpop { left: auto; right: 0; font-size: var(--t-ui); }
 
 /* The proxy offer and its progress: a message bar over the foot of the monitor. */
-.monitor .proxybar { position: absolute; left: 10px; right: 10px; bottom: 10px; z-index: 5; padding: 6px 8px 6px 12px; border-radius: 8px; background: var(--raised); box-shadow: 0 6px 20px var(--shadow); font-size: 13px; }
+.monitor .proxybar { position: absolute; left: 10px; right: 10px; bottom: 10px; z-index: 5; padding: 6px 8px 6px 12px; border-radius: 8px; background: var(--raised); box-shadow: 0 6px 20px var(--shadow); font-size: var(--t-ui); }
 .monitor .proxyrow { min-height: 30px; }
-.monitor .proxyrow .btn { height: 30px; padding: 0 12px; font-size: 13px; border-radius: 6px; }
-.monitor .srcswitch button { font-size: 13px; }
+.monitor .proxyrow .btn { height: 30px; padding: 0 12px; font-size: var(--t-ui); border-radius: 6px; }
+.monitor .srcswitch button { font-size: var(--t-ui); }
 
 /* The transport: timecode at the left, play in the middle, volume and full screen at the right. */
 .transport { flex: none; display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 8px; height: 42px; padding: 0 8px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .transport .tleft, .transport .tmid, .transport .tright { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .transport .tright { justify-content: flex-end; }
-.transport .tc { font-size: 13px; padding: 0 4px; white-space: nowrap; }
-.transport .tc small { font-size: 12.5px; }
-.transport .chipx { height: 26px; font-size: 12.5px; }
+.transport .tc { font-size: var(--t-ui); padding: 0 4px; white-space: nowrap; }
+.transport .tc small { font-size: var(--t-small); }
+.transport .chipx { height: 26px; font-size: var(--t-small); }
 .transport .btn.ib { width: 30px; height: 30px; padding: 0; border-radius: 6px; }
 .transport .btn.tplay { width: 34px; }
 .transport .btn .ic { width: 16px; height: 16px; }
@@ -157,7 +155,7 @@
 .tlpanel { flex: 0 1 auto; max-height: 55%; min-height: 0; overflow: auto; }
 .tlpanel.sized { flex: none; }
 .trow { display: grid; grid-template-columns: 272px minmax(0, 1fr); min-height: 0; }
-.thead { display: flex; align-items: center; gap: 6px; padding: 0 10px; border-right: 1px solid var(--line); color: var(--text-2); font-size: 12.5px; font-weight: 600; }
+.thead { display: flex; align-items: center; gap: 6px; padding: 0 10px; border-right: 1px solid var(--line); color: var(--text-2); font-size: var(--t-ui); font-weight: 600; }
 .thead .tlock { display: inline-grid; color: var(--text-3); }
 .thead .tlock .ic { width: 13px; height: 13px; }
 .tlane { position: relative; margin: 0 12px; }
@@ -166,7 +164,7 @@
 .ruler { position: relative; height: 30px; margin: 0 12px; border-bottom: 1px solid var(--line); cursor: pointer; touch-action: none; user-select: none; }
 .rtick { position: absolute; bottom: 0; width: 1px; height: 5px; background: var(--line-2); pointer-events: none; }
 .rtick.major { height: 9px; }
-.rlbl { position: absolute; bottom: 10px; left: 3px; font: 11px var(--mono); color: var(--text-3); white-space: nowrap; }
+.rlbl { position: absolute; bottom: 10px; left: 3px; font: var(--t-meta) var(--mono); color: var(--text-3); white-space: nowrap; }
 .ruler .mk { top: auto; bottom: 1px; padding: 0; transform: translateX(-50%); cursor: pointer; }
 .ruler .mk:not(.ring) { border: 0; box-shadow: 0 0 0 2px var(--app); }
 /* A dot sits over a ring at the same moment, so the ring's band and the dot's centre are both reachable (§21.5). The ring is
@@ -189,12 +187,12 @@
 
 /* The Picture track: a block per shot. */
 .ptrack .tlane { height: 40px; }
-.pblock { position: absolute; top: 6px; bottom: 6px; display: flex; align-items: center; min-width: 0; padding: 0 8px; border: 1px solid var(--line-2); border-left-width: 2px; border-left-color: var(--pic); border-radius: 4px; background: var(--raised); color: var(--text-2); font: 12.5px/1 var(--sans); text-align: left; cursor: pointer; }
+.pblock { position: absolute; top: 6px; bottom: 6px; display: flex; align-items: center; min-width: 0; padding: 0 8px; border: 1px solid var(--line-2); border-left-width: 2px; border-left-color: var(--pic); border-radius: 4px; background: var(--raised); color: var(--text-2); font: var(--t-ui)/1 var(--sans); text-align: left; cursor: pointer; }
 .pblock:hover { background: var(--hover); color: var(--text); }
 .pblock[aria-current="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
 .pblock .plbl { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* A block's full name and tag, in its tooltip (the block itself does not clip, so the tooltip is whole). */
-.pblock[data-tip]::after { left: 0; transform: translateY(2px); font-size: 12.5px; padding: 5px 8px; border-radius: 5px; }
+.pblock[data-tip]::after { left: 0; transform: translateY(2px); font-size: var(--t-small); padding: 5px 8px; border-radius: 5px; }
 .pblock[data-tip]:hover::after, .pblock[data-tip]:focus-visible::after { transform: none; }
 
 /* §27, 5.6: the sound rows. A swatch in the sound's colour, its name and take count, then M, S and the level. */
@@ -208,18 +206,15 @@
 .strack .shead { gap: 5px; min-width: 0; flex-wrap: nowrap; }
 .strack .shead .sw { flex: none; width: 8px; height: 8px; border-radius: 2px; background: var(--c); }
 .strack .shead .snm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.strack .shead .tcount { flex: none; border: 0; background: none; padding: 0 4px; border-radius: 4px; cursor: pointer; font-family: var(--mono); }
-.strack .shead .tcount:not(.new) { background: var(--raised); }
-.strack .shead .tcount:hover { color: var(--text); }
-.strack .shead .ms { flex: none; width: 20px; height: 20px; border-radius: 4px; font: 600 12.5px/1 var(--sans); }
+.strack .shead .ms { flex: none; width: 22px; height: 22px; border-radius: 4px; font: 600 var(--t-small)/1 var(--sans); }
 .strack .shead .slvl { display: flex; align-items: center; gap: 4px; flex: none; }
 .strack .shead .slvl input { width: 48px; margin: 0; accent-color: var(--c); }
-.strack .shead .db { width: 50px; font-size: 12.5px; font-weight: 500; color: var(--text-3); text-align: right; white-space: nowrap; }
+.strack .shead .db { width: 50px; font-size: var(--t-small); font-weight: 500; color: var(--text-3); text-align: right; white-space: nowrap; }
 /* One block: the take in use, its name over its waveform; dashed and empty when nothing plays. */
-.sblock { position: absolute; top: 3px; bottom: 3px; display: flex; align-items: center; min-width: 0; padding: 0 8px; border: 1px solid var(--line-2); border-left: 2px solid var(--c); border-radius: 4px; background: var(--raised); color: var(--text-2); font: 12.5px/1 var(--sans); overflow: hidden; pointer-events: none; }
+.sblock { position: absolute; top: 3px; bottom: 3px; display: flex; align-items: center; min-width: 0; padding: 0 8px; border: 1px solid var(--line-2); border-left: 2px solid var(--c); border-radius: 4px; background: var(--raised); color: var(--text-2); font: var(--t-ui)/1 var(--sans); overflow: hidden; pointer-events: none; }
 .sblock .slbl { position: relative; z-index: 1; padding: 2px 5px; border-radius: 3px; background: var(--raised); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sblock.none { border: 1px dashed var(--line-2); background: none; color: var(--text-3); }
-.sblock.none .slbl { background: none; padding: 0; line-height: 16px; }
+.sblock.none .slbl { background: none; padding: 0; line-height: 18px; }
 .sblock.gone { color: var(--over); }
 /* A take made for an older cut (madeForStale): a dashed amber outline. */
 .sblock.stale { border: 1px dashed var(--todo); border-left: 2px dashed var(--todo); }
@@ -234,13 +229,13 @@
 .strack .cue:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 /* §27, 5.6: before there is a cut, a slate where the picture would be. */
-.noslate { margin: auto; display: grid; justify-items: center; gap: 8px; padding: 16px; max-width: 360px; text-align: center; color: var(--k-text-2); font-size: 13px; }
-.noslate h3 { margin: 0; font-size: 15px; font-weight: 600; color: var(--k-text); }
+.noslate { margin: auto; display: grid; justify-items: center; gap: 8px; padding: 16px; max-width: 360px; text-align: center; color: var(--k-text-2); font-size: var(--t-ui); }
+.noslate h3 { margin: 0; font-size: var(--t-title); font-weight: 600; color: var(--k-text); }
 .noslate p { margin: 0; }
 .noslate > .ic { width: 28px; height: 28px; color: var(--k-text-3); }
 
 /* §27, 5.6: the loudness of what you hear, in the transport beside the volume. */
-.tloud { display: flex; align-items: baseline; gap: 10px; margin-right: 8px; font-size: 12.5px; color: var(--text-3); white-space: nowrap; }
+.tloud { display: flex; align-items: baseline; gap: 10px; margin-right: 8px; font-size: var(--t-small); color: var(--text-3); white-space: nowrap; }
 .tloud .lcell { display: inline-flex; align-items: baseline; gap: 4px; }
 .tloud b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
 .tloud[aria-busy="true"] b { color: var(--text-2); }
@@ -252,22 +247,20 @@
 @container (max-width: 820px) { .tloud [data-cell="musicUnderVo"] { display: none; } }
 @container (max-width: 700px) { .tloud [data-cell="truePeak"] { display: none; } }
 /* ---- status bar: one line, 26 px, at the foot. The notes panel's drawer stops above it, so it never covers it. ---- */
-.status { display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 84px 0 10px; border-top: 1px solid var(--line); background: var(--app); color: var(--text-3); font-size: 12.5px; white-space: nowrap; overflow-x: clip; overflow-y: visible; }
-.status > .ic { width: 14px; height: 14px; }
-.status .next { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.status .next b { color: var(--text); font-weight: 500; }
-.status .nextgo { padding: 0; border: 0; background: none; color: var(--accent-2); font: inherit; font-weight: 500; cursor: pointer; }
-.status .nextgo:hover { text-decoration: underline; }
-.status .smeta { display: flex; gap: 12px; font-size: 12.5px; color: var(--text-2); }
+.status { display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 84px 0 10px; border-top: 1px solid var(--line); background: var(--app); color: var(--text-3); font-size: var(--t-small); white-space: nowrap; overflow-x: clip; overflow-y: visible; }
+.status .ssend { display: inline-flex; align-items: center; gap: 6px; padding: 0 6px; border: 0; border-radius: 4px; background: none; color: var(--accent-2); font: inherit; font-weight: 500; cursor: pointer; }
+.status .ssend:hover { background: var(--hover); }
+.status .ssend .ic { width: 14px; height: 14px; }
+.status .smeta { display: flex; gap: 12px; font-size: var(--t-small); color: var(--text-2); }
 /* On a one-format cut the shape is a button; its popover (the request for the other shapes) opens above the bar, at the
    window's right, fixed so the bar's own clipping never cuts it. */
 .status .sshape { display: inline-flex; }
 .status .sfmt { padding: 0 4px; border: 0; border-radius: 4px; background: transparent; color: var(--accent-2); font: inherit; cursor: pointer; }
 .status .sfmt:hover, .status .sfmt[aria-expanded="true"] { background: var(--hover); }
 /* The bar clips only sideways, so the tooltip opens above its own button, lined up with the button's right side. */
-.status .sfmt[data-tip]::after, .status .sfmt[data-tip]:hover::after, .status .sfmt[data-tip]:focus-visible::after { top: auto; left: auto; right: 0; bottom: calc(100% + 6px); transform: none; font-size: 12.5px; padding: 5px 8px; border-radius: 5px; }
+.status .sfmt[data-tip]::after, .status .sfmt[data-tip]:hover::after, .status .sfmt[data-tip]:focus-visible::after { top: auto; left: auto; right: 0; bottom: calc(100% + 6px); transform: none; font-size: var(--t-small); padding: 5px 8px; border-radius: 5px; }
 .status .sfmt[aria-expanded="true"]::after { display: none; }
-.fmtpop.spop { position: fixed; top: auto; left: auto; right: 10px; bottom: 32px; white-space: normal; font-size: 13px; color: var(--text); font-family: var(--sans); }
+.fmtpop.spop { position: fixed; top: auto; left: auto; right: 10px; bottom: 32px; white-space: normal; font-size: var(--t-ui); color: var(--text); font-family: var(--sans); }
 
 /* Narrow windows (under the 1100 px the desk is made for): the project's name and the small labels go first, so the
    Film and Cut buttons keep to their side of the centred workspaces. */
@@ -284,49 +277,51 @@
 .deskcols { display: grid; grid-template-columns: minmax(0, 1fr) var(--notes-w, 300px); gap: 0; align-items: stretch; }
 .nhidden .deskcols { grid-template-columns: minmax(0, 1fr); }
 .deskcols > .wsmain { min-width: 0; height: max(var(--work-h, calc(100vh - 160px)), 360px); overflow: auto; padding-right: 12px; }
-.npanel { position: relative; display: flex; flex-direction: column; min-width: 0; height: max(var(--work-h, calc(100vh - 160px)), 360px); padding-left: 8px; font-size: 13px; }
+.npanel { position: relative; display: flex; flex-direction: column; min-width: 0; height: max(var(--work-h, calc(100vh - 160px)), 360px); padding-left: 8px; font-size: var(--t-ui); }
 .npanel[hidden] { display: none; }
 .nresize { position: absolute; left: 0; top: 0; bottom: 0; z-index: 2; width: 6px; border-radius: 3px; cursor: col-resize; touch-action: none; }
 .nresize:hover, .nresize:focus-visible { background: var(--accent-soft); outline: none; }
 .npanel > .ntabs, .npanel > .ntabpanel, .npanel > .nfoot { background: var(--raised); }
 .ntabs { display: flex; align-items: center; gap: 4px; height: 38px; padding: 0 6px; border-radius: 8px 8px 0 0; border-bottom: 1px solid var(--line); }
 .ntablist { display: flex; align-items: center; gap: 2px; }
-.ntab { position: relative; display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: var(--text-2); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
+.ntab { position: relative; display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: var(--text-2); font: inherit; font-size: var(--t-ui); font-weight: 500; cursor: pointer; }
 .ntab:hover { background: var(--hover); color: var(--text); }
 .ntab[aria-selected="true"] { background: var(--app); color: var(--text); font-weight: 600; }
-.ntab .n { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--todo-soft); color: var(--todo); font: 600 12.5px/18px var(--mono); text-align: center; }
+.ntab .n { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--todo-soft); color: var(--todo); font: 600 var(--t-small)/20px var(--mono); text-align: center; }
 .ntab .cdot { position: absolute; top: 4px; right: 2px; width: 7px; height: 7px; border-radius: 50%; background: var(--todo); }
 .ntabs .ibtn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--text-2); cursor: pointer; }
 .ntabs .ibtn:hover { background: var(--hover); color: var(--text); }
 .ntabs .ibtn .ic { width: 15px; height: 15px; }
-.ntabs [data-tip]::after { left: auto; right: 0; transform: none; bottom: auto; top: calc(100% + 6px); font-size: 12.5px; }
+.ntabs [data-tip]::after { left: auto; right: 0; transform: none; bottom: auto; top: calc(100% + 6px); font-size: var(--t-small); }
 .ntabpanel { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .ntabpanel[hidden] { display: none; }
 /* The notes list and its box fill the tab; the panel's own background is the card. */
 .npanel .panel.side { flex: 1; height: auto; min-height: 0; border-radius: 0; background: transparent; }
 .npanel .ph { padding: 8px 10px 4px; justify-content: flex-end; }
-.npanel .seg button { font-size: 12.5px; }
-.npanel .note { font-size: 13px; }
-.npanel .list .none { font-size: 13px; }
-.npanel .nt .on, .npanel .nmarks, .npanel .shotref { font-size: 12.5px; }
+.npanel .seg button { font-size: var(--t-ui); }
+.ntabs .nfilter .sel { height: 28px; padding: 0 28px 0 10px; border-radius: 6px; color: var(--text-2); font-size: var(--t-ui); }
+.ntabs .nfilter .sel:hover { color: var(--text); }
+.npanel .note { font-size: var(--t-ui); }
+.npanel .list .none { font-size: var(--t-ui); }
+.npanel .nt .on, .npanel .nmarks, .npanel .shotref { font-size: var(--t-small); }
 /* A note's status: an amber ring while it is to do, green when done. */
 .npanel .chk { width: 16px; height: 16px; border-width: 2px; }
-.npanel .chip { height: 26px; padding: 0 10px; font-size: 12.5px; }
-.npanel .sel.dbsel { height: 26px; padding: 0 22px 0 8px; font-size: 12.5px; }
+.npanel .chip { height: 26px; padding: 0 10px; font-size: var(--t-ui); }
+.npanel .sel.dbsel { height: 26px; padding: 0 22px 0 8px; font-size: var(--t-ui); }
 /* The marks take the chips' row and its height: one line, never wrapping. */
 .npanel .comp .row[aria-label="Marks"] { flex-wrap: nowrap; gap: 4px; }
 .npanel .markc { gap: 2px; }
 .npanel .row[aria-label="Marks"] .chip { padding: 0 8px; }
 .npanel .row[aria-label="Marks"] .onwrap svg.ic { right: 6px; }
-.npanel .comp { font-size: 13px; }
+.npanel .comp { font-size: var(--t-ui); }
 /* m7: where the note box would be on the Brief and Storyboard pages, the one line that says where notes are written. */
-.npanel .ninstead { margin: 0; padding: 12px; border-top: 1px solid var(--line); color: var(--text-3); font-size: 12.5px; line-height: 1.4; }
-.npanel .comp .input { font-size: 13px; }
+.npanel .ninstead { margin: 0; padding: 12px; border-top: 1px solid var(--line); color: var(--text-3); font-size: var(--t-small); line-height: 1.4; }
+.npanel .comp .input { font-size: var(--t-ui); }
 /* The target line: what the next note is about. */
 /* The target line (final review I6), two lines: the menu with the time beside it (and Clear at the end), then the target's
    name on its own line, wrapping to a second line before it ends in an ellipsis. The label's parts sit in the grid
    directly (.ntl is display: contents); the " · " between them is only for reading the line as text. */
-.comp .ntarget { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "menu when clear" "name name name"; align-items: center; column-gap: 6px; row-gap: 4px; min-width: 0; font-size: 12.5px; color: var(--text-2); }
+.comp .ntarget { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "menu when clear" "name name name"; align-items: center; column-gap: 6px; row-gap: 4px; min-width: 0; font-size: var(--t-ui); color: var(--text-2); }
 .ntarget .ntl { display: contents; }
 .ntarget .ntsep { display: none; }
 .ntarget .ntwhen { grid-area: when; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); color: var(--text); line-height: 26px; }
@@ -334,41 +329,36 @@
 .ntarget .ntclamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; line-height: 17px; }
 .comp .ntarget > .onwrap { grid-area: menu; flex: none; }
 .comp .ntarget > .onwrap .ntsel { width: auto; }
-.ntarget .sel.ntsel { height: 26px; padding: 0 26px 0 8px; border-radius: 6px; background: var(--app); color: var(--text); font-size: 12.5px; }
+.ntarget .sel.ntsel { height: 26px; padding: 0 26px 0 8px; border-radius: 6px; background: var(--app); color: var(--text); font-size: var(--t-ui); }
 .ntarget .ntclear { grid-area: clear; justify-self: end; flex: none; width: 24px; height: 24px; padding: 0; }
 .ntarget .ntclear .ic { width: 14px; height: 14px; }
 .ntarget .ntclear[data-tip]::after { left: auto; right: 0; transform: none; }
 /* The target's full words: wrapping, from its left edge, never past the panel's right. */
 .ntarget .ntname[data-tip]::after, .ntarget .ntname[data-tip]:hover::after { left: 0; transform: none; max-width: min(260px, calc(var(--notes-w, 300px) - 24px)); font-family: var(--sans); }
 .nfoot { display: flex; padding: 8px 10px; border-top: 1px solid var(--line); border-radius: 0 0 8px 8px; }
-.nfoot .sendbtn { flex: 1; justify-content: center; height: 32px; font-size: 13px; border-radius: 6px; }
-.nfoot .sendbtn .count { min-width: 18px; height: 18px; margin-left: 8px; padding: 0 5px; font: 600 12.5px/18px var(--mono); }
-.nfoot .sendbtn[data-tip]::after { bottom: calc(100% + 6px); font-size: 12.5px; }
+.nfoot .sendbtn { flex: 1; justify-content: center; height: 32px; font-size: var(--t-ui); border-radius: 6px; }
+.nfoot .sendbtn .count { min-width: 20px; height: 20px; margin-left: 8px; padding: 0 6px; font: 600 var(--t-small)/20px var(--mono); }
+.nfoot .sendbtn[data-tip]::after { bottom: calc(100% + 6px); font-size: var(--t-small); }
 /* Activity: the Change Log's list, sized for the panel. */
-.activity { display: grid; flex: 1; min-height: 0; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; font-size: 13px; }
+.activity { display: grid; flex: 1; min-height: 0; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; font-size: var(--t-ui); }
 .activity .dadd { padding: 8px 10px; }
-.activity .dadd input, .activity .dchips [role="radio"], .activity .dpill, .activity .dday, .activity .dbefore h3 { font-size: 13px; }
+.activity .dadd input, .activity .dpill, .activity .dday, .activity .dbefore h3 { font-size: var(--t-ui); }
 .activity .dadd input { padding: 5px 10px; }
-.activity .dadd .btn { padding: 5px 12px; font-size: 13px; }
-.activity .dchips { gap: 4px; padding: 8px 10px; }
-.activity .dchips [role="radio"] { padding: 1px 10px; }
+.activity .dadd .btn { padding: 5px 12px; font-size: var(--t-ui); }
 .activity .dday { padding: 10px 10px 2px; background: var(--raised); }
-.activity .lrow { grid-template-columns: 40px minmax(0, 1fr) 10px; gap: 2px 8px; padding: 6px 10px; font-size: 13px; }
-.activity .lrow .ltime { grid-row: 1 / span 2; font-size: 12.5px; }
-.activity .lrow .ltag { grid-column: 2; grid-row: 1; font-size: 12.5px; line-height: 18px; }
+.activity .lrow { grid-template-columns: 40px minmax(0, 1fr) 10px; gap: 2px 8px; padding: 6px 10px; font-size: var(--t-ui); }
+.activity .lrow .ltime { grid-row: 1 / span 2; font-size: var(--t-small); }
+.activity .lrow .ltag { grid-column: 2; grid-row: 1; font-size: var(--t-small); line-height: 18px; }
 .activity .lrow .ltext { grid-column: 2; grid-row: 2; }
 .activity .lrow .lgo { grid-column: 3; grid-row: 1; }
-.activity .lrow .lby { font-size: 12.5px; }
-.activity .dempty { padding: 20px 12px; font-size: 13px; }
+.activity .lrow .lby { font-size: var(--t-small); }
+.activity .dempty { padding: 20px 12px; font-size: var(--t-ui); }
 .activity .dbefore { margin: 10px 10px 0; }
-.activity .dfoot { padding: 8px 10px; font-size: 12.5px; }
-.activity .dfoot .btn { padding: 4px 10px; font-size: 12.5px; }
+.activity .dfoot { padding: 8px 10px; font-size: var(--t-small); }
+.activity .dfoot .btn { padding: 4px 10px; font-size: var(--t-ui); }
 /* The top bar's toggle: lit while the panel shows. */
 .top .ntoggle[aria-pressed="true"] { color: var(--accent-2); }
 /* §27, 5.7: the sound row whose take is the note's target, and the notes marked on the rows. */
-.strack.picked .sblock { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
-.strack .shead button.snm { padding: 0 3px; margin: 0 -3px; border: 0; border-radius: 3px; background: none; color: inherit; font: inherit; cursor: pointer; }
-.strack .shead button.snm:hover { color: var(--text); background: var(--hover); }
 .strack .shead button.snm[aria-pressed="true"] { color: var(--accent-2); }
 .strack .tlane .mk { z-index: 3; width: 8px; height: 8px; pointer-events: none; }
 .strack .tlane .span { top: 2px; bottom: 2px; z-index: 2; }
@@ -384,10 +374,13 @@
 /* The right column: the preview, full width at the cut's own shape (a tall cut is held to under half the column, centred),
    above the notes panel, which fills the rest. With the panel hidden it stays, the preview alone, at the same width. */
 .nhidden .deskcols.soundcols { grid-template-columns: minmax(0, 1fr) var(--notes-w, 300px); }
-.soundside { display: flex; flex-direction: column; gap: 8px; min-width: 0; height: max(var(--work-h, calc(100vh - 160px)), 360px); }
+/* --notes-room: what the preview always leaves for the notes panel under it, so its list stays readable whatever the
+   preview's size (Red, round 2): the panel's tab row, note box and Send take about 230 px (more with a range's marks), the
+   list keeps the rest, about 210, and there is the 8 px gap. NOTES_ROOM in share.ts is the same number. */
+.soundside { --notes-room: 448px; display: flex; flex-direction: column; gap: 8px; min-width: 0; height: max(var(--work-h, calc(100vh - 160px)), 360px); }
 .soundside > .npanel:not(.drawer) { flex: 1 1 0; height: auto; min-height: 0; }
 /* Its width is set, not stretched, so its height follows from the shape in WebKit too. */
-.soundside > .spreview { position: relative; z-index: 3; flex: none; align-self: flex-start; display: grid; box-sizing: border-box; width: calc(100% - 8px); min-height: 0; margin-left: 8px; aspect-ratio: var(--ar, 16 / 9); max-height: 45%; border-radius: 8px; }
+.soundside > .spreview { position: relative; z-index: 3; flex: none; align-self: flex-start; display: grid; box-sizing: border-box; width: calc(100% - 8px); min-height: 0; margin-left: 8px; aspect-ratio: var(--ar, 16 / 9); max-height: max(80px, min(45%, calc(100% - var(--notes-room)))); border-radius: 8px; }
 .soundside > .spreview.noslot { aspect-ratio: auto; max-height: none; }
 /* The line under the preview sits in the gap above the notes panel; dragging it sizes the preview (frame.tsx). Once
    dragged, the preview is held to --pv of the column, and the column widens to keep the cut's shape at that height, up
@@ -397,60 +390,64 @@
 @media (min-width: 1100px) {
   .shell .deskcols.soundcols.pvsized {
     --side-h: max(var(--work-h, calc(100vh - 160px)), 360px);
-    --pv-w: min(calc(var(--pv) * var(--side-h) * var(--ar)), calc(50vw - 8px));
+    /* The height chosen, never into the notes panel's room; the width that keeps the cut's shape, at most half the window. */
+    --pv-h: max(80px, min(calc(var(--pv) * var(--side-h)), calc(var(--side-h) - 448px)));
+    --pv-w: min(calc(var(--pv-h) * var(--ar)), calc(50vw - 8px));
     grid-template-columns: minmax(0, 1fr) max(var(--notes-w, 300px), calc(var(--pv-w) + 8px));
   }
-  .pvsized .soundside > .spreview { max-height: calc(var(--pv) * 100%); }
+  .pvsized .soundside > .spreview { max-height: var(--pv-h); }
 }
 .spreview .framebox { border-radius: 8px; }
 .spreview .fitbox { inset: 0; }
 .spreview .frame { border-radius: 0; cursor: pointer; }
-.spreview .tcover { right: 8px; bottom: 8px; font-size: 12px; padding: 3px 6px; }
+.spreview .tcover { right: 8px; bottom: 8px; font-size: var(--t-meta); padding: 3px 6px; }
 .spreview .noslate { padding: 14px 12px; }
 .spfull { position: absolute; top: 6px; right: 6px; z-index: 2; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; background: var(--scrim); color: var(--on-black); cursor: pointer; }
 .spfull:hover, .spfull:focus-visible { background: var(--k-hover); outline: none; }
 .spfull .ic { width: 15px; height: 15px; }
-.spfull[data-tip]::after, .spfull[data-tip]:hover::after, .spfull[data-tip]:focus-visible::after { left: auto; right: 0; bottom: auto; top: calc(100% + 6px); transform: none; font-size: 12.5px; padding: 5px 8px; border-radius: 5px; }
+.spfull[data-tip]::after, .spfull[data-tip]:hover::after, .spfull[data-tip]:focus-visible::after { left: auto; right: 0; bottom: auto; top: calc(100% + 6px); transform: none; font-size: var(--t-small); padding: 5px 8px; border-radius: 5px; }
 @media (max-width: 1299px) { .takespanel { --kh: 320px; } }
 .takespanel .trow { grid-template-columns: var(--kh) minmax(0, 1fr); }
 .takespanel .kstick { position: sticky; top: 0; z-index: 6; background: var(--app); }
 .rrow .kttl { font-weight: 600; color: var(--text); }
-.kblind { height: 22px; padding: 0 8px; gap: 4px; font-size: 12.5px; }
+.kblind { height: 22px; padding: 0 8px; gap: 4px; font-size: var(--t-ui); }
 .kblind .ic { width: 13px; height: 13px; }
 .kblind[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-2); }
-.khd { margin: 0; padding: 8px 10px 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-top: 1px solid var(--line); color: var(--text-3); font-size: 12.5px; font-weight: 600; }
+.khd { margin: 0; padding: 8px 10px 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-top: 1px solid var(--line); color: var(--text-3); font-size: var(--t-small); font-weight: 600; }
 .khd[data-tip]::after { left: 10px; bottom: auto; top: calc(100% + 2px); transform: none; width: max-content; max-width: min(520px, 80vw); white-space: normal; line-height: 1.3; text-align: left; }
 .kfold { display: flex; align-items: center; gap: 8px; padding-right: 10px; border-top: 1px solid var(--line); }
 .kfold .khd { flex: 0 1 auto; min-width: 0; border-top: 0; padding-bottom: 6px; padding-top: 6px; }
-.kfold .btn { flex: none; height: 22px; padding: 0 8px; font-size: 12.5px; }
-.khint { flex: none; margin-left: auto; color: var(--text-3); font-size: 12.5px; white-space: nowrap; }
-.knone { margin: 12px 10px; color: var(--text-2); font-size: 13px; }
+.kfold .btn { flex: none; height: 22px; padding: 0 8px; font-size: var(--t-ui); }
+.khint { flex: none; margin-left: auto; color: var(--text-3); font-size: var(--t-small); white-space: nowrap; }
+.knone { margin: 12px 10px; color: var(--text-2); font-size: var(--t-ui); }
 .take .khead { gap: 6px; font-weight: 500; }
 .take .tlane { height: 32px; cursor: pointer; }
 .take:has(.cue) .tlane { height: 52px; }
 .take.loose .tlane { height: 24px; cursor: default; }
 .take .chev { flex: none; width: 20px; height: 20px; border-radius: 5px; }
 .take .chev svg.ic { width: 12px; height: 12px; }
-.kpick { position: relative; flex: none; width: 16px; height: 16px; padding: 0; border: 1.5px solid var(--line-2); border-radius: 50%; background: transparent; cursor: pointer; }
+/* Whole pixels throughout (Red, round 2): an 18 px ring with a 2 px border leaves 14 px, and the 8 px dot sits 3 px in on every
+   side, so it is never a half pixel off centre. */
+.kpick { display: inline-grid; place-items: center; box-sizing: border-box; flex: none; width: 18px; height: 18px; padding: 0; border: 2px solid var(--line-2); border-radius: 50%; background: transparent; cursor: pointer; }
 .kpick:hover { border-color: var(--text-2); }
 .kpick[aria-checked="true"] { border-color: var(--accent); }
-.kpick[aria-checked="true"]::before { content: ""; position: absolute; inset: 2.5px; border-radius: 50%; background: var(--accent); }
+.kpick[aria-checked="true"]::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
 .kpick:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.knm { display: inline-flex; align-items: center; gap: 6px; min-width: 0; padding: 2px 4px; margin: 0 -2px; border: 0; border-radius: 4px; background: none; color: var(--text); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
+.knm { display: inline-flex; align-items: center; gap: 6px; min-width: 0; padding: 2px 4px; margin: 0 -2px; border: 0; border-radius: 4px; background: none; color: var(--text); font: inherit; font-size: var(--t-ui); text-align: left; cursor: pointer; }
 .knm [data-name] { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .knm:hover { background: var(--hover); }
 .knm[data-tip]::after { left: 0; transform: none; width: max-content; max-width: min(520px, 80vw); white-space: normal; line-height: 1.3; text-align: left; }
 span.knm, span.knm:hover { cursor: default; background: none; }
 .take.picked .knm { color: var(--accent-2); }
 .take.picked .sblock { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
-.ktag { flex: none; padding: 0 5px; border-radius: 4px; background: var(--raised); color: var(--text-3); font-size: 12.5px; line-height: 18px; }
+.ktag { flex: none; padding: 0 5px; border-radius: 4px; background: var(--raised); color: var(--text-3); font-size: var(--t-small); line-height: 18px; }
 .ktag.stale { background: var(--todo-soft); color: var(--todo); }
 /* Put away, Bring back or Unpick: a slot of its own at the end of the head, its width kept so nothing moves when it shows.
    It shows on the row under the pointer, with focus inside it, or selected; hidden, it takes no clicks. */
 .take .kslot { flex: none; display: flex; justify-content: flex-end; width: 84px; }
-.take .kput { height: 22px; padding: 0 8px; font-size: 12.5px; visibility: hidden; }
+.take .kput { height: 22px; padding: 0 8px; font-size: var(--t-ui); visibility: hidden; }
 .take:hover .kput, .take:focus-within .kput, .take.picked .kput { visibility: visible; }
-.take .filmsbtn { height: 22px; font-size: 12.5px; }
+.take .filmsbtn { height: 22px; font-size: var(--t-ui); }
 .take .sblock { border-left: 2px solid var(--c); overflow: visible; }
 .kfold .fdot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--todo); }
 .take .sblock.stale { border-left-style: dashed; }
@@ -472,18 +469,18 @@ span.knm, span.knm:hover { cursor: default; background: none; }
 .kinfo[aria-expanded="true"] { background: var(--accent-soft); color: var(--accent-2); }
 .kinfo:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .kinfo .ic { width: 14px; height: 14px; }
-.kdetail { margin: 0; padding: 0 12px 6px 36px; color: var(--text-2); font-size: 12.5px; line-height: 1.4; overflow-wrap: anywhere; }
+.kdetail { margin: 0; padding: 0 12px 6px 36px; color: var(--text-2); font-size: var(--t-small); line-height: 1.4; overflow-wrap: anywhere; }
 .take .tlane .mk { z-index: 3; width: 8px; height: 8px; }
 .take .tlane .span { top: 2px; bottom: 2px; z-index: 2; }
-.take .cue { top: 3px; bottom: auto; font: 500 12.5px/1.15 var(--sans); }
+.take .cue { top: 3px; bottom: auto; font: 500 var(--t-small)/1.15 var(--sans); }
 .take .cue-tick { top: 19px; bottom: 3px; height: auto; }
 .take:has(.cue) .sblock { align-items: flex-end; padding-bottom: 2px; }
 .takes .clayers { margin: 0 0 4px; }
 .takes .clayer { grid-template-columns: calc(var(--kh) - 136px) 136px minmax(0, 1fr); grid-template-areas: "name file track"; gap: 0; height: 26px; }
-.takes .clname { grid-area: name; padding: 0 10px 0 34px; font-size: 12.5px; }
-.takes .clname em { font-size: 12.5px; }
+.takes .clname { grid-area: name; padding: 0 10px 0 34px; font-size: var(--t-small); }
+.takes .clname em { font-size: var(--t-small); }
 .takes .clfile { grid-area: file; }
-.takes .clfile button, .takes .clfile small { height: 24px; font-size: 12.5px; }
+.takes .clfile button, .takes .clfile small { height: 24px; font-size: var(--t-small); }
 .takes .cltrack { grid-area: track; height: 24px; margin: 0 12px; border-radius: 4px; }
 
 @media (max-width: 1099px) {

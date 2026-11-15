@@ -2,7 +2,7 @@
 // remembered per browser, and the divider that sets the timeline panel's share of the column (moved here from Picture).
 import type { RefObject } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { PREVIEW_KEY, PREVIEW_MAX, PREVIEW_MIN, readShare } from "./share.js";
+import { NOTES_ROOM, PREVIEW_KEY, PREVIEW_MAX, PREVIEW_MIN, readShare } from "./share.js";
 
 /**
  * §27, 5.5 (final review I3): the film's one playhead across the Review tabs (Timeline, Voice, Music, Effects). The desk
@@ -90,12 +90,17 @@ export function usePreviewSize(): { size: number | null; keep(to: number | null)
 
 /**
  * The line under a sound tab's preview: dragging it down makes the picture bigger, up smaller (PREVIEW_MIN to
- * PREVIEW_MAX of the column); the arrow keys move it, a double-click puts it back. The right column widens to keep the
+ * PREVIEW_MAX of the column, and never into the notes panel's NOTES_ROOM); the arrow keys move it, a double-click puts it back. The right column widens to keep the
  * cut's shape (desk.css, up to half the window), and the notes panel takes the rest.
  */
 export function PreviewDivider({ column, preview, size }: { column: RefObject<HTMLElement>; preview: RefObject<HTMLElement>; size: ReturnType<typeof usePreviewSize> }) {
   const drag = useRef<{ top: number; height: number } | null>(null);
-  const clamp = (n: number) => Math.min(PREVIEW_MAX, Math.max(PREVIEW_MIN, n));
+  // Never into the notes panel's room (Red, round 2): the most is what leaves NOTES_ROOM under the preview.
+  const most = (): number => {
+    const h = column.current?.getBoundingClientRect().height ?? 0;
+    return h > 0 ? Math.max(PREVIEW_MIN, Math.min(PREVIEW_MAX, (h - NOTES_ROOM) / h)) : PREVIEW_MAX;
+  };
+  const clamp = (n: number) => Math.min(most(), Math.max(PREVIEW_MIN, n));
   const at = (clientY: number): number | null => {
     const d = drag.current;
     if (!d || d.height <= 0) return null;
@@ -121,8 +126,8 @@ export function PreviewDivider({ column, preview, size }: { column: RefObject<HT
       aria-orientation="horizontal"
       aria-label="Resize the preview"
       aria-valuemin={Math.round(PREVIEW_MIN * 100)}
-      aria-valuemax={Math.round(PREVIEW_MAX * 100)}
-      aria-valuenow={Math.round((size.size ?? current()) * 100)}
+      aria-valuemax={Math.round(most() * 100)}
+      aria-valuenow={Math.round(Math.min(most(), size.size ?? current()) * 100)}
       tabIndex={0}
       onPointerDown={(e) => {
         const col = column.current;

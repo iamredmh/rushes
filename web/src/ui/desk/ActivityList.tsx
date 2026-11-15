@@ -1,12 +1,12 @@
 // §22.8, §27 5.7: the notes panel's Activity tab, the Change Log. Newest first by day and live, with the "add a line" box,
-// the filters (a radio group kept for the session) and Export as Markdown. What the drawer was, in the panel.
+// the filter (one menu, kept for the session) and Export as Markdown. What the drawer was, in the panel.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { api } from "../../api.js";
 import {
   AREA_LABELS, BY_UI, FILTERS, clock, filterShows, footText, groupByDay, isFilter, jumpOf, localDate, newCount, ownKey, problemText, recall, remember, rowName, storageKey,
   type Filter, type JumpTarget, type KeyStore,
 } from "../../changelog.js";
-import { moveActive } from "../../versions.js";
+import { Icon } from "../Icon.js";
 import type { LogHead, LogLine, LogView, Project, Stage } from "../../types.js";
 import type { ChangeLogState } from "../ChangeLog.js";
 
@@ -78,7 +78,6 @@ export function ActivityList({ log, projectId, head, project, stage, toast, onJu
   const [text, setText] = useState("");
   const list = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
-  const chips = useRef<Record<string, HTMLButtonElement | null>>({});
   const shown = useRef<LogView | null>(null);
   shown.current = view;
   const filterRef = useRef(filter);
@@ -167,15 +166,6 @@ export function ActivityList({ log, projectId, head, project, stage, toast, onJu
     setFilter(f);
     remember(session(), storageKey(projectId, "log-filter"), f);
   };
-  // A radio group: the arrows move and choose.
-  const onChipKey = (e: KeyboardEvent, i: number) => {
-    const to = moveActive(e.key, i, FILTERS.length, true);
-    if (to === null) return;
-    e.preventDefault();
-    const f = FILTERS[to][0];
-    choose(f);
-    chips.current[f]?.focus();
-  };
   const showWaiting = () => {
     if (!waiting) return;
     apply(waiting);
@@ -250,20 +240,17 @@ export function ActivityList({ log, projectId, head, project, stage, toast, onJu
         />
         <button type="submit" class="btn">Add</button>
       </form>
-      <div class="dchips" role="radiogroup" aria-label="Show">
-        {FILTERS.map(([f, label], i) => (
-          <button
-            type="button"
-            role="radio"
-            aria-checked={filter === f}
-            tabIndex={filter === f ? 0 : -1}
-            ref={(el) => { chips.current[f] = el; }}
-            onClick={() => choose(f)}
-            onKeyDown={(e) => onChipKey(e, i)}
-          >
-            {label}
-          </button>
-        ))}
+      {/* Red, round 2: one menu, not two lines of chips. */}
+      <div class="dshow">
+        <span class="onwrap">
+          <select class="sel" aria-label="Show" value={filter} onChange={(e) => {
+            const v = (e.target as HTMLSelectElement).value;
+            if (isFilter(v)) choose(v);
+          }}>
+            {FILTERS.map(([f, label]) => <option key={f} value={f}>{label}</option>)}
+          </select>
+          <Icon name="chev" />
+        </span>
       </div>
       {/* The pill sits over the list, outside the scroller, so showing it never moves a line (§22.8). */}
       <div class="dwrap">

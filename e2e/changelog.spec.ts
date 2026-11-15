@@ -104,18 +104,18 @@ test("from the keyboard: its tab opens it, the arrows move between the tabs, and
   await expect(activity(page)).toBeVisible();
   await expect(logButton(page)).toBeFocused();
   await input.click();
-  // Tab moves from the input to Add, then into the chips (one stop for the group). WebKit's Tab
+  // Tab moves from the input to Add, then to the Show menu (Red, round 2: one menu, not chips). WebKit's Tab
   // skips buttons unless Safari's "Press Tab to highlight each item" is on, so this part is Chromium's.
   if (browserName === "webkit") return;
   await page.keyboard.press("Tab");
   await expect(activity(page).getByRole("button", { name: "Add", exact: true })).toBeFocused();
   await page.keyboard.press("Tab");
-  await expect(activity(page).getByRole("radio", { name: "All" })).toBeFocused();
+  await expect(activity(page).getByRole("combobox", { name: "Show" })).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(activity(page).getByRole("group", { name: "Entries" })).toBeFocused();
 });
 
-test("a line added in Activity is by you, about the tab on screen; the filters are a radio group kept for the session (§22.8)", async ({ page, rushes }) => {
+test("a line added in Activity is by you, about the tab on screen; the filter is one menu kept for the session (§22.8)", async ({ page, rushes }) => {
   await rushes.addCut("first cut");
   await rushes.addVariant("music", "Night drive", { seconds: 2, freq: 220 });
   await page.goto(rushes.url);
@@ -133,22 +133,23 @@ test("a line added in Activity is by you, about the tab on screen; the filters a
   const { entries } = await rushes.api("GET", "/api/log");
   expect(entries[0]).toMatchObject({ by: "user", area: "picture", kind: "entry" });
 
-  const chips = activity(page).getByRole("radiogroup", { name: "Show" });
-  await expect(chips.getByRole("radio")).toHaveText(["All", "Picture", "Voice", "Music", "Effects", "Mix", "Visuals", "Notes", "Files"]);
-  await chips.getByRole("radio", { name: "All" }).focus();
+  // Red, round 2: the filters are one menu, All by default.
+  const show = activity(page).getByRole("combobox", { name: "Show" });
+  await expect(show.locator("option")).toHaveText(["All", "Picture", "Voice", "Music", "Effects", "Mix", "Visuals", "Notes", "Files"]);
+  await expect(show).toHaveValue("all");
+  await show.focus();
   const t0 = await page.getByLabel("Timecode").textContent();
-  for (let i = 0; i < 3; i++) await page.keyboard.press("ArrowRight");
-  await expect(chips.getByRole("radio", { name: "Music" })).toHaveAttribute("aria-checked", "true");
-  await expect(chips.getByRole("radio", { name: "Music" })).toBeFocused();
-  await expect(chips.getByRole("radio", { checked: true })).toHaveCount(1);
-  await expect(page.getByLabel("Timecode")).toHaveText(t0!); // the arrows moved the chips, not the playhead
+  await page.keyboard.press("ArrowRight");
+  await expect(page.getByLabel("Timecode")).toHaveText(t0!); // a key in the menu never moves the playhead
+  await show.selectOption({ label: "Music" });
+  await expect(show).toHaveValue("music");
   await expect(rows(page)).toHaveCount(1);
   await expect(rows(page).first()).toContainText("Music:");
   await page.reload();
   await videoReady(page);
   await expect(activity(page)).toBeVisible();
-  await expect(chips.getByRole("radio", { name: "Music" })).toHaveAttribute("aria-checked", "true");
-  await chips.getByRole("radio", { name: "Effects" }).click();
+  await expect(show).toHaveValue("music");
+  await show.selectOption({ label: "Effects" });
   await expect(activity(page).getByText("Nothing for this filter.")).toBeVisible();
 });
 
@@ -389,7 +390,7 @@ test("with a filter on, live lines from other areas stay out (I3)", async ({ pag
   await page.goto(rushes.url);
   await videoReady(page);
   await logButton(page).click();
-  await activity(page).getByRole("radio", { name: "Music" }).click();
+  await activity(page).getByRole("combobox", { name: "Show" }).selectOption({ label: "Music" });
   await expect(activity(page).getByText("Nothing for this filter.")).toBeVisible();
   await rushes.api("POST", "/api/log", { text: "Moved the logo up", area: "picture" });
   await rushes.addVariant("music", "Night drive", { seconds: 1, freq: 220, lane: "night-drive" });
@@ -409,7 +410,7 @@ test("a slow answer for an older filter never replaces the newer one (I3)", asyn
   await page.goto(rushes.url);
   await videoReady(page);
   await logButton(page).click();
-  await activity(page).getByRole("radio", { name: "Music" }).click();
+  await activity(page).getByRole("combobox", { name: "Show" }).selectOption({ label: "Music" });
   await expect(rows(page)).toHaveCount(1);
   await page.waitForTimeout(1200); // the late answer for All has arrived by now
   await expect(rows(page)).toHaveCount(1);
@@ -468,13 +469,13 @@ test("a line added under a filter that leaves it out says where it went (M1)", a
   await page.goto(rushes.url);
   await videoReady(page);
   await logButton(page).click();
-  await activity(page).getByRole("radio", { name: "Music" }).click();
+  await activity(page).getByRole("combobox", { name: "Show" }).selectOption({ label: "Music" });
   const input = activity(page).getByLabel("Add a line to the log");
   await input.fill("Kept the wide shot");
   await input.press("Enter");
   await expect(input).toHaveValue("");
   await expect(page.getByRole("status")).toHaveText("Added under Picture. Choose All or Picture to see it.");
-  await activity(page).getByRole("radio", { name: "Picture" }).click();
+  await activity(page).getByRole("combobox", { name: "Show" }).selectOption({ label: "Picture" });
   await expect(rows(page).first()).toContainText("Kept the wide shot");
 });
 
@@ -550,7 +551,7 @@ test("a line that arrives while Activity is open counts as seen, even when its f
   await page.goto(rushes.url);
   await videoReady(page);
   await logButton(page).click();
-  await activity(page).getByRole("radio", { name: "Music" }).click();
+  await activity(page).getByRole("combobox", { name: "Show" }).selectOption({ label: "Music" });
   await expect(activity(page).getByText("Nothing for this filter.")).toBeVisible();
   await rushes.api("POST", "/api/log", { text: "Moved the logo up", area: "picture" });
   // The filtered list shows nothing new, so there's nothing on the page to wait for: give the change

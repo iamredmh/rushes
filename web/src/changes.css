@@ -36,9 +36,8 @@
 .dadd { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
 .dadd input { min-width: 0; padding: 8px 12px; border: 1px solid var(--line-2); border-radius: var(--r); background: var(--bg); color: var(--text); font: inherit; font-size: 15px; }
 .dadd .btn { height: auto; padding: 8px 14px; border: 1px solid var(--accent); background: var(--accent-soft); color: var(--accent-2); }
-.dchips { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
-.dchips [role="radio"] { padding: 2px 12px; border: 1px solid var(--line-2); border-radius: 999px; background: transparent; color: var(--text-2); font: inherit; font-size: 15px; cursor: pointer; }
-.dchips [aria-checked="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-2); }
+.dshow { display: flex; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+.dshow .sel { height: 30px; padding: 0 30px 0 10px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--app); color: var(--text); }
 .dwrap { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); min-height: 0; }
 .dlist { overflow: auto; overscroll-behavior: contain; padding: 4px 0 12px; }
 .dlist:focus-visible { outline-offset: -2px; }

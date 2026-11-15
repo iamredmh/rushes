@@ -1125,13 +1125,14 @@ test("the Other formats row follows the To do and Done filter", async ({ page, r
   await rushes.api("PATCH", `/api/notes/${note.id}`, { status: "done" });
   await page.goto(rushes.url);
   await videoReady(page);
-  const filter = page.getByRole("group", { name: "Filter notes" });
+  // Red, round 2: the filter is a menu in the notes panel's tab row.
+  const filter = page.getByRole("combobox", { name: "Filter notes" });
   await expect(page.locator(".otherrow")).toContainText("Other formats (2)");
-  await filter.getByRole("button", { name: /^To do/ }).click();
+  await filter.selectOption({ label: "To do" });
   await expect(page.locator(".otherrow")).toContainText("Other formats (1)");
   await page.locator(".otherrow").click();
   await expect(page.locator(".otherfmts .note .nx")).toHaveText(["Still to do."]);
-  await filter.getByRole("button", { name: "Done" }).click();
+  await filter.selectOption({ label: "Done" });
   await expect(page.locator(".otherrow")).toContainText("Other formats (1)");
   await expect(page.locator(".otherfmts .note .nx")).toHaveText(["Already done."]);
   await rushes.api("PATCH", `/api/notes/${note.id}`, { status: "todo" });

@@ -4,7 +4,7 @@ import type { Page } from "@playwright/test";
 import {
   expect, test, videoReady, cutButton, pickVersion, currentFilm, filmButton, openWorkspace, pickFilm, reviewTab, workspaceTab, type FormatSize, type Rushes,
   ELEVEN_FILMS, ELEVEN_FILMS_PROJECT, monitor, pictureTrack, ruler, rulerMarkers, shotBlocks, TOOL_TIPS, toolButton, toolStrip, transport,
-  hasFfmpeg, loudness, playButton, soundBlock, soundButton, soundLabel, soundLevel, soundTakes, soundTrack, expectReadableInRow, timelinePanel,
+  hasFfmpeg, loudness, playButton, soundBlock, soundButton, soundLabel, soundLevel, soundTrack, expectReadableInRow, timelinePanel,
   activity, openActivity, notesPanel, noteTargetLine, noteTargetLabel, noteTargetMenu, noteTargetName, noteTargetWhen, panelTab, panelToggle, rangeChip, sendButton, sentDialog, statusSend,
   openReviewTab, takesList, takeHeadings, takeRow, takeRows, takeCircle, takeName, takeTag, takeBlock, putAwayButton, pressRowButton, foldToggle,
 } from "./fixture.js";
@@ -145,26 +145,23 @@ test("a sound with new takes says so on its tab", async ({ page, rushes }) => {
   await expect(reviewTab(page, "Music")).toHaveText("Music 3");
 });
 
-test("the status bar says what is next and goes there", async ({ page, rushes }) => {
+test("Red, round 2: the status bar says nothing of what is next; it offers Send only on a page with no notes panel", async ({ page, rushes }) => {
   await rushes.addCut();
   await page.goto(rushes.url);
   await videoReady(page);
-  await expect(statusBar(page)).toContainText("Next: lock picture");
-  const { note } = await rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 0.5, text: "Hold the end card." });
-  await expect(statusBar(page)).toContainText("Next: send 1 note");
-  // Sent, it is open until the agent deals with it.
-  await sendButton(page).click();
-  await expect(sentDialog(page)).toBeVisible();
-  await expect(statusBar(page)).toContainText("Next: 1 note open");
-  await page.keyboard.press("Escape");
-  // The note dealt with and picture locked, a read arrives: choosing one is next, and the line goes to Voice.
-  await rushes.api("PATCH", `/api/notes/${note.id}`, { status: "done" });
-  await rushes.api("PUT", "/api/videos/hero/lock", { version: "v1" });
-  await rushes.addVariant("voice", "Read A", { seconds: 2, freq: 220 });
-  const next = statusBar(page).getByRole("button", { name: "choose a read" });
-  await expect(next).toBeVisible();
-  await next.click();
-  await expect(reviewTab(page, "Voice")).toHaveAttribute("aria-selected", "true");
+  await expect(statusBar(page)).not.toContainText("Next");
+  await rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 0.5, text: "Hold the end card." });
+  await expect(sendButton(page)).toHaveAccessibleName("Send 1");
+  // Review has its notes panel, and Send in it: the status bar holds only the cut's details.
+  await expect(statusSend(page)).toHaveCount(0);
+  await expect(statusBar(page)).not.toContainText("Send");
+  await expect(statusBar(page)).toContainText("v1");
+  // Assets has no panel: the status bar's Send is the way there.
+  await openWorkspace(page, "Assets");
+  await expect(statusSend(page)).toHaveText("Send 1 note");
+  await statusSend(page).click();
+  await expect(sendButton(page)).toBeFocused();
+  await expect(statusSend(page)).toHaveCount(0);
 });
 
 // The eleven-film project (once shelving.spec's): long names, four formats on the first, four shelved, a long project name.
@@ -325,7 +322,7 @@ test("a film with no cut opens on Plan, and Review is the page that asks for cut
   await expect(page.getByRole("button", { name: "Copy prompt for your agent" })).toBeVisible();
   await expect(page.getByRole("tablist", { name: "Review" })).toHaveCount(0);
   await expect(page.locator("video")).toHaveCount(0);
-  await expect(statusBar(page)).toContainText("Next: approve the plan");
+  await expect(statusBar(page)).not.toContainText("Next");
 });
 
 // ---- §27, 5.4 to 5.6: the Timeline tab. The monitor with its tool strip, the transport, the ruler and the Picture track ----
@@ -602,8 +599,9 @@ test("with a read, a bed and a pass in use, the timeline shows a row each, named
   await expect(soundBlock(page, "Music")).toHaveText("Warm keys");
   await expect(soundBlock(page, "Effects")).toHaveText("Pass A");
   for (const name of ["Voice", "Music", "Effects"] as const) {
-    await expect(soundTrack(page, name).locator(".thead")).toContainText(name);
-    await expect(soundTakes(page, name)).toHaveText("1");
+    // Red, round 2: the row's head is its name, M, S and level; no take count (what is new is on the sound's tab).
+    await expect(soundTrack(page, name).locator(".thead")).toHaveText(new RegExp(`^${name}MS`));
+    await expect(soundTrack(page, name).locator(".tcount")).toHaveCount(0);
     await expect(soundTrack(page, name).locator("canvas.wave")).toHaveCount(1);
   }
   // Under the Picture track, in this order.
@@ -619,9 +617,6 @@ test("with a read, a bed and a pass in use, the timeline shows a row each, named
   // A seek while paused moves the engine to the picture.
   await page.locator("video").evaluate((v: HTMLVideoElement) => { v.currentTime = 1.5; });
   await expect.poll(async () => Math.abs((await audio(page))!.time - 1.5)).toBeLessThan(0.06);
-  // The take count opens that sound's tab.
-  await soundTakes(page, "Music").click();
-  await expect(reviewTab(page, "Music")).toHaveAttribute("aria-selected", "true");
 });
 
 test("Mute Music silences only music, solo wins, and the level slider saves levels.music", async ({ page, rushes }) => {
@@ -860,9 +855,9 @@ test("a note is amber to do, blue once sent, green when done: on the ruler, its 
   await expect(dot).toHaveAccessibleName("With your agent · Mark done");
   await expect(dot).toHaveAttribute("data-tip", "With your agent · Mark done");
   // Still to do: the To do filter lists it.
-  await notesPanel(page).getByRole("button", { name: /^To do/ }).click();
+  await notesPanel(page).getByRole("combobox", { name: "Filter notes" }).selectOption({ label: "To do" });
   await expect(notesPanel(page).locator(`.note[data-note="${pic.id}"]`)).toBeVisible();
-  await notesPanel(page).getByRole("button", { name: /^All/ }).click();
+  await notesPanel(page).getByRole("combobox", { name: "Filter notes" }).selectOption({ label: "All" });
   // The take's own row, on its tab.
   await page.keyboard.press("4");
   const takeMark = takeBlock(page, "Warm keys").locator(`.mk[data-note="${mus.id}"]`);
@@ -1050,38 +1045,26 @@ test.describe("the notes panel", () => {
   const box = (page: Page) => notesPanel(page).getByRole("textbox", { name: "New note" });
   const notesOn = async (rushes: Rushes, stage: string) => (await rushes.api("GET", `/api/notes?stage=${stage}`)).notes as { text: string; stage: string; on: string | null; scope: string; t: number | null; tOut: number | null }[];
 
-  test("with a take selected by its row's name, a note is on that take: its stage and on, the whole take", async ({ page, rushes }) => {
-    const { bed } = await threeInUse(rushes);
-    await openTimeline(page, rushes, 3);
-    await soundTrack(page, "Music").getByRole("button", { name: "Music: note on the whole take" }).click();
-    await expect(noteTargetLine(page)).toContainText("Music · Warm keys");
-    await expect(notesPanel(page).getByRole("group", { name: "Start a note" }).getByRole("button")).toHaveText(["Tempo", "Key", "Energy", "Ending"]);
-    await box(page).fill("Ending is too abrupt.");
-    await box(page).press("Enter");
-    await expect.poll(async () => (await notesOn(rushes, "music")).length).toBe(1);
-    expect((await notesOn(rushes, "music"))[0]).toMatchObject({ stage: "music", on: `${bed.lane.id}/${bed.variant.id}`, scope: "whole", t: null, tOut: null });
-    await expect(notesPanel(page).locator(".note .on")).toHaveText(["Music · Warm keys"]);
-  });
-
-  test("a click on a take's block aims the note at that point on that take, and the note is marked on its row", async ({ page, rushes }) => {
+  test("Red, round 2: a sound row is never the note's target; a click on its block moves the playhead and the note stays on the film", async ({ page, rushes }) => {
     const { pass } = await threeInUse(rushes);
     await openTimeline(page, rushes, 3);
+    // The row's name is a label, not a button.
+    await expect(soundTrack(page, "Music").locator(".thead").getByRole("button", { name: /note on the whole take/ })).toHaveCount(0);
     const lane = soundTrack(page, "Effects").locator(".tlane");
     const r = (await lane.boundingBox())!;
     await page.mouse.click(r.x + r.width / 2, r.y + r.height / 2);
-    await expect(noteTargetLine(page)).toContainText(/^00:00:0\d:\d\d · Effects · Pass A/);
+    await expect.poll(() => page.locator("video").evaluate((v: HTMLVideoElement) => v.currentTime)).toBeGreaterThan(0.5);
+    await expect(noteTargetMenu(page)).toHaveValue("frame");
+    await expect(noteTargetLine(page)).not.toContainText("Pass A");
+    await expect(notesPanel(page).getByRole("group", { name: "Start a note" })).toHaveCount(0);
     await box(page).fill("The whoosh is late.");
     await box(page).press("Enter");
-    await expect.poll(async () => (await notesOn(rushes, "sfx")).length).toBe(1);
-    const saved = (await notesOn(rushes, "sfx"))[0];
-    expect(saved).toMatchObject({ stage: "sfx", on: `${pass.lane.id}/${pass.variant.id}`, scope: "point" });
-    expect(saved.t).toBeGreaterThan(0);
+    await expect.poll(async () => (await notesOn(rushes, "picture")).length).toBe(1);
+    expect(await notesOn(rushes, "sfx")).toHaveLength(0);
+    // A note on a take, written on its own tab (or by the agent), is still listed here and marked on its row.
+    await rushes.api("POST", "/api/notes", { stage: "sfx", video: "hero", on: `${pass.lane.id}/${pass.variant.id}`, scope: "point", t: 1, text: "Swap the whoosh." });
     await expect(soundTrack(page, "Effects").locator(".mk")).toHaveCount(1);
     await expect(soundTrack(page, "Music").locator(".mk")).toHaveCount(0);
-    // Esc in the empty box lets go of the take: the next note is on this frame again.
-    await box(page).focus();
-    await page.keyboard.press("Escape");
-    await expect(noteTargetMenu(page)).toHaveValue("frame");
   });
 
   test("with nothing selected a note is on picture at the playhead; choosing The whole mix puts it on the mix", async ({ page, rushes }) => {
@@ -1104,21 +1087,21 @@ test.describe("the notes panel", () => {
     expect((await notesOn(rushes, "mix"))[0]).toMatchObject({ stage: "mix", on: null, scope: "whole", t: null });
   });
 
-  test("Escape from a control in the notes panel keeps the take selected", async ({ page, rushes }) => {
+  test("Escape from a control in the notes panel keeps The whole mix chosen", async ({ page, rushes }) => {
     await threeInUse(rushes);
     await openTimeline(page, rushes, 3);
-    await soundTrack(page, "Music").getByRole("button", { name: "Music: note on the whole take" }).click();
-    await expect(noteTargetLine(page)).toContainText("Music · Warm keys");
+    await noteTargetMenu(page).selectOption({ label: "The whole mix" });
+    await expect(noteTargetMenu(page)).toHaveValue("mix");
     await panelTab(page, "Notes").focus();
     await page.keyboard.press("Escape");
-    await expect(noteTargetLine(page)).toContainText("Music · Warm keys");
+    await expect(noteTargetMenu(page)).toHaveValue("mix");
     // Escape from the desk itself still lets go of it.
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
     await page.keyboard.press("Escape");
     await expect(noteTargetMenu(page)).toHaveValue("frame");
   });
 
-  test("a note on a take or the mix uses up the box drawn before it: it does not wait for the next picture note", async ({ page, rushes }) => {
+  test("a note on the mix uses up the box drawn before it: it does not wait for the next picture note", async ({ page, rushes }) => {
     await threeInUse(rushes);
     await openTimeline(page, rushes, 3);
     await page.keyboard.press("b");
@@ -1128,14 +1111,12 @@ test.describe("the notes panel", () => {
     await page.mouse.move(o.x + o.width * 0.6, o.y + o.height * 0.6, { steps: 4 });
     await page.mouse.up();
     await expect(page.getByRole("button", { name: "Remove box" })).toBeVisible();
-    await soundTrack(page, "Music").getByRole("button", { name: "Music: note on the whole take" }).click();
+    await noteTargetMenu(page).selectOption({ label: "The whole mix" });
     await box(page).fill("Ending is too abrupt.");
     await box(page).press("Enter");
-    await expect.poll(async () => (await notesOn(rushes, "music")).length).toBe(1);
+    await expect.poll(async () => (await notesOn(rushes, "mix")).length).toBe(1);
     await expect(page.getByRole("button", { name: "Remove box" })).toHaveCount(0);
     // The next note, on picture, carries no box.
-    await box(page).focus();
-    await page.keyboard.press("Escape");
     await expect(noteTargetMenu(page)).toHaveValue("frame");
     await box(page).fill("Hold here.");
     await box(page).press("Enter");
@@ -1268,20 +1249,17 @@ test.describe("the notes panel", () => {
     await expect(box(page)).toBeFocused();
   });
 
-  test("Escape that closes a menu or the Sent panel leaves the take, the range and its marks; Escape in the empty box lets go of the take only", async ({ page, rushes }) => {
+  test("Escape that closes a menu or the Sent panel leaves The whole mix and the range; Escape in the empty box lets go of The whole mix only", async ({ page, rushes }) => {
     await threeInUse(rushes);
     await rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 0.5, text: "Hold the end card." });
     await openTimeline(page, rushes, 3);
-    await soundTrack(page, "Music").getByRole("button", { name: "Music: note on the whole take" }).click();
+    await noteTargetMenu(page).selectOption({ label: "The whole mix" });
     await page.keyboard.press("i");
     for (let i = 0; i < 10; i++) await page.keyboard.press("ArrowRight");
     await page.keyboard.press("o");
-    const marks = notesPanel(page).getByRole("group", { name: "Marks" });
-    await marks.getByRole("button", { name: "Quieter" }).click();
     const kept = async () => {
-      await expect(noteTargetLine(page)).toContainText("Music · Warm keys");
+      await expect(noteTargetMenu(page)).toHaveValue("mix");
       await expect(rangeChip(page)).toBeVisible();
-      await expect(marks.getByRole("button", { name: "Quieter" })).toHaveAttribute("aria-pressed", "true");
     };
     await kept();
     // The More menu, closed by Escape.
@@ -1296,7 +1274,7 @@ test.describe("the notes panel", () => {
     await page.keyboard.press("Escape");
     await expect(sentDialog(page)).toHaveCount(0);
     await kept();
-    // Escape in the empty note box: the take goes, the range stays.
+    // Escape in the empty note box: The whole mix goes, the range stays.
     await box(page).focus();
     await page.keyboard.press("Escape");
     await expect(noteTargetMenu(page)).toHaveValue("frame");
@@ -1693,18 +1671,6 @@ test("m4: after a note on the whole mix, the next note is on this frame again", 
   await box.fill("Hold this frame.");
   await box.press("Enter");
   await expect.poll(async () => (await rushes.api("GET", "/api/notes?stage=picture")).notes.length).toBe(1);
-});
-
-test("m6: the status bar's lock picture opens the Cut menu on its lock row", async ({ page, rushes }) => {
-  await rushes.addCut();
-  await page.goto(rushes.url);
-  await videoReady(page);
-  await expect(statusBar(page)).toContainText("Next: lock picture");
-  await statusBar(page).getByRole("button", { name: "lock picture" }).click();
-  await expect(page.getByRole("listbox", { name: "Versions" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Lock picture at v1" })).toBeFocused();
-  await page.keyboard.press("Enter");
-  await expect.poll(async () => (await rushes.api("GET", "/api/state")).project.videos[0].lockedVersion).toBe("v1");
 });
 
 // ---- final review I6: the target line names its target, on a line of its own ----

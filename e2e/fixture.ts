@@ -697,10 +697,6 @@ export function soundLevel(page: Page, name: Exclude<SoundName, "Cut sound">): L
   return soundTrack(page, name).getByRole("slider", { name: `${name} level`, exact: true });
 }
 
-/** A sound row's take count chip, which opens that sound's tab. */
-export function soundTakes(page: Page, name: Exclude<SoundName, "Cut sound">): Locator {
-  return soundTrack(page, name).locator(".tcount");
-}
 
 /** The lane of the Cut sound row, where the picture's own waveform is drawn. */
 export const CUT_SOUND_LANE = '[role="group"][aria-label="Cut sound track"] .tlane';
@@ -915,11 +911,11 @@ export function panelToggle(page: Page): Locator {
 }
 
 /**
- * The status bar's "send N notes" ("send N changes" when anything waiting is an edit rather than a note): it opens the notes
- * panel with Send in view, from any workspace (Visuals, Assets).
+ * The status bar's "Send N notes" ("Send N changes" when anything waiting is an edit rather than a note), shown only on a
+ * page with no notes panel (Visuals, Assets): it opens the notes panel with Send in view.
  */
 export function statusSend(page: Page): Locator {
-  return page.locator("footer.status").getByRole("button", { name: /^send \d+ (notes?|changes?)$/ });
+  return page.locator("footer.status").getByRole("button", { name: /^Send \d+ (notes?|changes?)$/ });
 }
 
 /** Presses Send wherever the person is: in the panel, or by way of the status bar from a workspace with no panel. */

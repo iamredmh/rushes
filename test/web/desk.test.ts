@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defaultTake, deskPlace, nextHint, NOTE_STATE_LABEL, noteState, pctOf, type NextInput, noteTarget, rulerMarks, takeCount, takeGroups, takeKey, takeSections, timecode, unsentCount, unsentEdits, deskView, viewForKey, viewForTab } from "../../web/src/desk.js";
+import { defaultTake, deskPlace, NOTE_STATE_LABEL, noteState, pctOf, noteTarget, rulerMarks, takeCount, takeGroups, takeKey, takeSections, timecode, unsentCount, unsentEdits, deskView, viewForKey, viewForTab } from "../../web/src/desk.js";
 import type { Lane, Note, Variant } from "../../web/src/types.js";
 
 describe("deskPlace", () => {
@@ -191,71 +191,6 @@ describe("defaultTake", () => {
     expect(defaultTake(takeGroups(lanes, "music", undefined, hero))?.variant.id).toBe("x");
     expect(defaultTake(takeGroups([lanes[0]], "music", undefined, hero))?.variant.id).toBe("old");
     expect(defaultTake(takeGroups([], "music", undefined, hero))).toBeNull();
-  });
-});
-
-describe("nextHint", () => {
-  const settled: { started: boolean; fresh: number; inUse: boolean; stale: boolean; madeFor?: string | null } = { started: true, fresh: 0, inUse: true, stale: false };
-  const base: NextInput = { plan: { exists: true, approved: true }, hasCut: true, unsent: 0, openNotes: 0, locked: true, sound: { voice: settled, music: settled, sfx: settled } };
-  const sound = (stage: "voice" | "music" | "sfx", change: Partial<typeof settled>) => ({ ...base, sound: { ...base.sound, [stage]: { ...settled, ...change } } });
-
-  it("has nothing to say when everything is settled", () => {
-    expect(nextHint(base)).toEqual({ text: "nothing to do", go: null });
-  });
-  it("starts with the plan when there is no cut", () => {
-    expect(nextHint({ ...base, hasCut: false, plan: { exists: true, approved: false } })).toEqual({ text: "approve the plan", go: "script" });
-    expect(nextHint({ ...base, hasCut: false })).toEqual({ text: "ask for cut 1", go: null });
-    expect(nextHint({ ...base, hasCut: false, plan: { exists: false, approved: false } })).toEqual({ text: "ask for cut 1", go: null });
-  });
-  it("does not send someone with a cut back to an unapproved plan", () => {
-    expect(nextHint({ ...base, plan: { exists: true, approved: false } })).toEqual({ text: "nothing to do", go: null });
-  });
-  it("says to send what is waiting, counted", () => {
-    expect(nextHint({ ...base, unsent: 1, openNotes: 1 })).toEqual({ text: "send 1 note", go: null });
-    expect(nextHint({ ...base, unsent: 3, openNotes: 5 })).toEqual({ text: "send 3 notes", go: null });
-  });
-  it("says changes, not notes, when anything waiting is an edit", () => {
-    expect(nextHint({ ...base, unsent: 1, unsentEdits: 1, sendTo: "script" })).toEqual({ text: "send 1 change", go: "script" });
-    expect(nextHint({ ...base, unsent: 3, unsentEdits: 1, sendTo: "picture" })).toEqual({ text: "send 3 changes", go: "picture" });
-    expect(nextHint({ ...base, unsent: 3, unsentEdits: 0, sendTo: "picture" })).toEqual({ text: "send 3 notes", go: "picture" });
-  });
-  it("leads ask for cut 1 to the Plan page last used, where Ready to build is, once there is a plan", () => {
-    expect(nextHint({ ...base, hasCut: false, planPage: "storyboard" })).toEqual({ text: "ask for cut 1", go: "storyboard" });
-    expect(nextHint({ ...base, hasCut: false, planPage: "brief" })).toEqual({ text: "ask for cut 1", go: "brief" });
-    // With no plan at all there is nothing on a Plan page to build from.
-    expect(nextHint({ ...base, hasCut: false, plan: { exists: false, approved: false }, planPage: "brief" })).toEqual({ text: "ask for cut 1", go: null });
-  });
-  it("leads to Send in the notes panel when told where it is, even before there is a cut", () => {
-    expect(nextHint({ ...base, unsent: 2, sendTo: "picture" })).toEqual({ text: "send 2 notes", go: "picture" });
-    expect(nextHint({ ...base, hasCut: false, unsent: 1, sendTo: "brief" })).toEqual({ text: "send 1 note", go: "brief" });
-    expect(nextHint({ ...base, hasCut: false, unsent: 1 })).toEqual({ text: "ask for cut 1", go: null });
-  });
-  it("says notes are open once they are sent", () => {
-    expect(nextHint({ ...base, openNotes: 1 })).toEqual({ text: "1 note open", go: "picture" });
-    expect(nextHint({ ...base, openNotes: 4, locked: false })).toEqual({ text: "4 notes open", go: "picture" });
-  });
-  it("says to lock picture when no note is open, and opens the Cut menu, where the lock is (m6)", () => {
-    expect(nextHint({ ...base, locked: false })).toEqual({ text: "lock picture", go: "picture", menu: "cut" });
-  });
-  it("takes the sounds one at a time: voice, then music, then effects", () => {
-    expect(nextHint(sound("voice", { started: false, inUse: false }))).toEqual({ text: "ask for a voiceover", go: null });
-    expect(nextHint(sound("music", { started: false, inUse: false }))).toEqual({ text: "ask for music", go: null });
-    expect(nextHint(sound("sfx", { started: false, inUse: false }))).toEqual({ text: "ask for sound effects", go: null });
-    expect(nextHint(sound("voice", { fresh: 2 }))).toEqual({ text: "choose a read", go: "voice" });
-    expect(nextHint(sound("music", { fresh: 3 }))).toEqual({ text: "choose a bed", go: "music" });
-    expect(nextHint(sound("sfx", { fresh: 1 }))).toEqual({ text: "choose an effects pass", go: "sfx" });
-    // m5 (spec 5.9's table): the cut it was made for, by name.
-    expect(nextHint(sound("voice", { stale: true, madeFor: "v1" }))).toEqual({ text: "the read in use was made for v1", go: "voice" });
-    expect(nextHint(sound("music", { stale: true, madeFor: "v2" }))).toEqual({ text: "the bed in use was made for v2", go: "music" });
-    expect(nextHint(sound("sfx", { stale: true, madeFor: "v1" }))).toEqual({ text: "the effects pass in use was made for v1", go: "sfx" });
-    expect(nextHint(sound("sfx", { stale: true }))).toEqual({ text: "the effects pass in use was made for an older cut", go: "sfx" });
-  });
-  it("settles voice before it asks for music", () => {
-    const i = { ...base, sound: { voice: { ...settled, fresh: 2 }, music: { started: false, fresh: 0, inUse: false, stale: false }, sfx: settled } };
-    expect(nextHint(i)).toEqual({ text: "choose a read", go: "voice" });
-  });
-  it("leaves the sounds alone until picture is locked", () => {
-    expect(nextHint({ ...sound("voice", { fresh: 2 }), locked: false })).toEqual({ text: "lock picture", go: "picture", menu: "cut" });
   });
 });
 

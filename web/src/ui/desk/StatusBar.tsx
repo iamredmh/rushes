@@ -1,14 +1,14 @@
-// §27, 5.9: one line at the foot of the desk. Left, what to do next, a button when it leads somewhere on the desk;
-// right, the format, frame rate, cut and lock state.
+// §27, 5.9: one line at the foot of the desk: the format, frame rate, cut and lock state, on the right. (Red, round 2:
+// the "Next:" line on the left is gone; what to do next is yours to know.) On a page with no notes panel (Visuals,
+// Assets) it keeps a Send on the left while anything waits, since Send lives in the panel.
 import { useLayoutEffect, useRef, useState } from "preact/hooks";
-import type { DeskView } from "../../desk.js";
 import { FormatPrompt } from "../FormatToggle.js";
 import { Icon } from "../Icon.js";
 import { useDismiss } from "../useDismiss.js";
 
 export interface StatusBarProps {
-  next: { text: string; go: DeskView | null };
-  onGo(view: DeskView): void;
+  /** "Send 2 notes", on a page with no notes panel while anything waits; null elsewhere. */
+  send?: { text: string; onGo(): void } | null;
   /** Null before the film has a cut. */
   cut: { format: string | null; fps: number; id: string; lockedAt: string | null } | null;
   /**
@@ -59,21 +59,15 @@ function ShapeButton({ label, prompt, toast }: { label: string; prompt: string; 
   );
 }
 
-export function StatusBar({ next, onGo, cut, shapes = null }: StatusBarProps) {
-  const go = next.go;
+export function StatusBar({ send = null, cut, shapes = null }: StatusBarProps) {
   return (
     <footer class="status">
-      <Icon name="send" />
-      <span class="next">
-        Next:{" "}
-        {go ? (
-          <button type="button" class="nextgo" onClick={() => onGo(go)}>
-            {next.text}
-          </button>
-        ) : (
-          <b>{next.text}</b>
-        )}
-      </span>
+      {send && (
+        <button type="button" class="ssend" onClick={send.onGo}>
+          <Icon name="send" />
+          {send.text}
+        </button>
+      )}
       <span class="sp" />
       {cut && (
         <span class="smeta mono">

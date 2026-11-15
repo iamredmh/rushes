@@ -28,8 +28,6 @@ export interface NotesProps {
   onTextChange?(hasText: boolean): void;
   /** §27, 5.7: the target line above the box, from the selection (noteTarget). */
   target?: NoteTargetLine;
-  /** Quick-start chips (a take is the target): each puts "Chip: " in the note box, and never sends anything. */
-  chips?: string[];
   /** Quick marks, offered while the target is a range on a take. */
   marks?: { value: Mark[]; onChange(marks: Mark[]): void };
   /** What a listed note is on ("B · Warm keys", "Cue · Swipe"), shown beside its time. */
@@ -52,6 +50,40 @@ export interface NotesProps {
   readOnly?: boolean;
   /** One line where the hidden note box would be, saying where notes are written instead (the Brief and Storyboard pages). */
   instead?: string;
+  /** The filter, when it is shown elsewhere (the notes panel's tab row, Red round 2): no filter row of its own then. */
+  filter?: Filter;
+}
+
+/** All, To do and Done as one menu, for the notes panel's tab row (Red, round 2), where the Notes tab already counts to-dos. */
+export function NoteFilterMenu({ filter, onChange }: { filter: Filter; onChange(f: Filter): void }) {
+  return (
+    <span class="onwrap nfilter">
+      <select class="sel" aria-label="Filter notes" value={filter} onChange={(e) => {
+        const v = (e.target as HTMLSelectElement).value;
+        if (v === "all" || v === "todo" || v === "done") onChange(v);
+        (e.target as HTMLSelectElement).blur();
+      }}>
+        <option value="all">All</option>
+        <option value="todo">To do</option>
+        <option value="done">Done</option>
+      </select>
+      <Icon name="chev" />
+    </span>
+  );
+}
+
+/** All, To do (with its count) and Done. */
+export function NoteFilter({ filter, onChange, todo }: { filter: Filter; onChange(f: Filter): void; todo: number }) {
+  return (
+    <div class="seg" role="group" aria-label="Filter notes">
+      {(["all", "todo", "done"] as const).map((f) => (
+        <button aria-pressed={filter === f} onClick={() => onChange(f)}>
+          {f === "all" ? "All" : f === "todo" ? "To do" : "Done"}
+          {f === "todo" && todo > 0 && <span class="n">{todo}</span>}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 /** §27, 5.7: what the next note is about, named on the line above the box. */
@@ -96,10 +128,11 @@ const MARK_KINDS: { kind: MarkKind; label: string }[] = [
 
 /** The notes column used on every tab: list, filter, done circles and the note box. */
 export function Notes({
-  notes, version, placeholder, attachments, inputRef, toast, onAdd, onSeek, onChanged, onTextChange, target, chips, marks, onLabel, fixedTimes, selectedId,
-  formatTag, cardExtra, formatScope, listFooter, readOnly, instead,
+  notes, version, placeholder, attachments, inputRef, toast, onAdd, onSeek, onChanged, onTextChange, target, marks, onLabel, fixedTimes, selectedId,
+  formatTag, cardExtra, formatScope, listFooter, readOnly, instead, filter: shownFilter,
 }: NotesProps) {
-  const [filter, setFilter] = useState<Filter>("all");
+  const [ownFilter, setFilter] = useState<Filter>("all");
+  const filter = shownFilter ?? ownFilter;
   const ownInput = useRef<HTMLTextAreaElement>(null);
   const box = inputRef ?? ownInput;
   const [text, setText] = useState("");
@@ -136,30 +169,13 @@ export function Notes({
     }
   };
 
-  /** Start a note with `value` in the box, caret at the end. A chip starts "Tempo: ". */
-  const begin = (value: string) => {
-    setText(value);
-    onTextChange?.(true);
-    const el = box.current;
-    if (el) {
-      el.value = value;
-      el.focus();
-      el.setSelectionRange(value.length, value.length);
-    }
-  };
-
   return (
     <div class="panel side notes" role="region" aria-label="Notes">
-      <div class="ph">
-        <div class="seg" role="group" aria-label="Filter notes">
-          {(["all", "todo", "done"] as const).map((f) => (
-            <button aria-pressed={filter === f} onClick={() => setFilter(f)}>
-              {f === "all" ? "All" : f === "todo" ? "To do" : "Done"}
-              {f === "todo" && todo > 0 && <span class="n">{todo}</span>}
-            </button>
-          ))}
+      {shownFilter === undefined && (
+        <div class="ph">
+          <NoteFilter filter={filter} onChange={setFilter} todo={todo} />
         </div>
-      </div>
+      )}
       <div class="list">
         {placed.length === 0 && <div class="none">{filter !== "all" ? "Nothing here." : footer ? "None on this format." : "No notes yet."}</div>}
         {placed.map(({ n, at }) => (
@@ -238,12 +254,6 @@ export function Notes({
                 <Icon name="x" />
               </button>
             )}
-          </div>
-        )}
-        {/* With a range, the marks row takes the chips' place, so the composer never grows by a row. */}
-        {chips && chips.length > 0 && !marks && (
-          <div class="row" role="group" aria-label="Start a note">
-            {chips.map((c) => <button type="button" class="chip" onClick={() => begin(`${c}: `)}>{c}</button>)}
           </div>
         )}
         {marks && (

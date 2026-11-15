@@ -224,9 +224,9 @@ test("a whole note sends no time and is listed but not drawn", async ({ page, ru
   await twoBeds(page, rushes);
   // Nothing clicked: the note is on the first bed, whole.
   await expect(noteTargetLabel(page)).toHaveText("Music · A · Deep house");
-  await page.getByRole("button", { name: "Tempo" }).click();
-  await expect(page.getByRole("textbox", { name: "New note" })).toHaveValue("Tempo: ");
-  await page.keyboard.type("110 BPM, keep the bassline.");
+  // Red, round 2: no quick-start chips; what the note is about is said in it.
+  await expect(page.getByRole("group", { name: "Start a note" })).toHaveCount(0);
+  await page.getByRole("textbox", { name: "New note" }).fill("Tempo: 110 BPM, keep the bassline.");
   await page.keyboard.press("Enter");
   await expect(page.locator(".note .t")).toHaveText("Whole");
   const { notes } = await rushes.api("GET", "/api/notes?stage=music");
@@ -466,13 +466,15 @@ test("the notes column shows three marked notes in full above the composer, at 1
   await expect(page.locator(".note")).toHaveCount(3);
   const comp = page.locator(".comp");
   const pointHeight = (await comp.boundingBox())!.height;
-  // A range swaps the chips for the marks: the composer doesn't grow.
+  // A range brings the marks row (there are no chips now for it to replace, Red round 2): the composer grows by that row
+  // and no more, and the three notes still show in full.
   await page.keyboard.press("i");
   for (let i = 0; i < 10; i++) await page.keyboard.press("ArrowRight");
   await page.keyboard.press("o");
   await expect(page.getByRole("group", { name: "Marks" })).toBeVisible();
   await expect(page.getByRole("group", { name: "Start a note" })).toHaveCount(0);
-  expect(Math.abs((await comp.boundingBox())!.height - pointHeight)).toBeLessThanOrEqual(1);
+  const marksRow = (await page.getByRole("group", { name: "Marks" }).boundingBox())!.height;
+  expect((await comp.boundingBox())!.height - pointHeight).toBeLessThanOrEqual(marksRow + 12); // the row, its 8 px gap, a pixel or two of rounding
   const list = (await notesPanel(page).locator(".list").boundingBox())!;
   const compTop = (await comp.boundingBox())!.y;
   for (let i = 0; i < 3; i++) {
@@ -789,17 +791,18 @@ test("Voiceover plays one read at a time: the read in use, then a clicked read, 
   expect(await heard(page)).toEqual([`${R2_ID}/more-sombre@0`]);
 });
 
-test("Voiceover notes are on a whole read, a point or a range of it (round 1), whole first, with chips for each and no marks", async ({ page, rushes }) => {
+test("Voiceover notes are on a whole read, a point or a range of it (round 1), whole first, with no chips and no marks", async ({ page, rushes }) => {
   await twoRounds(rushes);
   await openVoice(page, rushes, 5);
   // Nothing clicked, the playhead at the start: the whole of the read in use.
   await expect(noteTargetLabel(page)).toHaveText(`Voice · ${R1} · Gerald`);
-  const chips = page.getByRole("group", { name: "Start a note" }).getByRole("button");
-  await expect(chips).toHaveText(["Speaker", "Pacing", "Tone", "Overall"]);
-  // A point at the playhead, with the point's chips.
+  // Red, round 2: no quick-start chips on any of them.
+  const chips = page.getByRole("group", { name: "Start a note" });
+  await expect(chips).toHaveCount(0);
+  // A point at the playhead.
   await page.evaluate(() => window.__rushesAudio!.engine!.seek(1));
   await expect(noteTargetLabel(page)).toHaveText(`00:00:01:00 · Voice · ${R1} · Gerald`);
-  await expect(chips).toHaveText(["Fix this", "Keep this"]);
+  await expect(chips).toHaveCount(0);
   // Round 1: the Range tool is on the strip, and I and O mark a range, live on the ruler and every read's block.
   await expect(toolButton(page, "Range")).toBeVisible();
   await page.keyboard.press("i");
@@ -813,11 +816,10 @@ test("Voiceover notes are on a whole read, a point or a range of it (round 1), w
   await expect(page.getByRole("slider", { name: "Timeline" }).locator(".span")).toHaveCount(1);
   await expect(noteTargetLabel(page)).toContainText("–");
   await expect(noteTargetLabel(page)).toContainText(`Voice · ${R1} · Gerald`);
-  // A range takes the point's chips ("Fix this" reads as well for a stretch), and no marks: a read is replaced, not levelled.
-  await expect(chips).toHaveText(["Fix this", "Keep this"]);
+  // A range has no chips and no marks: a read is replaced, not levelled.
+  await expect(chips).toHaveCount(0);
   await expect(page.getByRole("group", { name: "Marks" })).toHaveCount(0);
-  await chips.filter({ hasText: "Fix this" }).click();
-  await page.keyboard.type(" re-record this phrase.");
+  await page.getByRole("textbox", { name: "New note" }).fill("Fix this: re-record this phrase.");
   await page.keyboard.press("Enter");
   await expect(page.locator(".note")).toHaveCount(1);
   const { notes } = await rushes.api("GET", "/api/notes?stage=voice");
@@ -831,10 +833,10 @@ test("Voiceover notes are on a whole read, a point or a range of it (round 1), w
   await expect(rangeChip(page)).toBeVisible();
   await rangeChip(page).getByRole("button").click();
   await expect(rangeChip(page)).toHaveCount(0);
-  // A click on another read's block: a point on it, with the point's chips.
+  // A click on another read's block: a point on it.
   await clickLaneAt(page, "more excited", 1);
   await expect(noteTargetLabel(page)).toContainText(/^00:00:01:00 · Voice/);
-  await expect(chips).toHaveText(["Fix this", "Keep this"]);
+  await expect(chips).toHaveCount(0);
 });
 
 test("a point note draws on its read's block only; a whole note is listed and not drawn", async ({ page, rushes }) => {
@@ -1450,7 +1452,7 @@ test("the Voice row plays the read in use, matching the server (§18.4, §27.6)"
   await expect.poll(() => heard(page)).toEqual(["music/warm-keys@0", "sfx/pass-a@0"]);
 });
 
-test("Mix notes: a range on Music with Quieter 3 dB, written through the target line, is saved on the bed and spans its row; the whole mix is a menu away", async ({ page, rushes }) => {
+test("Mix notes: one saved on Music with Quieter 3 dB is listed and spans its row; the whole mix is a menu away, and a sound row is never the target (Red, round 2)", async ({ page, rushes }) => {
   const { bed } = await mixProject(page, rushes);
   // One the Mix tab saved on Music, before the desk: still listed with what it is on and its marks, and drawn on its row.
   const old = (await rushes.api("POST", "/api/notes", { stage: "mix", video: "hero", on: `${bed.lane.id}/${bed.variant.id}`, scope: "range", t: 0.5, tOut: 1, marks: [{ kind: "quieter", db: 3 }], text: "Music creeps up under the line." })).note;
@@ -1459,37 +1461,14 @@ test("Mix notes: a range on Music with Quieter 3 dB, written through the target 
   await expect(page.locator(`.note[data-note="${old.id}"] .nmarks`)).toHaveText("Quieter 3 dB");
   await expect(soundTrack(page, "Music").locator(`.span[data-note="${old.id}"]`)).toHaveCount(1);
 
-  // The bed, picked by its row's name, then a range marked: the note is a range on the bed, with its marks.
-  await soundTrack(page, "Music").getByRole("button", { name: "Music: note on the whole take" }).click();
-  await seekPicture(page, 1);
-  await page.keyboard.press("i");
-  await seekPicture(page, 2);
-  await page.keyboard.press("o");
-  await expect(rangeChip(page)).toBeVisible();
-  await expect(noteTargetLine(page)).toContainText("00:00:01:00–00:00:02:00 · Music · Warm keys");
-  const marks = notesPanel(page).getByRole("group", { name: "Marks" });
-  await marks.getByRole("button", { name: "Quieter" }).click();
-  await expect(notesPanel(page).getByRole("combobox", { name: "Quieter by" })).toHaveValue("3");
-  await page.keyboard.press("n");
-  await page.keyboard.type("Too busy here.");
-  await page.keyboard.press("Enter");
-  await expect(page.locator(".note")).toHaveCount(2);
-  const range = (await rushes.api("GET", "/api/notes?stage=music")).notes.find((n: { text: string }) => n.text === "Too busy here.");
-  expect(range).toMatchObject({ stage: "music", on: `${bed.lane.id}/${bed.variant.id}`, scope: "range", t: 1, tOut: 2, marks: [{ kind: "quieter", db: 3 }] });
-  await expect(page.locator(`.note[data-note="${range.id}"] .on`)).toHaveText("Music · Warm keys");
-  await expect(page.locator(`.note[data-note="${range.id}"] .nmarks`)).toHaveText("Quieter 3 dB");
-  await expect(soundTrack(page, "Music").locator(`.span[data-note="${range.id}"]`)).toHaveCount(1);
-  await expect(soundTrack(page, "Voice").locator(".span, .mk")).toHaveCount(0);
-  // The range is used up by the note, as a picture note uses it.
-  await expect(rangeChip(page)).toHaveCount(0);
-
-  // Let go of the bed: the menu offers the whole mix, which is saved as a whole-mix note is.
-  await clearTarget(page).click();
+  // The row's name is not a button: a take is noted on its own tab.
+  await expect(soundTrack(page, "Music").getByRole("button", { name: /note on the whole take/ })).toHaveCount(0);
+  // The menu offers the whole mix, which is saved as a whole-mix note is.
   await noteTargetMenu(page).selectOption({ label: "The whole mix" });
   await page.getByRole("textbox", { name: "New note" }).click();
   await page.keyboard.type("A touch quiet overall.");
   await page.keyboard.press("Enter");
-  await expect(page.locator(".note")).toHaveCount(3);
+  await expect(page.locator(".note")).toHaveCount(2);
   const whole = (await rushes.api("GET", "/api/notes?stage=mix")).notes.find((n: { text: string }) => n.text === "A touch quiet overall.");
   expect(whole).toMatchObject({ on: null, scope: "whole", t: null, marks: [] });
   await expect(page.locator(`.note[data-note="${whole.id}"] .on`)).toHaveText("Whole mix");
@@ -1498,13 +1477,12 @@ test("Mix notes: a range on Music with Quieter 3 dB, written through the target 
   await page.getByRole("textbox", { name: "New note" }).click();
   await page.keyboard.type("Frame is soft.");
   await page.keyboard.press("Enter");
-  await expect(page.locator(".note")).toHaveCount(4);
+  await expect(page.locator(".note")).toHaveCount(3);
   expect((await rushes.api("GET", "/api/notes?stage=picture")).notes).toHaveLength(1);
-  // Each note with a time is a marker on the ruler, with the picture's: the old Mix-tab note, the range on the bed and the
-  // picture note (the whole-mix note has no time).
-  await expect(rulerMarkers(page)).toHaveCount(3);
+  // Each note with a time is a marker on the ruler, with the picture's: the old Mix-tab note and the picture note (the
+  // whole-mix note has no time).
+  await expect(rulerMarkers(page)).toHaveCount(2);
   await expect(rulerMarkers(page).and(page.locator(`[data-note="${old.id}"]`))).toHaveCount(1);
-  await expect(rulerMarkers(page).and(page.locator(`[data-note="${range.id}"]`))).toHaveCount(1);
 });
 
 test("a Mix note on an SFX pass named like the music bed is marked on the Effects row, and an old bare id on Music", async ({ page, rushes }) => {
@@ -1524,19 +1502,8 @@ test("a Mix note on an SFX pass named like the music bed is marked on the Effect
   await expect(soundTrack(page, "Music").locator(`.mk[data-note="${old.id}"]`)).toHaveCount(1);
   await expect(page.locator(`.note[data-note="${mixed.id}"] .on`)).toHaveText("Sound effects · Option A");
   await expect(soundTrack(page, "Effects").locator(`.mk[data-note="${mixed.id}"]`)).toHaveCount(1);
-  // A note on the pass, written through the target line: a click on the Effects row's block at 2 s.
-  const lane = soundTrack(page, "Effects").locator(".tlane");
-  const r = (await lane.boundingBox())!;
-  const dur = await page.locator("video").evaluate((v: HTMLVideoElement) => v.duration);
-  await page.mouse.click(r.x + (r.width * 2) / dur, r.y + r.height / 2);
-  await expect(noteTargetLine(page)).toContainText("Effects · Option A");
-  await page.getByRole("textbox", { name: "New note" }).fill("Too loud here.");
-  await page.getByRole("textbox", { name: "New note" }).press("Enter");
-  await expect.poll(async () => (await rushes.api("GET", "/api/notes?stage=sfx")).notes.length).toBe(1);
-  const added = (await rushes.api("GET", "/api/notes?stage=sfx")).notes[0];
-  expect(added).toMatchObject({ stage: "sfx", on: `${pass.lane.id}/${pass.variant.id}`, scope: "point" });
-  expect(added.t).toBeGreaterThan(1.8);
-  expect(added.t).toBeLessThan(2.2);
+  // A note on the pass, written on its own tab (here through the API): marked on the Effects row, not on Music's.
+  const added = (await rushes.api("POST", "/api/notes", { stage: "sfx", video: "hero", on: `${pass.lane.id}/${pass.variant.id}`, scope: "point", t: 2, text: "Too loud here." })).note;
   await expect(page.locator(`.note[data-note="${added.id}"] .on`)).toHaveText("Effects · Option A");
   await expect(soundTrack(page, "Effects").locator(`.mk[data-note="${added.id}"]`)).toHaveCount(1);
   await expect(soundTrack(page, "Music").locator(`.mk[data-note="${added.id}"]`)).toHaveCount(0);

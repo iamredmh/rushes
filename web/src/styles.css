@@ -113,6 +113,18 @@
   --k-text-3: #8a8a8a;
   --shadow: rgba(0, 0, 0, 0.2);
 }
+
+:root {
+  /* The desk's type scale (Red, round 2): every size in desk.css is one of these. Meta is the smallest thing on the desk
+     (ruler times, the timecode over the picture); small is what sits beside a label (counts, levels, times, tooltips,
+     the status bar); ui is the label itself (tabs, menus, buttons, track and take names, notes); body is a page's text
+     (the Plan pages); title heads a panel or slate. */
+  --t-meta: 12px;
+  --t-small: 13px;
+  --t-ui: 14px;
+  --t-body: 15px;
+  --t-title: 17px;
+}
 /* §27: surfaces that stay near-black in light mode too (the picture's surround, the Original/Proxy
    switch over it, the lightboxes, the full-screen viewer). What sits on them reads as on dark: the
    text, line and ground tokens point at the dark set inside them. */
