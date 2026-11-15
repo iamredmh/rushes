@@ -785,6 +785,23 @@ describe("formats for agents (§21.4)", () => {
     await t.close();
   });
 
+  it("rushes_list_notes lists by state: what was sent to the agent and isn't done, whichever batch it came in", async () => {
+    const t = await connect();
+    const api = new RushesClient(t.running.url);
+    const add = async (text: string) => (await api.post("/api/notes", { stage: "picture", scope: "whole", text })).note;
+    const first = await add("Warmer grade.");
+    await api.post("/api/batches", {});
+    const second = await add("Cut the last shot.");
+    await api.post("/api/batches", {});
+    const third = await add("Not sent yet.");
+    const sent = (await t.call("rushes_list_notes", { state: "sent" })).json.notes;
+    expect(sent.map((n: any) => [n.id, n.state, n.batch])).toEqual([[first.id, "sent", "b_1"], [second.id, "sent", "b_2"]]);
+    expect((await t.call("rushes_list_notes", { state: "todo" })).json.notes.map((n: any) => n.id)).toEqual([third.id]);
+    const replied = (await t.call("rushes_reply", { replies: [{ id: first.id, status: "done" }] })).json.notes[0];
+    expect(replied.state).toBe("done");
+    await t.close();
+  });
+
   it("the new inputs carry the server's own limits (≤7 formats beside the cut, path ≤1024, id ≤16, label hint ≤16)", async () => {
     const t = await connect();
     const { tools } = await t.client.listTools();

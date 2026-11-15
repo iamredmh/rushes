@@ -375,6 +375,19 @@ describe("API", () => {
       expect(back.json.use.music).toMatchObject({ lane: "round-1", variant: "pulse" });
       expect((await call("GET", "/api/picks")).json.use.music.lane).toBe("round-1");
     });
+    it("GET /api/picks lists every take with its state, for one film and per film, as the desk's lists show them", async () => {
+      const { call } = await two();
+      await call("PUT", "/api/picks", { video: "hero", lanes: { "round-2": "george-slow" } });
+      await call("PUT", "/api/variants/round-1/george/put-away", { away: true });
+      const states = (takes: { variant: string; state: string }[]) => takes.map((t) => [t.variant, t.state]);
+      const one = (await call("GET", "/api/picks?video=hero")).json;
+      expect(states(one.takes.voice)).toEqual([["george-slow", "in-use"], ["george", "put-away"]]);
+      expect(one.takes.voice[0]).toMatchObject({ lane: "round-2", round: expect.any(String), name: expect.any(String), stale: false });
+      const all = (await call("GET", "/api/picks")).json;
+      expect(states(all.videos.hero.takes.voice)).toEqual(states(one.takes.voice));
+      // The dashboard's own state is unchanged: it works the states out itself.
+      expect((await call("GET", "/api/state")).json.picks.videos.hero.takes).toBeUndefined();
+    });
     it("PUT /api/variants/:lane/:variant/put-away hides a take and brings it back", async () => {
       const { call } = await two();
       const away = await call("PUT", "/api/variants/round-1/george/put-away", { away: true });
@@ -583,6 +596,24 @@ describe("API", () => {
     expect(latest.json.batch.id).toBe("b_1");
     expect(latest.json.notes[0].batch).toBe("b_1");
     expect((await call("GET", "/api/batches/b_9")).status).toBe(404);
+  });
+
+  it("every note it hands out carries its state, an agent can list by state, and the file never stores one", async () => {
+    const { call, store } = await setup();
+    const a = (await call("POST", "/api/notes", { stage: "picture", scope: "point", t: 1, text: "x" })).json.note;
+    expect(a.state).toBe("todo");
+    await call("POST", "/api/batches", {});
+    const b = (await call("POST", "/api/notes", { stage: "picture", scope: "point", t: 2, text: "y" })).json.note;
+    expect((await call("GET", "/api/batches/latest")).json.notes.map((n: { state: string }) => n.state)).toEqual(["sent"]);
+    const ids = async (q: string) => (await call("GET", `/api/notes?${q}`)).json.notes.map((n: { id: string }) => n.id);
+    expect(await ids("state=sent")).toEqual([a.id]);
+    expect(await ids("state=todo")).toEqual([b.id]);
+    expect(await ids("status=todo")).toEqual([a.id, b.id]);
+    expect((await call("GET", "/api/notes?state=lost")).status).toBe(400);
+    // The agent marks it done, then the user reopens it: it leaves its batch and is to do again.
+    expect((await call("POST", "/api/replies", { replies: [{ id: a.id, status: "done" }] })).json.notes[0]).toMatchObject({ state: "done", batch: "b_1" });
+    expect((await call("PATCH", `/api/notes/${a.id}`, { status: "todo" })).json.note).toMatchObject({ state: "todo", batch: null });
+    expect((await store.read("notes")).notes.some((n) => "state" in n)).toBe(false);
   });
 
   it("Send to agent with no stage sends every tab's open notes in one batch, and logs it once", async () => {

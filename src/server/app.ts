@@ -8,6 +8,7 @@ import { addTake, editSection, setSections } from "../core/script.js";
 import { addNote, applyReply, applyUserEdit, checkNoteFormat, filterNotes } from "../core/notes.js";
 import { FORMAT_ID_RE, MAX_FORMATS, isPictureSize, labelOfId, versionFormats } from "../core/formats.js";
 import { createBatch, latestBatch } from "../core/batches.js";
+import { markSent, NOTE_STATES, withState, type NoteState } from "../core/noteState.js";
 import { exportFileName, notesMarkdown } from "../core/exportNotes.js";
 import { tabStates } from "../core/tabs.js";
 import { addVisualVersion, checkVisualNote, registerVisual, visualNoteView, visualRatios, type PageInput, type PictureInput } from "../core/visuals.js";
@@ -27,7 +28,7 @@ import { candidatePaths, listAssets, fpsFor, screenshotName } from "./assets.js"
 import { osRevealer, osOpener, OPEN_SAFE_EXT, type Revealer, type Opener } from "./reveal.js";
 import type { CorruptEvent } from "./watch.js";
 import { inUse, setInUse } from "../core/picks.js";
-import { putAway } from "../core/takes.js";
+import { filmTakes, putAway } from "../core/takes.js";
 import { LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, PinSchema, FileKindSchema, MarkSchema, ProjectIdSchema, ShotSchema, LEVEL_MIN, LEVEL_MAX, LEVEL_STEP, lanesForVideo, picksForVideo, variantFilms, type InUse, type Levels, type Batch, type Note, type Picks, type Project, type VisualsFile } from "../core/schema.js";
 import { LABEL_MAX, oneLineOf } from "../core/labels.js";
 import { byOf, logBookFor } from "./logbook.js";
@@ -61,8 +62,9 @@ const formatId = z.string().max(16).regex(FORMAT_ID_RE);
 const MAX_PATH = 1024;
 
 /** §25.5: a note on a visual with where it is, in words, and the picture to open: what an agent reading the batch needs. */
-function withVisualViews<T extends Note>(notes: T[], visuals: Pick<VisualsFile, "visuals">): (T | (T & { visual: ReturnType<typeof visualNoteView> }))[] {
-  return notes.map((n) => (n.stage === "visuals" ? { ...n, visual: visualNoteView(n, visuals) } : n));
+// Every note the server hands out carries its lifecycle state (noteState.ts), worked out, never stored.
+function withVisualViews<T extends Note>(notes: T[], visuals: Pick<VisualsFile, "visuals">): ((T & { state: NoteState }) | (T & { state: NoteState; visual: ReturnType<typeof visualNoteView> }))[] {
+  return notes.map((n) => (n.stage === "visuals" ? { ...withState(n), visual: visualNoteView(n, visuals) } : withState(n)));
 }
 
 const NewNoteBody = z.object({
@@ -194,6 +196,7 @@ const BatchBody = z.object({ stage: StageSchema.optional() });
 const NoteQuery = z.object({
   stage: StageSchema.optional(),
   status: z.enum(["todo", "done"]).optional(),
+  state: z.enum(NOTE_STATES).optional(),
   batch: z.string().optional(),
   version: z.string().optional(),
   // §21.4: a format's notes, with the all-format notes unless onlyThisFormat (R14: Picture only).
@@ -893,7 +896,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
       }
     }
     const { result } = await store.update("notes", (f) => addNote(f, { ...b, shot, by: "user" }));
-    return c.json({ note: result }, 201);
+    return c.json({ note: withState(result) }, 201);
   });
 
   app.patch("/api/notes/:id", async (c) => {
@@ -903,14 +906,14 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     const visuals = project ? await store.read("visuals") : null;
     const check = project && visuals ? (next: Note, prev: Note) => (next.stage === "visuals" ? checkVisualNote(next, visuals) : checkNoteFormat({ next, prev, boxRedrawn: b.box !== undefined }, project)) : undefined;
     const { result } = await store.update("notes", (f) => applyUserEdit(f, { id: c.req.param("id"), ...b }, check));
-    return c.json({ note: result });
+    return c.json({ note: withState(result) });
   });
 
   app.post("/api/replies", async (c) => {
     const b = await body(c, RepliesBody);
     const { result } = await store.update("notes", (f) => b.replies.map((r) => applyReply(f, r)));
     await log.add(() => repliesEvent(result), by(c));
-    return c.json({ notes: result });
+    return c.json({ notes: result.map(withState) });
   });
 
   // ---- media ----
@@ -1300,9 +1303,17 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     return { ...picks, use: filmUse(project, picks, undefined), videos };
   };
 
+  // An agent's reading also lists every take with its state (in-use, new, earlier, put-away: takes.ts), as the
+  // desk's lists show them: per film, or for one film with ?video=.
   app.get("/api/picks", async (c) => {
     const [project, picks] = await Promise.all([store.read("project"), store.read("picks")]);
-    return c.json(withUse(project, picks, c.req.query("video")));
+    const video = c.req.query("video");
+    const read = withUse(project, picks, video);
+    if (video) return c.json({ ...read, takes: filmTakes(project, picks, video) });
+    const videos: Record<string, object> = {};
+    for (const [id, v] of Object.entries(read.videos)) videos[id] = { ...v, takes: filmTakes(project, picks, id) };
+    for (const v of project.videos) videos[v.id] ??= { lanes: {}, levels: {}, takes: filmTakes(project, picks, v.id) };
+    return c.json({ ...read, takes: filmTakes(project, picks, undefined), videos });
   });
 
   app.put("/api/picks", async (c) => {
@@ -1403,9 +1414,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
         .catch(() => "");
       if (recent) result.prompt = `${result.prompt}\n\n${recent}`;
       await store.update("batches", (f) => { f.batches.push(result); });
-      await store.update("notes", (f) => {
-        for (const n of f.notes) if (n.batch === null && result.noteIds.includes(n.id)) n.batch = result.id;
-      });
+      await store.update("notes", (f) => markSent(f.notes, result));
       await log.add(() => notesSentEvent(result), by(c));
       return result;
     });

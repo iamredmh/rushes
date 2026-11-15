@@ -1,6 +1,7 @@
 // §27: the desk's own logic, pure. Where a view sits in the workspaces, what the number keys open,
 // and how a sound's takes are grouped.
-import { isNewTake, madeForStale } from "../../src/core/takes.js";
+import { madeForStale, takeState } from "../../src/core/takes.js";
+import { NOTE_STATE_LABEL, noteState, type NoteState } from "../../src/core/noteState.js";
 import type { PlanPage } from "./lib.js";
 import type { InUse, Lane, LaneStage, Note, Stage, Variant, Video } from "./types.js";
 
@@ -109,7 +110,9 @@ export function takeGroups(lanes: Lane[], stage: LaneStage, use: Use | undefined
     for (const part of parts) {
       const rest: TakeRow[] = [];
       for (const variant of part.variants) {
-        const inUse = use !== undefined && use.lane === l.id && use.variant === variant.id;
+        // The server's own answer (src/core/takes.ts), so the lists and an agent's rushes_get_picks agree.
+        const state = takeState(variant, l.id, use);
+        const inUse = state === "in-use";
         const row: TakeRow = {
           lane: l.id,
           round: part.round,
@@ -119,9 +122,9 @@ export function takeGroups(lanes: Lane[], stage: LaneStage, use: Use | undefined
           stale: video ? madeForStale(variant, video) : false,
           inUse,
         };
-        if (inUse) out.inUse = row;
-        else if (variant.putAway !== undefined) out.away.push(row);
-        else if (isNewTake(variant, use)) out.fresh.push(row);
+        if (state === "in-use") out.inUse = row;
+        else if (state === "put-away") out.away.push(row);
+        else if (state === "new") out.fresh.push(row);
         else rest.push(row);
       }
       if (rest.length > 0) out.earlier.push({ round: part.round, takes: rest });
@@ -264,14 +267,10 @@ export function unsentCount(i: Unsent): number {
 
 /**
  * §27, 5.5 and 5.7 (ruled in the final review, I4): a note is to do (amber), sent (blue: a to-do note in a batch Send
- * made, so the agent has it) or done (green). A sent note is still to do: the To do filter keeps it.
+ * made, so the agent has it) or done (green). A sent note is still to do: the To do filter keeps it. The lifecycle is the
+ * server's own (src/core/noteState.ts), so the desk, the server and an agent read the same state.
  */
-export type NoteState = "todo" | "sent" | "done";
-export function noteState(n: Pick<Note, "status" | "batch">): NoteState {
-  return n.status === "done" ? "done" : n.batch !== null ? "sent" : "todo";
-}
-/** Each state in words, for a marker's or a dot's name and tooltip. */
-export const NOTE_STATE_LABEL: Record<NoteState, string> = { todo: "To do", sent: "With your agent", done: "Done" };
+export { NOTE_STATE_LABEL, noteState, type NoteState } from "../../src/core/noteState.js";
 /** A marker's name and tooltip: the note's text, after "With your agent · " while the agent has it. */
 export const markTitle = (state: NoteState, text: string): string => (state === "sent" ? `${NOTE_STATE_LABEL.sent} · ${text}` : text);
 

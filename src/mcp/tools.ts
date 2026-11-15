@@ -5,6 +5,7 @@ import { VERSION } from "../server/app.js";
 import { BRING_IN_MAX } from "../server/found.js";
 import { LABEL_MAX, oneLineOf } from "../core/labels.js";
 import { LOG_AREAS } from "../core/logText.js";
+import { NOTE_STATES } from "../core/noteState.js";
 import type { Check } from "../cli/doctor.js";
 
 export interface ToolContext {
@@ -410,11 +411,12 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     {
       title: "List notes",
       description:
-        "Notes left in Rushes, filtered by tab, status, batch or version. A note's `on` says what it's about: null on Picture or for the whole mix, \"<lane>/<variant>\" for a music bed, SFX pass or voice variant, \"<lane>/<variant>:<cue>\" for an SFX cue, \"vo\" for the VO lane on Mix. Older notes may carry a bare variant id, \"vo\" for the assembled read, \"<section>:<take>\" for a take, or a section id. On Picture, a note's `format` is null when it's for every format, or a format id such as \"9x16\" when it's for that shape only. Notes on a shelved film (one the user has set aside) are left out.",
+        "Notes left in Rushes, filtered by tab, state, status, batch or version. Each note has a `state`: \"todo\" (the user's, not sent yet), \"sent\" (in a batch the user sent: yours to fix) or \"done\". `state: \"sent\"` lists everything you have been given and not finished, whichever batch it came in. A note's `on` says what it's about: null on Picture or for the whole mix, \"<lane>/<variant>\" for a music bed, SFX pass or voice variant, \"<lane>/<variant>:<cue>\" for an SFX cue, \"vo\" for the VO lane on Mix. Older notes may carry a bare variant id, \"vo\" for the assembled read, \"<section>:<take>\" for a take, or a section id. On Picture, a note's `format` is null when it's for every format, or a format id such as \"9x16\" when it's for that shape only. Notes on a shelved film (one the user has set aside) are left out.",
       inputSchema: {
         project,
         stage: stage.optional(),
-        status: z.enum(["todo", "done"]).optional(),
+        state: z.enum(NOTE_STATES).optional().describe('"todo": not sent yet; "sent": sent to you and not done; "done".'),
+        status: z.enum(["todo", "done"]).optional().describe('"todo" is both unsent and sent notes; prefer `state`.'),
         batch: z.string().optional(),
         version: z.string().optional(),
         format: z
@@ -452,7 +454,7 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     "rushes_reply",
     {
       title: "Reply to notes",
-      description: "Reply to one or more notes. Set status \"done\" when fixed, fixT to the time the fix is visible in the new cut, and fixVersion to that cut.",
+      description: "Reply to one or more notes. Set status \"done\" when fixed, fixT to the time the fix is visible in the new cut, and fixVersion to that cut. A reply without a status leaves its state as it was (a sent note stays with you); status \"todo\" on a done note reopens it for the user's next Send. Each note comes back with its new `state`.",
       inputSchema: {
         project,
         replies: z
@@ -486,7 +488,7 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     {
       title: "Get picks",
       description:
-        "Which read, bed and effects pass is in use for a film (`use.voice`, `use.music`, `use.sfx`: one each, or absent when nothing is picked), and each sound's level in dB (where the user wants voice, music and sfx to sit). A take you add is not in use until the user picks it. `lanes` still lists the pick inside each round. Picks and levels belong to one film: pass `video` (the film's id, as in the note you are fixing) to read that film's own; without it you get the whole file, each film's under `videos`. Section take picks are kept for older projects but not used.",
+        "Which read, bed and effects pass is in use for a film (`use.voice`, `use.music`, `use.sfx`: one each, or absent when nothing is picked), and each sound's level in dB (where the user wants voice, music and sfx to sit). A take you add is not in use until the user picks it. `lanes` still lists the pick inside each round. `takes` lists every read, bed and effects pass per sound, newest round first, each with its `state`: \"in-use\", \"new\" (arrived since the pick and waiting to be heard), \"earlier\" or \"put-away\" (the user set it aside: don't offer it again), and `madeFor`/`stale` (the cut it was made for, and whether the film has a later one). Picks and levels belong to one film: pass `video` (the film's id, as in the note you are fixing) to read that film's own; without it you get the whole file, each film's under `videos` (with its own `takes`). Section take picks are kept for older projects but not used.",
       inputSchema: { project, video: z.string().optional().describe("The film's id. Picks and levels are per film.") },
     },
     safe(async ({ project, video }) => (await ctx.client(project)).get(`/api/picks${video ? `?video=${encodeURIComponent(video)}` : ""}`)),

@@ -2,6 +2,7 @@ import { chipOrder, versionFormats } from "./formats.js";
 import { STAGES, type Batch, type BatchesFile, type Note, type NotesFile, type Project, type Script, type Stage } from "./schema.js";
 import { EmptyBatchError } from "./errors.js";
 import { noteInPlay } from "./project.js";
+import { moveNote, noteState } from "./noteState.js";
 import { isChanged } from "./script.js";
 import { TAB_NAMES } from "./logEvents.js";
 
@@ -27,12 +28,12 @@ export function createBatch(
   now = new Date(),
 ): Batch {
   // §26: a shelved film is never asked about; its open notes stay unsent.
-  const notes = ctx.notes.notes.filter((n) => (stage === undefined || n.stage === stage) && n.status === "todo" && n.batch === null && noteInPlay(n, ctx.project));
+  const notes = ctx.notes.notes.filter((n) => (stage === undefined || n.stage === stage) && noteState(n) === "todo" && noteInPlay(n, ctx.project));
   const sections = stage === undefined || stage === "script" ? ctx.script.sections.filter((s) => isChanged(s) || s.status === "flagged") : [];
   if (notes.length === 0 && sections.length === 0) throw new EmptyBatchError(stage);
 
   const id = `b_${ctx.batches.batches.length + 1}`;
-  for (const n of notes) n.batch = id;
+  for (const n of notes) moveNote(n, { type: "send", batch: id });
   // The tabs it covers, in tab order.
   const stages = STAGES.filter((st) => (st === "script" && sections.length > 0) || notes.some((n) => n.stage === st));
   const only = stages.length === 1 ? stages[0] : null;

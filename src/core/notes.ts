@@ -4,6 +4,7 @@ import {
 import { InvalidError, NotFoundError, RushesError } from "./errors.js";
 import { labelOfId, versionFormats } from "./formats.js";
 import { newId } from "./ids.js";
+import { noteState, setStatus, type NoteState } from "./noteState.js";
 
 export interface NewNote {
   stage: Stage;
@@ -54,16 +55,11 @@ export interface Reply {
   fixVersion?: string | null;
 }
 
-/** A done note going back to todo leaves its batch, so the next Send includes it. */
-function reopen(n: Note, status: Note["status"] | undefined): void {
-  if (n.status === "done" && status === "todo") n.batch = null;
-}
-
 export function applyReply(file: NotesFile, r: Reply): Note {
   const n = find(file, r.id);
   if (r.reply !== undefined) n.reply = r.reply;
-  reopen(n, r.status);
-  if (r.status !== undefined) n.status = r.status;
+  // A status is a move in the note's lifecycle (noteState.ts): done to todo reopens it, which leaves its batch.
+  setStatus(n, r.status);
   if (r.fixT !== undefined) n.fixT = r.fixT;
   if (r.fixVersion !== undefined) n.fixVersion = r.fixVersion;
   return n;
@@ -96,8 +92,10 @@ export function applyUserEdit(file: NotesFile, e: UserEdit, check?: (next: Note,
   const parsed = NoteSchema.safeParse(next);
   if (!parsed.success) throw new InvalidError("Note edit is invalid", parsed.error.issues);
   check?.(parsed.data, n);
-  reopen(n, e.status);
-  Object.assign(n, { ...parsed.data, batch: n.batch });
+  // Status and batch move together, by the lifecycle's rules (noteState.ts); the rest is the user's edit.
+  const life = { status: n.status, batch: n.batch };
+  setStatus(life, e.status);
+  Object.assign(n, { ...parsed.data, ...life });
   return n;
 }
 
@@ -213,6 +211,8 @@ export function onLabel(note: Pick<Note, "stage" | "on">, ctx: OnContext): strin
 export interface NoteFilter {
   stage?: Stage;
   status?: Note["status"];
+  /** The lifecycle's state (noteState.ts): "sent" is the to-do notes a Send has given the agent. */
+  state?: NoteState;
   batch?: string;
   version?: string;
   format?: string;
@@ -224,6 +224,7 @@ export function filterNotes(notes: Note[], f: NoteFilter = {}): Note[] {
     (n) =>
       (f.stage === undefined || n.stage === f.stage) &&
       (f.status === undefined || n.status === f.status) &&
+      (f.state === undefined || noteState(n) === f.state) &&
       (f.batch === undefined || n.batch === f.batch) &&
       (f.version === undefined || n.version === f.version) &&
       (f.format === undefined || (n.stage === "picture" && (n.format === f.format || (!f.onlyThisFormat && n.format === null)))),
