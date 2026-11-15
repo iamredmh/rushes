@@ -1293,8 +1293,8 @@ test("the timeline shows a row per sound; mute and solo change the lane gains, a
   // View state only: nothing is saved. A trip to another Review tab keeps it for the film (final review I3: one
   // timeline, whose tabs are views of it); a fresh page starts with none.
   const picks = await rushes.api("GET", "/api/picks");
-  // (`use` is the take in use per sound, §27.6: worked out by the server, not mute or solo.)
-  expect(Object.keys(picks).sort()).toEqual(["lanes", "levels", "rev", "schema", "sections", "use", "videos"]);
+  // (`use` is the take in use per sound and `takes` each take's state, §27.6: worked out by the server, not mute or solo.)
+  expect(Object.keys(picks).sort()).toEqual(["lanes", "levels", "rev", "schema", "sections", "takes", "use", "videos"]);
   await page.keyboard.press("4");
   await openReviewTab(page, "Timeline");
   await loaded(page, 3);

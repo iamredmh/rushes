@@ -153,7 +153,14 @@ test("ticked files come in as unpicked reads: the rows leave, the tabs unlock, a
   await openWorkspace(page, "Review");
   await expect(reviewTab(page, "Voice")).not.toHaveAttribute("data-locked");
   await expect(reviewTab(page, "Music")).not.toHaveAttribute("data-locked");
-  expect(await rushes.api("GET", "/api/picks")).toEqual(picksBefore);
+  // Nothing was picked: the picks are as they were, and every take that came in is new (waiting), none in use.
+  const withoutTakes = (p: any) => JSON.parse(JSON.stringify(p, (k, v) => (k === "takes" ? undefined : v)));
+  const after = await rushes.api("GET", "/api/picks");
+  const takesAfter = after.takes;
+  expect(withoutTakes(after)).toEqual(withoutTakes(picksBefore));
+  const states = [...takesAfter.voice, ...takesAfter.music, ...takesAfter.sfx].map((t: { state: string }) => t.state);
+  expect(states.length).toBeGreaterThan(0);
+  expect(new Set(states)).toEqual(new Set(["new"]));
   const { project } = await rushes.api("GET", "/api/state");
   const variants = project.lanes.flatMap((l: { stage: string; name: string; variants: { file: string }[] }) => l.variants.map((v) => [l.stage, l.name, v.file]));
   expect(variants.sort()).toEqual([["music", "Music", "bed/loop-low.wav"], ["voice", "Vo", "vo/take-one.wav"]]);
