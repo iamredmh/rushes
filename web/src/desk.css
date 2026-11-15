@@ -389,6 +389,19 @@
 /* Its width is set, not stretched, so its height follows from the shape in WebKit too. */
 .soundside > .spreview { position: relative; z-index: 3; flex: none; align-self: flex-start; display: grid; box-sizing: border-box; width: calc(100% - 8px); min-height: 0; margin-left: 8px; aspect-ratio: var(--ar, 16 / 9); max-height: 45%; border-radius: 8px; }
 .soundside > .spreview.noslot { aspect-ratio: auto; max-height: none; }
+/* The line under the preview sits in the gap above the notes panel; dragging it sizes the preview (frame.tsx). Once
+   dragged, the preview is held to --pv of the column, and the column widens to keep the cut's shape at that height, up
+   to half the window; never narrower than the notes panel's own width. */
+.pvsplit { flex: none; height: 8px; margin: -8px 0 -8px 8px; border-radius: 4px; cursor: row-resize; }
+.pvsplit:hover, .pvsplit:focus-visible { background: var(--accent-soft); outline: none; }
+@media (min-width: 1100px) {
+  .shell .deskcols.soundcols.pvsized {
+    --side-h: max(var(--work-h, calc(100vh - 160px)), 360px);
+    --pv-w: min(calc(var(--pv) * var(--side-h) * var(--ar)), calc(50vw - 8px));
+    grid-template-columns: minmax(0, 1fr) max(var(--notes-w, 300px), calc(var(--pv-w) + 8px));
+  }
+  .pvsized .soundside > .spreview { max-height: calc(var(--pv) * 100%); }
+}
 .spreview .framebox { border-radius: 8px; }
 .spreview .fitbox { inset: 0; }
 .spreview .frame { border-radius: 0; cursor: pointer; }
@@ -478,6 +491,8 @@ span.knm, span.knm:hover { cursor: default; background: none; }
   /* Stacked: the preview under the takes, kept to a sensible size; the notes panel is the drawer. */
   .soundside { height: auto; padding-top: 8px; }
   .soundside > .spreview { margin-left: 0; width: min(100%, 520px); max-height: 50vh; }
+  /* Stacked, the preview keeps its sensible size: nothing to drag. */
+  .pvsplit { display: none; }
   /* Under the top bar's tooltips and menus (37 and up) and the monitor's format switch (36), over the rest of the work area. */
   .npanel.drawer { position: fixed; top: 44px; right: 0; bottom: 26px; z-index: 35; width: min(var(--notes-w, 300px), 100vw); height: auto; padding-left: 0; background: var(--raised); border-left: 1px solid var(--line-2); box-shadow: -16px 0 40px var(--shadow); }
   .npanel.drawer > .ntabs, .npanel.drawer > .nfoot { border-radius: 0; }

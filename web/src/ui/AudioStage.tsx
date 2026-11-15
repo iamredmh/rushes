@@ -25,7 +25,7 @@ import type { Asset, Mark, Note, Version } from "../types.js";
 import { shortLabel } from "../versions.js";
 import { waveDraws } from "./Lanes.js";
 import type { FilmsControl } from "./FilmsMenu.js";
-import { type ReviewClock, useReviewClock, useVolume } from "./desk/frame.js";
+import { PreviewDivider, type ReviewClock, usePreviewSize, useReviewClock, useVolume } from "./desk/frame.js";
 import { Icon } from "./Icon.js";
 import { NoCutSlate } from "./desk/NoCut.js";
 import { escapeIsFree, NotesPanel, useNoteBox } from "./desk/NotesPanel.js";
@@ -306,6 +306,9 @@ export function AudioStage(props: AudioStageProps) {
   const input = useRef<HTMLTextAreaElement>(null);
   const openNoteBox = useNoteBox(input);
   const monitorRef = useRef<HTMLDivElement>(null);
+  // The preview's size once its divider has been dragged (shared by the three sound tabs), and the column it is a share of.
+  const previewSize = usePreviewSize();
+  const sideRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const onIn = (e: FocusEvent) => setNoteFocused(!!input.current && e.target === input.current);
     const onOut = (e: FocusEvent) => {
@@ -609,7 +612,10 @@ export function AudioStage(props: AudioStageProps) {
   );
 
   return (
-    <div class="split deskcols soundcols">
+    <div
+      class={`split deskcols soundcols${preview && previewSize.size !== null ? " pvsized" : ""}`}
+      style={preview && previewSize.size !== null ? { "--pv": String(previewSize.size), "--ar": String(aspect) } : undefined}
+    >
       <div class="tl soundtab">
         <Clocked engine={engine}>
           {(t) => (
@@ -707,8 +713,9 @@ export function AudioStage(props: AudioStageProps) {
       </div>
 
       {/* The right column: the preview above the notes panel; with the panel hidden, the preview alone at the same width. */}
-      <div class="soundside">
+      <div class="soundside" ref={sideRef}>
         {previewBox}
+        {preview && <PreviewDivider column={sideRef} preview={monitorRef} size={previewSize} />}
         <ClockedBy engine={engine} by={(t) => `${targetAt(t).label}\n${placeholderAt(t)}`}>
           {(t) => {
             const target = targetAt(t);
