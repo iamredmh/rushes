@@ -227,9 +227,24 @@ describe("FoundScanner", () => {
 
   it("when the first pass runs out of time, carries on in the background and completes", async () => {
     const { scanner, announced } = await setup({ files: ["vo/a.wav", "bed/b.wav"], limits: { budgetMs: 0 } });
+    // Hold the background pass until the first pass has been looked at. summary() reads the
+    // project files before it reports, and on a fast machine the background pass landed in
+    // that gap, so "not complete yet" read as complete (CI, macOS, 2026-11-15).
+    const walks = scanner as unknown as { walkOnce: (limits: Partial<ScanLimits>) => Promise<unknown> };
+    const realWalk = walks.walkOnce.bind(scanner);
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let calls = 0;
+    walks.walkOnce = async (limits) => {
+      calls++;
+      if (calls > 1) await held;
+      return realWalk(limits);
+    };
     await scanner.scan();
     expect((await scanner.summary()).complete).toBe(false);
+    release();
     await scanner.settled();
+    expect(calls).toBe(2);
     const s = await scanner.summary();
     expect(s.complete).toBe(true);
     expect(s.scanning).toBe(false);
