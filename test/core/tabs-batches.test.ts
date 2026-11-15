@@ -216,6 +216,14 @@ describe("createBatch", () => {
     expect(b.prompt).toContain("rushes_reply");
   });
 
+  it("tells the agent a voice range note is about that stretch of the read, as Voice now takes a range (round 1)", () => {
+    const c = ctx();
+    addNote(c.notes, { stage: "voice", scope: "range", t: 1, tOut: 2.5, text: "Re-record this phrase" });
+    const b = createBatch(c, "voice");
+    expect(b.prompt).toContain("A range note (t to tOut) is about that stretch of the read");
+    expect(b.prompt).not.toContain("marks such as");
+  });
+
   it("keeps picture's own prompt wording (it doesn't go through picks)", () => {
     const c = ctx();
     addNote(c.notes, { stage: "picture", scope: "point", t: 1, text: "x" });

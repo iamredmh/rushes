@@ -759,6 +759,64 @@ export function takeBlock(page: Page, name: string): Locator {
   return takeRow(page, name).locator(".tlane");
 }
 
+/** A row's details button (round 1), beside its name: it opens the take's details as a line of its own under the row. */
+export function takeDetailsButton(page: Page, name: string): Locator {
+  return takeRow(page, name).getByRole("button", { name: `Details for ${name}`, exact: true });
+}
+
+/** The details line a row's details button opens: the element right after the row, when it is one. */
+export function takeDetailsLine(page: Page, name: string): Locator {
+  return takeRow(page, name).locator("xpath=following-sibling::*[1][contains(concat(' ', normalize-space(@class), ' '), ' kdetail ')]");
+}
+
+/** A box on the page, or a failure naming what had none (hidden, or not in the page). */
+export async function boxOf(el: Locator): Promise<{ x: number; y: number; width: number; height: number }> {
+  const b = await el.boundingBox();
+  if (!b) throw new Error(`no box for ${el}`);
+  return b;
+}
+
+/** `inner`'s box lies inside `outer`'s (half a pixel's slack for rounding). */
+export async function expectInside(inner: Locator, outer: Locator): Promise<void> {
+  const [i, o] = [await boxOf(inner), await boxOf(outer)];
+  expect(i.x, "left edge").toBeGreaterThanOrEqual(o.x - 0.5);
+  expect(i.y, "top edge").toBeGreaterThanOrEqual(o.y - 0.5);
+  expect(i.x + i.width, "right edge").toBeLessThanOrEqual(o.x + o.width + 0.5);
+  expect(i.y + i.height, "bottom edge").toBeLessThanOrEqual(o.y + o.height + 0.5);
+}
+
+/**
+ * Round 1: no words over a take's waveform. Every piece of text a person can see in the row (its name, tag, buttons,
+ * an effects pass's cue names), measured as drawn (each text run's own boxes, not its element's), stays clear of the
+ * row's waveform canvas. Returns what overlaps, "ok" when nothing does, or "no waveform" when the row draws none.
+ */
+export async function textOverWaveform(row: Locator): Promise<string> {
+  return row.evaluate((rowEl) => {
+    const wave = rowEl.querySelector("canvas.wave");
+    if (!wave) return "no waveform";
+    const w = wave.getBoundingClientRect();
+    const hits: string[] = [];
+    const walker = document.createTreeWalker(rowEl, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const text = node.textContent?.trim();
+      const parent = node.parentElement;
+      if (!text || !parent) continue;
+      const style = getComputedStyle(parent);
+      if (style.visibility === "hidden" || (typeof parent.checkVisibility === "function" && !parent.checkVisibility({ opacityProperty: true }))) continue;
+      // Visually hidden text (a 1 px box clipped away) is for screen readers, not drawn.
+      const pb = parent.getBoundingClientRect();
+      if (pb.width <= 1 && pb.height <= 1) continue;
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      for (const r of range.getClientRects()) {
+        if (r.width === 0 || r.height === 0) continue;
+        if (r.left < w.right && r.right > w.left && r.top < w.bottom && r.bottom > w.top) hits.push(`"${text}" at y ${Math.round(r.top)}-${Math.round(r.bottom)} over the waveform at y ${Math.round(w.top)}-${Math.round(w.bottom)}`);
+      }
+    }
+    return hits.join("; ") || "ok";
+  });
+}
+
 /**
  * A row's slot button: Put away, Bring back on a put-away take, or Unpick on the take in use. It shows on the row under the
  * pointer, with focus inside it, or selected (pressRowButton hovers the row first).

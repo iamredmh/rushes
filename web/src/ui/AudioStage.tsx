@@ -1,14 +1,15 @@
-// §27, 5.8: the frame of a sound's tab (Voice, Music and Effects), the Timeline tab's own parts reused: the monitor
-// (the tool strip and the cut, muted, following the audio clock; the no-cut slate before there is one), the transport,
-// the divider, then the timeline panel: the ruler, the Picture row, and the sound's takes (Takes). The notes panel is
-// the right-hand column, its target line following the selection and the playhead.
+// §27, 5.8: the frame of a sound's tab (Voice, Music and Effects), the Timeline tab's own parts reused. The left column
+// is the transport, then the tool strip down the left edge beside the timeline panel: the ruler, the Picture row, and
+// the sound's takes (Takes), with all the column's height (Red, round 1: the picture is only a reference here). The right
+// column is a small preview of the cut (muted, following the audio clock; the no-cut slate before there is one) above
+// the notes panel, its target line following the selection and the playhead.
 //
-// One AudioEngine per mount (useAudioStage) is the clock. It plays this sound's take (the one selected, else the take in
-// use, else the first one waiting) with the other sounds' takes in use under it at their saved levels, as the Timeline
-// tab would; "Only this sound" silences the others. Selecting is a 4 ms gain ramp on one clock, never a restart; nothing is
-// saved until a circle is pressed. Nothing here re-renders per frame: the parts that show the time (the transport, the
-// ruler, the Picture row, the monitor's timecode and the notes panel) each follow the engine on their own (Clocked),
-// and the takes' playheads are moved through a ref.
+// One AudioEngine per mount (useAudioStage) is the clock. It plays this sound's take only (the one selected, else the
+// take in use, else the first one waiting): the other sounds and the cut's own sound are heard on the Timeline tab, never
+// here. Selecting is a 4 ms gain ramp on one clock, never a restart; nothing is saved until a circle is pressed. Nothing
+// here re-renders per frame: the parts that show the time (the transport, the ruler, the Picture row, the preview's
+// timecode and the notes panel) each follow the engine on their own (Clocked), and the takes' playheads are moved
+// through a ref.
 import type { ComponentChildren } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, mediaUrl, putAway, setPick } from "../api.js";
@@ -18,19 +19,19 @@ import { assetRev, type Clip, needsVideoSync, setStreamThreshold } from "../audi
 import { useAudioStage } from "../audio/useAudioStage.js";
 import { defaultTake, noteState, noteTarget, pctOf as pctOfLength, rulerMarks, type TakeGroups, takeKey, type TakeRow, takeSections, timecode, type Tool } from "../desk.js";
 import {
-  blindOrder, fmt, frameAt, noteTime, notePending, type Scope, shotAt, shotLabel, shotSeek, snap, spacePressesButton, stepFrame, testFlags, variantFilms, variantMeta,
+  blindOrder, fmt, frameAt, noteTime, notePending, type Scope, shotAt, shotLabel, shotSeek, snap, spacePressesButton, stepFrame, takeDetails, testFlags, variantFilms,
 } from "../lib.js";
 import type { Asset, Mark, Note, Version } from "../types.js";
 import { shortLabel } from "../versions.js";
 import { waveDraws } from "./Lanes.js";
 import type { FilmsControl } from "./FilmsMenu.js";
-import { type ReviewClock, SplitDivider, splitPanel, useReviewClock, useSplit, useVolume } from "./desk/frame.js";
+import { type ReviewClock, useReviewClock, useVolume } from "./desk/frame.js";
+import { Icon } from "./Icon.js";
 import { NoCutSlate } from "./desk/NoCut.js";
 import { escapeIsFree, NotesPanel, useNoteBox } from "./desk/NotesPanel.js";
 import { PictureTrack } from "./desk/PictureTrack.js";
 import { Ruler, type RulerMarker } from "./desk/Ruler.js";
 import { type LooseItem, type TakeItem, type TakeListSection, type TakeMark, Takes } from "./desk/Takes.js";
-import type { OtherSounds } from "./desk/useMix.js";
 import { ToolStrip } from "./desk/ToolStrip.js";
 import { Transport } from "./desk/Transport.js";
 
@@ -109,9 +110,9 @@ export interface TakeList {
 }
 
 /**
- * The tab's items: each take's clip (none when its file is missing), its meta and its Films button. With Blind (`blind`
- * the shuffle's seed and `word` the name, "Read"), each heading's takes are shuffled and every take is named "Read n" in
- * the order shown; what plays never changes with it.
+ * The tab's items: each take's clip (none when its file is missing), its details and its Films button. With Blind
+ * (`blind` the shuffle's seed and `word` the name, "Read"), each heading's takes are shuffled, every take is named "Read
+ * n" in the order shown and its details are hidden; what plays never changes with it.
  */
 export function takeList(opts: {
   stage: SoundStage;
@@ -135,7 +136,7 @@ export function takeList(opts: {
       take: t,
       key,
       name: names.get(key)!,
-      meta: blind ? "·····" : variantMeta(t.variant.meta, stage === "sfx" ? t.variant.cues.length : 0),
+      details: blind ? [] : takeDetails(t.variant.meta, stage === "sfx" ? t.variant.cues.length : 0),
       missing,
       // Every take of a sound shares one engine lane: they are alternatives, and one is heard at a time.
       clip: missing ? null : { id: key, lane: stage, path: t.variant.file, offset: 0, duration: 0, rev: asset ? assetRev(asset) : undefined },
@@ -169,8 +170,6 @@ export interface AudioStageProps {
   loose: { items: LooseItem[]; what: string };
   /** Beside the tab's name on the ruler's row: Blind on Voice and Music. */
   headerExtra?: ComponentChildren;
-  /** The other sounds' takes in use and the saved levels (otherSounds): heard under this sound's take, as on the timeline. */
-  others: OtherSounds;
   preview: Preview | null;
   /** What to ask your agent for, for a cut (the no-cut slate). */
   prompt: string;
@@ -182,8 +181,9 @@ export interface AudioStageProps {
   onLabel(note: Note): string | null;
   /** A note's target line names the take (or one of its cues) like this: "Round 2 · Gerald", "Cue · Swipe". */
   targetName(item: TakeItem, cue: string | null): string;
-  /** Music and Effects take a range (I and O, the Range tool) and its marks; Voice takes a whole read or a point. */
-  hasRange: boolean;
+  /** Every sound's tab takes a range (I and O, the Range tool); Music and Effects also tick marks on it (Rise, Fall,
+   *  Louder, Quieter). Voice takes none: a read is replaced, not levelled (round 1 ruling). */
+  rangeMarks: boolean;
   chipsFor(scope: Scope): string[];
   /** The target menu's whole-take choice: "The whole read". */
   wholeLabel: string;
@@ -205,25 +205,6 @@ const NO_RANGE = { in: null, out: null } as { in: number | null; out: number | n
 const COLOR: Record<SoundStage, string> = { voice: "var(--vo)", music: "var(--music)", sfx: "var(--sfx)" };
 // Which folded groups are open, per sound, for the session.
 const awayOpen = new Set<SoundStage>();
-/** A sound's engine lane on the timeline, whose saved level it plays at. */
-const MIX_LANE: Record<SoundStage, "vo" | "music" | "sfx"> = { voice: "vo", music: "music", sfx: "sfx" };
-/** "Only this sound": remembered per browser, off by default. */
-const ALONE_KEY = "rushes:solo-tab";
-function readAlone(): boolean {
-  try {
-    return localStorage.getItem(ALONE_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-function keepAlone(on: boolean): void {
-  try {
-    if (on) localStorage.setItem(ALONE_KEY, "1");
-    else localStorage.removeItem(ALONE_KEY);
-  } catch {
-    // Storage refused (a private window): the setting holds for this visit only.
-  }
-}
 const looseOpen = new Set<SoundStage>();
 
 /** Re-renders its children as the engine's clock moves, so the parent never has to. */
@@ -262,7 +243,7 @@ function ClockedBy({ engine, by, children }: { engine: AudioEngine; by: (t: numb
 type Picked = { key: string; cue: string | null; clicked: boolean };
 
 export function AudioStage(props: AudioStageProps) {
-  const { stage, title, list, preview, fps, notes, noteRow, onLabel, targetName, hasRange, toast, onChanged, onPendingChange, readOnly = false } = props;
+  const { stage, title, list, preview, fps, notes, noteRow, onLabel, targetName, rangeMarks, toast, onChanged, onPendingChange, readOnly = false } = props;
   if (hook) hook.renders++;
 
   // ---- the takes on show, and what the engine plays ----
@@ -274,16 +255,9 @@ export function AudioStage(props: AudioStageProps) {
   };
   const showAway = awayOpen.has(stage);
   const items = [...list.sections.flatMap((s) => s.items), ...(showAway ? list.away : [])];
-  // Only the takes you can reach are decoded: a folded Put away keeps its files out of the engine.
-  const ownClips = items.flatMap((it) => (it.clip ? [it.clip] : []));
-  // §27, 5.8: the other sounds' takes in use play under it, at their saved levels, unless Only this sound is on.
-  const others = props.others;
-  const clips = [...ownClips, ...others.clips];
-  const [alone, setAloneState] = useState(readAlone);
-  const setAlone = (on: boolean) => {
-    setAloneState(on);
-    keepAlone(on);
-  };
+  // Only the takes you can reach are decoded: a folded Put away keeps its files out of the engine. Only this sound's: a
+  // sound's tab is for hearing that sound on its own (Red, round 1).
+  const clips = items.flatMap((it) => (it.clip ? [it.clip] : []));
   const [loadedDuration, setLoadedDuration] = useState<number | null>(null);
   const [aspect, setAspect] = useState(16 / 9);
   const file = preview?.version.file;
@@ -320,23 +294,17 @@ export function AudioStage(props: AudioStageProps) {
   // lane's selection apart from its clips, so this may run before setClips.
   useLayoutEffect(() => engine.selectVariant(stage, heardKey), [engine, heardKey]);
 
-  // ---- the transport's level, the divider, the tools ----
+  // ---- the transport's level and the tools ----
   const [sound, setSound] = useVolume();
-  // What you hear: each sound at its saved level (this one's on its own lane), the transport's level on top.
-  const master = sound.muted ? 0 : sound.level;
-  const laneLevels: Record<string, number> = { [stage]: others.gains[MIX_LANE[stage]] * master };
-  for (const lane of ["vo", "music", "sfx"] as const) if (MIX_LANE[stage] !== lane) laneLevels[lane] = alone ? 0 : others.gains[lane] * master;
-  useLayoutEffect(() => {
-    for (const [lane, gain] of Object.entries(laneLevels)) engine.setLaneGain(lane, gain);
-  }, [engine, JSON.stringify(laneLevels)]);
-  const split = useSplit();
+  // What you hear: the take at full level under the transport's volume. A sound's saved level is a mix decision, heard on
+  // the Timeline tab.
+  useLayoutEffect(() => engine.setLaneGain(stage, sound.muted ? 0 : sound.level), [engine, sound.muted, sound.level]);
   const [range, setRange] = useState(NO_RANGE);
   const [marks, setMarks] = useState<Mark[]>([]);
   const [noteHasText, setNoteHasText] = useState(false);
   const [noteFocused, setNoteFocused] = useState(false);
   const input = useRef<HTMLTextAreaElement>(null);
   const openNoteBox = useNoteBox(input);
-  const column = useRef<HTMLDivElement>(null);
   const monitorRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const onIn = (e: FocusEvent) => setNoteFocused(!!input.current && e.target === input.current);
@@ -374,7 +342,7 @@ export function AudioStage(props: AudioStageProps) {
   // ---- the note's target, read at `at` (the playhead now) ----
   const targetItem = selectedItem ?? items.find((it) => it.key === list.defaultKey) ?? null;
   const cue = selectedItem && picked?.cue && selectedItem.cues.some((c) => c.id === picked.cue) ? picked.cue : null;
-  const marked = hasRange && range.in !== null && range.out !== null ? { t: range.in, tOut: range.out } : null;
+  const marked = range.in !== null && range.out !== null ? { t: range.in, tOut: range.out } : null;
   /** A point (at the playhead, or a cue's time) unless the menu says the whole take: a point once the playhead has moved off zero or a point was clicked. */
   const pointAt = (at: number) => (whole !== null ? !whole : cue !== null || !!(selectedItem && picked?.clicked) || snap(at, fps) > 0);
   const targetAt = (at: number) => {
@@ -392,7 +360,7 @@ export function AudioStage(props: AudioStageProps) {
     return noteTarget({ kind: "take", stage, on, name, t }, null, fps);
   };
   const placeholderAt = (at: number) => {
-    if (hasRange && range.in !== null && range.out === null) return "Set an Out point";
+    if (range.in !== null && range.out === null) return "Set an Out point";
     const target = targetAt(at);
     if (target.scope === "whole") return `Note on ${props.wholeLabel.toLowerCase()}`;
     if (target.scope === "range") return `Note on ${noteTime(target.t, target.tOut)}`;
@@ -455,11 +423,11 @@ export function AudioStage(props: AudioStageProps) {
   };
   const seek = (t: number) => engine.seek(t);
   const setIn = () => {
-    if (!hasRange || readOnly) return;
+    if (readOnly) return;
     setRange({ in: snap(engine.time, fps), out: null });
   };
   const setOut = () => {
-    if (!hasRange || readOnly) return;
+    if (readOnly) return;
     const at = snap(engine.time, fps);
     const start = range.in ?? 0;
     if (at <= start) return toast("Out has to come after In");
@@ -549,7 +517,7 @@ export function AudioStage(props: AudioStageProps) {
 
   // ---- notes ----
   const add = async (text: string) => {
-    if (hasRange && range.in !== null && range.out === null) throw new Error("set an Out point for the range");
+    if (range.in !== null && range.out === null) throw new Error("set an Out point for the range");
     const target = targetAt(engine.time);
     await api.post("/api/notes", {
       stage,
@@ -560,22 +528,23 @@ export function AudioStage(props: AudioStageProps) {
       t: target.t,
       tOut: target.tOut,
       text,
-      marks: target.scope === "range" ? marks : [],
+      marks: rangeMarks && target.scope === "range" ? marks : [],
     });
     setRange(NO_RANGE);
     setMarks([]);
     onChanged();
   };
-  // Audio times are the audio's own: they don't move with the cut, so they're drawn as saved. Voice takes no range, so an
-  // older range note there is drawn as a point at its In, never a span.
+  // Audio times are the audio's own: they don't move with the cut, so they're drawn as saved: a point at its time, a range
+  // (on every sound's tab, Voice too since round 1) as a span from In to Out.
   const drawn: Record<string, TakeMark[]> = {};
   const timed: Note[] = [];
   for (const n of notes) {
     if (n.scope === "whole" || n.t === null) continue;
     const key = noteRow(n);
     if (key === null) continue;
-    (drawn[key] ??= []).push({ id: n.id, t: n.t, tOut: hasRange ? n.tOut : null, status: noteState(n), text: n.text });
-    timed.push({ ...n, tOut: hasRange ? n.tOut : null });
+    const tOut = n.scope === "range" ? n.tOut : null;
+    (drawn[key] ??= []).push({ id: n.id, t: n.t, tOut, status: noteState(n), text: n.text });
+    timed.push({ ...n, tOut });
   }
   const timedText = new Map(timed.map((n) => [n.id, n.text]));
   const rulerMarkers: RulerMarker[] = rulerMarks(timed, length).map((m) => ({ ...m, ring: false, title: timedText.get(m.id) ?? "" }));
@@ -585,56 +554,63 @@ export function AudioStage(props: AudioStageProps) {
   const shots = preview ? preview.version.shots.filter((s) => !length || s.start < length) : [];
   const menuLabels = [{ value: "point", label: cue ? "This cue" : "This moment" }, { value: "whole", label: props.wholeLabel }];
 
-  return (
-    <div class="split deskcols">
-      <div class="tl soundtab" ref={column}>
-        <div class="monitor" ref={monitorRef}>
-          <ToolStrip
-            active={tool}
-            readOnly={readOnly}
-            grabbing={false}
-            tools={hasRange ? ["select", "note", "range"] : ["select", "note"]}
-            onSelect={selectTool}
-            onNote={openNoteBox}
-            onRange={() => (marking ? setOut() : setIn())}
-            onBox={() => undefined}
-            onGrab={() => undefined}
-          />
-          {preview ? (
-            <div class="framebox">
-              <div class="fitbox">
-                <div class="frame" style={{ aspectRatio: String(aspect), "--ar": String(aspect) }}>
-                  <video
-                    ref={video}
-                    src={mediaUrl(preview.version.file)}
-                    muted
-                    playsInline
-                    preload="auto"
-                    aria-label="Picture preview"
-                    onLoadedMetadata={(e) => {
-                      const v = e.target as HTMLVideoElement;
-                      if (Number.isFinite(v.duration)) setLoadedDuration(v.duration);
-                      if (v.videoWidth && v.videoHeight) setAspect(v.videoWidth / v.videoHeight);
-                      paintRef.current(engine.time);
-                    }}
-                    // A seek requested while another was still landing is skipped; catch up once it lands.
-                    onSeeked={() => paintRef.current(engine.time)}
-                    onClick={toggle}
-                  />
-                  <Clocked engine={engine}>
-                    {(t) => {
-                      const shot = shotAt(shots, snap(t, fps));
-                      return <div class="tcover">f{frameAt(t, fps)}{shot && ` · shot ${shotLabel(shot.n)}`}</div>;
-                    }}
-                  </Clocked>
-                </div>
+  // The preview: the cut chosen in the Cut menu, muted, at its own shape across the right column; the no-cut slate before
+  // there is one. It is what goes full screen.
+  const previewBox = (
+    <div class={`monitor spreview${preview ? "" : " noslot"}`} ref={monitorRef} style={preview ? { "--ar": String(aspect) } : undefined}>
+      {preview ? (
+        <>
+          <div class="framebox">
+            <div class="fitbox">
+              <div class="frame" style={{ aspectRatio: String(aspect), "--ar": String(aspect) }}>
+                <video
+                  ref={video}
+                  src={mediaUrl(preview.version.file)}
+                  muted
+                  playsInline
+                  preload="auto"
+                  aria-label="Picture preview"
+                  onLoadedMetadata={(e) => {
+                    const v = e.target as HTMLVideoElement;
+                    if (Number.isFinite(v.duration)) setLoadedDuration(v.duration);
+                    if (v.videoWidth && v.videoHeight) setAspect(v.videoWidth / v.videoHeight);
+                    paintRef.current(engine.time);
+                  }}
+                  // A seek requested while another was still landing is skipped; catch up once it lands.
+                  onSeeked={() => paintRef.current(engine.time)}
+                  onClick={toggle}
+                />
+                <Clocked engine={engine}>
+                  {(t) => {
+                    const shot = shotAt(shots, snap(t, fps));
+                    return <div class="tcover">f{frameAt(t, fps)}{shot && ` · shot ${shotLabel(shot.n)}`}</div>;
+                  }}
+                </Clocked>
               </div>
             </div>
-          ) : (
-            <NoCutSlate prompt={props.prompt} toast={toast} then="Until then the takes play here on their own." />
-          )}
-        </div>
+          </div>
+          <button
+            type="button"
+            class="spfull"
+            data-tip="Full screen · F"
+            aria-label="Full screen · F"
+            onClick={(e) => {
+              if (e.detail > 0) (e.currentTarget as HTMLElement).blur();
+              fullScreen();
+            }}
+          >
+            <Icon name="expand" />
+          </button>
+        </>
+      ) : (
+        <NoCutSlate prompt={props.prompt} toast={toast} then="Until then the takes play here on their own." />
+      )}
+    </div>
+  );
 
+  return (
+    <div class="split deskcols soundcols">
+      <div class="tl soundtab">
         <Clocked engine={engine}>
           {(t) => (
             <Transport
@@ -649,112 +625,122 @@ export function AudioStage(props: AudioStageProps) {
               muted={sound.muted}
               onVolume={(level) => setSound({ level, muted: level === 0 ? sound.muted : false })}
               onMute={() => setSound({ ...sound, muted: !sound.muted })}
-              onFullScreen={preview ? fullScreen : undefined}
             />
           )}
         </Clocked>
 
-        <SplitDivider column={column} split={split} />
-
-        <div {...splitPanel(split.split, "tlpanel takespanel")}>
-          <div class="kstick">
-          <div class="trow rrow">
-            <div class="thead">
-              <span class="kttl">{title}</span>
-              <span class="sp" />
-              {others.clips.length > 0 && (
-                <button type="button" class="btn ghost sm kalone" aria-pressed={alone} data-tip={alone ? "The other sounds are silent" : "Hear this sound without the others"} onClick={() => setAlone(!alone)}>
-                  Only this sound
-                </button>
+        {/* The tool strip keeps the Timeline's place, down the left edge, here beside the ruler, the Picture row and the takes. */}
+        <div class="kbody">
+          <ToolStrip
+            active={tool}
+            readOnly={readOnly}
+            grabbing={false}
+            tools={["select", "note", "range"]}
+            onSelect={selectTool}
+            onNote={openNoteBox}
+            onRange={() => (marking ? setOut() : setIn())}
+            onBox={() => undefined}
+            onGrab={() => undefined}
+          />
+          <div class="tlpanel takespanel">
+            <div class="kstick">
+              <div class="trow rrow">
+                <div class="thead">
+                  <span class="kttl">{title}</span>
+                  <span class="sp" />
+                  {props.headerExtra}
+                </div>
+                <Clocked engine={engine}>
+                  {(t) => (
+                    <Ruler duration={length} t={t} marks={rulerMarkers} live={liveRange} onSeek={seek} onMark={(id) => {
+                      const n = timed.find((x) => x.id === id);
+                      if (n?.t != null) {
+                        engine.pause();
+                        seek(n.t);
+                      }
+                    }} />
+                  )}
+                </Clocked>
+              </div>
+              {preview && (
+                <Clocked engine={engine}>
+                  {(t) => (
+                    <PictureTrack
+                      shots={shots}
+                      duration={length}
+                      t={t}
+                      current={shotAt(shots, snap(t, fps))?.n ?? null}
+                      cutLabel={shortLabel(preview.version) || preview.version.id}
+                      locked={preview.locked}
+                      onSeek={(start) => {
+                        engine.pause();
+                        seek(shotSeek(start, fps));
+                      }}
+                    />
+                  )}
+                </Clocked>
               )}
-              {props.headerExtra}
             </div>
-            <Clocked engine={engine}>
-              {(t) => (
-                <Ruler duration={length} t={t} marks={rulerMarkers} live={liveRange} onSeek={seek} onMark={(id) => {
-                  const n = timed.find((x) => x.id === id);
-                  if (n?.t != null) {
-                    engine.pause();
-                    seek(n.t);
-                  }
-                }} />
-              )}
-            </Clocked>
-          </div>
-          {preview && (
-            <Clocked engine={engine}>
-              {(t) => (
-                <PictureTrack
-                  shots={shots}
-                  duration={length}
-                  t={t}
-                  current={shotAt(shots, snap(t, fps))?.n ?? null}
-                  cutLabel={shortLabel(preview.version) || preview.version.id}
-                  locked={preview.locked}
-                  onSeek={(start) => {
-                    engine.pause();
-                    seek(shotSeek(start, fps));
-                  }}
-                />
-              )}
-            </Clocked>
-          )}
-          </div>
-          <div ref={takesRoot}>
-            <Takes
-              label={`${title} takes`}
-              color={COLOR[stage]}
-              sections={list.sections}
-              away={{ items: list.away, open: showAway, dot: notes.some((n) => n.status === "todo" && list.away.some((it) => it.key === noteRow(n))), onToggle: () => toggleSet(awayOpen) }}
-              loose={{ ...props.loose, open: looseOpen.has(stage), onToggle: () => toggleSet(looseOpen) }}
-              none={props.none}
-              length={length}
-              media={media}
-              selected={selectedItem?.key ?? null}
-              marks={drawn}
-              range={range}
-              layers={props.layers}
-              onSelect={select}
-              onPick={(it) => void pick(it, it.take.variant.id)}
-              onUnpick={(it) => void pick(it, null)}
-              onPutAway={(it, to) => void away(it, to)}
-              toast={toast}
-            />
+            <div ref={takesRoot}>
+              <Takes
+                label={`${title} takes`}
+                color={COLOR[stage]}
+                sections={list.sections}
+                away={{ items: list.away, open: showAway, dot: notes.some((n) => n.status === "todo" && list.away.some((it) => it.key === noteRow(n))), onToggle: () => toggleSet(awayOpen) }}
+                loose={{ ...props.loose, open: looseOpen.has(stage), onToggle: () => toggleSet(looseOpen) }}
+                none={props.none}
+                length={length}
+                media={media}
+                selected={selectedItem?.key ?? null}
+                marks={drawn}
+                range={range}
+                layers={props.layers}
+                onSelect={select}
+                onPick={(it) => void pick(it, it.take.variant.id)}
+                onUnpick={(it) => void pick(it, null)}
+                onPutAway={(it, to) => void away(it, to)}
+                toast={toast}
+              />
+            </div>
           </div>
         </div>
       </div>
 
-      <ClockedBy engine={engine} by={(t) => `${targetAt(t).label}\n${placeholderAt(t)}`}>
-        {(t) => {
-          const target = targetAt(t);
-          if (hook) hook.panelRenders++;
-          return (
-            <NotesPanel
-              notes={notes}
-              version={preview?.version.id ?? null}
-              placeholder={placeholderAt(t)}
-              inputRef={input}
-              toast={toast}
-              onAdd={add}
-              onChanged={onChanged}
-              onTextChange={setNoteHasText}
-              fixedTimes
-              onSeek={(to) => engine.seek(to)}
-              target={{
-                label: target.label,
-                when: target.when,
-                name: target.name,
-                menu: targetItem && !marked ? { value: target.scope === "whole" ? "whole" : "point", options: menuLabels, onChange: (v) => setWhole(v === "whole") } : undefined,
-                onClear: selectedItem || whole !== null ? clearAim : undefined,
-              }}
-              chips={props.chipsFor(target.scope)}
-              marks={!hasRange || target.scope !== "range" ? undefined : { value: marks, onChange: setMarks }}
-              onLabel={onLabel}
-              readOnly={readOnly}
-            />
-          );
-        }}
-      </ClockedBy>
+      {/* The right column: the preview above the notes panel; with the panel hidden, the preview alone at the same width. */}
+      <div class="soundside">
+        {previewBox}
+        <ClockedBy engine={engine} by={(t) => `${targetAt(t).label}\n${placeholderAt(t)}`}>
+          {(t) => {
+            const target = targetAt(t);
+            if (hook) hook.panelRenders++;
+            return (
+              <NotesPanel
+                notes={notes}
+                version={preview?.version.id ?? null}
+                placeholder={placeholderAt(t)}
+                inputRef={input}
+                toast={toast}
+                onAdd={add}
+                onChanged={onChanged}
+                onTextChange={setNoteHasText}
+                fixedTimes
+                onSeek={(to) => engine.seek(to)}
+                target={{
+                  label: target.label,
+                  when: target.when,
+                  name: target.name,
+                  menu: targetItem && !marked ? { value: target.scope === "whole" ? "whole" : "point", options: menuLabels, onChange: (v) => setWhole(v === "whole") } : undefined,
+                  onClear: selectedItem || whole !== null ? clearAim : undefined,
+                }}
+                chips={props.chipsFor(target.scope)}
+                marks={!rangeMarks || target.scope !== "range" ? undefined : { value: marks, onChange: setMarks }}
+                onLabel={onLabel}
+                readOnly={readOnly}
+              />
+            );
+          }}
+        </ClockedBy>
+      </div>
     </div>
   );
 }

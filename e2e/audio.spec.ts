@@ -7,6 +7,7 @@ import { makeWav } from "./fixtures/wav.js";
 import {
   expect, type Rushes, test, openReviewTab, reviewTab, workspaceTab, currentFilm, pickFilm, videoReady, loudness, rangeChip, notesPanel, panelToggle, noteTargetLine, noteTargetLabel, noteTargetName, noteTargetMenu, clearTarget, rulerMarkers, soundBlock, soundButton, soundTrack,
   monitor, playButton, toolButton, takesList, takeHeadings, takeRow, takeRows, takeCircle, takeName, takeBlock, pressRowButton, foldToggle, clickTakeAt, expectReadableInRow,
+  takeDetailsButton, takeDetailsLine, textOverWaveform, transport,
 } from "./fixture.js";
 
 test("the generated WAV fixture decodes in Chromium to the tone it describes", async ({ page }) => {
@@ -91,9 +92,12 @@ test("Music shows a row per bed, and its circle persists the pick", async ({ pag
   await twoBeds(page, rushes);
   const rows = takeRows(page);
   await expect(rows.nth(0).locator("[data-name]")).toHaveText("A · Deep house");
-  await expect(rows.nth(0).locator("[data-meta]")).toHaveText("120 BPM · A minor");
+  // Round 1: a bed's details are on its name (a tooltip, read out as its description), never over its waveform.
+  await expect(takeName(page, "A · Deep house")).toHaveAttribute("data-tip", "120 BPM · A minor");
+  await expect(takeName(page, "A · Deep house")).toHaveAttribute("aria-description", "120 BPM · A minor");
   await expect(rows.nth(1).locator("[data-name]")).toHaveText("B · Warm keys");
-  await expect(rows.nth(1).locator("[data-meta]")).toHaveText("Soft keys, no drums");
+  await expect(takeName(page, "B · Warm keys")).toHaveAttribute("data-tip", "Soft keys, no drums");
+  await expect(takesList(page).locator(".tlane").filter({ hasText: /BPM|Soft keys/ })).toHaveCount(0);
   const useB = takeCircle(page, "B · Warm keys");
   await expect(useB).toHaveAttribute("aria-checked", "false");
   await expect(useB).toHaveAccessibleName("Use this one: B · Warm keys");
@@ -239,10 +243,13 @@ test("Blind hides the names and reveals them again", async ({ page, rushes }) =>
   await expect(page.locator(".split")).not.toContainText("Deep house");
   await expect(page.locator(".split")).not.toContainText("Warm keys");
   await expect(page.locator(".split")).not.toContainText("120 BPM");
+  // Blind hides the details too: no tooltip on a name, no details button to open them.
+  await expect(takeRows(page).locator(".knm[data-tip]")).toHaveCount(0);
+  await expect(takeRows(page).locator(".kinfo")).toHaveCount(0);
   await blind.click();
   await expect(blind).toHaveAttribute("aria-pressed", "false");
   await expect(takeRows(page).locator("[data-name]")).toHaveText(["A · Deep house", "B · Warm keys"]);
-  await expect(takeRows(page).nth(0).locator("[data-meta]")).toHaveText("120 BPM · A minor");
+  await expect(takeName(page, "A · Deep house")).toHaveAttribute("data-tip", "120 BPM · A minor");
 });
 
 test("cue labels close together never overlap, even in a narrow window", async ({ page, rushes }) => {
@@ -268,7 +275,8 @@ test("Sound effects labels cues, and a note on a cue saves the cue and its time"
   await expect(takeRows(page)).toHaveCount(2);
   await loaded(page, 2);
   await expect(rowOf(page, "sfx/pass-a").locator(".cue")).toHaveText(["Whoosh", "Swipe"]);
-  await expect(rowOf(page, "sfx/pass-a").locator("[data-meta]")).toHaveText("Subtle · 2 cues");
+  // The cue count is a detail, on the name, not over the waveform.
+  await expect(rowOf(page, "sfx/pass-a").locator(".knm")).toHaveAttribute("data-tip", "Subtle · 2 cues");
   // A cue's label aims the note at that cue, at its time.
   await rowOf(page, "sfx/pass-a").locator(".cue", { hasText: "Swipe" }).click();
   await expect(noteTargetLabel(page)).toHaveText(/^00:00:01:\d\d · Effects · Cue · Swipe$/);
@@ -608,7 +616,7 @@ test("Voiceover lists every round's reads open: New, In use and Earlier, each un
   await expect(takeHeadings(page)).toHaveText([`New · ${R2}`, `In use · ${R1}`, `Earlier · ${R1}`]);
   await expect(takeRows(page)).toHaveCount(5);
   await expect(takeRows(page).locator("[data-name]")).toHaveText(["more excited", "more sombre", "Gerald", "Jane", "Louise"]);
-  await expect(takeRows(page).locator("[data-meta]")).toHaveText(["Brighter, quicker", "Slower, lower", "Low, measured", "Warm, conversational", "Bright, upbeat"]);
+  expect(await takeRows(page).locator(".knm").evaluateAll((els) => els.map((e) => e.getAttribute("data-tip")))).toEqual(["Brighter, quicker", "Slower, lower", "Low, measured", "Warm, conversational", "Bright, upbeat"]);
   await expect(takeCircle(page, "Gerald")).toHaveAttribute("aria-checked", "true");
   // Nothing folds by itself.
   await expect(takesList(page).locator(".kfold")).toHaveCount(0);
@@ -781,28 +789,52 @@ test("Voiceover plays one read at a time: the read in use, then a clicked read, 
   expect(await heard(page)).toEqual([`${R2_ID}/more-sombre@0`]);
 });
 
-test("Voiceover notes are on a whole read or a point on it, whole first: no In/Out, no ranges, and chips for each", async ({ page, rushes }) => {
+test("Voiceover notes are on a whole read, a point or a range of it (round 1), whole first, with chips for each and no marks", async ({ page, rushes }) => {
   await twoRounds(rushes);
   await openVoice(page, rushes, 5);
   // Nothing clicked, the playhead at the start: the whole of the read in use.
   await expect(noteTargetLabel(page)).toHaveText(`Voice · ${R1} · Gerald`);
   const chips = page.getByRole("group", { name: "Start a note" }).getByRole("button");
   await expect(chips).toHaveText(["Speaker", "Pacing", "Tone", "Overall"]);
-  // No Range tool here, and I and O do nothing: the note is a point at the playhead, never a range.
-  await expect(toolButton(page, "Range")).toHaveCount(0);
+  // A point at the playhead, with the point's chips.
   await page.evaluate(() => window.__rushesAudio!.engine!.seek(1));
-  await page.keyboard.press("i");
-  await page.evaluate(() => window.__rushesAudio!.engine!.seek(2));
-  await page.keyboard.press("o");
-  await expect(rangeChip(page)).toHaveCount(0);
-  await expect(takesList(page).locator(".span")).toHaveCount(0);
-  await expect(noteTargetLabel(page)).toHaveText(`00:00:02:00 · Voice · ${R1} · Gerald`);
+  await expect(noteTargetLabel(page)).toHaveText(`00:00:01:00 · Voice · ${R1} · Gerald`);
   await expect(chips).toHaveText(["Fix this", "Keep this"]);
+  // Round 1: the Range tool is on the strip, and I and O mark a range, live on the ruler and every read's block.
+  await expect(toolButton(page, "Range")).toBeVisible();
+  await page.keyboard.press("i");
+  await expect(toolButton(page, "Range")).toHaveAttribute("aria-pressed", "true");
+  await expect(rangeChip(page)).toContainText("0:01.00");
+  await page.evaluate(() => window.__rushesAudio!.engine!.seek(2.5));
+  await page.keyboard.press("o");
+  await expect(rangeChip(page)).toContainText("0:01.00");
+  await expect(rangeChip(page)).toContainText("0:02.50");
+  await expect(takesList(page).locator(".span.live")).toHaveCount(5);
+  await expect(page.getByRole("slider", { name: "Timeline" }).locator(".span")).toHaveCount(1);
+  await expect(noteTargetLabel(page)).toContainText("–");
+  await expect(noteTargetLabel(page)).toContainText(`Voice · ${R1} · Gerald`);
+  // A range takes the point's chips ("Fix this" reads as well for a stretch), and no marks: a read is replaced, not levelled.
+  await expect(chips).toHaveText(["Fix this", "Keep this"]);
+  await expect(page.getByRole("group", { name: "Marks" })).toHaveCount(0);
+  await chips.filter({ hasText: "Fix this" }).click();
+  await page.keyboard.type(" re-record this phrase.");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".note")).toHaveCount(1);
+  const { notes } = await rushes.api("GET", "/api/notes?stage=voice");
+  expect(notes[0]).toMatchObject({ stage: "voice", scope: "range", on: "round-1-voices/gerald", t: 1, tOut: 2.5, marks: [] });
+  // Saved, the range is drawn as a span on its read, and the live range is gone.
+  await expect(rowOf(page, "round-1-voices/gerald").locator(`.span[data-note="${notes[0].id}"]`)).toHaveCount(1);
+  await expect(takesList(page).locator(".span.live")).toHaveCount(0);
+  // Clear range lets go of a range without a note.
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press("i");
+  await expect(rangeChip(page)).toBeVisible();
+  await rangeChip(page).getByRole("button").click();
+  await expect(rangeChip(page)).toHaveCount(0);
   // A click on another read's block: a point on it, with the point's chips.
   await clickLaneAt(page, "more excited", 1);
   await expect(noteTargetLabel(page)).toContainText(/^00:00:01:00 · Voice/);
   await expect(chips).toHaveText(["Fix this", "Keep this"]);
-  await expect(page.getByRole("group", { name: "Marks" })).toHaveCount(0);
 });
 
 test("a point note draws on its read's block only; a whole note is listed and not drawn", async ({ page, rushes }) => {
@@ -840,7 +872,9 @@ test("Blind on Voiceover names every read Read 1…n, the one in use too, and ne
   await openVoice(page, rushes, 5);
   await page.getByRole("button", { name: "Blind" }).click();
   await expect(takeRows(page).locator("[data-name]")).toHaveText(["Read 1", "Read 2", "Read 3", "Read 4", "Read 5"]);
-  await expect(takeRows(page).locator("[data-meta]")).toHaveText(["·····", "·····", "·····", "·····", "·····"]);
+  // Blind hides every read's details: no tooltip on a name, no details button.
+  await expect(takeRows(page).locator(".knm[data-tip]")).toHaveCount(0);
+  await expect(takeRows(page).locator(".kinfo")).toHaveCount(0);
   for (const name of ["Jane", "Louise", "excited", "sombre", "Low, measured"]) await expect(takesList(page)).not.toContainText(name);
   // The read in use is a "Read n" too.
   await expect(takesList(page).locator('.take:has([aria-checked="true"]) [data-name]')).toHaveText(/^Read \d$/);
@@ -873,47 +907,56 @@ test("two rounds that both hold a Gerald are told apart by the note's target, ea
   expect((await rushes.api("GET", "/api/notes?stage=voice")).notes[0]).toMatchObject({ on: "round-1-voices/gerald", scope: "whole" });
 });
 
-test("a cut-off read description shows in full as a tooltip, and the note's target names the round", async ({ page, rushes }) => {
-  // Narrow enough that the description is cut short on its block.
+test("a read's description is in its name's tooltip, and the note's target names the round", async ({ page, rushes }) => {
   await page.setViewportSize({ width: 800, height: 900 });
   await twoRounds(rushes, { steadier: true });
   await openVoice(page, rushes, 6);
-  const long = rowOf(page, `${R2_ID}/steadier-pace`).locator("[data-meta]");
-  expect(await long.locator("[data-meta-text]").evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
-  await expect(long).toHaveAttribute("data-tip", LONG);
-  await expect(rowOf(page, `${R2_ID}/more-sombre`).locator("[data-meta]")).not.toHaveAttribute("data-tip");
-  await expect(rowOf(page, `${R2_ID}/more-sombre`).locator(".knm")).not.toHaveAttribute("data-tip");
+  // Round 1: the description is never on the block, cut short or not: it is the name's tooltip, in full.
+  await expect(rowOf(page, `${R2_ID}/steadier-pace`).locator(".knm")).toHaveAttribute("data-tip", LONG);
+  await expect(rowOf(page, `${R2_ID}/steadier-pace`).locator(".tlane")).not.toContainText("slower intro");
+  await expect(rowOf(page, `${R2_ID}/more-sombre`).locator(".knm")).toHaveAttribute("data-tip", "Slower, lower");
   await takeName(page, "more sombre").click();
   // Under 1100 px the notes panel is a drawer: opened, its target names the round.
   await panelToggle(page).click();
   await expect(noteTargetLabel(page)).toHaveText(`Voice · ${R2} · more sombre`);
 });
 
-test("a cut-off description's tooltip isn't clipped by its block", async ({ page, rushes }) => {
+test("a read's details tooltip isn't clipped, and wraps its lines", async ({ page, rushes }) => {
   await page.setViewportSize({ width: 800, height: 900 });
   await twoRounds(rushes, { steadier: true });
   await openVoice(page, rushes, 6);
-  const meta = rowOf(page, `${R2_ID}/steadier-pace`).locator("[data-meta]");
-  await expect(meta).toHaveAttribute("data-tip", LONG);
-  await expect(meta).toHaveCSS("overflow", "visible");
-  // Every box between the tooltip's element and its row must stay unclipped too, or the tooltip is
-  // cut off even though the element itself is fine.
-  const chain = await overflowChain(meta);
+  const name = rowOf(page, `${R2_ID}/steadier-pace`).locator(".knm");
+  await expect(name).toHaveAttribute("data-tip", LONG);
+  // Every box between the tooltip's element and its row must stay unclipped, or the tooltip is cut off.
+  const chain = await overflowChain(name);
   expect(chain.length).toBeGreaterThan(1);
   expect(chain.every((o) => o === "visible")).toBe(true);
   // Hovering actually shows the tooltip (opacity: 1 once the 0.12s transition settles), with the full text.
-  await meta.hover();
-  await expect.poll(() => meta.evaluate((el) => Number(getComputedStyle(el, "::after").opacity))).toBe(1);
-  expect(await meta.evaluate((el) => getComputedStyle(el, "::after").content)).toBe(JSON.stringify(LONG));
+  await name.hover();
+  await expect.poll(() => name.evaluate((el) => Number(getComputedStyle(el, "::after").opacity))).toBe(1);
+  expect(await name.evaluate((el) => getComputedStyle(el, "::after").content)).toBe(JSON.stringify(LONG));
+  expect(await name.evaluate((el) => getComputedStyle(el, "::after").whiteSpace)).toBe("pre-line");
 });
 
-test("an older Range note on a read draws on Voiceover as a point at its In, never a span (§18.3)", async ({ page, rushes }) => {
+test("a range note on a read draws on Voiceover as a span from its In to its Out (round 1); a point note stays a point", async ({ page, rushes }) => {
   await twoRounds(rushes);
-  const { note } = await rushes.api("POST", "/api/notes", { stage: "voice", on: `${R2_ID}/more-sombre`, scope: "range", t: 1, tOut: 3, text: "From before rounds." });
+  const { note } = await rushes.api("POST", "/api/notes", { stage: "voice", on: `${R2_ID}/more-sombre`, scope: "range", t: 1, tOut: 3, text: "Replace this stretch." });
+  const { note: point } = await rushes.api("POST", "/api/notes", { stage: "voice", on: `${R2_ID}/more-sombre`, scope: "point", t: 2, text: "A clipped word." });
   await openVoice(page, rushes, 5);
   const row = rowOf(page, `${R2_ID}/more-sombre`);
   await expect(row.locator(`.mk[data-note="${note.id}"]`)).toHaveCount(1);
-  await expect(row.locator(`.span[data-note="${note.id}"]`)).toHaveCount(0);
+  const span = row.locator(`.span[data-note="${note.id}"]`);
+  await expect(span).toHaveCount(1);
+  // From 1 s to 3 s of the 4 s scale: half the lane's width, starting a quarter in.
+  const lane = (await row.locator(".tlane").boundingBox())!;
+  const box = (await span.boundingBox())!;
+  expect(Math.abs(box.x - (lane.x + lane.width / 4))).toBeLessThanOrEqual(2);
+  expect(Math.abs(box.width - lane.width / 2)).toBeLessThanOrEqual(2);
+  await expect(row.locator(`.mk[data-note="${point.id}"]`)).toHaveCount(1);
+  await expect(row.locator(`.span[data-note="${point.id}"]`)).toHaveCount(0);
+  // The notes panel lists it by its range.
+  await expect(page.locator(`.note[data-note="${note.id}"]`)).toContainText("0:01.00");
+  await expect(page.locator(`.note[data-note="${note.id}"]`)).toContainText("0:03.00");
 });
 
 test("a cut-off round heading and the note's target show in full as tooltips, inside the window", async ({ page, rushes }) => {
@@ -950,41 +993,16 @@ test("a cut-off round heading and the note's target show in full as tooltips, in
   expect(box.left + box.width).toBeLessThanOrEqual(box.vw);
 });
 
-test("a description cut off only once its long-file mark appears still gets its tooltip", async ({ page, rushes }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
-  // Probe the meta line's room with and without the mark, then pick a description that fits only without it.
-  await rushes.addVariant("voice", "Probe", { round: R1, seconds: 3, freq: 220, meta: { description: "x" } });
+test("a long file's mark sits beside the read's name, not over its waveform", async ({ page, rushes }) => {
+  await rushes.addVariant("voice", "Probe", { round: R1, seconds: 3, freq: 220, meta: { description: "Steady" } });
   await page.goto(rushes.testUrl("streamOver=1"));
   await openReviewTab(page, "Voice");
   await loaded(page, 1);
-  const probe = takesList(page).locator("[data-meta]").first();
-  await expect(probe.locator(".smk")).toHaveCount(1);
-  const description = await probe.evaluate((el) => {
-    const text = el.querySelector("[data-meta-text]") as HTMLElement;
-    // The text is a flex item that shrinks: its room is the line, less the mark and the gap.
-    const without = el.clientWidth;
-    const withMark = without - (el.querySelector(".smk") as HTMLElement).offsetWidth - parseFloat(getComputedStyle(el).columnGap);
-    const ruler = text.cloneNode() as HTMLElement;
-    Object.assign(ruler.style, { position: "absolute", visibility: "hidden", overflow: "visible", width: "auto" });
-    el.appendChild(ruler);
-    let s = "";
-    for (let n = 1; n < 400; n++) {
-      ruler.textContent = "m".repeat(n);
-      const w = ruler.scrollWidth;
-      if (w > withMark + 1 && w < without - 1) { s = ruler.textContent; break; }
-    }
-    ruler.remove();
-    return s;
-  });
-  expect(description.length).toBeGreaterThan(0);
-  const read = await rushes.addVariant("voice", "Fits", { round: R1, seconds: 3, freq: 247, meta: { description } });
-  await page.reload();
-  await openReviewTab(page, "Voice");
-  await loaded(page, 2);
-  const meta = rowOf(page, `${read.lane.id}/${read.variant.id}`).locator("[data-meta]");
-  await expect(meta.locator(".smk")).toHaveCount(1);
-  expect(await meta.locator("[data-meta-text]").evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
-  await expect(meta).toHaveAttribute("data-tip", description);
+  const row = takeRow(page, "Probe");
+  await expect(row.locator(".khead .smk")).toHaveCount(1);
+  await expect(row.locator(".tlane .smk")).toHaveCount(0);
+  await expect(row.locator(".knm")).toHaveAttribute("data-tip", "Steady");
+  expect(await textOverWaveform(row)).toBe("ok");
 });
 
 test("a read added with no round shows under the day it arrived, and older notes are listed, not drawn", async ({ page, rushes }) => {
@@ -1690,8 +1708,8 @@ test("leaving the timeline stops the mix and releases its engine", async ({ page
   await page.evaluate(() => { (window as unknown as { __old: unknown }).__old = window.__rushesAudio!.engine; });
   await page.keyboard.press("4");
   await expect(reviewTab(page, "Music")).toHaveAttribute("aria-selected", "true");
-  // The Music tab plays the bed with the read and the pass in use under it (§27, 5.8): three files.
-  await loaded(page, 3);
+  // The Music tab plays the bed alone (round 1: a sound's tab is that sound only): one file.
+  await loaded(page, 1);
   const old = await page.evaluate(() => {
     const e = (window as unknown as { __old: { playing: boolean; inspect(): Snapshot } }).__old;
     return { playing: e.playing, sources: e.inspect().sources, live: window.__rushesAudio!.liveContexts() };
@@ -1824,8 +1842,8 @@ test("Space plays after a mouse click on a tab, M, S, Blind or a scope chip (§1
   await spaceToggles(page);
 
   await openReviewTab(page, "Music");
-  // The bed, with the read and the pass in use under it (§27, 5.8).
-  await loaded(page, 3);
+  // The bed alone (round 1: a sound's tab is that sound only).
+  await loaded(page, 1);
   await spaceToggles(page);
   await button("Blind").click();
   await expect(button("Blind")).toHaveAttribute("aria-pressed", "true");
@@ -1889,4 +1907,195 @@ test("Sound effects and Music list only the film you are on, with its own notes"
   await foldToggle(page, "Not on this film").click();
   await expect(takesList(page).locator(".take.loose")).toHaveCount(1);
   await expect(takesList(page).getByRole("button", { name: /^Films for Round 1 · F2A read/ })).toBeVisible();
+});
+
+// ---- Red's round 1 (the sound tabs): the picture is a small preview above the notes panel, the takes area has the rest
+// of the column, no words over a waveform (the details are on the name and a details line), and Voice takes a range. ----
+
+/** A cut, a read with a description, a bed with BPM and key, and an effects pass with cues: one of each sound. */
+async function oneOfEach(rushes: Rushes) {
+  await rushes.addCut();
+  await rushes.addVariant("voice", "Alice · natural", { round: "Round 1", seconds: 4, freq: 220, meta: { description: "Warm, conversational, a touch slower in the middle" } });
+  await rushes.addVariant("voice", "Gerald · bright", { round: "Round 1", seconds: 4, freq: 262, meta: { description: "Bright, upbeat" } });
+  await rushes.addVariant("music", "Warm pad", { seconds: 4, freq: 330, meta: { description: "Soft keys, no drums", bpm: 96, key: "D major" } });
+  await rushes.addVariant("sfx", "Pass A", { seconds: 4, freq: 440, meta: { description: "Subtle" }, cues: [{ name: "Swipe", t: 1 }, { name: "Tap", t: 2.5 }] });
+}
+
+const column = (page: Page) => page.locator(".soundtab");
+const takesPanel = (page: Page) => page.locator(".soundtab .takespanel");
+const rightColumn = (page: Page) => page.locator(".soundside");
+
+for (const tab of ["Voice", "Music", "Effects"] as const) {
+  test(`${tab}: the preview sits in the right column above the notes panel, and the takes area has the rest of the left column`, async ({ page, rushes }) => {
+    await oneOfEach(rushes);
+    await page.goto(rushes.testUrl());
+    await openReviewTab(page, tab);
+    await loaded(page, tab === "Voice" ? 2 : 1);
+    const preview = monitor(page);
+    await expect(preview.locator("video")).toBeVisible();
+    // The preview is inside the right column, above the notes panel, and as wide as it.
+    const pv = (await preview.boundingBox())!;
+    const side = (await rightColumn(page).boundingBox())!;
+    const panel = (await notesPanel(page).boundingBox())!;
+    expect(pv.x).toBeGreaterThanOrEqual(side.x - 0.5);
+    expect(pv.x + pv.width).toBeLessThanOrEqual(side.x + side.width + 0.5);
+    expect(pv.y).toBeGreaterThanOrEqual(side.y - 0.5);
+    expect(pv.y + pv.height).toBeLessThanOrEqual(panel.y + 0.5);
+    expect(Math.abs(pv.x + pv.width - (panel.x + panel.width))).toBeLessThanOrEqual(1);
+    // At the cut's own shape (16:9), full width of the column.
+    expect(Math.abs(pv.width / pv.height - 16 / 9)).toBeLessThan(0.03);
+    // Nothing of the picture is left in the left column: the transport is at its top, then the tool strip beside the
+    // takes area, which runs to the column's foot. No divider to drag.
+    const col = (await column(page).boundingBox())!;
+    expect(pv.x).toBeGreaterThanOrEqual(col.x + col.width);
+    const tr = (await transport(page).boundingBox())!;
+    expect(tr.y - col.y).toBeLessThanOrEqual(2);
+    const takes = (await takesPanel(page).boundingBox())!;
+    const strip = (await page.getByRole("toolbar", { name: "Tools" }).boundingBox())!;
+    expect(takes.y).toBeGreaterThanOrEqual(tr.y + tr.height - 1);
+    expect(col.y + col.height - (takes.y + takes.height)).toBeLessThanOrEqual(2);
+    expect(Math.abs(strip.y - takes.y)).toBeLessThanOrEqual(1);
+    expect(strip.x + strip.width).toBeLessThanOrEqual(takes.x + 0.5);
+    expect(strip.x - col.x).toBeLessThanOrEqual(2);
+    // Taller than before: the timeline panel was capped at 55% of the column under the monitor.
+    expect(takes.height).toBeGreaterThan(col.height * 0.8);
+    await expect(page.getByRole("separator", { name: "Resize the timeline" })).toHaveCount(0);
+    // The full-screen button is on the preview, with its frame and shot readout.
+    await expect(preview.getByRole("button", { name: "Full screen · F" })).toBeVisible();
+    await expect(preview.locator(".tcover")).toHaveText(/^f0/);
+    await expect(transport(page).getByRole("button", { name: "Full screen · F" })).toHaveCount(0);
+  });
+}
+
+test("hiding the notes panel leaves the preview alone in the right column, at the same width; a click on it plays", async ({ page, rushes }) => {
+  await oneOfEach(rushes);
+  await page.goto(rushes.testUrl());
+  await openReviewTab(page, "Music");
+  await loaded(page, 1);
+  const before = (await monitor(page).boundingBox())!;
+  const takesBefore = (await takesPanel(page).boundingBox())!;
+  await panelToggle(page).click();
+  await expect(notesPanel(page)).toBeHidden();
+  const after = (await monitor(page).boundingBox())!;
+  expect(Math.abs(after.width - before.width)).toBeLessThanOrEqual(1);
+  expect(Math.abs(after.x - before.x)).toBeLessThanOrEqual(1);
+  expect(Math.abs(after.y - before.y)).toBeLessThanOrEqual(1);
+  expect(Math.abs((await takesPanel(page).boundingBox())!.width - takesBefore.width)).toBeLessThanOrEqual(1);
+  // A click on the preview plays and pauses, on the one clock.
+  await monitor(page).locator("video").click();
+  await expect.poll(async () => (await inspect(page)).playing).toBe(true);
+  await monitor(page).locator("video").click();
+  await expect.poll(async () => (await inspect(page)).playing).toBe(false);
+  await panelToggle(page).click();
+  await expect(notesPanel(page)).toBeVisible();
+});
+
+test("with no cut, the no-cut slate takes the preview's place above the notes panel", async ({ page, rushes }) => {
+  await rushes.addVariant("music", "Bed", { seconds: 4, freq: 220 });
+  await page.goto(rushes.testUrl());
+  await openReviewTab(page, "Music");
+  await loaded(page, 1);
+  const slate = monitor(page).getByLabel("No cut yet");
+  await expect(slate).toBeVisible();
+  const s = (await monitor(page).boundingBox())!;
+  const side = (await rightColumn(page).boundingBox())!;
+  const panel = (await notesPanel(page).boundingBox())!;
+  expect(s.x).toBeGreaterThanOrEqual(side.x - 0.5);
+  expect(s.y + s.height).toBeLessThanOrEqual(panel.y + 0.5);
+  await expect(monitor(page).getByRole("button", { name: "Copy prompt for your agent" })).toBeInViewport({ ratio: 1 });
+  await expect(monitor(page).getByRole("button", { name: "Full screen · F" })).toHaveCount(0);
+});
+
+test("under the stacking width the preview sits below the takes area, and the notes are the drawer", async ({ page, rushes }) => {
+  await page.setViewportSize({ width: 900, height: 900 });
+  await oneOfEach(rushes);
+  await page.goto(rushes.testUrl());
+  await openReviewTab(page, "Voice");
+  await loaded(page, 2);
+  const col = (await column(page).boundingBox())!;
+  const pv = (await monitor(page).boundingBox())!;
+  expect(pv.y).toBeGreaterThanOrEqual(col.y + col.height - 0.5);
+  expect(pv.width).toBeLessThanOrEqual(521);
+  expect(pv.height).toBeLessThanOrEqual(450);
+  await panelToggle(page).click();
+  await expect(notesPanel(page)).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
+test("no words over any take's waveform on Voice, Music and Effects; the details are on the name", async ({ page, rushes }) => {
+  await oneOfEach(rushes);
+  await page.goto(rushes.testUrl());
+  for (const [tab, files] of [["Voice", 2], ["Music", 1], ["Effects", 1]] as const) {
+    await openReviewTab(page, tab);
+    await loaded(page, files);
+    const rows = takeRows(page);
+    for (let i = 0; i < (await rows.count()); i++) {
+      const row = rows.nth(i);
+      // Hovered, so Put away shows too.
+      await row.hover();
+      await expect.poll(() => textOverWaveform(row), { message: `${tab} row ${i}` }).toBe("ok");
+    }
+  }
+  // An effects pass keeps its cue names (above its waveform, not on it) and its layers toggle; its cue count is a detail.
+  await expect(takeRow(page, "Pass A").locator(".cue")).toHaveText(["Swipe", "Tap"]);
+  await expect(takeRow(page, "Pass A").getByRole("button", { name: "Layers for Pass A" })).toBeVisible();
+  await expect(takeName(page, "Pass A")).toHaveAttribute("data-tip", "Subtle · 2 cues");
+  await openReviewTab(page, "Music");
+  await expect(takeName(page, "Warm pad")).toHaveAttribute("data-tip", "Soft keys, no drums · 96 BPM · D major");
+  await expect(takeName(page, "Warm pad")).toHaveAttribute("aria-description", "Soft keys, no drums · 96 BPM · D major");
+  // Hovered, the name shows its details.
+  await takeName(page, "Warm pad").hover();
+  await expect.poll(() => takeName(page, "Warm pad").evaluate((el) => Number(getComputedStyle(el, "::after").opacity))).toBe(1);
+});
+
+test("a take's details button opens its details as a line under its row, pushing the rows below down; several can be open", async ({ page, rushes, browserName }) => {
+  await oneOfEach(rushes);
+  await page.goto(rushes.testUrl());
+  await openReviewTab(page, "Voice");
+  await loaded(page, 2);
+  const alice = takeDetailsButton(page, "Alice · natural");
+  const gerald = takeDetailsButton(page, "Gerald · bright");
+  await expect(alice).toHaveAttribute("aria-expanded", "false");
+  await expect(alice).toHaveAttribute("data-tip", "Details");
+  await expect(takeDetailsLine(page, "Alice · natural")).toHaveCount(0);
+  const geraldRowBefore = (await takeRow(page, "Gerald · bright").boundingBox())!;
+  await alice.click();
+  await expect(alice).toHaveAttribute("aria-expanded", "true");
+  const line = takeDetailsLine(page, "Alice · natural");
+  await expect(line).toHaveText("Warm, conversational, a touch slower in the middle");
+  await expect(alice).toHaveAttribute("aria-controls", (await line.getAttribute("id"))!);
+  // A line of its own: under its row, inside the takes panel, and the row below moves down by its height.
+  const row = (await takeRow(page, "Alice · natural").boundingBox())!;
+  const box = (await line.boundingBox())!;
+  expect(box.y).toBeGreaterThanOrEqual(row.y + row.height - 0.5);
+  await expectReadableInRow(line, takesPanel(page));
+  const geraldRow = (await takeRow(page, "Gerald · bright").boundingBox())!;
+  expect(geraldRow.y).toBeGreaterThanOrEqual(geraldRowBefore.y + box.height - 1);
+  expect(geraldRow.y).toBeGreaterThanOrEqual(box.y + box.height - 0.5);
+  // It covers no waveform: its box and every row's waveform box are apart.
+  for (const name of ["Alice · natural", "Gerald · bright"]) {
+    const wave = (await takeRow(page, name).locator("canvas.wave").boundingBox())!;
+    expect(box.y + box.height <= wave.y + 0.5 || box.y >= wave.y + wave.height - 0.5).toBe(true);
+  }
+  // Several can be open, and the keyboard reaches each: Tab from Gerald's name to his details button, Enter opens it.
+  // (WebKit's Tab skips buttons unless the system's "every control" setting is on, so there it is focused directly.)
+  await takeName(page, "Gerald · bright").focus();
+  if (browserName === "webkit") await gerald.focus();
+  else await page.keyboard.press("Tab");
+  await expect(gerald).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(gerald).toHaveAttribute("aria-expanded", "true");
+  await expect(takeDetailsLine(page, "Gerald · bright")).toHaveText("Bright, upbeat");
+  await expect(line).toBeVisible();
+  // Pressed again, it closes.
+  await alice.click();
+  await expect(alice).toHaveAttribute("aria-expanded", "false");
+  await expect(takeDetailsLine(page, "Alice · natural")).toHaveCount(0);
+  await expect(takeDetailsLine(page, "Gerald · bright")).toBeVisible();
+  // Blind hides the details: the button goes, and with it the open line.
+  await page.getByRole("button", { name: "Blind" }).click();
+  await expect(takesList(page).locator(".kinfo")).toHaveCount(0);
+  await expect(takesList(page).locator(".kdetail")).toHaveCount(0);
+  await expect(takesList(page)).not.toContainText("Bright, upbeat");
+  await page.getByRole("button", { name: "Blind" }).click();
 });

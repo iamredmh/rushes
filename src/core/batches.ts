@@ -92,7 +92,7 @@ function stepsFor(stage: Stage): string {
   return stage === "script"
     ? "Use rushes_get_batch, take each section's proposed line, then rushes_set_script with just those sections (it merges by id). If voiceover already exists, re-record the picked voice with the corrected script and register it with rushes_add_variant as a new read in a new round."
     : stage === "voice"
-      ? "Use rushes_get_batch and rushes_get_picks. Answer the notes with new whole reads (rushes_add_variant with stage voice and round): a new round for a new direction, or the current round for a small fix to a marked word. Say in each read's description what changed. Then rushes_reply."
+      ? "Use rushes_get_batch and rushes_get_picks. Answer the notes with new whole reads (rushes_add_variant with stage voice and round): a new round for a new direction, or the current round for a small fix to a marked word. A range note (t to tOut) is about that stretch of the read: replace or fix just that part. Say in each read's description what changed. Then rushes_reply."
       : stage === "mix"
         ? // §19.6: rushes_get_picks also carries each lane's level -- where the user wants it sitting.
           'Use rushes_get_batch and rushes_get_picks, fix each note (marks such as "Fall" or "Quieter 3 dB" are part of the note), register the new variant, then rushes_reply. The picks\' levels say where the user wants each lane to sit.'

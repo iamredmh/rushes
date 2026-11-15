@@ -3,10 +3,11 @@
 // One list for Voice, Music and Effects: what differs (Blind's names, an effects pass's cues and layers) comes in on the
 // items and props.
 //
-// A row is a circle (a radio: the take in use is checked), the name (a click selects the take
-// and auditions it), a tag with the cut it was made for, Films, Put away (Bring back on a put-away take, Unpick on the
-// take in use) and the take's
-// waveform as a block on the shared time scale. Every circle is one radio group: one Tab stop, moved by the arrows.
+// A row is a circle (a radio: the take in use is checked), the name (a click selects the take and auditions it; its
+// details in its tooltip), a details button, a tag with the cut it was made for, Films, Put away (Bring back on a
+// put-away take, Unpick on the take in use) and the take's waveform as a block on the shared time scale, with no text
+// over it (Red, round 1): the details open as a line of their own under the row. Every circle is one radio group: one
+// Tab stop, moved by the arrows.
 //
 // Nothing here re-renders per frame: the playheads are plain elements the tab moves through a ref.
 import { Fragment } from "preact";
@@ -31,8 +32,9 @@ export interface TakeItem {
   key: string;
   /** As shown: Blind names it "Read 2". */
   name: string;
-  /** Its description, or BPM and key, and an effects pass's cue count ("·····" in Blind). */
-  meta: string | null;
+  /** Its description, BPM, key, loudness and an effects pass's cue count (takeDetails): in its name's tooltip and its
+   *  details line, never over its waveform. Empty in Blind, which hides them. */
+  details: string[];
   /** Its file isn't on disk: nothing plays. */
   missing: boolean;
   /** What the engine plays for it (null when its file is missing). */
@@ -96,8 +98,8 @@ export interface TakesProps {
 }
 
 /**
- * What's cut off by its column: "n" a take's name, "m" its meta line, "h" a heading (a fold line's too). By row key,
- * "l:<key>" for a take on another film, or "h:<heading>".
+ * What's cut off by its column: "n" a take's name, "m" a loose take's meta line, "h" a heading (a fold line's too). By
+ * row key, "l:<key>" for a take on another film, or "h:<heading>".
  */
 type Cut = Record<string, string>;
 
@@ -105,8 +107,7 @@ function measureCut(root: HTMLElement): Cut {
   const out: Cut = {};
   const over = (el: Element | null) => el !== null && el.scrollWidth > el.clientWidth;
   for (const row of root.querySelectorAll<HTMLElement>(".take[data-take]")) {
-    const flags = (over(row.querySelector("[data-name]")) ? "n" : "") + (over(row.querySelector("[data-meta-text]")) ? "m" : "");
-    if (flags) out[row.dataset.take!] = flags;
+    if (over(row.querySelector("[data-name]"))) out[row.dataset.take!] = "n";
   }
   for (const row of root.querySelectorAll<HTMLElement>(".take[data-loose]")) {
     const flags = (over(row.querySelector("[data-name]")) ? "n" : "") + (over(row.querySelector("[data-meta-text]")) ? "m" : "");
@@ -137,7 +138,7 @@ export function Takes(props: TakesProps) {
     return (r !== undefined && r !== "error" ? `${r.duration}${r.streamed ? "s" : ""}` : "") + (r === "error" ? "b" : "");
   };
   const shape = JSON.stringify([
-    length, sections.map((s) => s.heading), shown.map((it) => [it.key, it.name, it.meta ?? "", it.missing, marksOf(it), it.take.madeFor ?? ""]),
+    length, sections.map((s) => s.heading), shown.map((it) => [it.key, it.name, it.details.length > 0, it.missing, marksOf(it), it.take.madeFor ?? ""]),
     // The fold lines' headings carry their counts, and an open fold's rows their names and meta lines.
     away.items.length, loose.items.length, loose.open ? loose.items.map((l) => [l.key, l.name, l.meta ?? ""]) : null,
   ]);
@@ -154,6 +155,15 @@ export function Takes(props: TakesProps) {
   // §23: the one hover card for every pass's cues, and which cue label is each block's Tab stop.
   const { shown: shownCard, api: card } = useCueCard();
   const [focusCue, setFocusCue] = useState<Record<string, number>>({});
+  // Whose details line is open, by take key: several can be, each under its own row.
+  const [openDetails, setOpenDetails] = useState<ReadonlySet<string>>(new Set());
+  const toggleDetails = (key: string) =>
+    setOpenDetails((was) => {
+      const next = new Set(was);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
 
   // One radio group: the take in use is its Tab stop, else the first circle. The arrows move focus between circles
   // without picking (a pick changes the timeline, so it waits for Enter or Space) and never step a frame.
@@ -197,6 +207,11 @@ export function Takes(props: TakesProps) {
     };
     const tip = take.inUse ? "In use" : "Use this one";
     const label = it.missing ? "File not found" : broken ? "This file won't play in a browser" : null;
+    const details = it.details.join(" · ");
+    const detailsOpen = details !== "" && openDetails.has(it.key);
+    const detailsId = `kd-${it.key}`;
+    // The name's tooltip: the name in full when its column cuts it short, then the take's details.
+    const nameTip = [flags.includes("n") ? it.name : null, details || null].filter(Boolean).join("\n");
     return (
       <Fragment key={it.key}>
         <div class={`trow take${current ? " picked" : ""}`} role="group" aria-label={it.name} data-take={it.key} aria-current={current ? "true" : undefined}>
@@ -241,13 +256,27 @@ export function Takes(props: TakesProps) {
               data-player
               aria-label={it.name}
               aria-pressed={current}
-              aria-description={it.missing ? "Missing" : undefined}
-              data-tip={flags.includes("n") ? it.name : undefined}
+              aria-description={[it.missing ? "Missing" : null, details || null].filter(Boolean).join(". ") || undefined}
+              data-tip={nameTip || undefined}
               onClick={() => onSelect(it, null)}
             >
               <span data-name>{it.name}</span>
               {it.missing && <Missing />}
             </button>
+            {streamed && <span class="smk" data-tip="Long file: switching isn't sample-exact"><Icon name="stream" /></span>}
+            {details !== "" && (
+              <button
+                type="button"
+                class="kinfo"
+                aria-label={`Details for ${it.name}`}
+                aria-expanded={detailsOpen}
+                aria-controls={detailsOpen ? detailsId : undefined}
+                data-tip={detailsOpen ? "Hide the details" : "Details"}
+                onClick={() => toggleDetails(it.key)}
+              >
+                <Icon name="info" />
+              </button>
+            )}
             {take.madeFor && (
               <span class={`ktag mono${take.stale ? " stale" : ""}`} data-tip={take.stale ? `Made for ${take.madeFor}, an older cut` : `Made for ${take.madeFor}`}>
                 {take.madeFor}
@@ -268,15 +297,9 @@ export function Takes(props: TakesProps) {
             </span>
           </div>
           <div class="tlane" onClick={(e) => onSelect(it, timeAt(e))}>
+            {/* The block holds no words but a state in place of a waveform (a file not found, or one that won't play). */}
             <div class={`sblock${take.stale ? " stale" : ""}${label ? " none gone" : ""}`} style={{ left: "0%", width: `${label ? 100 : pct(end)}%` }}>
-              <span class="slbl" data-meta data-tip={label === null && flags.includes("m") && it.meta ? it.meta : undefined}>
-                {label ?? (
-                  <>
-                    {streamed && <span class="smk" data-tip="Long file: switching isn't sample-exact"><Icon name="stream" /></span>}
-                    <span data-meta-text>{it.meta ?? ""}</span>
-                  </>
-                )}
-              </span>
+              {label && <span class="slbl">{label}</span>}
             </div>
             {it.clip && <Wave segments={[{ offset: 0, duration: loaded?.duration ?? 0, peaks: loaded ? loaded.peaks : null }]} length={length} color={color} />}
             {timed.map((c, i) => (
@@ -328,6 +351,10 @@ export function Takes(props: TakesProps) {
             <span class="playhead" />
           </div>
         </div>
+        {detailsOpen && (
+          // A line of its own under the row, pushing the rows below down: never over a waveform.
+          <p class="kdetail" id={detailsId} data-details-of={it.key}>{details}</p>
+        )}
         {layersOpen && timed.length > 0 && (
           <CueLayers id={`cl-${it.key}`} name={it.name} cues={timed} length={length} color={color} card={card} onSeek={(t, cue) => onSelect(it, t, cue)} toast={toast} />
         )}

@@ -13,7 +13,7 @@ export interface ToolStripProps {
   onRange(): void;
   onBox(): void;
   onGrab(): void;
-  /** The tools this view offers (a sound's tab has no Box or Grab, Voice no Range). Defaults to all five. */
+  /** The tools this view offers (a sound's tab has no Box or Grab). Defaults to all five. */
   tools?: Tool[];
 }
 

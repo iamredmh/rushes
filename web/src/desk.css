@@ -376,14 +376,35 @@
 /* ---- §27, 5.8: a sound's tab. Its takes under the ruler and the Picture row (which stay at the top as the list scrolls), a
    heading per group, and a row per take: a circle, the name, the cut it was made for, Films and Put away, then its block. ---- */
 .takespanel { --kh: 360px; }
+/* Round 1: on a sound's tab the left column is the transport, then the tool strip down the left edge beside the timeline
+   panel, which takes all the rest of the column's height (no divider: the picture is a preview in the right column). */
+.soundtab > .transport { border-top: 0; }
+.soundtab > .kbody { flex: 1 1 0; min-height: 0; display: flex; }
+.soundtab .takespanel { flex: 1 1 auto; min-width: 0; max-height: none; }
+/* The right column: the preview, full width at the cut's own shape (a tall cut is held to under half the column, centred),
+   above the notes panel, which fills the rest. With the panel hidden it stays, the preview alone, at the same width. */
+.nhidden .deskcols.soundcols { grid-template-columns: minmax(0, 1fr) var(--notes-w, 300px); }
+.soundside { display: flex; flex-direction: column; gap: 8px; min-width: 0; height: max(var(--work-h, calc(100vh - 160px)), 360px); }
+.soundside > .npanel:not(.drawer) { flex: 1 1 0; height: auto; min-height: 0; }
+/* Its width is set, not stretched, so its height follows from the shape in WebKit too. */
+.soundside > .spreview { position: relative; z-index: 3; flex: none; align-self: flex-start; display: grid; box-sizing: border-box; width: calc(100% - 8px); min-height: 0; margin-left: 8px; aspect-ratio: var(--ar, 16 / 9); max-height: 45%; border-radius: 8px; }
+.soundside > .spreview.noslot { aspect-ratio: auto; max-height: none; }
+.spreview .framebox { border-radius: 8px; }
+.spreview .fitbox { inset: 0; }
+.spreview .frame { border-radius: 0; cursor: pointer; }
+.spreview .tcover { right: 8px; bottom: 8px; font-size: 12px; padding: 3px 6px; }
+.spreview .noslate { padding: 14px 12px; }
+.spfull { position: absolute; top: 6px; right: 6px; z-index: 2; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; background: var(--scrim); color: var(--on-black); cursor: pointer; }
+.spfull:hover, .spfull:focus-visible { background: var(--k-hover); outline: none; }
+.spfull .ic { width: 15px; height: 15px; }
+.spfull[data-tip]::after, .spfull[data-tip]:hover::after, .spfull[data-tip]:focus-visible::after { left: auto; right: 0; bottom: auto; top: calc(100% + 6px); transform: none; font-size: 12.5px; padding: 5px 8px; border-radius: 5px; }
 @media (max-width: 1299px) { .takespanel { --kh: 320px; } }
 .takespanel .trow { grid-template-columns: var(--kh) minmax(0, 1fr); }
 .takespanel .kstick { position: sticky; top: 0; z-index: 6; background: var(--app); }
 .rrow .kttl { font-weight: 600; color: var(--text); }
 .kblind { height: 22px; padding: 0 8px; gap: 4px; font-size: 12.5px; }
 .kblind .ic { width: 13px; height: 13px; }
-.kblind[aria-pressed="true"], .kalone[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-2); }
-.kalone { height: 22px; padding: 0 8px; font-size: 12.5px; }
+.kblind[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-2); }
 .khd { margin: 0; padding: 8px 10px 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-top: 1px solid var(--line); color: var(--text-3); font-size: 12.5px; font-weight: 600; }
 .khd[data-tip]::after { left: 10px; bottom: auto; top: calc(100% + 2px); transform: none; width: max-content; max-width: min(520px, 80vw); white-space: normal; line-height: 1.3; text-align: left; }
 .kfold { display: flex; align-items: center; gap: 8px; padding-right: 10px; border-top: 1px solid var(--line); }
@@ -393,7 +414,7 @@
 .knone { margin: 12px 10px; color: var(--text-2); font-size: 13px; }
 .take .khead { gap: 6px; font-weight: 500; }
 .take .tlane { height: 32px; cursor: pointer; }
-.take:has(.cue) .tlane { height: 46px; }
+.take:has(.cue) .tlane { height: 52px; }
 .take.loose .tlane { height: 24px; cursor: default; }
 .take .chev { flex: none; width: 20px; height: 20px; border-radius: 5px; }
 .take .chev svg.ic { width: 12px; height: 12px; }
@@ -421,13 +442,24 @@ span.knm, span.knm:hover { cursor: default; background: none; }
 .kfold .fdot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--todo); }
 .take .sblock.stale { border-left-style: dashed; }
 .take .slbl { display: flex; flex: 1 1 auto; align-items: center; gap: 4px; min-width: 0; overflow: visible; background: none; color: var(--text-3); }
-.take .slbl [data-meta-text] { min-width: 0; padding: 1px 5px; border-radius: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: var(--raised); }
-.take .slbl [data-meta-text]:empty { display: none; }
-.take.loose .slbl [data-meta-text] { padding: 0; background: none; }
-.take .slbl[data-tip] { pointer-events: auto; overflow: visible; }
-.take .slbl[data-tip]::after { left: 0; transform: none; width: max-content; max-width: min(520px, 80vw); white-space: normal; line-height: 1.3; text-align: left; }
-.take .slbl .smk .ic { width: 13px; height: 13px; }
+.take.loose .slbl [data-meta-text] { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.take.loose .slbl[data-tip] { pointer-events: auto; overflow: visible; }
+.take.loose .slbl[data-tip]::after { left: 0; transform: none; width: max-content; max-width: min(520px, 80vw); white-space: normal; line-height: 1.3; text-align: left; }
 .take .wave { position: absolute; left: 0; top: 4px; width: 100%; height: calc(100% - 8px); z-index: 0; pointer-events: none; }
+/* Round 1: no words over a waveform. A pass's cue names sit in a strip above its waveform, which starts where the ticks do. */
+.take:has(.cue) .wave { top: 19px; height: calc(100% - 22px); }
+/* The name's tooltip is the take's details (its full name first when the column cuts it short): one per line. */
+.knm[data-tip]::after { white-space: pre-line; }
+/* A long file's mark, beside the name. */
+.take .khead .smk { display: inline-grid; flex: none; color: var(--text-3); }
+.take .khead .smk .ic { width: 13px; height: 13px; }
+/* The details button beside the name, and the line it opens under the row (several can be open). */
+.kinfo { display: grid; place-items: center; flex: none; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--text-3); cursor: pointer; }
+.kinfo:hover { background: var(--hover); color: var(--text); }
+.kinfo[aria-expanded="true"] { background: var(--accent-soft); color: var(--accent-2); }
+.kinfo:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.kinfo .ic { width: 14px; height: 14px; }
+.kdetail { margin: 0; padding: 0 12px 6px 36px; color: var(--text-2); font-size: 12.5px; line-height: 1.4; overflow-wrap: anywhere; }
 .take .tlane .mk { z-index: 3; width: 8px; height: 8px; }
 .take .tlane .span { top: 2px; bottom: 2px; z-index: 2; }
 .take .cue { top: 3px; bottom: auto; font: 500 12.5px/1.15 var(--sans); }
@@ -443,6 +475,9 @@ span.knm, span.knm:hover { cursor: default; background: none; }
 
 @media (max-width: 1099px) {
   .deskcols { grid-template-columns: minmax(0, 1fr); }
+  /* Stacked: the preview under the takes, kept to a sensible size; the notes panel is the drawer. */
+  .soundside { height: auto; padding-top: 8px; }
+  .soundside > .spreview { margin-left: 0; width: min(100%, 520px); max-height: 50vh; }
   /* Under the top bar's tooltips and menus (37 and up) and the monitor's format switch (36), over the rest of the work area. */
   .npanel.drawer { position: fixed; top: 44px; right: 0; bottom: 26px; z-index: 35; width: min(var(--notes-w, 300px), 100vw); height: auto; padding-left: 0; background: var(--raised); border-left: 1px solid var(--line-2); box-shadow: -16px 0 40px var(--shadow); }
   .npanel.drawer > .ntabs, .npanel.drawer > .nfoot { border-radius: 0; }

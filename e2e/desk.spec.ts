@@ -1561,35 +1561,37 @@ test.describe("a tab per sound", () => {
     expect((await rushes.api("GET", "/api/notes?stage=sfx")).notes[0]).toMatchObject({ on: "round-1/pass-a", scope: "whole", t: null });
   });
 
-  test("a sound's tab plays the other sounds in use under its take, at their saved levels; Only this sound plays it alone, remembered", async ({ page, rushes }) => {
-    const { bed } = await threeInUse(rushes);
+  test("a sound's tab plays only its own sound (round 1): never the other sounds in use, and no Only this sound button", async ({ page, rushes }) => {
+    const { read, bed, pass } = await threeInUse(rushes);
     const glow = await rushes.addVariant("music", "Glow", { seconds: 4, freq: 440 });
-    await rushes.api("PUT", "/api/picks", { video: "hero", levels: { voice: -6, sfx: 3 } });
+    await rushes.api("PUT", "/api/picks", { video: "hero", levels: { voice: -6, music: -9, sfx: 3 } });
+    // A browser that turned the old switch on: the stored setting means nothing now.
+    await page.addInitScript(() => localStorage.setItem("rushes:solo-tab", "0"));
     await page.goto(rushes.testUrl());
     await videoReady(page);
+    for (const [tab, own] of [["Music", `${bed.lane.id}/${bed.variant.id}`], ["Voice", `${read.lane.id}/${read.variant.id}`], ["Effects", `${pass.lane.id}/${pass.variant.id}`]] as const) {
+      await openReviewTab(page, tab);
+      // Only this sound's takes are loaded at all, and only the one in use is heard: the others in use never play under it.
+      await loadedOn(page, tab === "Music" ? 2 : 1);
+      await expect.poll(() => heardOn(page)).toEqual([own]);
+      await expect(page.getByRole("button", { name: "Only this sound" })).toHaveCount(0);
+      // The cut's own sound stays silent here, as before.
+      expect(await videoMuted(page)).toBe(true);
+    }
+    // A sound's tab plays its take at full level under the transport's volume: the saved level is the Timeline's.
     await openReviewTab(page, "Music");
-    await loadedOn(page, 4);
-    // Nothing selected: the bed in use, with the read and the pass in use under it.
-    await expect.poll(async () => (await heardOn(page)).sort()).toEqual([`${bed.lane.id}/${bed.variant.id}`, "round-1-voices/gerald", "sfx/pass-a"].sort());
-    // Each at its saved level, as on the timeline.
+    await loadedOn(page, 2);
     const lanes = (await audio(page))!.lanes;
-    expect(lanes.vo).toBeCloseTo(10 ** (-6 / 20), 3);
-    expect(lanes.sfx).toBeCloseTo(10 ** (3 / 20), 3);
     expect(lanes.music).toBeCloseTo(1, 3);
-    // An earlier bed selected plays in the bed's place; the others stay.
+    // Selecting another bed plays it in the bed's place, alone.
     await takeName(page, "Glow").click();
-    await expect.poll(async () => (await heardOn(page)).sort()).toEqual([`${glow.lane.id}/${glow.variant.id}`, "round-1-voices/gerald", "sfx/pass-a"].sort());
-    // Only this sound: the bed alone, and still so after a reload.
-    const alone = page.getByRole("button", { name: "Only this sound" });
-    await expect(alone).toHaveAttribute("aria-pressed", "false");
-    await alone.click();
-    await expect(alone).toHaveAttribute("aria-pressed", "true");
     await expect.poll(() => heardOn(page)).toEqual([`${glow.lane.id}/${glow.variant.id}`]);
-    await page.reload();
-    await openReviewTab(page, "Music");
-    await loadedOn(page, 4);
-    await expect(page.getByRole("button", { name: "Only this sound" })).toHaveAttribute("aria-pressed", "true");
-    await expect.poll(() => heardOn(page)).toEqual([`${bed.lane.id}/${bed.variant.id}`]);
+    // The Timeline tab's mix is unchanged: all three, at their saved levels.
+    await openReviewTab(page, "Timeline");
+    await expect.poll(async () => (await heardOn(page)).length).toBe(3);
+    const mix = (await audio(page))!.lanes;
+    expect(mix.vo).toBeCloseTo(10 ** (-6 / 20), 3);
+    expect(mix.sfx).toBeCloseTo(10 ** (3 / 20), 3);
   });
 
   test("beds added with no round on two days show under two day headings, the newest day first", async ({ page, rushes }) => {
