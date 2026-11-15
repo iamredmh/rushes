@@ -4,13 +4,13 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api } from "../../api.js";
 import { noteTarget } from "../../desk.js";
-import { AUDIO_CHIPS, copyShortcut, LOCKED_TAB, snap, spacePressesButton, stepFrame } from "../../lib.js";
+import { copyShortcut, LOCKED_TAB, snap, spacePressesButton, stepFrame } from "../../lib.js";
 import type { Asset, Note, State, Video } from "../../types.js";
 import { Icon } from "../Icon.js";
-import { escapeIsFree, NotesPanel, useNoteBox } from "./NotesPanel.js";
-import { useTakeSelection } from "./useTakeSelection.js";
+import { NotesPanel, useNoteBox } from "./NotesPanel.js";
+import { takeNotesOf } from "./useTakeSelection.js";
 import { Ruler } from "./Ruler.js";
-import { LoudnessReadout, type SoundTab, SoundTracks } from "./SoundTracks.js";
+import { LoudnessReadout, SoundTracks } from "./SoundTracks.js";
 import { type MixView, useMix } from "./useMix.js";
 import { type ReviewClock, useReviewClock } from "./frame.js";
 import { Transport } from "./Transport.js";
@@ -30,14 +30,13 @@ export interface NoCutProps {
   toast(message: string): void;
   onChanged(): void;
   onPendingChange?(pending: boolean): void;
-  onOpenTab?(tab: SoundTab): void;
   /** §27, 5.5 (final review I3): the film's one playhead across the Review tabs, and where its mute and solo are kept. */
   clock?: ReviewClock;
   mixView?: { current: MixView | null };
 }
 
 /** The Timeline tab with no cut: a slate where the picture would be, then the transport, the ruler and the sound rows. */
-export function NoCutTimeline({ state, assets, video, notes, prompt, readOnly = false, toast, onChanged, onPendingChange, onOpenTab, clock, mixView }: NoCutProps) {
+export function NoCutTimeline({ state, assets, video, notes, prompt, readOnly = false, toast, onChanged, onPendingChange, clock, mixView }: NoCutProps) {
   const [sound, setSound] = useState({ level: 1, muted: false });
   const fps = state.project.fps || 30;
   // Before useMix (which owns the engine), so leaving reads the time before the engine is disposed.
@@ -57,14 +56,10 @@ export function NoCutTimeline({ state, assets, video, notes, prompt, readOnly = 
   useEffect(() => engine.onChange(() => setPlaying(engine.playing)), [engine]);
   const input = useRef<HTMLTextAreaElement>(null);
   const [hasText, setHasText] = useState(false);
-  // §27, 5.7: a take picked on its row is the note's target; otherwise the mix at the playhead (there is no frame).
-  const takes = useTakeSelection(mix, state.notes.notes, video, fps, (to) => {
-    engine.pause();
-    engine.seek(to);
-  });
-  const { takeSel, takeNotes } = takes;
+  // §27, 5.7: a note here is on the mix at the playhead (there is no frame); a take is noted on its own tab.
+  const takeNotes = takeNotesOf(mix, state.notes.notes, video);
   const openNoteBox = useNoteBox(input);
-  const targetAt = (at: number) => noteTarget(takeSel ?? { kind: "mix", t: at }, null, fps);
+  const targetAt = (at: number) => noteTarget({ kind: "mix", t: at }, null, fps);
   const target = targetAt(snap(t, fps));
   useLayoutEffect(() => onPendingChange?.(hasText), [hasText]);
   useEffect(() => () => onPendingChange?.(false), []);
@@ -84,7 +79,6 @@ export function NoCutTimeline({ state, assets, video, notes, prompt, readOnly = 
     } else if (e.key === "ArrowLeft") { e.preventDefault(); step(e.shiftKey ? -10 : -1); }
     else if (e.key === "ArrowRight") { e.preventDefault(); step(e.shiftKey ? 10 : 1); }
     else if (e.key.toLowerCase() === "n" && !readOnly) { e.preventDefault(); openNoteBox(); }
-    else if (e.key.toLowerCase() === "v" || escapeIsFree(e)) takes.clear();
   };
   useLayoutEffect(() => {
     const k = (e: KeyboardEvent) => onKey.current(e);
@@ -127,10 +121,7 @@ export function NoCutTimeline({ state, assets, video, notes, prompt, readOnly = 
             duration={length}
             t={t}
             onSeek={(to) => engine.seek(to)}
-            onOpenTab={onOpenTab}
-            selected={takes.selected}
             notes={[...notes, ...takeNotes]}
-            onPick={readOnly ? undefined : takes.pick}
           />
         </div>
       </div>
@@ -147,8 +138,7 @@ export function NoCutTimeline({ state, assets, video, notes, prompt, readOnly = 
         onLabel={mix.noteLabel}
         fixedTimes
         onSeek={(to) => engine.seek(to)}
-        target={{ label: target.label, when: target.when, name: target.name, onClear: takeSel ? takes.clear : undefined }}
-        chips={takeSel ? AUDIO_CHIPS[takeSel.stage] : undefined}
+        target={{ label: target.label, when: target.when, name: target.name }}
       />
     </div>
   );

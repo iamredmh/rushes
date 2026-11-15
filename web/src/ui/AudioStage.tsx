@@ -184,7 +184,6 @@ export interface AudioStageProps {
   /** Every sound's tab takes a range (I and O, the Range tool); Music and Effects also tick marks on it (Rise, Fall,
    *  Louder, Quieter). Voice takes none: a read is replaced, not levelled (round 1 ruling). */
   rangeMarks: boolean;
-  chipsFor(scope: Scope): string[];
   /** The target menu's whole-take choice: "The whole read". */
   wholeLabel: string;
   /** Said in the list when the film has no takes of this sound. */
@@ -739,7 +738,6 @@ export function AudioStage(props: AudioStageProps) {
                   menu: targetItem && !marked ? { value: target.scope === "whole" ? "whole" : "point", options: menuLabels, onChange: (v) => setWhole(v === "whole") } : undefined,
                   onClear: selectedItem || whole !== null ? clearAim : undefined,
                 }}
-                chips={props.chipsFor(target.scope)}
                 marks={!rangeMarks || target.scope !== "range" ? undefined : { value: marks, onChange: setMarks }}
                 onLabel={onLabel}
                 readOnly={readOnly}

@@ -188,9 +188,8 @@ test("editing a script line marks it Edited by you, with the current wording str
   await expect(editedMark(row)).toContainText("Edited by you");
   await expect(baselineText(row)).toHaveText("Your work lives on one laptop.");
   await expect(sendButton(page)).toHaveAccessibleName("Send 1");
-  // An edited line is a change, not a note, and the status bar says so (Send itself is "Send 1").
-  await expect(page.locator("footer.status")).toContainText("Next: send 1 change");
-  await expect(page.locator("footer.status")).not.toContainText("note");
+  // The Plan page has its notes panel, so the status bar offers no Send of its own (Red, round 2).
+  await expect(page.locator("footer.status")).not.toContainText("Send");
   await expect(planStatus(page)).toHaveText("0 of 1 line approved · 1 edited");
   await expect(planTab(page, "Script").locator(".dot")).toBeVisible();
   // Revert goes back to the current wording, and the mark goes with it.

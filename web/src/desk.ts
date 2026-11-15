@@ -1,5 +1,5 @@
 // §27: the desk's own logic, pure. Where a view sits in the workspaces, what the number keys open,
-// how a sound's takes are grouped, and the one line that says what to do next.
+// and how a sound's takes are grouped.
 import { isNewTake, madeForStale } from "../../src/core/takes.js";
 import type { PlanPage } from "./lib.js";
 import type { InUse, Lane, LaneStage, Note, Stage, Variant, Video } from "./types.js";
@@ -173,57 +173,6 @@ export function takeSections(g: TakeGroups, shuffle: (takes: TakeRow[]) => TakeR
 export function takeCount(g: TakeGroups): { all: number; fresh: number } {
   const earlier = g.earlier.reduce((n, r) => n + r.takes.length, 0);
   return { all: g.fresh.length + (g.inUse ? 1 : 0) + earlier + g.away.length, fresh: g.fresh.length };
-}
-
-export interface NextInput {
-  plan: { exists: boolean; approved: boolean };
-  hasCut: boolean;
-  /** Notes and edits waiting to be sent (unsentCount). */
-  unsent: number;
-  /** Of those, how many are edits rather than notes (unsentEdits): any at all and the line says "changes". */
-  unsentEdits?: number;
-  /** The Plan page last used, where Ready to build is: "ask for cut 1" leads there once there is a plan. */
-  planPage?: "brief" | "script" | "storyboard";
-  /** Where Send is (the view whose notes panel to open), when the line should lead there. */
-  sendTo?: DeskView | null;
-  /** To-do notes on this film, sent or not. */
-  openNotes: number;
-  locked: boolean;
-  /** Each sound: whether it has takes, how many are new, whether one is in use, and whether that one was made for an older
-   *  cut (`madeFor`: the cut it was made for). */
-  sound: Record<LaneStage, { started: boolean; fresh: number; inUse: boolean; stale: boolean; madeFor?: string | null }>;
-}
-
-const SOUND_WORDS: Record<LaneStage, { ask: string; one: string }> = {
-  voice: { ask: "ask for a voiceover", one: "a read" },
-  music: { ask: "ask for music", one: "a bed" },
-  sfx: { ask: "ask for sound effects", one: "an effects pass" },
-};
-const counted = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
-
-/**
- * The status bar's one line (§27, 5.9): the first of these that applies. `go` is where clicking it
- * leads (for Send, the view whose notes panel holds it), or null when the step is not somewhere on the desk (asking the agent).
- */
-export function nextHint(i: NextInput): { text: string; go: DeskView | null; menu?: "cut" } {
-  // With somewhere to send from, what waits is sent first, cut or no cut (a Visuals note, a plan's edits).
-  if (i.unsent > 0 && (i.hasCut || i.sendTo)) return { text: `send ${counted(i.unsent, (i.unsentEdits ?? 0) > 0 ? "change" : "note")}`, go: i.sendTo ?? null };
-  if (!i.hasCut) {
-    if (i.plan.exists && !i.plan.approved) return { text: "approve the plan", go: "script" };
-    return { text: "ask for cut 1", go: i.plan.exists ? (i.planPage ?? null) : null };
-  }
-  if (i.openNotes > 0) return { text: `${counted(i.openNotes, "note")} open`, go: "picture" };
-  // m6: the lock is in the Cut menu: the line opens it on its lock row.
-  if (!i.locked) return { text: "lock picture", go: "picture", menu: "cut" };
-  // One sound at a time: voice is settled before music is asked for.
-  for (const stage of ["voice", "music", "sfx"] as const) {
-    const s = i.sound[stage];
-    const w = SOUND_WORDS[stage];
-    if (!s.started) return { text: w.ask, go: null };
-    if (s.fresh > 0) return { text: `choose ${w.one}`, go: stage };
-    if (s.inUse && s.stale) return { text: `the ${w.one.replace(/^an? /, "")} in use was made for ${s.madeFor ?? "an older cut"}`, go: stage };
-  }
-  return { text: "nothing to do", go: null };
 }
 
 /**

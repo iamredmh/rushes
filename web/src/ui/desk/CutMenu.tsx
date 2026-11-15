@@ -11,11 +11,9 @@ export interface CutMenuProps {
   newer: string | null;
   onPick(id: string): void;
   onToggleLock(): void;
-  /** m6: changed (a count) to open the menu with its lock row focused (the status bar's "lock picture"). */
-  openLock?: number;
 }
 
-export function CutMenu({ video, shown, newer, onPick, onToggleLock, openLock = 0 }: CutMenuProps) {
+export function CutMenu({ video, shown, newer, onPick, onToggleLock }: CutMenuProps) {
   const locked = !!video.lockedVersion;
   return (
     <VersionMenu
@@ -25,7 +23,6 @@ export function CutMenu({ video, shown, newer, onPick, onToggleLock, openLock = 
       lockedVersion={video.lockedVersion}
       newer={newer}
       onPick={onPick}
-      openFooter={openLock}
       footer={(close) => (
         <button
           type="button"

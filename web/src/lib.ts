@@ -525,7 +525,6 @@ export function boxFrom(x0: number, y0: number, x1: number, y1: number, w: numbe
 
 // ---- audio tabs (§17) ----
 
-export type AudioStageId = "voice" | "music" | "sfx" | "mix";
 export type Scope = "point" | "range" | "whole";
 export type MarkKind = Mark["kind"];
 
@@ -546,13 +545,6 @@ export function notePending(p: { range: { in: number | null }; marks: readonly u
   return p.range.in !== null || p.marks.length > 0 || p.hasText;
 }
 
-/** Quick-start chips per audio tab (§17.1; Voiceover's are its Whole chips, §18.3). They only put a prefix in the note box. */
-export const AUDIO_CHIPS: Record<AudioStageId, string[]> = {
-  voice: ["Speaker", "Pacing", "Tone", "Overall"],
-  music: ["Tempo", "Key", "Energy", "Ending"],
-  sfx: ["Timing", "Level", "Swap sound", "Remove"],
-  mix: ["Level", "Balance", "Loudness"],
-};
 
 /** Louder/Quieter amounts on offer, and the default (§17.1). */
 export const MARK_DB: readonly number[] = [1, 2, 3, 6, 9];

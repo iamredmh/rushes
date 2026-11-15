@@ -6,7 +6,7 @@ import {
   filmAfterShelving, inPlay, isPlanPage, labelOfId, latest, lockedFound, neighbourFormat, neighbourVideo, planProgress, planTarget, previousVersion, proxyKey, readyPrompt, storySendPrompt, storyboardPrompt, versionFormats, type PlanPage,
 } from "../lib.js";
 import { onLabel } from "../../../src/core/notes.js";
-import { deskPlace, deskView, nextHint, noteTarget, takeCount, takeGroups, unsentCount, unsentEdits, viewForKey, type DeskView } from "../desk.js";
+import { deskPlace, deskView, noteTarget, takeCount, takeGroups, unsentCount, unsentEdits, viewForKey, type DeskView } from "../desk.js";
 import type { Batch, BriefView, FoundCounts, FoundKind, Note, Stage, StoryboardView, Video } from "../types.js";
 import { useRushes } from "../useRushes.js";
 import { Assets, type FoundRequest } from "./Assets.js";
@@ -190,6 +190,7 @@ export function App() {
   const panel = usePanelPlace();
   const panelHere = !!stage && (deskPlace(stage).workspace === "review" || deskPlace(stage).workspace === "plan");
   const changeLog = useChangeLog(projectId() ?? "", state?.log, (open) => open && panelHere && panel.shown);
+  // Send is to be brought into view and focused once the notes panel it opened is on screen (the status bar's Send).
   const [reveal, setReveal] = useState(false);
   const panelToggle = useRef<HTMLButtonElement>(null);
   // A note box to focus once the panel that holds it is on screen (revealNotes).
@@ -315,7 +316,6 @@ export function App() {
   // §26: shelve a film, or restore it. The Film menu acts on the film you are in; the Shelved list can restore any.
   const [shelvedRequest, setShelvedRequest] = useState(0);
   // m6: a request to open the Cut menu on its lock row (the status bar's "lock picture").
-  const [cutRequest, setCutRequest] = useState(0);
   // The latest switchFilm, for the Undo on a toast made a render ago (its own closure would still see the old film).
   const switchFilmRef = useRef(switchFilm);
   switchFilmRef.current = switchFilm;
@@ -556,45 +556,25 @@ export function App() {
     music: takeGroups(lanes, "music", use?.music, video),
     sfx: takeGroups(lanes, "sfx", use?.sfx, video),
   };
-  const soundState = (g: (typeof sounds)["voice"]) => {
-    const c = takeCount(g);
-    return { started: c.all > 0, fresh: c.fresh, inUse: g.inUse !== null, stale: !!g.inUse?.stale, madeFor: g.inUse?.madeFor ?? null };
-  };
-  // What Send would send that has not been sent yet: one number for Send's count and the status bar's line.
+  // What Send would send that has not been sent yet: Send's count.
   const inPlayIds = new Set(state.project.videos.filter(inPlay).map((v) => v.id));
   const unsentFrom = { notes: state.notes.notes, inPlay: inPlayIds, scriptTodo: tab("script")?.todo ?? 0, briefChanged: state.brief.changed, storyboardChanged: state.storyboard.changed };
   const unsent = unsentCount(unsentFrom);
-  // Where Send is, for the status bar's "send N notes": Plan when only the plan's edits wait, else Review.
+  // Where Send is, for the status bar's Send on a page with no notes panel (Visuals, Assets): Plan when only the plan's
+  // edits wait, else Review.
   const planOnly = state.notes.notes.every((n) => n.stage === "script" || n.status !== "todo" || n.batch !== null || (!!n.video && !inPlayIds.has(n.video)));
   const sendTo: View = planOnly && unsent > 0 && (state.brief.changed + state.storyboard.changed + (tab("script")?.todo ?? 0)) > 0
     ? (isPlanPage(stage) ? stage : planLast)
-    : deskPlace(stage).workspace === "review" ? stage : reviewLast;
-  const next = nextHint({
-    plan: { exists: state.brief.exists || state.storyboard.exists || state.script.sections.length > 0, approved },
-    hasCut: !!version,
-    unsent,
-    unsentEdits: unsentEdits(unsentFrom),
-    planPage: isPlanPage(stage) ? stage : planLast,
-    sendTo,
-    openNotes: video ? openNotes(video.id) : 0,
-    locked,
-    sound: { voice: soundState(sounds.voice), music: soundState(sounds.music), sfx: soundState(sounds.sfx) },
-  });
-  /** Where the status bar's line leads: a plan page opens as key 1 would. */
-  const goNext = (to: View) => {
-    // m6: "lock picture" opens the Cut menu on its lock row, where the lock is.
-    if (next.menu === "cut") return setCutRequest((n) => n + 1);
-    if (unsent > 0 && to === sendTo) {
-      // Send, in the notes panel: the panel shown on its Notes tab, and Send brought into view.
-      if (pending && to !== stage) return toast("Add or clear your note first");
-      if (to !== stage) show(to as Stage);
-      panel.setShown(true);
-      changeLog.setOpen(false);
-      setReveal(true);
-      return;
-    }
-    if (isPlanPage(to)) return planKey();
-    show(to as Stage);
+    : reviewLast;
+  // Red, round 2: the status bar no longer says what is next. It keeps one thing: on a page with no notes panel, a way to
+  // Send what waits, since Send lives in the panel.
+  const statusSend = unsent > 0 && !panelHere ? { text: `Send ${unsent} ${unsentEdits(unsentFrom) > 0 ? (unsent === 1 ? "change" : "changes") : unsent === 1 ? "note" : "notes"}` } : null;
+  const goSend = () => {
+    if (pending) return toast("Add or clear your note first");
+    show(sendTo as Stage);
+    panel.setShown(true);
+    changeLog.setOpen(false);
+    setReveal(true);
   };
   const reviewRows: ReviewTabRow[] = REVIEW_TABS.map(({ view, label }) => ({
     view,
@@ -713,7 +693,6 @@ export function App() {
               video={video}
               shown={version}
               newer={readyVersionId}
-              openLock={cutRequest}
               onPick={(id) => {
                 // m2: another cut would drop a marked In, range or box on the Timeline: it waits for them, as the Film menu
                 // does. A half-typed note is kept across a cut, so it does not hold the menu.
@@ -880,7 +859,6 @@ export function App() {
               toast={toast}
               onChanged={() => void refresh()}
               onPendingChange={setPending}
-              onOpenTab={(tab) => show(tab)}
               clock={reviewClock}
               mixView={mixView}
             />
@@ -920,7 +898,6 @@ export function App() {
               ) : null}
               state={state}
               assets={assets}
-              onOpenTab={(tab) => show(tab)}
             />
           ) : stage === "brief" ? (
             withPanel(<Brief brief={state.brief} toast={toast} onChanged={() => void refresh()} settle={planSettle} />, planPanel)
@@ -961,8 +938,7 @@ export function App() {
         </main>
       </div>
       <StatusBar
-        next={next}
-        onGo={goNext}
+        send={statusSend ? { text: statusSend.text, onGo: goSend } : null}
         cut={video && version ? { format: formatLabel, fps, id: version.id, lockedAt: video.lockedVersion } : null}
         // §27, 5.9: with one shape and so no switch on the monitor, the status bar's shape offers the request for the others.
         shapes={stage === "picture" && video && version && chips.length === 1 ? { prompt: formatPrompt(state.project.name, video.name, version.id), toast } : null}

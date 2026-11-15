@@ -3,7 +3,7 @@
 // has Blind; an effects pass labels its cues on its block and opens its layers by sound (§23).
 import { useState } from "preact/hooks";
 import { takeGroups, type TakeRow } from "../desk.js";
-import { agentPrompt, AUDIO_CHIPS, defaultVersion, filmLanes, filmNotes, filmPicks, otherLanes, variantNoteRow, variantOnLabel, variantOnOptions, variantRows } from "../lib.js";
+import { agentPrompt, defaultVersion, filmLanes, filmNotes, filmPicks, otherLanes, variantNoteRow, variantOnLabel, variantOnOptions, variantRows } from "../lib.js";
 import type { Asset, State, Version, Video } from "../types.js";
 import { AudioStage, filmsOf, type Preview, takeList } from "./AudioStage.js";
 import { filmsControl } from "./FilmsMenu.js";
@@ -93,7 +93,6 @@ export function VariantTab({ stage, state, assets, video, toast, onChanged, onPe
       onLabel={(n) => variantOnLabel(rows, options, n.on)}
       targetName={(it, cue) => (cue === null ? it.name : options.find((o) => o.value === `c:${it.key}:${cue}`)?.label ?? it.name)}
       rangeMarks
-      chipsFor={() => AUDIO_CHIPS[stage]}
       wholeLabel={`The whole ${words.one}`}
       none={words.none}
       layers={stage === "sfx" ? {

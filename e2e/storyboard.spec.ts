@@ -224,7 +224,7 @@ test("the Plan workspace says Ready to build once the brief, the script and ever
   await expect(row).not.toContainText("Ready to build");
 });
 
-test("with the plan approved, the status bar's ask for cut 1 opens the Plan page last used, where Ready to build is", async ({ page, rushes }) => {
+test("with the plan approved, key 1 opens the Plan page last used, where Ready to build is", async ({ page, rushes }) => {
   await withBoard(rushes, BOARD.replaceAll("Status: draft", "Status: approved"));
   await rushes.writeFiles([{ path: "brief.md", text: BRIEF.replace("Status: draft", "Status: approved") }]);
   await rushes.api("PUT", "/api/script", SCRIPT);
@@ -232,10 +232,11 @@ test("with the plan approved, the status bar's ask for cut 1 opens the Plan page
   await rushes.api("PATCH", `/api/script/${script.sections[0].id}`, { status: "approved" });
   await page.goto(rushes.url);
   await openStoryboard(page);
-  // Away from Plan, the status bar's line is a button back to the page last used.
+  // Away from Plan, key 1 goes back to the page last used (the status bar no longer says what is next: Red, round 2).
   await page.keyboard.press("8");
   await expect(workspaceTab(page, "Assets")).toHaveAttribute("aria-selected", "true");
-  await page.locator("footer.status").getByRole("button", { name: "ask for cut 1" }).click();
+  await expect(page.locator("footer.status")).not.toContainText("ask for cut 1");
+  await page.keyboard.press("1");
   await expect(workspaceTab(page, "Plan")).toHaveAttribute("aria-selected", "true");
   await expect(planTab(page, "Storyboard")).toHaveAttribute("aria-selected", "true");
   await expect(page.locator(".planrow")).toContainText("Ready to build");

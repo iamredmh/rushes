@@ -71,7 +71,7 @@ Your agent registers what it makes. You review it in the browser. When you press
 
 ## Every stage in one place
 
-Four workspaces in the top bar, in the order the work happens; the first, Plan, has a switch for Brief, Script and Storyboard. **Review** holds the cut on the **Timeline** tab and a tab for each sound: **Voice**, **Music** and **Effects**. Then come **Visuals** and **Assets**. A tab unlocks as soon as it has something in it, and a locked tab tells you what to ask your agent for. The notes panel sits on the right, with its **Notes** and **Activity** tabs and **Send** at its foot, and the status bar at the bottom says what to do **Next:**.
+Four workspaces in the top bar, in the order the work happens; the first, Plan, has a switch for Brief, Script and Storyboard. **Review** holds the cut on the **Timeline** tab and a tab for each sound: **Voice**, **Music** and **Effects**. Then come **Visuals** and **Assets**. A tab unlocks as soon as it has something in it, and a locked tab tells you what to ask your agent for. The notes panel sits on the right, with its **Notes** and **Activity** tabs and **Send** at its foot. On Visuals and Assets, which have no notes panel, the status bar at the bottom offers **Send** while anything is waiting.
 
 ### Timeline: point at the exact frame
 
@@ -396,7 +396,8 @@ Voice works in rounds: the same script read by a few voices, then variations of 
 
 - The circle beside a take (**Use this one**) picks a music bed, SFX pass or voice read, which then shows as **In use** and plays on the Timeline tab. Clicking a take's block auditions it without changing the pick. **Unpick** on the take in use clears the pick, and **Put away** moves a take you don't want out of the list's way (**Bring back** returns it).
 - **Blind** (Voice and Music) renames the beds `Bed 1`, `Bed 2`… — on Voice, each round's reads `Read 1`, `Read 2`… — in a shuffled order and masks their descriptions, so you can compare without knowing which is which.
-- On Voice, a note is **Whole** (`Speaker`, `Pacing`, `Tone` or `Overall` — the read as a whole), **Point** (`Fix this` or `Keep this`, marked at the playhead) or on a **range** of the read (I and O, the same chips), to have a stretch replaced. There are no Rise/Fall/Louder/Quieter marks there.
+- On Voice, a note is on the whole read, a point (marked at the playhead) or a **range** of the read (I and O), to have a stretch replaced. There are no Rise/Fall/Louder/Quieter marks there. Say what you want in the note itself: there are no preset prompts.
+- On the Timeline tab a note is on the film (this frame, or the whole mix), never on one sound's take: to note a take, open its sound's tab.
 - On a range of a music bed or an effects pass, a note can carry marks: toggle **Rise**, **Fall**, **Louder** or **Quieter** (with a dB amount, 3 by default) to say how a range should change — "Fall" or "Quieter 3 dB".
 - The **Timeline** tab shows a loudness readout — integrated LUFS, true peak, and the music's level under the VO — measured over exactly what the timeline plays, using the newest round's picked voice read. It needs **ffmpeg** on your PATH; without it, the readout shows "—". After a timeout or an error, click the readout to measure again.
 - Each sound's row on the Timeline tab (Voice, Music, Effects) has mute (**M**), solo (**S**) and a level slider, −24 dB to +6 dB in 0.5 dB steps, shown as e.g. `−14.0 dB`. Double-click resets it to 0; arrow keys move it 0.5 dB at a time. Levels are saved with your picks, never change a file, and the loudness readout is measured with them applied.

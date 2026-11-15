@@ -382,10 +382,10 @@ test("the done tick closes a note and reopens it, and Send, by the status bar's 
   await rushes.api("POST", "/api/notes", { stage: "visuals", scope: "whole", version: "v2", on: "launch-carousel/2", format: null, text: "Second." });
   await openVisuals(page, rushes);
   // Visuals has no notes panel: the status bar counts what waits, and leads to Send.
-  await expect(statusSend(page)).toHaveText("send 2 notes");
+  await expect(statusSend(page)).toHaveText("Send 2 notes");
   await page.locator(".vznote", { hasText: "First." }).getByRole("button", { name: "Mark done" }).click();
   await expect.poll(async () => (await notesJson(rushes)).find((n) => n.text === "First.").status).toBe("done");
-  await expect(statusSend(page)).toHaveText("send 1 note");
+  await expect(statusSend(page)).toHaveText("Send 1 note");
   await sendNotes(page);
   const dialog = sentDialog(page);
   await expect(dialog).toContainText("rushes_add_visual");

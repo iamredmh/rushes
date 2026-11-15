@@ -7,7 +7,7 @@ import { createContext, type RefObject } from "preact";
 import { useContext, useEffect, useRef, useState } from "preact/hooks";
 import type { ChangeLogState } from "../ChangeLog.js";
 import { Icon } from "../Icon.js";
-import { Notes, type NotesProps } from "../Notes.js";
+import { type Filter, NoteFilterMenu, Notes, type NotesProps } from "../Notes.js";
 import { ActivityList, type ActivityListProps } from "./ActivityList.js";
 
 /** The panel's width: 300 px until dragged, kept between these. */
@@ -31,7 +31,8 @@ export interface PanelShared {
   width: number;
   /** A new width while dragging; `keep` saves it for this browser. */
   setWidth(width: number, keep: boolean): void;
-  /** Send is to be brought into view and given focus (the status bar's "send N notes"), by whichever panel is mounted. */
+  /** Send is to be brought into view and given focus (the status bar's Send, from a page with no panel), by whichever
+   *  panel is mounted. */
   reveal: boolean;
   onRevealed(): void;
   /** Shows the panel on its Notes tab (opening the drawer under 1100 px), then runs `then` once it is on screen. */
@@ -141,7 +142,9 @@ export function NotesPanel(props: NotesPanelProps) {
   const sendRef = useRef<HTMLButtonElement>(null);
   const root = useRef<HTMLElement>(null);
   const drag = useRef<{ right: number } | null>(null);
-  // The status bar's "send N notes" brings Send into view and gives it focus, once the panel it opened is on screen.
+  // The notes' filter, in the tab row beside Notes and Activity (Red, round 2: the list gets the line it had).
+  const [noteFilter, setNoteFilter] = useState<Filter>("all");
+  // The status bar's Send brings Send into view and gives it focus, once the panel it opened is on screen.
   useEffect(() => {
     if (!desk?.reveal || !desk.shown) return;
     const el = sendRef.current;
@@ -150,7 +153,6 @@ export function NotesPanel(props: NotesPanelProps) {
     el.scrollIntoView({ block: "nearest" });
     el.focus();
   }, [desk?.reveal, desk?.shown]);
-
   if (!desk) return <Notes {...props} />;
   const { log, activity, send, shown, narrow } = desk;
   const tab = log.open ? "activity" : "notes";
@@ -240,6 +242,7 @@ export function NotesPanel(props: NotesPanelProps) {
           </button>
         </div>
         <span class="sp" />
+        {tab === "notes" && <NoteFilterMenu filter={noteFilter} onChange={setNoteFilter} />}
         {narrow && (
           <button type="button" class="ibtn" aria-label={HIDE} data-tip={HIDE} onClick={() => desk.setShown(false)}>
             <Icon name="x" />
@@ -248,7 +251,7 @@ export function NotesPanel(props: NotesPanelProps) {
       </div>
       {/* Hidden, never unmounted, while Activity shows: a half-typed note stays where it was. */}
       <div class="ntabpanel" role="tabpanel" id="npanel-notes" aria-labelledby="ntab-notes" hidden={tab !== "notes"}>
-        <Notes {...props} />
+        <Notes {...props} filter={noteFilter} />
       </div>
       {tab === "activity" && (
         <div class="ntabpanel" role="tabpanel" id="npanel-activity" aria-label="Activity">

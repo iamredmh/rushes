@@ -4,18 +4,13 @@
 import { useState } from "preact/hooks";
 import { takeGroups, type TakeRow } from "../desk.js";
 import {
-  agentPrompt, AUDIO_CHIPS, defaultVersion, filmLanes, filmNotes, filmPicks, otherLanes, type VariantRow, type VoiceNotes, voiceNoteRows, voiceOnLabel, voiceRounds, variantRows,
+  agentPrompt, defaultVersion, filmLanes, filmNotes, filmPicks, otherLanes, type VariantRow, type VoiceNotes, voiceNoteRows, voiceOnLabel, voiceRounds, variantRows,
 } from "../lib.js";
 import type { Asset, State, Version, Video } from "../types.js";
 import { AudioStage, filmsOf, type Preview, takeList } from "./AudioStage.js";
 import { filmsControl } from "./FilmsMenu.js";
 import { BlindButton } from "./VariantTab.js";
 import type { ReviewClock } from "./desk/frame.js";
-
-const CHIPS: Record<"whole" | "point", string[]> = {
-  whole: AUDIO_CHIPS.voice,
-  point: ["Fix this", "Keep this"],
-};
 
 // Blind holds for the session, as on Music: its shuffle is fixed at page load, and the switch survives a trip to another tab.
 const BLIND_SEED = Math.floor(Math.random() * 2 ** 31);
@@ -84,8 +79,6 @@ export function Voice({ state, assets, video, toast, onChanged, onPendingChange,
       onLabel={(n) => voiceOnLabel(model, n.on, nameOf)}
       targetName={(it) => `${it.take.round} · ${it.name}`}
       rangeMarks={false}
-      // A range takes the point chips: "Fix this" and "Keep this" read as well for a stretch of a read as for a moment.
-      chipsFor={(scope) => CHIPS[scope === "whole" ? "whole" : "point"]}
       wholeLabel="The whole read"
       none="No voice reads for this film yet."
       toast={toast}

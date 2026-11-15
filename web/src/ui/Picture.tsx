@@ -3,20 +3,20 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, mediaUrl, originalFrame } from "../api.js";
 import { noteTarget, pctOf as pctOfLength, rulerMarks, type Selection, type Tool } from "../desk.js";
 import {
-  AUDIO_CHIPS, BOX_REASON, boxFrom, boxShowsOn, contentRect, fmt, frameAt, noteFormatTag, noteTime, otherFormatNotes, placeNote, RESHAPE_MS, reshapeKeyframes, scopeHint, shotAt,
+  BOX_REASON, boxFrom, boxShowsOn, contentRect, fmt, frameAt, noteFormatTag, noteTime, otherFormatNotes, placeNote, RESHAPE_MS, reshapeKeyframes, scopeHint, shotAt,
   shotLabel, shotSeek, snap, spacePressesButton, stepFrame, testFlags, versionFormats, visibleNotes,
   type FormatView, type ProxyProgress,
 } from "../lib.js";
-import type { Asset, Mark, Note, ProxyJob, State, Video, Version } from "../types.js";
+import type { Asset, Note, ProxyJob, State, Video, Version } from "../types.js";
 import { FormatScope } from "./FormatScope.js";
 import { Icon } from "./Icon.js";
 import { escapeIsFree, NotesPanel, useNoteBox } from "./desk/NotesPanel.js";
-import { useTakeSelection } from "./desk/useTakeSelection.js";
+import { takeNotesOf } from "./desk/useTakeSelection.js";
 import { OtherFormats } from "./OtherFormats.js";
 import { ProxyBar } from "./ProxyBar.js";
 import { PictureTrack } from "./desk/PictureTrack.js";
 import { Ruler, type RulerMarker } from "./desk/Ruler.js";
-import { LoudnessReadout, type SoundTab, SoundTracks } from "./desk/SoundTracks.js";
+import { LoudnessReadout, SoundTracks } from "./desk/SoundTracks.js";
 import { type MixView, useMix } from "./desk/useMix.js";
 import { ToolStrip } from "./desk/ToolStrip.js";
 import { Transport } from "./desk/Transport.js";
@@ -87,8 +87,6 @@ export interface PictureProps {
   /** §27, 5.6: the project and its files, for the sound rows under the Picture track. */
   state: State;
   assets: Asset[];
-  /** A sound row's take count was clicked: open that sound's tab. */
-  onOpenTab?(tab: SoundTab): void;
 }
 
 /** §27, 5.7: with nothing selected, the note is on this frame or on the whole mix. */
@@ -104,7 +102,7 @@ export function Picture({
   video, version, fps, notes, toast, onChanged, onPendingChange, onMarksPendingChange, clock, mixView, grab, onGrabChange, playerRef,
   ffmpeg = false, proxyJob, noteProxyJob, source = "proxy", onSourceChange,
   formats = [], format = null, formatMissing = false, onPrimarySize, onBoxPendingChange, onFormatChange, readOnly = false, formatSwitch,
-  state, assets, onOpenTab,
+  state, assets,
 }: PictureProps) {
   const ref = useRef<HTMLVideoElement>(null);
   // The film's playhead, read once as the tab mounts (after the tab it replaces has left its time), for applyMetadata.
@@ -153,15 +151,11 @@ export function Picture({
   const [noteHasText, setNoteHasText] = useState(false);
   // §27, 5.4: whether the note box has focus, so the Note tool shows as the one in use.
   const [noteFocused, setNoteFocused] = useState(false);
-  // §27, 5.7: what the next note is about. A take picked on its sound row (at the time clicked, or the whole take), else
-  // "This frame" or "The whole mix" as the target line's menu says; a range marked narrows either to the range.
+  // §27, 5.7: what the next note is about: "This frame" or "The whole mix" as the target line's menu says; a range marked
+  // narrows either to the range. A take is noted on its own tab (Red, round 2), never picked here.
   const [aim, setAim] = useState<"frame" | "mix">("frame");
-  const [noteMarks, setNoteMarks] = useState<Mark[]>([]);
-  // Lets go of the take and the menu's choice; a marked range and its ticked marks stay (they have their own control).
-  const clearSelection = () => {
-    takes.clear();
-    setAim("frame");
-  };
+  // Lets go of the menu's choice; a marked range stays (it has its own control).
+  const clearSelection = () => setAim("frame");
   const openNoteBox = useNoteBox(input);
   // §27, 5.5: the level and mute, remembered per browser; §27, 5.4: the timeline's share of the column, once dragged.
   const [sound, setSound] = useVolume();
@@ -460,13 +454,8 @@ export function Picture({
 
   // §27, 5.6: the takes in use, played in step with the picture, and the cut's own sound.
   const mix = useMix({ state, assets, video, version, player: ref, duration, monitor: sound, toast, onChanged, keep: mixView });
-  // A take picked as the target that is no longer in use (unpicked here, by the agent or in another tab) lets go.
   // The notes on the takes in use are this tab's too: listed, and marked on their rows.
-  const takes = useTakeSelection(mix, state.notes.notes, video, fps, (to) => {
-    ref.current?.pause();
-    seek(to);
-  }, () => setNoteMarks([]));
-  const { takeSel, takeNotes } = takes;
+  const takeNotes = takeNotesOf(mix, state.notes.notes, video);
 
   // §27, 5.5: the level and mute live on the element, and are remembered per browser. With a take in use the takes are
   // heard instead (through the engine, at the same level), and the cut's own sound only when its row says so.
@@ -540,7 +529,6 @@ export function Picture({
   /** The selection now, read at the moment it is used: the playhead from the element, never a render behind. */
   const selectionAt = (at: number): Selection => {
     const marked = range.in !== null && range.out !== null ? { t: range.in, tOut: range.out } : null;
-    if (takeSel) return marked ? { ...takeSel, ...marked } : takeSel;
     if (aim === "mix") return marked ? { kind: "mix", ...marked } : { kind: "mix" };
     return marked ? { kind: "range", ...marked } : { kind: "frame", t: at };
   };
@@ -552,15 +540,13 @@ export function Picture({
   const add = async (text: string) => {
     const target = targetAt(now());
     if (target.stage !== "picture") {
-      // A take or the whole mix (§27, 5.7): its stage and `on`, with the marks when it is a range on a take.
+      // The whole mix (§27, 5.7): its stage and `on`.
       await api.post("/api/notes", {
         stage: target.stage, video: video.id, version: version.id, on: target.on, scope: target.scope, t: target.t, tOut: target.tOut, text,
-        marks: target.scope === "range" && takeSel ? noteMarks : [],
       });
       clearRange();
-      setNoteMarks([]);
-      // m4: a note on the whole mix is not a setting: the next note is on this frame again (a take picked stays picked).
-      if (target.stage === "mix") setAim("frame");
+      // m4: a note on the whole mix is not a setting: the next note is on this frame again.
+      setAim("frame");
       // A box, a grabbed frame and the format scope belong to a picture note: this note used the box up, so none is left
       // waiting to land on the next picture note by surprise.
       setNoteScope("this");
@@ -903,10 +889,7 @@ export function Picture({
             duration={duration}
             t={t}
             onSeek={seek}
-            onOpenTab={onOpenTab}
-            selected={takes.selected}
             notes={[...visible, ...takeNotes]}
-            onPick={readOnly ? undefined : takes.pick}
           />
         </div>
       </div>
@@ -927,11 +910,9 @@ export function Picture({
           label: target.label,
           when: target.when,
           name: target.name,
-          menu: !takeSel ? { value: aim, options: AIM_OPTIONS, onChange: (v) => setAim(v === "mix" ? "mix" : "frame") } : undefined,
-          onClear: takeSel || aim === "mix" ? clearSelection : undefined,
+          menu: { value: aim, options: AIM_OPTIONS, onChange: (v) => setAim(v === "mix" ? "mix" : "frame") },
+          onClear: aim === "mix" ? clearSelection : undefined,
         }}
-        chips={takeSel ? AUDIO_CHIPS[takeSel.stage] : undefined}
-        marks={takeSel && range.in !== null && range.out !== null ? { value: noteMarks, onChange: setNoteMarks } : undefined}
         formatTag={(n) => noteFormatTag(n, many)}
         cardExtra={many && view ? (n) => (
           <FormatScope
