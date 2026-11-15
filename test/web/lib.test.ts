@@ -101,7 +101,7 @@ describe("fit", () => {
 
 describe("firstTab", () => {
   const tabs = (unlocked: string[]): TabState[] =>
-    (["script", "picture", "voice", "music", "sfx", "mix"] as const).map((stage) => ({ stage, unlocked: unlocked.includes(stage), todo: 0 }));
+    (["script", "picture", "voice", "music", "sfx", "mix"] as const).map((stage) => ({ stage, unlocked: unlocked.includes(stage), todo: 0, sent: 0 }));
   it("prefers Picture, then the first unlocked tab, then Picture", () => {
     expect(firstTab(tabs(["script", "picture"]))).toBe("picture");
     expect(firstTab(tabs(["script"]))).toBe("script");

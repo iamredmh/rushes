@@ -5,7 +5,7 @@ import {
 import type { TabState } from "../../web/src/types.js";
 
 const tabs = (unlocked: Partial<Record<TabState["stage"], boolean>>): TabState[] =>
-  (["script", "picture", "voice", "music", "sfx", "mix"] as const).map((stage) => ({ stage, unlocked: !!unlocked[stage], todo: 0 }));
+  (["script", "picture", "voice", "music", "sfx", "mix"] as const).map((stage) => ({ stage, unlocked: !!unlocked[stage], todo: 0, sent: 0 }));
 
 describe("planning pages", () => {
   it("are Brief, Script and Storyboard, and only those are planning pages", () => {

@@ -1,5 +1,6 @@
 import { STAGES, type NotesFile, type Project, type Script, type Stage, type VisualsFile } from "./schema.js";
 import { noteInPlay } from "./project.js";
+import { noteState } from "./noteState.js";
 import { isChanged } from "./script.js";
 
 export interface TabState {
@@ -7,6 +8,8 @@ export interface TabState {
   unlocked: boolean;
   /** Open items: to-do notes, plus changed or flagged sections on the script tab. */
   todo: number;
+  /** Of those notes, how many a Send has already given the agent (noteState.ts: "sent"). */
+  sent: number;
 }
 
 function laneHasVariants(p: Project, stage: "voice" | "music" | "sfx"): boolean {
@@ -30,8 +33,8 @@ export function tabStates(p: Project, s: Script, n: NotesFile, v: Pick<VisualsFi
   };
   return STAGES.map((stage) => {
     // §26: a shelved film's open notes are kept but do not count.
-    const notes = n.notes.filter((x) => x.stage === stage && x.status === "todo" && noteInPlay(x, p)).length;
+    const open = n.notes.filter((x) => x.stage === stage && x.status === "todo" && noteInPlay(x, p));
     const rows = stage === "script" ? s.sections.filter((x) => isChanged(x) || x.status === "flagged").length : 0;
-    return { stage, unlocked: unlocked[stage], todo: notes + rows };
+    return { stage, unlocked: unlocked[stage], todo: open.length + rows, sent: open.filter((x) => noteState(x) === "sent").length };
   });
 }

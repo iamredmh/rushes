@@ -78,6 +78,16 @@ describe("tabStates", () => {
 });
 
 describe("createBatch", () => {
+  it("says how many of a tab's open notes are already with the agent", () => {
+    const c = ctx();
+    addVersion(c.project, { video: "Hero", file: "v1.mp4" });
+    addNote(c.notes, { stage: "picture", scope: "whole", text: "A" });
+    addNote(c.notes, { stage: "picture", scope: "whole", text: "B" });
+    createBatch(c);
+    addNote(c.notes, { stage: "picture", scope: "whole", text: "C" });
+    expect(tabStates(c.project, c.script, c.notes).find((t) => t.stage === "picture")).toMatchObject({ todo: 3, sent: 2 });
+  });
+
   it("batches this tab's unsent to-do notes and builds a prompt", () => {
     const c = ctx();
     const a = addNote(c.notes, { stage: "picture", scope: "point", t: 1, text: "a" });
