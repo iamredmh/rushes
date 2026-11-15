@@ -103,6 +103,14 @@ describe("BriefService", () => {
     expect(await file()).toContain("Status: draft");
   });
 
+  it("saving a section with the words it already has keeps the brief approved", async () => {
+    const { brief } = await setup();
+    const a = await brief.setStatus("approved", (await brief.view()).hash);
+    const tone = a.sections.find((s) => s.heading === "Tone")!;
+    const same = await brief.setSection(tone.index, "Tone", tone.yours, a.hash);
+    expect(same.status).toBe("approved");
+  });
+
   it("does not follow a link, and does not treat a folder as a brief", async () => {
     const a = await setup(null);
     await writeFile(join(a.root, "elsewhere.md"), AGENT);

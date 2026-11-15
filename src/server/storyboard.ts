@@ -1,3 +1,4 @@
+import { statusAfterEdit } from "../core/approval.js";
 import { hashText } from "../core/brief.js";
 import { InvalidError, RushesError } from "../core/errors.js";
 import { STORYBOARD_FILE, cutShots, editShot, parseStoryboard, type Shot, type ShotEdit } from "../core/storyboard.js";
@@ -89,7 +90,9 @@ export class StoryboardService extends RecordFile {
       const prev = await this.current(expectHash);
       const was = parseStoryboard(prev).shots.find((s) => s.index === index);
       const changesWords = was && ((edit.description !== undefined && edit.description.trim() !== was.description) || (edit.direction !== undefined && edit.direction.replace(/\s*\r?\n\s*/g, " ").trim() !== was.direction));
-      const full: ShotEdit = was?.status === "approved" && changesWords && edit.status === undefined ? { ...edit, status: "draft" } : edit;
+      // approval.ts: only a status that changes is written, so a shot with no Status line keeps none.
+      const status = was ? statusAfterEdit(was.status, { wordsChanged: !!changesWords, status: edit.status }) : edit.status;
+      const full: ShotEdit = status !== undefined && (edit.status !== undefined || status !== was?.status) ? { ...edit, status } : edit;
       let next: string;
       try {
         next = editShot(prev, index, heading, full);

@@ -1,3 +1,4 @@
+import { statusAfterEdit } from "../core/approval.js";
 import { BRIEF_FILE, hashText, parseBrief, setSectionBody, setStatus, type BriefStatus } from "../core/brief.js";
 import { InvalidError, RushesError } from "../core/errors.js";
 import type { Store } from "../core/store.js";
@@ -61,7 +62,7 @@ export class BriefService extends RecordFile {
     return this.run(async () => this.build(await this.readText(), await this.store.read("brief")));
   }
 
-  /** Saves one section. An edit to an approved brief reopens it: the status line goes back to draft. */
+  /** Saves one section. A change to an approved brief's words reopens it: the status line goes back to draft. */
   setSection(index: number, heading: string, text: string, expectHash: string): Promise<BriefView> {
     return this.run(async () => {
       const prev = await this.current(expectHash);
@@ -71,7 +72,9 @@ export class BriefService extends RecordFile {
       } catch (e) {
         throw new InvalidError((e as Error).message);
       }
-      if (parseBrief(next).status === "approved") next = setStatus(next, "draft");
+      // approval.ts: an approved brief reopens when a section's words change, not on a save of the same words.
+      const was = parseBrief(next).status;
+      if (was === "approved" && statusAfterEdit(was, { wordsChanged: next !== prev }) === "draft") next = setStatus(next, "draft");
       if (next !== prev) await this.write(prev, next);
       return this.build(next, await this.store.read("brief"));
     });

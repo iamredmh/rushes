@@ -1,3 +1,4 @@
+import { statusAfterEdit } from "./approval.js";
 import type { Script, Section, Take } from "./schema.js";
 import { InvalidError, NotFoundError } from "./errors.js";
 import { uniqueId } from "./ids.js";
@@ -127,11 +128,16 @@ export interface SectionEdit {
   status?: Section["status"];
 }
 
+/** The user's edit to a section. A change to an approved section's words or direction reopens it (approval.ts). */
 export function editSection(script: Script, id: string, edit: SectionEdit): Section {
   const s = findSection(script, id);
+  const words = (x: { proposed: string | null; current: string }) => (x.proposed ?? x.current).trim();
+  const wordsChanged =
+    (edit.proposed !== undefined && words({ proposed: edit.proposed, current: s.current }) !== words(s)) ||
+    (edit.direction !== undefined && edit.direction.trim() !== s.direction.trim());
+  s.status = statusAfterEdit(s.status, { wordsChanged, status: edit.status });
   if (edit.proposed !== undefined) s.proposed = edit.proposed;
   if (edit.direction !== undefined) s.direction = edit.direction;
-  if (edit.status !== undefined) s.status = edit.status;
   return s;
 }
 

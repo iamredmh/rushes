@@ -40,6 +40,24 @@ describe("setSections", () => {
     expect(s.sections[0]).toMatchObject({ id: "a:b", end: 6, current: "B" });
   });
 
+  it("your change to an approved line's words or direction reopens it, as on the brief and the storyboard", () => {
+    const s = empty();
+    setSections(s, [{ start: 0, end: 10, current: "Old line." }, { start: 10, end: 20, current: "Second." }]);
+    editSection(s, "s1", { status: "approved" });
+    editSection(s, "s1", { proposed: "Old line." });
+    expect(s.sections[0].status).toBe("approved");
+    editSection(s, "s1", { proposed: "New line." });
+    expect(s.sections[0].status).toBe("draft");
+    editSection(s, "s1", { proposed: "Newer line.", status: "approved" });
+    expect(s.sections[0].status).toBe("approved");
+    editSection(s, "s2", { status: "approved" });
+    editSection(s, "s2", { direction: "Slower" });
+    expect(s.sections[1].status).toBe("draft");
+    editSection(s, "s2", { status: "flagged" });
+    editSection(s, "s2", { proposed: "Second, again." });
+    expect(s.sections[1].status).toBe("flagged");
+  });
+
   it("keeps the user's proposal, direction and takes when the agent re-sends a section", () => {
     const s = empty();
     setSections(s, [{ start: 0, end: 10, current: "Old line." }]);
