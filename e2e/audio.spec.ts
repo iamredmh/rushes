@@ -1,6 +1,6 @@
 // Audio tab tests. The engine's own logic is unit-tested (test/web/timeline.test.ts and
 // engine.test.ts); the full in-browser engine checks arrive with the Music tab (Task 3).
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { makeWav } from "./fixtures/wav.js";
@@ -1990,6 +1990,109 @@ test("hiding the notes panel leaves the preview alone in the right column, at th
   await expect(notesPanel(page)).toBeVisible();
 });
 
+// ---- The preview's divider: dragging the line under the preview makes the picture bigger or smaller. The right column
+// widens to keep the cut's shape (up to half the window), the notes panel takes what is left, and the size is remembered
+// per browser across the three sound tabs. The notes panel's own width and the Timeline's divider are left alone. ----
+
+const previewDivider = (page: Page) => page.getByRole("separator", { name: "Resize the preview" });
+
+async function dragBy(page: Page, handle: Locator, dy: number) {
+  const d = (await handle.boundingBox())!;
+  await page.mouse.move(d.x + d.width / 2, d.y + d.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(d.x + d.width / 2, d.y + d.height / 2 + dy, { steps: 6 });
+  await page.mouse.up();
+}
+
+test("the preview's divider drags it bigger and smaller, keeps its shape, and the size is remembered across the sound tabs", async ({ page, rushes }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await oneOfEach(rushes);
+  await page.goto(rushes.testUrl());
+  await openReviewTab(page, "Voice");
+  await loaded(page, 2);
+  const divider = previewDivider(page);
+  await expect(divider).toBeVisible();
+  const before = (await monitor(page).boundingBox())!;
+  const sideBefore = (await rightColumn(page).boundingBox())!;
+  const takesBefore = (await takesPanel(page).boundingBox())!;
+  // The divider sits between the preview and the notes panel.
+  const d = (await divider.boundingBox())!;
+  expect(d.y).toBeGreaterThanOrEqual(before.y + before.height - 0.5);
+  expect(d.y + d.height).toBeLessThanOrEqual((await notesPanel(page).boundingBox())!.y + 0.5);
+
+  // Down: a bigger picture, still 16:9, so the right column widens and the takes area gives up the width.
+  await dragBy(page, divider, 160);
+  const big = (await monitor(page).boundingBox())!;
+  expect(big.height).toBeGreaterThan(before.height + 100);
+  expect(Math.abs(big.width / big.height - 16 / 9)).toBeLessThan(0.03);
+  expect((await rightColumn(page).boundingBox())!.width).toBeGreaterThan(sideBefore.width + 150);
+  expect((await takesPanel(page).boundingBox())!.width).toBeLessThan(takesBefore.width - 150);
+  // Still above the notes panel, which keeps the rest of the column.
+  const panel = (await notesPanel(page).boundingBox())!;
+  expect(big.y + big.height).toBeLessThanOrEqual(panel.y + 0.5);
+  expect(panel.height).toBeGreaterThan(200);
+  expect(await page.evaluate(() => localStorage.getItem("rushes:preview"))).not.toBeNull();
+
+  // Remembered after a reload, and the same on Music.
+  await page.reload();
+  await openReviewTab(page, "Voice");
+  await loaded(page, 2);
+  expect(Math.abs((await monitor(page).boundingBox())!.height - big.height)).toBeLessThanOrEqual(3);
+  await openReviewTab(page, "Music");
+  await loaded(page, 1);
+  expect(Math.abs((await monitor(page).boundingBox())!.height - big.height)).toBeLessThanOrEqual(3);
+
+  // Up: smaller than it started, at the column's width (the notes panel keeps its own width; the picture is centred).
+  await dragBy(page, previewDivider(page), -(big.height - before.height) - 70);
+  const small = (await monitor(page).boundingBox())!;
+  expect(small.height).toBeLessThan(before.height - 40);
+  expect(Math.abs((await rightColumn(page).boundingBox())!.width - sideBefore.width)).toBeLessThanOrEqual(1);
+  const frame = (await monitor(page).locator("video").boundingBox())!;
+  expect(Math.abs(frame.width / frame.height - 16 / 9)).toBeLessThan(0.03);
+  expect(Math.abs(frame.x + frame.width / 2 - (small.x + small.width / 2))).toBeLessThanOrEqual(1.5);
+
+  // A double-click puts it back as it was.
+  await previewDivider(page).dblclick();
+  const reset = (await monitor(page).boundingBox())!;
+  expect(Math.abs(reset.height - before.height)).toBeLessThanOrEqual(2);
+  expect(Math.abs(reset.width - before.width)).toBeLessThanOrEqual(2);
+  expect(await page.evaluate(() => localStorage.getItem("rushes:preview"))).toBeNull();
+
+  // The notes panel's width and the Timeline's divider were never touched.
+  expect(await page.evaluate(() => [localStorage.getItem("rushes:notes-width"), localStorage.getItem("rushes:split")])).toEqual([null, null]);
+});
+
+test("the preview grows no wider than half the window and leaves the notes panel room; the arrow keys move it too", async ({ page, rushes }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await oneOfEach(rushes);
+  await page.goto(rushes.testUrl());
+  await openReviewTab(page, "Effects");
+  await loaded(page, 1);
+  await dragBy(page, previewDivider(page), 700);
+  const side = (await rightColumn(page).boundingBox())!;
+  expect(side.width).toBeLessThanOrEqual(1440 / 2 + 1);
+  const pv = (await monitor(page).boundingBox())!;
+  expect(pv.y + pv.height).toBeLessThanOrEqual((await notesPanel(page).boundingBox())!.y + 0.5);
+  expect((await notesPanel(page).boundingBox())!.height).toBeGreaterThanOrEqual(side.height * 0.2);
+  const frame = (await monitor(page).locator("video").boundingBox())!;
+  expect(Math.abs(frame.width / frame.height - 16 / 9)).toBeLessThan(0.03);
+  // The takes area keeps the rest of the width.
+  expect((await takesPanel(page).boundingBox())!.width).toBeGreaterThan(500);
+
+  await previewDivider(page).dblclick();
+  const start = (await monitor(page).boundingBox())!.height;
+  await previewDivider(page).focus();
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
+  const down = (await monitor(page).boundingBox())!.height;
+  expect(down).toBeGreaterThan(start + 20);
+  await expect(previewDivider(page)).toHaveAttribute("aria-valuenow", /^\d+$/);
+  await page.keyboard.press("ArrowUp");
+  expect((await monitor(page).boundingBox())!.height).toBeLessThan(down - 10);
+  // The arrows moved the divider, not the playhead or the takes.
+  expect((await inspect(page)).playing).toBe(false);
+});
+
 test("with no cut, the no-cut slate takes the preview's place above the notes panel", async ({ page, rushes }) => {
   await rushes.addVariant("music", "Bed", { seconds: 4, freq: 220 });
   await page.goto(rushes.testUrl());
@@ -2004,6 +2107,8 @@ test("with no cut, the no-cut slate takes the preview's place above the notes pa
   expect(s.y + s.height).toBeLessThanOrEqual(panel.y + 0.5);
   await expect(monitor(page).getByRole("button", { name: "Copy prompt for your agent" })).toBeInViewport({ ratio: 1 });
   await expect(monitor(page).getByRole("button", { name: "Full screen · F" })).toHaveCount(0);
+  // Nothing to resize until there is a picture.
+  await expect(previewDivider(page)).toHaveCount(0);
 });
 
 test("under the stacking width the preview sits below the takes area, and the notes are the drawer", async ({ page, rushes }) => {

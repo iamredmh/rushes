@@ -2,6 +2,7 @@
 // remembered per browser, and the divider that sets the timeline panel's share of the column (moved here from Picture).
 import type { RefObject } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { PREVIEW_KEY, PREVIEW_MAX, PREVIEW_MIN, readShare } from "./share.js";
 
 /**
  * §27, 5.5 (final review I3): the film's one playhead across the Review tabs (Timeline, Voice, Music, Effects). The desk
@@ -43,14 +44,7 @@ function readVolume(): { level: number; muted: boolean } {
   }
 }
 
-function readSplit(): number | null {
-  try {
-    const n = Number(localStorage.getItem(SPLIT_KEY));
-    return localStorage.getItem(SPLIT_KEY) !== null && Number.isFinite(n) ? Math.min(SPLIT_MAX, Math.max(SPLIT_MIN, n)) : null;
-  } catch {
-    return null;
-  }
-}
+const readSplit = () => readShare(SPLIT_KEY, SPLIT_MIN, SPLIT_MAX);
 
 function remember(key: string, value: string | null): void {
   try {
@@ -79,6 +73,81 @@ export function useSplit(): { split: number | null; keep(to: number | null): voi
       remember(SPLIT_KEY, to === null ? null : String(Math.round(to * 1000) / 1000));
     },
   };
+}
+
+/** The preview's share of the sound tab's right column (null: the cut's shape at the column's width, up to 45%). */
+export function usePreviewSize(): { size: number | null; keep(to: number | null): void; set(to: number): void } {
+  const [size, setSize] = useState(() => readShare(PREVIEW_KEY, PREVIEW_MIN, PREVIEW_MAX));
+  return {
+    size,
+    set: setSize,
+    keep: (to) => {
+      setSize(to);
+      remember(PREVIEW_KEY, to === null ? null : String(Math.round(to * 1000) / 1000));
+    },
+  };
+}
+
+/**
+ * The line under a sound tab's preview: dragging it down makes the picture bigger, up smaller (PREVIEW_MIN to
+ * PREVIEW_MAX of the column); the arrow keys move it, a double-click puts it back. The right column widens to keep the
+ * cut's shape (desk.css, up to half the window), and the notes panel takes the rest.
+ */
+export function PreviewDivider({ column, preview, size }: { column: RefObject<HTMLElement>; preview: RefObject<HTMLElement>; size: ReturnType<typeof usePreviewSize> }) {
+  const drag = useRef<{ top: number; height: number } | null>(null);
+  const clamp = (n: number) => Math.min(PREVIEW_MAX, Math.max(PREVIEW_MIN, n));
+  const at = (clientY: number): number | null => {
+    const d = drag.current;
+    if (!d || d.height <= 0) return null;
+    // The divider's middle sits 4 px under the preview's foot.
+    const to = clamp((clientY - 4 - d.top) / d.height);
+    size.set(to);
+    return to;
+  };
+  const end = () => {
+    if (!drag.current) return;
+    drag.current = null;
+    if (size.size !== null) size.keep(size.size);
+  };
+  const current = (): number => {
+    const col = column.current?.getBoundingClientRect();
+    const pv = preview.current?.getBoundingClientRect();
+    return col && pv && col.height > 0 ? pv.height / col.height : PREVIEW_MIN;
+  };
+  return (
+    <div
+      class="pvsplit"
+      role="separator"
+      aria-orientation="horizontal"
+      aria-label="Resize the preview"
+      aria-valuemin={Math.round(PREVIEW_MIN * 100)}
+      aria-valuemax={Math.round(PREVIEW_MAX * 100)}
+      aria-valuenow={Math.round((size.size ?? current()) * 100)}
+      tabIndex={0}
+      onPointerDown={(e) => {
+        const col = column.current;
+        if (!col || e.button !== 0) return;
+        const r = col.getBoundingClientRect();
+        drag.current = { top: r.top, height: r.height };
+        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      }}
+      onPointerMove={(e) => at(e.clientY)}
+      onPointerUp={(e) => {
+        const to = at(e.clientY);
+        drag.current = null;
+        if (to !== null) size.keep(to);
+      }}
+      onPointerCancel={() => end()}
+      onLostPointerCapture={() => end()}
+      onDblClick={() => size.keep(null)}
+      onKeyDown={(e) => {
+        if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+        e.preventDefault();
+        e.stopPropagation();
+        size.keep(clamp((size.size ?? current()) + (e.key === "ArrowDown" ? 0.03 : -0.03)));
+      }}
+    />
+  );
 }
 
 /** The panel's style for a share of the column, and its class. */
