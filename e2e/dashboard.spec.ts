@@ -154,7 +154,7 @@ test("a box on a vertical cut in a frame that doesn't fit it is still measured a
   await videoReady(page);
   // Force the frame back to 16:9, as Safari used to leave it: the 9:16 picture is pillarboxed
   // inside a wider overlay, so the overlay and the picture are no longer the same rect.
-  // (As wide as the monitor's box allows at 16:9: with the notes panel at 300 px the box is wider than 16:9 at 1440×900.)
+  // (As wide as the monitor's box allows at 16:9: with the notes panel at 360 px the box is wider than 16:9 at 1440×900.)
   await page.addStyleTag({ content: ".framebox .frame{width:min(100cqw, 100cqh * 16 / 9)!important;aspect-ratio:16/9!important}" });
   const overlay = (await page.locator(".overlay").boundingBox())!;
   expect(overlay.width / overlay.height).toBeCloseTo(16 / 9, 1);
@@ -587,7 +587,8 @@ test("the Picture track names each shot, follows the playhead, and notes record 
   });
   await page.goto(rushes.url);
   await videoReady(page);
-  await expect(shotBlocks(page)).toHaveText(["01 Title card", "02 Window rises in", "03 Wide, cursor enters"]);
+  await expect(shotBlocks(page)).toHaveText(["01", "02", "03"]);
+  for (const [i, name] of (["01 Title card", "02 Window rises in", "03 Wide, cursor enters"] as const).entries()) await expect(shotBlocks(page).nth(i)).toHaveAccessibleName(name);
   await expect(shotBlocks(page).nth(0)).toHaveAttribute("data-tip", "01 Title card · establish");
   await expect(shotBlocks(page).nth(0)).toHaveAttribute("aria-current", "true");
   await shotBlocks(page).nth(1).click();
@@ -684,7 +685,8 @@ test("a cut whose first shot starts after a lead-in gets a block at every shot, 
   await rushes.api("PUT", "/api/videos/hero/shots", { shots: [{ name: "Logo", start: 0.5 }, { name: "Hero", start: 2 }] });
   await page.goto(rushes.url);
   await videoReady(page);
-  await expect(shotBlocks(page)).toHaveText(["01 Logo", "02 Hero"]);
+  await expect(shotBlocks(page)).toHaveText(["01", "02"]);
+  for (const [i, name] of (["01 Logo", "02 Hero"] as const).entries()) await expect(shotBlocks(page).nth(i)).toHaveAccessibleName(name);
   // The lead-in has no block: the first starts an eighth of the way along.
   const track = (await page.locator(".ptrack .tlane").boundingBox())!;
   const first = (await shotBlocks(page).nth(0).boundingBox())!;
@@ -1787,7 +1789,8 @@ test.describe("the Picture waveform (§19.9)", () => {
       const z = (sel: string) => Number(getComputedStyle(document.querySelector(sel)!).zIndex);
       return { th: t.height, inside: c.top >= t.top && c.bottom <= t.bottom && c.left >= t.left && c.right <= t.right, wave: z(canvas), head: z(`${lane} .playhead`) };
     }, [CUT_SOUND_LANE, CUT_SOUND_WAVE]);
-    expect(box.th).toBe(40);
+    // Red, 16 Nov: the tracks share the timeline panel's height, so the row is at least its old 40 px.
+    expect(box.th).toBeGreaterThanOrEqual(40);
     expect(box.inside).toBe(true);
     expect(box.wave).toBeLessThan(box.head);
 
@@ -1910,7 +1913,7 @@ test.describe("the Picture waveform (§19.9)", () => {
     await expect(page.locator(".proxybar").getByRole("button", { name: "Create proxy" })).toBeVisible();
     await expect.poll(() => wavePixels(page)).toBeGreaterThan(50);
     await expectPlayerOnScreen(page);
-    expect(await page.evaluate((lane) => document.querySelector(lane)!.getBoundingClientRect().height, CUT_SOUND_LANE)).toBe(40);
+    expect(await page.evaluate((lane) => document.querySelector(lane)!.getBoundingClientRect().height, CUT_SOUND_LANE)).toBeGreaterThanOrEqual(40);
   });
 
   test("switching to another cut never shows the last one's waveform", async ({ page, rushes }) => {
@@ -1995,7 +1998,8 @@ test.describe("a tall cut (fix round 1)", () => {
     const f = await frameBox(page);
     // Still the cut's own shape, just shorter.
     expect(f.width / f.height).toBeCloseTo(360 / 640, 1);
-    expect(f.height).toBeGreaterThan(500);
+    // Red, 16 Nov: the timeline starts at 40% of the column, so the picture gives it the room.
+    expect(f.height).toBeGreaterThan(380);
   });
 
   test("a 9:16 4K cut with the proxy offer showing still fits", async ({ page, rushes }) => {
@@ -2009,7 +2013,7 @@ test.describe("a tall cut (fix round 1)", () => {
     await expectColumnFilled(page);
   });
 
-  test("with a shot list, the note box still fits, and the Picture track sits under the ruler", async ({ page, rushes }) => {
+  test("with a shot list, the note box still fits, and the Picture track sits at the timeline's foot, over the zoom bar", async ({ page, rushes }) => {
     await rushes.addVerticalCut();
     await rushes.api("PUT", "/api/videos/hero/shots", { shots: [{ name: "Open", start: 0 }, { name: "Turn", start: 1 }] });
     await page.goto(rushes.url);
@@ -2017,11 +2021,12 @@ test.describe("a tall cut (fix round 1)", () => {
     await expect(shotBlocks(page)).toHaveCount(2);
     await expectAllOnScreen(page);
     await expectColumnFilled(page);
-    // The track comes straight after the ruler.
+    // Red, 16 Nov: the shots sit at the foot of the tracks, straight above the zoom bar.
     const track = (await page.locator(".ptrack").boundingBox())!;
     const r = (await ruler(page).boundingBox())!;
-    expect(track.y).toBeGreaterThanOrEqual(r.y + r.height - 1);
-    expect(track.y - (r.y + r.height)).toBeLessThan(4);
+    const zoom = (await page.locator(".zrow").boundingBox())!;
+    expect(track.y).toBeGreaterThan(r.y + r.height);
+    expect(Math.abs(zoom.y - (track.y + track.height))).toBeLessThan(2);
   });
 
   test("a 16:9 cut fills the monitor at 1440×900: its full width or its full height, whichever it meets first", async ({ page, rushes }) => {
@@ -2029,7 +2034,7 @@ test.describe("a tall cut (fix round 1)", () => {
     await page.goto(rushes.url);
     await videoReady(page);
     const fit = (await page.locator(".monitor .fitbox").boundingBox())!;
-    // §27, 5.7: with the notes panel 300 px wide the monitor's box is wider than 16:9 here, so the picture meets its height.
+    // §27, 5.7: with the notes panel 360 px wide the monitor's box is wider than 16:9 here, so the picture meets its height.
     await expect.poll(async () => {
       const f = await frameBox(page);
       return Math.round(f.width) === Math.round(fit.width) || Math.round(f.height) === Math.round(fit.height);
@@ -2039,12 +2044,13 @@ test.describe("a tall cut (fix round 1)", () => {
     await expectAllOnScreen(page);
   });
 
-  test("a taller window gives a 9:16 cut more room: at 1440×1100 it is at least its full 640 px", async ({ page, rushes }) => {
+  test("a taller window gives a 9:16 cut more room: at 1440×1100 it is over 500 px", async ({ page, rushes }) => {
     await page.setViewportSize({ width: 1440, height: 1100 });
     await rushes.addVerticalCut();
     await page.goto(rushes.url);
     await videoReady(page);
-    await expect.poll(async () => Math.round((await frameBox(page)).height)).toBeGreaterThanOrEqual(640);
+    // Red, 16 Nov: the timeline's 40% comes first; the picture still grows with the window.
+    await expect.poll(async () => Math.round((await frameBox(page)).height)).toBeGreaterThan(500);
     const f = await frameBox(page);
     expect(f.width / f.height).toBeCloseTo(360 / 640, 1);
     await expectAllOnScreen(page);
@@ -2080,14 +2086,15 @@ test.describe("a very short window (fix round 3, M2)", () => {
     await expect(shotBlocks(page)).toHaveCount(2);
     const r = await page.evaluate(() => {
       const box = (sel: string) => document.querySelector(sel)!.getBoundingClientRect();
-      return { monitor: box(".monitor").height, column: box(".tl"), ruler: box(".ruler").bottom, track: box(".ptrack"), frame: box(".frame").height };
+      return { monitor: box(".monitor").height, column: box(".tl"), ruler: box(".ruler").bottom, track: box(".ptrack"), tracks: box(".tracks"), frame: box(".frame").height };
     });
     // The column keeps its 360 px floor (the work area scrolls instead), and the monitor its 140.
     expect(r.column.height).toBeGreaterThanOrEqual(359);
     expect(r.monitor).toBeGreaterThanOrEqual(139);
     expect(r.frame).toBeGreaterThan(100);
     expect(r.track.top).toBeGreaterThanOrEqual(r.ruler - 1);
-    expect(r.column.bottom).toBeGreaterThanOrEqual(r.track.bottom - 1);
+    // The tracks scroll inside their own box when the window is this short; that box stays inside the column.
+    expect(r.column.bottom).toBeGreaterThanOrEqual(r.tracks.bottom - 1);
   });
 });
 

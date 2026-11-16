@@ -120,8 +120,8 @@ if (typeof location !== "undefined" && testFlags(location.search).test) window._
 const BAR = 3;
 const BAR_WIDTH = 2;
 
-/** The canvas. `length` is the timeline's length in seconds (the peaks' own when it isn't known yet). */
-export function PictureWave({ wave, length }: { wave: Wave; length: number }) {
+/** The canvas. `length` is the stretch drawn, in seconds from `from` (the peaks' own length when it isn't known yet). */
+export function PictureWave({ wave, length, from = 0 }: { wave: Wave; length: number; from?: number }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0, dpr: 1 });
 
@@ -161,9 +161,9 @@ export function PictureWave({ wave, length }: { wave: Wave; length: number }) {
     x.fillStyle = getComputedStyle(c).color;
     const perBucket = wave.duration / n;
     for (let left = 0; left < size.w; left += BAR) {
-      const t0 = (left / size.w) * span;
+      const t0 = from + (left / size.w) * span;
       if (t0 >= wave.duration) break;
-      const t1 = ((left + BAR) / size.w) * span;
+      const t1 = from + ((left + BAR) / size.w) * span;
       const a = Math.min(n - 1, Math.floor(t0 / perBucket));
       const b = Math.min(n, Math.max(a + 1, Math.ceil(t1 / perBucket)));
       let amp = 0;
@@ -171,7 +171,7 @@ export function PictureWave({ wave, length }: { wave: Wave; length: number }) {
       const h = Math.max(1, Math.min(1, amp) * size.h);
       x.fillRect(left, (size.h - h) / 2, BAR_WIDTH, h);
     }
-  }, [size, wave, length]);
+  }, [size, wave, length, from]);
 
   return <canvas ref={ref} class="pwave" aria-hidden="true" />;
 }

@@ -137,7 +137,7 @@ test("only one bed is in use at a time, across rounds, and the timeline plays th
   await openReviewTab(page, "Music");
   await expect(takeCircle(page, "Pulse")).toHaveAttribute("aria-checked", "true");
   await openReviewTab(page, "Timeline");
-  await expect(soundBlock(page, "Music")).toHaveText("Pulse");
+  await expect(soundBlock(page, "Music")).toHaveAccessibleName(/ · Pulse$/);
   await expect(soundTrack(page, "Music")).not.toContainText("Drift");
 });
 
@@ -1262,10 +1262,10 @@ test("the timeline shows a row per sound; mute and solo change the lane gains, a
   await mixProject(page, rushes);
   const asked = await openMix(page, rushes, 3);
   await expect(soundRows(page).locator(".snm")).toHaveText(["Voice", "Music", "Effects"]);
-  await expect(soundBlock(page, "Voice")).toHaveText("Gerald");
-  await expect(soundBlock(page, "Voice")).toHaveAttribute("title", "Round 1 · Voices · Gerald");
-  await expect(soundBlock(page, "Music")).toHaveText("Warm keys");
-  await expect(soundBlock(page, "Effects")).toHaveText("Pass A");
+  await expect(soundBlock(page, "Voice")).toHaveAccessibleName(/ · Gerald$/);
+  await expect(soundBlock(page, "Voice")).toHaveAccessibleName("Round 1 · Voices · Gerald");
+  await expect(soundBlock(page, "Music")).toHaveAccessibleName(/ · Warm keys$/);
+  await expect(soundBlock(page, "Effects")).toHaveAccessibleName(/ · Pass A$/);
   await expect(soundTrack(page, "Effects").locator(".cue")).toHaveText(["Swipe"]);
   await expect.poll(() => laneGainsOf(page)).toEqual({ vo: 1, music: 1, sfx: 1 });
   expect(await heard(page)).toEqual([`${VO_READ}@0`, "music/warm-keys@0", "sfx/pass-a@0"]);
@@ -1422,7 +1422,7 @@ test("a sound with nothing in use, or a missing file, is empty and left out of t
   await expect(soundBlock(page, "Music")).toHaveText("Nothing chosen yet");
   await expect(soundBlock(page, "Effects")).toHaveText("File not found");
   for (const name of ["Music", "Effects"] as const) await expectReadableInRow(soundBlock(page, name).locator(".slbl"), soundTrack(page, name));
-  await expect(soundBlock(page, "Voice")).toHaveText("Gerald");
+  await expect(soundBlock(page, "Voice")).toHaveAccessibleName(/ · Gerald$/);
   expect(await heard(page)).toEqual([`${VO_READ}@0`]);
   await expect.poll(() => asked.at(-1)).toEqual(["voice"]);
   // Soloing a sound that plays nothing leaves nothing to measure.
@@ -1434,15 +1434,14 @@ test("the Voice row plays the read in use, matching the server (§18.4, §27.6)"
   const { read, read2 } = await mixProject(page, rushes);
   const asked = await openMix(page, rushes, 3);
   // Round 1 is picked, Round 2 isn't: the mix falls back to the older round, the newest with a pick.
-  await expect(soundBlock(page, "Voice")).toHaveAttribute("title", "Round 1 · Voices · Gerald");
+  await expect(soundBlock(page, "Voice")).toHaveAccessibleName("Round 1 · Voices · Gerald");
   expect(await heard(page)).toEqual([`${VO_READ}@0`, "music/warm-keys@0", "sfx/pass-a@0"]);
 
   // Picking Round 2's "more sombre" makes it the read in use: it takes over, and the mix changed, so the loudness
   // readout asks again.
   const before = asked.length;
   await rushes.api("PUT", "/api/picks", { video: "hero", lanes: { [read2.lane.id]: read2.variant.id } });
-  await expect(soundBlock(page, "Voice")).toHaveText("more sombre");
-  await expect(soundBlock(page, "Voice")).toHaveAttribute("title", "Round 2 · Gerald, tone · more sombre");
+  await expect(soundBlock(page, "Voice")).toHaveAccessibleName("Round 2 · Gerald, tone · more sombre");
   await expect.poll(() => heard(page)).toEqual([`${VO_READ_2}@0`, "music/warm-keys@0", "sfx/pass-a@0"]);
   await expect.poll(() => asked.length).toBeGreaterThan(before);
 

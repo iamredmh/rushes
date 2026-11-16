@@ -1,6 +1,6 @@
 // §27, 5.7: the notes panel, the right-hand column of Review and Plan. Two tabs, Notes (the list, its filter and the note
 // box with its target line) and Activity (the Change Log), and at its foot Send, with what is waiting. It is as tall as
-// the work area, 300 px wide until its divider is dragged (remembered per browser), and `\` hides or shows it; under
+// the work area, 360 px wide until its divider is dragged (remembered per browser), and `\` hides or shows it; under
 // 1100 px it is a drawer over the work area. One component, mounted by every view that has notes: what they share (the
 // tab chosen, Activity, Send, whether it is shown and how wide) comes from the desk through PanelContext.
 import { createContext, type RefObject } from "preact";
@@ -10,8 +10,8 @@ import { Icon } from "../Icon.js";
 import { type Filter, NoteFilterMenu, Notes, type NotesProps } from "../Notes.js";
 import { ActivityList, type ActivityListProps } from "./ActivityList.js";
 
-/** The panel's width: 300 px until dragged, kept between these. */
-export const PANEL_WIDTH = 300;
+/** The panel's width: 360 px until dragged (Red, 16 Nov: room for the notes), kept between these. */
+export const PANEL_WIDTH = 360;
 export const PANEL_MIN = 240;
 export const PANEL_MAX = 560;
 /** Below this the panel is a drawer over the work area. */

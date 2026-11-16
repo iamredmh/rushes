@@ -21,7 +21,8 @@ const PATHS: Record<string, string> = {
   next: '<path d="M9 6l6 6-6 6"/>',
   in: '<path d="M10 5H6v14h4"/><path d="M14 12h6M17 9l3 3-3 3"/>',
   out: '<path d="M14 5h4v14h-4"/><path d="M4 12h6M7 9l3 3-3 3"/>',
-  box: '<path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/>',
+  // A marquee (Red, 16 Nov): a dashed box, so it never reads as Full screen.
+  box: '<rect x="4" y="5" width="16" height="14" stroke-linecap="butt" stroke-linejoin="miter" stroke-dasharray="3 2"/>',
   camera: '<path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="3.5"/>',
   check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
   flag: '<path d="M5 21V4M5 4h11l-2 4 2 4H5"/>',
@@ -50,7 +51,12 @@ const PATHS: Record<string, string> = {
   range: '<path d="M5 5v14M19 5v14M8 12h8"/><path d="M10.5 9.5L8 12l2.5 2.5M13.5 9.5L16 12l-2.5 2.5"/>',
   volume: '<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/>',
   mute: '<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M16 9.5l5 5M21 9.5l-5 5"/>',
-  expand: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
+  // Full screen: two arrows out to the top right and bottom left corners.
+  expand: '<path d="M14 4h6v6M20 4l-6.5 6.5M10 20H4v-6M4 20l6.5-6.5"/>',
+  // Fit the tracks to the panel: rows pressed between two bars.
+  fitrows: '<path d="M4 4h16M4 20h16"/><path d="M12 7v10M9 9.5L12 7l3 2.5M9 14.5l3 2.5 3-2.5"/>',
+  zoomin: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M20 20l-5-5M8 10.5h5M10.5 8v5"/>',
+  zoomout: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M20 20l-5-5M8 10.5h5"/>',
   info: '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5M12 7.8h.01"/>',
 };
 

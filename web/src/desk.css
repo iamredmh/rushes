@@ -274,7 +274,7 @@
 /* ---- §27, 5.7: the notes panel. The right column of Review and Plan, as tall as the work area and --notes-w wide (300 px
    until its divider is dragged). Hidden (\), the workspace takes the room; under 1100 px it is a drawer over the work area. ---- */
 /* The desk's two columns, the workspace and the notes panel (scoped: Assets' preview is a .split of its own). */
-.deskcols { display: grid; grid-template-columns: minmax(0, 1fr) var(--notes-w, 300px); gap: 0; align-items: stretch; }
+.deskcols { display: grid; grid-template-columns: minmax(0, 1fr) var(--notes-w, 360px); gap: 0; align-items: stretch; }
 .nhidden .deskcols { grid-template-columns: minmax(0, 1fr); }
 .deskcols > .wsmain { min-width: 0; height: max(var(--work-h, calc(100vh - 160px)), 360px); overflow: auto; padding-right: 12px; }
 .npanel { position: relative; display: flex; flex-direction: column; min-width: 0; height: max(var(--work-h, calc(100vh - 160px)), 360px); padding-left: 8px; font-size: var(--t-ui); }
@@ -334,7 +334,7 @@
 .ntarget .ntclear .ic { width: 14px; height: 14px; }
 .ntarget .ntclear[data-tip]::after { left: auto; right: 0; transform: none; }
 /* The target's full words: wrapping, from its left edge, never past the panel's right. */
-.ntarget .ntname[data-tip]::after, .ntarget .ntname[data-tip]:hover::after { left: 0; transform: none; max-width: min(260px, calc(var(--notes-w, 300px) - 24px)); font-family: var(--sans); }
+.ntarget .ntname[data-tip]::after, .ntarget .ntname[data-tip]:hover::after { left: 0; transform: none; max-width: min(260px, calc(var(--notes-w, 360px) - 24px)); font-family: var(--sans); }
 .nfoot { display: flex; padding: 8px 10px; border-top: 1px solid var(--line); border-radius: 0 0 8px 8px; }
 .nfoot .sendbtn { flex: 1; justify-content: center; height: 32px; font-size: var(--t-ui); border-radius: 6px; }
 .nfoot .sendbtn .count { min-width: 20px; height: 20px; margin-left: 8px; padding: 0 6px; font: 600 var(--t-small)/20px var(--mono); }
@@ -373,7 +373,7 @@
 .soundtab .takespanel { flex: 1 1 auto; min-width: 0; max-height: none; }
 /* The right column: the preview, full width at the cut's own shape (a tall cut is held to under half the column, centred),
    above the notes panel, which fills the rest. With the panel hidden it stays, the preview alone, at the same width. */
-.nhidden .deskcols.soundcols { grid-template-columns: minmax(0, 1fr) var(--notes-w, 300px); }
+.nhidden .deskcols.soundcols { grid-template-columns: minmax(0, 1fr) var(--notes-w, 360px); }
 /* --notes-room: what the preview always leaves for the notes panel under it, so its list stays readable whatever the
    preview's size (Red, round 2): the panel's tab row, note box and Send take about 230 px (more with a range's marks), the
    list keeps the rest, about 210, and there is the 8 px gap. NOTES_ROOM in share.ts is the same number. */
@@ -393,7 +393,7 @@
     /* The height chosen, never into the notes panel's room; the width that keeps the cut's shape, at most half the window. */
     --pv-h: max(80px, min(calc(var(--pv) * var(--side-h)), calc(var(--side-h) - 448px)));
     --pv-w: min(calc(var(--pv-h) * var(--ar)), calc(50vw - 8px));
-    grid-template-columns: minmax(0, 1fr) max(var(--notes-w, 300px), calc(var(--pv-w) + 8px));
+    grid-template-columns: minmax(0, 1fr) max(var(--notes-w, 360px), calc(var(--pv-w) + 8px));
   }
   .pvsized .soundside > .spreview { max-height: var(--pv-h); }
 }
@@ -491,9 +491,88 @@ span.knm, span.knm:hover { cursor: default; background: none; }
   /* Stacked, the preview keeps its sensible size: nothing to drag. */
   .pvsplit { display: none; }
   /* Under the top bar's tooltips and menus (37 and up) and the monitor's format switch (36), over the rest of the work area. */
-  .npanel.drawer { position: fixed; top: 44px; right: 0; bottom: 26px; z-index: 35; width: min(var(--notes-w, 300px), 100vw); height: auto; padding-left: 0; background: var(--raised); border-left: 1px solid var(--line-2); box-shadow: -16px 0 40px var(--shadow); }
+  .npanel.drawer { position: fixed; top: 44px; right: 0; bottom: 26px; z-index: 35; width: min(var(--notes-w, 360px), 100vw); height: auto; padding-left: 0; background: var(--raised); border-left: 1px solid var(--line-2); box-shadow: -16px 0 40px var(--shadow); }
   .npanel.drawer > .ntabs, .npanel.drawer > .nfoot { border-radius: 0; }
 }
 @media (max-width: 559px) { .npanel.drawer { width: 100vw; } }
 /* A narrow window gives the takes' blocks more of the width. */
 @media (max-width: 760px) { .takespanel { --kh: 240px; } }
+
+/* ---- Red, 16 Nov 2026: the Timeline tab as editing software has it. ----
+   Edge to edge: Review's columns meet the window's edges and each other along 1 px lines, with no margin or rounded card
+   around them (that inset came from the older dashboard's padded pages; Plan's reading pages keep it). */
+.body:has(.deskcols > .tl), .body:has(.deskcols.soundcols) { padding: 0; overflow-x: hidden; }
+.body:has(.deskcols > .tl) .deskcols > .tl { border: 0; border-right: 1px solid var(--line); border-radius: 0; }
+.body:has(.deskcols > .tl) .npanel, .body:has(.deskcols.soundcols) .npanel:not(.drawer) { padding-left: 0; }
+.body:has(.deskcols > .tl) .npanel .ntabs, .body:has(.deskcols.soundcols) .npanel:not(.drawer) .ntabs { border-radius: 0; }
+
+/* The timeline panel: the ruler, the tracks (scrolling inside themselves once sized past the panel) and the zoom bar. */
+.tl > .tlpanel.deskpanel { display: flex; flex-direction: column; max-height: none; overflow: hidden; }
+.deskpanel > .rrow, .deskpanel > .zrow { flex: none; }
+.deskpanel .thead .tbtn { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--text-3); cursor: pointer; }
+.deskpanel .thead .tbtn:hover:not(:disabled) { background: var(--hover); color: var(--text); }
+.deskpanel .thead .tbtn:disabled { color: var(--text-4); cursor: default; }
+.deskpanel .thead .tbtn .ic { width: 17px; height: 17px; }
+.deskpanel .rrow .thead { justify-content: flex-end; }
+.deskpanel .rrow .thead [data-tip]::after { left: auto; right: 0; transform: none; }
+.tracks { flex: 1 1 0; min-height: 0; overflow-x: hidden; overflow-y: auto; }
+.tracks > .trow { position: relative; min-height: 24px; border-bottom: 1px solid var(--line); }
+.tracks > .trow > .tlane { height: auto; }
+.tracks > .strack.idle { min-height: 24px; }
+/* Fit: the tracks share the panel's height, a sound with nothing in use and the shots taking less. */
+/* A pixel spare at the foot: WebKit clips a fitted box at a rounded height, which shaved a fraction off the last row. */
+.tracks.fitted { display: flex; flex-direction: column; padding-bottom: 1px; }
+.tracks > .trow:last-child > .trsz { bottom: 0; height: 4px; }
+.tracks.fitted > .trow { flex: 1 1 0; min-height: 28px; }
+.tracks.fitted > .strack.idle { flex-grow: 0.4; min-height: 24px; }
+.tracks.fitted > .ptrack { flex-grow: 0.6; min-height: 30px; }
+/* The handle along each track's foot. */
+.trsz { position: absolute; left: 0; right: 0; bottom: -3px; height: 6px; z-index: 6; cursor: row-resize; touch-action: none; }
+.trsz:hover { background: var(--accent-soft); }
+
+/* The waveform fills a sized track; a taller one reads louder detail. */
+.tracks .strack .wave { top: 4px; height: calc(100% - 8px); }
+.tracks .strack .sblock { top: 2px; bottom: 2px; }
+
+/* The shots: quiet blocks at the foot, a number each (the name is in the tooltip). */
+.tracks .pblock { top: 4px; bottom: 4px; padding: 0 6px; border-color: var(--line); border-left-color: color-mix(in srgb, var(--pic) 60%, transparent); background: transparent; color: var(--text-3); font: 500 var(--t-small)/1 var(--mono); }
+.tracks .pblock:hover { background: var(--hover); color: var(--text-2); }
+.tracks .pblock[aria-current="true"] { border-color: var(--line-2); border-left-color: var(--pic); background: var(--raised); color: var(--text); }
+
+/* The ruler: time along the top, and under it the notes band, the place to click, scrub and find notes. */
+.deskpanel .ruler { height: 52px; border-bottom: 0; }
+.ruler { height: 48px; }
+.rband { position: absolute; left: 0; right: 0; bottom: 3px; height: 28px; border-radius: 5px; background: var(--raised); box-shadow: inset 0 0 0 1px var(--line); pointer-events: none; }
+.deskpanel .rband { height: 30px; }
+.ruler:hover .rband { background: var(--hover); }
+.rtick { top: 0; bottom: auto; }
+.rtick.major { height: 9px; }
+.rlbl { top: 2px; bottom: auto; left: 4px; }
+.ruler .mk { bottom: 12px; }
+.deskpanel .ruler .mk { bottom: 13px; }
+.ruler .mk.ring { bottom: 10px; }
+.deskpanel .ruler .mk.ring { bottom: 11px; }
+.ruler .span { bottom: 6px; height: 22px; border-radius: 4px; }
+.deskpanel .ruler .span { height: 24px; }
+.ruler .playhead::before { top: -1px; bottom: auto; }
+.rhover { position: absolute; top: 0; bottom: 3px; width: 1px; background: var(--text-3); z-index: 3; pointer-events: none; }
+.rhtc { position: absolute; top: 1px; left: 4px; padding: 0 4px; border-radius: 3px; background: var(--raised); color: var(--text); font: var(--t-meta) var(--mono); white-space: nowrap; }
+
+/* Zoomed in, what is off screen is cut off at the lanes' edges (their tooltips still open downwards). */
+.deskpanel.zoomed .ruler, .deskpanel.zoomed .tlane { overflow-x: clip; }
+
+/* The zoom bar under the tracks: the whole cut, with the stretch on screen as a thumb to drag. */
+.zrow .thead { gap: 2px; justify-content: flex-end; }
+.zrow .thead [data-tip]::after { bottom: calc(100% + 6px); }
+.zbar { position: relative; margin: 0 12px; display: flex; align-items: center; height: 30px; }
+.ztrack { position: relative; flex: 1; height: 14px; border-radius: 7px; background: var(--raised); box-shadow: inset 0 0 0 1px var(--line); cursor: pointer; touch-action: none; }
+.zthumb { position: absolute; top: 0; bottom: 0; min-width: 24px; border-radius: 7px; background: var(--line-2); cursor: grab; }
+.zthumb:hover { background: var(--text-4); }
+.zthumb:active { cursor: grabbing; }
+.zthumb:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.zthumb[data-tip]::after { bottom: calc(100% + 8px); }
+.zgrip { position: absolute; top: 1px; bottom: 1px; width: 12px; border-radius: 6px; background: var(--text-3); cursor: ew-resize; }
+.zgrip.start { left: 1px; }
+.zgrip.end { right: 1px; }
+.zgrip:hover { background: var(--text); }
+.zplay { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--text); z-index: 2; pointer-events: none; }

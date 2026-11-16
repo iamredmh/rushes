@@ -369,7 +369,8 @@ test("the Picture track has a block per shot; the one under the playhead is curr
   await rushes.api("PUT", "/api/videos/hero/shots", { shots: [{ name: "Open", start: 0 }, { name: "Turn", start: 1 }, { name: "Logo", start: 2.5 }] });
   await page.goto(rushes.url);
   await videoReady(page);
-  await expect(shotBlocks(page)).toHaveText(["01 Open", "02 Turn", "03 Logo"]);
+  await expect(shotBlocks(page)).toHaveText(["01", "02", "03"]);
+  for (const [i, name] of (["01 Open", "02 Turn", "03 Logo"] as const).entries()) await expect(shotBlocks(page).nth(i)).toHaveAccessibleName(name);
   await expect(shotBlocks(page).nth(0)).toHaveAttribute("aria-current", "true");
   // Each block runs from its start to the next shot's.
   const [a, b, c] = await Promise.all([0, 1, 2].map(async (i) => (await shotBlocks(page).nth(i).boundingBox())!));
@@ -595,18 +596,18 @@ async function openTimeline(page: Page, rushes: Rushes, files: number) {
 test("with a read, a bed and a pass in use, the timeline shows a row each, named for its take, and plays all three with the picture", async ({ page, rushes }) => {
   await threeInUse(rushes);
   await openTimeline(page, rushes, 3);
-  await expect(soundBlock(page, "Voice")).toHaveText("Gerald");
-  await expect(soundBlock(page, "Music")).toHaveText("Warm keys");
-  await expect(soundBlock(page, "Effects")).toHaveText("Pass A");
+  await expect(soundBlock(page, "Voice")).toHaveAccessibleName(/ · Gerald$/);
+  await expect(soundBlock(page, "Music")).toHaveAccessibleName(/ · Warm keys$/);
+  await expect(soundBlock(page, "Effects")).toHaveAccessibleName(/ · Pass A$/);
   for (const name of ["Voice", "Music", "Effects"] as const) {
     // Red, round 2: the row's head is its name, M, S and level; no take count (what is new is on the sound's tab).
     await expect(soundTrack(page, name).locator(".thead")).toHaveText(new RegExp(`^${name}MS`));
     await expect(soundTrack(page, name).locator(".tcount")).toHaveCount(0);
     await expect(soundTrack(page, name).locator("canvas.wave")).toHaveCount(1);
   }
-  // Under the Picture track, in this order.
+  // Red, 16 Nov: the ruler, the sounds in this order, the Picture track at the foot, then the zoom bar.
   const rows = await page.locator(".tlpanel .trow").evaluateAll((els) => els.map((e) => e.getAttribute("aria-label")));
-  expect(rows).toEqual([null, "Picture track", "Voice track", "Music track", "Effects track"]);
+  expect(rows).toEqual([null, "Voice track", "Music track", "Effects track", "Picture track", null]);
   expect(await heardNow(page)).toEqual(["round-1-voices/gerald", "music/warm-keys", "sfx/pass-a"]);
   // The video is the clock: Play starts it, and the engine follows.
   await transport(page).getByRole("button", { name: "Play · Space" }).click();
@@ -783,8 +784,8 @@ test("a project with takes in use and no cut plays them on the Timeline tab, wit
   await page.keyboard.press("6");
   await expect(reviewTab(page, "Timeline")).toHaveAttribute("aria-selected", "true");
   await expect(page.locator(".noslate")).toContainText("No cut yet");
-  await expect(soundBlock(page, "Voice")).toHaveText("Gerald");
-  await expect(soundBlock(page, "Music")).toHaveText("Warm keys");
+  await expect(soundBlock(page, "Voice")).toHaveAccessibleName(/ · Gerald$/);
+  await expect(soundBlock(page, "Music")).toHaveAccessibleName(/ · Warm keys$/);
   await expect.poll(async () => (await audio(page))?.media.length ?? 0, { timeout: 10_000 }).toBe(2);
   expect(await heardNow(page)).toEqual(["round-1-voices/gerald", "music/warm-keys"]);
   await transport(page).getByRole("button", { name: "Play · Space" }).click();
@@ -1447,7 +1448,7 @@ test.describe("a tab per sound", () => {
     await expect(takeHeadings(page)).toHaveText(["New · Round 2", "In use · Round 1"]);
     await expect(takeRows(page).locator(".knm")).toHaveText(["Pulse", "Drift", "Glow", "Old bed"]);
     await openReviewTab(page, "Timeline");
-    await expect(soundBlock(page, "Music")).toHaveText("Old bed");
+    await expect(soundBlock(page, "Music")).toHaveAccessibleName(/ · Old bed$/);
   });
 
   test("the circles are one Tab stop moved by the arrows, Enter on a name selects it, and Space still plays", async ({ page, rushes }) => {
@@ -1681,7 +1682,7 @@ test.describe("the note's target line", () => {
     await rushes.addVariant("music", "B · Warm keys", { seconds: 4, freq: 330 });
     await page.goto(rushes.testUrl());
     await videoReady(page);
-    expect(Math.round((await notesPanel(page).boundingBox())!.width)).toBe(300);
+    expect(Math.round((await notesPanel(page).boundingBox())!.width)).toBe(360);
     // This frame: the menu and the timecode on the first line, the shot on the second.
     await expect(noteTargetWhen(page)).toHaveText("00:00:00:00");
     await expect(noteTargetName(page)).toHaveText("01 Opening wide");

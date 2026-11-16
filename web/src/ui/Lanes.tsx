@@ -19,8 +19,9 @@ export interface WaveSegment {
 const BAR = 3;
 const BAR_WIDTH = 2;
 
-/** A lane's waveform: bars across the timeline where its clips sit. The Timeline tab's sound rows draw one too. */
-export function Wave({ segments, length, color }: { segments: WaveSegment[]; length: number; color: string }) {
+/** A lane's waveform: bars across the timeline where its clips sit. The Timeline tab's sound rows draw one too, of the
+ *  stretch on screen once zoomed: `length` seconds from `from`. */
+export function Wave({ segments, length, color, from = 0 }: { segments: WaveSegment[]; length: number; color: string; from?: number }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0, dpr: 1 });
 
@@ -47,7 +48,7 @@ export function Wave({ segments, length, color }: { segments: WaveSegment[]; len
   }, []);
 
   // Redraws only when the peaks, the size, the length, the colour or the theme change: never per frame.
-  const deps: unknown[] = [size, length, color, theme];
+  const deps: unknown[] = [size, length, from, color, theme];
   for (const s of segments) deps.push(s.offset, s.duration, s.peaks);
   useEffect(() => {
     const c = ref.current;
@@ -64,7 +65,7 @@ export function Wave({ segments, length, color }: { segments: WaveSegment[]; len
     const bars = Math.floor(size.w / BAR);
     const secondsPerBar = (length * BAR) / size.w;
     for (let i = 0; i < bars; i++) {
-      const t0 = i * secondsPerBar;
+      const t0 = from + i * secondsPerBar;
       const t1 = t0 + secondsPerBar;
       let amp = -1;
       for (const s of segments) {

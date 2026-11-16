@@ -30,8 +30,10 @@ export function useReviewClock(clock: ReviewClock | undefined, film: string, rea
 const VOLUME_KEY = "rushes:volume";
 /** §27, 5.4: the timeline panel's share of the column once its divider has been dragged, remembered per browser. */
 const SPLIT_KEY = "rushes:split";
-/** The timeline panel never takes more than this share of the column, nor less than the ruler needs. */
-const SPLIT_MAX = 0.55;
+/** The timeline panel never takes more than this share of the column, nor less than the ruler needs. Red, 16 Nov: the
+ *  timeline is where the notes go, so it can take most of the column, and starts at DEFAULT_SPLIT. */
+const SPLIT_MAX = 0.75;
+export const DEFAULT_SPLIT = 0.4;
 const SPLIT_MIN = 0.08;
 
 function readVolume(): { level: number; muted: boolean } {

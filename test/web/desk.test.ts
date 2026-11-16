@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { clampView, followView, fullView, isFull, panView, viewPct, viewTime, zoomView } from "../../web/src/desk.js";
 import { defaultTake, deskPlace, NOTE_STATE_LABEL, noteState, pctOf, noteTarget, rulerMarks, takeCount, takeGroups, takeKey, takeSections, timecode, unsentCount, unsentEdits, deskView, viewForKey, viewForTab } from "../../web/src/desk.js";
 import type { Lane, Note, Variant } from "../../web/src/types.js";
 
@@ -313,5 +314,41 @@ describe("unsentEdits", () => {
   });
   it("is nothing when only notes wait", () => {
     expect(unsentEdits({ ...base, notes: [n({ id: "a" }), n({ id: "b" })], scriptTodo: 2 })).toBe(0);
+  });
+});
+
+describe("the timeline's zoom (Red, 16 Nov)", () => {
+  it("places a time across the stretch on screen, and a point back on the cut", () => {
+    expect(viewPct(15, { start: 10, end: 20 })).toBe(50);
+    expect(viewPct(0, { start: 10, end: 20 })).toBe(-10);
+    expect(viewPct(40, { start: 10, end: 20 })).toBe(110);
+    expect(viewTime(0.25, { start: 10, end: 30 })).toBe(15);
+    expect(viewTime(2, { start: 10, end: 30 })).toBe(30);
+  });
+
+  it("zooms about the anchor, which keeps its place on screen", () => {
+    const v = zoomView({ start: 0, end: 100 }, 100, 0.5, 25);
+    expect(v).toEqual({ start: 12.5, end: 62.5 });
+    expect(viewPct(25, v)).toBe(25);
+  });
+
+  it("never zooms in past two seconds, nor out past the cut", () => {
+    expect(zoomView({ start: 10, end: 14 }, 100, 0.1, 12)).toEqual({ start: 11, end: 13 });
+    expect(zoomView({ start: 40, end: 60 }, 100, 50)).toEqual(fullView(100));
+    expect(isFull(zoomView({ start: 40, end: 60 }, 100, 50), 100)).toBe(true);
+  });
+
+  it("pans inside the cut, keeping the view's length", () => {
+    expect(panView({ start: 80, end: 90 }, 100, 30)).toEqual({ start: 90, end: 100 });
+    expect(panView({ start: 5, end: 15 }, 100, -30)).toEqual({ start: 0, end: 10 });
+    expect(clampView({ start: -5, end: 1 }, 100)).toEqual({ start: 0, end: 6 });
+  });
+
+  it("pages to follow the playhead, as Premiere does", () => {
+    const v = { start: 0, end: 10 };
+    expect(followView(v, 100, 5)).toBe(v);
+    expect(followView(v, 100, 10.5)).toEqual({ start: 10.5, end: 20.5 });
+    expect(followView(v, 100, 96)).toEqual({ start: 90, end: 100 });
+    expect(followView({ start: 50, end: 60 }, 100, 20)).toEqual({ start: 19, end: 29 });
   });
 });

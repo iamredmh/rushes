@@ -285,7 +285,8 @@ test("at 1440×900 a 9:16 format keeps the timeline and note box on screen; the 
   await expect(page.locator(CUT_SOUND_WAVE)).toBeVisible({ timeout: 15_000 });
   await radio(page, "9:16").click();
   await expect(page.locator(".proxybar")).toBeHidden();
-  await expect(shotBlocks(page)).toHaveText(["01 Open", "02 Logo"]);
+  await expect(shotBlocks(page)).toHaveText(["01", "02"]);
+  for (const [i, name] of (["01 Open", "02 Logo"] as const).entries()) await expect(shotBlocks(page).nth(i)).toHaveAccessibleName(name);
   await expect(cutLength(page)).toHaveText("0:04.00");
   await expect(page.locator(CUT_SOUND_WAVE)).toBeVisible();
   const vp = page.viewportSize()!;

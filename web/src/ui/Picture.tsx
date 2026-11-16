@@ -1,7 +1,7 @@
 import type { ComponentChildren } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, mediaUrl, originalFrame } from "../api.js";
-import { noteTarget, pctOf as pctOfLength, rulerMarks, type Selection, type Tool } from "../desk.js";
+import { noteTarget, rulerMarks, type Selection, type Tool, viewPct, viewTime, zoomView } from "../desk.js";
 import {
   BOX_REASON, boxFrom, boxShowsOn, contentRect, fmt, frameAt, noteFormatTag, noteTime, otherFormatNotes, placeNote, RESHAPE_MS, reshapeKeyframes, scopeHint, shotAt,
   shotLabel, shotSeek, snap, spacePressesButton, stepFrame, testFlags, versionFormats, visibleNotes,
@@ -20,7 +20,9 @@ import { LoudnessReadout, SoundTracks } from "./desk/SoundTracks.js";
 import { type MixView, useMix } from "./desk/useMix.js";
 import { ToolStrip } from "./desk/ToolStrip.js";
 import { Transport } from "./desk/Transport.js";
-import { type ReviewClock, SplitDivider, splitPanel, useReviewClock, useSplit, useVolume } from "./desk/frame.js";
+import { useTimeView, useTrackHeights } from "./desk/tracks.js";
+import { RowSizer, ZoomBar } from "./desk/ZoomBar.js";
+import { DEFAULT_SPLIT, type ReviewClock, SplitDivider, splitPanel, useReviewClock, useSplit, useVolume } from "./desk/frame.js";
 import { shortLabel } from "../versions.js";
 
 declare global {
@@ -160,6 +162,10 @@ export function Picture({
   // §27, 5.5: the level and mute, remembered per browser; §27, 5.4: the timeline's share of the column, once dragged.
   const [sound, setSound] = useVolume();
   const split = useSplit();
+  // Red, 16 Nov: the tracks' heights (dragged at each one's foot, or fitted to the panel) and the stretch of the cut the
+  // lanes show (the zoom bar under them), paging to follow the playhead.
+  const tracks = useTrackHeights();
+  const tv = useTimeView(duration, t, version.id);
   const monitorRef = useRef<HTMLDivElement>(null);
   const columnRef = useRef<HTMLDivElement>(null);
   // The click that ends a box drag shouldn't also start playback.
@@ -595,6 +601,9 @@ export function Picture({
     else if (k === "v") selectTool();
     else if (escapeIsFree(e)) clearSelection();
     else if (k === "f") { e.preventDefault(); if (!e.repeat) fullScreen(); }
+    // Premiere's keys for the timeline's zoom: = in, - out, \ the whole cut (\ alone is the notes panel's, on the desk).
+    else if (e.key === "=" || e.key === "+") { e.preventDefault(); tv.set(zoomView(tv.view, duration, 0.5, t)); }
+    else if (e.key === "-" || e.key === "_") { e.preventDefault(); tv.set(zoomView(tv.view, duration, 2, t)); }
     // §26: a shelved film is view only: the marking keys do nothing.
     else if (readOnly && /^[iogbn]$/.test(k)) return;
     else if (k === "i") setIn();
@@ -670,13 +679,13 @@ export function Picture({
   const placed = [...visible, ...takeNotes].map((n) => ({ n, at: placeNote(n, version.id) })).filter(({ at }) => at.t !== null);
   // The ruler's markers: each note placed on this cut, a ring for an all-format note on a cut with formats (§21.5).
   const placedById = new Map(placed.map(({ n }) => [n.id, n]));
-  const marks: RulerMarker[] = rulerMarks(placed.map(({ n, at }) => ({ ...n, t: at.t, tOut: at.tOut })), duration).map((m) => {
+  const marks: RulerMarker[] = rulerMarks(placed.map(({ n, at }) => ({ ...n, t: at.t, tOut: at.tOut })), duration, tv.view).map((m) => {
     const n = placedById.get(m.id)!;
     const tag = noteFormatTag(n, many);
     return { ...m, ring: many && n.format === null, title: tag ? `${tag} · ${n.text}` : n.text };
   });
-  // Clamped to the timeline, whatever the file on screen reports (review M6).
-  const pctOf = (s: number) => pctOfLength(s, duration);
+  // Clamped to the timeline, whatever the file on screen reports (review M6), then placed on the stretch on screen.
+  const pctOf = (s: number) => viewPct(Math.min(duration, Math.max(0, s)), tv.view);
   const liveRange = range.in !== null ? { left: pctOf(range.in), width: pctOf(range.out ?? range.in + 0.2) - pctOf(range.in) } : null;
   /** Seek to a note and select it, as clicking its time in the list does. */
   const showNote = (n: Note, to: number) => {
@@ -725,6 +734,28 @@ export function Picture({
       if (r.play) void v.play().catch(() => undefined);
     }
   };
+
+  // On the timeline: Ctrl/Cmd or Alt with the wheel (a pinch on a trackpad) zooms about the pointer; a sideways swipe, or
+  // Shift with the wheel, scrolls along the cut once zoomed. A plain wheel scrolls the tracks.
+  const onWheel = (e: WheelEvent) => {
+    const lane = (e.currentTarget as HTMLElement).querySelector<HTMLElement>(".ruler");
+    const r = lane?.getBoundingClientRect();
+    if (!r || r.width <= 0 || !(duration > 0)) return;
+    const frac = (e.clientX - r.left) / r.width;
+    if (e.ctrlKey || e.metaKey || e.altKey) {
+      e.preventDefault();
+      tv.set(zoomView(tv.view, duration, Math.exp(Math.max(-1, Math.min(1, e.deltaY * 0.01))), viewTime(frac, tv.view)));
+      return;
+    }
+    const sideways = e.shiftKey ? e.deltaY || e.deltaX : Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : 0;
+    if (sideways && tv.zoomed) {
+      e.preventDefault();
+      const span = tv.view.end - tv.view.start;
+      tv.set({ start: tv.view.start + (sideways / r.width) * span, end: tv.view.end + (sideways / r.width) * span });
+    }
+  };
+
+  const withClass = <T extends { class: string }>(p: T, more: string): T => ({ ...p, class: `${p.class} ${more}` });
 
   const choose = (to: Source) => {
     if (to !== source) onSourceChange?.(video.id, to);
@@ -864,14 +895,36 @@ export function Picture({
 
         <SplitDivider column={columnRef} split={split} />
 
-        <div {...splitPanel(split.split)}>
+        <div {...withClass(splitPanel(split.split ?? DEFAULT_SPLIT), `deskpanel${tv.zoomed ? " zoomed" : ""}`)} onWheel={onWheel}>
           <div class="trow rrow">
-            <div class="thead" />
-            <Ruler duration={duration} t={t} marks={marks} live={liveRange} onSeek={seek} onMark={(id) => {
+            <div class="thead">
+              <button
+                type="button"
+                class="tbtn"
+                data-tip="Fit the tracks to the panel"
+                aria-label="Fit the tracks to the panel"
+                aria-pressed={tracks.heights === null}
+                onClick={(e) => { if (e.detail > 0) (e.currentTarget as HTMLElement).blur(); tracks.fit(); }}
+              >
+                <Icon name="fitrows" />
+              </button>
+            </div>
+            <Ruler duration={duration} t={t} marks={marks} live={liveRange} view={tv.view} onSeek={seek} onMark={(id) => {
               const p = placed.find(({ n }) => n.id === id);
               if (p) showNote(p.n, p.at.t!);
             }} />
           </div>
+          <div id="tltracks" class={`tracks${tracks.heights === null ? " fitted" : ""}`} ref={tracks.box}>
+          <SoundTracks
+            mix={mix}
+            duration={duration}
+            t={t}
+            onSeek={seek}
+            notes={[...visible, ...takeNotes]}
+            view={tv.view}
+            rowStyle={tracks.style}
+            sizer={(row) => <RowSizer row={row} name={row === "vo" ? "Voice" : row === "music" ? "Music" : row === "sfx" ? "Effects" : "Cut sound"} tracks={tracks} />}
+          />
           <PictureTrack
             shots={shots}
             duration={duration}
@@ -883,14 +936,22 @@ export function Picture({
               ref.current?.pause();
               seek(shotSeek(start, fps));
             }}
+            view={tv.view}
+            style={tracks.style("picture")}
+            sizer={<RowSizer row="picture" name="Picture" tracks={tracks} />}
           />
-          <SoundTracks
-            mix={mix}
-            duration={duration}
-            t={t}
-            onSeek={seek}
-            notes={[...visible, ...takeNotes]}
-          />
+          </div>
+          <div class="trow zrow">
+            <div class="thead">
+              <button type="button" class="tbtn" data-tip="Zoom out · -" aria-label="Zoom out · -" disabled={!tv.zoomed} onClick={(e) => { if (e.detail > 0) (e.currentTarget as HTMLElement).blur(); tv.set(zoomView(tv.view, duration, 2, t)); }}>
+                <Icon name="zoomout" />
+              </button>
+              <button type="button" class="tbtn" data-tip="Zoom in · =" aria-label="Zoom in · =" disabled={duration <= 0 || tv.view.end - tv.view.start <= Math.min(duration, 2) + 1e-6} onClick={(e) => { if (e.detail > 0) (e.currentTarget as HTMLElement).blur(); tv.set(zoomView(tv.view, duration, 0.5, t)); }}>
+                <Icon name="zoomin" />
+              </button>
+            </div>
+            <ZoomBar view={tv.view} duration={duration} t={t} onView={tv.set} />
+          </div>
         </div>
       </div>
 

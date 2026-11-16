@@ -285,12 +285,74 @@ export interface RulerMark {
 /** A time as a percentage of `length`, clamped to the timeline (0 to 100), whatever the file on screen reports; 0 with no length. */
 export const pctOf = (s: number, length: number): number => (length > 0 ? Math.min(100, Math.max(0, (s / length) * 100)) : 0);
 
-/** The ruler's markers, one per note with a time (placed on the cut on screen by the caller), clamped to the cut. */
-export function rulerMarks(notes: Note[], length: number): RulerMark[] {
+/** The ruler's markers, one per note with a time (placed on the cut on screen by the caller), clamped to the cut. With a
+ *  `view` (the timeline zoomed in), the percentages are of the stretch on screen. */
+export function rulerMarks(notes: Note[], length: number, view?: TimeView): RulerMark[] {
+  const at = (s: number) => (view ? viewPct(Math.min(length, Math.max(0, s)), view) : pctOf(s, length));
   return notes
     .filter((n) => n.t !== null)
     .map((n) => {
-      const left = pctOf(n.t!, length);
-      return { id: n.id, left, width: n.tOut !== null ? pctOf(n.tOut, length) - left : null, status: noteState(n) };
+      const left = at(n.t!);
+      return { id: n.id, left, width: n.tOut !== null ? at(n.tOut) - left : null, status: noteState(n) };
     });
+}
+
+/**
+ * The stretch of the cut the timeline shows, in seconds: the whole cut, or less once zoomed in (Red, 16 Nov: Premiere's
+ * zoom bar under the timeline). Every lane places its marks with `viewPct`, so they all zoom and scroll together.
+ */
+export interface TimeView {
+  start: number;
+  end: number;
+}
+
+/** The shortest stretch the timeline zooms in to: two seconds, or the whole cut when it is shorter. */
+export const minSpan = (length: number): number => Math.min(length, 2);
+
+/** The whole cut. */
+export const fullView = (length: number): TimeView => ({ start: 0, end: Math.max(0, length) });
+
+/** True when the view shows the whole cut. */
+export const isFull = (v: TimeView, length: number): boolean => v.start <= 1e-6 && v.end >= length - 1e-6;
+
+/**
+ * A time as a percentage across the stretch on screen. Not clamped to 0 to 100 (a mark off screen sits past the lane's
+ * edge, which clips it), only to a little either side so a long range's width stays right.
+ */
+export function viewPct(s: number, v: TimeView): number {
+  const span = v.end - v.start;
+  if (!(span > 0)) return 0;
+  return Math.min(110, Math.max(-10, ((s - v.start) / span) * 100));
+}
+
+/** The time under a point `frac` (0 to 1) across the lane. */
+export const viewTime = (frac: number, v: TimeView): number => v.start + Math.min(1, Math.max(0, frac)) * (v.end - v.start);
+
+/** A view held inside the cut, at least `minSpan` long, its length kept when it is only moved. */
+export function clampView(v: TimeView, length: number): TimeView {
+  if (!(length > 0)) return fullView(0);
+  const span = Math.min(length, Math.max(minSpan(length), v.end - v.start));
+  const start = Math.min(length - span, Math.max(0, v.start));
+  return { start, end: start + span };
+}
+
+/** Zoomed by `factor` (under 1 zooms in) about the time `anchor`, which stays where it is on screen. */
+export function zoomView(v: TimeView, length: number, factor: number, anchor = (v.start + v.end) / 2): TimeView {
+  const span = Math.min(length, Math.max(minSpan(length), (v.end - v.start) * factor));
+  const frac = v.end > v.start ? (anchor - v.start) / (v.end - v.start) : 0.5;
+  return clampView({ start: anchor - frac * span, end: anchor - frac * span + span }, length);
+}
+
+/** Moved along the cut by `by` seconds, its length kept. */
+export const panView = (v: TimeView, length: number, by: number): TimeView => clampView({ start: v.start + by, end: v.end + by }, length);
+
+/**
+ * Where the view goes so the playhead `t` stays on screen, as Premiere pages: past the right edge, the next page starts at
+ * the playhead; before the left edge (a jump back), the playhead lands a tenth of the way in. A playhead already on
+ * screen leaves the view as it is.
+ */
+export function followView(v: TimeView, length: number, t: number): TimeView {
+  if (t >= v.start && t <= v.end) return v;
+  const span = v.end - v.start;
+  return clampView(t > v.end ? { start: t, end: t + span } : { start: t - span * 0.1, end: t + span * 0.9 }, length);
 }

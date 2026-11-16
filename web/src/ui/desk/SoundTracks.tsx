@@ -3,10 +3,11 @@
 // when the cut file has a sound of its own. The takes in use play through one engine that follows the picture.
 // What they play, how loud and what is heard is useMix's (useMix.ts); these are its rows and its loudness readout.
 // Red, round 2: no take counts here (what is new is on the sound's tab), and a row is never a note's target.
+import type { ComponentChildren } from "preact";
 import { useState } from "preact/hooks";
 import { mediaKey } from "../../audio/timeline.js";
 import { cueKeys, cueLabel, cueName, cuesInTime } from "../../cues.js";
-import { markTitle, noteState, pctOf } from "../../desk.js";
+import { fullView, markTitle, noteState, type TimeView, viewPct, viewTime } from "../../desk.js";
 import { LEVEL_MAX, LEVEL_MIN, LEVEL_STEP, levelText, loudnessReadout, type MixLane } from "../../lib.js";
 import type { Note } from "../../types.js";
 import { CUE_CARD_ID, CueCard, cardHover, useCueCard } from "../CueCard.js";
@@ -26,14 +27,20 @@ export interface SoundTracksProps {
   onSeek(t: number): void;
   /** The notes marked on the rows (each on the row `mix.noteRow` names). */
   notes?: Note[];
+  /** The stretch of the cut on screen (the whole cut without one). */
+  view?: TimeView;
+  /** A row's height once the tracks have been sized, and the handle at its foot (tracks.ts). */
+  rowStyle?(row: string): Record<string, string> | undefined;
+  sizer?(row: string): ComponentChildren;
 }
 
 /** The rows under the Picture track. */
-export function SoundTracks({ mix, duration, t, onSeek, notes = [] }: SoundTracksProps) {
-  const pct = (s: number) => pctOf(s, duration);
+export function SoundTracks({ mix, duration, t, onSeek, notes = [], view: shown, rowStyle, sizer }: SoundTracksProps) {
+  const view = shown ?? fullView(duration);
+  const pct = (s: number) => viewPct(s, view);
   const timeAt = (e: MouseEvent): number | null => {
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    return r.width > 0 ? Math.min(duration, Math.max(0, ((e.clientX - r.left) / r.width) * duration)) : null;
+    return r.width > 0 ? Math.min(duration, Math.max(0, viewTime((e.clientX - r.left) / r.width, view))) : null;
   };
   const seekAt = (e: MouseEvent) => {
     const at = timeAt(e);
@@ -61,7 +68,7 @@ export function SoundTracks({ mix, duration, t, onSeek, notes = [] }: SoundTrack
         const ckeys = cueKeys(timed);
         const here = notes.filter((n) => n.t !== null && mix.noteRow(n) === row.lane);
         return (
-          <div key={row.lane} class={`trow strack${take ? "" : " idle"}`} role="group" aria-label={`${name} track`} data-sound={row.lane} style={{ "--c": COLOR[row.lane] }}>
+          <div key={row.lane} class={`trow strack${take ? "" : " idle"}`} role="group" aria-label={`${name} track`} data-sound={row.lane} data-row={row.lane} style={{ "--c": COLOR[row.lane], ...rowStyle?.(row.lane) }}>
             <div class="thead shead">
               <i class="sw" aria-hidden="true" />
               <span class="snm">{name}</span>
@@ -92,14 +99,14 @@ export function SoundTracks({ mix, duration, t, onSeek, notes = [] }: SoundTrack
             <div class="tlane" onClick={seekAt}>
               {row.block === "take" ? (
                 <>
+                  {/* No name on the block (Red, 16 Nov: it was distracting): which take is in use is on the sound's tab. */}
                   <div
                     class={`sblock${take!.stale ? " stale" : ""}`}
-                    title={take!.stale ? `${take!.round} · ${take!.variant.name} · made for an older cut` : `${take!.round} · ${take!.variant.name}`}
-                    style={{ left: "0%", width: `${pct(end)}%` }}
-                  >
-                    <span class="slbl">{label}</span>
-                  </div>
-                  <Wave segments={[{ offset: 0, duration: loaded?.duration ?? 0, peaks: loaded ? loaded.peaks : null }]} length={duration} color={COLOR[row.lane]} />
+                    role="img"
+                    aria-label={take!.stale ? `${take!.round} · ${label} · made for an older cut` : `${take!.round} · ${label}`}
+                    style={{ left: `${pct(0)}%`, width: `${pct(end) - pct(0)}%` }}
+                  />
+                  <Wave segments={[{ offset: 0, duration: loaded?.duration ?? 0, peaks: loaded ? loaded.peaks : null }]} length={view.end - view.start} from={view.start} color={COLOR[row.lane]} />
                 </>
               ) : (
                 <div class={`sblock none${row.block === "missing" || row.block === "broken" ? " gone" : ""}`} style={{ left: "0%", width: "100%" }}>
@@ -142,11 +149,12 @@ export function SoundTracks({ mix, duration, t, onSeek, notes = [] }: SoundTrack
               ))}
               <span class="playhead" style={{ left: `${pct(t)}%` }} />
             </div>
+            {sizer?.(row.lane)}
           </div>
         );
       })}
       {mix.cut.shown && (
-        <div class="trow strack csound" role="group" aria-label="Cut sound track" style={{ "--c": "var(--pic)" }}>
+        <div class="trow strack csound" role="group" aria-label="Cut sound track" data-row="cut" style={{ "--c": "var(--pic)", ...rowStyle?.("cut") }}>
           <div class="thead shead">
             <i class="sw" aria-hidden="true" />
             <span class="snm">Cut sound</span>
@@ -157,7 +165,7 @@ export function SoundTracks({ mix, duration, t, onSeek, notes = [] }: SoundTrack
             {mix.cut.wave ? (
               <>
                 <div class="sblock cut" style={{ left: "0%", width: "100%" }} />
-                <PictureWave wave={mix.cut.wave} length={duration} />
+                <PictureWave wave={mix.cut.wave} length={view.end - view.start} from={view.start} />
               </>
             ) : (
               <div class="sblock none" style={{ left: "0%", width: "100%" }}>
@@ -166,6 +174,7 @@ export function SoundTracks({ mix, duration, t, onSeek, notes = [] }: SoundTrack
             )}
             <span class="playhead" style={{ left: `${pct(t)}%` }} />
           </div>
+          {sizer?.("cut")}
         </div>
       )}
       <CueCard shown={shownCard} onHide={card.hide} />
