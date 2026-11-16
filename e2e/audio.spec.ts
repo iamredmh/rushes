@@ -668,7 +668,7 @@ test("Voiceover decodes only what you can reach; folding Put away mid-play never
   expect(heardSource).toBeGreaterThan(0);
 
   // Showing Put away decodes it: its row shows at once, and the held file loads late.
-  const fold = foldToggle(page, "Put away");
+  const fold = foldToggle(page, "Archived");
   await fold.click();
   await expect(takeRows(page)).toHaveCount(4);
   await loaded(page, 3);
@@ -711,7 +711,7 @@ test("every round is open on every film, and Show on Put away holds for the sess
   await rushes.api("PUT", `/api/variants/${jane.lane.id}/${jane.variant.id}/put-away`, { away: true });
   await openVoice(page, rushes, 4);
   await expect(takeRows(page)).toHaveCount(4);
-  const fold = foldToggle(page, "Put away");
+  const fold = foldToggle(page, "Archived");
   await fold.click();
   await expect(fold).toHaveAttribute("aria-expanded", "true");
   await expect(takeRows(page)).toHaveCount(5);
@@ -738,7 +738,7 @@ test("Put away shows a dot while one of its reads has an open note; an older rou
   await page.locator(`.note[data-note="${note.id}"] .chk`).click();
   await expect(takesList(page).locator('.kfold[data-fold="away"] .fdot')).toHaveCount(0);
   // Shown, the point note is drawn on her block again.
-  await foldToggle(page, "Put away").click();
+  await foldToggle(page, "Archived").click();
   await expect(rowOf(page, key).locator(`.mk[data-note="${note.id}"]`)).toHaveCount(1);
 });
 

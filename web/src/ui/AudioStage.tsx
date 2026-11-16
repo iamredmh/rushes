@@ -17,7 +17,7 @@ import { type AudioEngine, type EngineSnapshot, liveContexts } from "../audio/en
 import { type SampleState, samples } from "../audio/sample.js";
 import { assetRev, type Clip, needsVideoSync, setStreamThreshold } from "../audio/timeline.js";
 import { useAudioStage } from "../audio/useAudioStage.js";
-import { defaultTake, noteState, noteTarget, pctOf as pctOfLength, rulerMarks, type TakeGroups, takeKey, type TakeRow, takeSections, timecode, type Tool } from "../desk.js";
+import { defaultTake, noteState, noteTarget, pctOf as pctOfLength, rulerMarks, viewPct, zoomView, type TakeGroups, takeKey, type TakeRow, takeSections, timecode, type Tool } from "../desk.js";
 import {
   blindOrder, fmt, frameAt, noteTime, notePending, type Scope, shotAt, shotLabel, shotSeek, snap, spacePressesButton, stepFrame, takeDetails, testFlags, variantFilms,
 } from "../lib.js";
@@ -30,8 +30,10 @@ import { Icon } from "./Icon.js";
 import { NoCutSlate } from "./desk/NoCut.js";
 import { escapeIsFree, NotesPanel, useNoteBox } from "./desk/NotesPanel.js";
 import { PictureTrack } from "./desk/PictureTrack.js";
+import { useTimeView } from "./desk/tracks.js";
+import { timelineWheel, ZoomRow } from "./desk/ZoomBar.js";
 import { Ruler, type RulerMarker } from "./desk/Ruler.js";
-import { type LooseItem, type TakeItem, type TakeListSection, type TakeMark, Takes } from "./desk/Takes.js";
+import { archiveTakesOff, type LooseItem, type TakeItem, type TakeListSection, type TakeMark, Takes } from "./desk/Takes.js";
 import { ToolStrip } from "./desk/ToolStrip.js";
 import { Transport } from "./desk/Transport.js";
 
@@ -374,6 +376,11 @@ export function AudioStage(props: AudioStageProps) {
     setWhole(null);
   };
 
+  // ---- the stretch of the cut on screen (Red, 16 Nov 2026: the sound tabs zoom and scroll as the Timeline does) ----
+  const tv = useTimeView(length, null, `${props.film ?? ""}:${preview?.version.id ?? ""}`);
+  const tvRef = useRef(tv);
+  tvRef.current = tv;
+
   // ---- the playheads and the muted picture: refs, never per-frame state ----
   const takesRoot = useRef<HTMLDivElement>(null);
   const heads = useRef<HTMLElement[]>([]);
@@ -383,7 +390,10 @@ export function AudioStage(props: AudioStageProps) {
   const lastPaintT = useRef(0);
   const paint = (t: number) => {
     const len = engine.length;
-    const left = `${len > 0 ? (Math.min(t, len) / len) * 100 : 0}%`;
+    const tvNow = tvRef.current;
+    // Zoomed, the playheads sit on the stretch on screen, and the view pages along to keep the playhead in it.
+    if (tvNow?.zoomed) tvNow.follow(t);
+    const left = tvNow?.zoomed ? `${viewPct(Math.min(t, len), tvNow.view)}%` : `${len > 0 ? (Math.min(t, len) / len) * 100 : 0}%`;
     for (const h of heads.current) h.style.left = left;
     // The picture follows the audio clock: seeked back once it's more than a frame off (§17.2).
     const v = video.current;
@@ -470,10 +480,19 @@ export function AudioStage(props: AudioStageProps) {
     onChanged();
   };
   const away = async (it: TakeItem, to: boolean) => {
+    // A take other films share comes off this film only; it stays on the rest (Takes.archiveTakesOff).
+    if (to && it.films && archiveTakesOff(it)) {
+      const c = it.films;
+      const here = c.films.find((f) => f.here)!.id;
+      const rest = c.films.filter((f) => f.id !== here && c.on.includes(f.id)).map((f) => f.name);
+      c.onChange(c.on.filter((id) => id !== here));
+      toast(`Taken off this film. Still on ${rest.join(", ")}.`);
+      return;
+    }
     try {
       await putAway(it.take.lane, it.take.variant.id, to);
     } catch (e) {
-      toast(`Couldn't ${to ? "put it away" : "bring it back"}: ${(e as Error).message}`);
+      toast(`Couldn't ${to ? "archive it" : "restore it"}: ${(e as Error).message}`);
     }
     onChanged();
   };
@@ -484,7 +503,7 @@ export function AudioStage(props: AudioStageProps) {
     if (typing(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
     const k = e.key.toLowerCase();
     if (e.key === " ") {
-      // A focused button (Blind, Put away, a circle) is pressed by Space, not played over (§19.8).
+      // A focused button (Blind, Archive, a circle) is pressed by Space, not played over (§19.8).
       if (spacePressesButton(e.target)) return;
       e.preventDefault();
       toggle();
@@ -497,6 +516,8 @@ export function AudioStage(props: AudioStageProps) {
     else if (k === "i") setIn();
     else if (k === "o") setOut();
     else if (k === "n" && !readOnly) { e.preventDefault(); openNoteBox(); }
+    else if (e.key === "=" || e.key === "+") { e.preventDefault(); tv.set(zoomView(tv.view, length, 0.5, engine.time)); }
+    else if (e.key === "-" || e.key === "_") { e.preventDefault(); tv.set(zoomView(tv.view, length, 2, engine.time)); }
   };
   // Bound in a layout effect, so a key pressed straight after switching to the tab is never missed.
   useLayoutEffect(() => {
@@ -549,8 +570,8 @@ export function AudioStage(props: AudioStageProps) {
     timed.push({ ...n, tOut });
   }
   const timedText = new Map(timed.map((n) => [n.id, n.text]));
-  const rulerMarkers: RulerMarker[] = rulerMarks(timed, length).map((m) => ({ ...m, ring: false, title: timedText.get(m.id) ?? "" }));
-  const pctOf = (s: number) => pctOfLength(s, length);
+  const rulerMarkers: RulerMarker[] = rulerMarks(timed, length, tv.view).map((m) => ({ ...m, ring: false, title: timedText.get(m.id) ?? "" }));
+  const pctOf = (s: number) => (tv.zoomed ? viewPct(Math.min(length, Math.max(0, s)), tv.view) : pctOfLength(s, length));
   const liveRange = range.in !== null ? { left: pctOf(range.in), width: pctOf(range.out ?? range.in + 0.2) - pctOf(range.in) } : null;
   const rangeLabel = range.in === null ? null : range.out === null ? `${fmt(range.in)} →` : noteTime(range.in, range.out);
   const shots = preview ? preview.version.shots.filter((s) => !length || s.start < length) : [];
@@ -647,7 +668,7 @@ export function AudioStage(props: AudioStageProps) {
             onBox={() => undefined}
             onGrab={() => undefined}
           />
-          <div class="tlpanel takespanel">
+          <div class={`tlpanel takespanel${tv.zoomed ? " zoomed" : ""}`} onWheel={(e) => timelineWheel(e, tv, length)}>
             <div class="kstick">
               <div class="trow rrow">
                 <div class="thead">
@@ -657,7 +678,7 @@ export function AudioStage(props: AudioStageProps) {
                 </div>
                 <Clocked engine={engine}>
                   {(t) => (
-                    <Ruler duration={length} t={t} marks={rulerMarkers} live={liveRange} onSeek={seek} onMark={(id) => {
+                    <Ruler duration={length} t={t} marks={rulerMarkers} live={liveRange} view={tv.view} onSeek={seek} onMark={(id) => {
                       const n = timed.find((x) => x.id === id);
                       if (n?.t != null) {
                         engine.pause();
@@ -667,12 +688,38 @@ export function AudioStage(props: AudioStageProps) {
                   )}
                 </Clocked>
               </div>
+            </div>
+            <div ref={takesRoot}>
+              <Takes
+                label={`${title} takes`}
+                color={COLOR[stage]}
+                sections={list.sections}
+                away={{ items: list.away, open: showAway, dot: notes.some((n) => n.status === "todo" && list.away.some((it) => it.key === noteRow(n))), onToggle: () => toggleSet(awayOpen) }}
+                loose={{ ...props.loose, open: looseOpen.has(stage), onToggle: () => toggleSet(looseOpen) }}
+                none={props.none}
+                length={length}
+                view={tv.zoomed ? tv.view : undefined}
+                media={media}
+                selected={selectedItem?.key ?? null}
+                marks={drawn}
+                range={range}
+                layers={props.layers}
+                onSelect={select}
+                onPick={(it) => void pick(it, it.take.variant.id)}
+                onUnpick={(it) => void pick(it, null)}
+                onPutAway={(it, to) => void away(it, to)}
+                toast={toast}
+              />
+            </div>
+            {/* Red, 16 Nov 2026: the scenes under the takes, out of their way, then the zoom bar, as on the Timeline. */}
+            <div class="kfoot">
               {preview && (
                 <Clocked engine={engine}>
                   {(t) => (
                     <PictureTrack
                       shots={shots}
                       duration={length}
+                      view={tv.view}
                       t={t}
                       current={shotAt(shots, snap(t, fps))?.n ?? null}
                       cutLabel={shortLabel(preview.version) || preview.version.id}
@@ -685,27 +732,7 @@ export function AudioStage(props: AudioStageProps) {
                   )}
                 </Clocked>
               )}
-            </div>
-            <div ref={takesRoot}>
-              <Takes
-                label={`${title} takes`}
-                color={COLOR[stage]}
-                sections={list.sections}
-                away={{ items: list.away, open: showAway, dot: notes.some((n) => n.status === "todo" && list.away.some((it) => it.key === noteRow(n))), onToggle: () => toggleSet(awayOpen) }}
-                loose={{ ...props.loose, open: looseOpen.has(stage), onToggle: () => toggleSet(looseOpen) }}
-                none={props.none}
-                length={length}
-                media={media}
-                selected={selectedItem?.key ?? null}
-                marks={drawn}
-                range={range}
-                layers={props.layers}
-                onSelect={select}
-                onPick={(it) => void pick(it, it.take.variant.id)}
-                onUnpick={(it) => void pick(it, null)}
-                onPutAway={(it, to) => void away(it, to)}
-                toast={toast}
-              />
+              <Clocked engine={engine}>{(t) => <ZoomRow tv={tv} duration={length} t={t} />}</Clocked>
             </div>
           </div>
         </div>

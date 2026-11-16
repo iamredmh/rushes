@@ -75,21 +75,33 @@ export function useTrackHeights(): TrackHeights {
 
 /**
  * The stretch of the cut on screen: the whole cut until zoomed. A new cut (another length) starts whole again. While the
- * playhead moves past either edge, the view pages to keep it on screen.
+ * playhead moves past either edge, the view pages to keep it on screen. `t` null: the caller pages it itself with
+ * `follow(t)` (the sound tabs, whose playhead never re-renders them).
  */
-export function useTimeView(duration: number, t: number, cut: string): { view: TimeView; zoomed: boolean; set(v: TimeView | null): void } {
+export interface TimeViewState {
+  view: TimeView;
+  zoomed: boolean;
+  set(v: TimeView | null): void;
+  /** Pages the view to keep `t` on screen (only while zoomed). */
+  follow(t: number): void;
+}
+
+export function useTimeView(duration: number, t: number | null, cut: string): TimeViewState {
   const [kept, setKept] = useState<TimeView | null>(null);
   useEffect(() => setKept(null), [duration, cut]);
   const view = kept && duration > 0 ? clampView(kept, duration) : fullView(duration);
   const set = (v: TimeView | null) => setKept(v === null || isFull(v, duration) ? null : clampView(v, duration));
+  const follow = (at: number) => {
+    if (!kept) return;
+    const next = followView(view, duration, at);
+    if (next !== view) setKept(next);
+  };
   // Paging: only while zoomed, and only when the playhead itself moves (a pan away while paused stays where it is put).
   const last = useRef(t);
   useEffect(() => {
-    if (last.current === t) return;
+    if (t === null || last.current === t) return;
     last.current = t;
-    if (!kept) return;
-    const next = followView(view, duration, t);
-    if (next !== view) setKept(next);
+    follow(t);
   }, [t]);
-  return { view, zoomed: kept !== null, set };
+  return { view, zoomed: kept !== null, set, follow };
 }

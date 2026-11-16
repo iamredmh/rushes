@@ -21,7 +21,7 @@ import { type MixView, useMix } from "./desk/useMix.js";
 import { ToolStrip } from "./desk/ToolStrip.js";
 import { Transport } from "./desk/Transport.js";
 import { useTimeView, useTrackHeights } from "./desk/tracks.js";
-import { RowSizer, ZoomBar } from "./desk/ZoomBar.js";
+import { RowSizer, timelineWheel, ZoomRow } from "./desk/ZoomBar.js";
 import { DEFAULT_SPLIT, type ReviewClock, SplitDivider, splitPanel, useReviewClock, useSplit, useVolume } from "./desk/frame.js";
 import { shortLabel } from "../versions.js";
 
@@ -735,25 +735,7 @@ export function Picture({
     }
   };
 
-  // On the timeline: Ctrl/Cmd or Alt with the wheel (a pinch on a trackpad) zooms about the pointer; a sideways swipe, or
-  // Shift with the wheel, scrolls along the cut once zoomed. A plain wheel scrolls the tracks.
-  const onWheel = (e: WheelEvent) => {
-    const lane = (e.currentTarget as HTMLElement).querySelector<HTMLElement>(".ruler");
-    const r = lane?.getBoundingClientRect();
-    if (!r || r.width <= 0 || !(duration > 0)) return;
-    const frac = (e.clientX - r.left) / r.width;
-    if (e.ctrlKey || e.metaKey || e.altKey) {
-      e.preventDefault();
-      tv.set(zoomView(tv.view, duration, Math.exp(Math.max(-1, Math.min(1, e.deltaY * 0.01))), viewTime(frac, tv.view)));
-      return;
-    }
-    const sideways = e.shiftKey ? e.deltaY || e.deltaX : Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : 0;
-    if (sideways && tv.zoomed) {
-      e.preventDefault();
-      const span = tv.view.end - tv.view.start;
-      tv.set({ start: tv.view.start + (sideways / r.width) * span, end: tv.view.end + (sideways / r.width) * span });
-    }
-  };
+  const onWheel = (e: WheelEvent) => timelineWheel(e, tv, duration);
 
   const withClass = <T extends { class: string }>(p: T, more: string): T => ({ ...p, class: `${p.class} ${more}` });
 
@@ -941,17 +923,7 @@ export function Picture({
             sizer={<RowSizer row="picture" name="Picture" tracks={tracks} />}
           />
           </div>
-          <div class="trow zrow">
-            <div class="thead">
-              <button type="button" class="tbtn" data-tip="Zoom out · -" aria-label="Zoom out · -" disabled={!tv.zoomed} onClick={(e) => { if (e.detail > 0) (e.currentTarget as HTMLElement).blur(); tv.set(zoomView(tv.view, duration, 2, t)); }}>
-                <Icon name="zoomout" />
-              </button>
-              <button type="button" class="tbtn" data-tip="Zoom in · =" aria-label="Zoom in · =" disabled={duration <= 0 || tv.view.end - tv.view.start <= Math.min(duration, 2) + 1e-6} onClick={(e) => { if (e.detail > 0) (e.currentTarget as HTMLElement).blur(); tv.set(zoomView(tv.view, duration, 0.5, t)); }}>
-                <Icon name="zoomin" />
-              </button>
-            </div>
-            <ZoomBar view={tv.view} duration={duration} t={t} onView={tv.set} />
-          </div>
+          <ZoomRow tv={tv} duration={duration} t={t} />
         </div>
       </div>
 

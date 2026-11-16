@@ -576,3 +576,12 @@ span.knm, span.knm:hover { cursor: default; background: none; }
 .zgrip.end { right: 1px; }
 .zgrip:hover { background: var(--text); }
 .zplay { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--text); z-index: 2; pointer-events: none; }
+
+/* Red, 16 Nov 2026: a sound's tab zooms and scrolls as the Timeline does. The takes fill the panel; the scenes and the
+   zoom bar sit at its foot, out of the takes' way, and stay there as the list scrolls. */
+.soundtab .takespanel { display: flex; flex-direction: column; overflow-x: hidden; }
+.soundtab .takespanel > .kstick { flex: none; }
+.soundtab .takespanel > div:has(> .takes) { flex: 1 0 auto; }
+.takespanel .kfoot { flex: none; position: sticky; bottom: 0; z-index: 6; background: var(--app); border-top: 1px solid var(--line); }
+.takespanel .kfoot .ptrack { min-height: 28px; }
+.takespanel.zoomed .ruler, .takespanel.zoomed .tlane { overflow-x: clip; }

@@ -15,7 +15,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { LoadResult } from "../../audio/engine.js";
 import { type Clip, mediaKey } from "../../audio/timeline.js";
 import { cueKeys, cueLabel, cueName, cuesInTime } from "../../cues.js";
-import { markTitle, type NoteState, pctOf, type TakeRow } from "../../desk.js";
+import { markTitle, type NoteState, pctOf, type TakeRow, type TimeView, viewPct, viewTime } from "../../desk.js";
 import { cueRoom } from "../../lib.js";
 import type { Cue } from "../../types.js";
 import { Missing } from "../AssetViews.js";
@@ -42,6 +42,17 @@ export interface TakeItem {
   /** An effects pass's cues, labelled on its block. Empty on Voice and Music. */
   cues: Cue[];
   films?: FilmsControl;
+}
+
+/**
+ * Red, 16 Nov 2026: Archive on a take that other films share takes it off this film only (it stays on the others,
+ * listed here under "Not on this film"). On a take only this film has, Archive hides it everywhere, never deleted.
+ */
+export function archiveTakesOff(it: Pick<TakeItem, "films">): boolean {
+  const c = it.films;
+  if (!c || c.readOnly) return false;
+  const here = c.films.find((f) => f.here)?.id;
+  return here !== undefined && c.on.includes(here) && c.on.length > 1;
 }
 
 /** A take on other films (or none), listed under "Not on this film" with only its Films button: put it on this film first. */
@@ -81,6 +92,8 @@ export interface TakesProps {
   /** Said in the list when the film has no takes of this sound. */
   none: string;
   length: number;
+  /** The stretch of the cut on screen, once zoomed (the bar under the list); the whole cut without. */
+  view?: TimeView;
   media: Record<string, LoadResult | "error">;
   /** The selected take's key: auditioned, and the note's target. */
   selected: string | null;
@@ -119,8 +132,10 @@ function measureCut(root: HTMLElement): Cut {
 const sameCut = (a: Cut, b: Cut) => Object.keys(a).length === Object.keys(b).length && Object.keys(a).every((k) => a[k] === b[k]);
 
 export function Takes(props: TakesProps) {
-  const { label, color, sections, away, loose, none, length, media, selected, marks, range, layers, onSelect, onPick, onUnpick, onPutAway, toast } = props;
-  const pct = (s: number) => pctOf(s, length);
+  const { label, color, sections, away, loose, none, length, view, media, selected, marks, range, layers, onSelect, onPick, onUnpick, onPutAway, toast } = props;
+  const pct = (s: number) => (view ? viewPct(s, view) : pctOf(s, length));
+  // How much wider the cut is than the stretch on screen: the cues' label room grows with the zoom.
+  const zoom = view && view.end > view.start && length > 0 ? length / (view.end - view.start) : 1;
   const root = useRef<HTMLDivElement>(null);
 
   // A name, meta line or heading cut off by its column shows in full as a tooltip. Measured when the text changes or the
@@ -186,6 +201,7 @@ export function Takes(props: TakesProps) {
   const row = (it: TakeItem, put: "away" | "back" | null) => {
     const take = it.take;
     const current = it.key === selected;
+    const shared = archiveTakesOff(it);
     const flags = cut[it.key] ?? "";
     const result = it.clip ? media[mediaKey(it.clip)] : undefined;
     const loaded = result !== undefined && result !== "error" ? result : null;
@@ -203,7 +219,9 @@ export function Takes(props: TakesProps) {
     const layersOpen = !!layers?.open(it.key);
     const timeAt = (e: MouseEvent) => {
       const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      return r.width > 0 ? Math.min(length, Math.max(0, ((e.clientX - r.left) / r.width) * length)) : 0;
+      if (!(r.width > 0)) return 0;
+      const frac = (e.clientX - r.left) / r.width;
+      return Math.min(length, Math.max(0, view ? viewTime(frac, view) : frac * length));
     };
     const tip = take.inUse ? "In use" : "Use this one";
     const label = it.missing ? "File not found" : broken ? "This file won't play in a browser" : null;
@@ -290,18 +308,25 @@ export function Takes(props: TakesProps) {
               {put === null ? (
                 <button type="button" class="btn ghost sm kput" onClick={() => onUnpick(it)}>Unpick</button>
               ) : (
-                <button type="button" class="btn ghost sm kput" onClick={() => onPutAway(it, put === "away")}>
-                  {put === "away" ? "Put away" : "Bring back"}
+                <button
+                  type="button"
+                  class="btn ghost sm kput tip-end"
+                  aria-label={put === "away" ? "Archive" : "Restore"}
+                  // Red, 16 Nov 2026: "Archive", not "Put away". On a take several films share, it takes it off this film only.
+                  data-tip={put === "away" && shared ? "Takes it off this film; it stays on its other films" : undefined}
+                  onClick={() => onPutAway(it, put === "away")}
+                >
+                  {put === "away" ? "Archive" : "Restore"}
                 </button>
               )}
             </span>
           </div>
           <div class="tlane" onClick={(e) => onSelect(it, timeAt(e))}>
             {/* The block holds no words but a state in place of a waveform (a file not found, or one that won't play). */}
-            <div class={`sblock${take.stale ? " stale" : ""}${label ? " none gone" : ""}`} style={{ left: "0%", width: `${label ? 100 : pct(end)}%` }}>
+            <div class={`sblock${take.stale ? " stale" : ""}${label ? " none gone" : ""}`} style={label ? { left: "0%", width: "100%" } : { left: `${pct(0)}%`, width: `${pct(end) - pct(0)}%` }}>
               {label && <span class="slbl">{label}</span>}
             </div>
-            {it.clip && <Wave segments={[{ offset: 0, duration: loaded?.duration ?? 0, peaks: loaded ? loaded.peaks : null }]} length={length} color={color} />}
+            {it.clip && <Wave segments={[{ offset: 0, duration: loaded?.duration ?? 0, peaks: loaded ? loaded.peaks : null }]} length={view ? view.end - view.start : length} from={view?.start} color={color} />}
             {timed.map((c, i) => (
               <i
                 class={`cue-tick${card.shown === `m:${it.key}:${ckeys[i]}` ? " hot" : ""}`}
@@ -328,7 +353,7 @@ export function Takes(props: TakesProps) {
                   tabIndex={i === tabCue ? 0 : -1}
                   aria-label={cueLabel(c)}
                   aria-describedby={hot ? CUE_CARD_ID : undefined}
-                  style={{ left: `${pct(c.t)}%`, color, maxWidth: `calc(${(rooms[i] * 100).toFixed(3)}% - 8px)` }}
+                  style={{ left: `${pct(c.t)}%`, color, maxWidth: `calc(${(rooms[i] * zoom * 100).toFixed(3)}% - 8px)` }}
                   {...cardHover(card, cc)}
                   onFocus={(e) => {
                     setFocusCue((f) => (f[it.key] === i ? f : { ...f, [it.key]: i }));
@@ -378,7 +403,7 @@ export function Takes(props: TakesProps) {
       {away.items.length > 0 && (
         <>
           <div class="kfold" data-fold="away">
-            {heading(`Put away · ${away.items.length}`)}
+            {heading(`Archived · ${away.items.length}`)}
             {away.dot && <span class="fdot" data-dot data-tip="Open notes" aria-label="Open notes" role="img" />}
             <button type="button" class="btn ghost sm" aria-expanded={away.open} onClick={away.onToggle}>{away.open ? "Hide" : "Show"}</button>
           </div>

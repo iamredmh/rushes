@@ -2,8 +2,9 @@
 // to move along the cut, either end to zoom; a double-click shows the whole cut again. And the handle at the foot of
 // each track that sets its height.
 import { useRef } from "preact/hooks";
-import { clampView, minSpan, panView, type TimeView } from "../../desk.js";
-import { ROW_MAX, ROW_MIN, type TrackHeights } from "./tracks.js";
+import { clampView, minSpan, panView, type TimeView, viewTime, zoomView } from "../../desk.js";
+import { Icon } from "../Icon.js";
+import { ROW_MAX, ROW_MIN, type TimeViewState, type TrackHeights } from "./tracks.js";
 
 export interface ZoomBarProps {
   view: TimeView;
@@ -123,4 +124,47 @@ export function RowSizer({ row, name, tracks }: { row: string; name: string; tra
       }}
     />
   );
+}
+
+/** The row under a timeline: zoom out, zoom in (about the playhead), and the bar. The Timeline tab and every sound's tab. */
+export function ZoomRow({ tv, duration, t }: { tv: TimeViewState; duration: number; t: number }) {
+  const press = (factor: number) => (e: MouseEvent) => {
+    if (e.detail > 0) (e.currentTarget as HTMLElement).blur();
+    tv.set(zoomView(tv.view, duration, factor, t));
+  };
+  return (
+    <div class="trow zrow">
+      <div class="thead">
+        <button type="button" class="tbtn" data-tip="Zoom out · -" aria-label="Zoom out · -" disabled={!tv.zoomed} onClick={press(2)}>
+          <Icon name="zoomout" />
+        </button>
+        <button type="button" class="tbtn" data-tip="Zoom in · =" aria-label="Zoom in · =" disabled={duration <= 0 || tv.view.end - tv.view.start <= Math.min(duration, 2) + 1e-6} onClick={press(0.5)}>
+          <Icon name="zoomin" />
+        </button>
+      </div>
+      <ZoomBar view={tv.view} duration={duration} t={t} onView={tv.set} />
+    </div>
+  );
+}
+
+/**
+ * The wheel over a timeline: Ctrl/Cmd or Alt (a pinch on a trackpad) zooms about the pointer; a sideways swipe, or Shift
+ * with the wheel, scrolls along the cut once zoomed. A plain wheel scrolls the rows. Placed by the panel's `.ruler`.
+ */
+export function timelineWheel(e: WheelEvent, tv: TimeViewState, duration: number): void {
+  const lane = (e.currentTarget as HTMLElement).querySelector<HTMLElement>(".ruler");
+  const r = lane?.getBoundingClientRect();
+  if (!r || r.width <= 0 || !(duration > 0)) return;
+  const frac = (e.clientX - r.left) / r.width;
+  if (e.ctrlKey || e.metaKey || e.altKey) {
+    e.preventDefault();
+    tv.set(zoomView(tv.view, duration, Math.exp(Math.max(-1, Math.min(1, e.deltaY * 0.01))), viewTime(frac, tv.view)));
+    return;
+  }
+  const sideways = e.shiftKey ? e.deltaY || e.deltaX : Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : 0;
+  if (sideways && tv.zoomed) {
+    e.preventDefault();
+    const span = tv.view.end - tv.view.start;
+    tv.set({ start: tv.view.start + (sideways / r.width) * span, end: tv.view.end + (sideways / r.width) * span });
+  }
 }

@@ -1402,13 +1402,13 @@ test.describe("a tab per sound", () => {
     await expect(takeHeadings(page)).toHaveText(["In use · Round 2", "Earlier · Round 1"]);
     await expect(putAwayButton(page, "Drift")).toHaveCount(0);
     await pressRowButton(page, "Pulse");
-    await expect(takeHeadings(page)).toHaveText(["In use · Round 2", "Put away · 1"]);
+    await expect(takeHeadings(page)).toHaveText(["In use · Round 2", "Archived · 1"]);
     await expect(takeRow(page, "Pulse")).toHaveCount(0);
     const lane = (await rushes.api("GET", "/api/state")).project.lanes.find((l: { id: string }) => l.id === "round-1");
     expect(lane.variants[0].putAway).toEqual(expect.any(String));
-    await foldToggle(page, "Put away").click();
-    await expect(foldToggle(page, "Put away")).toHaveAttribute("aria-expanded", "true");
-    await pressRowButton(page, "Pulse", "Bring back");
+    await foldToggle(page, "Archived").click();
+    await expect(foldToggle(page, "Archived")).toHaveAttribute("aria-expanded", "true");
+    await pressRowButton(page, "Pulse", "Restore");
     await expect(takeHeadings(page)).toHaveText(["In use · Round 2", "Earlier · Round 1"]);
     await takeRow(page, "Pulse").hover();
     await expect(putAwayButton(page, "Pulse")).toBeVisible();
@@ -1520,6 +1520,23 @@ test.describe("a tab per sound", () => {
     // The take in use has Unpick in the same place.
     await takeRow(page, "Drift").hover();
     await expect(putAwayButton(page, "Drift", "Unpick")).toBeVisible();
+  });
+
+  test("Archive on a take two films share takes it off this film only, never archiving it on the other", async ({ page, rushes }) => {
+    await rushes.addCut("hero", "Hero");
+    await rushes.addCut("cutdown", "Cutdown");
+    const pulse = await rushes.addVariant("music", "Pulse", { seconds: 2, freq: 220, round: "Round 1", video: ["Hero", "Cutdown"] });
+    await page.goto(rushes.url);
+    await videoReady(page);
+    await openReviewTab(page, "Music");
+    await pressRowButton(page, "Pulse");
+    await expect(page.locator(".toast", { hasText: "Taken off this film" })).toBeVisible();
+    await expect.poll(async () => {
+      const p = (await rushes.api("GET", "/api/state")).project;
+      const v = p.lanes.find((l: { id: string }) => l.id === pulse.lane.id).variants.find((x: { id: string }) => x.id === pulse.variant.id);
+      return { videos: v.videos, away: v.putAway ?? null };
+    }).toEqual({ videos: ["cutdown"], away: null });
+    await expect(takeRow(page, "Pulse")).toHaveCount(0);
   });
 
   test("on Effects, choosing The whole pass with a cue selected puts the note on the pass, not the cue", async ({ page, rushes }) => {

@@ -720,7 +720,7 @@ export function takesList(page: Page): Locator {
   return page.locator(".takes");
 }
 
-/** The list's group headings, in order: "New · Round 3", "In use · Round 2", "Earlier · Round 1", "Put away · 2". */
+/** The list's group headings, in order: "New · Round 3", "In use · Round 2", "Earlier · Round 1", "Archived · 2". */
 export function takeHeadings(page: Page): Locator {
   return takesList(page).getByRole("heading");
 }
@@ -817,19 +817,19 @@ export async function textOverWaveform(row: Locator): Promise<string> {
  * A row's slot button: Put away, Bring back on a put-away take, or Unpick on the take in use. It shows on the row under the
  * pointer, with focus inside it, or selected (pressRowButton hovers the row first).
  */
-export function putAwayButton(page: Page, name: string, kind: "Put away" | "Bring back" | "Unpick" = "Put away"): Locator {
+export function putAwayButton(page: Page, name: string, kind: "Archive" | "Restore" | "Unpick" = "Archive"): Locator {
   return takeRow(page, name).getByRole("button", { name: kind, exact: true });
 }
 
 /** Presses a row's Put away, Bring back or Unpick the way a mouse would: the row hovered, so the button shows, then clicked. */
-export async function pressRowButton(page: Page, name: string, kind: "Put away" | "Bring back" | "Unpick" = "Put away"): Promise<void> {
+export async function pressRowButton(page: Page, name: string, kind: "Archive" | "Restore" | "Unpick" = "Archive"): Promise<void> {
   await takeRow(page, name).hover();
   await putAwayButton(page, name, kind).click();
 }
 
-/** Show / Hide on a folded group's line: "Put away" or "Not on this film". */
-export function foldToggle(page: Page, group: "Put away" | "Not on this film"): Locator {
-  return takesList(page).locator(`.kfold[data-fold="${group === "Put away" ? "away" : "loose"}"]`).getByRole("button");
+/** Show / Hide on a folded group's line: "Archived" or "Not on this film". */
+export function foldToggle(page: Page, group: "Archived" | "Not on this film"): Locator {
+  return takesList(page).locator(`.kfold[data-fold="${group === "Archived" ? "away" : "loose"}"]`).getByRole("button");
 }
 
 /** Clicks a take's block `t` seconds in (on the list's time scale): the take is selected at that point, and the playhead goes there. */
