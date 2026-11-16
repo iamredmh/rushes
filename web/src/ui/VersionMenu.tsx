@@ -5,7 +5,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { ComponentChildren } from "preact";
 import type { Version } from "../types.js";
-import { ago, agoSpoken, moveActive, oneLineOf, shortLabel, typeAhead, versionMeta } from "../versions.js";
+import { ago, agoSpoken, moveActive, notePoints, oneLineOf, shortLabel, typeAhead, versionMeta } from "../versions.js";
 import { Icon } from "./Icon.js";
 
 export interface VersionMenuProps {
@@ -278,7 +278,7 @@ export function VersionMenu({ versions, shown, lockedVersion, onPick, name = "Ve
           {!touch && (
             <div class="vdetail" id="vdetail">
               <h4>{detail.id}</h4>
-              <p dir="auto">{oneLineOf(detail.note) || "No note."}</p>
+              <NoteDetail note={detail.note} />
               <span class="vmeta">{versionMeta(detail, now)}</span>
             </div>
           )}
@@ -293,3 +293,22 @@ function rowName(v: Version, lockedVersion: string | null, now: Date): string {
   return [v.id, shortLabel(v), v.id === lockedVersion ? "locked" : "", agoSpoken(v.addedAt, now)].filter(Boolean).join(", ");
 }
 
+
+/** The selected cut's note as a lead and points (Red, 16 Nov), not one block of text. */
+function NoteDetail({ note }: { note: string }) {
+  // A note of only invisible characters is no note (M2), as in the list.
+  if (!oneLineOf(note)) return <p dir="auto">No note.</p>;
+  const { lead, points } = notePoints(note);
+  return (
+    <div class="vnote" dir="auto">
+      {lead && <p class="vlead">{lead}</p>}
+      {points.length > 0 && (
+        <ul>
+          {points.map((p, i) => (
+            <li key={i}>{p.head && <b>{p.head}: </b>}{p.text}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}

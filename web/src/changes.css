@@ -22,6 +22,13 @@
 .vdetail { display: grid; align-content: start; gap: 8px; min-width: 0; max-height: min(420px, 60vh); overflow: auto; padding: 12px 14px; border-left: 1px solid var(--line); background: var(--app); font-size: 15px; }
 .vdetail h4 { margin: 0; font: 600 15px var(--mono); color: var(--text-2); }
 .vdetail p { margin: 0; overflow-wrap: anywhere; }
+/* A cut's note as a lead and points (Red, 16 Nov): easier to read than one block. */
+.vnote { display: grid; gap: 8px; min-width: 0; line-height: 1.45; }
+.vnote .vlead { color: var(--text); font-weight: 500; }
+.vnote ul { margin: 0; padding-left: 16px; display: grid; gap: 6px; color: var(--text-2); }
+.vnote li { overflow-wrap: anywhere; }
+.vnote li::marker { color: var(--text-3); }
+.vnote li b { color: var(--text); font-weight: 600; }
 .vmeta { color: var(--text-3); font-family: var(--mono); }
 /* A narrow window has no room beside the list: the note goes under it, and the two share one
    height cap (at most 65% of the window between them). */

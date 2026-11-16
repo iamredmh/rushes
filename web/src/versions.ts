@@ -80,3 +80,63 @@ export function versionMeta(v: { duration: number | null; shots: readonly unknow
   if (when) parts.push(when);
   return parts.join(" · ");
 }
+
+/**
+ * A cut's note, laid out to read (Red, 16 Nov: the Cut menu's note was one wall of text). The first sentence is the lead;
+ * the rest are points, one a sentence. A note the agent already wrote as a list ("- ", "* ", "• " or "1. " lines) keeps its
+ * own points, with what comes before them as the lead. A point that opens with a short name and a colon ("Workload: the
+ * camera ...") has that name as its `head`.
+ */
+export interface NotePoint {
+  head: string | null;
+  text: string;
+}
+export function notePoints(note: string): { lead: string; points: NotePoint[] } {
+  const text = note.trim();
+  if (!text) return { lead: "", points: [] };
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const bullet = /^(?:[-*•]|\d+[.)])\s+/;
+  let lead: string;
+  let items: string[];
+  if (lines.some((l) => bullet.test(l))) {
+    const first = lines.findIndex((l) => bullet.test(l));
+    lead = lines.slice(0, first).join(" ");
+    items = [];
+    for (const l of lines.slice(first)) {
+      if (bullet.test(l)) items.push(l.replace(bullet, ""));
+      else if (items.length) items[items.length - 1] += ` ${l}`;
+    }
+  } else {
+    const sentences = splitSentences(lines.join(" "));
+    lead = sentences[0] ?? "";
+    items = sentences.slice(1);
+  }
+  return {
+    lead,
+    points: items.map((s) => {
+      const m = /^([^:.()]{1,28}):\s+(.+)$/s.exec(s);
+      return m ? { head: m[1], text: m[2] } : { head: null, text: s };
+    }),
+  };
+}
+
+/** Sentences: a break after ., ! or ? and a space, outside brackets, before a capital, a digit or a quote. */
+function splitSentences(text: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === "(" || c === "[") depth++;
+    else if ((c === ")" || c === "]") && depth > 0) depth--;
+    else if ((c === "." || c === "!" || c === "?") && depth === 0 && text[i + 1] === " " && /["'“A-Z0-9]/.test(text[i + 2] ?? "")) {
+      // Not after a short abbreviation such as "e.g." or "vs.".
+      if (c === "." && /\b(?:e\.g|i\.e|vs|etc|approx|cf)$/i.test(text.slice(start, i))) continue;
+      out.push(text.slice(start, i + 1).trim());
+      start = i + 2;
+    }
+  }
+  const rest = text.slice(start).trim();
+  if (rest) out.push(rest);
+  return out;
+}

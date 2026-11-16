@@ -215,7 +215,7 @@ export function createMcpServer(ctx: ToolContext): McpServer {
         project,
         video: z.string().describe("Video id or name, e.g. \"Hero 60s\"."),
         file: z.string().describe("Path to the rendered file, absolute or relative to the project."),
-        note: z.string().optional().describe("What changed in this cut."),
+        note: z.string().optional().describe("What changed in this cut: one short summary line, then a \"- \" line for each change (the Cut menu shows it as points)."),
         label: z
           .string()
           // Counted as the route counts it: on one clean line (padding and invisible characters don't count), in characters.

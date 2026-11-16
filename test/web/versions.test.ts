@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ago, agoSpoken, cutSubtitle, dayDiff, moveActive, oneLineOf, shortLabel, typeAhead, versionMeta } from "../../web/src/versions.js";
+import { ago, agoSpoken, cutSubtitle, dayDiff, moveActive, notePoints, oneLineOf, shortLabel, typeAhead, versionMeta } from "../../web/src/versions.js";
 
 describe("versions.ts (§22.4)", () => {
   it("re-exports the server's shortLabel, so both sides say the same", () => {
@@ -104,5 +104,32 @@ describe("the version list's helpers (§22.8)", () => {
     expect(versionMeta({ duration: 39.7, shots: new Array(11).fill(0), addedAt: before(2 * 3_600_000) }, now)).toBe("39.7 s · 11 shots · 2 h ago");
     expect(versionMeta({ duration: null, shots: [0], addedAt: before(1000) }, now)).toBe("1 shot · just now");
     expect(versionMeta({ duration: 4, shots: [], addedAt: "" }, now)).toBe("4.0 s · no shots");
+  });
+});
+
+describe("notePoints (Red, 16 Nov: a cut's note as points, not a wall of text)", () => {
+  it("leads with the first sentence and lists the rest, a name before a colon as its head", () => {
+    const note = "Red's three notes on v4 (batch b_12), built by films/make_v5.py into films/v5-demo.html. Workload: the camera follows the cursor down (12.6 to 13.3 s), then back up for Nano. Prompt box about 2/3 of its old height. Audio unchanged from v4.";
+    expect(notePoints(note)).toEqual({
+      lead: "Red's three notes on v4 (batch b_12), built by films/make_v5.py into films/v5-demo.html.",
+      points: [
+        { head: "Workload", text: "the camera follows the cursor down (12.6 to 13.3 s), then back up for Nano." },
+        { head: null, text: "Prompt box about 2/3 of its old height." },
+        { head: null, text: "Audio unchanged from v4." },
+      ],
+    });
+  });
+
+  it("keeps a list the agent wrote, with what comes before it as the lead", () => {
+    expect(notePoints("Three fixes from b_12.\n- Workload: Dense is whole\n- Prompt box smaller\n  with a soft fade\n* Audio as v4")).toEqual({
+      lead: "Three fixes from b_12.",
+      points: [{ head: "Workload", text: "Dense is whole" }, { head: null, text: "Prompt box smaller with a soft fade" }, { head: null, text: "Audio as v4" }],
+    });
+  });
+
+  it("never breaks inside brackets, a decimal or an abbreviation", () => {
+    expect(notePoints("Slower zooms (about 1.4x. Was 1x). Tried e.g. Dense first. Done").points.map((p) => p.text)).toEqual(["Tried e.g. Dense first.", "Done"]);
+    expect(notePoints("").lead).toBe("");
+    expect(notePoints("Just one line").points).toEqual([]);
   });
 });
