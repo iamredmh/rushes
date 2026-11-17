@@ -22,7 +22,7 @@ import type { AgentId, AgentRules, AgentSettings, AlwaysRule, Batch, Note } from
 import type { ChangeEvent, Store } from "../../core/store.js";
 import { logBookFor } from "../logbook.js";
 import { AcpConnection, type AcpPermissionOutcome, type AcpPermissionParams, type AdapterSpec, type McpServerSpec } from "./acp.js";
-import { adapterSpec, rushesMcp } from "./adapters.js";
+import { ASK_MODE, adapterSpec, rushesMcp, sessionSetup } from "./adapters.js";
 import { PermissionBroker, addRule, allowOutcome, dropRule, toRequest, type AskChoice, type PendingAsk } from "./broker.js";
 import { detectAgents, type AgentInfo } from "./detect.js";
 import { agentRulesFor, type AgentRulesFile } from "./rules.js";
@@ -438,11 +438,13 @@ export class AgentRunner {
     const settings = await this.loadSettings();
     check();
     const mcp = [this.mcp(root)];
+    const setup = sessionSetup(info.id);
     const kept = settings.session;
     let sessionId: string | null = null;
+    let modes: string[] = [];
     if (kept && kept.agent === info.id && loadSession) {
       try {
-        await c.loadSession(kept.id, root, mcp);
+        ({ modes } = await c.loadSession(kept.id, root, mcp, setup));
         sessionId = kept.id;
       } catch (e) {
         // An agent prunes old conversations. With the adapter still up, start a new one rather than fail
@@ -453,8 +455,9 @@ export class AgentRunner {
       }
     }
     if (sessionId === null) {
-      const { sessionId: made } = await c.newSession(root, mcp);
+      const { sessionId: made, modes: offered } = await c.newSession(root, mcp, setup);
       sessionId = made;
+      modes = offered;
       check();
       const startedAt = this.now().toISOString();
       const { data } = await this.store.update("agent", (f) => {
@@ -463,9 +466,29 @@ export class AgentRunner {
       this.applySettings(data);
     }
     check();
-    // R10: the session's mode is never changed (no acceptEdits), so every edit comes to Rushes as an ask.
+    await this.askMode(c, info, sessionId, modes);
+    check();
     if (c.hasExited) throw new Error("the adapter exited as it started");
     this.sessionId = sessionId;
+  }
+
+  /**
+   * R14/R15: every opened or loaded session goes into the mode in which the agent asks Rushes before it acts
+   * (ASK_MODE), before the first prompt. Not offered, or refused: one Activity line, and the run carries on.
+   */
+  private async askMode(c: AcpConnection, info: AgentInfo, sessionId: string, modes: string[]): Promise<void> {
+    const want = ASK_MODE[info.id];
+    if (!want) return;
+    if (!modes.includes(want)) {
+      this.addLine(`${info.name} didn't offer a mode where Rushes can approve actions`, null);
+      return;
+    }
+    try {
+      await c.setMode(sessionId, want);
+    } catch (e) {
+      if (c.hasExited) throw e;
+      this.addLine(`${info.name} could not be put in a mode where Rushes can approve actions: ${messageOf(e)}`, null);
+    }
   }
 
   /** Makes `conn` the runner's adapter and listens to it. */

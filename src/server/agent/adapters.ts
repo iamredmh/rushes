@@ -19,6 +19,36 @@ export const ADAPTERS: Record<AgentId, { pkg: string; version: string }> = {
   codex: { pkg: "@agentclientprotocol/codex-acp", version: "2.7.0" },
 };
 
+/*
+ * R14/R15: the session mode in which the agent asks Rushes (session/request_permission) before it acts, instead of
+ * approving its own actions. The runner sends session/set_mode with it after every session/new and session/load,
+ * when the session offers it. Never acceptEdits, auto, bypassPermissions or dontAsk (Claude), nor agent or
+ * agent-full-access (Codex): in those the agent, or its own reviewer, decides.
+ *
+ * Claude (claude-agent-acp 0.107.3, read 17 Nov 2026):
+ *   - dist/session-mode.js:47-48: with no permissions.defaultMode in the user's settings a session starts in `auto`
+ *     ("Claude handles permission decisions", :312) when the catalog offers it. That is F1.
+ *   - `default` is "Manual: Always ask before making changes" (dist/session-mode.js:290-292). In it Claude Code calls
+ *     the adapter's canUseTool for every action its own rules don't already allow, and canUseTool always ends in
+ *     requestPermissionFromClient, i.e. session/request_permission (dist/v1/acp-agent.js:6608-6710; :6646 "Do not
+ *     auto-allow here based on the session's advertised mode"). The user's own allow rules still win (F3).
+ *   - No env var or launch flag sets the initial mode (the only env the adapter reads is listed in its README and
+ *     dist; none is a mode). The setup requests take `configOptions` instead (the "Session options" RFD,
+ *     dist/initial-config-options.js; advertised as sessionCapabilities.options, dist/v1/acp-agent.js:531-532):
+ *     session/new and session/load apply them before they answer (dist/v1/acp-agent.js:601-611, 767-783, via
+ *     selectSessionConfigOption :5753, config id "mode" = MODE_CONFIG_ID, dist/session-mode.js:5). So no prompt
+ *     ever runs in `auto`; the set_mode after it is the second guard.
+ */
+export const ASK_MODE: Partial<Record<AgentId, string>> = {
+  claude: "default",
+};
+
+/** Extra params for session/new and session/load: Claude's initial mode, so the session is never in `auto` (R14). */
+export function sessionSetup(agent: AgentId): Record<string, unknown> {
+  if (agent === "claude") return { configOptions: [{ configId: "mode", value: ASK_MODE.claude }] };
+  return {};
+}
+
 /** How to start the ACP adapter for an agent, in the project folder. */
 export function adapterSpec(agent: AgentInfo, root: string): AdapterSpec {
   const { pkg, version } = ADAPTERS[agent.id];

@@ -576,12 +576,60 @@ describe("Rushes is the only gate (R10)", () => {
     expect(recorded(r.log(), "normal")).toEqual(ALLOW_ONCE);
   });
 
-  it("never sends session/set_mode, so every edit comes to Rushes", async () => {
+});
+
+/** What reached the fake agent, in order, as "method" or "method:modeId" for set_mode. */
+const sessionSteps = (log: any[]) =>
+  log
+    .filter((m) => typeof m.method === "string" && m.method.startsWith("session/") && m.method !== "session/update")
+    .map((m) => (m.method === "session/set_mode" ? `${m.method}:${m.params.modeId}` : m.method));
+const CLAUDE_MODES = ["auto", "default", "acceptEdits", "plan", "bypassPermissions", "dontAsk"];
+const SELF_APPROVING = ["auto", "acceptEdits", "bypassPermissions", "dontAsk"];
+
+describe("AgentRunner session mode (R14, R15)", () => {
+  it("Claude: set_mode default after session/new and again after session/load, each before the first prompt", async () => {
+    const r = await rig({ loadSession: true, modes: CLAUDE_MODES, turns: [] }, { runner: { idleMs: 30 } });
+    await r.runner.send(await r.batch("One"));
+    await r.phase("finished");
+    await r.waitFor("the first adapter to exit", () => started[0]?.hasExited);
+    await r.runner.send(await r.batch("Two"));
+    await r.waitFor("the second prompt", () => prompts(r.log()).length === 2);
+    expect(sessionSteps(r.log())).toEqual([
+      "session/new", "session/set_mode:default", "session/prompt",
+      "session/load", "session/set_mode:default", "session/prompt",
+    ]);
+  });
+
+  it("Claude: the setup requests already ask for default through configOptions, so the session never starts in auto", async () => {
+    const r = await rig({ loadSession: true, modes: CLAUDE_MODES, turns: [] }, { runner: { idleMs: 30 } });
+    await r.runner.send(await r.batch("One"));
+    await r.phase("finished");
+    await r.waitFor("the first adapter to exit", () => started[0]?.hasExited);
+    await r.runner.send(await r.batch("Two"));
+    await r.waitFor("the second prompt", () => prompts(r.log()).length === 2);
+    const setups = r.log().filter((m) => m.method === "session/new" || m.method === "session/load");
+    expect(setups).toHaveLength(2);
+    for (const m of setups) expect(m.params.configOptions, m.method).toEqual([{ configId: "mode", value: "default" }]);
+  });
+
+  it("never sends a mode in which the agent approves its own actions, whatever the permission level", async () => {
     for (const permissions of ["project-edits", "ask-all"] as const) {
-      const r = await rig({ modes: ["default", "acceptEdits", "plan"], turns: [] }, { rules: { permissions } });
+      const r = await rig({ modes: CLAUDE_MODES, turns: [] }, { rules: { permissions } });
       await r.runner.send(await r.batch("One"));
       await r.phase("finished");
-      expect(r.log().some((m) => m.method === "session/set_mode"), permissions).toBe(false);
+      const sent = r.log().filter((m) => m.method === "session/set_mode").map((m) => m.params.modeId);
+      expect(sent, permissions).toEqual(["default"]);
+      for (const bad of SELF_APPROVING) expect(sent, permissions).not.toContain(bad);
     }
+  });
+
+  it("Claude: with no default mode offered, one Activity line says so and the run carries on", async () => {
+    const r = await rig({ modes: ["auto", "acceptEdits", "plan"], turns: [] });
+    await r.runner.send(await r.batch("One"));
+    await r.phase("finished");
+    expect(r.log().some((m) => m.method === "session/set_mode")).toBe(false);
+    const said = r.runner.status().lines.filter((l) => l.text === "Claude Code didn't offer a mode where Rushes can approve actions");
+    expect(said).toHaveLength(1);
+    expect(prompts(r.log())).toHaveLength(1);
   });
 });

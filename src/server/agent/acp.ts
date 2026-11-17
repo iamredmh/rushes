@@ -86,13 +86,14 @@ export class AcpConnection extends EventEmitter {
     return { loadSession: r?.agentCapabilities?.loadSession === true };
   }
 
-  async newSession(cwd: string, mcp: McpServerSpec[]): Promise<{ sessionId: string; modes: string[] }> {
-    const r = await this.rpc.request<any>("session/new", { cwd, mcpServers: mcp });
+  /** `extra` is merged into the request's params (an adapter's own setup fields, such as Claude's configOptions). */
+  async newSession(cwd: string, mcp: McpServerSpec[], extra: Record<string, unknown> = {}): Promise<{ sessionId: string; modes: string[] }> {
+    const r = await this.rpc.request<any>("session/new", { cwd, mcpServers: mcp, ...extra });
     return { sessionId: String(r.sessionId), modes: modeIds(r) };
   }
 
-  async loadSession(id: string, cwd: string, mcp: McpServerSpec[]): Promise<{ modes: string[] }> {
-    const r = await this.rpc.request<any>("session/load", { sessionId: id, cwd, mcpServers: mcp });
+  async loadSession(id: string, cwd: string, mcp: McpServerSpec[], extra: Record<string, unknown> = {}): Promise<{ modes: string[] }> {
+    const r = await this.rpc.request<any>("session/load", { sessionId: id, cwd, mcpServers: mcp, ...extra });
     return { modes: modeIds(r) };
   }
 
