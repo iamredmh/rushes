@@ -32,6 +32,7 @@ import { StatusBar } from "./desk/StatusBar.js";
 import { TopBar } from "./desk/TopBar.js";
 import { AgentChip } from "./agent/AgentChip.js";
 import { actOnSend, askNotificationsOnce, useFirstSend, WhyLine } from "./agent/FirstSend.js";
+import { useAskNotify } from "../notify.js";
 import { Workspaces } from "./desk/Workspaces.js";
 import type { ReviewClock } from "./desk/frame.js";
 import type { MixView } from "./desk/useMix.js";
@@ -187,6 +188,7 @@ export function App() {
     }, ms);
   };
   const firstSend = useFirstSend(agent, noteAgent, toast, () => setSent((s) => s && { ...s, why: null }));
+  useAskNotify(agent);
   // §20.5: a request to open Assets › Found (the header chip), and what the chip last said while Found was open.
   const [foundRequest, setFoundRequest] = useState<FoundRequest>({ n: 0, pending: false });
   const [foundSeen, setFoundSeen] = useState<string | null>(null);

@@ -15,7 +15,7 @@ export type { BuildState } from "../../src/core/plan.js";
 export type { AgentId, AgentRules, AlwaysRule } from "../../src/core/schema.js";
 export type { AgentInfo } from "../../src/server/agent/detect.js";
 export type { ActivityLine, AgentPhase, AgentStatus, SendResult } from "../../src/server/agent/runner.js";
-export type { PendingAsk } from "../../src/server/agent/broker.js";
+export type { AskChoice, PendingAsk } from "../../src/server/agent/broker.js";
 export type { SendHandOver } from "../../src/server/app.js";
 
 import type { BatchesFile, NotesFile, Picks, Project as StoredProject, Script, Version as StoredVersion, Video as StoredVideo, VisualsFile } from "../../src/core/schema.js";

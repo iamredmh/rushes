@@ -37,6 +37,10 @@
 //                           is logged (as a received response) and, when `record` is given,
 //                           also appended to the log as { recorded: record, outcome }.
 //                           Default options: allow_once, allow_always, reject_once.
+//   { permissions: [{ toolCall, options?, meta?, record? }, ...] }
+//                           send every one of these session/request_permission at once (an agent asking for parallel
+//                           tool calls) and wait until all are answered; each answer is logged, and recorded as above
+//                           when it has `record` as soon as it comes. session/cancel answers all still open as cancelled.
 //   { http: { method, path, body } }
 //                           fetch(FAKE_ACP_BASE + path) with a JSON body and wait for it
 //                           (stands in for the agent's rushes_* tools)
@@ -98,6 +102,45 @@ function askClient(method, params, turn) {
   });
 }
 
+function permissionParams(p, turn) {
+  const options = p.options ?? [
+    { optionId: "allow-once", name: "Allow once", kind: "allow_once" },
+    { optionId: "allow-always", name: "Allow always", kind: "allow_always" },
+    { optionId: "reject-once", name: "Reject", kind: "reject_once" },
+  ];
+  const params = { sessionId: turn.sessionId, toolCall: p.toolCall, options };
+  if (p.meta) params._meta = p.meta;
+  return params;
+}
+
+/**
+ * Sends every permission request at once and waits for all the answers, recording each as it comes; a cancel answers
+ * those still open.
+ */
+function askAll(list, turn) {
+  const ids = [];
+  const answers = list.map(
+    (p) =>
+      new Promise((resolve) => {
+        const id = `f${nextOutId++}`;
+        ids.push(id);
+        waiting.set(id, { resolve });
+        send({ id, method: "session/request_permission", params: permissionParams(p, turn) });
+      }).then((res) => {
+        if (p.record) log({ recorded: p.record, outcome: res.result?.outcome ?? null });
+      }),
+  );
+  turn.wake = () => {
+    for (const id of ids) {
+      const w = waiting.get(id);
+      if (!w) continue;
+      waiting.delete(id);
+      w.resolve({ result: { outcome: { outcome: "cancelled" } } });
+    }
+  };
+  return Promise.all(answers);
+}
+
 async function runTurn(turn) {
   const steps = scenario.turns?.[turn.index] ?? [];
   let stopReason = "end_turn";
@@ -106,15 +149,10 @@ async function runTurn(turn) {
     if (step.update) {
       send({ method: "session/update", params: { sessionId: turn.sessionId, update: step.update } });
     } else if (step.permission) {
-      const options = step.permission.options ?? [
-        { optionId: "allow-once", name: "Allow once", kind: "allow_once" },
-        { optionId: "allow-always", name: "Allow always", kind: "allow_always" },
-        { optionId: "reject-once", name: "Reject", kind: "reject_once" },
-      ];
-      const params = { sessionId: turn.sessionId, toolCall: step.permission.toolCall, options };
-      if (step.permission.meta) params._meta = step.permission.meta;
-      const res = await askClient("session/request_permission", params, turn);
+      const res = await askClient("session/request_permission", permissionParams(step.permission, turn), turn);
       if (step.record) log({ recorded: step.record, outcome: res.result?.outcome ?? null });
+    } else if (Array.isArray(step.permissions)) {
+      await askAll(step.permissions, turn);
     } else if (step.http) {
       const { method, path, body } = step.http;
       const r = await fetch(process.env.FAKE_ACP_BASE + path, { method, headers: { "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });

@@ -3,11 +3,13 @@
 // the work area, 360 px wide until its divider is dragged (remembered per browser), and `\` hides or shows it; under
 // 1100 px it is a drawer over the work area. One component, mounted by every view that has notes: what they share (the
 // tab chosen, Activity, Send, whether it is shown and how wide) comes from the desk through PanelContext. §28: above Send,
-// the Send to AI row (AgentRow); under it, what Send does now (footLine).
+// the Send to AI row (AgentRow); under it, what Send does now (footLine). Under the tab row, on every tab, the agent's
+// pending permission asks (AskCards).
 import { createContext, type RefObject } from "preact";
 import { useContext, useEffect, useRef, useState } from "preact/hooks";
 import { footLine } from "../../agent.js";
 import { AgentRow, type AgentPanel } from "../agent/AgentRow.js";
+import { AskCards } from "../agent/AskCard.js";
 import type { ChangeLogState } from "../ChangeLog.js";
 import { Icon } from "../Icon.js";
 import { type Filter, NoteFilterMenu, Notes, type NotesProps } from "../Notes.js";
@@ -257,6 +259,7 @@ export function NotesPanel(props: NotesPanelProps) {
           </button>
         )}
       </div>
+      {agent && <AskCards {...agent} />}
       {/* Hidden, never unmounted, while Activity shows: a half-typed note stays where it was. */}
       <div class="ntabpanel" role="tabpanel" id="npanel-notes" aria-labelledby="ntab-notes" hidden={tab !== "notes"}>
         <Notes {...props} filter={noteFilter} />

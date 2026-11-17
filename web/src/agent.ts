@@ -3,7 +3,7 @@
 // and the notes the desk already holds, so every tab says the same thing.
 import { alwaysLabel } from "../../src/core/alwaysLabel.js";
 import { noteState } from "../../src/core/noteState.js";
-import type { ActivityLine, AgentId, AgentInfo, AgentPhase, AgentRules, AgentStatus, AlwaysRule, Note, SendHandOver } from "./types.js";
+import type { ActivityLine, AgentId, AgentInfo, AgentPhase, AgentRules, AgentStatus, AlwaysRule, AskChoice, Note, PendingAsk, SendHandOver } from "./types.js";
 
 /** A note as these helpers read it. The desk's notes carry `needsYou` from the server's `withState`. */
 export type NoteLite = Pick<Note, "id" | "batch" | "status" | "fixVersion"> & { needsYou?: boolean };
@@ -239,4 +239,21 @@ export function followSend(r: SendHandOver | undefined, s: AgentStatus | null): 
     case "stopped": return none;
     default: return { ...none, dialog: true, why: s?.on && said ? said : null };
   }
+}
+
+// ---- the ask cards in the notes panel (task 5) ----
+
+/** The card's fixed words; Always is the server's own label (PendingAsk.always), never made here. */
+export const ASK_WORDS = { once: "Allow once", no: "No" } as const;
+
+/** The card's first line. */
+export const askLead = (id: AgentId | null): string => `${agentName(id)} wants to:`;
+
+/**
+ * The card's buttons, in order: Allow once, then Always only when the server offers one (a non-blank label: never for
+ * a chained command, an untyped call or a path outside the project), then No. Each is a choice the answer route takes.
+ */
+export function askChoices(ask: Pick<PendingAsk, "always">): { choice: AskChoice; label: string }[] {
+  const always = ask.always.trim() !== "" ? [{ choice: "always" as const, label: ask.always }] : [];
+  return [{ choice: "once", label: ASK_WORDS.once }, ...always, { choice: "no", label: ASK_WORDS.no }];
 }

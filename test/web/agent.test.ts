@@ -2,10 +2,10 @@
 // the live strip and what the desk does after Send. Every string is the plan's own.
 import { describe, expect, it } from "vitest";
 import {
-  MENU_WORDS, PERMISSION_CHOICES, SHEET_WORDS, afterSend, focusAfterRemove, followSend, mayQuestion, notSignedInWhy, sendToLabel, sheetDefault, sheetPrimary, sheetRows, whoNext, agentName, canStop, chipShows, chipText, chipTone, footLine, liveLines, menuAgents, menuRowCount, noteAgentBadge, rowText, ruleRows, whoLine,
+  ASK_WORDS, askChoices, askLead, MENU_WORDS, PERMISSION_CHOICES, SHEET_WORDS, afterSend, focusAfterRemove, followSend, mayQuestion, notSignedInWhy, sendToLabel, sheetDefault, sheetPrimary, sheetRows, whoNext, agentName, canStop, chipShows, chipText, chipTone, footLine, liveLines, menuAgents, menuRowCount, noteAgentBadge, rowText, ruleRows, whoLine,
   type NoteLite,
 } from "../../web/src/agent.js";
-import type { AgentInfo, AgentStatus } from "../../web/src/types.js";
+import type { AgentInfo, AgentStatus, PendingAsk } from "../../web/src/types.js";
 
 const status = (over: Partial<AgentStatus> = {}): AgentStatus => ({
   on: true, agent: "claude", phase: "idle", batches: [], current: { note: null, doing: null }, asks: [], lines: [], error: null, session: null, asked: true,
@@ -401,5 +401,38 @@ describe("followSend (task 4)", () => {
     // Off is today's Send: the dialog exactly as it was, no reason line.
     expect(followSend({ handedTo: null, why: "Send to AI is off" }, off)).toEqual({ toast: null, dialog: true, why: null, handed: false });
     expect(followSend(undefined, null)).toEqual({ toast: null, dialog: true, why: null, handed: false });
+  });
+});
+
+describe("the ask card (task 5)", () => {
+  const ask = (over: Partial<PendingAsk> = {}): PendingAsk => ({ id: "ask_1", title: "Run ffprobe", kind: "execute", command: "ffprobe -v error renders/a.mp4", always: "", at: "2026-11-17T10:00:00.000Z", ...over });
+
+  it("leads with the agent's name, or your agent", () => {
+    expect(askLead("claude")).toBe("Claude Code wants to:");
+    expect(askLead("codex")).toBe("Codex wants to:");
+    expect(askLead(null)).toBe("your agent wants to:");
+  });
+
+  it("offers Allow once, then the server's Always only when it gives one, then No", () => {
+    expect(askChoices(ask())).toEqual([
+      { choice: "once", label: "Allow once" },
+      { choice: "no", label: "No" },
+    ]);
+    expect(askChoices(ask({ command: "npx hyperframes render out.mp4", always: "Always for npx hyperframes here" }))).toEqual([
+      { choice: "once", label: "Allow once" },
+      { choice: "always", label: "Always for npx hyperframes here" },
+      { choice: "no", label: "No" },
+    ]);
+  });
+
+  it("never offers Always the server didn't: a chained command, an untyped call, a blank label", () => {
+    expect(askChoices(ask({ command: "npm run build && rm -rf out", always: "" })).map((c) => c.choice)).toEqual(["once", "no"]);
+    expect(askChoices(ask({ kind: null, command: null, always: "" })).map((c) => c.choice)).toEqual(["once", "no"]);
+    expect(askChoices(ask({ always: "   " })).map((c) => c.choice)).toEqual(["once", "no"]);
+  });
+
+  it("each choice is one the route takes, said as the server's words", () => {
+    expect(ASK_WORDS).toEqual({ once: "Allow once", no: "No" });
+    for (const c of askChoices(ask({ always: "Always for reads here" }))) expect(["once", "always", "no"]).toContain(c.choice);
   });
 });

@@ -1,5 +1,5 @@
 // §28, Send to AI (plan 2): the run's chip in the top bar, and Stop; the Send to AI row above Send and the agent menu;
-// the first-Send sheet and what Send does with the answer.
+// the first-Send sheet and what Send does with the answer; the ask cards in the notes panel and the notification for an ask.
 // The agent is the fake (e2e/agentFixture.ts).
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -818,4 +818,291 @@ test("Send asks to notify in its own click while Send to AI is on, once", async 
   await sendBtn(page).click();
   await expect.poll(async () => (await readAgentLog(rushes.agentLog)).filter((m) => m.method === "session/prompt").length, { timeout: 10_000 }).toBe(2);
   expect(await notifyAsked()).toEqual(["click"]);
+});
+
+// ---- the ask cards in the notes panel, and the notification for an ask (task 5) ----
+
+const FFPROBE = { toolCallId: "t1", kind: "execute", title: "Run ffprobe", rawInput: { command: "ffprobe -v error renders/a.mp4" } };
+const CHAINED = { toolCallId: "t2", kind: "execute", title: "Build and clean up", rawInput: { command: "npm run build && rm -rf out" } };
+const HYPERFRAMES = { toolCallId: "t3", kind: "execute", title: "Render the film", rawInput: { command: "npx hyperframes render out/film.mp4" } };
+
+const askCards = (page: Page): Locator => panel(page).locator(".askcard");
+/** A card's buttons, by their words, in order. */
+const cardButtons = (card: Locator): Promise<string[]> => card.getByRole("button").allTextContents();
+
+/** Every answer the desk posts to an ask: its id and the body, in order. */
+function watchAnswers(page: Page): { id: string; body: unknown }[] {
+  const posted: { id: string; body: unknown }[] = [];
+  page.on("request", (r) => {
+    const m = /\/api\/agent\/permission\/([^/?]+)$/.exec(new URL(r.url()).pathname);
+    if (m && r.method() === "POST") posted.push({ id: decodeURIComponent(m[1]), body: r.postDataJSON() });
+  });
+  return posted;
+}
+
+/** What the fake recorded as each permission's answer, by its `record` name. */
+async function recorded(rushes: AgentRushes): Promise<Record<string, unknown>> {
+  const out: Record<string, unknown> = {};
+  for (const m of await readAgentLog(rushes.agentLog)) if (typeof m.recorded === "string") out[m.recorded] = m.outcome;
+  return out;
+}
+
+/**
+ * The card is on screen in full: inside the notes panel, under the tab row and above the tab's own content, its command
+ * in mono on its own line, wrapped (never cut or scrolled) inside the card, its buttons inside it, nothing spilling.
+ */
+async function cardFits(page: Page, card: Locator): Promise<void> {
+  await expect(card).toBeVisible();
+  const c = (await card.boundingBox())!;
+  const p = (await panel(page).boundingBox())!;
+  inside(c, p);
+  const vp = page.viewportSize()!;
+  inside(c, { x: 0, y: 0, width: vp.width, height: vp.height });
+  const tabs = (await panel(page).locator(".ntabs").boundingBox())!;
+  expect(c.y).toBeGreaterThanOrEqual(tabs.y + tabs.height - 0.5);
+  const body = (await panel(page).locator(".ntabpanel:not([hidden])").boundingBox())!;
+  expect(c.y + c.height).toBeLessThanOrEqual(body.y + 0.5);
+  expect(await card.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  const cmd = card.locator(".askcmd");
+  if (await cmd.count()) {
+    const b = (await cmd.boundingBox())!;
+    inside(b, c);
+    expect(b.width).toBeGreaterThan(c.width / 2);
+    expect(await cmd.evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/Geist Mono/);
+    expect(await cmd.evaluate((el) => el.scrollWidth <= el.clientWidth + 1 && el.scrollHeight <= el.clientHeight + 1)).toBe(true);
+    // On its own line: nothing beside it.
+    const title = (await card.locator(".asktitle").boundingBox())!;
+    expect(b.y).toBeGreaterThanOrEqual(title.y + title.height - 0.5);
+  }
+  for (const btn of await card.getByRole("button").all()) {
+    const b = (await btn.boundingBox())!;
+    inside(b, c);
+    expect(b.height).toBeGreaterThanOrEqual(24);
+  }
+  // No word cut off or pushed out of its box.
+  expect(await card.evaluate((el) => [el, ...el.querySelectorAll("*")].filter((e) => e.scrollWidth > e.clientWidth + 1 && getComputedStyle(e).overflow !== "visible").map((e) => e.className))).toEqual([]);
+}
+
+/** A picture of the notes panel's top, from the tab row to under the last card, kept with the test's results. */
+async function shootAsks(page: Page, name: string): Promise<void> {
+  const p = (await panel(page).boundingBox())!;
+  const last = (await askCards(page).last().boundingBox())!;
+  const y = Math.max(0, p.y - 4);
+  await page.screenshot({ path: test.info().outputPath(`${name}.png`), clip: { x: Math.max(0, p.x - 4), y, width: p.width + 8, height: last.y + last.height + 16 - y } });
+}
+
+/** The colour a token resolves to, as the browser writes colours, for comparing with a computed style. */
+const tokenColour = (page: Page, token: string) =>
+  page.evaluate((t) => {
+    const probe = document.createElement("span");
+    probe.style.color = `var(${t})`;
+    document.body.append(probe);
+    const c = getComputedStyle(probe).color;
+    probe.remove();
+    return c;
+  }, token);
+
+test("an ask shows and Allow once lets the run go on", async ({ page, startWithAgent }) => {
+  const rushes = await startWithAgent({ turns: [[{ permission: { toolCall: FFPROBE }, record: "ffprobe" }, { stop: "end_turn" }]] });
+  await readyToSend(rushes);
+  const notifyAsked = await watchNotifications(page);
+  const answers = watchAnswers(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await expect(askCards(page)).toHaveCount(0);
+  await rushes.api("POST", "/api/batches", {});
+
+  const card = askCards(page);
+  await expect(card).toHaveCount(1);
+  await expect(card.locator(".asklead")).toHaveText("Claude Code wants to:");
+  await expect(card.locator(".asktitle")).toHaveText("Run ffprobe");
+  await expect(card.locator(".askcmd")).toHaveText("ffprobe -v error renders/a.mp4");
+  // The server offers no Always for a command with a flag where its subcommand would be, and the card shows none.
+  const { status } = await rushes.api("GET", "/api/agent");
+  expect(status.asks).toMatchObject([{ id: "ask_1", title: "Run ffprobe", command: "ffprobe -v error renders/a.mp4", always: "" }]);
+  expect(await cardButtons(card)).toEqual(["Allow once", "No"]);
+  // Its left rule is the to-do colour.
+  expect(await card.evaluate((el) => getComputedStyle(el).borderLeftColor)).toBe(await tokenColour(page, "--todo"));
+  await cardFits(page, card);
+  await shootAsks(page, "ask-once-1440");
+
+  // The chip waits on you, in the to-do look: its dot on screen in the to-do colour.
+  await expect(chip(page)).toHaveText("Claude Code is waiting for you");
+  await expect(page.locator("header.top .agentchip")).toHaveClass(/\btodo\b/);
+  await chipFits(page);
+  const dot = chip(page).locator(".adot");
+  const [d, c] = [(await dot.boundingBox())!, (await chip(page).boundingBox())!];
+  expect(d.width).toBeGreaterThanOrEqual(7);
+  inside(d, c);
+  expect(await dot.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(await tokenColour(page, "--todo"));
+  await shoot(page, "chip-waiting-1440");
+
+  await page.setViewportSize({ width: 900, height: 900 });
+  await page.getByRole("button", { name: "Show the notes panel · \\" }).click();
+  await cardFits(page, card);
+  await shootAsks(page, "ask-once-900");
+  await expect(chip(page)).toBeVisible();
+  await chipFits(page);
+  await shoot(page, "chip-waiting-900");
+
+  // While the answer is on its way, every button is disabled.
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  await page.route("**/api/agent/permission/**", async (route) => {
+    await held;
+    await route.continue();
+  });
+  await card.getByRole("button", { name: "Allow once" }).click();
+  for (const b of await card.getByRole("button").all()) await expect(b).toBeDisabled();
+  release();
+  await expect(askCards(page)).toHaveCount(0);
+  await expect(chip(page)).toHaveText("Claude Code finished", { timeout: 10_000 });
+
+  // The server got exactly the button pressed, and the agent was told allow once; no Always rule was kept.
+  expect(answers).toEqual([{ id: "ask_1", body: { choice: "once" } }]);
+  await expect.poll(() => recorded(rushes)).toEqual({ ffprobe: { outcome: "selected", optionId: "allow-once" } });
+  expect((await rushes.api("GET", "/api/agent")).status.always).toEqual([]);
+  // An ask never asks the browser for leave to notify.
+  expect(await notifyAsked()).toEqual([]);
+});
+
+test("two asks stack and answer separately", async ({ page, startWithAgent }) => {
+  const rushes = await startWithAgent({
+    turns: [[{ permissions: [{ toolCall: CHAINED, record: "chained" }, { toolCall: HYPERFRAMES, record: "hyperframes" }] }, { stop: "end_turn" }]],
+  });
+  await readyToSend(rushes);
+  const answers = watchAnswers(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await rushes.api("POST", "/api/batches", {});
+
+  await expect(askCards(page)).toHaveCount(2);
+  const [first, second] = [askCards(page).nth(0), askCards(page).nth(1)];
+  // The two arrive together and the server holds them in the order it took them in (each reads the rules first, so
+  // either may come first): the cards are in the server's order, oldest first.
+  type Ask = { id: string; title: string; command: string; always: string };
+  const asks: Ask[] = (await rushes.api("GET", "/api/agent")).status.asks;
+  expect(asks.map((a) => a.id)).toEqual(["ask_1", "ask_2"]);
+  const byTitle = (t: string) => asks.find((x) => x.title === t)!;
+  // Always only where the server offers one: never for a chained command.
+  expect(byTitle("Build and clean up")).toMatchObject({ command: "npm run build && rm -rf out", always: "" });
+  expect(byTitle("Render the film")).toMatchObject({ command: "npx hyperframes render out/film.mp4", always: "Always for npx hyperframes here" });
+  const buttons = (a: Ask) => (a.always ? ["Allow once", a.always, "No"] : ["Allow once", "No"]);
+  for (const [card, ask] of [[first, asks[0]], [second, asks[1]]] as const) {
+    await expect(card.locator(".asktitle")).toHaveText(ask.title);
+    await expect(card.locator(".askcmd")).toHaveText(ask.command);
+    expect(await cardButtons(card)).toEqual(buttons(ask));
+  }
+  // One above the other.
+  const [a, b] = [(await first.boundingBox())!, (await second.boundingBox())!];
+  expect(a.y + a.height).toBeLessThanOrEqual(b.y);
+  await cardFits(page, first);
+  await cardFits(page, second);
+  await shootAsks(page, "asks-two-1440");
+  // On every tab: Activity shows them too, above its list.
+  await panel(page).getByRole("tab", { name: /^Activity/ }).click();
+  await expect(page.getByRole("tabpanel", { name: "Activity" })).toBeVisible();
+  await expect(askCards(page)).toHaveCount(2);
+  await cardFits(page, second);
+  await shootAsks(page, "asks-two-activity-1440");
+  await panel(page).getByRole("tab", { name: /^Notes/ }).click();
+
+  // The chained command gets No, the other Always; the first card is answered first, and the second stays until its own
+  // answer. Always tells the agent allow once, and Rushes keeps the rule itself.
+  const choiceFor = (x: Ask) => (x.always ? { choice: "always", button: x.always, record: "hyperframes", option: "allow-once" } : { choice: "no", button: "No", record: "chained", option: "reject-once" });
+  const [c1, c2] = [choiceFor(asks[0]), choiceFor(asks[1])];
+  expect(new Set([c1.choice, c2.choice])).toEqual(new Set(["always", "no"]));
+  await first.getByRole("button", { name: c1.button, exact: true }).click();
+  await expect(askCards(page)).toHaveCount(1);
+  await expect(askCards(page).locator(".asktitle")).toHaveText(asks[1].title);
+  await expect.poll(() => recorded(rushes)).toEqual({ [c1.record]: { outcome: "selected", optionId: c1.option } });
+  await askCards(page).getByRole("button", { name: c2.button, exact: true }).click();
+  await expect(askCards(page)).toHaveCount(0);
+  await expect.poll(() => recorded(rushes)).toEqual({ chained: { outcome: "selected", optionId: "reject-once" }, hyperframes: { outcome: "selected", optionId: "allow-once" } });
+  expect(answers).toEqual([{ id: "ask_1", body: { choice: c1.choice } }, { id: "ask_2", body: { choice: c2.choice } }]);
+  const rule = { kind: "execute", command: "npx hyperframes" };
+  expect((await rushes.api("GET", "/api/agent")).status.always).toEqual([rule]);
+  expect(JSON.parse(await readFile(rulesPath(rushes.root, rushes.configDir), "utf8")).always).toEqual([rule]);
+  await expect(chip(page)).toHaveText("Claude Code finished", { timeout: 10_000 });
+});
+
+test("card fits at 900 px", async ({ page, startWithAgent }) => {
+  const long =
+    "ffmpeg -hide_banner -i renders/the-long-film-name-for-the-festival-cut-v12.mp4 -vf scale=1920:1080:flags=lanczos,format=yuv420p " +
+    "-c:v libx264 -crf 18 -preset slow -c:a aac -b:a 320k renders/out/the-long-film-name-for-the-festival-cut-v12-1080p-final-final.mp4 " +
+    "renders/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/0123456789abcdefghijklmnopqrstuvwxyz0123456789.mp4";
+  const rushes = await startWithAgent({ turns: [[{ permission: { toolCall: { toolCallId: "t9", kind: "execute", title: "Make the 1080p file", rawInput: { command: long } } } }, { stop: "end_turn" }]] });
+  await readyToSend(rushes);
+  await page.setViewportSize({ width: 900, height: 900 });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await page.getByRole("button", { name: "Show the notes panel · \\" }).click();
+  await rushes.api("POST", "/api/batches", {});
+  const card = askCards(page);
+  await expect(card).toHaveCount(1);
+  // The whole command, never cut short: wrapped over several lines inside the card.
+  await expect(card.locator(".askcmd")).toHaveText(long);
+  expect(await card.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  const lines = await card.locator(".askcmd").evaluate((el) => Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)));
+  expect(lines).toBeGreaterThanOrEqual(4);
+  await cardFits(page, card);
+  await shootAsks(page, "ask-long-900");
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await cardFits(page, card);
+  await shootAsks(page, "ask-long-1440");
+});
+
+test("an ask notifies while the page is hidden, once, and so does a question; neither asks for leave", async ({ page, startWithAgent }) => {
+  const rushes = await startWithAgent({
+    turns: [[{ permission: { toolCall: FFPROBE }, record: "a" }, { permission: { toolCall: HYPERFRAMES }, record: "b" }, { sleep: 2500 }, { stop: "end_turn" }]],
+  });
+  const id = await readyToSend(rushes);
+  await page.addInitScript(() => {
+    const w = window as unknown as { __shown: { title: string; body: string }[]; __asked: number; __setHidden(h: boolean): void };
+    w.__shown = [];
+    w.__asked = 0;
+    let hidden = false;
+    w.__setHidden = (h) => void (hidden = h);
+    Object.defineProperty(Document.prototype, "hidden", { get: () => hidden, configurable: true });
+    Object.defineProperty(Document.prototype, "visibilityState", { get: () => (hidden ? "hidden" : "visible"), configurable: true });
+    class Fake {
+      static permission = "granted";
+      static requestPermission() {
+        w.__asked++;
+        return Promise.resolve("granted");
+      }
+      onclick: (() => void) | null = null;
+      constructor(title: string, opts: { body: string }) {
+        w.__shown.push({ title, body: opts.body });
+      }
+      close() {}
+    }
+    Object.defineProperty(window, "Notification", { value: Fake, configurable: true, writable: true });
+  });
+  const shown = () => page.evaluate(() => (window as unknown as { __shown: unknown[] }).__shown);
+  const setHidden = (h: boolean) => page.evaluate((x) => (window as unknown as { __setHidden(h: boolean): void }).__setHidden(x), h);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await rushes.api("POST", "/api/batches", {});
+  // The first ask arrives while the page is in view: the card says it, no notification.
+  await expect(askCards(page)).toHaveCount(1);
+  await page.waitForTimeout(300);
+  expect(await shown()).toEqual([]);
+  // Hidden, the next ask notifies, once, however many statuses follow.
+  await setHidden(true);
+  await rushes.api("POST", "/api/agent/permission/ask_1", { choice: "once" });
+  await expect.poll(shown).toEqual([{ title: "Rushes", body: "Claude Code is waiting for you" }]);
+  await rushes.api("POST", "/api/agent/permission/ask_2", { choice: "once" });
+  // The agent asks on the note and the turn ends: a question.
+  await rushes.api("POST", "/api/replies", { replies: [{ id, reply: "Up or down?" }] });
+  await expect.poll(async () => (await rushes.api("GET", "/api/agent")).status.phase, { timeout: 10_000 }).toBe("question");
+  await expect.poll(shown).toEqual([
+    { title: "Rushes", body: "Claude Code is waiting for you" },
+    { title: "Rushes", body: "Claude Code has a question" },
+  ]);
+  await page.waitForTimeout(500);
+  expect(await shown()).toHaveLength(2);
+  expect(await page.evaluate(() => (window as unknown as { __asked: number }).__asked)).toBe(0);
 });
