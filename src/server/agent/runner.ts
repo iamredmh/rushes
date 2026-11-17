@@ -193,6 +193,12 @@ export class AgentRunner {
     };
   }
 
+  /** Reads agent.json now and gives the status from it: for a route that has just changed the settings. */
+  async reload(): Promise<AgentStatus> {
+    await this.loadSettings();
+    return this.status();
+  }
+
   /** From the first send until the queue is empty and no ask is waiting. */
   busy(): boolean {
     return this.starting !== null || this.stopping !== null || this.turn !== null || this.ending || this.queue.length > 0 || this.broker.size > 0;

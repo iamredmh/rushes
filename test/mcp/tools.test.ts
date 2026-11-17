@@ -45,13 +45,14 @@ async function connect(opts: { files?: string[]; probe?: Probe; formatProbe?: Vi
 }
 
 describe("MCP tools", () => {
-  it("lists the twenty-four tools", async () => {
+  it("lists the twenty-five tools", async () => {
     const t = await connect();
     const { tools } = await t.client.listTools();
     expect(tools.map((x) => x.name).sort()).toEqual([
       "rushes_add_file", "rushes_add_format", "rushes_add_take", "rushes_add_variant", "rushes_add_version", "rushes_add_visual", "rushes_bring_in", "rushes_doctor", "rushes_export_notes",
       "rushes_get_batch", "rushes_get_log", "rushes_get_picks", "rushes_get_script", "rushes_list_assets", "rushes_list_notes",
       "rushes_lock_picture", "rushes_log", "rushes_open", "rushes_reply", "rushes_scan", "rushes_set_films", "rushes_set_script", "rushes_set_shots", "rushes_status",
+      "rushes_working_on",
     ]);
     const set = tools.find((x) => x.name === "rushes_set_script")!;
     expect((set.inputSchema.properties as Record<string, { description?: string }>).replace.description).toMatch(/replace the whole script; default merges by id/);
@@ -113,6 +114,27 @@ describe("MCP tools", () => {
     expect((await t.call("rushes_list_notes", { stage: "picture", status: "todo" })).json.notes).toEqual([]);
     const status = await t.call("rushes_status");
     expect(status.json.tabs.find((x: any) => x.stage === "picture")).toMatchObject({ unlocked: true, todo: 0 });
+    await t.close();
+  });
+
+  it("rushes_working_on is registered and posts to the server", async () => {
+    const t = await connect();
+    const { tools } = await t.client.listTools();
+    const tool = tools.find((x) => x.name === "rushes_working_on")!;
+    expect(tool.description).toBe(
+      "Say which note you are working on now and what you are doing, in a few plain words, before you start on it. Only for a note that was sent to you. The user sees it on the note while you work.",
+    );
+    expect(Object.keys(tool.inputSchema.properties as object).sort()).toEqual(["doing", "note", "project"]);
+    const api = new RushesClient(t.running.url);
+    const sent = (await api.post("/api/notes", { stage: "picture", scope: "whole", text: "Logo lands early" })).note;
+    await api.post("/api/batches", {});
+    const todo = (await api.post("/api/notes", { stage: "picture", scope: "whole", text: "Not sent" })).note;
+    const r = await t.call("rushes_working_on", { note: sent.id, doing: "Holding the logo half a second longer" });
+    expect(r.isError).toBe(false);
+    expect((await api.get("/api/agent")).status.current).toEqual({ note: sent.id, doing: "Holding the logo half a second longer" });
+    const refused = await t.call("rushes_working_on", { note: todo.id, doing: "Something" });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toMatch(/note_not_sent/);
     await t.close();
   });
 

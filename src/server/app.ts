@@ -29,7 +29,7 @@ import { osRevealer, osOpener, OPEN_SAFE_EXT, type Revealer, type Opener } from 
 import type { CorruptEvent } from "./watch.js";
 import { inUse, setInUse } from "../core/picks.js";
 import { filmTakes, putAway } from "../core/takes.js";
-import { LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, PinSchema, FileKindSchema, MarkSchema, ProjectIdSchema, ShotSchema, LEVEL_MIN, LEVEL_MAX, LEVEL_STEP, lanesForVideo, picksForVideo, variantFilms, type InUse, type Levels, type Batch, type Note, type Picks, type Project, type VisualsFile } from "../core/schema.js";
+import { AGENTS, LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, PinSchema, FileKindSchema, MarkSchema, ProjectIdSchema, ShotSchema, LEVEL_MIN, LEVEL_MAX, LEVEL_STEP, lanesForVideo, picksForVideo, variantFilms, type InUse, type Levels, type Batch, type Note, type Picks, type Project, type VisualsFile } from "../core/schema.js";
 import { LABEL_MAX, oneLineOf } from "../core/labels.js";
 import { byOf, logBookFor } from "./logbook.js";
 import { BriefService } from "./brief.js";
@@ -40,6 +40,9 @@ import {
 } from "../core/logEvents.js";
 import { LOG_AREAS, LOG_MAX, changeLogFileName, logText, recentChanges } from "../core/logText.js";
 import { defaultRunner, measureMix, type LoudnessRunner } from "./loudness.js";
+import { AgentRunner, type AgentStatus, type SendResult } from "./agent/runner.js";
+import { clearDetectCache, detectAgents, type AgentInfo } from "./agent/detect.js";
+import { openInTerminal, type TerminalOpener } from "./agent/terminal.js";
 
 import { VERSION } from "../version.js";
 export { VERSION };
@@ -191,6 +194,9 @@ const LevelValue = z.number().min(LEVEL_MIN).max(LEVEL_MAX).multipleOf(LEVEL_STE
 const LevelsBody = z.object({ voice: LevelValue.nullable(), music: LevelValue.nullable(), sfx: LevelValue.nullable() }).partial();
 const PutAwayBody = z.object({ away: z.boolean() });
 const PicksBody = z.object({ video: z.string().min(1).max(200).optional(), lanes: PickMap.optional(), sections: PickMap.optional(), levels: LevelsBody.optional() });
+// §28: the Send to AI switch, the agent and what it may do unasked.
+const AgentSetupBody = z.object({ on: z.boolean(), agent: z.enum(AGENTS).optional(), permissions: z.enum(["project-edits", "ask-all"]).optional() });
+
 // No stage: every tab's open notes (Send). A stage: that tab's only.
 const BatchBody = z.object({ stage: StageSchema.optional() });
 
@@ -340,6 +346,12 @@ export interface AppOptions {
   formatProbe?: VideoProber;
   /** How long a render's read may take before Rushes gives up on it. Defaults to PROBE_TIMEOUT_MS; tests set it low. */
   formatProbeTimeoutMs?: number;
+  /** §28: the project's one agent runner. startServer passes its own so it can close it and keep the server up while it works. */
+  agent?: AgentRunner;
+  /** §28: which agents are installed and signed in, for setup and sign-in. Defaults to detectAgents; tests inject a fake. */
+  detect?: () => Promise<AgentInfo[]>;
+  /** §28: opens Terminal with an agent's login command for "Sign in in Terminal". Defaults to openInTerminal; tests inject a fake. */
+  terminal?: TerminalOpener;
 }
 
 const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost"]);
@@ -365,6 +377,10 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   const found = opts.found ?? new FoundScanner({ store, probe: ffprobeDuration, announce: foundAnnouncer(store) });
   const brief = opts.brief ?? new BriefService(store);
   const storyboard = opts.storyboard ?? new StoryboardService(store);
+  // §28: made before any route is reachable, so every agent route and Send has it.
+  const agent = opts.agent ?? new AgentRunner(store);
+  const detect = opts.detect ?? (() => detectAgents());
+  const terminal = opts.terminal ?? openInTerminal;
   /** §24.12: whether the plan (brief, script, storyboard) is approved, from the files as they are now. */
   const planBuild = async () => {
     const [b, script, sb] = await Promise.all([brief.view(), store.read("script"), storyboard.view()]);
@@ -1408,9 +1424,13 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   // is recorded first and the notes are marked second: if the second write fails, the notes are
   // still unsent and go out again in the next batch. The other way round, a failure stranded notes
   // naming a batch that was never recorded, and the next batch reused its id.
+  // §28: once filed, the batch goes to the agent runner (with Send to AI off it says so and the desk copies
+  // the prompt). The hand-over starts inside the queue, so two Sends reach the runner in the order they were
+  // filed, but the queue doesn't wait for it: an agent starting up never holds the next Send's filing.
   let batchQueue: Promise<unknown> = Promise.resolve();
   app.post("/api/batches", async (c) => {
     const { stage } = await body(c, BatchBody);
+    let handing: Promise<SendResult> | undefined;
     const run = batchQueue.catch(() => undefined).then(async (): Promise<Batch> => {
       const [project, script, notes, batches] = await Promise.all([store.read("project"), store.read("script"), store.read("notes"), store.read("batches")]);
       // createBatch marks the notes it takes and files the batch in `batches`; on copies, it only
@@ -1425,10 +1445,14 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
       await store.update("batches", (f) => { f.batches.push(result); });
       await store.update("notes", (f) => markSent(f.notes, result));
       await log.add(() => notesSentEvent(result), by(c));
+      handing = (async () => agent.send(result))();
       return result;
     });
     batchQueue = run;
-    return c.json({ batch: await run }, 201);
+    const batch = await run;
+    // The Send never fails because of the agent: an error becomes the reason it wasn't handed over.
+    const handed: SendResult = await handing!.catch((e: unknown) => ({ handedTo: null, why: e instanceof Error ? e.message : String(e) }));
+    return c.json({ batch, agent: handed }, 201);
   });
 
   app.get("/api/batches/:id", async (c) => {
@@ -1506,21 +1530,90 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     return c.json({ entry }, 201);
   });
 
+  // ---- Send to AI (§28) ----
+  const agentStatusOf = async () => ({ status: await agent.reload() });
+  app.get("/api/agent", async (c) => c.json(await agentStatusOf()));
+  // ?fresh=1 checks again now (after the user signs in), not from the last 30 s.
+  app.get("/api/agent/detect", async (c) => {
+    if (c.req.query("fresh") === "1") clearDetectCache();
+    return c.json({ agents: await detect() });
+  });
+  app.post("/api/agent/setup", async (c) => {
+    const b = await body(c, AgentSetupBody);
+    if (b.on) {
+      const id = b.agent ?? (await store.read("agent")).agent;
+      if (!id) throw new InvalidError("Choose an agent to turn Send to AI on");
+      // Checked again now, so a user who has just signed in isn't refused from the cache.
+      clearDetectCache();
+      const info = (await detect()).find((a) => a.id === id);
+      if (!info?.installed || !info.signedIn) {
+        const name = info?.name ?? (id === "claude" ? "Claude Code" : "Codex");
+        throw new RushesError(`${name} is not signed in. Choose Sign in in Terminal, then try again.`, 409, "agent_not_signed_in", { agent: id });
+      }
+    }
+    await store.update("agent", (f) => {
+      f.on = b.on;
+      // Another agent can't continue this one's conversation.
+      if (b.agent !== undefined && b.agent !== f.agent) {
+        f.agent = b.agent;
+        f.session = null;
+      }
+      if (b.permissions !== undefined) f.permissions = b.permissions;
+    });
+    return c.json(await agentStatusOf());
+  });
+  // Start a fresh conversation: the next Send starts a new session.
+  app.post("/api/agent/fresh", async (c) => {
+    await store.update("agent", (f) => { f.session = null; });
+    return c.json(await agentStatusOf());
+  });
+  app.post("/api/agent/stop", async (c) => {
+    await agent.stop();
+    return c.json(await agentStatusOf());
+  });
+  app.post("/api/agent/permission/:id", async (c) => {
+    const { choice } = await body(c, z.object({ choice: z.enum(["once", "always", "no"]) }));
+    await agent.answer(c.req.param("id"), choice);
+    return c.json(await agentStatusOf());
+  });
+  app.delete("/api/agent/always/:index", async (c) => {
+    const index = c.req.param("index");
+    if (!/^\d{1,4}$/.test(index)) throw new InvalidError("The rule's index must be a whole number");
+    await agent.removeRule(Number(index));
+    return c.json(await agentStatusOf());
+  });
+  // The command is the agent's own login command from detection, never text from the request.
+  app.post("/api/agent/sign-in", async (c) => {
+    const b = await body(c, z.object({ agent: z.enum(AGENTS) }));
+    const info = (await detect()).find((a) => a.id === b.agent);
+    if (!info) throw new InvalidError(`Rushes doesn't know how to sign in to ${b.agent}`);
+    await terminal(info.signIn);
+    return c.body(null, 204);
+  });
+  app.post("/api/agent/working-on", async (c) => {
+    const b = await body(c, z.object({ note: z.string().min(1), doing: z.string().min(1).max(200) }));
+    await agent.workingOn(b.note, b.doing);
+    return c.body(null, 204);
+  });
+
   // ---- live updates ----
   app.get("/api/events", (c) =>
     streamSSE(c, async (stream) => {
       const send = (e: ChangeEvent) => void stream.writeSSE({ event: "change", data: JSON.stringify(e) });
       const corrupt = (e: CorruptEvent) => void stream.writeSSE({ event: "corrupt", data: JSON.stringify(e) });
       const proxy = (e: ProxyEvent) => void stream.writeSSE({ event: "proxy", data: JSON.stringify(e) });
+      const agentStatus = (s: AgentStatus) => void stream.writeSSE({ event: "agent", data: JSON.stringify(s) });
       store.on("change", send);
       store.on("corrupt", corrupt);
       store.on("proxy", proxy);
+      store.on("agent", agentStatus);
       streams++;
       stream.onAbort(() => {
         streams--;
         store.off("change", send);
         store.off("corrupt", corrupt);
         store.off("proxy", proxy);
+        store.off("agent", agentStatus);
       });
       await stream.writeSSE({ event: "hello", data: JSON.stringify({ root: store.root }) });
       while (!stream.aborted) await stream.sleep(15000).then(() => stream.writeSSE({ event: "ping", data: "" }));

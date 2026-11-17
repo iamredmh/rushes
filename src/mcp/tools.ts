@@ -474,6 +474,24 @@ export function createMcpServer(ctx: ToolContext): McpServer {
   );
 
   server.registerTool(
+    "rushes_working_on",
+    {
+      title: "Say what you are working on",
+      description:
+        "Say which note you are working on now and what you are doing, in a few plain words, before you start on it. Only for a note that was sent to you. The user sees it on the note while you work.",
+      inputSchema: {
+        project,
+        note: z.string().min(1).describe("The note's id."),
+        doing: z.string().min(1).max(200).describe('What you are doing, e.g. "Moving the title up".'),
+      },
+    },
+    safe(async ({ project, note, doing }) => {
+      await (await ctx.client(project)).post("/api/agent/working-on", { note, doing });
+      return { ok: true, note, doing };
+    }),
+  );
+
+  server.registerTool(
     "rushes_list_assets",
     {
       title: "List assets",

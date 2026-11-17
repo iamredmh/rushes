@@ -186,7 +186,7 @@ If your user asked you to use Rushes, do this:
 2. If it added anything, tell the user to restart the app (or start a new session) so the `rushes_*` tools load.
 3. From then on, follow [AGENTS.md](AGENTS.md). If the user wants a new film, start with **Starting a film** in AGENTS.md: plan it with them first, then build. Otherwise, in short: register what you made, call `rushes_open`, wait for the user to press **Send**, then `rushes_get_batch`, fix the notes, and `rushes_reply`.
 
-The MCP server has twenty-four tools: `rushes_open`, `rushes_status`, `rushes_add_version`, `rushes_add_format`, `rushes_add_visual`, `rushes_add_variant`, `rushes_set_films`, `rushes_set_script`, `rushes_get_script`, `rushes_add_take`, `rushes_list_notes`, `rushes_list_assets`, `rushes_get_batch`, `rushes_reply`, `rushes_get_picks`, `rushes_set_shots`, `rushes_lock_picture`, `rushes_add_file`, `rushes_export_notes`, `rushes_log`, `rushes_get_log`, `rushes_scan`, `rushes_bring_in` and `rushes_doctor`.
+The MCP server has twenty-five tools: `rushes_open`, `rushes_status`, `rushes_add_version`, `rushes_add_format`, `rushes_add_visual`, `rushes_add_variant`, `rushes_set_films`, `rushes_set_script`, `rushes_get_script`, `rushes_add_take`, `rushes_list_notes`, `rushes_list_assets`, `rushes_get_batch`, `rushes_reply`, `rushes_working_on`, `rushes_get_picks`, `rushes_set_shots`, `rushes_lock_picture`, `rushes_add_file`, `rushes_export_notes`, `rushes_log`, `rushes_get_log`, `rushes_scan`, `rushes_bring_in` and `rushes_doctor`.
 
 If you can't run commands, give the user the matching line from **Manual setup** below.
 
@@ -288,6 +288,37 @@ Every tab is visible from the start, in workflow order, even before there's anyt
 When the project's folder already holds files for a locked Voice, Music or Effects tab, its page also says how many were found and offers a **Review** button, such as "14 music files found in this project". See **Finding your other files**, below.
 
 Hovering a locked tab shows a short tooltip, e.g. "Locked: ask your agent for music beds". The Assets workspace follows the same rule.
+
+## Send to AI
+
+Send to AI hands your notes to an agent on this Mac, so there's no prompt to paste. It starts your own Claude Code or Codex in the project folder, so every run uses your own Claude or ChatGPT plan, just as if you had typed the prompt yourself. The first run fetches a small adapter for that agent with `npx`.
+
+Rushes never sees a password, token or key, and never signs you in. When an agent isn't signed in, **Sign in in Terminal** opens Terminal with that agent's own login command (`claude auth login` or `codex login`) for you to run there.
+
+**The switch.** Above **Send**, a row reads **Send to AI** with the agent's name and a switch. On, Send files the batch as always and hands it to the agent: what it is doing shows on each note and in Activity, its questions arrive as replies on the note, and your answer goes back to it. Off, Send copies the prompt, as before. When the agent can't start or isn't signed in, Send copies the prompt and says why. The agent's name opens a menu to choose another agent, start a fresh conversation, change what it may do without asking, and see the "Always" rules. **Stop** ends a run and gives its unfinished notes back.
+
+**Permissions.** There are two levels:
+
+- **Edit files in this project** (the default): the agent reads and edits files inside the project folder without asking. Commands, the network and anything outside the folder ask first.
+- **Ask me for everything**: every action asks.
+
+An ask shows what the agent wants to do and the exact command, with **Allow once**, **Always** and **No**. It waits until you answer. It never turns into a yes by itself.
+
+**"Always" rules.** **Always** keeps a rule for this project, so the same request runs without asking next time. The agent's menu lists the rules, and you can remove any of them. The settings live in `.rushes/agent.json`: the switch, the agent, the permission level, the rules and the conversation to continue. Nothing secret.
+
+"Always" trusts one program and subcommand, such as `npx hyperframes`, `npm install` or `git commit`. Later commands that start with the same two words run without asking, whatever their other arguments. That trust covers whatever that program and subcommand can be told to run:
+
+- options that start other programs, such as `git grep -O`, `rg --pre`, `ssh -o ProxyCommand`, `find -exec` and `npm run --script-shell`;
+- project scripts that `npm run`, `bun run` and `go run` execute, and a package `npx` finds in the project's own `node_modules`;
+- packages that `npm install`, `npm init`, `npm create` and `npm explore` fetch and run;
+- services that `docker compose run` starts.
+
+Rushes never offers "Always" for:
+
+- a shell, or a wrapper such as `nohup` or `sudo`;
+- a quoted or spaced program path;
+- a subcommand that runs any package or program (`npm exec`, `npm x`, `pnpm dlx`, `uv run`, `deno run`, `nix run`);
+- one package runner run through another (`npx npm`, `bunx pnpm`).
 
 ## The Change Log
 

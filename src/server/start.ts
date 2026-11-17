@@ -15,6 +15,7 @@ import { PeakJobs, removeOrphanPeaks, removePeakTemps, type PeakJobsOptions } fr
 import { FoundScanner, ffprobeDuration, foundAnnouncer, type FoundProbe } from "./found.js";
 import type { ScanLimits } from "../core/found.js";
 import type { VideoProber } from "../core/media.js";
+import { AgentRunner, type RunnerOptions } from "./agent/runner.js";
 
 export const DEFAULT_PORT = 4580;
 
@@ -51,6 +52,8 @@ export interface StartOptions {
   found?: { probe?: FoundProbe; limits?: Partial<ScanLimits> };
   /** How §21's formats are read. Defaults to ffprobe; tests inject a fake. */
   formats?: { probe?: VideoProber };
+  /** §28: how the agent runner detects and starts agents. Tests only: they drive the fake agent. */
+  agent?: RunnerOptions;
 }
 
 function listen(server: Server, port: number, host: string): Promise<number> {
@@ -94,7 +97,12 @@ export async function startServer(rootDir: string, opts: StartOptions = {}): Pro
   const found = new FoundScanner({ store, probe: opts.found?.probe ?? ffprobeDuration, announce: foundAnnouncer(store), limits: opts.found?.limits });
   const brief = new BriefService(store);
   const storyboard = new StoryboardService(store);
-  const appOpts: AppOptions = { brief, storyboard, webDir: opts.webDir, onShutdown: () => void close(), reveal: opts.reveal, proxyJobs, peakJobs, found, formatProbe: opts.formats?.probe };
+  // §28: one agent runner per server, on the root it serves, made before the app so every route has it.
+  const runner = new AgentRunner(store, opts.agent);
+  const appOpts: AppOptions = {
+    brief, storyboard, webDir: opts.webDir, onShutdown: () => void close(), reveal: opts.reveal, proxyJobs, peakJobs, found, formatProbe: opts.formats?.probe,
+    agent: runner, detect: opts.agent?.detect,
+  };
   const app = createApp(store, appOpts);
   const listener = getRequestListener(app.fetch);
   let lastRequest = Date.now();
@@ -124,6 +132,7 @@ export async function startServer(rootDir: string, opts: StartOptions = {}): Pro
   } catch (e) {
     // Another server owns this project, or the lock couldn't be written: don't leave a socket open.
     found.close();
+    await runner.close();
     server.closeAllConnections?.();
     await new Promise<void>((ok) => server.close(() => ok()));
     throw e;
@@ -168,7 +177,8 @@ export async function startServer(rootDir: string, opts: StartOptions = {}): Pro
       found.close();
       // A running proxy's ffmpeg must not outlive the server; its partial file is deleted too.
       // From here no new job starts either (a POST or an autoProxy cut racing the close).
-      await Promise.all([proxyJobs.close(), peakJobs.close()]);
+      // The agent's adapter goes too (its pending asks are cancelled); notes stay as they are.
+      await Promise.all([proxyJobs.close(), peakJobs.close(), runner.close()]);
       server.closeAllConnections?.();
       await new Promise<void>((ok) => server.close(() => ok()));
       await removeLock(root, token);
@@ -181,7 +191,8 @@ export async function startServer(rootDir: string, opts: StartOptions = {}): Pro
     const idleMs = opts.idleMs;
     const tick = () => {
       server.getConnections((_err, open) => {
-        if (open === 0 && Date.now() - lastRequest >= idleMs) void close();
+        // Never while the agent is working, or waiting on the user: its run would die with the server.
+        if (open === 0 && Date.now() - lastRequest >= idleMs && !runner.busy()) void close();
         else idleTimer = setTimeout(tick, Math.max(50, idleMs / 4));
       });
     };
