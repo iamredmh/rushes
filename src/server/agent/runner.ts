@@ -167,6 +167,8 @@ export class AgentRunner {
   private readonly broker: PermissionBroker;
   /** The latest Always rule write; a permission ask waits for it before reading the rules. */
   private ruleWrite: Promise<void> = Promise.resolve();
+  /** R13: per note, the follow-ups being handed (from the user's answer until hand() returns). */
+  private readonly answering = new Map<string, number>();
   /** A turn has ended and the runner is reading the notes to choose question or finished. */
   private ending = false;
 
@@ -256,6 +258,19 @@ export class AgentRunner {
    * Send to AI is off.
    */
   private async followUp(e: { note: string; text: string }): Promise<void> {
+    // R13: held from before hand() until it returns (the job is queued or running by then, or refused), so a turn
+    // ending meanwhile leaves this note to the follow-up.
+    this.answering.set(e.note, (this.answering.get(e.note) ?? 0) + 1);
+    try {
+      await this.followUpHanded(e);
+    } finally {
+      const left = (this.answering.get(e.note) ?? 1) - 1;
+      if (left > 0) this.answering.set(e.note, left);
+      else this.answering.delete(e.note);
+    }
+  }
+
+  private async followUpHanded(e: { note: string; text: string }): Promise<void> {
     let job: TurnJob | null = null;
     const r = await this.hand(async () => {
       job = await followUpFor(this.store, e).catch((err: unknown) => {
@@ -601,17 +616,20 @@ export class AgentRunner {
 
   /**
    * M3: a note the ended turn left with the agent: still sent in the turn's batch, no question waiting on it, and no
-   * follow-up queued for it. A follow-up turn answers for its own note only.
+   * other follow-up for it in flight. A follow-up turn answers for its own note only.
    *
-   * A note whose last reply is the user's belongs to R11 (its follow-up may still be in accept, not yet queued),
-   * which follows it up or parks it. Only the follow-up turn for that very answer gives it back, when it leaves it.
+   * R13: a follow-up in flight is one being handed (`answering`: read, accepted, started) or queued. The turn ending
+   * now has already left `this.turn`, so a follow-up turn that leaves its own note untouched gives it back unless
+   * another answer on it is still on its way.
    */
   private leftOver(job: TurnJob, n: Note): boolean {
     if (n.batch !== job.batchId || noteState(n) !== "sent" || needsYou(n)) return false;
     if (job.kind === "followUp" && n.id !== job.note) return false;
-    const ownAnswer = job.kind === "followUp" && n.replies.length === job.replies;
-    if (n.replies.at(-1)?.by === "user" && !ownAnswer) return false;
-    return !this.queue.some((q) => q.kind === "followUp" && q.note === n.id);
+    return !this.followUpInFlight(n.id);
+  }
+
+  private followUpInFlight(note: string): boolean {
+    return (this.answering.get(note) ?? 0) > 0 || this.queue.some((q) => q.kind === "followUp" && q.note === note);
   }
 
   /** The prompt failed while the adapter stayed up (an RPC error): the run fails and the adapter is replaced. */
