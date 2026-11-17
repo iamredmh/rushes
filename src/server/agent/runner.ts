@@ -18,7 +18,7 @@ import { NotFoundError, RushesError } from "../../core/errors.js";
 import { oneLine } from "../../core/labels.js";
 import { lineEvent } from "../../core/logEvents.js";
 import { needsYou, noteState, recallNote, recallNotes } from "../../core/noteState.js";
-import type { AgentId, AgentRules, AgentSettings, AlwaysRule, Batch } from "../../core/schema.js";
+import type { AgentId, AgentRules, AgentSettings, AlwaysRule, Batch, Note } from "../../core/schema.js";
 import type { ChangeEvent, Store } from "../../core/store.js";
 import { logBookFor } from "../logbook.js";
 import { AcpConnection, type AcpPermissionOutcome, type AcpPermissionParams, type AdapterSpec, type McpServerSpec } from "./acp.js";
@@ -552,19 +552,40 @@ export class AgentRunner {
     // Still busy while the notes are read, so a send now queues and is picked up below. The phase follows
     // the batch this turn worked on: a question on one of its notes makes it "question".
     let question = false;
+    let back = 0;
     try {
       const notes = await this.store.read("notes");
       question = notes.notes.some((n) => n.batch === job.batchId && needsYou(n));
+      // M3: what the turn left untouched (still sent, no question waiting) goes back to to do.
+      if (notes.notes.some((n) => this.leftOver(job, n))) {
+        const { result } = await this.store.update("notes", (f) => {
+          const left = f.notes.filter((n) => this.leftOver(job, n));
+          for (const n of left) recallNote(f.notes, n.id, job.batchId);
+          return left.length;
+        });
+        back = result;
+      }
     } catch (e) {
       console.error(`Rushes: couldn't read the notes after a turn: ${messageOf(e)}`);
     }
     if (gen !== this.gen) return;
+    if (back > 0) this.addLine(back === 1 ? "1 note was not picked up and is back in to do" : `${back} notes were not picked up and are back in to do`, null);
     this.ending = false;
     if (this.queue.length) return this.pump();
     this.phase = question ? "question" : "finished";
     this.current = { note: null, doing: null };
     this.announce();
     this.armIdle();
+  }
+
+  /**
+   * M3: a note the ended turn left with the agent: still sent in the turn's batch, no question waiting on it, and no
+   * follow-up queued for it. A follow-up turn answers for its own note only.
+   */
+  private leftOver(job: TurnJob, n: Note): boolean {
+    if (n.batch !== job.batchId || noteState(n) !== "sent" || needsYou(n)) return false;
+    if (job.kind === "followUp" && n.id !== job.note) return false;
+    return !this.queue.some((q) => q.kind === "followUp" && q.note === n.id);
   }
 
   /** The prompt failed while the adapter stayed up (an RPC error): the run fails and the adapter is replaced. */

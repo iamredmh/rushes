@@ -85,13 +85,17 @@ async function rig(scenario: object, opts: { settings?: Partial<AgentSettings>; 
     }
   };
   const phase = (p: AgentStatus["phase"], of = runner) => waitFor(`phase ${p} (now ${of.status().phase})`, () => of.status().phase === p);
+  /** The agent asks on these notes (rushes_reply with no status), so they stay with it when its turn ends (M3). */
+  const asked = (...ids: string[]) => store.update("notes", (f) => {
+    for (const id of ids) applyReply(f, { id, reply: "Which one?" });
+  });
   /** The user answers on a note, exactly as POST /api/notes/:id/replies does. */
   const answerOn = async (id: string, text: string) => {
     await store.update("notes", (f) => addUserReply(f, id, text));
     store.emit("user-reply", { note: id, text: text.trim() });
   };
   await waitFor("the runner to read agent.json", () => runner.status().on && runner.status().agent !== null);
-  return { root, store, runner, makeRunner, log, scenario: writeScenario, batch, waitFor, phase, answerOn };
+  return { root, store, runner, makeRunner, log, scenario: writeScenario, batch, waitFor, phase, answerOn, asked };
 }
 
 const prompts = (log: any[]) => log.filter((m) => m.method === "session/prompt");
@@ -303,8 +307,9 @@ describe("AgentRunner answers on notes", () => {
   it("an answer on a note while the adapter idles is sent at once", async () => {
     const r = await rig({ turns: [] });
     const b = await r.batch("Move the title");
+    await r.asked(b.noteIds[0]);
     await r.runner.send(b);
-    await r.phase("finished");
+    await r.phase("question");
     await r.answerOn(b.noteIds[0], "Up a bit.");
     await r.waitFor("the follow-up prompt", () => prompts(r.log()).length === 2);
     expect(promptText(prompts(r.log())[1])).toBe(followUp(b.noteIds[0], "Move the title", "Up a bit."));
@@ -316,8 +321,9 @@ describe("AgentRunner answers on notes", () => {
     const r = await rig({ loadSession: true, turns: [] }, { runner: { idleMs: 30 } });
     const long = "A".repeat(150) + "B".repeat(100);
     const b = await r.batch(long);
+    await r.asked(b.noteIds[0]);
     await r.runner.send(b);
-    await r.phase("finished");
+    await r.phase("question");
     await r.waitFor("the first adapter to exit", () => started[0]?.hasExited);
     await r.answerOn(b.noteIds[0], "Yes, both.");
     await r.waitFor("the follow-up prompt", () => prompts(r.log()).length === 2);
@@ -335,8 +341,9 @@ describe("AgentRunner answers on notes", () => {
   it("an answer that arrives while the adapter is starting goes after the batch that started it", async () => {
     const r = await rig({ loadSession: true, turns: [] }, { runner: { idleMs: 30 } });
     const b1 = await r.batch("One");
+    await r.asked(b1.noteIds[0]);
     await r.runner.send(b1);
-    await r.phase("finished");
+    await r.phase("question");
     await r.waitFor("the first adapter to exit", () => started[0]?.hasExited);
     const b2 = await r.batch("Two");
     const sending = r.runner.send(b2);
@@ -374,10 +381,10 @@ describe("AgentRunner answers on notes", () => {
   it("R11: after a restart, an answer on a sent note is followed up in the kept session", async () => {
     const r = await rig({ loadSession: true, turns: [] });
     const b1 = await r.batch("One");
-    await r.runner.send(b1);
-    await r.phase("finished");
     // The agent asked on the note, so it stays with the agent.
-    await r.store.update("notes", (f) => void applyReply(f, { id: b1.noteIds[0], reply: "Which title?" }));
+    await r.asked(b1.noteIds[0]);
+    await r.runner.send(b1);
+    await r.phase("question");
     // The server restarts: a fresh runner on the same store, with the session kept in agent.json.
     await r.runner.close();
     expect((await r.store.read("agent")).session?.id).toBe("fake-session-1");
@@ -413,11 +420,9 @@ describe("AgentRunner answers on notes", () => {
     let signedIn = true;
     const r = await rig({ turns: [] }, { runner: { detect: async () => [{ ...claude, signedIn }] } });
     const b1 = await r.batch("One", "Two");
+    await r.asked(...b1.noteIds);
     await r.runner.send(b1);
-    await r.phase("finished");
-    await r.store.update("notes", (f) => {
-      for (const id of b1.noteIds) applyReply(f, { id, reply: "Which one?" });
-    });
+    await r.phase("question");
     signedIn = false;
     await r.answerOn(b1.noteIds[0], "Yes");
     const line = `Your answer on ${b1.noteIds[0]} is saved. Press Send to hand it to Claude Code.`;
@@ -444,8 +449,9 @@ describe("AgentRunner answers on notes", () => {
   it("stop during a follow-up gives that note back and leaves the batch's other notes", async () => {
     const r = await rig({ turns: [[], [{ sleep: 60000 }]] });
     const b1 = await r.batch("One", "Two");
+    await r.asked(...b1.noteIds);
     await r.runner.send(b1);
-    await r.phase("finished");
+    await r.phase("question");
     await r.answerOn(b1.noteIds[0], "Yes");
     await r.waitFor("the follow-up prompt", () => prompts(r.log()).length === 2);
     await r.phase("working");
@@ -459,8 +465,9 @@ describe("AgentRunner answers on notes", () => {
   it("a follow-up whose adapter fails to start gives its note back", async () => {
     const r = await rig({ loadSession: true, turns: [] }, { runner: { idleMs: 30 } });
     const b1 = await r.batch("One", "Two");
+    await r.asked(...b1.noteIds);
     await r.runner.send(b1);
-    await r.phase("finished");
+    await r.phase("question");
     await r.waitFor("the first adapter to exit", () => started[0]?.hasExited);
     await r.scenario({ exitOnStart: 9, turns: [] });
     await r.answerOn(b1.noteIds[0], "Yes");
@@ -481,8 +488,9 @@ describe("AgentRunner answers on notes", () => {
       wrapSpec: (base) => (hang ? { ...base, args: ["-e", "setInterval(() => {}, 1000)"] } : base),
     });
     const b1 = await r.batch("One");
+    await r.asked(b1.noteIds[0]);
     await r.runner.send(b1);
-    await r.phase("finished");
+    await r.phase("question");
     await r.waitFor("the first adapter to exit", () => started[0]?.hasExited);
     hang = true;
     await r.answerOn(b1.noteIds[0], "Yes");
