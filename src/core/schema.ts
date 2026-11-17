@@ -586,6 +586,8 @@ export type VisualsFile = z.infer<typeof VisualsFileSchema>;
 // Send to AI: the agent's own settings. Holds no secret: only which agent, what it may do unasked, and the session to resume.
 export const AGENTS = ["claude", "codex"] as const;
 export type AgentId = (typeof AGENTS)[number];
+/** What the agent may do without asking: edit files in the project (the default), or ask for everything. */
+export const AgentPermissionsSchema = z.enum(["project-edits", "ask-all"]);
 export const AlwaysRuleSchema = z.object({ kind: z.string().max(32), command: z.string().max(200).nullable() });
 export type AlwaysRule = z.infer<typeof AlwaysRuleSchema>;
 export const AgentSettingsSchema = fileObject({
@@ -593,7 +595,7 @@ export const AgentSettingsSchema = fileObject({
   rev: z.number().int(),
   on: z.boolean().default(false),
   agent: z.enum(AGENTS).nullable().default(null),
-  permissions: z.enum(["project-edits", "ask-all"]).default("project-edits"),
+  permissions: AgentPermissionsSchema.default("project-edits"),
   always: z.array(AlwaysRuleSchema).max(50).default([]),
   session: fileObject({ id: z.string(), agent: z.enum(AGENTS), startedAt: z.string() }).nullable().default(null),
 });

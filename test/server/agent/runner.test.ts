@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { tmpProject } from "../../helpers/tmp.js";
 import { AcpConnection, type AdapterSpec, type McpServerSpec } from "../../../src/server/agent/acp.js";
-import { AgentRunner, type AgentStatus, type RunnerOptions } from "../../../src/server/agent/runner.js";
+import { AGENT_START_MS, AgentRunner, type AgentStatus, type RunnerOptions } from "../../../src/server/agent/runner.js";
 import type { AgentInfo } from "../../../src/server/agent/detect.js";
 import { AGENT_LINES } from "../../../src/core/agentActivity.js";
 import { createBatch } from "../../../src/core/batches.js";
@@ -441,6 +441,42 @@ describe("AgentRunner", () => {
     expect(s.error).toBe(why);
     expect((await notesOf(r.store, b.noteIds)).map(noteState)).toEqual(["todo"]);
     expect(r.runner.busy()).toBe(false);
+  });
+
+  it("an adapter that never finishes starting fails after startMs, is killed, and gives its notes back", async () => {
+    const r = await rig({ hangOnInitialize: true, turns: [] }, { runner: { startMs: 300 } });
+    const b = await r.batch("One");
+    const t0 = Date.now();
+    const result = await r.runner.send(b);
+    expect(Date.now() - t0).toBeLessThan(3000);
+    expect(result).toEqual({ handedTo: null, why: "Claude Code did not start within 0.3 seconds" });
+    const s = r.runner.status();
+    expect(s.phase).toBe("failed");
+    expect(s.error).toBe("Claude Code did not start within 0.3 seconds");
+    expect((await notesOf(r.store, b.noteIds)).map(noteState)).toEqual(["todo"]);
+    expect(r.runner.busy()).toBe(false);
+    await r.waitFor("the adapter to exit", () => started[0].hasExited);
+    // The next Send starts a fresh adapter.
+    await r.scenario({ turns: [] });
+    expect(await r.runner.send(await r.batch("Two"))).toEqual({ handedTo: "claude" });
+  });
+
+  it("the start timeout defaults to two minutes and says so", async () => {
+    expect(AGENT_START_MS).toBe(120_000);
+    const r = await rig({ hangOnInitialize: true, turns: [] }, { runner: { startMs: 120_000 } });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const sending = r.runner.send(await r.batch("One"));
+      // Only setTimeout is faked: setImmediate still turns, so poll with it.
+      for (let i = 0; i < 1000 && r.runner.status().phase !== "starting"; i++) await new Promise((ok) => setImmediate(ok));
+      expect(r.runner.status().phase).toBe("starting");
+      await vi.advanceTimersByTimeAsync(119_000);
+      expect(r.runner.status().phase).toBe("starting");
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(await sending).toEqual({ handedTo: null, why: "Claude Code did not start within 2 minutes" });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("the adapter exits after idleMs with nothing to do, keeping the session", async () => {

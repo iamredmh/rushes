@@ -9,7 +9,7 @@
 //   FAKE_ACP_BASE      base URL used by `http` steps
 //
 // Scenario: { loadSession?: boolean, loadFails?: string, exitOnCancel?: boolean, modes?: string[], exitOnStart?: number,
-//             ignoreSigterm?: boolean, turns: Step[][] }
+//             ignoreSigterm?: boolean, hangOnInitialize?: boolean, turns: Step[][] }
 //   loadSession  advertised as agentCapabilities.loadSession (default false)
 //   loadFails    session/load answers a JSON-RPC error with this message (still logged as { loaded: id }),
 //                as an agent does for a session it has pruned
@@ -17,6 +17,7 @@
 //   modes        when given, session/new and session/load answer
 //                { modes: { currentModeId: modes[0], availableModes: modes.map(id => ({ id, name: id })) } }
 //   exitOnStart  exit with that code before reading anything
+//   hangOnInitialize  never answer initialize (an adapter that stalls as it starts)
 //   ignoreSigterm  trap SIGTERM and carry on, so only SIGKILL ends the process
 //   turns        turn i runs on the i-th session/prompt; with fewer turns than
 //                prompts the extra prompt ends at once with end_turn
@@ -134,6 +135,7 @@ function onMessage(msg) {
   }
   switch (msg.method) {
     case "initialize":
+      if (scenario.hangOnInitialize) break;
       send({ id: msg.id, result: { protocolVersion: 1, agentCapabilities: { loadSession: !!scenario.loadSession }, authMethods: [] } });
       break;
     case "session/new":

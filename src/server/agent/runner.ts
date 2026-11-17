@@ -49,6 +49,8 @@ export interface RunnerOptions {
   spec?: (a: AgentInfo, root: string) => AdapterSpec;
   mcp?: (root: string) => McpServerSpec;
   idleMs?: number;
+  /** How long the adapter may take to start (spawn, initialize, new or loaded session). Defaults to AGENT_START_MS. */
+  startMs?: number;
   now?: () => Date;
 }
 
@@ -57,6 +59,8 @@ export type SendResult = { handedTo: AgentId } | { handedTo: null; why: string; 
 
 /** How long the adapter stays up after its last turn (§5.2). */
 export const AGENT_IDLE_MS = 600_000;
+/** How long an adapter may take to start, from spawn to a ready session (a first `npx -y` fetch included). */
+export const AGENT_START_MS = 120_000;
 /** How long Stop waits for a cancelled turn to end before it kills the adapter. */
 export const STOP_WAIT_MS = 5000;
 /** Activity keeps this many lines, in memory only. */
@@ -75,6 +79,12 @@ class Halted extends Error {
 }
 
 const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/** 120000 -> "2 minutes", 1500 -> "1.5 seconds". */
+function spell(ms: number): string {
+  if (ms >= 60_000 && ms % 60_000 === 0) return ms === 60_000 ? "1 minute" : `${ms / 60_000} minutes`;
+  return ms === 1000 ? "1 second" : `${ms / 1000} seconds`;
+}
 
 /** The last line of a stderr tail with anything in it, as one short line. */
 function lastLine(stderr: string): string {
@@ -114,6 +124,7 @@ export class AgentRunner {
   private readonly specFor: (a: AgentInfo, root: string) => AdapterSpec;
   private readonly mcp: (root: string) => McpServerSpec;
   private readonly idleMs: number;
+  private readonly startMs: number;
   private readonly now: () => Date;
 
   private settings: AgentSettings | null = null;
@@ -170,6 +181,7 @@ export class AgentRunner {
     this.specFor = opts.spec ?? adapterSpec;
     this.mcp = opts.mcp ?? rushesMcp;
     this.idleMs = opts.idleMs ?? AGENT_IDLE_MS;
+    this.startMs = opts.startMs ?? AGENT_START_MS;
     this.now = opts.now ?? (() => new Date());
     this.broker = new PermissionBroker(store.root, { now: this.now, onChange: () => this.asksChanged() });
     store.on("change", this.onChange);
@@ -305,60 +317,80 @@ export class AgentRunner {
     this.current = { note: null, doing: null };
     this.announce();
     let conn: AcpConnection | null = null;
+    // A start that outlives startMs (a slow first fetch, an adapter that stalls) fails like any other start.
+    let timedOut = false;
+    let timer: NodeJS.Timeout | undefined;
     try {
       conn = AcpConnection.start(this.specFor(info, root));
       this.attach(conn);
       const c = conn;
-      const check = () => {
-        if (gen !== this.gen || this.conn !== c) throw new Halted();
-      };
-      const { loadSession } = await c.initialize();
-      check();
-      const settings = await this.loadSettings();
-      check();
-      const mcp = [this.mcp(root)];
-      const kept = settings.session;
-      let sessionId: string | null = null;
-      let modes: string[] = [];
-      if (kept && kept.agent === info.id && loadSession) {
-        try {
-          ({ modes } = await c.loadSession(kept.id, root, mcp));
-          sessionId = kept.id;
-        } catch (e) {
-          // An agent prunes old conversations. With the adapter still up, start a new one rather than fail
-          // this Send and every one after it.
-          if (c.hasExited) throw e;
-          check();
-          this.addLine("Started a new conversation (the last one could not be loaded)", null);
-        }
-      }
-      if (sessionId === null) {
-        let made: string;
-        ({ sessionId: made, modes } = await c.newSession(root, mcp));
-        sessionId = made;
-        check();
-        const startedAt = this.now().toISOString();
-        const { data } = await this.store.update("agent", (f) => {
-          f.session = { id: made, agent: info.id, startedAt };
-        });
-        this.applySettings(data);
-      }
-      check();
-      if (settings.permissions === "project-edits" && modes.includes("acceptEdits")) {
-        await c.setMode(sessionId, "acceptEdits");
-        check();
-      }
-      if (c.hasExited) throw new Error("the adapter exited as it started");
-      this.sessionId = sessionId;
-      this.connPermissions = settings.permissions;
+      const deadline = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          timedOut = true;
+          reject(new Error("timed out"));
+        }, this.startMs);
+        timer.unref();
+      });
+      const opening = this.open(c, info, gen, root);
+      // Left behind on a timeout: the adapter is killed below, and what it then throws is not news.
+      opening.catch(() => undefined);
+      await Promise.race([opening, deadline]);
     } catch (e) {
       if (e instanceof Halted || gen !== this.gen) throw e instanceof Halted ? e : new Halted();
       if (conn && this.conn === conn) this.dropConn();
-      const tail = conn ? lastLine(this.exits.get(conn)?.stderr ?? "") : "";
-      const why = `${info.name} could not start: ${tail || messageOf(e)}`;
+      const tail = conn && !timedOut ? lastLine(this.exits.get(conn)?.stderr ?? "") : "";
+      const why = timedOut ? `${info.name} did not start within ${spell(this.startMs)}` : `${info.name} could not start: ${tail || messageOf(e)}`;
       await this.failRun(why);
       throw new Error(why);
+    } finally {
+      clearTimeout(timer);
     }
+  }
+
+  /** From initialize to a ready session on `c`. Throws Halted when a Stop or close, or another adapter, came first. */
+  private async open(c: AcpConnection, info: AgentInfo, gen: number, root: string): Promise<void> {
+    const check = () => {
+      if (gen !== this.gen || this.conn !== c) throw new Halted();
+    };
+    const { loadSession } = await c.initialize();
+    check();
+    const settings = await this.loadSettings();
+    check();
+    const mcp = [this.mcp(root)];
+    const kept = settings.session;
+    let sessionId: string | null = null;
+    let modes: string[] = [];
+    if (kept && kept.agent === info.id && loadSession) {
+      try {
+        ({ modes } = await c.loadSession(kept.id, root, mcp));
+        sessionId = kept.id;
+      } catch (e) {
+        // An agent prunes old conversations. With the adapter still up, start a new one rather than fail
+        // this Send and every one after it.
+        if (c.hasExited) throw e;
+        check();
+        this.addLine("Started a new conversation (the last one could not be loaded)", null);
+      }
+    }
+    if (sessionId === null) {
+      let made: string;
+      ({ sessionId: made, modes } = await c.newSession(root, mcp));
+      sessionId = made;
+      check();
+      const startedAt = this.now().toISOString();
+      const { data } = await this.store.update("agent", (f) => {
+        f.session = { id: made, agent: info.id, startedAt };
+      });
+      this.applySettings(data);
+    }
+    check();
+    if (settings.permissions === "project-edits" && modes.includes("acceptEdits")) {
+      await c.setMode(sessionId, "acceptEdits");
+      check();
+    }
+    if (c.hasExited) throw new Error("the adapter exited as it started");
+    this.sessionId = sessionId;
+    this.connPermissions = settings.permissions;
   }
 
   /** Makes `conn` the runner's adapter and listens to it. */

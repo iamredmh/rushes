@@ -29,7 +29,7 @@ import { osRevealer, osOpener, OPEN_SAFE_EXT, type Revealer, type Opener } from 
 import type { CorruptEvent } from "./watch.js";
 import { inUse, setInUse } from "../core/picks.js";
 import { filmTakes, putAway } from "../core/takes.js";
-import { AGENTS, LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, PinSchema, FileKindSchema, MarkSchema, ProjectIdSchema, ShotSchema, LEVEL_MIN, LEVEL_MAX, LEVEL_STEP, lanesForVideo, picksForVideo, variantFilms, type InUse, type Levels, type Batch, type Note, type Picks, type Project, type VisualsFile } from "../core/schema.js";
+import { AGENTS, AgentPermissionsSchema, LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, PinSchema, FileKindSchema, MarkSchema, ProjectIdSchema, ShotSchema, LEVEL_MIN, LEVEL_MAX, LEVEL_STEP, lanesForVideo, picksForVideo, variantFilms, type InUse, type Levels, type Batch, type Note, type Picks, type Project, type VisualsFile } from "../core/schema.js";
 import { LABEL_MAX, oneLineOf } from "../core/labels.js";
 import { byOf, logBookFor } from "./logbook.js";
 import { BriefService } from "./brief.js";
@@ -40,8 +40,9 @@ import {
 } from "../core/logEvents.js";
 import { LOG_AREAS, LOG_MAX, changeLogFileName, logText, recentChanges } from "../core/logText.js";
 import { defaultRunner, measureMix, type LoudnessRunner } from "./loudness.js";
-import { AgentRunner, type AgentStatus, type SendResult } from "./agent/runner.js";
+import type { AgentRunner, AgentStatus, SendResult } from "./agent/runner.js";
 import { clearDetectCache, detectAgents, type AgentInfo } from "./agent/detect.js";
+import type { AgentId } from "../core/schema.js";
 import { openInTerminal, type TerminalOpener } from "./agent/terminal.js";
 
 import { VERSION } from "../version.js";
@@ -195,7 +196,7 @@ const LevelsBody = z.object({ voice: LevelValue.nullable(), music: LevelValue.nu
 const PutAwayBody = z.object({ away: z.boolean() });
 const PicksBody = z.object({ video: z.string().min(1).max(200).optional(), lanes: PickMap.optional(), sections: PickMap.optional(), levels: LevelsBody.optional() });
 // §28: the Send to AI switch, the agent and what it may do unasked.
-const AgentSetupBody = z.object({ on: z.boolean(), agent: z.enum(AGENTS).optional(), permissions: z.enum(["project-edits", "ask-all"]).optional() });
+const AgentSetupBody = z.object({ on: z.boolean(), agent: z.enum(AGENTS).optional(), permissions: AgentPermissionsSchema.optional() });
 
 // No stage: every tab's open notes (Send). A stage: that tab's only.
 const BatchBody = z.object({ stage: StageSchema.optional() });
@@ -346,12 +347,46 @@ export interface AppOptions {
   formatProbe?: VideoProber;
   /** How long a render's read may take before Rushes gives up on it. Defaults to PROBE_TIMEOUT_MS; tests set it low. */
   formatProbeTimeoutMs?: number;
-  /** §28: the project's one agent runner. startServer passes its own so it can close it and keep the server up while it works. */
-  agent?: AgentRunner;
+  /**
+   * §28: the project's one agent runner. startServer passes its own so it can close it and keep the server up
+   * while it works. Without one (in-process app tests) there is no agent: Send says Send to AI is off, and the
+   * routes that drive an agent answer 503. Nothing is subscribed to the store, so nothing is left open.
+   */
+  agent?: AgentControl;
   /** §28: which agents are installed and signed in, for setup and sign-in. Defaults to detectAgents; tests inject a fake. */
   detect?: () => Promise<AgentInfo[]>;
   /** §28: opens Terminal with an agent's login command for "Sign in in Terminal". Defaults to openInTerminal; tests inject a fake. */
   terminal?: TerminalOpener;
+  /** §28: how long Send waits for the agent to take the batch before answering `starting: true`. Defaults to SEND_WAIT_MS. */
+  sendWaitMs?: number;
+}
+
+/** What the routes use of the agent runner. */
+export type AgentControl = Pick<AgentRunner, "status" | "reload" | "send" | "stop" | "answer" | "removeRule" | "workingOn">;
+
+/**
+ * What Send's response says about the agent: the runner's own result, or, when the agent is still starting after
+ * SEND_WAIT_MS, `starting: true`. The batch is then queued; a later failure reaches the desk as the agent status.
+ */
+export type SendHandOver = SendResult | { handedTo: AgentId | null; starting: true };
+
+/** How long Send's response waits for the agent to take the batch (a first start can take minutes). */
+export const SEND_WAIT_MS = 5_000;
+
+const OFF_STATUS: AgentStatus = { on: false, agent: null, phase: "off", batches: [], current: { note: null, doing: null }, asks: [], lines: [], error: null, session: null };
+
+/** The stand-in when no runner is given: Send to AI is off, and nothing can drive an agent. */
+function noAgent(): AgentControl {
+  const none = () => Promise.reject(new RushesError("Send to AI runs only in a Rushes server.", 503, "agent_unavailable"));
+  return {
+    status: () => structuredClone(OFF_STATUS),
+    reload: async () => structuredClone(OFF_STATUS),
+    send: async () => ({ handedTo: null, why: "Send to AI is off" }),
+    stop: async () => undefined,
+    answer: none,
+    removeRule: none,
+    workingOn: none,
+  };
 }
 
 const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost"]);
@@ -378,7 +413,8 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   const brief = opts.brief ?? new BriefService(store);
   const storyboard = opts.storyboard ?? new StoryboardService(store);
   // §28: made before any route is reachable, so every agent route and Send has it.
-  const agent = opts.agent ?? new AgentRunner(store);
+  const agent = opts.agent ?? noAgent();
+  const sendWaitMs = opts.sendWaitMs ?? SEND_WAIT_MS;
   const detect = opts.detect ?? (() => detectAgents());
   const terminal = opts.terminal ?? openInTerminal;
   /** §24.12: whether the plan (brief, script, storyboard) is approved, from the files as they are now. */
@@ -1450,9 +1486,14 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     });
     batchQueue = run;
     const batch = await run;
-    // The Send never fails because of the agent: an error becomes the reason it wasn't handed over.
-    const handed: SendResult = await handing!.catch((e: unknown) => ({ handedTo: null, why: e instanceof Error ? e.message : String(e) }));
-    return c.json({ batch, agent: handed }, 201);
+    // The Send never fails because of the agent: an error becomes the reason it wasn't handed over, and an
+    // agent still starting after sendWaitMs never holds the answer (it says so, and the run carries on).
+    const handed = handing!.catch((e: unknown): SendResult => ({ handedTo: null, why: e instanceof Error ? e.message : String(e) }));
+    let timer: NodeJS.Timeout | undefined;
+    const waited = new Promise<null>((ok) => { timer = setTimeout(() => ok(null), sendWaitMs); });
+    const settled = await Promise.race([handed, waited]).finally(() => clearTimeout(timer));
+    const result: SendHandOver = settled ?? { handedTo: agent.status().agent, starting: true };
+    return c.json({ batch, agent: result }, 201);
   });
 
   app.get("/api/batches/:id", async (c) => {
@@ -1540,18 +1581,21 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   });
   app.post("/api/agent/setup", async (c) => {
     const b = await body(c, AgentSetupBody);
+    let checked: AgentId | null = null;
     if (b.on) {
       const id = b.agent ?? (await store.read("agent")).agent;
       if (!id) throw new InvalidError("Choose an agent to turn Send to AI on");
       // Checked again now, so a user who has just signed in isn't refused from the cache.
       clearDetectCache();
       const info = (await detect()).find((a) => a.id === id);
-      if (!info?.installed || !info.signedIn) {
-        const name = info?.name ?? (id === "claude" ? "Claude Code" : "Codex");
-        throw new RushesError(`${name} is not signed in. Choose Sign in in Terminal, then try again.`, 409, "agent_not_signed_in", { agent: id });
-      }
+      const name = info?.name ?? (id === "claude" ? "Claude Code" : "Codex");
+      if (!info?.installed) throw new RushesError(`${name} is not installed.`, 409, "agent_not_installed", { agent: id });
+      if (!info.signedIn) throw new RushesError(`${name} is not signed in. Choose Sign in in Terminal, then try again.`, 409, "agent_not_signed_in", { agent: id });
+      checked = id;
     }
     await store.update("agent", (f) => {
+      // Turned on only for the agent that was checked: one changed meanwhile (another tab) is refused.
+      if (b.on && (b.agent ?? f.agent) !== checked) throw new RushesError("The agent changed. Try again.", 409, "agent_changed");
       f.on = b.on;
       // Another agent can't continue this one's conversation.
       if (b.agent !== undefined && b.agent !== f.agent) {

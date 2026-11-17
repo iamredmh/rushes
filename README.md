@@ -291,7 +291,7 @@ Hovering a locked tab shows a short tooltip, e.g. "Locked: ask your agent for mu
 
 ## Send to AI
 
-Send to AI hands your notes to an agent on this Mac, so there's no prompt to paste. It starts your own Claude Code or Codex in the project folder, so every run uses your own Claude or ChatGPT plan, just as if you had typed the prompt yourself. The first run fetches a small adapter for that agent with `npx`.
+Send to AI hands your notes to an agent on this Mac, so there's no prompt to paste. It starts your own Claude Code or Codex in the project folder, signed in your way (a Claude or ChatGPT plan, or an API key), so every run is billed to that account, just as if you had typed the prompt yourself. The first run fetches a small adapter for that agent with `npx`.
 
 Rushes never sees a password, token or key, and never signs you in. When an agent isn't signed in, **Sign in in Terminal** opens Terminal with that agent's own login command (`claude auth login` or `codex login`) for you to run there.
 

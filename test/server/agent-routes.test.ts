@@ -1,9 +1,10 @@
+import { readFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { tmpProject } from "../helpers/tmp.js";
 import { sse } from "../helpers/sse.js";
-import { createApp } from "../../src/server/app.js";
+import { createApp, type AppOptions } from "../../src/server/app.js";
 import { startServer, type Running } from "../../src/server/start.js";
 import { AgentRunner, type AgentStatus, type RunnerOptions } from "../../src/server/agent/runner.js";
 import type { AgentInfo } from "../../src/server/agent/detect.js";
@@ -29,15 +30,21 @@ const codex = (over: Partial<AgentInfo> = {}): AgentInfo => ({
 });
 
 /** Runner options that start the fake agent with `scenarioPath`. */
-function fakeAgent(store: Store, agents: () => AgentInfo[]): { opts: RunnerOptions; scenario: (s: object) => Promise<void> } {
+function fakeAgent(store: Store, agents: () => AgentInfo[]): { opts: RunnerOptions; scenario: (s: object) => Promise<void>; log: () => any[] } {
   const scenarioPath = join(store.dir, "scenario.json");
+  const logPath = join(store.dir, "fake-log.jsonl");
   return {
     opts: {
       detect: async () => agents(),
-      spec: (_a, r) => ({ command: process.execPath, args: [FAKE], env: { FAKE_ACP_SCENARIO: scenarioPath }, cwd: r }),
+      spec: (_a, r) => ({ command: process.execPath, args: [FAKE], env: { FAKE_ACP_SCENARIO: scenarioPath, FAKE_ACP_LOG: logPath }, cwd: r }),
       mcp: (root) => ({ name: "rushes", command: process.execPath, args: ["-e", "", root], env: [] }),
     },
     scenario: (s) => writeFile(scenarioPath, JSON.stringify(s)),
+    log: () => {
+      let text = "";
+      try { text = readFileSync(logPath, "utf8"); } catch { /* not written yet */ }
+      return text.split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    },
   };
 }
 
@@ -51,25 +58,25 @@ async function waitFor<T>(what: string, check: () => T | Promise<T>): Promise<No
   }
 }
 
-async function rig(o: { settings?: Partial<AgentSettings>; agents?: AgentInfo[]; scenario?: object } = {}) {
+async function rig(o: { settings?: Partial<AgentSettings>; agents?: AgentInfo[]; scenario?: object; runner?: Partial<RunnerOptions>; app?: Partial<AppOptions> } = {}) {
   const { root, store } = await tmpProject("lumen");
   let agents = o.agents ?? [claude(), codex()];
   const fake = fakeAgent(store, () => agents);
   await fake.scenario(o.scenario ?? { turns: [] });
   if (o.settings) await store.update("agent", (f) => void Object.assign(f, o.settings));
-  const runner = new AgentRunner(store, fake.opts);
+  const runner = new AgentRunner(store, { ...fake.opts, ...o.runner });
   runners.push(runner);
   const wantOn = o.settings?.on ?? false;
   await waitFor("the runner to read agent.json", () => runner.status().on === wantOn);
   const opened: string[] = [];
-  const app = createApp(store, { agent: runner, detect: async () => agents, terminal: async (command) => void opened.push(command) });
+  const app = createApp(store, { agent: runner, detect: async () => agents, terminal: async (command) => void opened.push(command), ...o.app });
   const call = async (method: string, path: string, json?: unknown) => {
     const res = await app.request(path, { method, headers: { "content-type": "application/json" }, body: json === undefined ? undefined : JSON.stringify(json) });
     const text = await res.text();
     return { status: res.status, json: (text ? JSON.parse(text) : null) as any };
   };
   const note = async (text: string) => (await call("POST", "/api/notes", { stage: "picture", scope: "whole", text })).json.note.id as string;
-  return { root, store, runner, call, note, opened, setAgents: (next: AgentInfo[]) => { agents = next; } };
+  return { root, store, runner, call, note, opened, log: fake.log, setAgents: (next: AgentInfo[]) => { agents = next; } };
 }
 
 describe("Send hands the batch to the agent", () => {
@@ -90,6 +97,20 @@ describe("Send hands the batch to the agent", () => {
     expect(res.json.agent).toEqual({ handedTo: "claude" });
     expect((await r.store.read("batches")).batches.map((b) => b.id)).toEqual([res.json.batch.id]);
     await waitFor("the run to finish", () => !r.runner.busy());
+  });
+
+  it("Send answers within its bound while the agent is still starting, and a later failure shows in the status", async () => {
+    const r = await rig({ settings: { on: true, agent: "claude" }, scenario: { hangOnInitialize: true, turns: [] }, runner: { startMs: 1500 }, app: { sendWaitMs: 200 } });
+    const id = await r.note("Tighten the opening");
+    const t0 = Date.now();
+    const res = await r.call("POST", "/api/batches", {});
+    expect(Date.now() - t0).toBeLessThan(1200);
+    expect(res.status).toBe(201);
+    expect(res.json.agent).toEqual({ handedTo: "claude", starting: true });
+    expect(res.json.batch.noteIds).toEqual([id]);
+    await waitFor("the start to fail", () => r.runner.status().phase === "failed");
+    expect(r.runner.status().error).toBe("Claude Code did not start within 1.5 seconds");
+    await waitFor("the note to come back", async () => (await r.store.read("notes")).notes[0].batch === null);
   });
 
   it("Send passes a Stop's refusal on as it is, stopped flag included", async () => {
@@ -147,14 +168,14 @@ describe("agent routes", () => {
     expect(await r.store.read("agent")).toMatchObject({ on: true, agent: "claude", permissions: "ask-all" });
   });
 
-  it("setup refuses an agent that is not signed in with agent_not_signed_in", async () => {
+  it("setup refuses an agent that is not signed in with agent_not_signed_in, and one not installed with agent_not_installed", async () => {
     const r = await rig({ agents: [claude({ signedIn: false }), codex({ installed: false, signedIn: false, path: null })] });
     const res = await r.call("POST", "/api/agent/setup", { on: true, agent: "claude" });
     expect(res.status).toBe(409);
     expect(res.json).toMatchObject({ error: "agent_not_signed_in", message: "Claude Code is not signed in. Choose Sign in in Terminal, then try again." });
     const notInstalled = await r.call("POST", "/api/agent/setup", { on: true, agent: "codex" });
     expect(notInstalled.status).toBe(409);
-    expect(notInstalled.json).toMatchObject({ error: "agent_not_signed_in", message: "Codex is not signed in. Choose Sign in in Terminal, then try again." });
+    expect(notInstalled.json).toMatchObject({ error: "agent_not_installed", message: "Codex is not installed." });
     expect(await r.store.read("agent")).toMatchObject({ on: false, agent: null });
     // Turning off is always allowed.
     const off = await r.call("POST", "/api/agent/setup", { on: false, agent: "claude" });
@@ -168,6 +189,21 @@ describe("agent routes", () => {
     expect((await r.call("POST", "/api/agent/setup", { on: true, agent: "gemini" })).status).toBe(400);
     expect((await r.call("POST", "/api/agent/setup", { on: true, permissions: "anything" })).status).toBe(400);
     expect((await r.call("POST", "/api/agent/setup", { on: true })).status).toBe(400);
+  });
+
+  it("setup refuses to turn on when the agent changed while it was being checked", async () => {
+    const r = await rig({ settings: { on: false, agent: "claude" } });
+    const app = createApp(r.store, {
+      agent: r.runner,
+      detect: async () => {
+        await r.store.update("agent", (f) => { f.agent = "codex"; });
+        return [claude(), codex({ signedIn: false })];
+      },
+    });
+    const res = await app.request("/api/agent/setup", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ on: true }) });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: "agent_changed", message: "The agent changed. Try again." });
+    expect(await r.store.read("agent")).toMatchObject({ on: false, agent: "codex" });
   });
 
   it("setup with a new agent clears the kept session; the same agent keeps it", async () => {
@@ -213,6 +249,20 @@ describe("agent routes", () => {
     expect(res.json.status.asks).toEqual([]);
   });
 
+  it("permission/:id with always on an ask that offers no Always allows once and keeps no rule", async () => {
+    const untyped = { permission: { toolCall: { toolCallId: "u1", title: "Do something" } }, record: "untyped" };
+    const r = await rig({ settings: { on: true, agent: "claude" }, scenario: { turns: [[untyped]] } });
+    await r.note("Tighten the opening");
+    await r.call("POST", "/api/batches", {});
+    const ask = await waitFor("an ask", () => r.runner.status().asks[0]);
+    expect(ask.always).toBe("");
+    const res = await r.call("POST", `/api/agent/permission/${ask.id}`, { choice: "always" });
+    expect(res.status).toBe(200);
+    await waitFor("the answer to reach the agent", () => r.log().find((m) => m.recorded === "untyped"));
+    expect(r.log().find((m) => m.recorded === "untyped").outcome).toEqual({ outcome: "selected", optionId: "allow-once" });
+    expect((await r.store.read("agent")).always).toEqual([]);
+  });
+
   it("always/:index removes a kept rule; an unknown index is 404", async () => {
     const always = [{ kind: "execute", command: "git commit" }, { kind: "execute", command: "npx hyperframes" }];
     const r = await rig({ settings: { on: true, agent: "claude", always } });
@@ -247,6 +297,23 @@ describe("agent routes", () => {
     expect((await r.call("POST", "/api/agent/sign-in", { agent: "touch /tmp/owned" })).status).toBe(400);
     expect((await r.call("POST", "/api/agent/sign-in", {})).status).toBe(400);
     expect(r.opened).toEqual(["claude auth login", "codex login"]);
+  });
+});
+
+describe("an app made without a runner", () => {
+  it("subscribes nothing to the store, files Sends with Send to AI off, and has no agent to drive", async () => {
+    const { store } = await tmpProject("lumen");
+    const before = { change: store.listenerCount("change"), reply: store.listenerCount("user-reply") };
+    const app = createApp(store);
+    expect({ change: store.listenerCount("change"), reply: store.listenerCount("user-reply") }).toEqual(before);
+    const call = async (method: string, path: string, json?: unknown) => {
+      const res = await app.request(path, { method, headers: { "content-type": "application/json" }, body: json === undefined ? undefined : JSON.stringify(json) });
+      return { status: res.status, json: (await res.json()) as any };
+    };
+    await call("POST", "/api/notes", { stage: "picture", scope: "whole", text: "Tighten the opening" });
+    expect((await call("POST", "/api/batches", {})).json.agent).toEqual({ handedTo: null, why: "Send to AI is off" });
+    expect((await call("GET", "/api/agent")).json.status).toMatchObject({ on: false, phase: "off" });
+    expect((await call("POST", "/api/agent/working-on", { note: "n_1", doing: "x" })).status).toBe(503);
   });
 });
 
