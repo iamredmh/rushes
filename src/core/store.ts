@@ -6,7 +6,7 @@ import { CorruptFileError, InvalidError, RevConflictError } from "./errors.js";
 
 export const RUSHES_DIR = ".rushes";
 
-const GITIGNORE = "proxies/\npeaks/\nserver.json\nserver.log\nlog.json.bad*\n*.tmp\n*.bak\n";
+const GITIGNORE = "proxies/\npeaks/\nserver.json\nserver.log\nagent.json\nlog.json.bad*\n*.tmp\n*.bak\n";
 
 function defaults(key: FileKey, name: string): FileData[FileKey] {
   switch (key) {
@@ -29,6 +29,8 @@ function defaults(key: FileKey, name: string): FileData[FileKey] {
       return { schema: 1, rev: 0, baseline: "", seen: "" };
     case "visuals":
       return { schema: 1, rev: 0, visuals: [] };
+    case "agent":
+      return { schema: 1, rev: 0, on: false, agent: null, permissions: "project-edits", always: [], session: null };
   }
 }
 
@@ -36,7 +38,7 @@ function defaults(key: FileKey, name: string): FileData[FileKey] {
  * Files `init` doesn't write (found.json, log.json, brief.json, storyboard.json). Each is created by its first write, and reads
  * as its default until then, so a project made before the file existed needs nothing done to it.
  */
-const CREATED_ON_WRITE: ReadonlySet<FileKey> = new Set<FileKey>(["found", "log", "brief", "storyboard", "visuals"]);
+const CREATED_ON_WRITE: ReadonlySet<FileKey> = new Set<FileKey>(["found", "log", "brief", "storyboard", "visuals", "agent"]);
 
 export interface ChangeEvent {
   file: FileKey;

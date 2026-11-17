@@ -22,6 +22,16 @@ describe("Store", () => {
     expect(ignore.split("\n")).toContain("log.json.bad*");
   });
 
+  it("agent.json reads as its default before its first write, and is git-ignored", async () => {
+    const { store } = await tmpProject("agent-default");
+    await expect(access(store.path("agent"))).rejects.toThrow();
+    expect(await store.read("agent")).toEqual({ schema: 1, rev: 0, on: false, agent: null, permissions: "project-edits", always: [], session: null });
+    expect((await readFile(join(store.dir, ".gitignore"), "utf8")).split("\n")).toContain("agent.json");
+    await store.update("agent", (a) => { a.on = true; a.agent = "claude"; });
+    expect((await store.read("agent")).on).toBe(true);
+    await access(store.path("agent"));
+  });
+
   it("init does not overwrite existing files", async () => {
     const { store } = await tmpProject("first");
     await store.update("project", (p) => { p.fps = 60; });

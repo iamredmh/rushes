@@ -583,6 +583,22 @@ export const VisualsFileSchema = fileObject({
 });
 export type VisualsFile = z.infer<typeof VisualsFileSchema>;
 
+// Send to AI: the agent's own settings. Holds no secret: only which agent, what it may do unasked, and the session to resume.
+export const AGENTS = ["claude", "codex"] as const;
+export type AgentId = (typeof AGENTS)[number];
+export const AlwaysRuleSchema = z.object({ kind: z.string().max(32), command: z.string().max(200).nullable() });
+export type AlwaysRule = z.infer<typeof AlwaysRuleSchema>;
+export const AgentSettingsSchema = fileObject({
+  schema: z.literal(1),
+  rev: z.number().int(),
+  on: z.boolean().default(false),
+  agent: z.enum(AGENTS).nullable().default(null),
+  permissions: z.enum(["project-edits", "ask-all"]).default("project-edits"),
+  always: z.array(AlwaysRuleSchema).max(50).default([]),
+  session: fileObject({ id: z.string(), agent: z.enum(AGENTS), startedAt: z.string() }).nullable().default(null),
+});
+export type AgentSettings = z.infer<typeof AgentSettingsSchema>;
+
 export const FILES = {
   project: { name: "project.json", schema: ProjectSchema },
   script: { name: "script.json", schema: ScriptSchema },
@@ -596,6 +612,7 @@ export const FILES = {
   storyboard: { name: "storyboard.json", schema: BriefStateSchema },
   // §25.3: created by its first write, like the brief's.
   visuals: { name: "visuals.json", schema: VisualsFileSchema },
+  agent: { name: "agent.json", schema: AgentSettingsSchema },
 } as const;
 export type FileKey = keyof typeof FILES;
 export type FileData = {
@@ -609,4 +626,5 @@ export type FileData = {
   brief: BriefState;
   storyboard: BriefState;
   visuals: VisualsFile;
+  agent: AgentSettings;
 };
