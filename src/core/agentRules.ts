@@ -181,7 +181,7 @@ export function canAlways(req: PermissionRequest, root: string): boolean {
   return kind !== "execute" || plainCommand(req.command ?? "");
 }
 
-export function decide(req: PermissionRequest, s: AgentRules, root: string): "allow" | "ask" {
+export function decide(req: PermissionRequest, s: Pick<AgentRules, "permissions" | "always">, root: string): "allow" | "ask" {
   if (s.permissions === "ask-all") return "ask";
   if (s.always.some((r) => matches(r, req, root))) return "allow";
   if (req.kind && PROJECT_KINDS.has(req.kind) && inProject(req, root)) return "allow";

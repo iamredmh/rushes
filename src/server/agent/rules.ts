@@ -1,5 +1,6 @@
 // R10: what the agent may do without asking (permissions and Always rules) is kept per user, outside the project,
-// so an agent working in the project can never grant itself a rule by editing a file there.
+// so an agent working in the project can never grant itself a rule by editing a file there. So is the user's answer to
+// the first-Send sheet (I1, `setUp`): a project folder from someone else can't arrive already set up.
 //
 //   <user config dir>/rushes/agent-rules/<key>.json
 //   user config dir: $XDG_CONFIG_HOME when it is an absolute path, else ~/.config
@@ -39,10 +40,10 @@ export function rulesPath(root: string, configDir = userConfigDir()): string {
   return join(configDir, "rushes", "agent-rules", `${rulesKey(root)}.json`);
 }
 
-/** No file yet: edits in the project unasked, no Always rules. */
-const DEFAULTS = (): AgentRules => ({ permissions: "project-edits", always: [] });
-/** A file that can't be read as rules: nothing goes through unasked until it is written again. */
-const FAIL_CLOSED = (): AgentRules => ({ permissions: "ask-all", always: [] });
+/** No file yet: edits in the project unasked, no Always rules, and not set up (I1): the first Send asks. */
+const DEFAULTS = (): AgentRules => ({ permissions: "project-edits", always: [], setUp: false });
+/** A file that can't be read as rules: nothing goes through unasked, and nothing is handed over, until it is written again. */
+const FAIL_CLOSED = (): AgentRules => ({ permissions: "ask-all", always: [], setUp: false });
 
 let writes = 0;
 

@@ -646,11 +646,54 @@ test("a start failure recalls and does not copy", async ({ page, startWithAgent 
   await expect(toastEl(page)).toBeVisible();
 });
 
+/** The project's own agent.json, written as a project folder from someone else could arrive with it. */
+const forgeAgentJson = (rushes: AgentRushes) =>
+  writeFile(join(rushes.root, ".rushes", "agent.json"), JSON.stringify({ schema: 1, rev: 1, on: true, agent: "claude", session: null, asked: true }));
+
+/** The user's own answer to the first-Send sheet, in their rules file (I1), as the setup route writes it. */
+async function userSetUp(rushes: AgentRushes): Promise<void> {
+  const path = rulesPath(rushes.root, rushes.configDir);
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  await writeFile(path, JSON.stringify({ permissions: "project-edits", always: [], setUp: true }), { mode: 0o600 });
+}
+
+test("a project that arrives set up asks first, and hands nothing over until the user sets it up (I1)", async ({ page, startWithAgent }) => {
+  const rushes = await startWithAgent({ turns: [[{ stop: "end_turn" }]] });
+  await rushes.addCut("first cut");
+  await forgeAgentJson(rushes);
+  await rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 0.5, text: "Hold the end card." });
+  expect((await rushes.api("GET", "/api/agent")).status).toMatchObject({ on: true, agent: "claude", asked: false });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  // Send asks who gets the notes, whatever the project's file says, and posts nothing.
+  await sendBtn(page).click();
+  await expect(page.getByRole("dialog", { name: "Who should get these notes?" })).toBeVisible();
+  await expect(sentPop(page)).toHaveCount(0);
+  expect(await rushes.api("GET", "/api/batches/latest").catch(() => null)).toBeNull();
+  await page.keyboard.press("Escape");
+  await expect(sheet(page)).toHaveCount(0);
+  // Sent another way (the API), the batch is filed but nothing is handed over and no adapter starts.
+  const { agent } = await rushes.api("POST", "/api/batches", {});
+  expect(agent).toEqual({ handedTo: null, why: "Send to AI is not set up" });
+  await page.waitForTimeout(500);
+  expect(await readAgentLog(rushes.agentLog)).toEqual([]);
+  // The user sets it up through the sheet: their own file holds the answer, and the next Send reaches the agent.
+  await rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 1, text: "Softer cut." });
+  await expect(sendBtn(page)).toHaveAccessibleName("Send 1");
+  await sendBtn(page).click();
+  await primary(page, "Next").click();
+  await primary(page, "Send to Claude Code").click();
+  await expect(toastEl(page)).toHaveText(/^(Sent to|Starting) Claude Code$/);
+  expect(JSON.parse(await readFile(rulesPath(rushes.root, rushes.configDir), "utf8"))).toMatchObject({ setUp: true });
+  await expect.poll(async () => (await readAgentLog(rushes.agentLog)).some((m) => m.method === "session/prompt"), { timeout: 10_000 }).toBe(true);
+});
+
 test("not signed in falls back to the dialog with Set up", async ({ page, startWithAgent }) => {
   const rushes = await startWithAgent({ turns: [] }, { agents: [{ id: "claude", installed: true, signedIn: false }, { id: "codex", installed: true, signedIn: true }] });
   await rushes.addCut("first cut");
   // Set up while Claude Code was signed in (the setup route refuses it now), then signed out.
-  await writeFile(join(rushes.root, ".rushes", "agent.json"), JSON.stringify({ schema: 1, rev: 1, on: true, agent: "claude", session: null, asked: true }));
+  await forgeAgentJson(rushes);
+  await userSetUp(rushes);
   await rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 0.5, text: "Hold the end card." });
   const copied = await watchClipboard(page);
   await page.goto(rushes.url);

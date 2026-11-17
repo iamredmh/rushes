@@ -38,15 +38,15 @@ describe("the agent's rules file (R10)", () => {
     const { root } = await tmpProject();
     const config = await realpath(await mkdtemp(join(tmpdir(), "rushes-config-")));
     const f = new AgentRulesFile(root, config);
-    expect(await f.read()).toEqual({ permissions: "project-edits", always: [] });
+    expect(await f.read()).toEqual({ permissions: "project-edits", always: [], setUp: false });
     await f.update((r) => {
       r.permissions = "ask-all";
       r.always.push({ kind: "execute", command: "npm run" });
     });
-    expect(JSON.parse(await readFile(f.path, "utf8"))).toEqual({ permissions: "ask-all", always: [{ kind: "execute", command: "npm run" }] });
+    expect(JSON.parse(await readFile(f.path, "utf8"))).toEqual({ permissions: "ask-all", always: [{ kind: "execute", command: "npm run" }], setUp: false });
     expect((await stat(f.path)).mode & 0o777).toBe(0o600);
     expect((await stat(join(config, "rushes", "agent-rules"))).mode & 0o777).toBe(0o700);
-    expect(await f.read()).toEqual({ permissions: "ask-all", always: [{ kind: "execute", command: "npm run" }] });
+    expect(await f.read()).toEqual({ permissions: "ask-all", always: [{ kind: "execute", command: "npm run" }], setUp: false });
   });
 
   it("keeps the newest 50 of a longer list instead of failing (M8)", async () => {
@@ -72,7 +72,7 @@ describe("the agent's rules file (R10)", () => {
     const quiet = vi.spyOn(console, "error").mockImplementation(() => undefined);
     for (const bad of ["{", JSON.stringify({ permissions: "everything", always: [] })]) {
       await writeFile(f.path, bad);
-      expect(await f.read()).toEqual({ permissions: "ask-all", always: [] });
+      expect(await f.read()).toEqual({ permissions: "ask-all", always: [], setUp: false });
     }
     quiet.mockRestore();
   });

@@ -600,7 +600,10 @@ const AgentSettingsShape = fileObject({
   on: z.boolean().default(false),
   agent: z.enum(AGENTS).nullable().default(null),
   session: fileObject({ id: z.string(), agent: z.enum(AGENTS), startedAt: z.string() }).nullable().default(null),
-  /** Whether the first-Send sheet has been answered: false until any setup, so the first Send asks who gets the notes. */
+  /**
+   * Legacy (I1): whether the first-Send sheet had been answered. Never read and no longer written: a project can arrive
+   * with it set. The user's own rules file keeps that answer instead (AgentRules.setUp).
+   */
   asked: z.boolean().default(false),
 });
 export type AgentSettings = z.infer<typeof AgentSettingsShape>;
@@ -616,12 +619,18 @@ export const AgentSettingsSchema = AgentSettingsShape.transform((s): AgentSettin
 export const AgentRulesSchema = z.object({
   permissions: AgentPermissionsSchema.default("project-edits"),
   always: z.array(AlwaysRuleSchema).max(ALWAYS_KEPT).default([]),
+  /**
+   * I1: the user answered the first-Send sheet for this project (any setup). Nothing is handed to an agent without it,
+   * whatever the project's agent.json says, since a project folder can arrive from someone else with that set.
+   */
+  setUp: z.boolean().default(false),
 });
 export type AgentRules = z.infer<typeof AgentRulesSchema>;
 /** Read leniently: a longer list keeps its newest ALWAYS_KEPT rules rather than failing (M8). */
 export const AgentRulesReadSchema = z.object({
   permissions: AgentPermissionsSchema.default("project-edits"),
   always: z.array(AlwaysRuleSchema).default([]).transform((a) => a.slice(-ALWAYS_KEPT)),
+  setUp: z.boolean().default(false),
 });
 
 export const FILES = {

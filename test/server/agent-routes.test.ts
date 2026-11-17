@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -60,13 +60,15 @@ async function waitFor<T>(what: string, check: () => T | Promise<T>): Promise<No
   }
 }
 
-async function rig(o: { settings?: Partial<AgentSettings>; rules?: Partial<AgentRules>; agents?: AgentInfo[]; scenario?: object; runner?: Partial<RunnerOptions>; app?: Partial<AppOptions> } = {}) {
+async function rig(o: { settings?: Partial<AgentSettings>; rules?: Partial<AgentRules>; agents?: AgentInfo[]; scenario?: object; runner?: Partial<RunnerOptions>; app?: Partial<AppOptions>; consent?: boolean } = {}) {
   const { root, store } = await tmpProject("lumen");
   let agents = o.agents ?? [claude(), codex()];
   const fake = fakeAgent(store, () => agents);
   await fake.scenario(o.scenario ?? { turns: [] });
   if (o.settings) await store.update("agent", (f) => void Object.assign(f, o.settings));
-  if (o.rules) await agentRulesFor(store).update((f) => void Object.assign(f, o.rules));
+  // I1: a project turned on was set up by the user (their own rules file says so), unless a test says otherwise.
+  const consent = o.consent ?? o.settings?.on === true;
+  if (o.rules || consent) await agentRulesFor(store).update((f) => void Object.assign(f, consent ? { setUp: true } : {}, o.rules));
   const runner = new AgentRunner(store, { ...fake.opts, ...o.runner });
   runners.push(runner);
   const wantOn = o.settings?.on ?? false;
@@ -153,6 +155,31 @@ describe("Send hands the batch to the agent", () => {
   });
 });
 
+describe("the user's consent lives in their own rules file, never in the project (I1)", () => {
+  it("a project arriving with agent.json set up and on opens the sheet and hands nothing over; setup through the route does", async () => {
+    const r = await rig({ settings: { on: true, agent: "claude", asked: true }, consent: false, scenario: { turns: [[{ stop: "end_turn" }]] } });
+    expect((await r.call("GET", "/api/agent")).json.status).toMatchObject({ on: true, agent: "claude", asked: false });
+    await r.note("Tighten the opening");
+    const res = await r.call("POST", "/api/batches", {});
+    expect(res.status).toBe(201);
+    // The desk's copy dialog with Set up: nothing started, nothing handed over.
+    expect(res.json.agent).toEqual({ handedTo: null, why: "Send to AI is not set up" });
+    expect(r.log()).toEqual([]);
+    expect(r.runner.busy()).toBe(false);
+    // The user sets it up: their own file holds the consent, 0600, and the next Send goes to the agent.
+    const set = await r.call("POST", "/api/agent/setup", { on: true, agent: "claude" });
+    expect(set.json.status).toMatchObject({ on: true, agent: "claude", asked: true });
+    const file = agentRulesFor(r.store).path;
+    expect(JSON.parse(readFileSync(file, "utf8"))).toMatchObject({ setUp: true });
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+    await r.note("Then the end card");
+    const again = await r.call("POST", "/api/batches", {});
+    expect(again.json.agent).toEqual({ handedTo: "claude" });
+    await waitFor("the agent to be handed the batch", () => r.log().some((m) => m.method === "session/prompt"));
+    await waitFor("the run to finish", () => !r.runner.busy());
+  });
+});
+
 describe("agent routes", () => {
   it("GET /api/agent gives the status and /api/agent/detect the agents found", async () => {
     const r = await rig({ agents: [claude(), codex({ installed: false, signedIn: false, path: null })] });
@@ -215,13 +242,15 @@ describe("agent routes", () => {
   it("asked starts false and turns true after any setup, {on:false} included; a refused setup leaves it false", async () => {
     const r = await rig({ agents: [claude({ signedIn: false }), codex()] });
     expect((await r.call("GET", "/api/agent")).json.status.asked).toBe(false);
-    expect(await r.store.read("agent")).toMatchObject({ asked: false });
+    expect((await agentRulesFor(r.store).read()).setUp).toBe(false);
     // A refusal settles nothing: the first Send still asks.
     expect((await r.call("POST", "/api/agent/setup", { on: true, agent: "claude" })).status).toBe(409);
     expect((await r.call("GET", "/api/agent")).json.status.asked).toBe(false);
     const off = await r.call("POST", "/api/agent/setup", { on: false });
     expect(off.json.status).toMatchObject({ on: false, asked: true });
-    expect(await r.store.read("agent")).toMatchObject({ on: false, asked: true });
+    // I1: the answer is kept in the user's own rules file, not in the project.
+    expect((await agentRulesFor(r.store).read()).setUp).toBe(true);
+    expect(await r.store.read("agent")).toMatchObject({ on: false, asked: false });
     // Another project's first setup turning Send to AI on says so too.
     const s = await rig();
     expect((await s.call("POST", "/api/agent/setup", { on: true, agent: "codex" })).json.status).toMatchObject({ on: true, agent: "codex", asked: true });
@@ -381,6 +410,7 @@ describe("the macOS notification when no desk is open (spec §5.4)", () => {
     const fake = fakeAgent(store, () => [claude(), codex()]);
     await fake.scenario({ turns: [[exec("npm test", "t")]] });
     await store.update("agent", (f) => void Object.assign(f, { on: true, agent: "claude" }));
+    await agentRulesFor(store).update((f) => void (f.setUp = true));
     const told: Array<[string, string]> = [];
     const s = await startServer(root, { port: 0, agent: fake.opts, notify: async (title, body) => void told.push([title, body]) });
     servers.push(s);

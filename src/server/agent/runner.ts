@@ -87,6 +87,8 @@ const EXIT_WAIT_MS = 4000;
 const CANCELLED: AcpPermissionOutcome = { outcome: "cancelled" };
 /** Why a send or follow-up is refused once close() has begun. */
 const CLOSING = "Rushes is closing";
+/** I1: Send to AI is on in the project, but the user's own rules file has no answer to the first-Send sheet. */
+export const NOT_SET_UP = "Send to AI is not set up";
 
 /** Each agent by name, as Activity and the notification say it. */
 export const AGENT_NAMES: Readonly<Record<AgentId, string>> = { claude: "Claude Code", codex: "Codex" };
@@ -159,7 +161,7 @@ export class AgentRunner {
   private settings: AgentSettings | null = null;
   /** The user's rules for this project, kept outside it (R10). `rules` is the last read, for the status. */
   private readonly rulesFile: AgentRulesFile;
-  private rules: AgentRules = { permissions: "project-edits", always: [] };
+  private rules: AgentRules = { permissions: "project-edits", always: [], setUp: false };
   private ruleReads = 0;
   private rulesApplied = 0;
   /** agent.json reads started, and the newest one applied (a write counts as one). */
@@ -237,7 +239,8 @@ export class AgentRunner {
       lines: this.lines.slice(),
       error: this.error,
       session: this.settings?.session?.id ?? null,
-      asked: this.settings?.asked ?? false,
+      // I1: from the user's own rules file, never the project's agent.json.
+      asked: this.rules.setUp,
       permissions: this.rules.permissions,
       always: this.rules.always.map((r) => ({ ...r })),
     };
@@ -348,11 +351,14 @@ export class AgentRunner {
   private async accept(job: TurnJob, sinceGen: number | null): Promise<Accepted | null> {
     while (this.stopping) await this.stopping;
     if (this.closed) return { why: CLOSING };
-    const settings = await this.loadSettings();
+    const [settings, rules] = await Promise.all([this.loadSettings(), this.loadRules()]);
     if (!settings.on) return { why: "Send to AI is off" };
     const agent = settings.agent;
     const park = (why: string, name: string): Accepted =>
       job.kind === "followUp" ? { why, park: { name, batch: job.batchId } } : { why };
+    // I1: the switch in the project's agent.json is not the user's consent; their own rules file is. Without it nothing
+    // is handed over and nothing starts: the desk opens the first-Send sheet, or the copy dialog says why, with Set up.
+    if (!rules.setUp) return park(NOT_SET_UP, agent ? NAMES[agent] : "your agent");
     if (job.kind === "followUp" && (!agent || settings.session?.agent !== agent)) {
       return park("No conversation to carry on", agent ? NAMES[agent] : "your agent");
     }
@@ -888,7 +894,7 @@ export class AgentRunner {
   }
 
   private applySettings(next: AgentSettings, seq = ++this.reads): void {
-    const key = (s: AgentSettings | null) => JSON.stringify(s ? [s.on, s.agent, s.session?.id ?? null, s.asked] : null);
+    const key = (s: AgentSettings | null) => JSON.stringify(s ? [s.on, s.agent, s.session?.id ?? null] : null);
     const changed = key(next) !== key(this.settings);
     this.settings = next;
     this.applied = seq;

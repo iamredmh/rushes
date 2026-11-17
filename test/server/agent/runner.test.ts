@@ -12,6 +12,7 @@ import { createBatch } from "../../../src/core/batches.js";
 import { addNote, addUserReply, applyReply } from "../../../src/core/notes.js";
 import { noteState, recallNote } from "../../../src/core/noteState.js";
 import { RushesError } from "../../../src/core/errors.js";
+import { agentRulesFor } from "../../../src/server/agent/rules.js";
 import type { AgentSettings, Batch } from "../../../src/core/schema.js";
 import type { Store } from "../../../src/core/store.js";
 
@@ -56,7 +57,7 @@ interface Rig {
   settings: (over: Partial<AgentSettings>) => Promise<void>;
 }
 
-async function rig(scenario: object, opts: { agents?: AgentInfo[]; settings?: Partial<AgentSettings>; runner?: RunnerOptions } = {}): Promise<Rig> {
+async function rig(scenario: object, opts: { agents?: AgentInfo[]; settings?: Partial<AgentSettings>; runner?: RunnerOptions; consent?: boolean } = {}): Promise<Rig> {
   const { root, store } = await tmpProject();
   const scenarioPath = join(store.dir, "scenario.json");
   const logPath = join(store.dir, "fake-log.jsonl");
@@ -66,6 +67,8 @@ async function rig(scenario: object, opts: { agents?: AgentInfo[]; settings?: Pa
     await store.update("agent", (f) => Object.assign(f, over));
   };
   await settings({ on: true, agent: "claude", ...opts.settings });
+  // I1: the user set Send to AI up (their own rules file says so), unless a test is about a project that only claims it.
+  if (opts.consent !== false) await agentRulesFor(store).update((f) => void (f.setUp = true));
   const runner = new AgentRunner(store, {
     detect: async () => opts.agents ?? [claude(), codex],
     spec: (a, r) => ({ command: process.execPath, args: [FAKE], env: { FAKE_ACP_SCENARIO: scenarioPath, FAKE_ACP_LOG: logPath, ...fakeModesEnv(a) }, cwd: r }),
@@ -124,6 +127,21 @@ describe("AgentRunner", () => {
     expect(r.runner.status().batches).toEqual([]);
     // The notes stay with the batch: the desk copies the prompt instead.
     expect((await notesOf(r.store, b.noteIds)).map(noteState)).toEqual(["sent"]);
+  });
+
+  it("a project's agent.json saying Send to AI is on hands nothing over until the user's own file says it was set up (I1)", async () => {
+    const r = await rig({ turns: [[{ stop: "end_turn" }]] }, { settings: { on: true, agent: "claude", asked: true }, consent: false });
+    expect(r.runner.status()).toMatchObject({ on: true, agent: "claude", asked: false });
+    const b = await r.batch("Move the title");
+    expect(await r.runner.send(b)).toEqual({ handedTo: null, why: "Send to AI is not set up" });
+    expect(started).toHaveLength(0);
+    expect(r.log()).toEqual([]);
+    expect(r.runner.busy()).toBe(false);
+    // The user's own file says it was set up: the next Send goes.
+    await agentRulesFor(r.store).update((f) => void (f.setUp = true));
+    expect(await r.runner.send(await r.batch("Again"))).toEqual({ handedTo: "claude" });
+    expect(r.runner.status().asked).toBe(true);
+    await r.phase("finished");
   });
 
   it("send while the agent is not signed in says so and starts nothing", async () => {

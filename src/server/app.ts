@@ -1606,21 +1606,24 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
       if (!info.signedIn) throw new RushesError(`${name} is not signed in. Choose Sign in in Terminal, then try again.`, 409, "agent_not_signed_in", { agent: id });
       checked = id;
     }
+    // R10 and I1: what the agent may do, and the user's answer to the first-Send sheet (any setup, Copy a prompt
+    // ({on:false}) included), are kept in the user's own rules file, outside the project, where neither the agent nor a
+    // project folder from someone else can set them. Written first, so a Send never sees the switch on without it.
+    const permissions = b.permissions;
+    await agentRulesFor(store).update((f) => {
+      f.setUp = true;
+      if (permissions !== undefined) f.permissions = permissions;
+    });
     await store.update("agent", (f) => {
       // Turned on only for the agent that was checked: one changed meanwhile (another tab) is refused.
       if (b.on && (b.agent ?? f.agent) !== checked) throw new RushesError("The agent changed. Try again.", 409, "agent_changed");
       f.on = b.on;
-      // Any setup answers the first-Send sheet, Copy a prompt ({on:false}) included.
-      f.asked = true;
       // Another agent can't continue this one's conversation.
       if (b.agent !== undefined && b.agent !== f.agent) {
         f.agent = b.agent;
         f.session = null;
       }
     });
-    // R10: kept in the user's own rules file, outside the project, where the agent can't change it.
-    const permissions = b.permissions;
-    if (permissions !== undefined) await agentRulesFor(store).update((f) => void (f.permissions = permissions));
     return c.json(await agentStatusOf());
   });
   // Start a fresh conversation: the next Send starts a new session.
