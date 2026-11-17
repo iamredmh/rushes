@@ -293,9 +293,17 @@ Hovering a locked tab shows a short tooltip, e.g. "Locked: ask your agent for mu
 
 Send to AI hands your notes to an agent on this Mac, so there's no prompt to paste. It starts your own Claude Code or Codex in the project folder, signed in your way (a Claude or ChatGPT plan, or an API key), so every run is billed to that account, just as if you had typed the prompt yourself. The first run fetches a small adapter for that agent with `npx`.
 
-Rushes never sees a password, token or key, and never signs you in. When an agent isn't signed in, **Sign in in Terminal** opens Terminal with that agent's own login command (`claude auth login` or `codex login`) for you to run there.
+Rushes never sees a password or key, and never signs you in. When an agent isn't signed in, **Sign in in Terminal** opens Terminal with that agent's own login command (`claude auth login` or `codex login`) for you to run there.
 
-**The switch.** Above **Send**, a row reads **Send to AI** with the agent's name and a switch. On, Send files the batch as always and hands it to the agent: what it is doing shows on each note and in Activity, its questions arrive as replies on the note, and your answer goes back to it. Off, Send copies the prompt, as before. When the agent can't start or isn't signed in, Send copies the prompt and says why. The agent's name opens a menu to choose another agent, start a fresh conversation, change what it may do without asking, and see the "Always" rules. **Stop** ends a run and gives its unfinished notes back.
+**The switch.** Above **Send**, a row reads **Send to AI** with the agent's name and a switch. On, Send files the batch as always and hands it to the agent: what it is doing shows on each note and in Activity, its questions arrive as replies on the note, and your answer goes back to it. Off, Send copies the prompt, as before. Under Send, one line says what the agent may do: "Edits files in this project, asks before commands" or "Asks before everything", and "next Send continues the conversation" when there is one to continue.
+
+The first time you press Send, a sheet asks "Who should get these notes?" (an agent, or copy a prompt as before), then "What may <agent> do without asking?".
+
+If the agent fails to start, the notes go back in to do and nothing is copied. If Send to AI is not set up, not signed in or not installed, Send opens the copy dialog with the prompt and says why.
+
+The agent's name opens a menu to choose another agent, **Start a fresh conversation**, change what it may do without asking, and see the "Always" rules. **Stop** ends a run and gives its unfinished notes back.
+
+**New cuts.** When the agent adds a version, a toast offers it, and the **Cut** menu shows a dot until you look. The agent only adds a version when the picture or sound changed, and it is asked to wait for its commands to finish before it replies, so a run does not leave work going in the background.
 
 **Permissions.** There are two levels:
 
@@ -310,7 +318,7 @@ Rushes sees only what the agent asks it. The agent's own permission settings, su
 
 With Codex, commands that write files or reach the network ask, but commands that only read, such as searches and listings, run without asking.
 
-**"Always" rules.** **Always** keeps a rule for this project, so the same request runs without asking next time. The agent's menu lists the rules, and you can remove any of them. Always rules are kept in your user settings, outside the project, so the agent cannot change them. The permission level and the rules are in `~/.config/rushes/agent-rules/` (or under `$XDG_CONFIG_HOME`), one file per project. `.rushes/agent.json` keeps only the switch, the agent and the conversation to continue. Nothing secret.
+**"Always" rules.** **Always** keeps a rule for this project, so the same request runs without asking next time. The button names the rule, such as "Always for npx hyperframes here". The agent's menu lists the rules, and you can remove any of them. Always rules are kept in your user settings, outside the project, so the agent cannot change them. The permission level and the rules are in `~/.config/rushes/agent-rules/` (or under `$XDG_CONFIG_HOME`), one file per project. `.rushes/agent.json` keeps only the switch, the agent and the conversation to continue. Nothing secret.
 
 "Always" trusts one program and subcommand, such as `npx hyperframes`, `npm install` or `git commit`. Later commands that start with the same two words run without asking, whatever their other arguments. That trust covers whatever that program and subcommand can be told to run:
 
