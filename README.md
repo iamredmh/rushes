@@ -304,7 +304,7 @@ Rushes never sees a password, token or key, and never signs you in. When an agen
 
 Some folders and files in the project always ask, at either level and whatever "Always" rules you keep, even to read them: they hold settings, hooks or tokens. They are `.rushes/`, `.git/`, `.claude/`, `.codex/`, `.mcp.json`, `.vscode/` and `.idea/`. Moving or deleting the project folder itself always asks too.
 
-An ask shows what the agent wants to do and the exact command, with **Allow once**, **Always** and **No**. It waits until you answer. It never turns into a yes by itself.
+An ask shows what the agent wants to do and the exact command, with **Allow once**, **Always** and **No**. It waits until you answer. It never turns into a yes by itself. When the agent asks, or ends a run with a question, and no Rushes tab is open, your Mac shows a notification saying the agent is waiting in this project.
 
 Rushes sees only what the agent asks it. The agent's own permission settings, such as allow rules in Claude Code's settings, can still approve actions without asking, and Rushes never sees those.
 
