@@ -25,6 +25,19 @@ describe("activityLine", () => {
     expect(activityLine({ sessionUpdate: "tool_call", title: "Ran the render" }, root)).toBe("Ran the render");
   });
 
+  it("never trims a sibling folder that shares the root's name as a prefix (M7)", () => {
+    const line = (title: string) => activityLine({ sessionUpdate: "tool_call", title }, root);
+    expect(line(`Opened ${root} 2/a.mp4`)).toBe(`Opened ${root} 2/a.mp4`);
+    expect(line(`Opened ${root}2/a.mp4`)).toBe(`Opened ${root}2/a.mp4`);
+    expect(line(`Opened ${root}-old/a.mp4`)).toBe(`Opened ${root}-old/a.mp4`);
+    expect(line(`Copied ${root}/a.mp4 to ${root} 2/a.mp4`)).toBe(`Copied a.mp4 to ${root} 2/a.mp4`);
+    // A path that only contains the root further in is not under it.
+    expect(line(`Opened /Volumes/x${root}/a.mp4`)).toBe(`Opened /Volumes/x${root}/a.mp4`);
+    // The root itself, at the end or before punctuation, is ".".
+    expect(line(`Listed ${root}`)).toBe("Listed .");
+    expect(line(`Listed "${root}", then stopped`)).toBe(`Listed ".", then stopped`);
+  });
+
   it("a tool call title is one line and kept short", () => {
     expect(activityLine({ sessionUpdate: "tool_call", title: "Ran\nnpm test" }, root)).toBe("Ran npm test");
     const long = activityLine({ sessionUpdate: "tool_call", title: "x".repeat(500) }, root)!;

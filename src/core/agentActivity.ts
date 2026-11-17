@@ -10,11 +10,18 @@ export const AGENT_LINES =
 /** An Activity line is one line of at most this many characters. */
 export const ACTIVITY_LINE_MAX = 200;
 
-/** `text` with the project folder cut from every path in it: "<root>/a/b" reads "a/b", the folder itself ".". */
+/**
+ * `text` with the project folder cut from every path in it: "<root>/a/b" reads "a/b", the folder itself ".". Only
+ * the root followed by a slash, or the root alone (at the end, or before a line break, quote, bracket or punctuation),
+ * and only where a path starts (M7): "<root> 2/a" and "<root>-old/a" are other folders and stay as they are. A root
+ * followed by a space may be such a folder, so it is left whole.
+ */
 function withoutRoot(text: string, root: string): string {
   const base = root.replace(/[\\/]+$/, "");
   if (!base) return text;
-  return text.split(base + "/").join("").split(base).join(".");
+  const escaped = base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const at = new RegExp(`(?<![\\w./-])${escaped}(?:/|(?=$|[\\r\\n"'\`),;:\\]]))`, "g");
+  return text.replace(at, (m) => (m.endsWith("/") && m.length > base.length ? "" : "."));
 }
 
 /**
