@@ -3,7 +3,7 @@
 // Every change goes to the server, and the status it answers is folded in at once (the SSE event follows).
 import type { MutableRef } from "preact/hooks";
 import { useEffect, useRef, useState } from "preact/hooks";
-import { menuAgents, menuRowCount, rowText } from "../../agent.js";
+import { focusAfterRemove, menuAgents, menuRowCount, rowText } from "../../agent.js";
 import { api, ApiError } from "../../api.js";
 import type { AgentId, AgentInfo, AgentRules, AgentStatus, AlwaysRule } from "../../types.js";
 import { Icon } from "../Icon.js";
@@ -88,7 +88,17 @@ export function AgentRow({ status, onSetUp, menu: opener, onStatus, toast }: Age
   };
   // A setting: the menu stays open, ticked where it is.
   const permissions = (p: AgentRules["permissions"]) => void setup({ on: status.on, permissions: p }, status.agent);
-  const remove = (rule: AlwaysRule) => void call(() => api.del("/api/agent/always", rule));
+  // The Remove pressed goes with its rule: focus moves to a row still there, so the menu's keys keep working.
+  const remove = async (rule: AlwaysRule) => {
+    const at = status.always.findIndex((r) => r.kind === rule.kind && r.command === rule.command);
+    const to = focusAfterRemove(status, agents, Math.max(0, at));
+    try {
+      onStatus((await api.del<{ status: AgentStatus }>("/api/agent/always", rule)).status);
+      menu.focus(to);
+    } catch (e) {
+      toast((e as Error).message);
+    }
+  };
 
   const text = rowText(status);
   return (
@@ -115,7 +125,7 @@ export function AgentRow({ status, onSetUp, menu: opener, onStatus, toast }: Age
             onSignIn={signIn}
             onFresh={() => void fresh()}
             onPermissions={permissions}
-            onRemove={remove}
+            onRemove={(r) => void remove(r)}
           />
         )}
       </span>

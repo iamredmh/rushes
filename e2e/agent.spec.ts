@@ -191,21 +191,21 @@ function inside(inner: { x: number; y: number; width: number; height: number }, 
 const overlap = (a: { x: number; y: number; width: number; height: number }, b: { x: number; y: number; width: number; height: number }): boolean =>
   a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
 
-/** The row, Send and the who-line are on screen, inside the foot, one above the other with no overlap; nothing spills. */
+/** The row, Send (while something waits) and the who-line are on screen, inside the foot, one above the other with no
+ *  overlap; nothing spills. */
 async function footFits(page: Page): Promise<void> {
   const f = (await foot(page).boundingBox())!;
-  const boxes = [(await row(page).boundingBox())!, (await sendBtn(page).boundingBox())!, (await who(page).boundingBox())!];
+  const parts = [row(page), ...((await sendBtn(page).count()) ? [sendBtn(page)] : []), who(page)];
+  const boxes = [];
+  for (const p of parts) boxes.push((await p.boundingBox())!);
   for (const b of boxes) {
     expect(b.width).toBeGreaterThan(40);
     expect(b.height).toBeGreaterThan(8);
     inside(b, f);
   }
-  expect(overlap(boxes[0], boxes[1])).toBe(false);
-  expect(overlap(boxes[1], boxes[2])).toBe(false);
-  expect(overlap(boxes[0], boxes[2])).toBe(false);
-  // Row above Send above the who-line.
-  expect(boxes[0].y + boxes[0].height).toBeLessThanOrEqual(boxes[1].y + 0.5);
-  expect(boxes[1].y + boxes[1].height).toBeLessThanOrEqual(boxes[2].y + 0.5);
+  // Each above the next, none overlapping.
+  for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) expect(overlap(boxes[i], boxes[j])).toBe(false);
+  for (let i = 0; i + 1 < boxes.length; i++) expect(boxes[i].y + boxes[i].height).toBeLessThanOrEqual(boxes[i + 1].y + 0.5);
   inside(f, (await panel(page).boundingBox())!);
   // No word cut off or pushed out of its box.
   expect(await foot(page).evaluate((el) => [el, ...el.querySelectorAll("*")].filter((e) => e.scrollWidth > e.clientWidth + 1 && getComputedStyle(e).overflow !== "visible").map((e) => e.className))).toEqual([]);
@@ -359,4 +359,88 @@ test("Start a fresh conversation shows once there is one, and drops it", async (
   await fresh.click();
   await expect(who(page)).toHaveText("Edits files in this project, asks before commands");
   expect((await rushes.api("GET", "/api/agent")).status.session).toBeNull();
+});
+
+test("with nothing waiting the foot keeps the row: Set up, then off and on again", async ({ page, startWithAgent }) => {
+  const rushes = await startWithAgent({ turns: [] });
+  await rushes.addCut("first cut");
+  await page.goto(rushes.url);
+  await videoReady(page);
+  // No notes: no Send, but the way in is there.
+  await expect(sendBtn(page)).toHaveCount(0);
+  const setUp = row(page).getByRole("button", { name: "Set up Send to AI" });
+  await expect(setUp).toBeVisible();
+  await expect(who(page)).toHaveText("Copies a prompt for your own chat");
+  await footFits(page);
+  await shootFoot(page, "empty-setup-1440");
+  await setUp.click();
+  await agentMenu(page).getByRole("menuitemradio", { name: /Claude Code/ }).click();
+  await expect(toggle(page)).toHaveAttribute("aria-checked", "true");
+  // Off with nothing waiting: the row stays where it was, so the switch can turn it on again.
+  const before = (await toggle(page).boundingBox())!;
+  await toggle(page).click();
+  await expect(toggle(page)).toHaveAttribute("aria-checked", "false");
+  await expect(toggle(page)).toBeVisible();
+  await expect(who(page)).toHaveText("Copies a prompt for your own chat");
+  const after = (await toggle(page).boundingBox())!;
+  expect(Math.abs(after.x - before.x) + Math.abs(after.y - before.y)).toBeLessThanOrEqual(1);
+  await expect(sendBtn(page)).toHaveCount(0);
+  await footFits(page);
+  await shootFoot(page, "empty-off-1440");
+  await toggle(page).click();
+  await expect(toggle(page)).toHaveAttribute("aria-checked", "true");
+  await expect(who(page)).toHaveText("Edits files in this project, asks before commands");
+  expect((await rushes.api("GET", "/api/agent")).status.on).toBe(true);
+  await footFits(page);
+  await shootFoot(page, "empty-on-1440");
+  await page.setViewportSize({ width: 900, height: 700 });
+  await page.getByRole("button", { name: "Show the notes panel · \\" }).click();
+  await expect(row(page)).toBeVisible();
+  await footFits(page);
+  await shootFoot(page, "empty-on-900");
+  await toggle(page).click();
+  await expect(toggle(page)).toHaveAttribute("aria-checked", "false");
+  await footFits(page);
+  await shootFoot(page, "empty-off-900");
+});
+
+test("Remove by keyboard keeps focus in the menu", async ({ page, startWithAgent }) => {
+  const rushes = await startWithAgent({ turns: [] });
+  const rules = rulesPath(rushes.root, rushes.configDir);
+  await mkdir(dirname(rules), { recursive: true });
+  await writeFile(rules, JSON.stringify({ permissions: "project-edits", always: [{ kind: "execute", command: "npx hyperframes" }, { kind: "fetch", command: null }] }));
+  await withNote(rushes);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  const name = row(page).getByRole("button", { name: "Send to AI · Claude Code" });
+  await name.focus();
+  await page.keyboard.press("Enter");
+  const menu = agentMenu(page);
+  await expect(menu).toBeVisible();
+  /** The focused element's role and name, when it is a row of the agent menu; null otherwise. */
+  const focused = () =>
+    page.evaluate(() => {
+      const el = document.activeElement;
+      if (!el || !el.closest('[role="menu"][aria-label="Send to AI"]')) return null;
+      return `${el.getAttribute("role")}: ${el.getAttribute("aria-label") ?? el.textContent}`;
+    });
+  // The last row is the last rule's Remove.
+  await page.keyboard.press("End");
+  await expect.poll(focused).toBe("menuitem: Remove Always for web requests here");
+  await page.keyboard.press("Enter");
+  await expect(menu.getByText("Always for web requests here", { exact: true })).toHaveCount(0);
+  // Focus goes to the rule before it, and the arrows still move it.
+  await expect.poll(focused).toBe("menuitem: Remove Always for npx hyperframes here");
+  await page.keyboard.press("ArrowUp");
+  await expect.poll(focused).toBe("menuitemradio: Ask me for everything");
+  await page.keyboard.press("ArrowDown");
+  await expect.poll(focused).toBe("menuitem: Remove Always for npx hyperframes here");
+  // The last rule gone, focus goes to the menu's first row.
+  await page.keyboard.press("Enter");
+  await expect(menu.getByText("No Always rules yet", { exact: true })).toBeVisible();
+  await expect.poll(focused).toMatch(/^menuitemradio: .*Claude Code/);
+  await page.keyboard.press("ArrowDown");
+  await expect.poll(focused).toMatch(/^menuitemradio: .*Codex/);
+  await expect(menu).toBeVisible();
+  await shootFoot(page, "menu-keyboard-remove-1440");
 });

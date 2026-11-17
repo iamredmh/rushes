@@ -160,8 +160,8 @@ export function NotesPanel(props: NotesPanelProps) {
   }, [desk?.reveal, desk?.shown]);
   if (!desk) return <Notes {...props} />;
   const { log, activity, send, shown, narrow, agent } = desk;
-  // Send shows while something waits. With Send to AI on, the foot stays for its row (the menu, the switch) when nothing
-  // does; off, with nothing waiting, the panel is as it was.
+  // Send shows while something waits. The Send to AI row and its who-line stay whenever the desk knows the agent's
+  // status, so the switch never vanishes under the pointer and Set up is there before the first note.
   const sendShown = send.count > 0 || !!send.always;
   const tab = log.open ? "activity" : "notes";
   const todo = props.notes.filter((n) => n.status === "todo").length;
@@ -266,7 +266,7 @@ export function NotesPanel(props: NotesPanelProps) {
           <ActivityList {...activity} log={log} onEscape={() => activityTab.current?.focus()} />
         </div>
       )}
-      {(sendShown || agent?.status.on) && (
+      {(sendShown || agent) && (
         <div class={`nfoot${agent ? " agentfoot" : ""}`}>
           {agent && <AgentRow {...agent} />}
           {sendShown && (

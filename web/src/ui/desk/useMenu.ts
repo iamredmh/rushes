@@ -18,6 +18,8 @@ export interface Menu {
   row(i: number): (el: HTMLElement | null) => void;
   /** Goes on the menu's own element. */
   onKeyDown(e: KeyboardEvent): void;
+  /** Makes row `i` active and gives it focus once the menu has drawn (a row just removed and redrawn, say). */
+  focus(i: number): void;
   button: RefObject<HTMLButtonElement>;
   wrap: RefObject<HTMLSpanElement>;
 }
@@ -33,6 +35,7 @@ export function useMenu(count: number, find?: (text: string) => number | null): 
   const wrap = useRef<HTMLSpanElement>(null);
   const rows = useRef<(HTMLElement | null)[]>([]);
   const typed = useRef({ text: "", at: -Infinity });
+  const wanted = useRef<number | null>(null);
 
   const close = (focusButton: boolean) => {
     setOpen(false);
@@ -47,6 +50,13 @@ export function useMenu(count: number, find?: (text: string) => number | null): 
   useLayoutEffect(() => {
     if (open) rows.current[active]?.focus();
   }, [open, active]);
+  // After every draw: a row asked for by focus(), once it is there.
+  useLayoutEffect(() => {
+    const i = wanted.current;
+    if (i === null || !open) return;
+    wanted.current = null;
+    rows.current[i]?.focus();
+  });
 
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.key === "Tab") return close(false);
@@ -95,6 +105,10 @@ export function useMenu(count: number, find?: (text: string) => number | null): 
       rows.current[i] = el;
     },
     onKeyDown,
+    focus: (i) => {
+      wanted.current = Math.max(0, Math.min(count - 1, i));
+      setActive(wanted.current);
+    },
     button,
     wrap,
   };

@@ -147,3 +147,15 @@ export const ruleRows = (s: AgentStatus): { rule: AlwaysRule; label: string }[] 
 export function menuRowCount(s: AgentStatus, agents: readonly MenuAgent[]): number {
   return agents.reduce((n, a) => n + (a.signedIn ? 1 : 2), 0) + (s.session ? 1 : 0) + PERMISSION_CHOICES.length + s.always.length;
 }
+
+/**
+ * The row focus goes to once rule `index` of `s` (the status before) is removed, counted in the menu after it: the next
+ * rule's Remove, else the previous one's, else the menu's first row. The Removes are the menu's last rows.
+ */
+export function focusAfterRemove(s: AgentStatus, agents: readonly MenuAgent[], index: number): number {
+  const first = menuRowCount(s, agents) - s.always.length;
+  const left = s.always.length - 1;
+  if (index < left) return first + index;
+  if (left > 0) return first + left - 1;
+  return 0;
+}

@@ -2,7 +2,7 @@
 // the live strip and what the desk does after Send. Every string is the plan's own.
 import { describe, expect, it } from "vitest";
 import {
-  MENU_WORDS, PERMISSION_CHOICES, afterSend, agentName, canStop, chipShows, chipText, chipTone, footLine, liveLines, menuAgents, menuRowCount, noteAgentBadge, rowText, ruleRows, whoLine,
+  MENU_WORDS, PERMISSION_CHOICES, afterSend, focusAfterRemove, agentName, canStop, chipShows, chipText, chipTone, footLine, liveLines, menuAgents, menuRowCount, noteAgentBadge, rowText, ruleRows, whoLine,
   type NoteLite,
 } from "../../web/src/agent.js";
 import type { AgentInfo, AgentStatus } from "../../web/src/types.js";
@@ -266,6 +266,19 @@ describe("the Send to AI row and the agent menu (task 3)", () => {
     expect(menuRowCount(status(), agents)).toBe(5);
     // A conversation to start fresh from, and a rule's Remove.
     expect(menuRowCount(status({ session: "s1", always: [{ kind: "execute", command: "npx hyperframes" }] }), agents)).toBe(7);
+  });
+
+  it("focusAfterRemove: the next rule's Remove, else the previous one's, else the menu's first row", () => {
+    const agents = menuAgents([info("claude"), info("codex")], status());
+    const r = (command: string) => ({ kind: "execute", command });
+    // Two agents and two permissions come first: the Removes start at row 4.
+    const three = status({ always: [r("a b"), r("c d"), r("e f")] });
+    expect(focusAfterRemove(three, agents, 0)).toBe(4);
+    expect(focusAfterRemove(three, agents, 1)).toBe(5);
+    expect(focusAfterRemove(three, agents, 2)).toBe(5);
+    expect(focusAfterRemove(status({ always: [r("a b")] }), agents, 0)).toBe(0);
+    // A conversation to start fresh from moves the Removes down a row.
+    expect(focusAfterRemove(status({ session: "s1", always: [r("a b"), r("c d")] }), agents, 1)).toBe(5);
   });
 
   it("the menu's fixed words", () => {
