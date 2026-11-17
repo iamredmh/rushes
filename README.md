@@ -308,6 +308,8 @@ An ask shows what the agent wants to do and the exact command, with **Allow once
 
 Rushes sees only what the agent asks it. The agent's own permission settings, such as allow rules in Claude Code's settings, can still approve actions without asking, and Rushes never sees those.
 
+With Codex, commands that write files or reach the network ask, but commands that only read, such as searches and listings, run without asking.
+
 **"Always" rules.** **Always** keeps a rule for this project, so the same request runs without asking next time. The agent's menu lists the rules, and you can remove any of them. Always rules are kept in your user settings, outside the project, so the agent cannot change them. The permission level and the rules are in `~/.config/rushes/agent-rules/` (or under `$XDG_CONFIG_HOME`), one file per project. `.rushes/agent.json` keeps only the switch, the agent and the conversation to continue. Nothing secret.
 
 "Always" trusts one program and subcommand, such as `npx hyperframes`, `npm install` or `git commit`. Later commands that start with the same two words run without asking, whatever their other arguments. That trust covers whatever that program and subcommand can be told to run:
