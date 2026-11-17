@@ -7,7 +7,7 @@ import {
 } from "../lib.js";
 import { onLabel } from "../../../src/core/notes.js";
 import { deskPlace, deskView, noteTarget, takeCount, takeGroups, unsentCount, unsentEdits, viewForKey, type DeskView } from "../desk.js";
-import type { Batch, BriefView, FoundCounts, FoundKind, Note, SendHandOver, Stage, StoryboardView, Video } from "../types.js";
+import type { AgentStatus, Batch, BriefView, FoundCounts, FoundKind, Note, SendHandOver, Stage, StoryboardView, Video } from "../types.js";
 import { useRushes } from "../useRushes.js";
 import { Assets, type FoundRequest } from "./Assets.js";
 import { Brief } from "./Brief.js";
@@ -31,8 +31,7 @@ import { ReviewTabs, type ReviewTabRow } from "./desk/ReviewTabs.js";
 import { StatusBar } from "./desk/StatusBar.js";
 import { TopBar } from "./desk/TopBar.js";
 import { AgentChip } from "./agent/AgentChip.js";
-import { FirstSend, WhyLine } from "./agent/FirstSend.js";
-import { actOnSend } from "./agent/sendFollow.js";
+import { actOnSend, askNotificationsOnce, useFirstSend, WhyLine } from "./agent/FirstSend.js";
 import { Workspaces } from "./desk/Workspaces.js";
 import type { ReviewClock } from "./desk/frame.js";
 import type { MixView } from "./desk/useMix.js";
@@ -122,7 +121,6 @@ export function App() {
   // §26: a toast may carry one action (Undo after shelving a film).
   const [toastAction, setToastAction] = useState<{ label: string; run(): void } | null>(null);
   const [sent, setSent] = useState<Sent | null>(null);
-  const [firstSend, setFirstSend] = useState(false);
   // §24: the planning page you were last on, which key 1 returns to (Script, the old key 1, until you open Brief).
   const [planLast, setPlanLast] = useState<PlanPage>("script");
   // §27, 5.3: the Review tab you were last on, which the Review workspace opens on.
@@ -188,6 +186,7 @@ export function App() {
       setToastAction(null);
     }, ms);
   };
+  const firstSend = useFirstSend(agent, noteAgent, toast, () => setSent((s) => s && { ...s, why: null }));
   // §20.5: a request to open Assets › Found (the header chip), and what the chip last said while Found was open.
   const [foundRequest, setFoundRequest] = useState<FoundRequest>({ n: 0, pending: false });
   const [foundSeen, setFoundSeen] = useState<string | null>(null);
@@ -475,11 +474,11 @@ export function App() {
   // Send sends the whole project from whichever tab it is pressed on: every tab's open notes
   // on every film in play and the changed script lines (one batch), plus what changed in the brief and
   // the storyboard. Those two have no batch: their files are the record, so they are only lines to paste.
-  // §28: the first Send asks who gets the notes (FirstSend), which then sends with the status its setup answered.
-  const send = async (asked = agent?.asked !== false, status = agent) => {
+  const send = async ({ asked = agent?.asked !== false, status = agent }: { asked?: boolean; status?: AgentStatus | null } = {}) => {
     if (!state || !stage) return;
     setKeysOpen(false);
-    if (!asked && unsent > 0) return setFirstSend(true);
+    if (!asked && unsent > 0) return firstSend.open();
+    if (status?.on) askNotificationsOnce();
     // The Brief or Storyboard page waits for what you just typed to be saved, and is read as the server then has it.
     const settled = stage === "brief" || stage === "storyboard" ? await planSettle.current?.() : undefined;
     const brief = (stage === "brief" ? (settled as BriefView | undefined) : undefined) ?? state.brief;
@@ -631,7 +630,7 @@ export function App() {
     // On its own page Send always carries the brief's or storyboard's line (send()), so it shows there whenever that file exists.
     send: { count: unsent, always: (stage === "brief" && state.brief.exists) || (stage === "storyboard" && state.storyboard.exists), onSend: () => void send() },
     // §28: Set up Send to AI opens the first-Send sheet.
-    agent: agent && { status: agent, onSetUp: () => setFirstSend(true), menu: agentMenu, onStatus: noteAgent, toast },
+    agent: agent && { status: agent, onSetUp: firstSend.open, menu: agentMenu, onStatus: noteAgent, toast },
     shown: panel.shown,
     narrow: panel.narrow,
     setShown: panel.setShown,
@@ -766,17 +765,15 @@ export function App() {
         }
       />
 
-      {firstSend && agent && (
-        <FirstSend status={agent} waiting={unsent > 0} onStatus={noteAgent} toast={toast} onClose={(done) => { setFirstSend(false); if (done) setSent((s) => s && { ...s, why: null }); }} onSend={(s) => void send(true, s)} />
-      )}
-      {sent && !firstSend && (
+      {firstSend.sheet(unsent > 0, (s) => void send({ asked: true, status: s }))}
+      {sent && !firstSend.shown && (
         <div class="pop" role="dialog" aria-label="Sent to agent">
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
             <h3>{sent.title ?? `Batch ${sent.id} is ready`}</h3>
             <span class="sp" />
             <button class="btn ghost ib sm" aria-label="Close" data-tip="Close" onClick={() => setSent(null)}><Icon name="x" /></button>
           </div>
-          {sent.why && <WhyLine why={sent.why} onSetUp={() => setFirstSend(true)} />}
+          {sent.why && <WhyLine why={sent.why} onSetUp={firstSend.open} />}
           <pre>{sent.prompt}</pre>
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
             <button class="btn primary" onClick={() => void copy()}><Icon name="copy" />{copied ? "Copied" : "Copy prompt"}</button>

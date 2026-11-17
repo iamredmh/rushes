@@ -517,9 +517,33 @@ async function watchClipboard(page: Page): Promise<() => Promise<string[]>> {
   return () => page.evaluate(() => (window as unknown as { __copied: string[] }).__copied);
 }
 
+/**
+ * Stands in for the browser's notifications, "default" (not yet answered) until asked. Each request records the event
+ * being handled when it was made (window.event): "click" or "keydown" inside the press itself, null after an await,
+ * when the gesture is gone and Safari and Firefox would ignore it.
+ */
+async function watchNotifications(page: Page): Promise<() => Promise<(string | null)[]>> {
+  await page.addInitScript(() => {
+    const asked: (string | null)[] = [];
+    (window as unknown as { __notifyAsked: (string | null)[] }).__notifyAsked = asked;
+    let permission = "default";
+    const Fake = {
+      get permission() { return permission; },
+      requestPermission() {
+        asked.push(window.event ? window.event.type : null);
+        permission = "denied";
+        return Promise.resolve("denied");
+      },
+    };
+    Object.defineProperty(window, "Notification", { value: Fake, configurable: true, writable: true });
+  });
+  return () => page.evaluate(() => (window as unknown as { __notifyAsked: (string | null)[] }).__notifyAsked);
+}
+
 test("off: Send opens the old dialog", async ({ page, startWithAgent }) => {
   const rushes = await startWithAgent({ turns: [] });
   await withNote(rushes, false);
+  const notifyAsked = await watchNotifications(page);
   await page.goto(rushes.url);
   await videoReady(page);
   await sendBtn(page).click();
@@ -555,6 +579,8 @@ test("off: Send opens the old dialog", async ({ page, startWithAgent }) => {
   await sendBtn(page).click();
   await expect(sentPop(page)).toContainText("picture batch b_2");
   await expect(sheet(page)).toHaveCount(0);
+  // Copying a prompt never asks to notify.
+  expect(await notifyAsked()).toEqual([]);
 });
 
 test("first Send to Claude Code", async ({ page, startWithAgent }) => {
@@ -716,4 +742,80 @@ test("the sheet's step 1 fits at 900 px", async ({ page, startWithAgent }) => {
   await expect(page.getByRole("dialog", { name: "What may Claude Code do without asking?" })).toBeVisible();
   await sheetFits(page);
   await shootSheet(page, "sheet-may-claude-900");
+});
+
+test("Send to <A> asks to notify in the key press itself, and saves Ask me for everything", async ({ page, startWithAgent }) => {
+  const rushes = await startWithAgent({ turns: [[{ sleep: 4000 }, { stop: "end_turn" }]] });
+  await withNote(rushes, false);
+  const notifyAsked = await watchNotifications(page);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await sendBtn(page).click();
+  await primary(page, "Next").click();
+  const ask = sheet(page).getByRole("radio", { name: "Ask me for everything" });
+  await ask.check();
+  await expect(ask).toBeChecked();
+  await ask.focus();
+  // Enter on the row confirms, as Send to Claude Code does.
+  await page.keyboard.press("Enter");
+  await expect(sheet(page)).toHaveCount(0);
+  await expect(toastEl(page)).toHaveText(/^(Sent to|Starting) Claude Code$/);
+  // Asked once, while the key press was being handled (before the setup request was awaited).
+  expect(await notifyAsked()).toEqual(["keydown"]);
+  // What was picked is what is kept: the user's own rules file, read back through the status.
+  expect((await rushes.api("GET", "/api/agent")).status).toMatchObject({ on: true, agent: "claude", asked: true, permissions: "ask-all" });
+  await expect(who(page)).toHaveText(/^Asks before everything/);
+});
+
+test("Escape while Send to <A> is on its way doesn't cancel it into a send: the sheet finishes what it started", async ({ page, startWithAgent }) => {
+  const rushes = await startWithAgent({ turns: [[{ sleep: 4000 }, { stop: "end_turn" }]] });
+  await withNote(rushes, false);
+  const notifyAsked = await watchNotifications(page);
+  // Setup's answer is held until the test lets it go.
+  let release!: () => void;
+  const held = new Promise<void>((ok) => (release = ok));
+  await page.route("**/api/agent/setup", async (route) => {
+    await held;
+    await route.continue();
+  });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await sendBtn(page).click();
+  await primary(page, "Next").click();
+  await primary(page, "Send to Claude Code").click();
+  // Asked in the click itself, while setup is still on its way.
+  await expect.poll(notifyAsked).toEqual(["click"]);
+  // On its way: the buttons are off, and Escape neither closes the sheet nor lets the dialog under it go.
+  for (const name of ["Send to Claude Code", "Cancel", "Back"]) await expect(sheet(page).getByRole("button", { name, exact: true })).toBeDisabled();
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  await expect(sheet(page)).toBeVisible();
+  // Nothing has gone to the agent yet.
+  expect(await rushes.api("GET", "/api/batches/latest").catch(() => null)).toBeNull();
+  expect((await readAgentLog(rushes.agentLog)).some((m) => m.method === "session/prompt")).toBe(false);
+  release();
+  await expect(sheet(page)).toHaveCount(0);
+  await expect(toastEl(page)).toHaveText(/^(Sent to|Starting) Claude Code$/);
+  // One batch, sent once.
+  const { batch } = await rushes.api("GET", "/api/batches/latest");
+  expect(batch.id).toBe("b_1");
+  await expect.poll(async () => (await readAgentLog(rushes.agentLog)).filter((m) => m.method === "session/prompt").length, { timeout: 10_000 }).toBe(1);
+  expect(await notifyAsked()).toEqual(["click"]);
+});
+
+test("Send asks to notify in its own click while Send to AI is on, once", async ({ page, startWithAgent }) => {
+  const rushes = await startWithAgent({ turns: [[{ stop: "end_turn" }], [{ stop: "end_turn" }]] });
+  await withNote(rushes);
+  const notifyAsked = await watchNotifications(page);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await sendBtn(page).click();
+  await expect(toastEl(page)).toHaveText(/^(Sent to|Starting) Claude Code$/);
+  expect(await notifyAsked()).toEqual(["click"]);
+  // The browser has been asked: a later Send doesn't ask again.
+  await rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 1, text: "Softer cut." });
+  await expect(sendBtn(page)).toHaveAccessibleName("Send 1", { timeout: 10_000 });
+  await sendBtn(page).click();
+  await expect.poll(async () => (await readAgentLog(rushes.agentLog)).filter((m) => m.method === "session/prompt").length, { timeout: 10_000 }).toBe(2);
+  expect(await notifyAsked()).toEqual(["click"]);
 });

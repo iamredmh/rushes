@@ -6,6 +6,10 @@ import { useLayoutEffect, useRef, useState } from "preact/hooks";
 import { MENU_WORDS, PERMISSION_CHOICES, SHEET_WORDS, mayQuestion, notSignedInWhy, sheetDefault, sheetPrimary, sheetRows, whoNext, type Sheet, type SheetPick } from "../../agent.js";
 import { api, ApiError } from "../../api.js";
 import type { AgentId, AgentInfo, AgentRules, AgentStatus } from "../../types.js";
+import { askNotificationsOnce } from "./sendFollow.js";
+
+// The desk takes everything of Send to AI's first Send from here (one import in App).
+export { actOnSend, askNotificationsOnce } from "./sendFollow.js";
 
 export interface FirstSendProps {
   status: AgentStatus;
@@ -31,14 +35,19 @@ export function FirstSend({ status, waiting, onStatus, toast, onClose, onSend }:
   // Step 1 once detection answers (the rows to pick from are known then).
   const [sheet, setSheet] = useState<Sheet | null>(null);
   const [refused, setRefused] = useState<{ agent: AgentId; message: string } | null>(null);
-  // One setup at a time: a second press while one is on its way does nothing.
+  // One confirm at a time: while one is on its way the buttons are off and Escape waits (busy is read in handlers,
+  // pending drawn). Once the sheet has closed, nothing a late answer brings sends (closed).
   const busy = useRef(false);
+  const [pending, setPending] = useState(false);
+  const closed = useRef(false);
   const box = useRef<HTMLDivElement>(null);
   // Focus goes back where it was (Send, the row, Set up) when the sheet goes.
   const opener = useRef<Element | null>(document.activeElement);
   const rows = sheetRows(detected);
 
   const close = (done: boolean) => {
+    if (closed.current) return;
+    closed.current = true;
     onClose(done);
     const back = opener.current;
     if (back instanceof HTMLElement && back.isConnected) back.focus();
@@ -56,7 +65,8 @@ export function FirstSend({ status, waiting, onStatus, toast, onClose, onSend }:
       if (e.key !== "Escape") return;
       e.preventDefault();
       e.stopPropagation();
-      latestClose.current(false);
+      // Send to <A> was pressed and its setup is on its way: the sheet finishes what it started.
+      if (!busy.current) latestClose.current(false);
     };
     window.addEventListener("keydown", escape, true);
     return () => window.removeEventListener("keydown", escape, true);
@@ -83,7 +93,7 @@ export function FirstSend({ status, waiting, onStatus, toast, onClose, onSend }:
     }
   };
   const finish = (s: AgentStatus | null) => {
-    if (!s) return;
+    if (!s || closed.current) return;
     close(true);
     if (waiting) onSend(s);
   };
@@ -91,7 +101,10 @@ export function FirstSend({ status, waiting, onStatus, toast, onClose, onSend }:
 
   const confirm = async () => {
     if (!sheet || busy.current) return;
+    // Asked in the press itself, before anything is awaited: a browser only shows the request in a user's gesture.
+    if (sheet.step === "may") askNotificationsOnce();
     busy.current = true;
+    setPending(true);
     try {
       if (sheet.step === "may") return finish(await setup({ on: true, agent: sheet.agent, permissions: sheet.permissions }));
       setRefused(null);
@@ -107,6 +120,7 @@ export function FirstSend({ status, waiting, onStatus, toast, onClose, onSend }:
       setRefused({ agent, message: notSignedInWhy(agent) });
     } finally {
       busy.current = false;
+      setPending(false);
     }
   };
   const pick = (p: SheetPick) => {
@@ -170,15 +184,15 @@ export function FirstSend({ status, waiting, onStatus, toast, onClose, onSend }:
       {sheet && (
         <div class="fsacts">
           {sheet.step === "may" && (
-            <button type="button" class="btn ghost" onClick={() => setSheet({ step: "who", pick: sheet.agent })}>
+            <button type="button" class="btn ghost" disabled={pending} onClick={() => setSheet({ step: "who", pick: sheet.agent })}>
               {SHEET_WORDS.back}
             </button>
           )}
           <span class="sp" />
-          <button type="button" class="btn ghost" onClick={() => close(false)}>
+          <button type="button" class="btn ghost" disabled={pending} onClick={() => close(false)}>
             {SHEET_WORDS.cancel}
           </button>
-          <button type="button" class="btn primary" onClick={() => void confirm()}>
+          <button type="button" class="btn primary" disabled={pending} onClick={() => void confirm()}>
             {sheetPrimary(sheet)}
           </button>
         </div>
@@ -197,4 +211,28 @@ export function WhyLine({ why, onSetUp }: { why: string; onSetUp(): void }) {
       </button>
     </p>
   );
+}
+
+/**
+ * The desk's hold on the sheet: whether it is open, opening it (Send, Set up Send to AI, the dialog's Set up), and the
+ * sheet itself for the desk to place. `onAnswered`: setup went through (the copy dialog drops its stale reason).
+ */
+export function useFirstSend(agent: AgentStatus | null, onStatus: (s: AgentStatus) => void, toast: (m: string) => void, onAnswered: () => void) {
+  const [shown, setShown] = useState(false);
+  const open = () => setShown(true);
+  const sheet = (waiting: boolean, send: (status: AgentStatus) => void) =>
+    shown && agent ? (
+      <FirstSend
+        status={agent}
+        waiting={waiting}
+        onStatus={onStatus}
+        toast={toast}
+        onClose={(done) => {
+          setShown(false);
+          if (done) onAnswered();
+        }}
+        onSend={send}
+      />
+    ) : null;
+  return { shown, open, sheet };
 }
