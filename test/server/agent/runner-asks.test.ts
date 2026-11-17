@@ -617,6 +617,24 @@ describe("AgentRunner session mode (R14, R15)", () => {
     for (const m of setups) expect(m.params.configOptions, m.method).toEqual([{ configId: "mode", value: "default" }]);
   });
 
+  it("each session is in its ask mode when its first prompt arrives, after new and after load (round 2, item 5)", async () => {
+    const cases = [
+      ["default", { loadSession: true, modes: CLAUDE_MODES, turns: [] }, { runner: { idleMs: 30 } }],
+      ["read-only", { loadSession: true, turns: [] }, { ...CODEX, runner: { ...CODEX!.runner, idleMs: 30 } }],
+    ] as const;
+    for (const [want, scenario, opts] of cases) {
+      const r = await rig(scenario, opts);
+      await r.runner.send(await r.batch("One"));
+      await r.phase("finished");
+      await r.waitFor("the first adapter to exit", () => started.every((c) => c.hasExited));
+      await r.runner.send(await r.batch("Two"));
+      await r.waitFor("the second prompt", () => prompts(r.log()).length === 2);
+      expect(r.log().filter((m) => m.loaded), want).toHaveLength(1);
+      // The fake logs the session's mode as each prompt arrives: the first after session/new, the second after load.
+      expect(r.log().filter((m) => "promptMode" in m).map((m) => m.promptMode), want).toEqual([want, want]);
+    }
+  });
+
   it("never sends a mode in which the agent approves its own actions, whatever the permission level", async () => {
     for (const permissions of ["project-edits", "ask-all"] as const) {
       const r = await rig({ modes: CLAUDE_MODES, turns: [] }, { rules: { permissions } });

@@ -120,7 +120,23 @@ describe("isOwnRushesTool", () => {
     expect([...calls.keys()]).toEqual(["ok"]);
     const many: McpCalls = new Map();
     for (let i = 0; i < 1000; i++) noteMcpCall(many, codexCall("rushes", "rushes_reply", `i${i}`));
-    expect(many.size).toBeLessThanOrEqual(200);
+    expect(many.size).toBe(200);
     expect(many.has("i999")).toBe(true);
+    // The oldest go first: i800..i999 stay, i799 and before are gone.
+    expect(many.has("i800")).toBe(true);
+    expect(many.has("i799")).toBe(false);
+    expect([...many.keys()][0]).toBe("i800");
+    // A kept id seen again moves to the newest end, so it outlives ids seen once after it.
+    noteMcpCall(many, codexCall("rushes", "rushes_reply", "i800"));
+    noteMcpCall(many, codexCall("rushes", "rushes_reply", "fresh"));
+    expect(many.has("i800")).toBe(true);
+    expect(many.has("i801")).toBe(false);
+  });
+
+  it("an id reused by a call to another server asks", () => {
+    const calls = withCalls(codexCall("rushes", "rushes_reply", "item-1"), codexCall("rushes2", "rushes_reply", "item-1"));
+    expect(isOwnRushesTool("codex", ROOT, codexAsk("item-1"), calls)).toBe(false);
+    const back = withCalls(codexCall("rushes", "rushes_reply", "item-1"), codexCall("rushes", "other", "item-1"));
+    expect(isOwnRushesTool("codex", ROOT, codexAsk("item-1"), back)).toBe(false);
   });
 });
