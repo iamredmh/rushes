@@ -2,7 +2,7 @@
 // the live strip and what the desk does after Send. Every string is the plan's own.
 import { describe, expect, it } from "vitest";
 import {
-  ASK_WORDS, askChoices, askLead, MENU_WORDS, PERMISSION_CHOICES, SHEET_WORDS, afterSend, focusAfterRemove, followSend, mayQuestion, notSignedInWhy, sendToLabel, sheetDefault, sheetPrimary, sheetRows, whoNext, agentName, canStop, chipShows, chipText, chipTone, footLine, liveLines, menuAgents, menuRowCount, noteAgentBadge, rowText, ruleRows, whoLine,
+  ASK_ARM_MS, ASK_WORDS, askArmKey, askChoices, askLead, revealParts, revealText, MENU_WORDS, PERMISSION_CHOICES, SHEET_WORDS, afterSend, focusAfterRemove, followSend, mayQuestion, notSignedInWhy, sendToLabel, sheetDefault, sheetPrimary, sheetRows, whoNext, agentName, canStop, chipShows, chipText, chipTone, footLine, liveLines, menuAgents, menuRowCount, noteAgentBadge, rowText, ruleRows, whoLine,
   type NoteLite,
 } from "../../web/src/agent.js";
 import type { AgentInfo, AgentStatus, PendingAsk } from "../../web/src/types.js";
@@ -434,5 +434,50 @@ describe("the ask card (task 5)", () => {
   it("each choice is one the route takes, said as the server's words", () => {
     expect(ASK_WORDS).toEqual({ once: "Allow once", no: "No" });
     for (const c of askChoices(ask({ always: "Always for reads here" }))) expect(["once", "always", "no"]).toContain(c.choice);
+  });
+});
+
+describe("the ask card shows hidden characters (task 5, fix 1)", () => {
+  it("plain text is one plain part", () => {
+    expect(revealParts("ffprobe -v error renders/a.mp4")).toEqual([{ text: "ffprobe -v error renders/a.mp4" }]);
+    expect(revealParts("")).toEqual([]);
+  });
+
+  it("bidi controls show as <U+XXXX>, each its own part, the text around them kept", () => {
+    expect(revealParts("ls \u202Etxt.exe")).toEqual([{ text: "ls " }, { hidden: "<U+202E>" }, { text: "txt.exe" }]);
+    for (const c of ["\u202A", "\u202B", "\u202C", "\u202D", "\u202E", "\u2066", "\u2067", "\u2068", "\u2069", "\u200E", "\u200F", "\u061C"]) {
+      expect(revealText(`a${c}b`)).toBe(`a<U+${c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")}>b`);
+    }
+  });
+
+  it("zero-width and other invisible characters show too", () => {
+    expect(revealText("rm\u200B -rf\u200C\u200D\u2060\uFEFF x")).toBe("rm<U+200B> -rf<U+200C><U+200D><U+2060><U+FEFF> x");
+    expect(revealText("a\u00ADb\u2028c\u2029d")).toBe("a<U+00AD>b<U+2028>c<U+2029>d");
+    // Control characters other than tab and newline, and the invisible tag characters.
+    expect(revealText("a\rb\u0007c\u007Fd\u0085e")).toBe("a<U+000D>b<U+0007>c<U+007F>d<U+0085>e");
+    expect(revealText("a\u{E0041}b")).toBe("a<U+E0041>b");
+    expect(revealText("a\uFE0Fb")).toBe("a<U+FE0F>b");
+  });
+
+  it("tabs, newlines, ordinary Unicode and right-to-left letters are left alone", () => {
+    expect(revealParts("for f in *; do\n\techo \"$f\"; done")).toEqual([{ text: "for f in *; do\n\techo \"$f\"; done" }]);
+    expect(revealParts("ffmpeg -i café-שלום-日本.mp4 → out.mp4")).toEqual([{ text: "ffmpeg -i café-שלום-日本.mp4 → out.mp4" }]);
+  });
+
+  it("the joined parts are the revealed text", () => {
+    const s = "x\u202Ey\u2066z";
+    expect(revealParts(s).map((p) => ("text" in p ? p.text : p.hidden)).join("")).toBe(revealText(s));
+  });
+});
+
+describe("when a card's buttons may be pressed (task 5, fix 1)", () => {
+  it("the arm key is the ids of the asks above the card: it changes when one above goes or arrives, not below", () => {
+    expect(askArmKey(["ask_1", "ask_2", "ask_3"], 0)).toBe("");
+    expect(askArmKey(["ask_1", "ask_2", "ask_3"], 2)).toBe("ask_1 ask_2");
+    // ask_1 answered: ask_2 moves up into its place, so its key changes.
+    expect(askArmKey(["ask_2", "ask_3"], 0)).not.toBe(askArmKey(["ask_1", "ask_2", "ask_3"], 1));
+    // A new ask below changes nothing above it.
+    expect(askArmKey(["ask_1", "ask_2", "ask_4"], 1)).toBe(askArmKey(["ask_1", "ask_2"], 1));
+    expect(ASK_ARM_MS).toBeGreaterThanOrEqual(400);
   });
 });

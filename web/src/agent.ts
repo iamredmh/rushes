@@ -257,3 +257,38 @@ export function askChoices(ask: Pick<PendingAsk, "always">): { choice: AskChoice
   const always = ask.always.trim() !== "" ? [{ choice: "always" as const, label: ask.always }] : [];
   return [{ choice: "once", label: ASK_WORDS.once }, ...always, { choice: "no", label: ASK_WORDS.no }];
 }
+
+/**
+ * How long a card must stay where it is before its buttons take a press: one that has just arrived, or moved up when
+ * one above it was answered, drops presses until then, so the second click of a double-click can't answer it unread.
+ */
+export const ASK_ARM_MS = 450;
+
+/** What a card's place depends on: the asks above it. A new value re-arms the card (ASK_ARM_MS). */
+export const askArmKey = (ids: readonly string[], index: number): string => ids.slice(0, index).join(" ");
+
+/**
+ * Characters that change how a command reads without being seen: bidi controls (which can reorder what is shown), zero
+ * widths, joiners and other invisibles, controls other than tab and newline, line and paragraph separators, variation
+ * selectors and the tag characters. The card shows each as its code point instead.
+ */
+const HIDDEN = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180F\u200B-\u200F\u2028-\u202E\u2060-\u206F\u3164\uFE00-\uFE0F\uFEFF\uFFA0\uFFF0-\uFFFB\u{E0000}-\u{E0FFF}]/u;
+const HIDDEN_ALL = new RegExp(HIDDEN.source, "gu");
+
+const codeOf = (c: string): string => `<U+${c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")}>`;
+
+/** Text for display, split into plain runs and hidden characters shown as `<U+XXXX>`. Display only: never sent anywhere. */
+export function revealParts(s: string): ({ text: string } | { hidden: string })[] {
+  const parts: ({ text: string } | { hidden: string })[] = [];
+  let from = 0;
+  for (const m of s.matchAll(HIDDEN_ALL)) {
+    if (m.index > from) parts.push({ text: s.slice(from, m.index) });
+    parts.push({ hidden: codeOf(m[0]) });
+    from = m.index + m[0].length;
+  }
+  if (from < s.length) parts.push({ text: s.slice(from) });
+  return parts;
+}
+
+/** The same as one string, for a label read aloud or a title. */
+export const revealText = (s: string): string => s.replace(HIDDEN_ALL, codeOf);

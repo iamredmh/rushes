@@ -830,6 +830,16 @@ const askCards = (page: Page): Locator => panel(page).locator(".askcard");
 /** A card's buttons, by their words, in order. */
 const cardButtons = (card: Locator): Promise<string[]> => card.getByRole("button").allTextContents();
 
+/**
+ * Presses a card's button once the card takes presses: a card that has just arrived or moved (one above it answered)
+ * drops them for a moment, so a double-click can't answer the card that slides into place. The card says when it's
+ * ready (data-armed), so this waits on that, not on a clock.
+ */
+async function answerCard(card: Locator, name: string): Promise<void> {
+  await expect(card).toHaveAttribute("data-armed", "true");
+  await card.getByRole("button", { name, exact: true }).click();
+}
+
 /** Every answer the desk posts to an ask: its id and the body, in order. */
 function watchAnswers(page: Page): { id: string; body: unknown }[] {
   const posted: { id: string; body: unknown }[] = [];
@@ -953,7 +963,7 @@ test("an ask shows and Allow once lets the run go on", async ({ page, startWithA
     await held;
     await route.continue();
   });
-  await card.getByRole("button", { name: "Allow once" }).click();
+  await answerCard(card, "Allow once");
   for (const b of await card.getByRole("button").all()) await expect(b).toBeDisabled();
   release();
   await expect(askCards(page)).toHaveCount(0);
@@ -1014,11 +1024,11 @@ test("two asks stack and answer separately", async ({ page, startWithAgent }) =>
   const choiceFor = (x: Ask) => (x.always ? { choice: "always", button: x.always, record: "hyperframes", option: "allow-once" } : { choice: "no", button: "No", record: "chained", option: "reject-once" });
   const [c1, c2] = [choiceFor(asks[0]), choiceFor(asks[1])];
   expect(new Set([c1.choice, c2.choice])).toEqual(new Set(["always", "no"]));
-  await first.getByRole("button", { name: c1.button, exact: true }).click();
+  await answerCard(first, c1.button);
   await expect(askCards(page)).toHaveCount(1);
   await expect(askCards(page).locator(".asktitle")).toHaveText(asks[1].title);
   await expect.poll(() => recorded(rushes)).toEqual({ [c1.record]: { outcome: "selected", optionId: c1.option } });
-  await askCards(page).getByRole("button", { name: c2.button, exact: true }).click();
+  await answerCard(askCards(page), c2.button);
   await expect(askCards(page)).toHaveCount(0);
   await expect.poll(() => recorded(rushes)).toEqual({ chained: { outcome: "selected", optionId: "reject-once" }, hyperframes: { outcome: "selected", optionId: "allow-once" } });
   expect(answers).toEqual([{ id: "ask_1", body: { choice: c1.choice } }, { id: "ask_2", body: { choice: c2.choice } }]);
@@ -1105,4 +1115,79 @@ test("an ask notifies while the page is hidden, once, and so does a question; ne
   await page.waitForTimeout(500);
   expect(await shown()).toHaveLength(2);
   expect(await page.evaluate(() => (window as unknown as { __asked: number }).__asked)).toBe(0);
+});
+
+test("a double-click answers only the card it was meant for: the card sliding into place takes no press yet", async ({ page, startWithAgent }) => {
+  const rushes = await startWithAgent({
+    turns: [[{ permissions: [{ toolCall: CHAINED, record: CHAINED.title }, { toolCall: { ...CHAINED, toolCallId: "t4", title: "Clean again" }, record: "Clean again" }] }, { stop: "end_turn" }]],
+  });
+  await readyToSend(rushes);
+  const answers = watchAnswers(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await rushes.api("POST", "/api/batches", {});
+  await expect(askCards(page)).toHaveCount(2);
+  const first = askCards(page).nth(0);
+  await expect(first).toHaveAttribute("data-armed", "true");
+  const firstTitle = await first.locator(".asktitle").textContent();
+  // A person's double-click: the first click answers card 1, which goes, and card 2 slides up under the pointer before
+  // the second click comes (a browser counts clicks up to ~500 ms apart as one double-click). A synthetic dblclick sends
+  // both at once, while card 1's answer is still on its way, so it never meets card 2: the clicks are sent apart here.
+  const no = (await first.getByRole("button", { name: "No", exact: true }).boundingBox())!;
+  const [x, y] = [no.x + no.width / 2, no.y + no.height / 2];
+  await page.mouse.click(x, y);
+  await expect(askCards(page)).toHaveCount(1);
+  const left = askCards(page);
+  await expect(left.locator(".asktitle")).not.toHaveText(firstTitle!);
+  // The second click lands on card 2's No, in the place card 1's was.
+  expect(await page.evaluate(([px, py]) => document.elementFromPoint(px, py)?.closest("button")?.textContent, [x, y])).toBe("No");
+  await page.mouse.click(x, y, { clickCount: 2 });
+  // A press from the keyboard is dropped too while it isn't ready.
+  await left.getByRole("button", { name: "Allow once" }).focus();
+  await page.keyboard.press("Enter");
+  // Still not ready after both presses, so both came while it wasn't: the test proves what it says, however slow the
+  // machine. (Arming is one way until the card moves again, and the attribute follows it before any other input.)
+  await expect(left).toHaveAttribute("data-armed", "false", { timeout: 1 });
+  // Exactly one answer reached the server: the card pressed, with No. The other is still pending.
+  await page.waitForTimeout(200);
+  expect(answers).toEqual([{ id: "ask_1", body: { choice: "no" } }]);
+  expect((await rushes.api("GET", "/api/agent")).status.asks.map((a: { id: string }) => a.id)).toEqual(["ask_2"]);
+  // Once it has stayed put, it takes its answer as usual.
+  await answerCard(left, "Allow once");
+  await expect(askCards(page)).toHaveCount(0);
+  expect(answers).toEqual([{ id: "ask_1", body: { choice: "no" } }, { id: "ask_2", body: { choice: "once" } }]);
+  // The server may hold the two in either order (they arrive together): the agent heard No for the card pressed first.
+  const secondTitle = firstTitle === CHAINED.title ? "Clean again" : CHAINED.title;
+  await expect.poll(() => recorded(rushes)).toEqual({ [firstTitle!]: { outcome: "selected", optionId: "reject-once" }, [secondTitle]: { outcome: "selected", optionId: "allow-once" } });
+});
+
+test("a command's hidden characters show as what they are, and right-to-left can't reorder it", async ({ page, startWithAgent }) => {
+  // U+202E would make "rm -rf ~ #txt.exe" read backwards from the override; U+200B hides in "rm".
+  const real = "echo safe \u202E# txt.exe ~ fr- mr\u2066 && r\u200Bm -rf out";
+  const rushes = await startWithAgent({ turns: [[{ permission: { toolCall: { toolCallId: "t5", kind: "execute", title: "Tidy up", rawInput: { command: real } } } }, { stop: "end_turn" }]] });
+  await readyToSend(rushes);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await rushes.api("POST", "/api/batches", {});
+  const card = askCards(page);
+  await expect(card).toHaveCount(1);
+  // The server holds the real command; the card shows each hidden character as its code, in its own style.
+  expect((await rushes.api("GET", "/api/agent")).status.asks[0].command).toBe(real);
+  const cmd = card.locator(".askcmd");
+  await expect(cmd).toHaveText("echo safe <U+202E># txt.exe ~ fr- mr<U+2066> && r<U+200B>m -rf out");
+  await expect(cmd.locator(".askhid")).toHaveText(["<U+202E>", "<U+2066>", "<U+200B>"]);
+  expect(await cmd.evaluate((el) => /[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/.test(el.textContent ?? ""))).toBe(false);
+  expect(await cmd.evaluate((el) => [getComputedStyle(el).direction, getComputedStyle(el).unicodeBidi])).toEqual(["ltr", "isolate"]);
+  // Read left to right in the order typed: "echo" starts the line.
+  const firstWord = await cmd.evaluate((el) => {
+    const r = document.createRange();
+    r.setStart(el.firstChild!, 0);
+    r.setEnd(el.firstChild!, 4);
+    return r.getBoundingClientRect().x - el.getBoundingClientRect().x;
+  });
+  expect(firstWord).toBeLessThan(12);
+  await cardFits(page, card);
+  await shootAsks(page, "ask-hidden-chars-1440");
 });
