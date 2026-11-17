@@ -236,8 +236,8 @@ export function markLabel(m: Mark): string {
   return m.db === undefined ? label : `${label} ${m.db} dB`;
 }
 
-/** One message in a note's thread: the agent's reply or the user's answer. */
-export const ReplySchema = z.object({ by: z.enum(["agent", "user"]), text: z.string().trim().min(1).max(4000), at: z.string() });
+/** One message in a note's thread: the agent's reply or the user's answer. No length cap here, so stored data always loads; a user's answer is capped where it comes in (addUserReply). */
+export const ReplySchema = z.object({ by: z.enum(["agent", "user"]), text: z.string().trim().min(1), at: z.string() });
 export type NoteReply = z.infer<typeof ReplySchema>;
 
 /** A note from before threads: its one `reply` becomes the thread's first entry, stamped with the note's createdAt. */

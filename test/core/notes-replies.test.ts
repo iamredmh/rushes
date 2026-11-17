@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { addUserReply, applyReply } from "../../src/core/notes.js";
-import { NoteSchema, type NotesFile } from "../../src/core/schema.js";
+import { NoteSchema, NotesFileSchema, type NotesFile } from "../../src/core/schema.js";
 import { InvalidError } from "../../src/core/errors.js";
 
 const base = { id: "n1", stage: "picture", scope: "point", t: 1, text: "Move the title", createdAt: "2026-11-01T10:00:00.000Z" };
@@ -33,6 +33,21 @@ describe("reply threads", () => {
     applyReply(f, { id: "n1", reply: "" });
     expect(f.notes[0].reply).toBe("");
     expect(f.notes[0].replies).toEqual([]);
+  });
+  it("an old note with a 5000-character reply still loads, as the first thread entry", () => {
+    const long = "a".repeat(5000);
+    expect(NoteSchema.parse({ ...base, reply: long }).replies).toEqual([{ by: "agent", text: long, at: base.createdAt }]);
+  });
+  it("an agent reply of 5000 characters is stored and the notes file still parses", () => {
+    const f = file([sentNote]);
+    const long = "b".repeat(5000);
+    applyReply(f, { id: "n1", reply: long }, new Date("2026-11-02T09:00:00Z"));
+    expect(f.notes[0].replies[0]).toEqual({ by: "agent", text: long, at: "2026-11-02T09:00:00.000Z" });
+    expect(NotesFileSchema.safeParse(f).success).toBe(true);
+  });
+  it("addUserReply refuses 4001 characters and takes 4000", () => {
+    expect(() => addUserReply(file([sentNote]), "n1", "c".repeat(4001))).toThrow(InvalidError);
+    expect(addUserReply(file([sentNote]), "n1", "c".repeat(4000)).replies).toHaveLength(1);
   });
   it("addUserReply refuses an empty answer", () => {
     expect(() => addUserReply(file([sentNote]), "n1", "  ")).toThrow(InvalidError);

@@ -55,12 +55,12 @@ export interface Reply {
   fixVersion?: string | null;
 }
 
-export function applyReply(file: NotesFile, r: Reply): Note {
+export function applyReply(file: NotesFile, r: Reply, now = new Date()): Note {
   const n = find(file, r.id);
   if (r.reply !== undefined) {
     n.reply = r.reply;
     const text = r.reply.trim();
-    if (text !== "") n.replies.push({ by: "agent", text, at: new Date().toISOString() });
+    if (text !== "") n.replies.push({ by: "agent", text, at: now.toISOString() });
   }
   // A status is a move in the note's lifecycle (noteState.ts): done to todo reopens it, which leaves its batch.
   setStatus(n, r.status);
@@ -69,9 +69,12 @@ export function applyReply(file: NotesFile, r: Reply): Note {
   return n;
 }
 
+export const USER_REPLY_MAX = 4000;
+
 /** The user's answer to the agent's reply, added to the note's thread. */
 export function addUserReply(file: NotesFile, id: string, text: string, now = new Date()): Note {
   const n = find(file, id);
+  if (text.trim().length > USER_REPLY_MAX) throw new InvalidError(`An answer is at most ${USER_REPLY_MAX} characters`);
   const parsed = ReplySchema.safeParse({ by: "user", text, at: now.toISOString() });
   if (!parsed.success) throw new InvalidError("Reply is invalid", parsed.error.issues);
   n.replies.push(parsed.data);
