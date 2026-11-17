@@ -1,0 +1,36 @@
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { ADAPTERS, adapterSpec, rushesMcp } from "../../../src/server/agent/adapters.js";
+import type { AgentInfo } from "../../../src/server/agent/detect.js";
+
+const root = "/tmp/some project";
+const claude: AgentInfo = { id: "claude", name: "Claude Code", installed: true, signedIn: true, path: "/usr/local/bin/claude", signIn: "claude auth login" };
+const codex: AgentInfo = { id: "codex", name: "Codex", installed: true, signedIn: true, path: "/opt/homebrew/bin/codex", signIn: "codex login" };
+
+describe("adapterSpec", () => {
+  it("pins the version and points the Claude adapter at the user's claude", () => {
+    expect(adapterSpec(claude, root)).toMatchObject({
+      command: "npx", args: ["-y", `${ADAPTERS.claude.pkg}@${ADAPTERS.claude.version}`], cwd: root,
+      env: { CLAUDE_CODE_EXECUTABLE: "/usr/local/bin/claude" },
+    });
+    expect(ADAPTERS.claude.version).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(ADAPTERS.codex.version).toMatch(/^\d+\.\d+\.\d+$/);
+  });
+  it("does not set the Claude variable for Codex", () => {
+    const spec = adapterSpec(codex, root);
+    expect(spec.args).toEqual(["-y", `${ADAPTERS.codex.pkg}@${ADAPTERS.codex.version}`]);
+    expect(spec.env.CLAUDE_CODE_EXECUTABLE).toBeUndefined();
+  });
+});
+
+describe("rushesMcp", () => {
+  it("runs this package's CLI with the project folder", () => {
+    const spec = rushesMcp(root);
+    expect(spec).toMatchObject({ name: "rushes", command: process.execPath, env: [] });
+    expect(spec.args.slice(1)).toEqual(["mcp", root]);
+    expect(spec.args[0].endsWith(join("dist", "cli", "index.js"))).toBe(true);
+    // dist/cli/index.js sits under the package root, the folder holding package.json.
+    expect(existsSync(join(dirname(dirname(dirname(spec.args[0]))), "package.json"))).toBe(true);
+  });
+});

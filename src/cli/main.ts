@@ -48,7 +48,7 @@ Usage
   rushes new <folder> [--name NAME] [--no-browser]  start a film: the folders and a brief.md to fill in, then open it
   rushes setup [--only claude-code,codex,...] [--dry-run]
                                                     add Rushes to every agent harness on this machine
-  rushes mcp                                        run the MCP server over stdio
+  rushes mcp [folder]                               run the MCP server over stdio
   rushes status [dir]                               tabs and open items
   rushes doctor [dir] [--json]                      check Node, ffmpeg, agent harnesses and this project
   rushes add version <file> --video NAME [--label TEXT] [--note TEXT]
@@ -332,7 +332,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         return results.some((r) => r.status === "failed") ? 1 : 0;
       }
       case "mcp":
-        await runStdio(io.cwd);
+        await runStdio(rest[0] ? resolve(io.cwd, rest[0]) : io.cwd);
         return 0;
       case "status": {
         const root = rest[0] ? resolve(io.cwd, rest[0]) : dir;
