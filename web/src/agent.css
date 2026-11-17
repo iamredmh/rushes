@@ -139,3 +139,5 @@
 .nreply .input { display: block; min-height: 0; padding: 5px 9px; border-color: var(--line-2); font: 400 var(--t-small)/1.4 var(--sans); overflow-y: hidden; }
 .nreply .input:focus { border-color: var(--accent); }
 @media (prefers-reduced-motion: reduce) { .nbadge svg.ic.nspin { animation: none; } }
+/* A hidden character in the agent's words, spelled out (as on an ask card). */
+.nline .nhid { padding: 0 2px; border-radius: 3px; background: var(--todo-soft); color: var(--todo); unicode-bidi: isolate; }

@@ -345,3 +345,12 @@ export function fixGo(
   if (n.stage === "picture" && n.video) return { kind: "jump", to: { tab: "picture", video: n.video, version: n.fixVersion }, t: n.fixT };
   return null;
 }
+
+/**
+ * A badge's words as shown: the agent's own parts (what it is doing, the fix version it names) with hidden characters
+ * spelled out, so a bidi control can't reorder the line or a button that navigates. Rushes' own words are unchanged.
+ */
+export const badgeText = (b: NoteBadge): string => revealText(b.text);
+
+/** A reply's text as shown: each of its lines, split as revealParts splits it, the newlines between them kept. */
+export const threadParts = (text: string): ReturnType<typeof revealParts>[] => text.split("\n").map(revealParts);

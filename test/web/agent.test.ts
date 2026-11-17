@@ -2,7 +2,7 @@
 // the live strip and what the desk does after Send. Every string is the plan's own.
 import { describe, expect, it } from "vitest";
 import {
-  ASK_ARM_MS, ASK_WORDS, askArmKey, askChoices, askLead, revealParts, revealText, MENU_WORDS, PERMISSION_CHOICES, SHEET_WORDS, afterSend, focusAfterRemove, followSend, mayQuestion, notSignedInWhy, sendToLabel, sheetDefault, sheetPrimary, sheetRows, whoNext, agentName, canStop, chipShows, chipText, chipTone, footLine, liveLines, menuAgents, menuRowCount, noteAgentBadge, rowText, ruleRows, whoLine, answerPlaceholder, fixGo, noteLite, noteThread, replyBoxShows,
+  ASK_ARM_MS, ASK_WORDS, askArmKey, askChoices, askLead, revealParts, revealText, MENU_WORDS, PERMISSION_CHOICES, SHEET_WORDS, afterSend, focusAfterRemove, followSend, mayQuestion, notSignedInWhy, sendToLabel, sheetDefault, sheetPrimary, sheetRows, whoNext, agentName, canStop, chipShows, chipText, chipTone, footLine, liveLines, menuAgents, menuRowCount, noteAgentBadge, rowText, ruleRows, whoLine, answerPlaceholder, badgeText, fixGo, noteLite, noteThread, replyBoxShows, threadParts,
   type NoteLite,
 } from "../../web/src/agent.js";
 import type { AgentInfo, AgentStatus, Note, PendingAsk } from "../../web/src/types.js";
@@ -591,5 +591,23 @@ describe("fixGo: where Fixed in <v> goes", () => {
     expect(fixGo(fixed({ fixVersion: null }), "v7")).toBeNull();
     expect(fixGo(fixed({ fixT: null }), "v8")).toBeNull();
     expect(fixGo(fixed({ stage: "visuals", video: null }), "v7")).toBeNull();
+  });
+});
+
+describe("agent-written words on a card show hidden characters (task 6, fix 1)", () => {
+  it("Fixed in <v> spells out a bidi control in the agent's fixVersion", () => {
+    const b = noteAgentBadge(note("n1", { batch: "b1", status: "done", fixVersion: "v2‮" }), status())!;
+    expect(badgeText(b)).toBe("Fixed in v2<U+202E>");
+  });
+
+  it("what the agent is doing, too; Rushes' own words are unchanged", () => {
+    const s = status({ phase: "working", batches: ["b1"], current: { note: "n1", doing: "Trim​ming" } });
+    expect(badgeText(noteAgentBadge(note("n1", { batch: "b1" }), s)!)).toBe("Trim<U+200B>ming");
+    expect(badgeText(noteAgentBadge(note("n1", { batch: "b1", needsYou: true }), s)!)).toBe("Needs you");
+    expect(badgeText(noteAgentBadge(note("n2", { batch: "b1" }), s)!)).toBe("With Claude Code");
+  });
+
+  it("a reply's lines: an RLO inside is shown as what it is, the newlines kept", () => {
+    expect(threadParts("Moved it‮evif.\nDone.")).toEqual([[{ text: "Moved it" }, { hidden: "<U+202E>" }, { text: "evif." }], [{ text: "Done." }]]);
   });
 });

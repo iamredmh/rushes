@@ -2,7 +2,7 @@
 // you, that it is with the agent, or where it was fixed), its thread (the agent's replies and your answers, the last
 // three with Show all), and the reply box while the agent can hear an answer. A note with none of these is as it was.
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { answerPlaceholder, fixGo, noteAgentBadge, noteLite, noteThread, replyBoxShows, revealText } from "../../agent.js";
+import { answerPlaceholder, badgeText, fixGo, noteAgentBadge, noteLite, noteThread, replyBoxShows, threadParts } from "../../agent.js";
 import { api } from "../../api.js";
 import type { JumpTarget } from "../../changelog.js";
 import type { AgentStatus, Note } from "../../types.js";
@@ -42,6 +42,8 @@ export function NoteBadge({ n, agent, version, onSeek }: { n: Note; agent: Notes
     return () => v.removeEventListener("loadedmetadata", go);
   }, [version]);
   if (!badge) return null;
+  // The agent's own parts (what it is doing, the version it names) with hidden characters spelled out, isolated.
+  const text = badgeText(badge);
   if (badge.kind === "fixed") {
     const go = fixGo(n, version);
     const press = () => {
@@ -54,12 +56,10 @@ export function NoteBadge({ n, agent, version, onSeek }: { n: Note; agent: Notes
     return (
       <div class="nbadge fixed">
         <Icon name="check" />
-        {go ? <button type="button" class="nfix" onClick={press}>{badge.text}</button> : <span>{badge.text}</span>}
+        {go ? <button type="button" class="nfix" dir="auto" onClick={press}>{text}</button> : <span dir="auto">{text}</span>}
       </div>
     );
   }
-  // The agent's own words for what it is doing: shown as they are, hidden characters spelled out.
-  const text = badge.kind === "working" ? revealText(badge.text) : badge.text;
   return (
     <div class={`nbadge ${badge.kind}`}>
       {badge.kind === "working" && <Icon name="spin" class="nspin" />}
@@ -86,7 +86,15 @@ export function NoteThread({ n }: { n: Note }) {
           ) : (
             <span class="nwho" role="img" aria-label="You">Y</span>
           )}
-          <span class="ntext" dir="auto">{l.text}</span>
+          {/* The reply as written, its hidden characters spelled out (as an ask card's command), line by line. */}
+          <span class="ntext" dir="auto">
+            {threadParts(l.text).map((parts, j) => (
+              <>
+                {j > 0 && "\n"}
+                {parts.map((p) => ("text" in p ? p.text : <span class="nhid">{p.hidden}</span>))}
+              </>
+            ))}
+          </span>
           {l.time && <span class="ntime">{l.time}</span>}
         </div>
       ))}
@@ -102,7 +110,9 @@ export function ReplyBox({ n, status, toast, onChanged }: { n: Note; status: Age
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
-  // Grows with what is typed, up to four lines; past that it scrolls inside itself.
+  const shows = replyBoxShows(noteLite(n), status);
+  // Grows with what is typed, up to four lines; past that it scrolls inside itself. Sized again each time the box comes
+  // back (a new textarea, holding what was kept), not only as text is typed.
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -113,8 +123,8 @@ export function ReplyBox({ n, status, toast, onChanged }: { n: Note; status: Age
     const max = line * MAX_LINES + pad;
     el.style.height = `${Math.min(el.scrollHeight + parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth), max)}px`;
     el.style.overflowY = el.scrollHeight + parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth) > max ? "auto" : "hidden";
-  }, [text]);
-  if (!replyBoxShows(noteLite(n), status)) return null;
+  }, [text, shows]);
+  if (!shows) return null;
   const send = async () => {
     const value = text.trim();
     if (!value || busy) return;

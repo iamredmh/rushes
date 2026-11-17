@@ -1462,3 +1462,53 @@ test("a long thread shows its last three, wraps, and Fixed in v2 goes to the fix
   await fix.click();
   await expect.poll(() => page.locator("video").evaluate((v: HTMLVideoElement) => v.currentTime)).toBeCloseTo(2.1, 1);
 });
+
+test("the agent's own words on a card show hidden characters as what they are", async ({ page, rushes }) => {
+  await rushes.addCut("first cut");
+  const { note } = await rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 1, text: "Too dark." });
+  await rushes.api("POST", "/api/replies", { replies: [{ id: note.id, reply: "Lifted it‮evif.\nDone.", status: "done", fixT: 1, fixVersion: "v2‮" }] });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  const c = card(page, note.id);
+  await expect(badgeOf(c)).toHaveText("Fixed in v2<U+202E>");
+  await expect(badgeOf(c).locator("[dir=auto]")).toHaveCount(1);
+  const text = threadOf(c).locator(".ntext");
+  await expect(text).toHaveText("Lifted it<U+202E>evif.\nDone.");
+  await expect(text.locator(".nhid")).toHaveText("<U+202E>");
+  // The reply's two lines stay two lines.
+  expect((await text.boundingBox())!.height).toBeGreaterThan(30);
+  await noteFits(page, c);
+  await shootNote(page, c, "note-hidden-chars-1440");
+});
+
+test("a reply box that hides and comes back shows what was kept in full", async ({ page, startWithAgent }) => {
+  const rushes = await startWithAgent({ turns: [[{ sleep: 15_000 }, { stop: "end_turn" }]] });
+  const id = await readyToSend(rushes);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await rushes.api("POST", "/api/batches", {});
+  const c = card(page, id);
+  // Sent, not waiting on you: the box shows only while Send to AI is on.
+  await expect(replyBox(c)).toBeVisible({ timeout: 10_000 });
+  await replyBox(c).click();
+  await page.keyboard.type("One.");
+  await page.keyboard.press("Shift+Enter");
+  await page.keyboard.type("Two.");
+  await page.keyboard.press("Shift+Enter");
+  await page.keyboard.type("Three.");
+  await toggle(page).click();
+  await expect(toggle(page)).toHaveAttribute("aria-checked", "false");
+  await expect(c.locator(".nreply")).toHaveCount(0);
+  await toggle(page).click();
+  await expect(toggle(page)).toHaveAttribute("aria-checked", "true");
+  const box = replyBox(c);
+  await expect(box).toBeVisible();
+  await expect(box).toHaveValue("One.\nTwo.\nThree.");
+  // All three lines on show: nothing scrolled out of the box.
+  const [scroll, client, line] = await box.evaluate((el) => [el.scrollHeight, el.clientHeight, parseFloat(getComputedStyle(el).lineHeight)]);
+  expect(scroll).toBeLessThanOrEqual(client);
+  expect(client).toBeGreaterThanOrEqual(line * 3);
+  await noteFits(page, c);
+  await shootNote(page, c, "note-box-back-1440");
+});
