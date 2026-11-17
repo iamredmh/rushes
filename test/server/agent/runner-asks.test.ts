@@ -695,14 +695,20 @@ describe("AgentRunner: Rushes's own MCP tools (R16)", () => {
   it("Claude-shaped asks for rushes_ tools are allowed with no ask, under ask-all and project-edits", async () => {
     for (const permissions of ["ask-all", "project-edits"] as const) {
       const r = await rig({ turns: [] }, { rules: { permissions } });
-      await noneAsk(r, [claudeTool("mcp__rushes__rushes_working_on", "claude-working"), claudeTool("mcp__rushes__rushes_reply", "claude-reply")], permissions);
+      await noneAsk(r, [
+        claudeTool("mcp__rushes__rushes_working_on", "claude-working"),
+        claudeTool("mcp__rushes__rushes_reply", "claude-reply", own, { project: r.root, replies: [] }),
+      ], permissions);
     }
   });
 
   it("Codex-shaped asks for rushes_ tools are allowed with no ask, under ask-all and project-edits", async () => {
     for (const permissions of ["ask-all", "project-edits"] as const) {
       const r = await codexRig({ turns: [] }, { rules: { permissions } });
-      await noneAsk(r, [codexStart("rushes", "rushes_reply", "codex-reply"), codexAsk("codex-reply")], permissions);
+      await noneAsk(r, [
+        codexStart("rushes", "rushes_reply", "codex-reply"), codexAsk("codex-reply"),
+        codexStart("rushes", "rushes_reply", "codex-own-project", { project: r.root }), codexAsk("codex-own-project"),
+      ], permissions);
     }
   });
 
@@ -717,6 +723,7 @@ describe("AgentRunner: Rushes's own MCP tools (R16)", () => {
       claudeTool("mcp__rushes__rushes_reply", "user-scope", { name: "rushes", source: "user" }),
       claudeTool("mcp__rushes__rushes_reply", "project-scope", { name: "rushes", source: "project" }),
       claudeTool("mcp__rushes__rushes_reply", "local-scope", { name: "rushes", source: "local" }),
+      claudeTool("mcp__rushes__rushes_reply", "other-project", own, { project: "/tmp" }),
     ]);
   });
 
@@ -727,6 +734,7 @@ describe("AgentRunner: Rushes's own MCP tools (R16)", () => {
       codexStart("rushes", "other", "codex-other"), codexAsk("codex-other"),
       codexStart("rushes", "rushes_x;rm", "codex-semicolon"), codexAsk("codex-semicolon"),
       codexAsk("codex-unknown"),
+      codexStart("rushes", "rushes_reply", "codex-other-project", { project: "/tmp" }), codexAsk("codex-other-project"),
     ]);
   });
 

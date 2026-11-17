@@ -5,7 +5,7 @@ import type { AgentRules, AlwaysRule } from "./schema.js";
 export type PermissionRequest = { kind: string | null; title: string; command: string | null; paths: string[] };
 
 /** Resolve a path through symlinks. A path not there yet is judged by its longest existing ancestor, plus the rest. */
-function real(p: string): string {
+export function real(p: string): string {
   const abs = resolve(p);
   let cur = abs;
   const rest: string[] = [];

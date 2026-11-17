@@ -526,6 +526,8 @@ describe("cli", () => {
 
   it("finds the command after flags, so rushes --dir x mcp stays alive", () => {
     expect(longRunningCommand(["--dir", "x", "mcp"])).toBe(true);
+    // R17: the flag Send to AI starts it with is a known option.
+    expect(longRunningCommand(["mcp", "x", "--pinned"])).toBe(true);
     expect(longRunningCommand(["--port", "4400", "open", "."])).toBe(true);
     expect(longRunningCommand(["serve"])).toBe(true);
     expect(longRunningCommand(["new", "film"])).toBe(true);

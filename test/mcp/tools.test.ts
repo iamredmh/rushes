@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
@@ -10,7 +10,7 @@ import { startServer } from "../../src/server/start.js";
 import { createMcpServer } from "../../src/mcp/tools.js";
 import { ApiError, RushesClient } from "../../src/mcp/client.js";
 import { ensureServer, findServer } from "../../src/mcp/ensure.js";
-import { resolveDoctorRoot, resolveProjectRoot, stdioContext } from "../../src/mcp/stdio.js";
+import { pinnedRoot, resolveDoctorRoot, resolveProjectRoot, stdioContext } from "../../src/mcp/stdio.js";
 import { lockPath } from "../../src/server/lock.js";
 import { SOURCE } from "../../src/setup/harnesses.js";
 import { runDoctor, realDoctorEnv } from "../../src/cli/doctor.js";
@@ -373,6 +373,62 @@ describe("project root for stdio", () => {
       expect(r.content[0].text).toBe(ASK);
     }
     expect(spawns).toBe(0);
+    await client.close();
+  });
+});
+
+describe("pinned MCP server (R17: the one Send to AI hands the agent)", () => {
+  it("pinnedRoot takes no project, the root, or a path that resolves to it, and refuses everything else", async () => {
+    const { root } = await tmpProject("pinned");
+    const link = join(dirname(root), "pinned-link");
+    await symlink(root, link);
+    expect(pinnedRoot(root)).toBe(root);
+    expect(pinnedRoot(root, root)).toBe(root);
+    expect(pinnedRoot(root, ".")).toBe(root);
+    expect(pinnedRoot(root, `${root}/`)).toBe(root);
+    expect(pinnedRoot(root, link)).toBe(root);
+    expect(pinnedRoot(root, `sub/..`)).toBe(root);
+    const refused = `This Rushes MCP server only works on ${root}. Leave "project" out, or pass that folder.`;
+    for (const other of [dirname(root), join(root, "sub"), "/", "~", "..", "/tmp/elsewhere", `${root}-old`, `${root} 2`]) {
+      expect(() => pinnedRoot(root, other), other).toThrow(refused);
+    }
+  });
+
+  it("a pinned server's tools refuse another folder as a tool error, and never start a server there", async () => {
+    const { root } = await tmpProject("pinned-tools");
+    let spawns = 0;
+    const server = createMcpServer(stdioContext(root, { spawnServer: () => { spawns++; }, timeoutMs: 300 }, { pinned: true }));
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "test", version: "0" });
+    await Promise.all([server.connect(a), client.connect(b)]);
+    const other = dirname(root);
+    for (const [name, args] of [
+      ["rushes_status", { project: other }],
+      ["rushes_reply", { project: other, replies: [{ id: "n_1", reply: "x" }] }],
+      ["rushes_working_on", { project: other, note: "n_1", doing: "x" }],
+      ["rushes_doctor", { project: other }],
+    ] as const) {
+      const r = (await client.callTool({ name, arguments: args })) as { content: { text: string }[]; isError?: boolean };
+      expect(r.isError, name).toBe(true);
+      expect(r.content[0].text, name).toBe(`This Rushes MCP server only works on ${root}. Leave "project" out, or pass that folder.`);
+    }
+    expect(spawns).toBe(0);
+    // Its own folder goes through to the server (which this test never starts).
+    const own = (await client.callTool({ name: "rushes_status", arguments: { project: root } })) as { isError?: boolean };
+    expect(own.isError).toBe(true);
+    expect(spawns).toBe(1);
+    await client.close();
+  });
+
+  it("an unpinned server still takes any project", async () => {
+    let spawns = 0;
+    const { root } = await tmpProject("unpinned");
+    const server = createMcpServer(stdioContext("/", { spawnServer: () => { spawns++; }, timeoutMs: 300 }));
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "test", version: "0" });
+    await Promise.all([server.connect(a), client.connect(b)]);
+    await client.callTool({ name: "rushes_status", arguments: { project: root } });
+    expect(spawns).toBe(1);
     await client.close();
   });
 });

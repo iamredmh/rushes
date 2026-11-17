@@ -529,7 +529,7 @@ export class AgentRunner {
     if (!live()) return CANCELLED;
     // R16: Rushes's own MCP tools never ask, under any permission level.
     const adapter = this.adapters.get(conn);
-    if (adapter && isOwnRushesTool(adapter.agent, p, adapter.calls)) return allowOutcome(p.options);
+    if (adapter && isOwnRushesTool(adapter.agent, this.store.root, p, adapter.calls)) return allowOutcome(p.options);
     // The adapter hears "yes" before an Always rule is written: wait for that write, then read the rules.
     await this.ruleWrite;
     const rules = await this.loadRules();

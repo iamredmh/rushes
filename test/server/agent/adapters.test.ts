@@ -44,7 +44,8 @@ describe("rushesMcp", () => {
   it("runs this package's CLI with the project folder", () => {
     const spec = rushesMcp(root);
     expect(spec).toMatchObject({ name: "rushes", command: process.execPath, env: [] });
-    expect(spec.args.slice(1)).toEqual(["mcp", root]);
+    // R17: pinned to the project, so its tools refuse any other folder.
+    expect(spec.args.slice(1)).toEqual(["mcp", root, "--pinned"]);
     expect(spec.args[0].endsWith(join("dist", "cli", "index.js"))).toBe(true);
     // dist/cli/index.js sits under the package root, the folder holding package.json.
     expect(existsSync(join(dirname(dirname(dirname(spec.args[0]))), "package.json"))).toBe(true);

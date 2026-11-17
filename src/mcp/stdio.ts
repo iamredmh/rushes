@@ -1,10 +1,11 @@
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createMcpServer, type ToolContext } from "./tools.js";
 import { ensureServer, type EnsureOptions } from "./ensure.js";
 import { runDoctor, realDoctorEnv } from "../cli/doctor.js";
+import { isProjectRoot, projectPath } from "../core/projectFolder.js";
 
 export function openBrowser(url: string): void {
   const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open";
@@ -37,26 +38,33 @@ export function resolveDoctorRoot(defaultRoot: string, project?: string): string
 }
 
 /**
- * `project` against the launch folder. A leading "~" or "~/" is the home folder, as a shell would
- * read it: agents write paths that way, and resolve() alone would make a folder called "~" in the
- * working directory.
+ * R17: for a pinned server (the one Send to AI hands its agent, `rushes mcp <root> --pinned`), the only folder a
+ * tool may name is `root`: `project` left out, or resolving to it (symlinks resolved). Anything else throws, and the
+ * tool returns that as its error, so an auto-allowed rushes_* call can't write .rushes/ into another folder.
  */
-function projectPath(defaultRoot: string, project = "."): string {
-  const fromHome = project === "~" || /^~[\\/]/.test(project);
-  return resolve(defaultRoot, fromHome ? join(homedir(), project.slice(2)) : project);
+export function pinnedRoot(root: string, project?: string): string {
+  if (!isProjectRoot(root, project)) throw new Error(`This Rushes MCP server only works on ${root}. Leave "project" out, or pass that folder.`);
+  return root;
+}
+
+export interface StdioOptions {
+  /** R17: every tool works on the launch folder only. */
+  pinned?: boolean;
 }
 
 /** The tool context runStdio uses. */
-export function stdioContext(defaultRoot: string, ensure?: EnsureOptions): ToolContext {
+export function stdioContext(defaultRoot: string, ensure?: EnsureOptions, opts: StdioOptions = {}): ToolContext {
+  const forTool = opts.pinned ? (p?: string) => pinnedRoot(defaultRoot, p) : (p?: string) => resolveProjectRoot(defaultRoot, p);
+  const forDoctor = opts.pinned ? (p?: string) => pinnedRoot(defaultRoot, p) : (p?: string) => resolveDoctorRoot(defaultRoot, p);
   return {
-    client: async (project) => ensureServer(resolveProjectRoot(defaultRoot, project), ensure),
+    client: async (project) => ensureServer(forTool(project), ensure),
     openBrowser,
-    doctor: async (project) => runDoctor(realDoctorEnv(resolveDoctorRoot(defaultRoot, project))),
+    doctor: async (project) => runDoctor(realDoctorEnv(forDoctor(project))),
   };
 }
 
 /** Run the MCP server over stdio. Projects default to the directory the agent launched it in. */
-export async function runStdio(defaultRoot = process.cwd()): Promise<void> {
-  const server = createMcpServer(stdioContext(defaultRoot));
+export async function runStdio(defaultRoot = process.cwd(), opts: StdioOptions = {}): Promise<void> {
+  const server = createMcpServer(stdioContext(defaultRoot, undefined, opts));
   await server.connect(new StdioServerTransport());
 }

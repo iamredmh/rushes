@@ -89,7 +89,7 @@ function cliPath(): string {
 }
 
 /** dist/cli/index.js exists only after `npm run build`; callers under tsx pass RunnerOptions.mcp (Task 5). */
-/** The Rushes MCP server, handed to the agent so it can call rushes_reply. */
+/** The Rushes MCP server, handed to the agent so it can call rushes_reply. Pinned to `root` (R17): its tools refuse any other folder. */
 export function rushesMcp(root: string): McpServerSpec {
-  return { name: RUSHES_SERVER, command: process.execPath, args: [cliPath(), "mcp", root], env: [] };
+  return { name: RUSHES_SERVER, command: process.execPath, args: [cliPath(), "mcp", root, "--pinned"], env: [] };
 }
