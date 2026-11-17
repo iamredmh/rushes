@@ -31,6 +31,7 @@ import { ReviewTabs, type ReviewTabRow } from "./desk/ReviewTabs.js";
 import { StatusBar } from "./desk/StatusBar.js";
 import { TopBar } from "./desk/TopBar.js";
 import { AgentChip } from "./agent/AgentChip.js";
+import { useNewCut, usePlaying } from "./agent/useNewCut.js";
 import { actOnSend, askNotificationsOnce, useFirstSend, WhyLine } from "./agent/FirstSend.js";
 import { useAskNotify } from "../notify.js";
 import { Workspaces } from "./desk/Workspaces.js";
@@ -267,18 +268,19 @@ export function App() {
     return true;
   };
 
+  const playing = usePlaying(playerRef);
   // A new cut arriving mid-review mustn't rewind the player or drop pending marks. So the
   // moment something's pending, hold the cut on screen; a newer one then waits behind a chip.
   // Holding before the cut arrives means the player never renders the new cut, even once.
   useEffect(() => {
-    if (pending && versionId === null && target) {
+    if ((pending || playing) && versionId === null && target) {
       setVersionId(target.id);
       setHeld(true);
-    } else if (!pending && held && versionId === target?.id) {
+    } else if (!pending && !playing && held && versionId === target?.id) {
       setVersionId(null);
       setHeld(false);
     }
-  }, [pending, versionId, target?.id]);
+  }, [pending, playing, versionId, target?.id]);
   // A version pin that now matches where the film would follow anyway — e.g. one left over
   // from peeking at a newer cut via the "vN ready" chip, now that an unlock has made that
   // cut the default — is cleared. Otherwise it would keep overriding "follow" even once it's
@@ -289,6 +291,12 @@ export function App() {
   // §27, 5.2: the Cut button carries a dot whenever a newer cut than the one on screen exists, and either the video is
   // locked (so nothing would otherwise tell you a newer one arrived) or the cut is held.
   const readyVersionId = newest && version && newest.id !== version.id && (locked || held) ? newest.id : null;
+  // m2: another cut would drop a marked In, range or box on the Timeline: it waits for them, as the Film menu does. A
+  // half-typed note is kept across a cut, so it does not hold the menu. Picking the version the film would follow anyway
+  // collapses back to "follow" (null); anything else pins it, including the newest on a locked film (what you asked for).
+  const pickCut = (id: string) => (marksPending ? toast("Add or clear your note first") : (setVersionId(id === target?.id ? null : id), setHeld(false)));
+  // §28: a new cut from the agent switches, or waits behind a Show and a dot while the picture is held.
+  const unseenCut = useNewCut({ film: video?.id ?? null, versions: video?.versions.map((v) => v.id) ?? [], shown: version?.id, busy: playing || pending || marksPending || locked, select: pickCut, toast });
 
   /** Switches to another film, remembering this one's place and restoring the other's. Refused while marks are pending. */
   const switchFilm = (newId: string) => {
@@ -711,17 +719,8 @@ export function App() {
             <CutMenu
               video={video}
               shown={version}
-              newer={readyVersionId}
-              onPick={(id) => {
-                // m2: another cut would drop a marked In, range or box on the Timeline: it waits for them, as the Film menu
-                // does. A half-typed note is kept across a cut, so it does not hold the menu.
-                if (marksPending) return toast("Add or clear your note first");
-                // Picking the version the film would follow anyway collapses back to "follow"
-                // (null); picking anything else pins it explicitly — including the newest, on a
-                // locked film, which must show what you asked for rather than snap back to the lock.
-                setVersionId(id === target?.id ? null : id);
-                setHeld(false);
-              }}
+              newer={readyVersionId ?? unseenCut}
+              onPick={pickCut}
               onToggleLock={() => void toggleLock()}
             />
           ) : null

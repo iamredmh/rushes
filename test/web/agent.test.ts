@@ -2,7 +2,7 @@
 // the live strip and what the desk does after Send. Every string is the plan's own.
 import { describe, expect, it } from "vitest";
 import {
-  ASK_ARM_MS, ASK_WORDS, askArmKey, askChoices, askLead, revealParts, revealText, MENU_WORDS, PERMISSION_CHOICES, SHEET_WORDS, afterSend, focusAfterRemove, followSend, mayQuestion, notSignedInWhy, sendToLabel, sheetDefault, sheetPrimary, sheetRows, whoNext, agentName, canStop, chipShows, chipText, chipTone, footLine, liveLines, stripMode, stripLine, runLabel, menuAgents, menuRowCount, noteAgentBadge, rowText, ruleRows, whoLine, answerPlaceholder, badgeText, fixGo, noteLite, noteThread, replyBoxShows, threadParts,
+  ASK_ARM_MS, ASK_WORDS, askArmKey, askChoices, askLead, revealParts, revealText, MENU_WORDS, PERMISSION_CHOICES, SHEET_WORDS, afterSend, focusAfterRemove, followSend, mayQuestion, notSignedInWhy, sendToLabel, sheetDefault, sheetPrimary, sheetRows, whoNext, agentName, canStop, chipShows, chipText, chipTone, footLine, liveLines, stripMode, stripLine, runLabel, menuAgents, menuRowCount, noteAgentBadge, rowText, ruleRows, whoLine, answerPlaceholder, badgeText, fixGo, noteLite, noteThread, replyBoxShows, threadParts, newCutFor, stepCuts, cutAction, unseenCut,
   type NoteLite,
 } from "../../web/src/agent.js";
 import type { AgentInfo, AgentStatus, Note, PendingAsk } from "../../web/src/types.js";
@@ -631,5 +631,72 @@ describe("agent-written words on a card show hidden characters (task 6, fix 1)",
 
   it("a reply's lines: an RLO inside is shown as what it is, the newlines kept", () => {
     expect(threadParts("Moved it‮evif.\nDone.")).toEqual([[{ text: "Moved it" }, { hidden: "<U+202E>" }, { text: "evif." }], [{ text: "Done." }]]);
+  });
+});
+
+describe("the new cut (task 8)", () => {
+  it("newCutFor gives the version next has and prev lacks, and null for identical lists", () => {
+    expect(newCutFor(["v1", "v2"], ["v1", "v2", "v3"])).toBe("v3");
+    expect(newCutFor(["v1", "v2"], ["v1", "v2"])).toBeNull();
+    expect(newCutFor(["v1", "v2"], ["v1"])).toBeNull();
+  });
+
+  it("two cuts arriving together give the last", () => {
+    expect(newCutFor(["v1"], ["v1", "v2", "v3"])).toBe("v3");
+  });
+
+  it("the first look at a project that already has versions is not news", () => {
+    const first = stepCuts(null, "hero", ["v1", "v2"]);
+    expect(first.arrived).toBeNull();
+    expect(first.memory).toEqual({ film: "hero", versions: ["v1", "v2"] });
+  });
+
+  it("the state loading in after an empty first render is not news either", () => {
+    const empty = stepCuts(null, null, []);
+    expect(stepCuts(empty.memory, "hero", ["v1", "v2"]).arrived).toBeNull();
+  });
+
+  it("a cut that arrives afterwards is, whoever added it", () => {
+    const m = stepCuts(null, "hero", ["v1", "v2"]).memory;
+    expect(stepCuts(m, "hero", ["v1", "v2"]).arrived).toBeNull();
+    expect(stepCuts(m, "hero", ["v1", "v2", "v3"]).arrived).toBe("v3");
+  });
+
+  it("two cuts in a quick run: each look names the last one it has not seen", () => {
+    const a = stepCuts(stepCuts(null, "hero", ["v1"]).memory, "hero", ["v1", "v2", "v3"]);
+    expect(a.arrived).toBe("v3");
+    expect(stepCuts(a.memory, "hero", ["v1", "v2", "v3", "v4"]).arrived).toBe("v4");
+  });
+
+  it("switching film is not news; the other film's own cuts then are", () => {
+    const m = stepCuts(null, "hero", ["v1", "v2"]).memory;
+    const sw = stepCuts(m, "teaser", ["v1"]);
+    expect(sw.arrived).toBeNull();
+    expect(stepCuts(sw.memory, "teaser", ["v1", "v2"]).arrived).toBe("v2");
+    expect(stepCuts(sw.memory, "hero", ["v1", "v2", "v3"]).arrived).toBeNull();
+  });
+
+  it("not busy: switches and says so; busy: leaves the picture, offers Show and a dot", () => {
+    expect(cutAction("v3", "v2", false)).toEqual({ text: "v3 is in", show: true, offer: false, dot: false });
+    expect(cutAction("v3", "v2", true)).toEqual({ text: "v3 is in", show: false, offer: true, dot: true });
+    expect(cutAction(null, "v2", false)).toBeNull();
+  });
+
+  it("a cut already on screen needs no Show and no dot", () => {
+    expect(cutAction("v3", "v3", true)).toEqual({ text: "v3 is in", show: false, offer: false, dot: false });
+    expect(cutAction("v3", "v3", false)).toEqual({ text: "v3 is in", show: false, offer: false, dot: false });
+  });
+
+  it("an agent-written name shows its hidden characters", () => {
+    expect(cutAction("v3‮", "v2", false)!.text).toBe("v3<U+202E> is in");
+  });
+
+  it("the dot stays until the cut is on screen, and goes with the film or the cut", () => {
+    const u = { film: "hero", id: "v3" };
+    expect(unseenCut(u, "hero", "v2", ["v1", "v2", "v3"])).toBe("v3");
+    expect(unseenCut(u, "hero", "v3", ["v1", "v2", "v3"])).toBeNull();
+    expect(unseenCut(u, "teaser", "v2", ["v1", "v2", "v3"])).toBeNull();
+    expect(unseenCut(u, "hero", "v2", ["v1", "v2"])).toBeNull();
+    expect(unseenCut(null, "hero", "v2", ["v1", "v2"])).toBeNull();
   });
 });

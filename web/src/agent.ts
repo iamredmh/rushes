@@ -368,3 +368,47 @@ export const badgeText = (b: NoteBadge): string => revealText(b.text);
 
 /** A reply's text as shown: each of its lines, split as revealParts splits it, the newlines between them kept. */
 export const threadParts = (text: string): ReturnType<typeof revealParts>[] => text.split("\n").map(revealParts);
+
+// ---- the new cut (§28): a cut the agent adds while the desk is open ----
+
+/** The version in `next` that `prev` did not have, the last one when several arrived together; null when none did. */
+export function newCutFor(prev: readonly string[], next: readonly string[]): string | null {
+  const had = new Set(prev);
+  for (let i = next.length - 1; i >= 0; i--) if (!had.has(next[i]!)) return next[i]!;
+  return null;
+}
+
+/** The film and versions the desk last saw. */
+export interface CutMemory { film: string | null; versions: string[] }
+
+/**
+ * One look at the film on screen. The first look at a film (the first load, or a switch to another film) only sets what
+ * is known: whatever the film already had is not news. After that, a version the film gains is `arrived`. A cut added by
+ * the user is told the same way: the desk is not told who added it.
+ */
+export function stepCuts(memory: CutMemory | null, film: string | null, versions: readonly string[]): { memory: CutMemory; arrived: string | null } {
+  const now = { film, versions: [...versions] };
+  const arrived = memory && memory.film === film ? newCutFor(memory.versions, versions) : null;
+  return { memory: now, arrived };
+}
+
+/** What to do about an arrived cut: `show` switches to it now; `offer` leaves the picture and gives a Show button and a dot. */
+export interface CutAction { text: string; show: boolean; offer: boolean; dot: boolean }
+
+/**
+ * `busy`: something holds the picture where it is (playing, a note or mark being made, a locked picture). `shown` is the
+ * cut on screen: one already on screen needs no Show and no dot.
+ */
+export function cutAction(arrived: string | null, shown: string | null | undefined, busy: boolean): CutAction | null {
+  if (arrived === null) return null;
+  const text = `${revealText(arrived)} is in`;
+  if (!busy) return { text, show: shown !== arrived, offer: false, dot: false };
+  if (shown === arrived) return { text, show: false, offer: false, dot: false };
+  return { text, show: false, offer: true, dot: true };
+}
+
+/** The cut the Cut menu's dot is for: the unseen one, until it is on screen, or the film changes, or it goes. */
+export function unseenCut(unseen: { film: string | null; id: string } | null, film: string | null, shown: string | null | undefined, versions: readonly string[]): string | null {
+  if (!unseen || unseen.film !== film || unseen.id === shown || !versions.includes(unseen.id)) return null;
+  return unseen.id;
+}

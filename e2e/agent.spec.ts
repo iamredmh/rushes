@@ -5,7 +5,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { Locator, Page } from "@playwright/test";
 import { rulesPath } from "../src/server/agent/rules.js";
-import { cutButton, expect, pickVersion, readAgentLog, test, videoReady, type AgentRushes } from "./agentFixture.js";
+import { cutButton, expect, pickFilm, pickVersion, readAgentLog, test, videoReady, type AgentRushes } from "./agentFixture.js";
 
 /** The top bar's chip: what the agent is doing. Clicking it opens Activity. */
 const chip = (page: Page): Locator => page.locator("header.top .achip");
@@ -1610,3 +1610,144 @@ test("the strip folds into Show the run when the run ends, and a line with a not
   await expect(strip(page).locator(".lline").first()).toBeVisible();
   await stripFits(page);
 });
+
+// ---- the new cut lands (task 8) ----
+
+const cutDot = (page: Page): Locator => cutButton(page).locator(".vnewer");
+
+/** Two rects share no area. */
+const apart = (a: { x: number; y: number; width: number; height: number }, b: { x: number; y: number; width: number; height: number }): boolean =>
+  a.x + a.width <= b.x || b.x + b.width <= a.x || a.y + a.height <= b.y || b.y + b.height <= a.y;
+
+/** Starts the picture playing (muted, looping so it is still playing when the test looks). */
+async function startPlaying(page: Page): Promise<void> {
+  await page.locator("video").evaluate((v: HTMLVideoElement) => {
+    v.muted = true;
+    v.loop = true;
+    return v.play();
+  });
+  await expect.poll(() => page.locator("video").evaluate((v: HTMLVideoElement) => !v.paused)).toBe(true);
+}
+
+/** The cut button's dot lies on the button, whole, and the button is not clipped by the bar. */
+async function dotOnButton(page: Page): Promise<void> {
+  const d = (await cutDot(page).boundingBox())!;
+  const b = (await cutButton(page).boundingBox())!;
+  const bar = (await page.locator("header.top").boundingBox())!;
+  expect(d.width).toBeGreaterThanOrEqual(6);
+  expect(d.x).toBeGreaterThanOrEqual(b.x);
+  expect(d.x + d.width).toBeLessThanOrEqual(b.x + b.width);
+  expect(d.y).toBeGreaterThanOrEqual(b.y);
+  expect(d.y + d.height).toBeLessThanOrEqual(b.y + b.height);
+  expect(b.y + b.height).toBeLessThanOrEqual(bar.y + bar.height);
+  expect(await page.locator("header.top").evaluate((h) => h.scrollWidth <= h.clientWidth)).toBe(true);
+}
+
+test("a new cut switches when nothing plays", async ({ page, rushes }) => {
+  await rushes.addCut("first cut");
+  await rushes.addCut("second cut");
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await expect(cutButton(page)).toHaveAttribute("data-version", "v2");
+  // Opening a project that already has cuts says nothing.
+  await page.waitForTimeout(600);
+  await expect(toastEl(page)).toHaveCount(0);
+  await rushes.addCut("third cut");
+  await expect(toastEl(page)).toHaveText("v3 is in");
+  await expect(cutButton(page)).toHaveAttribute("data-version", "v3");
+  await expect(cutDot(page)).toHaveCount(0);
+  await expect(toastEl(page).getByRole("button", { name: "Show" })).toHaveCount(0);
+  await expect(toastEl(page)).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath("newcut-switched-1440.png"), clip: { x: 0, y: 0, width: 1440, height: 120 } });
+});
+
+test("a new cut waits while playing", async ({ page, rushes }) => {
+  await rushes.addCut("first cut");
+  await rushes.addCut("second cut");
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await startPlaying(page);
+  await rushes.addCut("third cut");
+  await expect(toastEl(page)).toContainText("v3 is in");
+  const show = toastEl(page).getByRole("button", { name: "Show" });
+  await expect(show).toBeVisible();
+  // The picture is left where it was, and still playing; the Cut menu says there is more.
+  await expect(cutButton(page)).toHaveAttribute("data-version", "v2");
+  expect(await page.locator("video").evaluate((v: HTMLVideoElement) => !v.paused)).toBe(true);
+  await expect(cutDot(page)).toBeVisible();
+  await expect(cutButton(page)).toHaveAccessibleDescription("v3 is ready");
+  await dotOnButton(page);
+  await page.screenshot({ path: test.info().outputPath("newcut-offered-1440.png"), clip: { x: 0, y: 0, width: 1440, height: 120 } });
+  // The dot outlives the toast, and pausing doesn't switch the picture behind your back.
+  await page.locator("video").evaluate((v: HTMLVideoElement) => v.pause());
+  await expect(toastEl(page)).toHaveCount(0, { timeout: 10_000 });
+  await expect(cutButton(page)).toHaveAttribute("data-version", "v2");
+  await expect(cutDot(page)).toBeVisible();
+  // Picking it from the menu is "viewed" too: the dot goes.
+  await pickVersion(page, "v3");
+  await expect(cutButton(page)).toHaveAttribute("data-version", "v3");
+  await expect(cutDot(page)).toHaveCount(0);
+});
+
+test("Show switches to the new cut and clears the dot", async ({ page, rushes }) => {
+  await rushes.addCut("first cut");
+  await rushes.addCut("second cut");
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await startPlaying(page);
+  await rushes.addCut("third cut");
+  await toastEl(page).getByRole("button", { name: "Show" }).click();
+  await expect(cutButton(page)).toHaveAttribute("data-version", "v3");
+  await expect(cutDot(page)).toHaveCount(0);
+  await expect(toastEl(page)).toHaveCount(0);
+});
+
+test("a cut for another film says nothing, and switching film says nothing", async ({ page, rushes }) => {
+  await rushes.addCut("hero one");
+  await rushes.addCut("teaser one", "Teaser");
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await rushes.addCut("teaser two", "Teaser");
+  await page.waitForTimeout(800);
+  await expect(toastEl(page)).toHaveCount(0);
+  await expect(cutButton(page)).toHaveAttribute("data-version", "v1");
+  await pickFilm(page, "Teaser");
+  await videoReady(page);
+  await expect(cutButton(page)).toHaveAttribute("data-version", "v2");
+  await page.waitForTimeout(600);
+  await expect(toastEl(page)).toHaveCount(0);
+  await expect(cutDot(page)).toHaveCount(0);
+});
+
+for (const width of [1440, 900]) {
+  test(`the new-cut toast keeps clear of the agent chip, Send and the Cut menu dot at ${width} px`, async ({ page, startWithAgent }) => {
+    const rushes = await startWithAgent({ turns: [[{ sleep: 8000 }, { stop: "end_turn" }]] });
+    const note = await readyToSend(rushes);
+    await rushes.addCut("second cut");
+    await rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v2", scope: "point", t: 0.7, text: "Another one." });
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto(rushes.url);
+    await videoReady(page);
+    await rushes.api("POST", "/api/batches", {});
+    await expect(chip(page)).toBeVisible({ timeout: 10_000 });
+    await startPlaying(page);
+    await rushes.addCut("third cut");
+    const toastBox = async () => (await toastEl(page).boundingBox())!;
+    await expect(toastEl(page).getByRole("button", { name: "Show" })).toBeVisible();
+    await expect(cutDot(page)).toBeVisible();
+    await dotOnButton(page);
+    const t = await toastBox();
+    expect(t.x).toBeGreaterThanOrEqual(0);
+    expect(t.x + t.width).toBeLessThanOrEqual(width);
+    // Not over the chip, nor over Send when the panel shows it.
+    expect(apart(t, (await chip(page).boundingBox())!)).toBe(true);
+    const send = page.locator(".sendbtn");
+    if (await send.isVisible()) expect(apart(t, (await send.boundingBox())!)).toBe(true);
+    // Nor over the Cut menu's own button.
+    expect(apart(t, (await cutButton(page).boundingBox())!)).toBe(true);
+    await page.screenshot({ path: test.info().outputPath(`newcut-geometry-${width}.png`), clip: { x: 0, y: 0, width, height: 140 } });
+    void note;
+  });
+}
