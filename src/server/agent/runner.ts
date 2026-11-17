@@ -26,7 +26,7 @@ import { adapterSpec, rushesMcp } from "./adapters.js";
 import { PermissionBroker, addRule, allowOutcome, dropRule, toRequest, type AskChoice, type PendingAsk } from "./broker.js";
 import { detectAgents, type AgentInfo } from "./detect.js";
 import { agentRulesFor, type AgentRulesFile } from "./rules.js";
-import { CarriedBatches, batchJob, followUpFor, type TurnJob } from "./followUp.js";
+import { batchJob, followUpFor, type TurnJob } from "./followUp.js";
 
 export type AgentPhase = "off" | "idle" | "starting" | "working" | "waiting" | "question" | "finished" | "failed";
 
@@ -60,6 +60,11 @@ export interface RunnerOptions {
 
 /** `stopped` is set when the batch was not handed over because the user pressed Stop: the desk then doesn't copy the prompt. */
 export type SendResult = { handedTo: AgentId } | { handedTo: null; why: string; stopped?: true };
+
+/** A follow-up parked by R11: its note goes back to to do, and Activity names the agent to Send to. */
+type Park = { name: string; batch: string };
+type HandResult = SendResult | { handedTo: null; why: string; park: Park };
+type Accepted = { info: AgentInfo } | { why: string; stopped?: true } | { why: string; park: Park };
 
 /** How long the adapter stays up after its last turn (§5.2). */
 export const AGENT_IDLE_MS = 600_000;
@@ -151,8 +156,6 @@ export class AgentRunner {
   private turn: { job: TurnJob; done: Promise<void> } | null = null;
   /** Permission asks waiting for the user. */
   private readonly broker: PermissionBroker;
-  /** Batches handed to the agent in this process: only their notes' answers become follow-ups (R3). */
-  private readonly carried = new CarriedBatches();
   /** The latest Always rule write; a permission ask waits for it before reading the rules. */
   private ruleWrite: Promise<void> = Promise.resolve();
   /** A turn has ended and the runner is reading the notes to choose question or finished. */
@@ -179,7 +182,7 @@ export class AgentRunner {
   private readonly onChange = (e: ChangeEvent) => {
     if (e.file === "agent" && !this.closed) this.track(this.loadSettings());
   };
-  /** The user answered on a note: a follow-up turn when R3 allows one (followUp.ts). */
+  /** The user answered on a note: a follow-up turn when R11 allows one (followUp.ts). */
   private readonly onUserReply = (e: { note: string; text: string }) => {
     if (!this.closed) this.track(this.followUp(e));
   };
@@ -233,25 +236,39 @@ export class AgentRunner {
    * flight. Never rejects: when the batch can't be handed over it says why, so the desk can copy the prompt.
    */
   async send(batch: Batch): Promise<SendResult> {
-    return (await this.hand(async () => batchJob(batch)))!;
+    const r = (await this.hand(async () => batchJob(batch)))!;
+    // A batch is never parked (only a follow-up is).
+    return "park" in r ? { handedTo: null, why: r.why } : r;
   }
 
-  /** Hands the answer on as a follow-up. One that can't be says why in Activity, unless Send to AI is off. */
+  /**
+   * Hands the answer on as a follow-up (R11). With Send to AI on but no kept session, or the agent not signed in,
+   * the note goes back to to do and Activity says so. One that can't be sent for another reason says why, unless
+   * Send to AI is off.
+   */
   private async followUp(e: { note: string; text: string }): Promise<void> {
     const r = await this.hand(() =>
-      followUpFor(this.store, this.carried, e).catch((err: unknown) => {
+      followUpFor(this.store, e).catch((err: unknown) => {
         console.error(`Rushes: couldn't read note ${e.note} to pass on its answer: ${messageOf(err)}`);
         throw err;
       }),
     );
+    if (!r || this.closed) return;
+    if ("park" in r) {
+      await this.recall({ batches: [], notes: [{ id: e.note, batch: r.park.batch }] });
+      if (this.closed) return;
+      this.addLine(`Your answer on ${e.note} is saved. Press Send to hand it to ${r.park.name}.`, e.note);
+      this.announce();
+      return;
+    }
     // Quiet when Send to AI is off, and when the user's own Stop cut it short.
-    if (!r || r.handedTo !== null || r.stopped || r.why === "Send to AI is off" || this.closed) return;
+    if (r.handedTo !== null || r.stopped || r.why === "Send to AI is off") return;
     this.addLine(`Your answer on ${e.note} was not sent: ${r.why}`, e.note);
     this.announce();
   }
 
   /** Queues the job `make` gives (none: nothing to do, null back), then starts the adapter or pumps the queue. */
-  private async hand(make: () => Promise<TurnJob | null>): Promise<SendResult | null> {
+  private async hand(make: () => Promise<TurnJob | null>): Promise<HandResult | null> {
     const accepting = this.sendLock.then(async () => {
       // A follow-up is dropped if a Stop lands after its note was read: the Stop may have taken the note back.
       const gen = this.gen;
@@ -259,13 +276,14 @@ export class AgentRunner {
       return job ? this.accept(job, job.kind === "followUp" ? gen : null) : null;
     });
     this.sendLock = accepting.catch(() => undefined);
-    let accepted: { info: AgentInfo } | { why: string; stopped?: true } | null;
+    let accepted: Accepted | null;
     try {
       accepted = await accepting;
     } catch (e) {
       return { handedTo: null, why: messageOf(e) };
     }
     if (accepted === null) return null;
+    if ("park" in accepted) return { handedTo: null, why: accepted.why, park: accepted.park };
     if ("why" in accepted) return accepted.stopped ? { handedTo: null, why: accepted.why, stopped: true } : { handedTo: null, why: accepted.why };
     try {
       await this.ensureStarted();
@@ -278,16 +296,25 @@ export class AgentRunner {
     return { handedTo: accepted.info.id };
   }
 
-  /** Checks the switch, the agent and its sign-in, then queues the job. Runs one at a time. */
-  private async accept(job: TurnJob, sinceGen: number | null): Promise<{ info: AgentInfo } | { why: string; stopped?: true }> {
+  /**
+   * Checks the switch, the agent and its sign-in, then queues the job. Runs one at a time. A follow-up that can't
+   * go now for want of a kept session or a signed-in agent is parked: its note goes back to to do (R11).
+   */
+  private async accept(job: TurnJob, sinceGen: number | null): Promise<Accepted> {
     while (this.stopping) await this.stopping;
     if (this.closed) return { why: "Rushes is closing" };
     const settings = await this.loadSettings();
     if (!settings.on) return { why: "Send to AI is off" };
-    if (!settings.agent) return { why: "No agent chosen" };
-    const info = (await this.detect()).find((a) => a.id === settings.agent);
-    if (!info?.installed) return { why: `${info?.name ?? NAMES[settings.agent]} is not installed` };
-    if (!info.signedIn) return { why: `${info.name} is not signed in` };
+    const agent = settings.agent;
+    const park = (why: string, name: string): Accepted =>
+      job.kind === "followUp" ? { why, park: { name, batch: job.batchId } } : { why };
+    if (job.kind === "followUp" && (!agent || settings.session?.agent !== agent)) {
+      return park("No conversation to carry on", agent ? NAMES[agent] : "your agent");
+    }
+    if (!agent) return { why: "No agent chosen" };
+    const info = (await this.detect()).find((a) => a.id === agent);
+    if (!info?.installed) return park(`${info?.name ?? NAMES[agent]} is not installed`, info?.name ?? NAMES[agent]);
+    if (!info.signedIn) return park(`${info.name} is not signed in`, info.name);
     // A Stop or close may have begun while this send was checking.
     while (this.stopping) await this.stopping;
     if (this.closed) return { why: "Rushes is closing" };
@@ -486,7 +513,6 @@ export class AgentRunner {
     const job = this.queue.shift()!;
     const gen = this.gen;
     const name = this.info?.name ?? "The agent";
-    if (job.kind === "batch") this.carried.add(job.batchId);
     this.clearIdle();
     let done!: () => void;
     this.turn = { job, done: new Promise<void>((r) => (done = r)) };

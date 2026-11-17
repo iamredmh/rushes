@@ -352,36 +352,93 @@ describe("AgentRunner answers on notes", () => {
     expect(started).toHaveLength(2);
   });
 
-  it("an answer on a note from outside this run's batches sends nothing", async () => {
+  it("an answer on a note that is not with the agent sends nothing", async () => {
     const r = await rig({ turns: [] });
     const b1 = await r.batch("One", "Done already");
     await r.runner.send(b1);
     await r.phase("finished");
     await r.store.update("notes", (f) => void applyReply(f, { id: b1.noteIds[1], reply: "Done.", status: "done" }));
-    // b_2 was sent by copying its prompt: never carried by this runner.
-    const b2 = await r.batch("Two");
     await r.store.update("notes", (f) => void addNote(f, { stage: "picture", scope: "whole", text: "Not sent" }));
     const todo = (await r.store.read("notes")).notes.find((n) => n.text === "Not sent")!;
-    await r.answerOn(b2.noteIds[0], "Yes");
     await r.answerOn(todo.id, "Yes");
     await r.answerOn(b1.noteIds[1], "Yes");
     // Answers are queued in order of arrival, so a batch sent now would run after any follow-up they made.
-    const b3 = await r.batch("Three");
-    await r.runner.send(b3);
-    await r.waitFor("b_3's prompt", () => prompts(r.log()).length >= 2);
+    const b2 = await r.batch("Two");
+    await r.runner.send(b2);
+    await r.waitFor("b_2's prompt", () => prompts(r.log()).length >= 2);
     await r.phase("finished");
-    expect(prompts(r.log()).map(promptText)).toEqual([b1.prompt + "\n\n" + AGENT_LINES, b3.prompt + "\n\n" + AGENT_LINES]);
+    expect(prompts(r.log()).map(promptText)).toEqual([b1.prompt + "\n\n" + AGENT_LINES, b2.prompt + "\n\n" + AGENT_LINES]);
+    expect(r.runner.status().lines.some((l) => l.text.startsWith("Your answer on"))).toBe(false);
+  });
 
-    // After a restart, nothing this process carried is known: b_1's open note gets no follow-up either.
+  it("R11: after a restart, an answer on a sent note is followed up in the kept session", async () => {
+    const r = await rig({ loadSession: true, turns: [] });
+    const b1 = await r.batch("One");
+    await r.runner.send(b1);
+    await r.phase("finished");
+    // The agent asked on the note, so it stays with the agent.
+    await r.store.update("notes", (f) => void applyReply(f, { id: b1.noteIds[0], reply: "Which title?" }));
+    // The server restarts: a fresh runner on the same store, with the session kept in agent.json.
     await r.runner.close();
+    expect((await r.store.read("agent")).session?.id).toBe("fake-session-1");
     const again = r.makeRunner();
     await r.waitFor("the new runner to read agent.json", () => again.status().on);
-    await r.answerOn(b1.noteIds[0], "Yes");
-    const b4 = await r.batch("Four");
-    await again.send(b4);
-    await r.waitFor("b_4's prompt", () => prompts(r.log()).length >= 3);
+    await r.answerOn(b1.noteIds[0], "The first one.");
+    await r.waitFor("the follow-up prompt", () => prompts(r.log()).length === 2);
     await r.phase("finished", again);
-    expect(prompts(r.log()).map(promptText).slice(2)).toEqual([b4.prompt + "\n\n" + AGENT_LINES]);
+    const second = prompts(r.log())[1];
+    expect(promptText(second)).toBe(followUp(b1.noteIds[0], "One", "The first one."));
+    expect(second.params.sessionId).toBe("fake-session-1");
+    expect(r.log().filter((m) => m.loaded).map((m) => m.loaded)).toEqual(["fake-session-1"]);
+  });
+
+  it("R11: with no kept session, an answer on a sent note puts it back in to do and says so", async () => {
+    const r = await rig({ turns: [] });
+    // Sent by copying the prompt: filed in a batch, with no session ever started.
+    const b1 = await r.batch("One", "Two");
+    expect((await r.store.read("agent")).session).toBeNull();
+    await r.answerOn(b1.noteIds[0], "Yes");
+    const line = `Your answer on ${b1.noteIds[0]} is saved. Press Send to hand it to Claude Code.`;
+    await r.waitFor("the Activity line", () => r.runner.status().lines.some((l) => l.text === line));
+    expect(r.runner.status().lines.find((l) => l.text === line)?.note).toBe(b1.noteIds[0]);
+    const [one, two] = await Promise.all(b1.noteIds.map(async (id) => (await r.store.read("notes")).notes.find((n) => n.id === id)!));
+    expect([noteState(one), one.batch]).toEqual(["todo", null]);
+    // Only that note: the rest of the batch stays with the agent.
+    expect([noteState(two), two.batch]).toEqual(["sent", "b_1"]);
+    expect(prompts(r.log())).toEqual([]);
+    expect(started).toHaveLength(0);
+  });
+
+  it("R11: with the agent not signed in, an answer on a sent note puts it back in to do and says so; with Send to AI off nothing changes", async () => {
+    let signedIn = true;
+    const r = await rig({ turns: [] }, { runner: { detect: async () => [{ ...claude, signedIn }] } });
+    const b1 = await r.batch("One", "Two");
+    await r.runner.send(b1);
+    await r.phase("finished");
+    await r.store.update("notes", (f) => {
+      for (const id of b1.noteIds) applyReply(f, { id, reply: "Which one?" });
+    });
+    signedIn = false;
+    await r.answerOn(b1.noteIds[0], "Yes");
+    const line = `Your answer on ${b1.noteIds[0]} is saved. Press Send to hand it to Claude Code.`;
+    await r.waitFor("the Activity line", () => r.runner.status().lines.some((l) => l.text === line));
+    await r.waitFor("the note to come back", async () => noteState((await r.store.read("notes")).notes.find((n) => n.id === b1.noteIds[0])!) === "todo");
+
+    signedIn = true;
+    await r.store.update("agent", (f) => void (f.on = false));
+    await r.waitFor("the switch to go off", () => r.runner.status().phase === "off");
+    const before = r.runner.status().lines.length;
+    await r.answerOn(b1.noteIds[1], "Yes");
+    // Turning it back on and sending shows any follow-up the answer had made: there is none, and no line.
+    await r.store.update("agent", (f) => void (f.on = true));
+    const b2 = await r.batch("Three");
+    await r.runner.send(b2);
+    await r.waitFor("b_2's prompt", () => prompts(r.log()).length >= 2);
+    await r.phase("finished");
+    expect(prompts(r.log()).map(promptText).slice(1)).toEqual([b2.prompt + "\n\n" + AGENT_LINES]);
+    expect(r.runner.status().lines.slice(before).some((l) => l.text.startsWith("Your answer on"))).toBe(false);
+    const two = (await r.store.read("notes")).notes.find((n) => n.id === b1.noteIds[1])!;
+    expect([noteState(two), two.batch]).toEqual(["sent", "b_1"]);
   });
 
   it("stop during a follow-up gives that note back and leaves the batch's other notes", async () => {
@@ -414,33 +471,6 @@ describe("AgentRunner answers on notes", () => {
     });
     const two = (await r.store.read("notes")).notes.find((x) => x.id === b1.noteIds[1])!;
     expect([noteState(two), two.batch]).toEqual(["sent", "b_1"]);
-  });
-
-  it("an answer that can't be handed over says so in Activity, except when Send to AI is off", async () => {
-    let signedIn = true;
-    const r = await rig({ turns: [] }, { runner: { detect: async () => [{ ...claude, signedIn }] } });
-    const b1 = await r.batch("One", "Two");
-    await r.runner.send(b1);
-    await r.phase("finished");
-    signedIn = false;
-    await r.answerOn(b1.noteIds[0], "Yes");
-    const line = `Your answer on ${b1.noteIds[0]} was not sent: Claude Code is not signed in`;
-    await r.waitFor("the Activity line", () => r.runner.status().lines.some((l) => l.text === line));
-    expect(r.runner.status().lines.find((l) => l.text === line)?.note).toBe(b1.noteIds[0]);
-
-    signedIn = true;
-    await r.store.update("agent", (f) => void (f.on = false));
-    await r.waitFor("the switch to go off", () => r.runner.status().phase === "off");
-    const before = r.runner.status().lines.length;
-    await r.answerOn(b1.noteIds[1], "Yes");
-    // Turning it back on and sending shows any follow-up the answer had made: there is none, and no line.
-    await r.store.update("agent", (f) => void (f.on = true));
-    const b2 = await r.batch("Three");
-    await r.runner.send(b2);
-    await r.waitFor("b_2's prompt", () => prompts(r.log()).length >= 2);
-    await r.phase("finished");
-    expect(prompts(r.log()).map(promptText).slice(1)).toEqual([b2.prompt + "\n\n" + AGENT_LINES]);
-    expect(r.runner.status().lines.slice(before).some((l) => l.text.startsWith("Your answer on"))).toBe(false);
   });
 
   it("a follow-up cut short by Stop while the adapter starts gives its note back and writes no refusal line", async () => {
