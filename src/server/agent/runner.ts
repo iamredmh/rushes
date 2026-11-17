@@ -83,7 +83,9 @@ export const AGENT_LINES_KEPT = 200;
 const EXIT_WAIT_MS = 4000;
 const CANCELLED: AcpPermissionOutcome = { outcome: "cancelled" };
 
-const NAMES: Record<AgentId, string> = { claude: "Claude Code", codex: "Codex" };
+/** Each agent by name, as Activity and the notification say it. */
+export const AGENT_NAMES: Readonly<Record<AgentId, string>> = { claude: "Claude Code", codex: "Codex" };
+const NAMES = AGENT_NAMES;
 
 /** A start-up ended by Stop or close, not by a failure. */
 class Halted extends Error {

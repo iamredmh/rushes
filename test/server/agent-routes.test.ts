@@ -353,3 +353,60 @@ describe("live agent status", () => {
     await waitFor("the agent listener to go", () => s.store.listenerCount("agent") === before);
   });
 });
+
+describe("the macOS notification when no desk is open (spec §5.4)", () => {
+  const exec = (command: string, record: string) => ({
+    permission: { toolCall: { toolCallId: record, title: `Run ${command}`, kind: "execute", rawInput: { command } } },
+    record,
+  });
+
+  async function server() {
+    const { root, store } = await tmpProject("lumen");
+    const fake = fakeAgent(store, () => [claude(), codex()]);
+    await fake.scenario({ turns: [[exec("npm test", "t")]] });
+    await store.update("agent", (f) => void Object.assign(f, { on: true, agent: "claude" }));
+    const told: Array<[string, string]> = [];
+    const s = await startServer(root, { port: 0, agent: fake.opts, notify: async (title, body) => void told.push([title, body]) });
+    servers.push(s);
+    const post = (path: string, json: unknown) =>
+      fetch(`${s.url}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(json) }).then((r) => r.json() as Promise<any>);
+    const status = async () => (await (await fetch(`${s.url}/api/agent`)).json() as any).status as AgentStatus;
+    /** A note the agent asks on before its turn ends, so the run ends in question. */
+    const sendAsked = async () => {
+      const note = (await post("/api/notes", { stage: "picture", scope: "whole", text: "Tighten the opening" })).note.id as string;
+      await store.update("notes", (f) => {
+        const n = f.notes.find((x) => x.id === note)!;
+        n.replies.push({ by: "agent", text: "Which part?", at: new Date().toISOString() });
+      });
+      expect((await post("/api/batches", {})).agent).toMatchObject({ handedTo: "claude" });
+    };
+    return { s, told, post, status, sendAsked };
+  }
+
+  it("tells the Mac when an ask arrives and when a run ends in a question, with no desk open", async () => {
+    const r = await server();
+    await r.sendAsked();
+    const ask = await waitFor("an ask", async () => (await r.status()).asks[0]);
+    await waitFor("the first notification", () => r.told.length === 1);
+    expect(r.told[0]).toEqual(["Rushes", "Claude Code is waiting for you in My Project"]);
+    await r.post(`/api/agent/permission/${ask.id}`, { choice: "once" });
+    await waitFor("the question", async () => (await r.status()).phase === "question");
+    await waitFor("the second notification", () => r.told.length === 2);
+    expect(r.told[1]).toEqual(["Rushes", "Claude Code is waiting for you in My Project"]);
+    // Never the command.
+    expect(r.told.flat().some((t) => t.includes("npm test"))).toBe(false);
+  });
+
+  it("stays quiet while a desk is open", async () => {
+    const r = await server();
+    const events = await sse(r.s.url);
+    await events.until("event: hello");
+    await r.sendAsked();
+    const ask = await waitFor("an ask", async () => (await r.status()).asks[0]);
+    await r.post(`/api/agent/permission/${ask.id}`, { choice: "once" });
+    await waitFor("the question", async () => (await r.status()).phase === "question");
+    await new Promise((ok) => setTimeout(ok, 100));
+    expect(r.told).toEqual([]);
+    events.stop();
+  });
+});

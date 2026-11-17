@@ -16,6 +16,7 @@ import { FoundScanner, ffprobeDuration, foundAnnouncer, type FoundProbe } from "
 import type { ScanLimits } from "../core/found.js";
 import type { VideoProber } from "../core/media.js";
 import { AgentRunner, type RunnerOptions } from "./agent/runner.js";
+import type { Notifier } from "./agent/notify.js";
 
 export const DEFAULT_PORT = 4580;
 
@@ -54,6 +55,8 @@ export interface StartOptions {
   formats?: { probe?: VideoProber };
   /** §28: how the agent runner detects and starts agents. Tests only: they drive the fake agent. */
   agent?: RunnerOptions;
+  /** Spec §5.4: the notification shown when the agent waits on the user and no desk is open. Defaults to osNotifier; tests inject a fake. */
+  notify?: Notifier;
 }
 
 function listen(server: Server, port: number, host: string): Promise<number> {
@@ -101,7 +104,7 @@ export async function startServer(rootDir: string, opts: StartOptions = {}): Pro
   const runner = new AgentRunner(store, opts.agent);
   const appOpts: AppOptions = {
     brief, storyboard, webDir: opts.webDir, onShutdown: () => void close(), reveal: opts.reveal, proxyJobs, peakJobs, found, formatProbe: opts.formats?.probe,
-    agent: runner, detect: opts.agent?.detect,
+    agent: runner, detect: opts.agent?.detect, notify: opts.notify,
   };
   const app = createApp(store, appOpts);
   const listener = getRequestListener(app.fetch);

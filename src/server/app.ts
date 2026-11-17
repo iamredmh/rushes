@@ -45,6 +45,7 @@ import { clearDetectCache, detectAgents, type AgentInfo } from "./agent/detect.j
 import type { AgentId } from "../core/schema.js";
 import { openInTerminal, type TerminalOpener } from "./agent/terminal.js";
 import { agentRulesFor } from "./agent/rules.js";
+import { notifyWhenWaiting, osNotifier, type Notifier } from "./agent/notify.js";
 
 import { VERSION } from "../version.js";
 export { VERSION };
@@ -360,6 +361,11 @@ export interface AppOptions {
   terminal?: TerminalOpener;
   /** §28: how long Send waits for the agent to take the batch before answering `starting: true`. Defaults to SEND_WAIT_MS. */
   sendWaitMs?: number;
+  /**
+   * Spec §5.4: tells the Mac when the agent waits on the user (an ask, or a run ending in a question) and no desk
+   * has the events stream open. Only with an `agent`. Defaults to osNotifier; tests inject a fake.
+   */
+  notify?: Notifier;
 }
 
 /** What the routes use of the agent runner. */
@@ -784,6 +790,8 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   // Event streams open now. Only `?test=1` shows it, so the e2e suite can check that a browser's
   // tabs share one stream (§19.8).
   let streams = 0;
+  // §5.4: with a runner, the Mac is told when the agent waits on the user and no desk is open to show it.
+  if (opts.agent) notifyWhenWaiting(store, opts.notify ?? osNotifier(), () => streams);
   app.get("/api/health", async (c) => {
     const [project, id] = await Promise.all([store.read("project"), getProjectId()]);
     // Ruling e: Change Log lines that couldn't be written are counted for `rushes doctor`, only when there are any.
