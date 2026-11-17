@@ -1,7 +1,7 @@
 // Send to AI (plan 2, task 5): when the desk notifies. Only while the page is hidden, once for each new ask and once
 // when the run turns to a question; never for an ask or a question already heard.
 import { describe, expect, it } from "vitest";
-import { NOTHING_HEARD, notices, type Heard } from "../../web/src/notify.js";
+import { NOTHING_HEARD, notices, outOfSight, type Heard } from "../../web/src/notify.js";
 import type { AgentStatus, PendingAsk } from "../../web/src/types.js";
 
 const status = (over: Partial<AgentStatus> = {}): AgentStatus => ({
@@ -63,5 +63,27 @@ describe("notices", () => {
   it("no status (no Send to AI) notifies nothing and forgets nothing", () => {
     expect(run([[null, true]])).toEqual([]);
     expect(run([[waiting("ask_1"), true], [null, true], [waiting("ask_1"), true]])).toHaveLength(1);
+  });
+});
+
+describe("outOfSight (I5)", () => {
+  const doc = (hidden: boolean, focused: boolean) => ({ hidden, hasFocus: () => focused });
+
+  it("a hidden page is out of sight", () => {
+    expect(outOfSight(doc(true, false))).toBe(true);
+    expect(outOfSight(doc(true, true))).toBe(true);
+  });
+
+  it("a page shown but without focus (behind another window, as Safari leaves it visible) is out of sight", () => {
+    expect(outOfSight(doc(false, false))).toBe(true);
+  });
+
+  it("only a page shown and in focus is in sight", () => {
+    expect(outOfSight(doc(false, true))).toBe(false);
+  });
+
+  it("a blurred page notifies a new ask", () => {
+    const r = notices(NOTHING_HEARD, waiting("ask_1"), outOfSight(doc(false, false)));
+    expect(r.notes).toEqual([{ body: "Claude Code is waiting for you", tag: "ask_1" }]);
   });
 });

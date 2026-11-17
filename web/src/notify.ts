@@ -1,6 +1,6 @@
 // §28, Send to AI: the browser notification when the agent needs you and the page is out of sight (plan 2, task 5).
 // A new ask notifies "<A> is waiting for you"; the run turning to a question notifies "<A> has a question". Each ask id,
-// and each turn to a question, notifies at most once, and only while the page is hidden. Leave to notify is never
+// and each turn to a question, notifies at most once, and only while the page is out of sight (outOfSight). Leave to notify is never
 // asked for here: only in the press that sends notes to an agent (sendFollow.askNotificationsOnce). Without it granted,
 // nothing shows, and the chip and the ask cards still say what needs you.
 import { useEffect, useRef } from "preact/hooks";
@@ -32,6 +32,13 @@ export function notices(before: Heard, s: AgentStatus | null, hidden: boolean): 
 }
 
 /**
+ * Whether the person can't be looking at the desk (I5): the page is hidden (a background tab, a minimised window), or it
+ * is shown but has no focus, as when another app's window is in front of it. Safari reports a page covered by another
+ * window as visible, so `hidden` alone would never notify there.
+ */
+export const outOfSight = (doc: Pick<Document, "hidden" | "hasFocus"> = document): boolean => doc.hidden || !doc.hasFocus();
+
+/**
  * Shows the notice, if the browser has already granted leave. The tag carries the page's path, so two tabs on one
  * project show one notification, and two projects never replace each other's. Clicking it brings the desk forward.
  */
@@ -52,7 +59,7 @@ export function showNotice(n: Notice): void {
 export function useAskNotify(s: AgentStatus | null): void {
   const heard = useRef<Heard>(NOTHING_HEARD);
   useEffect(() => {
-    const r = notices(heard.current, s, document.hidden);
+    const r = notices(heard.current, s, outOfSight());
     heard.current = r.heard;
     for (const n of r.notes) showNotice(n);
   }, [s]);

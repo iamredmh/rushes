@@ -1115,19 +1115,22 @@ test("card fits at 900 px", async ({ page, startWithAgent }) => {
   await shootAsks(page, "ask-long-1440");
 });
 
-test("an ask notifies while the page is hidden, once, and so does a question; neither asks for leave", async ({ page, startWithAgent }) => {
-  const rushes = await startWithAgent({
-    turns: [[{ permission: { toolCall: FFPROBE }, record: "a" }, { permission: { toolCall: HYPERFRAMES }, record: "b" }, { sleep: 2500 }, { stop: "end_turn" }]],
-  });
-  const id = await readyToSend(rushes);
+/**
+ * Stands in for the browser's notifications (granted) and for whether the page is hidden and has focus, so a test can
+ * put the desk out of sight either way. Returns what was shown, and setters for hidden and focus.
+ */
+async function stubNotices(page: Page) {
   await page.addInitScript(() => {
-    const w = window as unknown as { __shown: { title: string; body: string }[]; __asked: number; __setHidden(h: boolean): void };
+    const w = window as unknown as { __shown: { title: string; body: string }[]; __asked: number; __setHidden(h: boolean): void; __setFocused(f: boolean): void };
     w.__shown = [];
     w.__asked = 0;
     let hidden = false;
+    let focused = true;
     w.__setHidden = (h) => void (hidden = h);
+    w.__setFocused = (f) => void (focused = f);
     Object.defineProperty(Document.prototype, "hidden", { get: () => hidden, configurable: true });
     Object.defineProperty(Document.prototype, "visibilityState", { get: () => (hidden ? "hidden" : "visible"), configurable: true });
+    Document.prototype.hasFocus = () => focused;
     class Fake {
       static permission = "granted";
       static requestPermission() {
@@ -1142,8 +1145,19 @@ test("an ask notifies while the page is hidden, once, and so does a question; ne
     }
     Object.defineProperty(window, "Notification", { value: Fake, configurable: true, writable: true });
   });
-  const shown = () => page.evaluate(() => (window as unknown as { __shown: unknown[] }).__shown);
-  const setHidden = (h: boolean) => page.evaluate((x) => (window as unknown as { __setHidden(h: boolean): void }).__setHidden(x), h);
+  return {
+    shown: () => page.evaluate(() => (window as unknown as { __shown: unknown[] }).__shown),
+    setHidden: (h: boolean) => page.evaluate((x) => (window as unknown as { __setHidden(h: boolean): void }).__setHidden(x), h),
+    setFocused: (f: boolean) => page.evaluate((x) => (window as unknown as { __setFocused(f: boolean): void }).__setFocused(x), f),
+  };
+}
+
+test("an ask notifies while the page is hidden, once, and so does a question; neither asks for leave", async ({ page, startWithAgent }) => {
+  const rushes = await startWithAgent({
+    turns: [[{ permission: { toolCall: FFPROBE }, record: "a" }, { permission: { toolCall: HYPERFRAMES }, record: "b" }, { sleep: 2500 }, { stop: "end_turn" }]],
+  });
+  const id = await readyToSend(rushes);
+  const { shown, setHidden } = await stubNotices(page);
   await page.goto(rushes.url);
   await videoReady(page);
   await rushes.api("POST", "/api/batches", {});
@@ -1166,6 +1180,21 @@ test("an ask notifies while the page is hidden, once, and so does a question; ne
   await page.waitForTimeout(500);
   expect(await shown()).toHaveLength(2);
   expect(await page.evaluate(() => (window as unknown as { __asked: number }).__asked)).toBe(0);
+});
+
+test("an ask notifies while the page is shown but behind another window (no focus), as Safari leaves it visible (I5)", async ({ page, startWithAgent }) => {
+  const rushes = await startWithAgent({ turns: [[{ permission: { toolCall: FFPROBE }, record: "a" }, { stop: "end_turn" }]] });
+  await readyToSend(rushes);
+  const { shown, setFocused } = await stubNotices(page);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  // Shown, never hidden, but another window has the focus.
+  await setFocused(false);
+  expect(await page.evaluate(() => [document.hidden, document.visibilityState, document.hasFocus()])).toEqual([false, "visible", false]);
+  await rushes.api("POST", "/api/batches", {});
+  await expect(askCards(page)).toHaveCount(1);
+  await expect.poll(shown).toEqual([{ title: "Rushes", body: "Claude Code is waiting for you" }]);
+  await rushes.api("POST", "/api/agent/permission/ask_1", { choice: "once" });
 });
 
 test("a double-click answers only the card it was meant for: the card sliding into place takes no press yet", async ({ page, startWithAgent }) => {
