@@ -112,6 +112,20 @@ export function whoLine(s: AgentStatus): string {
 /** The live strip: the last `max` activity lines, newest first. */
 export const liveLines = (s: AgentStatus, max = 20): ActivityLine[] => (max > 0 ? s.lines.slice(-max).reverse() : []);
 
+/** The live strip in Activity: "live" while the run goes, "ended" (collapsed to one line) once it finished or failed with
+ *  lines to show, null when there is nothing to show (off, idle, or an ended run with no lines). */
+export function stripMode(s: AgentStatus): "live" | "ended" | null {
+  if (s.phase === "off" || s.phase === "idle") return null;
+  if (s.phase === "finished" || s.phase === "failed") return s.lines.length > 0 ? "ended" : null;
+  return "live";
+}
+
+/** The collapsed strip's one line. */
+export const runLabel = (n: number): string => `Show the run (${n})`;
+
+/** A strip line's text: the agent wrote it, so hidden and bidi characters are spelled out. */
+export const stripLine = (l: ActivityLine): string => revealText(l.text);
+
 // ---- the Send to AI row above Send, and the agent menu (task 3) ----
 
 /** The row: the agent it sends to, or the way in when none is chosen. */

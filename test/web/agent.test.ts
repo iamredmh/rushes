@@ -2,7 +2,7 @@
 // the live strip and what the desk does after Send. Every string is the plan's own.
 import { describe, expect, it } from "vitest";
 import {
-  ASK_ARM_MS, ASK_WORDS, askArmKey, askChoices, askLead, revealParts, revealText, MENU_WORDS, PERMISSION_CHOICES, SHEET_WORDS, afterSend, focusAfterRemove, followSend, mayQuestion, notSignedInWhy, sendToLabel, sheetDefault, sheetPrimary, sheetRows, whoNext, agentName, canStop, chipShows, chipText, chipTone, footLine, liveLines, menuAgents, menuRowCount, noteAgentBadge, rowText, ruleRows, whoLine, answerPlaceholder, badgeText, fixGo, noteLite, noteThread, replyBoxShows, threadParts,
+  ASK_ARM_MS, ASK_WORDS, askArmKey, askChoices, askLead, revealParts, revealText, MENU_WORDS, PERMISSION_CHOICES, SHEET_WORDS, afterSend, focusAfterRemove, followSend, mayQuestion, notSignedInWhy, sendToLabel, sheetDefault, sheetPrimary, sheetRows, whoNext, agentName, canStop, chipShows, chipText, chipTone, footLine, liveLines, stripMode, stripLine, runLabel, menuAgents, menuRowCount, noteAgentBadge, rowText, ruleRows, whoLine, answerPlaceholder, badgeText, fixGo, noteLite, noteThread, replyBoxShows, threadParts,
   type NoteLite,
 } from "../../web/src/agent.js";
 import type { AgentInfo, AgentStatus, Note, PendingAsk } from "../../web/src/types.js";
@@ -176,6 +176,28 @@ describe("liveLines", () => {
     const s = status({ lines: [line(1), line(2)] });
     liveLines(s);
     expect(s.lines.map((l) => l.text)).toEqual(["line 1", "line 2"]);
+  });
+});
+
+describe("the live strip (task 7)", () => {
+  it("stripMode: live while the run goes, collapsed once it ended with lines, nothing off or idle", () => {
+    const l = [{ at: "2026-11-17T10:00:00Z", text: "x", note: null }];
+    for (const phase of ["starting", "working", "waiting", "question"] as const) expect(stripMode(status({ phase, lines: l }))).toBe("live");
+    expect(stripMode(status({ phase: "working" }))).toBe("live");
+    for (const phase of ["finished", "failed"] as const) expect(stripMode(status({ phase, lines: l }))).toBe("ended");
+    expect(stripMode(status({ phase: "finished" }))).toBeNull();
+    expect(stripMode(status({ phase: "off", lines: l }))).toBeNull();
+    expect(stripMode(status({ phase: "idle", lines: l }))).toBeNull();
+  });
+
+  it("runLabel is the collapsed line", () => {
+    expect(runLabel(3)).toBe("Show the run (3)");
+    expect(runLabel(1)).toBe("Show the run (1)");
+  });
+
+  it("stripLine shows hidden characters in the agent's text", () => {
+    expect(stripLine({ at: "x", text: "Read\u202e file", note: null })).toBe(revealText("Read\u202e file"));
+    expect(stripLine({ at: "x", text: "Read file", note: null })).toBe("Read file");
   });
 });
 

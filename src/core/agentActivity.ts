@@ -10,7 +10,16 @@ export const AGENT_LINES =
   "Wait for each command to finish before you reply on a note; do not run work as a background task.";
 
 /** An Activity line is one line of at most this many characters. */
-export const ACTIVITY_LINE_MAX = 200;
+export const ACTIVITY_LINE_MAX = 120;
+/** A command in a line is cut to this many characters. */
+const COMMAND_MAX = 80;
+
+/** The agent's own Rushes calls, in Claude's spelling (mcp__rushes__rushes_x) and Codex's (mcp.rushes.rushes_x). */
+const OWN_TOOL = /^mcp(__|\.)rushes(__|\.)rushes_/;
+/** Tool calls that are the agent's housekeeping, not work on the notes. */
+const HOUSEKEEPING: ReadonlySet<string> = new Set(["Load skill", "ToolSearch", "Guardian Review", "Preparing file…"]);
+/** The titles an adapter gives a shell command. */
+const SHELL: ReadonlySet<string> = new Set(["Terminal", "Bash"]);
 
 /**
  * `text` with the project folder cut from every path in it: "<root>/a/b" reads "a/b", the folder itself ".". Only
@@ -36,7 +45,15 @@ export function activityLine(update: unknown, root: string): string | null {
   switch (u.sessionUpdate) {
     case "tool_call": {
       if (typeof u.title !== "string") return null;
-      const line = oneLine(withoutRoot(u.title, root), ACTIVITY_LINE_MAX);
+      const title = u.title.trim();
+      if (OWN_TOOL.test(title) || HOUSEKEEPING.has(title)) return null;
+      let text = u.title;
+      if (SHELL.has(title)) {
+        const raw = u.rawInput as { command?: unknown } | null | undefined;
+        const first = typeof raw?.command === "string" ? raw.command.split(/\r\n|\r|\n/).map((l) => l.trim()).find((l) => l !== "") : undefined;
+        text = first ? `Ran a command: ${oneLine(withoutRoot(first, root), COMMAND_MAX)}` : "Ran a command";
+      }
+      const line = oneLine(withoutRoot(text, root), ACTIVITY_LINE_MAX);
       return line === "" || line === "…" ? null : line;
     }
     case "plan": {

@@ -43,7 +43,47 @@ describe("activityLine", () => {
   it("a tool call title is one line and kept short", () => {
     expect(activityLine({ sessionUpdate: "tool_call", title: "Ran\nnpm test" }, root)).toBe("Ran npm test");
     const long = activityLine({ sessionUpdate: "tool_call", title: "x".repeat(500) }, root)!;
-    expect(long.length).toBeLessThanOrEqual(200);
+    expect(long.length).toBeLessThanOrEqual(120);
+  });
+
+  it("the agent's own Rushes tools say nothing, in Claude's and Codex's spelling", () => {
+    const t = (title: string) => activityLine({ sessionUpdate: "tool_call", title }, root);
+    expect(t("mcp__rushes__rushes_reply")).toBeNull();
+    expect(t("mcp__rushes__rushes_working_on")).toBeNull();
+    expect(t("mcp.rushes.rushes_reply")).toBeNull();
+    expect(t("mcp.rushes.rushes_working_on")).toBeNull();
+    // Another server's tool is not the agent's own Rushes call.
+    expect(t("mcp__other__rushes_reply")).not.toBeNull();
+    expect(t("mcp__rushes__other")).not.toBeNull();
+  });
+
+  it("housekeeping tools say nothing", () => {
+    const t = (title: string) => activityLine({ sessionUpdate: "tool_call", title }, root);
+    for (const title of ["Load skill", "ToolSearch", "Guardian Review", "Preparing file…"]) expect(t(title), title).toBeNull();
+  });
+
+  it("Terminal and Bash read as a command, with its first line when it has one", () => {
+    const t = (title: string, rawInput?: unknown) => activityLine({ sessionUpdate: "tool_call", title, rawInput }, root);
+    expect(t("Terminal", { command: "python3 - <<'PY'\nprint(1)\nPY" })).toBe("Ran a command: python3 - <<'PY'");
+    expect(t("Bash", { command: "npm test" })).toBe("Ran a command: npm test");
+    expect(t("Terminal")).toBe("Ran a command");
+    expect(t("Bash", { command: 5 })).toBe("Ran a command");
+    expect(t("Terminal", { command: "" })).toBe("Ran a command");
+    expect(t("Terminal", { command: "\n\nls -la" })).toBe("Ran a command: ls -la");
+    // The project folder is cut from a path in the command.
+    expect(t("Bash", { command: `cat ${root}/notes.md` })).toBe("Ran a command: cat notes.md");
+  });
+
+  it("a command is cut to 80 characters with an ellipsis, and any line to 120", () => {
+    const t = (title: string, rawInput?: unknown) => activityLine({ sessionUpdate: "tool_call", title, rawInput }, root)!;
+    const cut = t("Terminal", { command: "x".repeat(300) });
+    expect(cut).toBe(`Ran a command: ${"x".repeat(79)}…`);
+    expect(cut.length).toBe("Ran a command: ".length + 80);
+    expect(t("Terminal", { command: "y".repeat(80) })).toBe(`Ran a command: ${"y".repeat(80)}`);
+    expect(t("Read file", undefined).length).toBeLessThanOrEqual(120);
+    const long = activityLine({ sessionUpdate: "tool_call", title: "z".repeat(500) }, root)!;
+    expect(long.length).toBeLessThanOrEqual(120);
+    expect(long.endsWith("…")).toBe(true);
   });
 
   it("a tool call with no title says nothing", () => {

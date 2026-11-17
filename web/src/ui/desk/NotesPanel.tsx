@@ -10,6 +10,7 @@ import { useContext, useEffect, useRef, useState } from "preact/hooks";
 import { footLine } from "../../agent.js";
 import { AgentRow, type AgentPanel } from "../agent/AgentRow.js";
 import { AskCards } from "../agent/AskCard.js";
+import { LiveStrip } from "../agent/LiveStrip.js";
 import type { ChangeLogState } from "../ChangeLog.js";
 import { Icon } from "../Icon.js";
 import { type Filter, NoteFilterMenu, Notes, type NotesProps } from "../Notes.js";
@@ -179,6 +180,18 @@ export function NotesPanel(props: NotesPanelProps) {
     choose(to, false);
     (to === "notes" ? notesTab : activityTab).current?.focus();
   };
+  // A strip line that names a note: back to the Notes tab, the card in view.
+  const showNote = (id: string) => {
+    choose("notes", false);
+    setNoteFilter("all");
+    requestAnimationFrame(() => {
+      const card = root.current?.querySelector<HTMLElement>(`[data-note="${CSS.escape(id)}"]`);
+      if (!card) return;
+      card.scrollIntoView({ block: "nearest" });
+      card.tabIndex = -1;
+      card.focus({ preventScroll: true });
+    });
+  };
   const widthAt = (clientX: number) => {
     const d = drag.current;
     if (!d) return null;
@@ -266,7 +279,7 @@ export function NotesPanel(props: NotesPanelProps) {
       </div>
       {tab === "activity" && (
         <div class="ntabpanel" role="tabpanel" id="npanel-activity" aria-label="Activity">
-          <ActivityList {...activity} log={log} onEscape={() => activityTab.current?.focus()} />
+          <ActivityList {...activity} log={log} live={<LiveStrip status={agent?.status ?? null} notes={props.notes} onNote={showNote} />} onEscape={() => activityTab.current?.focus()} />
         </div>
       )}
       {(sendShown || agent) && (

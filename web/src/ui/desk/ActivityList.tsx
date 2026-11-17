@@ -1,5 +1,6 @@
 // §22.8, §27 5.7: the notes panel's Activity tab, the Change Log. Newest first by day and live, with the "add a line" box,
 // the filter (one menu, kept for the session) and Export as Markdown. What the drawer was, in the panel.
+import type { ComponentChildren } from "preact";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { api } from "../../api.js";
 import {
@@ -39,6 +40,8 @@ export interface ActivityListProps {
   stage: Stage | "assets";
   toast(message: string): void;
   onJump(to: JumpTarget): void;
+  /** §28: the agent's live strip, shown above the day groups (LiveStrip). */
+  live?: ComponentChildren;
   /** Esc from inside the list: the panel takes focus back to its Activity tab. */
   onEscape(): void;
 }
@@ -64,7 +67,7 @@ function Row({ entry: e, to, onGo }: { entry: LogLine; to: JumpTarget | null; on
   );
 }
 
-export function ActivityList({ log, projectId, head, project, stage, toast, onJump, onEscape }: ActivityListProps) {
+export function ActivityList({ log, projectId, head, project, stage, toast, onJump, live, onEscape }: ActivityListProps) {
   const [filter, setFilter] = useState<Filter>(() => {
     const saved = recall(session(), storageKey(projectId, "log-filter"));
     return isFilter(saved) ? saved : "all";
@@ -256,6 +259,7 @@ export function ActivityList({ log, projectId, head, project, stage, toast, onJu
       <div class="dwrap">
         {fresh > 0 && <button type="button" class="dpill" onClick={showWaiting}>{fresh} new</button>}
         <div class="dlist" ref={list} tabIndex={0} role="group" aria-label="Entries" onScroll={onScroll}>
+          {live}
           {view === null && !problem && <p class="dempty">Loading…</p>}
           {view === null && problem && <p class="dempty dproblem" role="alert">{problem}</p>}
           {nothing && <p class="dempty">Nothing yet. Rushes writes a line here whenever a cut, a take or a variant is added.</p>}

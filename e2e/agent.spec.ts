@@ -1512,3 +1512,101 @@ test("a reply box that hides and comes back shows what was kept in full", async 
   await noteFits(page, c);
   await shootNote(page, c, "note-box-back-1440");
 });
+
+// ---- task 7: the live strip in Activity, and readable lines ----
+
+const strip = (page: Page): Locator => page.getByRole("tabpanel", { name: "Activity" }).locator(".lstrip");
+
+/** The strip's lines sit inside it, each on one line, cut with an ellipsis instead of overflowing. */
+async function stripFits(page: Page): Promise<void> {
+  const s = (await strip(page).boundingBox())!;
+  const p = (await page.locator(".npanel").boundingBox())!;
+  inside(s, p);
+  const rows = strip(page).locator(".lsrow");
+  for (let i = 0; i < (await rows.count()); i++) {
+    const r = rows.nth(i);
+    expect((await r.boundingBox())!.height, `row ${i} is one line`).toBeLessThanOrEqual(34);
+    const t = r.locator(".lline");
+    const over = await t.evaluate((el) => el.scrollWidth > el.clientWidth + 1 && getComputedStyle(el).textOverflow !== "ellipsis");
+    expect(over, `row ${i} ellipsises`).toBe(false);
+    inside((await t.boundingBox())!, s);
+  }
+}
+
+test("Activity shows the run live", async ({ page, startWithAgent }) => {
+  const rushes = await startWithAgent({ turns: [] });
+  await readyToSend(rushes);
+  const heredoc = "python3 - <<'PY'\nimport json, os, sys\nprint('x' * 200)\nPY";
+  await rushes.setScenario({
+    turns: [[
+      { update: { sessionUpdate: "tool_call", toolCallId: "t1", title: "Read file" } },
+      { update: { sessionUpdate: "tool_call", toolCallId: "t2", title: "mcp__rushes__rushes_reply" } },
+      { update: { sessionUpdate: "tool_call", toolCallId: "t3", title: "mcp.rushes.rushes_working_on" } },
+      { update: { sessionUpdate: "tool_call", toolCallId: "t4", title: "ToolSearch" } },
+      { update: { sessionUpdate: "tool_call", toolCallId: "t5", title: "Terminal", rawInput: { command: heredoc } } },
+      { update: { sessionUpdate: "tool_call", toolCallId: "t6", title: "Edit " + "a very long file name ".repeat(12) + "end" } },
+      { sleep: 6000 },
+      { stop: "end_turn" },
+    ]],
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await rushes.api("POST", "/api/batches", {});
+  await expect(chip(page)).toHaveText(/Claude Code/, { timeout: 10_000 });
+  await panel(page).getByRole("tab", { name: /^Activity/ }).click();
+  await expect(strip(page).locator(".lhead")).toHaveText("Claude Code is working", { timeout: 10_000 });
+  const lines = strip(page).locator(".lline");
+  await expect(lines.filter({ hasText: "Read file" })).toHaveCount(1);
+  await expect(lines.filter({ hasText: "Ran a command: python3 - <<'PY'" })).toHaveCount(1);
+  // The agent's own Rushes calls and housekeeping are not lines; nothing is a raw tool name or a whole script.
+  const texts = await lines.allTextContents();
+  expect(texts.join("\n")).not.toMatch(/rushes_|ToolSearch|import json/);
+  for (const t of texts) expect(t.length).toBeLessThanOrEqual(120);
+  // Newest first, each with its time.
+  expect(texts[0]).toMatch(/^Edit /);
+  await expect(strip(page).locator(".ltime").first()).toHaveText(/\d\d:\d\d/);
+  await stripFits(page);
+  await page.screenshot({ path: test.info().outputPath("strip-1440.png") });
+  await page.setViewportSize({ width: 900, height: 900 });
+  await page.getByRole("button", { name: "Show the notes panel · \\" }).click();
+  await panel(page).getByRole("tab", { name: /^Activity/ }).click();
+  await expect(strip(page)).toBeVisible();
+  await stripFits(page);
+  await page.screenshot({ path: test.info().outputPath("strip-900.png") });
+});
+
+test("the strip folds into Show the run when the run ends, and a line with a note goes to that note", async ({ page, startWithAgent }) => {
+  const rushes = await startWithAgent({ turns: [] });
+  const id = await readyToSend(rushes);
+  await rushes.setScenario({
+    turns: [[
+      { http: { method: "POST", path: "/api/agent/working-on", body: { note: id, doing: "Measuring the cut" } } },
+      { update: { sessionUpdate: "tool_call", toolCallId: "t1", title: "Read file" } },
+      { sleep: 3000 },
+      { stop: "end_turn" },
+    ]],
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await rushes.api("POST", "/api/batches", {});
+  await panel(page).getByRole("tab", { name: /^Activity/ }).click();
+  const noted = strip(page).getByRole("button", { name: /Measuring the cut/ });
+  await expect(noted).toBeVisible({ timeout: 10_000 });
+  await expect(strip(page).getByRole("button", { name: /Read file/ })).toHaveCount(1);
+  await noted.click();
+  await expect(page.getByRole("tabpanel", { name: "Activity" })).toHaveCount(0);
+  await expect(card(page, id)).toBeVisible();
+  await expect(card(page, id)).toBeFocused();
+  // Once the run ends the strip is one line.
+  await panel(page).getByRole("tab", { name: /^Activity/ }).click();
+  const show = strip(page).getByRole("button", { name: /^Show the run \(\d+\)$/ });
+  await expect(show).toBeVisible({ timeout: 15_000 });
+  await expect(strip(page).locator(".lline")).toHaveCount(0);
+  expect((await strip(page).boundingBox())!.height).toBeLessThanOrEqual(48);
+  await page.screenshot({ path: test.info().outputPath("strip-ended-1440.png") });
+  await show.click();
+  await expect(strip(page).locator(".lline").first()).toBeVisible();
+  await stripFits(page);
+});
