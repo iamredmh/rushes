@@ -185,6 +185,24 @@ describe("AgentRunner", () => {
     expect(second.startedAt >= first.startedAt).toBe(true);
   });
 
+  it("a kept session that cannot be loaded falls back to a new conversation", async () => {
+    const r = await rig(
+      { loadSession: true, loadFails: "Session not found", turns: [] },
+      { settings: { session: { id: "pruned-1", agent: "claude", startedAt: "2026-11-01T00:00:00.000Z" } } },
+    );
+    const b = await r.batch("One");
+    expect(await r.runner.send(b)).toEqual({ handedTo: "claude" });
+    await r.phase("finished");
+    const log = r.log();
+    expect(log.filter((m) => m.loaded).map((m) => m.loaded)).toEqual(["pruned-1"]);
+    expect(log.filter((m) => m.method === "session/new")).toHaveLength(1);
+    expect(prompts(log).map((m) => m.params.sessionId)).toEqual(["fake-session-1"]);
+    expect((await r.store.read("agent")).session).toMatchObject({ id: "fake-session-1", agent: "claude" });
+    expect(r.runner.status().lines.map((l) => l.text)).toContain("Started a new conversation (the last one could not be loaded)");
+    expect(r.runner.status().error).toBeNull();
+    expect(started).toHaveLength(1);
+  });
+
   it("a kept session of another agent is not loaded", async () => {
     const r = await rig({ loadSession: true, turns: [] }, { settings: { session: { id: "codex-session", agent: "codex", startedAt: "2026-11-01T00:00:00.000Z" } } });
     await r.runner.send(await r.batch("One"));
@@ -295,8 +313,8 @@ describe("AgentRunner", () => {
     expect(r.runner.busy()).toBe(false);
     await r.runner.send(await r.batch("Trim the end"));
     await r.waitFor("the second prompt", () => prompts(r.log()).length === 2);
-    // b_1's question is still open, so the run still needs the user.
-    await r.phase("question");
+    // The phase follows the batch the turn carried: b_2 asked nothing.
+    await r.phase("finished");
 
     const plain = await rig({ turns: [] });
     await plain.runner.send(await plain.batch("Move the title"));
@@ -326,6 +344,30 @@ describe("AgentRunner", () => {
     expect((await r.store.read("agent")).session?.id).toBe("fake-session-1");
   });
 
+  it("stop is never a failure, even when the adapter exits on cancel", async () => {
+    const r = await rig({ exitOnCancel: true, turns: [[{ sleep: 60000 }]] });
+    const heard: AgentStatus[] = [];
+    r.store.on("agent", (s: AgentStatus) => heard.push(s));
+    const b = await r.batch("One");
+    await r.runner.send(b);
+    await r.phase("working");
+    await r.runner.stop();
+    expect(r.runner.status()).toMatchObject({ phase: "idle", error: null });
+    // close waits for every write a stray failure would have started.
+    await r.runner.close();
+    const phases = heard.map((s) => s.phase).filter((p, i, all) => p !== all[i - 1]);
+    expect(phases).toEqual(["starting", "working", "idle"]);
+    const texts = await changeLog(r.store);
+    expect(texts).toContain("Stopped Claude Code");
+    expect(texts.some((t) => t.includes("stopped unexpectedly"))).toBe(false);
+    expect((await notesOf(r.store, b.noteIds)).map(noteState)).toEqual(["todo"]);
+  });
+
+  it("a plain refusal is not flagged as stopped", async () => {
+    const r = await rig({ turns: [] }, { settings: { on: false } });
+    expect(await r.runner.send(await r.batch("One"))).not.toHaveProperty("stopped");
+  });
+
   it("stop with nothing running changes nothing", async () => {
     const r = await rig({ turns: [] });
     const heard: AgentStatus[] = [];
@@ -342,7 +384,8 @@ describe("AgentRunner", () => {
     const sending = r.runner.send(b);
     await r.phase("starting");
     await r.runner.stop();
-    expect(await sending).toMatchObject({ handedTo: null });
+    // Flagged, so the desk doesn't copy the prompt after the user pressed Stop.
+    expect(await sending).toEqual({ handedTo: null, why: "Stopped before the agent started", stopped: true });
     expect(r.runner.status().phase).toBe("idle");
     expect(started.every((c) => c.hasExited)).toBe(true);
     expect((await notesOf(r.store, b.noteIds)).map(noteState)).toEqual(["todo"]);
@@ -364,6 +407,19 @@ describe("AgentRunner", () => {
     expect(started).toHaveLength(2);
     expect(r.log().filter((m) => m.loaded).map((m) => m.loaded)).toEqual(["fake-session-1"]);
     expect(r.runner.status().error).toBeNull();
+  });
+
+  it("adapter exit mid-turn recalls the queued batches too", async () => {
+    const r = await rig({ turns: [[{ sleep: 150 }, { crash: 4 }]] });
+    const b1 = await r.batch("One");
+    const b2 = await r.batch("Two", "Three");
+    await Promise.all([r.runner.send(b1), r.runner.send(b2)]);
+    expect(r.runner.status().batches).toEqual(["b_1", "b_2"]);
+    await r.phase("failed");
+    expect(r.runner.status().batches).toEqual([]);
+    const ids = [...b1.noteIds, ...b2.noteIds];
+    await r.waitFor("every note to come back", async () => (await notesOf(r.store, ids)).every((n) => noteState(n) === "todo" && n.batch === null));
+    expect(prompts(r.log())).toHaveLength(1);
   });
 
   it("adapter exit with no stderr says only that it stopped", async () => {

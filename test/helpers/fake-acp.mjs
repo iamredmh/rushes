@@ -8,8 +8,12 @@
 //                      responses) is appended as one JSON line
 //   FAKE_ACP_BASE      base URL used by `http` steps
 //
-// Scenario: { loadSession?: boolean, modes?: string[], exitOnStart?: number, ignoreSigterm?: boolean, turns: Step[][] }
+// Scenario: { loadSession?: boolean, loadFails?: string, exitOnCancel?: boolean, modes?: string[], exitOnStart?: number,
+//             ignoreSigterm?: boolean, turns: Step[][] }
 //   loadSession  advertised as agentCapabilities.loadSession (default false)
+//   loadFails    session/load answers a JSON-RPC error with this message (still logged as { loaded: id }),
+//                as an agent does for a session it has pruned
+//   exitOnCancel on session/cancel during a turn, exit with code 0 instead of ending the turn
 //   modes        when given, session/new and session/load answer
 //                { modes: { currentModeId: modes[0], availableModes: modes.map(id => ({ id, name: id })) } }
 //   exitOnStart  exit with that code before reading anything
@@ -122,6 +126,7 @@ function onMessage(msg) {
   }
   if (!hasId) {
     if (msg.method === "session/cancel" && openTurn) {
+      if (scenario.exitOnCancel) process.exit(0);
       openTurn.cancelled = true;
       openTurn.wake?.();
     }
@@ -136,7 +141,8 @@ function onMessage(msg) {
       break;
     case "session/load":
       log({ loaded: msg.params?.sessionId });
-      send({ id: msg.id, result: { ...modesBlock() } });
+      if (typeof scenario.loadFails === "string") send({ id: msg.id, error: { code: -32603, message: scenario.loadFails } });
+      else send({ id: msg.id, result: { ...modesBlock() } });
       break;
     case "session/set_mode":
       send({ id: msg.id, result: {} });

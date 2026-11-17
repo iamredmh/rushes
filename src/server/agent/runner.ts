@@ -48,7 +48,8 @@ export interface RunnerOptions {
   now?: () => Date;
 }
 
-export type SendResult = { handedTo: AgentId } | { handedTo: null; why: string };
+/** `stopped` is set when the batch was not handed over because the user pressed Stop: the desk then doesn't copy the prompt. */
+export type SendResult = { handedTo: AgentId } | { handedTo: null; why: string; stopped?: true };
 
 /** How long the adapter stays up after its last turn (§5.2). */
 export const AGENT_IDLE_MS = 600_000;
@@ -89,8 +90,18 @@ function exited(c: AcpConnection, ms = EXIT_WAIT_MS): Promise<void> {
   });
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms).unref());
+/** Waits for `p` or `ms`, whichever comes first, and clears the timer when `p` wins. */
+async function within(p: Promise<unknown>, ms: number): Promise<void> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, ms);
+    timer.unref();
+  });
+  try {
+    await Promise.race([p, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export class AgentRunner {
@@ -115,8 +126,6 @@ export class AgentRunner {
   private turn: { batch: Batch; done: Promise<void> } | null = null;
   /** A turn has ended and the runner is reading the notes to choose question or finished. */
   private ending = false;
-  /** Every batch this runner has prompted: their open questions make a finished run "question". */
-  private handed = new Set<string>();
 
   private conn: AcpConnection | null = null;
   private sessionId: string | null = null;
@@ -188,6 +197,8 @@ export class AgentRunner {
     try {
       await this.ensureStarted();
     } catch (e) {
+      // Halted by the user's Stop (not by close): flagged, so the desk doesn't fall back to copying the prompt.
+      if (e instanceof Halted && !this.closed) return { handedTo: null, why: e.message, stopped: true };
       return { handedTo: null, why: messageOf(e) };
     }
     this.pump();
@@ -257,17 +268,28 @@ export class AgentRunner {
       check();
       const mcp = [this.mcp(root)];
       const kept = settings.session;
-      let sessionId: string;
-      let modes: string[];
+      let sessionId: string | null = null;
+      let modes: string[] = [];
       if (kept && kept.agent === info.id && loadSession) {
-        ({ modes } = await c.loadSession(kept.id, root, mcp));
-        sessionId = kept.id;
-      } else {
-        ({ sessionId, modes } = await c.newSession(root, mcp));
+        try {
+          ({ modes } = await c.loadSession(kept.id, root, mcp));
+          sessionId = kept.id;
+        } catch (e) {
+          // An agent prunes old conversations. With the adapter still up, start a new one rather than fail
+          // this Send and every one after it.
+          if (c.hasExited) throw e;
+          check();
+          this.addLine("Started a new conversation (the last one could not be loaded)", null);
+        }
+      }
+      if (sessionId === null) {
+        let made: string;
+        ({ sessionId: made, modes } = await c.newSession(root, mcp));
+        sessionId = made;
         check();
         const startedAt = this.now().toISOString();
         const { data } = await this.store.update("agent", (f) => {
-          f.session = { id: sessionId, agent: info.id, startedAt };
+          f.session = { id: made, agent: info.id, startedAt };
         });
         this.applySettings(data);
       }
@@ -322,7 +344,6 @@ export class AgentRunner {
     const gen = this.gen;
     const name = this.info?.name ?? "The agent";
     this.clearIdle();
-    this.handed.add(batch.id);
     let done!: () => void;
     this.turn = { batch, done: new Promise<void>((r) => (done = r)) };
     this.phase = "working";
@@ -352,11 +373,12 @@ export class AgentRunner {
     this.ending = true;
     this.milestone(stopReason === "end_turn" ? `${name} finished ${batch.id}` : `${name} ended ${batch.id} (${stopReason})`);
     this.announce();
-    // Still busy while the notes are read, so a send now queues and is picked up below.
+    // Still busy while the notes are read, so a send now queues and is picked up below. The phase follows
+    // the batch this turn carried: a question on one of its notes makes it "question".
     let question = false;
     try {
       const notes = await this.store.read("notes");
-      question = notes.notes.some((n) => n.batch !== null && this.handed.has(n.batch) && needsYou(n));
+      question = notes.notes.some((n) => n.batch === batch.id && needsYou(n));
     } catch (e) {
       console.error(`Rushes: couldn't read the notes after a turn: ${messageOf(e)}`);
     }
@@ -389,6 +411,8 @@ export class AgentRunner {
     this.live.delete(conn);
     this.exits.set(conn, e);
     if (conn !== this.conn || this.closed) return;
+    // A Stop is under way (an adapter may exit on session/cancel): halt() settles everything, and Stop is never a failure.
+    if (this.stopping) return;
     // While starting, the request in flight rejects and start() reports the failure with this stderr.
     if (this.starting && !this.sessionId) return;
     this.conn = null;
@@ -442,7 +466,7 @@ export class AgentRunner {
     const sessionId = this.sessionId;
     if (turn && conn && sessionId && !conn.hasExited) {
       conn.cancel(sessionId);
-      await Promise.race([turn.done, delay(STOP_WAIT_MS)]);
+      await within(turn.done, STOP_WAIT_MS);
     }
     // While starting, the adapter being started is `conn` too: killing it ends the start.
     const dropped = this.dropConn();
