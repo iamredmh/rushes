@@ -5,7 +5,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { Locator, Page } from "@playwright/test";
 import { rulesPath } from "../src/server/agent/rules.js";
-import { cutButton, expect, pickFilm, pickVersion, readAgentLog, test, videoReady, type AgentRushes } from "./agentFixture.js";
+import { cutButton, expect, openPlanPage, pickFilm, pickVersion, readAgentLog, sendButton, sentDialog, test, videoReady, type AgentRushes } from "./agentFixture.js";
 
 /** The top bar's chip: what the agent is doing. Clicking it opens Activity. */
 const chip = (page: Page): Locator => page.locator("header.top .achip");
@@ -621,6 +621,32 @@ test("first Send to Claude Code", async ({ page, startWithAgent }) => {
   inside((await badge.boundingBox())!, (await panel(page).locator(".note").boundingBox())!);
   await expect.poll(async () => (await readAgentLog(rushes.agentLog)).some((m) => m.method === "session/prompt"), { timeout: 10_000 }).toBe(true);
   await expect(row(page).getByRole("button", { name: "Send to AI · Claude Code" })).toBeVisible();
+});
+
+test("with the notes handed over, the brief's line is left to copy and the dialog says the agent doesn't have it (I4)", async ({ page, startWithAgent }) => {
+  const rushes = await startWithAgent({ turns: [[{ sleep: 3000 }, { stop: "end_turn" }]] });
+  await readyToSend(rushes);
+  await rushes.writeFiles([{ path: "brief.md", text: "# Brief: Launch\n\nStatus: draft\n\n## Purpose\nShow the product.\n" }]);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await openPlanPage(page, "Brief");
+  await expect(page.getByRole("heading", { name: "Brief" })).toBeVisible();
+  await sendButton(page).click();
+  await expect(toastEl(page)).toHaveText(/^(Sent to|Starting) Claude Code$/);
+  const dialog = sentDialog(page);
+  await expect(dialog).toContainText("Message for your agent");
+  const lead = dialog.locator(".slead");
+  await expect(lead).toHaveText("Claude Code has the notes. These lines aren't sent to it yet.");
+  await expect(lead).toBeVisible();
+  // Above the lines it speaks for, inside the dialog.
+  expect((await lead.boundingBox())!.y + (await lead.boundingBox())!.height).toBeLessThanOrEqual((await dialog.locator("pre").boundingBox())!.y + 0.5);
+  inside((await lead.boundingBox())!, (await dialog.boundingBox())!);
+  await expect(dialog.locator("pre")).toContainText("the brief is still a draft");
+  await page.screenshot({ path: test.info().outputPath("plan-lead-1440.png"), clip: { x: 900, y: 40, width: 540, height: 420 } });
+  // The notes went; the server was never sent the brief's line.
+  await expect.poll(async () => (await readAgentLog(rushes.agentLog)).some((m) => m.method === "session/prompt"), { timeout: 10_000 }).toBe(true);
+  const sentText = JSON.stringify((await readAgentLog(rushes.agentLog)).filter((m) => m.method === "session/prompt"));
+  expect(sentText).not.toContain("the brief is still a draft");
 });
 
 test("a start failure recalls and does not copy", async ({ page, startWithAgent }) => {

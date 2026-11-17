@@ -10,6 +10,7 @@ import { askNotificationsOnce } from "./sendFollow.js";
 
 // The desk takes everything of Send to AI's first Send from here (one import in App).
 export { actOnSend, askNotificationsOnce } from "./sendFollow.js";
+export { planLead } from "../../agent.js";
 
 export interface FirstSendProps {
   status: AgentStatus;

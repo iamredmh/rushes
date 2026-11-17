@@ -299,7 +299,7 @@ Rushes never sees a password or key, and never signs you in. When an agent isn't
 
 The first time you press Send, a sheet asks "Who should get these notes?" (an agent, or copy a prompt as before), then "What may <agent> do without asking?".
 
-If the agent fails to start, the notes go back in to do and nothing is copied. If Send to AI is not set up, not signed in or not installed, Send opens the copy dialog with the prompt and says why.
+If the agent fails to start, the notes go back in to do and nothing is copied. If Send to AI is not set up, not signed in or not installed, Send opens the copy dialog with the prompt and says why. Lines about the brief and the storyboard are not handed to the agent yet: when they changed, Send hands over the notes and opens **Message for your agent** with those lines, saying the agent has the notes but not these lines, for you to copy to it yourself.
 
 The agent's name opens a menu to choose another agent, **Start a fresh conversation**, change what it may do without asking, and see the "Always" rules. **Stop** ends a run and gives its unfinished notes back.
 

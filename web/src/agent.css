@@ -88,6 +88,8 @@
 .pop .swhy { display: flex; align-items: center; gap: 10px; margin: 0; padding: 6px 6px 6px 12px; border: 1px solid var(--todo-line); border-radius: var(--r); background: var(--todo-soft); color: var(--text); font-size: var(--t-small); line-height: 1.35; }
 .pop .swhy span { flex: 1; min-width: 0; }
 .pop .swhy .btn { flex: none; height: 30px; padding: 0 12px; font-size: var(--t-small); }
+/* I4: "Message for your agent" after the notes went to an agent: those lines were not sent to it. */
+.pop .slead { margin: 0; color: var(--text-2); font-size: var(--t-small); line-height: 1.35; }
 
 /* ---- the agent's permission asks (AskCards), under the notes panel's tab row on every tab. A card has a to-do left
    rule (it needs you); the command is mono on its own line, wrapped and never cut short. Many asks scroll in their own

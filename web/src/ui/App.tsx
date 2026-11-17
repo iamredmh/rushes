@@ -32,7 +32,7 @@ import { StatusBar } from "./desk/StatusBar.js";
 import { TopBar } from "./desk/TopBar.js";
 import { AgentChip } from "./agent/AgentChip.js";
 import { useNewCut, usePlaying } from "./agent/useNewCut.js";
-import { actOnSend, askNotificationsOnce, useFirstSend, WhyLine } from "./agent/FirstSend.js";
+import { actOnSend, askNotificationsOnce, planLead, useFirstSend, WhyLine } from "./agent/FirstSend.js";
 import { useAskNotify } from "../notify.js";
 import { Workspaces } from "./desk/Workspaces.js";
 import type { ReviewClock } from "./desk/frame.js";
@@ -57,7 +57,7 @@ const REVIEW_TABS: { view: Exclude<Stage, "script" | "visuals" | "mix">; label: 
 // Assets isn't a review stage (§15.3): it's a dashboard-only view, kept out of Stage and handled as its own case throughout this file.
 type View = DeskView;
 /** What Send shows: a batch, or (from the Brief page) a message that is not recorded anywhere. */
-type Sent = Pick<Batch, "id" | "prompt"> & { title?: string; why?: string | null };
+type Sent = Pick<Batch, "id" | "prompt"> & { title?: string; why?: string | null; lead?: string | null };
 const typing = (el: EventTarget | null) => el instanceof HTMLElement && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
 
 /** §19.1: a locked tab's own page -- what it's for, what unlocks it, and a prompt to copy for your agent. */
@@ -517,7 +517,7 @@ export function App() {
       if (stage === "storyboard" && !board.exists) return toast("There's no storyboard yet: copy the prompt on this page for your agent");
       return toast("Nothing open to send on any tab");
     }
-    setSent(batch ? { id: batch.id, prompt: [batch.prompt, ...planning].join("\n\n"), why: follow?.why } : { id: "plan", title: "Message for your agent", prompt: planning.join("\n\n") });
+    setSent(batch ? { id: batch.id, prompt: [batch.prompt, ...planning].join("\n\n"), why: follow?.why } : { id: "plan", title: "Message for your agent", prompt: planning.join("\n\n"), lead: planLead(follow, status) });
     setCopied(false);
     if (batch) void refresh();
   };
@@ -775,6 +775,7 @@ export function App() {
             <button class="btn ghost ib sm" aria-label="Close" data-tip="Close" onClick={() => setSent(null)}><Icon name="x" /></button>
           </div>
           {sent.why && <WhyLine why={sent.why} onSetUp={firstSend.open} />}
+          {sent.lead && <p class="slead">{sent.lead}</p>}
           <pre>{sent.prompt}</pre>
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
             <button class="btn primary" onClick={() => void copy()}><Icon name="copy" />{copied ? "Copied" : "Copy prompt"}</button>

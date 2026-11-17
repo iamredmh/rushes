@@ -2,7 +2,7 @@
 // the live strip and what the desk does after Send. Every string is the plan's own.
 import { describe, expect, it } from "vitest";
 import {
-  ASK_ARM_MS, ASK_WORDS, askArmKey, askChoices, askLead, revealParts, revealText, MENU_WORDS, PERMISSION_CHOICES, SHEET_WORDS, afterSend, focusAfterRemove, followSend, mayQuestion, notSignedInWhy, sendToLabel, sheetDefault, sheetPrimary, sheetRows, whoNext, agentName, canStop, chipShows, chipText, chipTone, footLine, liveLines, stripMode, stripLine, runLabel, menuAgents, menuRowCount, noteAgentBadge, rowText, ruleRows, whoLine, answerPlaceholder, badgeText, fixGo, noteLite, noteThread, replyBoxShows, threadParts, newCutFor, stepCuts, cutAction, unseenCut,
+  ASK_ARM_MS, ASK_WORDS, askArmKey, askChoices, askLead, revealParts, revealText, MENU_WORDS, PERMISSION_CHOICES, SHEET_WORDS, afterSend, focusAfterRemove, followSend, planLead, mayQuestion, notSignedInWhy, sendToLabel, sheetDefault, sheetPrimary, sheetRows, whoNext, agentName, canStop, chipShows, chipText, chipTone, footLine, liveLines, stripMode, stripLine, runLabel, menuAgents, menuRowCount, noteAgentBadge, rowText, ruleRows, whoLine, answerPlaceholder, badgeText, fixGo, noteLite, noteThread, replyBoxShows, threadParts, newCutFor, stepCuts, cutAction, unseenCut,
   type NoteLite,
 } from "../../web/src/agent.js";
 import type { AgentInfo, AgentStatus, Note, PendingAsk } from "../../web/src/types.js";
@@ -423,6 +423,23 @@ describe("followSend (task 4)", () => {
     // Off is today's Send: the dialog exactly as it was, no reason line.
     expect(followSend({ handedTo: null, why: "Send to AI is off" }, off)).toEqual({ toast: null, dialog: true, why: null, handed: false });
     expect(followSend(undefined, null)).toEqual({ toast: null, dialog: true, why: null, handed: false });
+  });
+});
+
+describe("planLead (I4)", () => {
+  it("when the notes went to an agent, the brief and storyboard lines say that agent doesn't have them", () => {
+    expect(planLead(followSend({ handedTo: "claude" }, status()), status())).toBe("Claude Code has the notes. These lines aren't sent to it yet.");
+    expect(planLead(followSend({ handedTo: "codex", starting: true }, status({ agent: "codex" })), status({ agent: "codex" }))).toBe(
+      "Codex has the notes. These lines aren't sent to it yet.",
+    );
+  });
+
+  it("says nothing when no notes went to an agent: off, refused, recalled, stopped, or no batch at all", () => {
+    expect(planLead(followSend({ handedTo: null, why: "Send to AI is off" }, status({ on: false })), status({ on: false }))).toBeNull();
+    expect(planLead(followSend({ handedTo: null, why: "Claude Code is not signed in" }, status()), status())).toBeNull();
+    expect(planLead(followSend({ handedTo: null, why: "x", recalled: true }, status()), status())).toBeNull();
+    expect(planLead(followSend({ handedTo: null, why: "Stopped", stopped: true }, status()), status())).toBeNull();
+    expect(planLead(null, status())).toBeNull();
   });
 });
 

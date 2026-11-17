@@ -261,6 +261,13 @@ export function followSend(r: SendHandOver | undefined, s: AgentStatus | null): 
   }
 }
 
+/**
+ * I4, for now: brief and storyboard lines are never handed to the agent, only shown in "Message for your agent" to copy.
+ * When the notes did go to an agent, that dialog says so above the lines. Null when no notes went (`f` null: no batch).
+ */
+export const planLead = (f: SendFollow | null, s: AgentStatus | null): string | null =>
+  f?.handed ? `${agentName(s?.agent ?? null)} has the notes. These lines aren't sent to it yet.` : null;
+
 // ---- the ask cards in the notes panel (task 5) ----
 
 /** The card's fixed words; Always is the server's own label (PendingAsk.always), never made here. */
