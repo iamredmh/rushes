@@ -84,6 +84,14 @@ describe("replies and recall", () => {
     expect(notes.map(noteState)).toEqual(["todo", "sent", "done"]);
   });
 
+  it("recallNote with a batch leaves a note that has since been filed in another", () => {
+    const notes: Pick<Note, "id" | "status" | "batch">[] = [{ id: "a", status: "todo", batch: "b_2" }];
+    expect(recallNote(notes, "a", "b_1")).toBe(false);
+    expect(notes[0].batch).toBe("b_2");
+    expect(recallNote(notes, "a", "b_2")).toBe(true);
+    expect(notes[0].batch).toBeNull();
+  });
+
   it("withState adds needsYou", () => {
     expect(withState(note({ batch: "b_1", replies: [{ by: "agent", text: "?", at: "t" }] })).needsYou).toBe(true);
     expect(withState(note()).needsYou).toBe(false);

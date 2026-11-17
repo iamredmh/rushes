@@ -1,5 +1,5 @@
 import { realpathSync } from "node:fs";
-import { dirname, resolve, sep, relative, isAbsolute } from "node:path";
+import { basename, dirname, resolve, sep, relative, isAbsolute } from "node:path";
 import type { AgentSettings, AlwaysRule } from "./schema.js";
 
 export type PermissionRequest = { kind: string | null; title: string; command: string | null; paths: string[] };
@@ -37,23 +37,41 @@ function inProject(req: PermissionRequest, root: string): boolean {
   return req.paths.length > 0 && req.paths.every((p) => inside(root, p));
 }
 
-/** Shell syntax that runs more than the named command, or sends its output somewhere: such a command always asks. */
-const CHAINED = /[;&|\n\r`<>]|\$\(/;
+/**
+ * A plain command: letters, digits, space, tab, `_ . / : = @ % + , -` and quotes. Anything else may make a shell
+ * run more than the named command (chaining, pipes, redirects, substitution, zsh's `=(…)` and glob qualifiers,
+ * globs, `~`, `$`), so a command with it always asks, whatever Always rules there are.
+ */
+export const SAFE_COMMAND = /^[A-Za-z0-9 \t_.\/:=@%+,'"-]*$/;
+
+/** A shell or env as the first word runs whatever follows it: never offered or honoured as an Always rule. */
+const SHELLS = new Set(["sh", "bash", "zsh", "fish", "dash", "ksh", "env"]);
+
+function startsWithShell(command: string): boolean {
+  const first = command.trim().split(/\s+/)[0]?.replace(/['"]/g, "") ?? "";
+  return SHELLS.has(basename(first));
+}
 
 function matches(rule: AlwaysRule, req: PermissionRequest, root: string): boolean {
   // "other" (an untyped tool call) would cover every future one: never kept, and never honoured in an old file.
   if (rule.kind === "other" || rule.kind !== (req.kind ?? "other")) return false;
   if (PROJECT_KINDS.has(rule.kind)) return inProject(req, root);
   if (rule.kind !== "execute") return true;
-  if (rule.command === null || req.command === null || CHAINED.test(req.command)) return false;
+  if (rule.command === null || req.command === null) return false;
+  if (!SAFE_COMMAND.test(req.command) || startsWithShell(rule.command) || startsWithShell(req.command)) return false;
   return req.command === rule.command || req.command.startsWith(rule.command + " ");
 }
 
-/** Whether an "Always" can be offered for this request: not for an untyped tool call, nor a command Rushes can't name. */
+/**
+ * Whether an "Always" can be offered for this request: not for an untyped tool call, and not for a command an
+ * Always rule could never match (empty, not plain, or a shell running something else).
+ */
 export function canAlways(req: PermissionRequest): boolean {
   const kind = req.kind ?? "other";
   if (kind === "other") return false;
-  return kind !== "execute" || (req.command ?? "").trim() !== "";
+  if (kind !== "execute") return true;
+  const command = (req.command ?? "").trim();
+  return command !== "" && SAFE_COMMAND.test(command) && !startsWithShell(command);
 }
 
 export function decide(req: PermissionRequest, s: Pick<AgentSettings, "permissions" | "always">, root: string): "allow" | "ask" {

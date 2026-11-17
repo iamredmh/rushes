@@ -96,6 +96,24 @@ describe("PermissionBroker", () => {
     }
   });
 
+  it("offers no Always for a shell however its argv is shaped, and Always there keeps nothing", async () => {
+    const b = broker();
+    for (const command of [
+      "bash -lc 'npm run build'",
+      ["bash", "-ec", "npm run build"],
+      ["bash", "-l", "-c", "npm run build"],
+      ["/usr/bin/env", "bash", "-c", "npm run build"],
+      ["bash", "-lc", "zsh -c ls"],
+      ["bash", "-lc", "npm run build =(touch p1)"],
+    ]) {
+      const outcome = b.ask(params({ kind: "execute", rawInput: { command } }));
+      const [ask] = b.pending();
+      expect(ask.always, JSON.stringify(command)).toBe("");
+      expect(b.answer(ask.id, "always")).toBeNull();
+      expect(await outcome).toEqual({ outcome: "selected", optionId: "allow-once" });
+    }
+  });
+
   it("keeps no rule when Always ends in cancelled (no allow option offered)", async () => {
     const b = broker();
     const outcome = b.ask(params({ kind: "execute", rawInput: { command: "npm run build" } }, [OPTIONS[2]]));

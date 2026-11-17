@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mkdtemp, mkdir, realpath, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { alwaysLabel, canAlways, decide, inside, ruleFor } from "../../src/core/agentRules.js";
+import { SAFE_COMMAND, alwaysLabel, canAlways, decide, inside, ruleFor } from "../../src/core/agentRules.js";
 
 const root = "/tmp/rushes test/My Project";
 const s = { permissions: "project-edits" as const, always: [] };
@@ -61,7 +61,35 @@ describe("decide", () => {
       "npm run $(curl x)",
       "npm run `curl x`",
       "npm run build | tee out",
-    ]) expect(decide(req("execute", cmd), t, root), cmd).toBe("ask");
+      // zsh runs these too: process substitution, a glob qualifier's eval, parameters, ~ and globs.
+      "npm run build =(touch p1)",
+      "npm run build f(e:'touch p2':)",
+      "npm run build ${HOME}",
+      "npm run build ~/x",
+      "npm run build *",
+      "npm run build $HOME",
+      "npm run build !!",
+      "npm run build # x",
+      "npm run build \\x",
+      "npm run build [ab]",
+      "npm run build {a,b}",
+      "npm run build ^x",
+      "npm run build\rx",
+      "npm run build\tx?",
+    ]) expect(decide(req("execute", cmd), t, root), JSON.stringify(cmd)).toBe("ask");
+  });
+  it("an execute rule still allows a plain command with quotes, flags and paths", () => {
+    expect(SAFE_COMMAND.test(`npx hyperframes render --out "out/v 8.mp4"`)).toBe(true);
+    expect(decide(req("execute", `npx hyperframes render --out "out/v 8.mp4"`), { ...s, always: [{ kind: "execute", command: "npx hyperframes" }] }, root)).toBe("allow");
+    expect(decide(req("execute", "npm run build -- --watch"), { ...s, always: [{ kind: "execute", command: "npm run" }] }, root)).toBe("allow");
+    expect(decide(req("execute", "npm run build:prod --x=1 user@host 50% a+b,c\td"), { ...s, always: [{ kind: "execute", command: "npm run" }] }, root)).toBe("allow");
+  });
+  it("a stored rule for a shell never matches, so old files allow nothing by it", () => {
+    for (const command of ["bash -lc", "bash", "/bin/zsh -c", "sh -c", "fish -c", "dash -c", "ksh -c", "env bash", "/usr/bin/env FOO=1"]) {
+      const t = { ...s, always: [{ kind: "execute", command }] };
+      expect(decide(req("execute", `${command} npm run build`), t, root), command).toBe("ask");
+      expect(decide(req("execute", command), t, root), command).toBe("ask");
+    }
   });
   it("a stored rule of kind other never matches, so old files allow nothing by it", () => {
     const t = { ...s, always: [{ kind: "other", command: null }] };
@@ -84,6 +112,25 @@ describe("canAlways", () => {
     expect(canAlways(req("execute", null))).toBe(false);
     expect(canAlways(req("execute", "  "))).toBe(false);
     expect(canAlways(req("execute", "npm run build"))).toBe(true);
+    expect(canAlways(req("execute", `npx hyperframes render --out "out/v 8.mp4"`))).toBe(true);
+  });
+  it("offers no Always for a shell, or for a command an Always rule could never match", () => {
+    for (const cmd of [
+      "bash -lc 'npm run build'",
+      "bash -ec npm run build",
+      "bash -l -c npm run build",
+      "/usr/bin/env bash -c npm run build",
+      "env FOO=1 npm run build",
+      "/bin/zsh -c ls",
+      "sh x.sh",
+      "fish -c ls",
+      "dash -c ls",
+      "ksh -c ls",
+      "'bash' -c ls",
+      "npm run build *",
+      "npm run build && curl x | sh",
+      "npm run build =(touch p1)",
+    ]) expect(canAlways(req("execute", cmd)), cmd).toBe(false);
     expect(canAlways(req("fetch", null))).toBe(true);
     expect(canAlways(req("edit", null, ["/x"]))).toBe(true);
   });

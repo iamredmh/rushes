@@ -214,7 +214,8 @@ export class AgentRunner {
         throw err;
       }),
     );
-    if (!r || r.handedTo !== null || r.why === "Send to AI is off" || this.closed) return;
+    // Quiet when Send to AI is off, and when the user's own Stop cut it short.
+    if (!r || r.handedTo !== null || r.stopped || r.why === "Send to AI is off" || this.closed) return;
     this.addLine(`Your answer on ${e.note} was not sent: ${r.why}`, e.note);
     this.announce();
   }
@@ -228,14 +229,14 @@ export class AgentRunner {
       return job ? this.accept(job, job.kind === "followUp" ? gen : null) : null;
     });
     this.sendLock = accepting.catch(() => undefined);
-    let accepted: { info: AgentInfo } | { why: string } | null;
+    let accepted: { info: AgentInfo } | { why: string; stopped?: true } | null;
     try {
       accepted = await accepting;
     } catch (e) {
       return { handedTo: null, why: messageOf(e) };
     }
     if (accepted === null) return null;
-    if ("why" in accepted) return { handedTo: null, why: accepted.why };
+    if ("why" in accepted) return accepted.stopped ? { handedTo: null, why: accepted.why, stopped: true } : { handedTo: null, why: accepted.why };
     try {
       await this.ensureStarted();
     } catch (e) {
@@ -248,7 +249,7 @@ export class AgentRunner {
   }
 
   /** Checks the switch, the agent and its sign-in, then queues the job. Runs one at a time. */
-  private async accept(job: TurnJob, sinceGen: number | null): Promise<{ info: AgentInfo } | { why: string }> {
+  private async accept(job: TurnJob, sinceGen: number | null): Promise<{ info: AgentInfo } | { why: string; stopped?: true }> {
     while (this.stopping) await this.stopping;
     if (this.closed) return { why: "Rushes is closing" };
     const settings = await this.loadSettings();
@@ -260,7 +261,7 @@ export class AgentRunner {
     // A Stop or close may have begun while this send was checking.
     while (this.stopping) await this.stopping;
     if (this.closed) return { why: "Rushes is closing" };
-    if (sinceGen !== null && sinceGen !== this.gen) return { why: "Stopped" };
+    if (sinceGen !== null && sinceGen !== this.gen) return { why: "Stopped", stopped: true };
     const queued = this.busy();
     if (!queued && this.conn) {
       // An idle adapter for another agent, another conversation or another permission level is replaced.
@@ -675,24 +676,25 @@ export class AgentRunner {
    * What goes back on Stop or failure, from the jobs in flight and queued: a batch's unfinished notes, and a
    * follow-up's own note (not the rest of its batch, whose turn has already ended).
    */
-  private unfinished(): { batches: string[]; notes: string[] } {
+  private unfinished(): { batches: string[]; notes: { id: string; batch: string }[] } {
     const jobs = [...(this.turn ? [this.turn.job] : []), ...this.queue];
     return {
       batches: jobs.filter((j) => j.kind === "batch").map((j) => j.batchId),
-      notes: jobs.flatMap((j) => (j.kind === "followUp" && j.note ? [j.note] : [])),
+      notes: jobs.flatMap((j) => (j.kind === "followUp" && j.note ? [{ id: j.note, batch: j.batchId }] : [])),
     };
   }
 
-  private recall(back: { batches: string[]; notes: string[] }): Promise<void> {
+  private recall(back: { batches: string[]; notes: { id: string; batch: string }[] }): Promise<void> {
     if (!back.batches.length && !back.notes.length) return Promise.resolve();
     return this.store
       .update("notes", (f) => {
         recallNotes(f.notes, back.batches);
-        for (const id of back.notes) recallNote(f.notes, id);
+        // Only while the note is still in the batch the follow-up was for.
+        for (const n of back.notes) recallNote(f.notes, n.id, n.batch);
       })
       .then(
         () => undefined,
-        (e: unknown) => console.error(`Rushes: couldn't give back the notes of ${[...back.batches, ...back.notes].join(", ")}: ${messageOf(e)}`),
+        (e: unknown) => console.error(`Rushes: couldn't give back the notes of ${[...back.batches, ...back.notes.map((n) => n.id)].join(", ")}: ${messageOf(e)}`),
       );
   }
 

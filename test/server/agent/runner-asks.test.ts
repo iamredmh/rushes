@@ -38,7 +38,7 @@ afterEach(async () => {
 const claude: AgentInfo = { id: "claude", name: "Claude Code", installed: true, signedIn: true, path: "/usr/local/bin/claude", signIn: "claude auth login" };
 const MCP = (root: string): McpServerSpec => ({ name: "rushes", command: process.execPath, args: ["-e", "", root], env: [] });
 
-async function rig(scenario: object, opts: { settings?: Partial<AgentSettings>; runner?: RunnerOptions } = {}) {
+async function rig(scenario: object, opts: { settings?: Partial<AgentSettings>; runner?: RunnerOptions; wrapSpec?: (base: AdapterSpec) => AdapterSpec } = {}) {
   const { root, store } = await tmpProject();
   const scenarioPath = join(store.dir, "scenario.json");
   const logPath = join(store.dir, "fake-log.jsonl");
@@ -48,7 +48,7 @@ async function rig(scenario: object, opts: { settings?: Partial<AgentSettings>; 
   const makeRunner = () => {
     const r = new AgentRunner(store, {
       detect: async () => [claude],
-      spec: (_a, at) => ({ command: process.execPath, args: [FAKE], env: { FAKE_ACP_SCENARIO: scenarioPath, FAKE_ACP_LOG: logPath }, cwd: at }),
+      spec: (_a, at) => (opts.wrapSpec ?? ((b) => b))({ command: process.execPath, args: [FAKE], env: { FAKE_ACP_SCENARIO: scenarioPath, FAKE_ACP_LOG: logPath }, cwd: at }),
       mcp: MCP,
       ...opts.runner,
     });
@@ -439,6 +439,28 @@ describe("AgentRunner answers on notes", () => {
     await r.phase("finished");
     expect(prompts(r.log()).map(promptText).slice(1)).toEqual([b2.prompt + "\n\n" + AGENT_LINES]);
     expect(r.runner.status().lines.slice(before).some((l) => l.text.startsWith("Your answer on"))).toBe(false);
+  });
+
+  it("a follow-up cut short by Stop while the adapter starts gives its note back and writes no refusal line", async () => {
+    let hang = false;
+    const r = await rig({ loadSession: true, turns: [] }, {
+      runner: { idleMs: 30 },
+      // An adapter that never answers initialize, so the restart stays in starting until Stop.
+      wrapSpec: (base) => (hang ? { ...base, args: ["-e", "setInterval(() => {}, 1000)"] } : base),
+    });
+    const b1 = await r.batch("One");
+    await r.runner.send(b1);
+    await r.phase("finished");
+    await r.waitFor("the first adapter to exit", () => started[0]?.hasExited);
+    hang = true;
+    await r.answerOn(b1.noteIds[0], "Yes");
+    await r.phase("starting");
+    await r.runner.stop();
+    // close waits for the follow-up's own handling to finish.
+    await r.runner.close();
+    expect(r.runner.status().lines.some((l) => l.text.startsWith("Your answer on"))).toBe(false);
+    const n = (await r.store.read("notes")).notes.find((x) => x.id === b1.noteIds[0])!;
+    expect([noteState(n), n.batch]).toEqual(["todo", null]);
   });
 
   it("stop drops a queued follow-up along with the queued batches", async () => {

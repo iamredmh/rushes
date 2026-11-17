@@ -77,10 +77,13 @@ export function recallNotes(notes: Pick<Note, "id" | "status" | "batch">[], batc
   return moved;
 }
 
-/** Recall one note: sent goes back to to do with no batch; the rest of its batch stays. True when it moved. */
-export function recallNote(notes: Pick<Note, "id" | "status" | "batch">[], id: string): boolean {
+/**
+ * Recall one note: sent goes back to to do with no batch; the rest of its batch stays. With `batch`, only while
+ * the note is still in that batch (one filed again elsewhere is left alone). True when it moved.
+ */
+export function recallNote(notes: Pick<Note, "id" | "status" | "batch">[], id: string, batch?: string): boolean {
   const n = notes.find((x) => x.id === id);
-  if (!n || noteState(n) !== "sent") return false;
+  if (!n || noteState(n) !== "sent" || (batch !== undefined && n.batch !== batch)) return false;
   moveNote(n, { type: "recall" });
   return true;
 }
