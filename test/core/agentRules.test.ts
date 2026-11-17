@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mkdtemp, mkdir, realpath, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RUNNER_SUBCOMMANDS, RUN_ANY_PROGRAM, SAFE_COMMAND, SHELLS, WRAPPERS, alwaysLabel, canAlways, decide, inside, plainCommand, ruleFor } from "../../src/core/agentRules.js";
+import { PACKAGE_RUNNERS, RUNNER_PROGRAMS, RUNNER_SUBCOMMANDS, RUN_ANY_PROGRAM, SAFE_COMMAND, SHELLS, WRAPPERS, alwaysLabel, canAlways, decide, inside, plainCommand, ruleFor } from "../../src/core/agentRules.js";
 
 const root = "/tmp/rushes test/My Project";
 const s = { permissions: "project-edits" as const, always: [] };
@@ -249,6 +249,30 @@ describe("exact program and subcommand (R7)", () => {
   it("a stored rule longer than two words is never honoured", () => {
     const t = { ...s, always: [{ kind: "execute", command: "npm run build" }] };
     expect(decide(req("execute", "npm run build"), t, root)).toBe("ask");
+  });
+
+  it("offers and honours no Always for a runner run through another runner, or deno and nix run (round 5)", () => {
+    const refused = [
+      "npx npm exec x", "npx pnpm dlx x", "bunx npm x", "pnpx yarn dlx x", "yarn npx x", "npx /usr/local/bin/NPM exec x",
+      "npx uv run perl", "bunx uvx ruff", "npx pipx run x", "npx deno run x", "npx corepack pnpm", "npx bun x",
+      "deno run https://x", "nix run nixpkgs#hello", "nix run github:x/y", "/opt/homebrew/bin/Deno run x.ts",
+    ];
+    for (const cmd of refused) {
+      expect(canAlways(req("execute", cmd)), cmd).toBe(false);
+      const rule = ruleFor(req("execute", cmd));
+      const t = { ...s, always: [rule] };
+      expect(decide(req("execute", cmd), t, root), cmd).toBe("ask");
+      expect(decide(req("execute", `${rule.command} anything`), t, root), cmd).toBe("ask");
+    }
+    const hf = req("execute", "npx hyperframes render --out out/v8.mp4");
+    expect(canAlways(hf)).toBe(true);
+    expect(decide(req("execute", "npx hyperframes render --out out/v9.mp4"), { ...s, always: [ruleFor(hf)] }, root)).toBe("allow");
+    const bun = req("execute", "bun run build");
+    expect(canAlways(bun)).toBe(true);
+    expect(decide(req("execute", "bun run build --watch"), { ...s, always: [ruleFor(bun)] }, root)).toBe("allow");
+    for (const p of ["npx", "bunx", "pnpx", "yarn"]) expect(PACKAGE_RUNNERS.has(p), p).toBe(true);
+    for (const p of ["npm", "npx", "pnpm", "pnpx", "yarn", "bun", "bunx", "uv", "uvx", "pipx", "deno", "corepack"]) expect(RUNNER_PROGRAMS.has(p), p).toBe(true);
+    for (const p of ["deno", "nix"]) expect(RUN_ANY_PROGRAM.has(p), p).toBe(true);
   });
 
   it("exports the runner subcommands", () => {

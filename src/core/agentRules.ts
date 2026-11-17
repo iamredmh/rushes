@@ -55,7 +55,13 @@ export const WRAPPERS: ReadonlySet<string> = new Set([
 /** Subcommands that run any package or program named after them (`npm x`, `npm exec`, `pnpm dlx`), whatever the program. */
 export const RUNNER_SUBCOMMANDS: ReadonlySet<string> = new Set(["x", "exec", "dlx"]);
 /** Programs whose `run` runs any program or package named after it (`uv run perl`), not a project script. */
-export const RUN_ANY_PROGRAM: ReadonlySet<string> = new Set(["uv", "pipx", "poetry", "pdm", "hatch", "conda", "docker", "podman", "mise"]);
+export const RUN_ANY_PROGRAM: ReadonlySet<string> = new Set(["uv", "pipx", "poetry", "pdm", "hatch", "conda", "docker", "podman", "mise", "deno", "nix"]);
+/** Programs that run the package named as their subcommand (`npx hyperframes`), so that package is the real program. */
+export const PACKAGE_RUNNERS: ReadonlySet<string> = new Set(["npx", "bunx", "pnpx", "yarn"]);
+/** Package runners and managers: run by a PACKAGE_RUNNER, their own subcommand (`npx npm exec x`) would go unchecked. */
+export const RUNNER_PROGRAMS: ReadonlySet<string> = new Set([
+  "npm", "npx", "pnpm", "pnpx", "yarn", "bun", "bunx", "uv", "uvx", "pipx", "deno", "corepack",
+]);
 
 /** A word a rule may be made of: no quotes, no `=`, nothing a shell reads as more than the word itself. */
 const RULE_WORD = /^[A-Za-z0-9_.\/@:+-]+$/;
@@ -82,6 +88,7 @@ export function alwaysWords(command: string): string[] | null {
     const sub = words[1].toLowerCase();
     if (RUNNER_SUBCOMMANDS.has(sub)) return null;
     if (sub === "run" && RUN_ANY_PROGRAM.has(name(words[0]))) return null;
+    if (PACKAGE_RUNNERS.has(name(words[0])) && RUNNER_PROGRAMS.has(name(words[1]))) return null;
   }
   return words;
 }

@@ -164,6 +164,11 @@ describe("PermissionBroker", () => {
       `"/bin/bash" -c x`,
       "../bin/tool run",
       "tools/../../bin/x y",
+      "npx npm exec x",
+      ["npx", "pnpm", "dlx", "x"],
+      "bunx npm x",
+      "deno run https://x",
+      "nix run github:x/y",
     ]) {
       const outcome = b.ask(params({ kind: "execute", rawInput: { command } }));
       const [ask] = b.pending();
@@ -179,6 +184,7 @@ describe("PermissionBroker", () => {
       [`npx hyperframes render --out "out/v 8.mp4"`, "Always for npx hyperframes here", "npx hyperframes"],
       [["npx", "hyperframes", "render", "--out", "out/v 8.mp4"], "Always for npx hyperframes here", "npx hyperframes"],
       ["npm run build", "Always for npm run here", "npm run"],
+      ["bun run build", "Always for bun run here", "bun run"],
       [`git commit -m "fix the time display"`, "Always for git commit here", "git commit"],
     ] as const) {
       void b.ask(params({ kind: "execute", rawInput: { command } }));
