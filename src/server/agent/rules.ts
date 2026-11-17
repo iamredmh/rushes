@@ -3,7 +3,7 @@
 //
 //   <user config dir>/rushes/agent-rules/<key>.json
 //   user config dir: $XDG_CONFIG_HOME when it is an absolute path, else ~/.config
-//   key: the first 16 hex characters of sha256(realpath(project root))
+//   key: the first 16 hex characters of sha256(realpath.native(project root)), the name as the volume stores it
 //
 // The folder is 0700 and the file 0600. Writes are serialised and atomic (tmp + rename), like the project's own files.
 import { createHash } from "node:crypto";
@@ -21,11 +21,14 @@ export function userConfigDir(env: NodeJS.ProcessEnv = process.env): string {
   return x && isAbsolute(x) ? x : join(homedir(), ".config");
 }
 
-/** The first 16 hex characters of sha256 of the project root's real path. */
+/**
+ * The first 16 hex characters of sha256 of the project root's real path. The native realpath gives the name as it is
+ * stored, so a case-variant path to the same folder on a case-insensitive volume names the same file.
+ */
 export function rulesKey(root: string): string {
   let real = root;
   try {
-    real = realpathSync(root);
+    real = realpathSync.native(root);
   } catch {
     /* not there (yet): its own path */
   }

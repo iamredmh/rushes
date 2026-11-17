@@ -428,6 +428,24 @@ describe("AgentRunner", () => {
     expect((await notesOf(r.store, [id])).map(noteState)).toEqual(["todo"]);
   });
 
+  it("a follow-up still being accepted when Rushes closes gives its note back (Residual minor)", async () => {
+    const d = heldDetect();
+    const r = await rig({ turns: [] }, { runner: { detect: d.detect } });
+    const b = await r.batch("Move the title");
+    const id = b.noteIds[0];
+    await r.store.update("notes", (f) => void applyReply(f, { id, reply: "Which title?" }));
+    await r.runner.send(b);
+    await r.phase("question");
+    await r.store.update("notes", (f) => void addUserReply(f, id, "The top one"));
+    r.store.emit("user-reply", { note: id, text: "The top one" });
+    await r.waitFor("the follow-up to reach detect", () => d.calls() >= 2);
+    const closing = r.runner.close();
+    d.release();
+    await closing;
+    expect(prompts(r.log())).toHaveLength(1);
+    expect((await notesOf(r.store, [id])).map((n) => [noteState(n), n.batch])).toEqual([["todo", null]]);
+  });
+
   it("a turn that leaves a question ends in phase question; one without ends finished", async () => {
     const r = await rig({ turns: [] });
     const b = await r.batch("Move the title");

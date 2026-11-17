@@ -82,6 +82,8 @@ export const AGENT_LINES_KEPT = 200;
 /** Long enough for AcpConnection.kill's SIGKILL (2 s) to land. */
 const EXIT_WAIT_MS = 4000;
 const CANCELLED: AcpPermissionOutcome = { outcome: "cancelled" };
+/** Why a send or follow-up is refused once close() has begun. */
+const CLOSING = "Rushes is closing";
 
 /** Each agent by name, as Activity and the notification say it. */
 export const AGENT_NAMES: Readonly<Record<AgentId, string>> = { claude: "Claude Code", codex: "Codex" };
@@ -254,18 +256,26 @@ export class AgentRunner {
    * Send to AI is off.
    */
   private async followUp(e: { note: string; text: string }): Promise<void> {
-    const r = await this.hand(() =>
-      followUpFor(this.store, e).catch((err: unknown) => {
+    let job: TurnJob | null = null;
+    const r = await this.hand(async () => {
+      job = await followUpFor(this.store, e).catch((err: unknown) => {
         console.error(`Rushes: couldn't read note ${e.note} to pass on its answer: ${messageOf(err)}`);
         throw err;
-      }),
-    );
-    if (!r || this.closed) return;
+      });
+      return job;
+    });
+    if (!r) return;
     if ("park" in r) {
       await this.recall({ batches: [], notes: [{ id: e.note, batch: r.park.batch }] });
       if (this.closed) return;
       this.addLine(`Your answer on ${e.note} is saved. Press Send to hand it to ${r.park.name}.`, e.note);
       this.announce();
+      return;
+    }
+    if (this.closed) {
+      // Refused because Rushes is closing, before it was queued: its note goes back too (I3), as a queued job's does.
+      const j = job as TurnJob | null;
+      if (j?.note && r.handedTo === null && r.why === CLOSING) await this.recall({ batches: [], notes: [{ id: j.note, batch: j.batchId }] });
       return;
     }
     // Quiet when Send to AI is off, and when the user's own Stop cut it short.
@@ -310,7 +320,7 @@ export class AgentRunner {
    */
   private async accept(job: TurnJob, sinceGen: number | null): Promise<Accepted | null> {
     while (this.stopping) await this.stopping;
-    if (this.closed) return { why: "Rushes is closing" };
+    if (this.closed) return { why: CLOSING };
     const settings = await this.loadSettings();
     if (!settings.on) return { why: "Send to AI is off" };
     const agent = settings.agent;
@@ -328,7 +338,7 @@ export class AgentRunner {
     if (job.kind === "followUp" && !(await this.stillSent(job))) return null;
     // A Stop or close may have begun while this send was checking.
     while (this.stopping) await this.stopping;
-    if (this.closed) return { why: "Rushes is closing" };
+    if (this.closed) return { why: CLOSING };
     if (sinceGen !== null && sinceGen !== this.gen) return { why: "Stopped", stopped: true };
     const queued = this.busy();
     if (!queued && this.conn) {
@@ -353,7 +363,7 @@ export class AgentRunner {
   /** One start at a time: a second caller waits on the first one's promise. */
   private ensureStarted(): Promise<void> {
     if (this.starting) return this.starting;
-    if (this.closed) return Promise.reject(new Error("Rushes is closing"));
+    if (this.closed) return Promise.reject(new Error(CLOSING));
     if (this.conn && this.sessionId && !this.conn.hasExited) return Promise.resolve();
     const info = this.info;
     if (!info) return Promise.reject(new Error("No agent chosen"));

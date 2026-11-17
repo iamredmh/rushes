@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, readFile, realpath, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { tmpProject } from "../../helpers/tmp.js";
 import { AgentRulesFile, agentRulesFor, rulesKey, rulesPath, userConfigDir } from "../../../src/server/agent/rules.js";
@@ -23,6 +24,14 @@ describe("the agent's rules file (R10)", () => {
     // Tests run with XDG_CONFIG_HOME set to a temp folder, never ~/.config.
     expect(agentRulesFor(store).path).toBe(rulesPath(root, process.env.XDG_CONFIG_HOME));
     expect(agentRulesFor(store)).toBe(agentRulesFor(store));
+  });
+
+  it("a case-variant path to the same project names the same file (skipped on a case-sensitive volume)", async () => {
+    const { root } = await tmpProject();
+    const variant = join(dirname(root), "mY pROJECT");
+    if (!existsSync(variant)) return; // case-sensitive volume: a different folder
+    expect(rulesKey(variant)).toBe(rulesKey(root));
+    expect(rulesKey(root.toUpperCase())).toBe(rulesKey(root));
   });
 
   it("reads the defaults with no file, and writes the file 0600 in a 0700 folder", async () => {
