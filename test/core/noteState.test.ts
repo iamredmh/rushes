@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canMove, markSent, moveNote, NOTE_STATE_LABEL, NOTE_TRANSITIONS, needsYou, noteState, recallNotes, withState } from "../../src/core/noteState.js";
+import { canMove, markSent, moveNote, NOTE_STATE_LABEL, NOTE_TRANSITIONS, needsYou, noteState, recallNote, recallNotes, withState } from "../../src/core/noteState.js";
 import type { Note } from "../../src/core/schema.js";
 
 const note = (over: Partial<Note> = {}): Note => ({
@@ -70,6 +70,18 @@ describe("replies and recall", () => {
     const copy = notes.map((n) => ({ ...n }));
     expect(recallNotes(copy, ["b_1"])).toEqual(["a"]);
     expect(copy.map(noteState)).toEqual(["todo", "done", "sent"]);
+  });
+
+  it("recallNote gives back one sent note only, leaving the rest of its batch", () => {
+    const notes: Pick<Note, "id" | "status" | "batch">[] = [{ id: "a", status: "todo", batch: "b_1" }, { id: "b", status: "todo", batch: "b_1" }, { id: "c", status: "done", batch: "b_1" }];
+    expect(recallNote(notes, "a")).toBe(true);
+    expect(notes.map(noteState)).toEqual(["todo", "sent", "done"]);
+    expect(notes[0].batch).toBeNull();
+    // Already to do, done, or not there: nothing moves.
+    expect(recallNote(notes, "a")).toBe(false);
+    expect(recallNote(notes, "c")).toBe(false);
+    expect(recallNote(notes, "zz")).toBe(false);
+    expect(notes.map(noteState)).toEqual(["todo", "sent", "done"]);
   });
 
   it("withState adds needsYou", () => {

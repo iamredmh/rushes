@@ -77,6 +77,14 @@ export function recallNotes(notes: Pick<Note, "id" | "status" | "batch">[], batc
   return moved;
 }
 
+/** Recall one note: sent goes back to to do with no batch; the rest of its batch stays. True when it moved. */
+export function recallNote(notes: Pick<Note, "id" | "status" | "batch">[], id: string): boolean {
+  const n = notes.find((x) => x.id === id);
+  if (!n || noteState(n) !== "sent") return false;
+  moveNote(n, { type: "recall" });
+  return true;
+}
+
 /** It is the user's turn: the note is with the agent and the last word in its thread is the agent's. */
 export function needsYou(n: Pick<Note, "status" | "batch" | "replies">): boolean {
   return noteState(n) === "sent" && n.replies.at(-1)?.by === "agent";

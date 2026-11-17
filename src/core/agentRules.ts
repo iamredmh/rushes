@@ -37,12 +37,23 @@ function inProject(req: PermissionRequest, root: string): boolean {
   return req.paths.length > 0 && req.paths.every((p) => inside(root, p));
 }
 
+/** Shell syntax that runs more than the named command, or sends its output somewhere: such a command always asks. */
+const CHAINED = /[;&|\n\r`<>]|\$\(/;
+
 function matches(rule: AlwaysRule, req: PermissionRequest, root: string): boolean {
-  if (rule.kind !== (req.kind ?? "other")) return false;
+  // "other" (an untyped tool call) would cover every future one: never kept, and never honoured in an old file.
+  if (rule.kind === "other" || rule.kind !== (req.kind ?? "other")) return false;
   if (PROJECT_KINDS.has(rule.kind)) return inProject(req, root);
   if (rule.kind !== "execute") return true;
-  if (rule.command === null || req.command === null) return false;
+  if (rule.command === null || req.command === null || CHAINED.test(req.command)) return false;
   return req.command === rule.command || req.command.startsWith(rule.command + " ");
+}
+
+/** Whether an "Always" can be offered for this request: not for an untyped tool call, nor a command Rushes can't name. */
+export function canAlways(req: PermissionRequest): boolean {
+  const kind = req.kind ?? "other";
+  if (kind === "other") return false;
+  return kind !== "execute" || (req.command ?? "").trim() !== "";
 }
 
 export function decide(req: PermissionRequest, s: Pick<AgentSettings, "permissions" | "always">, root: string): "allow" | "ask" {

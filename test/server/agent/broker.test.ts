@@ -29,6 +29,15 @@ describe("toRequest", () => {
     expect(toRequest(params({ kind: "execute" }), ROOT)).toEqual({ kind: "execute", title: "", command: null, paths: [] });
   });
 
+  it("takes the script out of a shell argv, so Always names the real command, not the shell", () => {
+    for (const shell of ["bash", "/bin/zsh", "sh", "/usr/local/bin/bash"])
+      for (const flag of ["-c", "-lc"])
+        expect(toRequest(params({ kind: "execute", rawInput: { command: [shell, flag, "npm run build"] } }), ROOT).command).toBe("npm run build");
+    // Other argv shapes are joined as before.
+    expect(toRequest(params({ kind: "execute", rawInput: { command: ["bash", "script.sh"] } }), ROOT).command).toBe("bash script.sh");
+    expect(toRequest(params({ kind: "execute", rawInput: { command: ["python", "-c", "print(1)"] } }), ROOT).command).toBe("python -c print(1)");
+  });
+
   it("resolves relative locations against the project root, not the process cwd", () => {
     const req = toRequest(params({ kind: "edit", locations: [{ path: "compositions/a.html" }, { path: "/elsewhere/b.txt" }] }), ROOT);
     expect(req.paths).toEqual([join(ROOT, "compositions/a.html"), "/elsewhere/b.txt"]);
@@ -74,6 +83,24 @@ describe("PermissionBroker", () => {
     const outcome = b.ask(params({ kind: "execute", rawInput: { command: "npm run build" } }));
     expect(b.answer(b.pending()[0].id, "always")).toEqual({ kind: "execute", command: "npm run" });
     expect(await outcome).toEqual({ outcome: "selected", optionId: "allow-once" });
+  });
+
+  it("offers no Always for an untyped tool call, and Always there acts as once, keeping nothing", async () => {
+    const b = broker();
+    for (const kind of [undefined, "other"]) {
+      const outcome = b.ask(params({ title: "Something", kind }));
+      const [ask] = b.pending();
+      expect(ask.always).toBe("");
+      expect(b.answer(ask.id, "always")).toBeNull();
+      expect(await outcome).toEqual({ outcome: "selected", optionId: "allow-once" });
+    }
+  });
+
+  it("keeps no rule when Always ends in cancelled (no allow option offered)", async () => {
+    const b = broker();
+    const outcome = b.ask(params({ kind: "execute", rawInput: { command: "npm run build" } }, [OPTIONS[2]]));
+    expect(b.answer(b.pending()[0].id, "always")).toBeNull();
+    expect(await outcome).toEqual({ outcome: "cancelled" });
   });
 
   it("falls back to allow_always only when no allow_once is offered", async () => {

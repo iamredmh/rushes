@@ -1,9 +1,9 @@
 // §28.4: permission asks the agent makes that Rushes's rules didn't allow on their own. Each one waits for
 // the user's answer in the desk. Nothing here has a timer: an ask is answered by the user, or cancelled by
 // Stop, close or the adapter going away (cancelAll), never by time passing.
-import { isAbsolute, resolve } from "node:path";
+import { basename, isAbsolute, resolve } from "node:path";
 import { NotFoundError } from "../../core/errors.js";
-import { alwaysLabel, ruleFor, type PermissionRequest } from "../../core/agentRules.js";
+import { alwaysLabel, canAlways, ruleFor, type PermissionRequest } from "../../core/agentRules.js";
 import type { AlwaysRule } from "../../core/schema.js";
 import type { AcpPermissionOutcome, AcpPermissionParams } from "./acp.js";
 
@@ -21,12 +21,23 @@ export type AskChoice = "once" | "always" | "no";
 
 const CANCELLED: AcpPermissionOutcome = { outcome: "cancelled" };
 
+const SHELLS = new Set(["sh", "bash", "zsh"]);
+
+/**
+ * An argv as one command. A shell running a script (`["bash", "-lc", "npm run build"]`, as Codex sends commands)
+ * is the script itself, so an Always rule names the real command and never "bash -lc". Other argvs are joined.
+ */
+function argvCommand(argv: string[]): string {
+  if (argv.length >= 3 && SHELLS.has(basename(argv[0])) && (argv[1] === "-c" || argv[1] === "-lc")) return argv[2];
+  return argv.join(" ");
+}
+
 /** The request in Rushes's terms. Relative locations are read against the project root, as the agent means them. */
 export function toRequest(p: AcpPermissionParams, root: string): PermissionRequest {
   const tc = p.toolCall;
   const raw = (tc.rawInput ?? null) as { command?: unknown } | null;
   const cmd = raw && typeof raw === "object" ? raw.command : undefined;
-  const command = typeof cmd === "string" ? cmd : Array.isArray(cmd) ? cmd.map(String).join(" ") : null;
+  const command = typeof cmd === "string" ? cmd : Array.isArray(cmd) ? argvCommand(cmd.map(String)) : null;
   const paths = (tc.locations ?? []).filter((l) => typeof l?.path === "string").map((l) => (isAbsolute(l.path) ? l.path : resolve(root, l.path)));
   return { kind: tc.kind ?? null, title: tc.title ?? "", command, paths };
 }
@@ -48,6 +59,7 @@ export const ALWAYS_KEPT = 50;
 
 /** Adds the rule to agent.json's list unless the same kind and command is there; at the cap the oldest goes. True when added. */
 export function addRule(always: AlwaysRule[], rule: AlwaysRule): boolean {
+  if (rule.kind === "other") return false;
   if (always.some((r) => r.kind === rule.kind && r.command === rule.command)) return false;
   always.push({ kind: rule.kind, command: rule.command });
   if (always.length > ALWAYS_KEPT) always.splice(0, always.length - ALWAYS_KEPT);
@@ -82,20 +94,26 @@ export class PermissionBroker {
   ask(p: AcpPermissionParams): Promise<AcpPermissionOutcome> {
     const req = toRequest(p, this.root);
     const id = `ask_${++this.count}`;
-    const ask: PendingAsk = { id, title: req.title, kind: req.kind, command: req.command, always: alwaysLabel(ruleFor(req)), at: this.now().toISOString() };
+    // "" means no Always is offered (an untyped tool call): the desk hides the button.
+    const always = canAlways(req) ? alwaysLabel(ruleFor(req)) : "";
+    const ask: PendingAsk = { id, title: req.title, kind: req.kind, command: req.command, always, at: this.now().toISOString() };
     const outcome = new Promise<AcpPermissionOutcome>((settle) => this.open.set(id, { ask, params: p, req, settle }));
     this.onChange();
     return outcome;
   }
 
-  /** Answers the agent. Returns the rule to keep for "always", else null. An unknown or answered id is not found. */
+  /**
+   * Answers the agent. Returns the rule to keep for "always", else null: also null when no Always was offered
+   * (it acts as "once") or when the agent was answered cancelled. An unknown or answered id is not found.
+   */
   answer(id: string, choice: AskChoice): AlwaysRule | null {
     const o = this.open.get(id);
     if (!o) throw new NotFoundError("ask", id);
     this.open.delete(id);
-    o.settle(choice === "no" ? rejectOutcome(o.params.options) : allowOutcome(o.params.options));
+    const outcome = choice === "no" ? rejectOutcome(o.params.options) : allowOutcome(o.params.options);
+    o.settle(outcome);
     this.onChange();
-    return choice === "always" ? ruleFor(o.req) : null;
+    return choice === "always" && o.ask.always !== "" && outcome.outcome === "selected" ? ruleFor(o.req) : null;
   }
 
   /** Stop, close or the adapter gone: every ask still open is answered cancelled. */

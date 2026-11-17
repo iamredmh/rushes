@@ -17,7 +17,7 @@ import { alwaysLabel, decide } from "../../core/agentRules.js";
 import { NotFoundError, RushesError } from "../../core/errors.js";
 import { oneLine } from "../../core/labels.js";
 import { lineEvent } from "../../core/logEvents.js";
-import { needsYou, noteState, recallNotes } from "../../core/noteState.js";
+import { needsYou, noteState, recallNote, recallNotes } from "../../core/noteState.js";
 import type { AgentId, AgentSettings, AlwaysRule, Batch } from "../../core/schema.js";
 import type { ChangeEvent, Store } from "../../core/store.js";
 import { logBookFor } from "../logbook.js";
@@ -162,7 +162,7 @@ export class AgentRunner {
   };
   /** The user answered on a note: a follow-up turn when R3 allows one (followUp.ts). */
   private readonly onUserReply = (e: { note: string; text: string }) => {
-    if (!this.closed) this.track(this.hand(() => followUpFor(this.store, this.carried, e)));
+    if (!this.closed) this.track(this.followUp(e));
   };
 
   constructor(private readonly store: Store, opts: RunnerOptions = {}) {
@@ -204,6 +204,19 @@ export class AgentRunner {
    */
   async send(batch: Batch): Promise<SendResult> {
     return (await this.hand(async () => batchJob(batch)))!;
+  }
+
+  /** Hands the answer on as a follow-up. One that can't be says why in Activity, unless Send to AI is off. */
+  private async followUp(e: { note: string; text: string }): Promise<void> {
+    const r = await this.hand(() =>
+      followUpFor(this.store, this.carried, e).catch((err: unknown) => {
+        console.error(`Rushes: couldn't read note ${e.note} to pass on its answer: ${messageOf(err)}`);
+        throw err;
+      }),
+    );
+    if (!r || r.handedTo !== null || r.why === "Send to AI is off" || this.closed) return;
+    this.addLine(`Your answer on ${e.note} was not sent: ${r.why}`, e.note);
+    this.announce();
   }
 
   /** Queues the job `make` gives (none: nothing to do, null back), then starts the adapter or pumps the queue. */
@@ -386,17 +399,23 @@ export class AgentRunner {
   /** The user's answer to a pending ask. "always" also keeps the rule in agent.json. */
   async answer(askId: string, choice: AskChoice): Promise<void> {
     const rule = this.broker.answer(askId, choice);
-    if (!rule) return;
-    const writing = this.keepRule(rule);
-    this.ruleWrite = writing.catch(() => undefined);
-    await writing;
+    if (rule) await this.ruleWriting(this.keepRule(rule));
   }
 
   /** Takes an Always rule out of agent.json by its index there. */
   async removeRule(index: number): Promise<void> {
-    const { data } = await this.store.update("agent", (f) => dropRule(f.always, index));
-    this.applySettings(data);
-    this.announce();
+    await this.ruleWriting(
+      this.store.update("agent", (f) => dropRule(f.always, index)).then(({ data }) => {
+        this.applySettings(data);
+        this.announce();
+      }),
+    );
+  }
+
+  /** A change to the Always rules: an ask arriving meanwhile waits for it before reading them. */
+  private ruleWriting(writing: Promise<void>): Promise<void> {
+    this.ruleWrite = writing.catch(() => undefined);
+    return writing;
   }
 
   /** Keeps the rule in agent.json (once; the oldest goes at the cap) and says so in Activity and the Change Log. */
@@ -431,7 +450,7 @@ export class AgentRunner {
     this.phase = "working";
     this.error = null;
     this.current = { note: null, doing: null };
-    this.milestone(`${name} started on ${job.label}`);
+    this.milestone(job.kind === "batch" ? `${name} started on ${job.label}` : `${name} picked up ${job.label}`);
     this.announce();
     this.track(
       conn.prompt(sessionId, job.prompt).then(
@@ -508,9 +527,9 @@ export class AgentRunner {
     this.track(this.failRun(`${name} stopped unexpectedly${line ? `: ${line}` : ""}`));
   }
 
-  /** The run failed: every batch in flight or waiting gives its notes back. The state changes at once; the writes follow. */
+  /** The run failed: every job in flight or waiting gives its notes back. The state changes at once; the writes follow. */
   private failRun(why: string): Promise<void> {
-    const ids = this.batchIds();
+    const back = this.unfinished();
     this.broker.cancelAll();
     this.turn = null;
     this.ending = false;
@@ -520,7 +539,7 @@ export class AgentRunner {
     this.current = { note: null, doing: null };
     this.addLine(why, null);
     this.announce();
-    return this.recall(ids).then(async () => {
+    return this.recall(back).then(async () => {
       await this.writeMilestone(why);
     });
   }
@@ -549,8 +568,8 @@ export class AgentRunner {
     }
     const name = this.info?.name ?? "the agent";
     const turn = this.turn;
-    // Follow-ups in flight or queued are dropped; only batches give notes back.
-    const ids = this.batchIds();
+    // Batches and follow-ups in flight or queued are dropped, and give their notes back.
+    const back = this.unfinished();
     this.queue = [];
     const conn = this.conn;
     const sessionId = this.sessionId;
@@ -564,7 +583,7 @@ export class AgentRunner {
     if (this.starting) await this.starting.catch(() => undefined);
     this.turn = null;
     this.ending = false;
-    await this.recall(ids);
+    await this.recall(back);
     this.phase = "idle";
     this.error = null;
     this.current = { note: null, doing: null };
@@ -652,19 +671,28 @@ export class AgentRunner {
     if (changed) this.announce();
   }
 
-  /** The batches in flight and queued, by id: the ones whose notes go back on Stop or failure. */
-  private batchIds(): string[] {
+  /**
+   * What goes back on Stop or failure, from the jobs in flight and queued: a batch's unfinished notes, and a
+   * follow-up's own note (not the rest of its batch, whose turn has already ended).
+   */
+  private unfinished(): { batches: string[]; notes: string[] } {
     const jobs = [...(this.turn ? [this.turn.job] : []), ...this.queue];
-    return jobs.filter((j) => j.kind === "batch").map((j) => j.batchId);
+    return {
+      batches: jobs.filter((j) => j.kind === "batch").map((j) => j.batchId),
+      notes: jobs.flatMap((j) => (j.kind === "followUp" && j.note ? [j.note] : [])),
+    };
   }
 
-  private recall(ids: string[]): Promise<void> {
-    if (!ids.length) return Promise.resolve();
+  private recall(back: { batches: string[]; notes: string[] }): Promise<void> {
+    if (!back.batches.length && !back.notes.length) return Promise.resolve();
     return this.store
-      .update("notes", (f) => recallNotes(f.notes, ids))
+      .update("notes", (f) => {
+        recallNotes(f.notes, back.batches);
+        for (const id of back.notes) recallNote(f.notes, id);
+      })
       .then(
         () => undefined,
-        (e: unknown) => console.error(`Rushes: couldn't give back the notes of ${ids.join(", ")}: ${messageOf(e)}`),
+        (e: unknown) => console.error(`Rushes: couldn't give back the notes of ${[...back.batches, ...back.notes].join(", ")}: ${messageOf(e)}`),
       );
   }
 

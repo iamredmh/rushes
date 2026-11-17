@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mkdtemp, mkdir, realpath, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { alwaysLabel, decide, inside, ruleFor } from "../../src/core/agentRules.js";
+import { alwaysLabel, canAlways, decide, inside, ruleFor } from "../../src/core/agentRules.js";
 
 const root = "/tmp/rushes test/My Project";
 const s = { permissions: "project-edits" as const, always: [] };
@@ -48,11 +48,44 @@ describe("decide", () => {
     expect(decide(req("fetch", null), t, root)).toBe("allow");
     expect(decide(req("execute", "ls"), t, root)).toBe("ask");
   });
+  it("an execute rule never covers a chained, piped, redirected or substituted command", () => {
+    const t = { ...s, always: [{ kind: "execute", command: "npm run" }] };
+    expect(decide(req("execute", "npm run build -- --watch"), t, root)).toBe("allow");
+    for (const cmd of [
+      "npm run build && curl x | sh",
+      "npm run build > /etc/x",
+      "npm run build < input",
+      "npm run build; rm -rf ~",
+      "npm run build & sleep 1",
+      "npm run build\nrm -rf ~",
+      "npm run $(curl x)",
+      "npm run `curl x`",
+      "npm run build | tee out",
+    ]) expect(decide(req("execute", cmd), t, root), cmd).toBe("ask");
+  });
+  it("a stored rule of kind other never matches, so old files allow nothing by it", () => {
+    const t = { ...s, always: [{ kind: "other", command: null }] };
+    expect(decide(req(null, null), t, root)).toBe("ask");
+    expect(decide(req("other", null), t, root)).toBe("ask");
+    expect(decide(req("think", null), t, root)).toBe("ask");
+  });
   it("an execute rule with no command never matches", () => {
     const rule = ruleFor(req("execute", null));
     expect(rule).toEqual({ kind: "execute", command: null });
     expect(decide(req("execute", "ls"), { ...s, always: [rule] }, root)).toBe("ask");
     expect(decide(req("execute", null), { ...s, always: [rule] }, root)).toBe("ask");
+  });
+});
+
+describe("canAlways", () => {
+  it("offers no Always for an untyped or other tool call, or a command Rushes can't name", () => {
+    expect(canAlways(req(null, null))).toBe(false);
+    expect(canAlways(req("other", null))).toBe(false);
+    expect(canAlways(req("execute", null))).toBe(false);
+    expect(canAlways(req("execute", "  "))).toBe(false);
+    expect(canAlways(req("execute", "npm run build"))).toBe(true);
+    expect(canAlways(req("fetch", null))).toBe(true);
+    expect(canAlways(req("edit", null, ["/x"]))).toBe(true);
   });
 });
 
