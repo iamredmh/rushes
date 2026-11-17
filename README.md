@@ -299,12 +299,16 @@ Rushes never sees a password, token or key, and never signs you in. When an agen
 
 **Permissions.** There are two levels:
 
-- **Edit files in this project** (the default): the agent reads and edits files inside the project folder without asking. Commands, the network and anything outside the folder ask first.
+- **Edit files in this project** (the default): the agent reads, edits, searches, moves and deletes files inside the project folder without asking. Commands, the network and anything outside the folder ask first.
 - **Ask me for everything**: every action asks.
+
+Some folders and files in the project always ask, at either level and whatever "Always" rules you keep, even to read them: they hold settings, hooks or tokens. They are `.rushes/`, `.git/`, `.claude/`, `.codex/`, `.mcp.json`, `.vscode/` and `.idea/`. Moving or deleting the project folder itself always asks too.
 
 An ask shows what the agent wants to do and the exact command, with **Allow once**, **Always** and **No**. It waits until you answer. It never turns into a yes by itself.
 
-**"Always" rules.** **Always** keeps a rule for this project, so the same request runs without asking next time. The agent's menu lists the rules, and you can remove any of them. The settings live in `.rushes/agent.json`: the switch, the agent, the permission level, the rules and the conversation to continue. Nothing secret.
+Rushes sees only what the agent asks it. The agent's own permission settings, such as allow rules in Claude Code's settings, can still approve actions without asking, and Rushes never sees those.
+
+**"Always" rules.** **Always** keeps a rule for this project, so the same request runs without asking next time. The agent's menu lists the rules, and you can remove any of them. Always rules are kept in your user settings, outside the project, so the agent cannot change them. The permission level and the rules are in `~/.config/rushes/agent-rules/` (or under `$XDG_CONFIG_HOME`), one file per project. `.rushes/agent.json` keeps only the switch, the agent and the conversation to continue. Nothing secret.
 
 "Always" trusts one program and subcommand, such as `npx hyperframes`, `npm install` or `git commit`. Later commands that start with the same two words run without asking, whatever their other arguments. That trust covers whatever that program and subcommand can be told to run:
 
@@ -317,8 +321,9 @@ Rushes never offers "Always" for:
 
 - a shell, or a wrapper such as `nohup` or `sudo`;
 - a quoted or spaced program path;
-- a subcommand that runs any package or program (`npm exec`, `npm x`, `pnpm dlx`, `uv run`, `deno run`, `nix run`);
-- one package runner run through another (`npx npm`, `bunx pnpm`).
+- a subcommand that runs any package or program (`npm exec`, `npm x`, `pnpm dlx`, `uv run`, `uv tool`, `docker container`, `deno run`, `nix run`);
+- one package runner run through another (`npx npm`, `bunx pnpm`, `npx pnpm@9`, `npx @pnpm/exe`, `uvx poetry`);
+- a request to read, edit, search, move or delete a file outside the project or in one of the folders above.
 
 ## The Change Log
 
