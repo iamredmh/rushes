@@ -4,7 +4,7 @@
 import { basename, isAbsolute, resolve } from "node:path";
 import { NotFoundError } from "../../core/errors.js";
 import { SHELLS, alwaysLabel, canAlways, ruleFor, type PermissionRequest } from "../../core/agentRules.js";
-import type { AlwaysRule } from "../../core/schema.js";
+import { ALWAYS_KEPT, type AlwaysRule } from "../../core/schema.js";
 import type { AcpPermissionOutcome, AcpPermissionParams } from "./acp.js";
 
 /** A permission ask waiting for the user's answer, as the desk shows it (§28.4). */
@@ -54,12 +54,12 @@ function pick(options: AcpPermissionParams["options"], first: string, fallback: 
 export const allowOutcome = (options: AcpPermissionParams["options"]) => pick(options, "allow_once", "allow_always");
 const rejectOutcome = (options: AcpPermissionParams["options"]) => pick(options, "reject_once", "reject_always");
 
-/** agent.json keeps at most this many Always rules (the schema's cap). */
-export const ALWAYS_KEPT = 50;
+/** The rules file keeps at most this many Always rules (the schema's cap). */
+export { ALWAYS_KEPT };
 
-/** Adds the rule to agent.json's list unless the same kind and command is there; at the cap the oldest goes. True when added. */
+/** Adds the rule to the rules file's list unless the same kind and command is there; at the cap the oldest goes. True when added. */
 export function addRule(always: AlwaysRule[], rule: AlwaysRule): boolean {
-  if (rule.kind === "other") return false;
+  if (rule.kind === "other" || rule.kind === "switch_mode") return false;
   if (always.some((r) => r.kind === rule.kind && r.command === rule.command)) return false;
   always.push({ kind: rule.kind, command: rule.command });
   if (always.length > ALWAYS_KEPT) always.splice(0, always.length - ALWAYS_KEPT);
@@ -95,7 +95,7 @@ export class PermissionBroker {
     const req = toRequest(p, this.root);
     const id = `ask_${++this.count}`;
     // "" means no Always is offered (an untyped tool call): the desk hides the button.
-    const always = canAlways(req) ? alwaysLabel(ruleFor(req)) : "";
+    const always = canAlways(req, this.root) ? alwaysLabel(ruleFor(req)) : "";
     const ask: PendingAsk = { id, title: req.title, kind: req.kind, command: req.command, always, at: this.now().toISOString() };
     const outcome = new Promise<AcpPermissionOutcome>((settle) => this.open.set(id, { ask, params: p, req, settle }));
     this.onChange();

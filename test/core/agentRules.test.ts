@@ -132,7 +132,7 @@ describe("plain program and subcommand (R6)", () => {
   it("offers no Always for a shell, a wrapper, an env assignment or a flag in the rule's words", () => {
     for (const cmd of wrapped) {
       expect(plainCommand(cmd), cmd).toBe(false);
-      expect(canAlways(req("execute", cmd)), cmd).toBe(false);
+      expect(canAlways(req("execute", cmd), root), cmd).toBe(false);
     }
   });
   it("never honours an old stored rule of those shapes, and the commands themselves ask", () => {
@@ -149,11 +149,11 @@ describe("plain program and subcommand (R6)", () => {
   });
   it("still offers and honours Always for a plain program and subcommand", () => {
     const first = req("execute", "npx hyperframes render --out out/v8.mp4");
-    expect(canAlways(first)).toBe(true);
+    expect(canAlways(first, root)).toBe(true);
     const rule = ruleFor(first);
     expect(alwaysLabel(rule)).toBe("Always for npx hyperframes here");
     expect(decide(req("execute", "npx hyperframes render --out out/v9.mp4"), { ...s, always: [rule] }, root)).toBe("allow");
-    expect(canAlways(req("execute", "npm run build"))).toBe(true);
+    expect(canAlways(req("execute", "npm run build"), root)).toBe(true);
     expect(plainCommand("npm run build")).toBe(true);
   });
   it("exports the shell and wrapper lists", () => {
@@ -186,11 +186,11 @@ describe("exact program and subcommand (R7)", () => {
   it("offers no Always when the program or subcommand is quoted, spaced, climbs a path, or runs any package", () => {
     for (const [cmd] of spaced) {
       expect(plainCommand(cmd), cmd).toBe(false);
-      expect(canAlways(req("execute", cmd)), cmd).toBe(false);
+      expect(canAlways(req("execute", cmd), root), cmd).toBe(false);
     }
     for (const cmd of [...runners, ...others]) {
       expect(plainCommand(cmd), cmd).toBe(false);
-      expect(canAlways(req("execute", cmd)), cmd).toBe(false);
+      expect(canAlways(req("execute", cmd), root), cmd).toBe(false);
     }
   });
 
@@ -213,7 +213,7 @@ describe("exact program and subcommand (R7)", () => {
 
   it("still offers and honours Always for a plain program and subcommand, whatever its later arguments", () => {
     const hf = req("execute", `npx hyperframes render --out "out/v 8.mp4"`);
-    expect(canAlways(hf)).toBe(true);
+    expect(canAlways(hf, root)).toBe(true);
     expect(alwaysLabel(ruleFor(hf))).toBe("Always for npx hyperframes here");
     const t = { ...s, always: [ruleFor(hf)] };
     expect(decide(req("execute", "npx hyperframes render --out out/v9.mp4"), t, root)).toBe("allow");
@@ -222,21 +222,21 @@ describe("exact program and subcommand (R7)", () => {
     expect(decide(req("execute", "npx hyperframes/../evil render"), t, root)).toBe("ask");
 
     const build = req("execute", "npm run build");
-    expect(canAlways(build)).toBe(true);
+    expect(canAlways(build, root)).toBe(true);
     const n = { ...s, always: [ruleFor(build)] };
     expect(decide(req("execute", "npm run build -- --watch"), n, root)).toBe("allow");
     // Later words are arguments to that program: a shell or wrapper name there is just a word.
     expect(decide(req("execute", "npm run build -- bash"), n, root)).toBe("allow");
-    expect(canAlways(req("execute", "npm run build -- bash"))).toBe(true);
+    expect(canAlways(req("execute", "npm run build -- bash"), root)).toBe(true);
 
     const commit = req("execute", `git commit -m "fix the time display"`);
-    expect(canAlways(commit)).toBe(true);
+    expect(canAlways(commit, root)).toBe(true);
     expect(decide(commit, { ...s, always: [{ kind: "execute", command: "git commit" }] }, root)).toBe("allow");
 
     // `.` as a later word, or the subcommand, is a path: only the program `.` is source.
     expect(decide(req("execute", "find . -name x.mp4"), { ...s, always: [{ kind: "execute", command: "find ." }] }, root)).toBe("allow");
     for (const ok of ["find .", "git add .", "./tools/render.sh out","bin/tool.v2 run", "@scope/cli:dev build+1", "uvx ruff", "cargo run", "npm run"])
-      expect(canAlways(req("execute", ok)), ok).toBe(true);
+      expect(canAlways(req("execute", ok), root), ok).toBe(true);
   });
 
   it("a one-word rule allows that word alone", () => {
@@ -258,17 +258,17 @@ describe("exact program and subcommand (R7)", () => {
       "deno run https://x", "nix run nixpkgs#hello", "nix run github:x/y", "/opt/homebrew/bin/Deno run x.ts",
     ];
     for (const cmd of refused) {
-      expect(canAlways(req("execute", cmd)), cmd).toBe(false);
+      expect(canAlways(req("execute", cmd), root), cmd).toBe(false);
       const rule = ruleFor(req("execute", cmd));
       const t = { ...s, always: [rule] };
       expect(decide(req("execute", cmd), t, root), cmd).toBe("ask");
       expect(decide(req("execute", `${rule.command} anything`), t, root), cmd).toBe("ask");
     }
     const hf = req("execute", "npx hyperframes render --out out/v8.mp4");
-    expect(canAlways(hf)).toBe(true);
+    expect(canAlways(hf, root)).toBe(true);
     expect(decide(req("execute", "npx hyperframes render --out out/v9.mp4"), { ...s, always: [ruleFor(hf)] }, root)).toBe("allow");
     const bun = req("execute", "bun run build");
-    expect(canAlways(bun)).toBe(true);
+    expect(canAlways(bun, root)).toBe(true);
     expect(decide(req("execute", "bun run build --watch"), { ...s, always: [ruleFor(bun)] }, root)).toBe("allow");
     for (const p of ["npx", "bunx", "pnpx", "yarn"]) expect(PACKAGE_RUNNERS.has(p), p).toBe(true);
     for (const p of ["npm", "npx", "pnpm", "pnpx", "yarn", "bun", "bunx", "uv", "uvx", "pipx", "deno", "corepack"]) expect(RUNNER_PROGRAMS.has(p), p).toBe(true);
@@ -283,12 +283,12 @@ describe("exact program and subcommand (R7)", () => {
 
 describe("canAlways", () => {
   it("offers no Always for an untyped or other tool call, or a command Rushes can't name", () => {
-    expect(canAlways(req(null, null))).toBe(false);
-    expect(canAlways(req("other", null))).toBe(false);
-    expect(canAlways(req("execute", null))).toBe(false);
-    expect(canAlways(req("execute", "  "))).toBe(false);
-    expect(canAlways(req("execute", "npm run build"))).toBe(true);
-    expect(canAlways(req("execute", `npx hyperframes render --out "out/v 8.mp4"`))).toBe(true);
+    expect(canAlways(req(null, null), root)).toBe(false);
+    expect(canAlways(req("other", null), root)).toBe(false);
+    expect(canAlways(req("execute", null), root)).toBe(false);
+    expect(canAlways(req("execute", "  "), root)).toBe(false);
+    expect(canAlways(req("execute", "npm run build"), root)).toBe(true);
+    expect(canAlways(req("execute", `npx hyperframes render --out "out/v 8.mp4"`), root)).toBe(true);
   });
   it("offers no Always for a shell, or for a command an Always rule could never match", () => {
     for (const cmd of [
@@ -306,9 +306,9 @@ describe("canAlways", () => {
       "npm run build *",
       "npm run build && curl x | sh",
       "npm run build =(touch p1)",
-    ]) expect(canAlways(req("execute", cmd)), cmd).toBe(false);
-    expect(canAlways(req("fetch", null))).toBe(true);
-    expect(canAlways(req("edit", null, ["/x"]))).toBe(true);
+    ]) expect(canAlways(req("execute", cmd), root), cmd).toBe(false);
+    expect(canAlways(req("fetch", null), root)).toBe(true);
+    expect(canAlways(req("edit", null, [`${root}/x`]), root)).toBe(true);
   });
 });
 
@@ -399,7 +399,7 @@ describe("runner spellings and more runners (I1, R8)", () => {
   ];
 
   it("offers no Always for these spellings", () => {
-    for (const cmd of refused) expect(canAlways(req("execute", cmd)), cmd).toBe(false);
+    for (const cmd of refused) expect(canAlways(req("execute", cmd), root), cmd).toBe(false);
   });
 
   it("never honours a stored rule of these spellings", () => {
@@ -413,7 +413,7 @@ describe("runner spellings and more runners (I1, R8)", () => {
 
   it("still offers and honours npx hyperframes, npm run build and bun run build", () => {
     for (const cmd of ["npx hyperframes render", "npm run build", "bun run build", "uvx ruff check", "git commit -m x", "npx @hyperframes/cli@1 render"]) {
-      expect(canAlways(req("execute", cmd)), cmd).toBe(true);
+      expect(canAlways(req("execute", cmd), root), cmd).toBe(true);
       expect(decide(req("execute", `${cmd} --more`), { ...s, always: [ruleFor(req("execute", cmd))] }, root), cmd).toBe("allow");
     }
   });
@@ -423,5 +423,36 @@ describe("runner spellings and more runners (I1, R8)", () => {
     for (const p of ["poetry", "hatch", "pdm"]) expect(RUNNER_PROGRAMS.has(p), p).toBe(true);
     for (const p of ["open", "osascript"]) expect(WRAPPERS.has(p), p).toBe(true);
     for (const w of ["exe", "exec", "x"]) expect(RUNNER_SUBCOMMANDS.has(w), w).toBe(true);
+  });
+});
+
+describe("no Always outside the project, for protected paths or for switch_mode (M4, M5)", () => {
+  it("offers no Always for a path request with any path outside the project or protected", () => {
+    for (const kind of ["read", "edit", "delete", "move", "search"]) {
+      expect(canAlways(req(kind, null, [`${root}/compositions/a.html`]), root), kind).toBe(true);
+      expect(canAlways(req(kind, null, ["/etc/hosts"]), root), kind).toBe(false);
+      expect(canAlways(req(kind, null, [`${root}/a`, "/etc/hosts"]), root), kind).toBe(false);
+      expect(canAlways(req(kind, null, [`${root}/.git/config`]), root), kind).toBe(false);
+      expect(canAlways(req(kind, null, [`${root}/a`, `${root}/.rushes/agent.json`]), root), kind).toBe(false);
+      expect(canAlways(req(kind, null), root), `${kind} with no path`).toBe(false);
+    }
+  });
+  it("offers and honours no Always for switch_mode", () => {
+    expect(canAlways(req("switch_mode", null), root)).toBe(false);
+    expect(decide(req("switch_mode", null), { ...s, always: [{ kind: "switch_mode", command: null }] }, root)).toBe("ask");
+  });
+  it("a delete or move of the project root itself always asks", () => {
+    const all = { ...s, always: [{ kind: "delete", command: null }, { kind: "move", command: null }] };
+    for (const kind of ["delete", "move"]) {
+      for (const t of [s, all]) {
+        expect(decide(req(kind, null, [root]), t, root), kind).toBe("ask");
+        expect(decide(req(kind, null, [`${root}/`]), t, root), kind).toBe("ask");
+      }
+      expect(canAlways(req(kind, null, [root]), root), kind).toBe(false);
+      expect(decide(req(kind, null, [`${root}/old.mp4`]), s, root), kind).toBe("allow");
+    }
+    // Reading or searching the folder itself is fine.
+    expect(decide(req("search", null, [root]), s, root)).toBe("allow");
+    expect(decide(req("read", null, [root]), s, root)).toBe("allow");
   });
 });

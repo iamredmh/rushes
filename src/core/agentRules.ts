@@ -48,9 +48,23 @@ export function isProtected(root: string, path: string): boolean {
   return rel.split(sep).some((part) => PROTECTED.has(part.toLowerCase()));
 }
 
+/** Kinds that change where a path is: never for the project folder itself (M5). */
+const ROOT_CHANGES = new Set(["delete", "move"]);
+
+/**
+ * Every path is inside the project and none is protected; a delete or move must also not be the project folder
+ * itself. With no path at all, false.
+ */
 function inProject(req: PermissionRequest, root: string): boolean {
-  return req.paths.length > 0 && req.paths.every((p) => inside(root, p) && !isProtected(root, p));
+  const notRoot = req.kind !== null && ROOT_CHANGES.has(req.kind);
+  return (
+    req.paths.length > 0 &&
+    req.paths.every((p) => inside(root, p) && !isProtected(root, p) && !(notRoot && real(p) === real(root)))
+  );
 }
+
+/** Kinds an Always rule is never offered or honoured for: "other" (an untyped tool call) and a switch of the agent's mode. */
+const NEVER_ALWAYS = new Set(["other", "switch_mode"]);
 
 /**
  * A plain command: letters, digits, space, tab, `_ . / : = @ % + , -` and quotes. Anything else may make a shell
@@ -135,8 +149,9 @@ export function plainCommand(command: string): boolean {
 }
 
 function matches(rule: AlwaysRule, req: PermissionRequest, root: string): boolean {
-  // "other" (an untyped tool call) would cover every future one: never kept, and never honoured in an old file.
-  if (rule.kind === "other" || rule.kind !== (req.kind ?? "other")) return false;
+  // "other" (an untyped tool call) would cover every future one, and switch_mode the agent's own mode: never kept,
+  // and never honoured in an old file.
+  if (NEVER_ALWAYS.has(rule.kind) || rule.kind !== (req.kind ?? "other")) return false;
   if (PROJECT_KINDS.has(rule.kind)) return inProject(req, root);
   if (rule.kind !== "execute") return true;
   if (rule.command === null || req.command === null) return false;
@@ -148,12 +163,14 @@ function matches(rule: AlwaysRule, req: PermissionRequest, root: string): boolea
 }
 
 /**
- * Whether an "Always" can be offered for this request: not for an untyped tool call, and not for a command that
- * isn't a plain program and subcommand (plainCommand).
+ * Whether an "Always" can be offered for this request: not for an untyped tool call or switch_mode, not for a
+ * command that isn't a plain program and subcommand (plainCommand), and not for a path request with any path
+ * outside the project or protected (M4), which such a rule could never allow.
  */
-export function canAlways(req: PermissionRequest): boolean {
+export function canAlways(req: PermissionRequest, root: string): boolean {
   const kind = req.kind ?? "other";
-  if (kind === "other") return false;
+  if (NEVER_ALWAYS.has(kind)) return false;
+  if (PROJECT_KINDS.has(kind)) return inProject(req, root);
   return kind !== "execute" || plainCommand(req.command ?? "");
 }
 
