@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mkdtemp, mkdir, realpath, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SAFE_COMMAND, alwaysLabel, canAlways, decide, inside, ruleFor } from "../../src/core/agentRules.js";
+import { SAFE_COMMAND, SHELLS, WRAPPERS, alwaysLabel, canAlways, decide, inside, plainCommand, ruleFor } from "../../src/core/agentRules.js";
 
 const root = "/tmp/rushes test/My Project";
 const s = { permissions: "project-edits" as const, always: [] };
@@ -102,6 +102,66 @@ describe("decide", () => {
     expect(rule).toEqual({ kind: "execute", command: null });
     expect(decide(req("execute", "ls"), { ...s, always: [rule] }, root)).toBe("ask");
     expect(decide(req("execute", null), { ...s, always: [rule] }, root)).toBe("ask");
+  });
+});
+
+describe("plain program and subcommand (R6)", () => {
+  // The reviewer's table: each would have stored a rule that runs any later script.
+  const wrapped = [
+    "FOO=1 bash -c ls",
+    "nohup bash -c ls",
+    "exec bash -c ls",
+    "command bash -c ls",
+    "time bash -c ls",
+    "nice bash -c ls",
+    "xargs -I @ sh -c ls",
+    "tcsh -c ls",
+    "csh -c ls",
+    "npm exec -- x",
+    "npx -y pkg",
+    "sudo npm run build",
+    "timeout 5 npm run build",
+    "caffeinate -i npm run build",
+    "npm run build -- bash",
+    "/opt/homebrew/bin/pwsh -c ls",
+    "rbash -c ls",
+    "mksh -c ls",
+    "builtin eval ls",
+    "source x.sh",
+    "arch -x86_64 npm run build",
+  ];
+  it("offers no Always for a shell, a wrapper, an env assignment or a flag in the rule's words", () => {
+    for (const cmd of wrapped) {
+      expect(plainCommand(cmd), cmd).toBe(false);
+      expect(canAlways(req("execute", cmd)), cmd).toBe(false);
+    }
+  });
+  it("never honours an old stored rule of those shapes, and the commands themselves ask", () => {
+    for (const cmd of wrapped) {
+      const rule = ruleFor(req("execute", cmd));
+      const t = { ...s, always: [rule] };
+      expect(decide(req("execute", cmd), t, root), cmd).toBe("ask");
+      // A rule taken from one of these is never honoured, unless its two words are themselves plain
+      // (`npm run build -- bash` gives `npm run`; the command itself still asks, above).
+      if (!plainCommand(rule.command ?? "")) expect(decide(req("execute", `${rule.command} anything else`), t, root), cmd).toBe("ask");
+    }
+    for (const command of ["FOO=1 bash", "nohup bash", "xargs -I", "npm exec", "npx -y", "tcsh -c", "csh -c", "exec bash", "command bash", "time bash", "nice bash"]) {
+      const t = { ...s, always: [{ kind: "execute", command }] };
+      expect(decide(req("execute", `${command} npm run build`), t, root), command).toBe("ask");
+    }
+  });
+  it("still offers and honours Always for a plain program and subcommand", () => {
+    const first = req("execute", "npx hyperframes render --out out/v8.mp4");
+    expect(canAlways(first)).toBe(true);
+    const rule = ruleFor(first);
+    expect(alwaysLabel(rule)).toBe("Always for npx hyperframes here");
+    expect(decide(req("execute", "npx hyperframes render --out out/v9.mp4"), { ...s, always: [rule] }, root)).toBe("allow");
+    expect(canAlways(req("execute", "npm run build"))).toBe(true);
+    expect(plainCommand("npm run build")).toBe(true);
+  });
+  it("exports the shell and wrapper lists", () => {
+    for (const sh of ["sh", "bash", "zsh", "fish", "dash", "ksh", "csh", "tcsh", "rbash", "mksh", "pwsh", "env"]) expect(SHELLS.has(sh), sh).toBe(true);
+    for (const w of ["exec", "command", "builtin", "nohup", "time", "nice", "timeout", "xargs", "sudo", "doas", "caffeinate", "arch", "eval", "source"]) expect(WRAPPERS.has(w), w).toBe(true);
   });
 });
 

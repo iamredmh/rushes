@@ -44,12 +44,28 @@ function inProject(req: PermissionRequest, root: string): boolean {
  */
 export const SAFE_COMMAND = /^[A-Za-z0-9 \t_.\/:=@%+,'"-]*$/;
 
-/** A shell or env as the first word runs whatever follows it: never offered or honoured as an Always rule. */
-const SHELLS = new Set(["sh", "bash", "zsh", "fish", "dash", "ksh", "env"]);
+/** Shells (and env): any of them runs whatever script follows it. broker.ts unwraps `[shell, -c|-lc, script]` by this list. */
+export const SHELLS: ReadonlySet<string> = new Set(["sh", "bash", "zsh", "fish", "dash", "ksh", "csh", "tcsh", "rbash", "mksh", "pwsh", "env"]);
+/** Programs that run another program given after them. */
+export const WRAPPERS: ReadonlySet<string> = new Set([
+  "exec", "command", "builtin", "nohup", "time", "nice", "timeout", "xargs", "sudo", "doas", "caffeinate", "arch", "eval", "source",
+]);
 
-function startsWithShell(command: string): boolean {
-  const first = command.trim().split(/\s+/)[0]?.replace(/['"]/g, "") ?? "";
-  return SHELLS.has(basename(first));
+const bare = (word: string) => basename(word.replace(/['"]/g, ""));
+
+/**
+ * R6: a command an Always rule may be offered for, stored from and honoured on: a plain program and subcommand.
+ * Refused when the command isn't plain (SAFE_COMMAND), when any word is a shell or a wrapper (quotes stripped,
+ * by basename), when the first word is an environment assignment, or when either of the rule's two words
+ * (the first two) is a flag: `npx -y` would allow any package.
+ */
+export function plainCommand(command: string): boolean {
+  const c = command.trim();
+  if (c === "" || !SAFE_COMMAND.test(c)) return false;
+  const words = c.split(/\s+/);
+  if (words[0].includes("=")) return false;
+  if (words.some((w) => SHELLS.has(bare(w)) || WRAPPERS.has(bare(w)))) return false;
+  return !words.slice(0, 2).some((w) => w.replace(/['"]/g, "").startsWith("-"));
 }
 
 function matches(rule: AlwaysRule, req: PermissionRequest, root: string): boolean {
@@ -58,20 +74,19 @@ function matches(rule: AlwaysRule, req: PermissionRequest, root: string): boolea
   if (PROJECT_KINDS.has(rule.kind)) return inProject(req, root);
   if (rule.kind !== "execute") return true;
   if (rule.command === null || req.command === null) return false;
-  if (!SAFE_COMMAND.test(req.command) || startsWithShell(rule.command) || startsWithShell(req.command)) return false;
+  // The stored rule and the request both: an old file's rule for a shell or wrapper is never honoured.
+  if (!plainCommand(rule.command) || !plainCommand(req.command)) return false;
   return req.command === rule.command || req.command.startsWith(rule.command + " ");
 }
 
 /**
- * Whether an "Always" can be offered for this request: not for an untyped tool call, and not for a command an
- * Always rule could never match (empty, not plain, or a shell running something else).
+ * Whether an "Always" can be offered for this request: not for an untyped tool call, and not for a command that
+ * isn't a plain program and subcommand (plainCommand).
  */
 export function canAlways(req: PermissionRequest): boolean {
   const kind = req.kind ?? "other";
   if (kind === "other") return false;
-  if (kind !== "execute") return true;
-  const command = (req.command ?? "").trim();
-  return command !== "" && SAFE_COMMAND.test(command) && !startsWithShell(command);
+  return kind !== "execute" || plainCommand(req.command ?? "");
 }
 
 export function decide(req: PermissionRequest, s: Pick<AgentSettings, "permissions" | "always">, root: string): "allow" | "ask" {

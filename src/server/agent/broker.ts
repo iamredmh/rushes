@@ -3,7 +3,7 @@
 // Stop, close or the adapter going away (cancelAll), never by time passing.
 import { basename, isAbsolute, resolve } from "node:path";
 import { NotFoundError } from "../../core/errors.js";
-import { alwaysLabel, canAlways, ruleFor, type PermissionRequest } from "../../core/agentRules.js";
+import { SHELLS, alwaysLabel, canAlways, ruleFor, type PermissionRequest } from "../../core/agentRules.js";
 import type { AlwaysRule } from "../../core/schema.js";
 import type { AcpPermissionOutcome, AcpPermissionParams } from "./acp.js";
 
@@ -20,8 +20,6 @@ export interface PendingAsk {
 export type AskChoice = "once" | "always" | "no";
 
 const CANCELLED: AcpPermissionOutcome = { outcome: "cancelled" };
-
-const SHELLS = new Set(["sh", "bash", "zsh"]);
 
 /**
  * An argv as one command. A shell running a script (`["bash", "-lc", "npm run build"]`, as Codex sends commands)

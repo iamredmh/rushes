@@ -30,7 +30,7 @@ describe("toRequest", () => {
   });
 
   it("takes the script out of a shell argv, so Always names the real command, not the shell", () => {
-    for (const shell of ["bash", "/bin/zsh", "sh", "/usr/local/bin/bash"])
+    for (const shell of ["bash", "/bin/zsh", "sh", "/usr/local/bin/bash", "/bin/tcsh", "csh", "pwsh"])
       for (const flag of ["-c", "-lc"])
         expect(toRequest(params({ kind: "execute", rawInput: { command: [shell, flag, "npm run build"] } }), ROOT).command).toBe("npm run build");
     // Other argv shapes are joined as before.
@@ -105,6 +105,15 @@ describe("PermissionBroker", () => {
       ["/usr/bin/env", "bash", "-c", "npm run build"],
       ["bash", "-lc", "zsh -c ls"],
       ["bash", "-lc", "npm run build =(touch p1)"],
+      "FOO=1 bash -c 'npm run build'",
+      "nohup bash -c ls",
+      ["xargs", "-I", "@", "sh", "-c", "ls"],
+      // As a string (not unwrapped) a tcsh or csh line is a shell; as an argv its plain script is the command.
+      "tcsh -c ls",
+      "/bin/csh -c ls",
+      ["tcsh", "-c", "nohup ls"],
+      "npm exec -- x",
+      "npx -y pkg",
     ]) {
       const outcome = b.ask(params({ kind: "execute", rawInput: { command } }));
       const [ask] = b.pending();
