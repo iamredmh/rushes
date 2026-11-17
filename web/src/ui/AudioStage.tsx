@@ -196,6 +196,8 @@ export interface AudioStageProps {
   onChanged(): void;
   /** A half-typed note, a range or ticked marks wait: the caller refuses a film or tab switch meanwhile. */
   onPendingChange?(pending: boolean): void;
+  /** §28 (final review I2): the tab's sound is playing, so a new cut waits rather than switching the picture. */
+  onPlayingChange?(playing: boolean): void;
   /** §27, 5.5 (final review I3): the film's one playhead across the Review tabs: the tab starts there, and leaves its
    *  time there when it goes. */
   clock?: ReviewClock;
@@ -244,7 +246,7 @@ function ClockedBy({ engine, by, children }: { engine: AudioEngine; by: (t: numb
 type Picked = { key: string; cue: string | null; clicked: boolean };
 
 export function AudioStage(props: AudioStageProps) {
-  const { stage, title, list, preview, fps, notes, noteRow, onLabel, targetName, rangeMarks, toast, onChanged, onPendingChange, readOnly = false } = props;
+  const { stage, title, list, preview, fps, notes, noteRow, onLabel, targetName, rangeMarks, toast, onChanged, onPendingChange, onPlayingChange, readOnly = false } = props;
   if (hook) hook.renders++;
 
   // ---- the takes on show, and what the engine plays ----
@@ -342,6 +344,9 @@ export function AudioStage(props: AudioStageProps) {
     onPendingChange?.(pending);
   }, [pending]);
   useEffect(() => () => onPendingChange?.(false), []);
+  // I2: playing holds the picture as Picture's player does; leaving the tab stops it, and says so.
+  useLayoutEffect(() => onPlayingChange?.(playing), [playing]);
+  useEffect(() => () => onPlayingChange?.(false), []);
 
   // ---- the note's target, read at `at` (the playhead now) ----
   const targetItem = selectedItem ?? items.find((it) => it.key === list.defaultKey) ?? null;

@@ -269,7 +269,7 @@ export function App() {
     return true;
   };
 
-  const playing = usePlaying(playerRef);
+  const [playing, onSoundPlaying] = usePlaying(playerRef);
   // A new cut arriving mid-review mustn't rewind the player or drop pending marks. So the
   // moment something's pending, hold the cut on screen; a newer one then waits behind a chip.
   // Holding before the cut arrives means the player never renders the new cut, even once.
@@ -952,6 +952,7 @@ export function App() {
               toast={toast}
               onChanged={() => void refresh()}
               onPendingChange={setPending}
+              onPlayingChange={onSoundPlaying}
               clock={reviewClock}
               version={version ?? null}
             />
@@ -966,6 +967,7 @@ export function App() {
               toast={toast}
               onChanged={() => void refresh()}
               onPendingChange={setPending}
+              onPlayingChange={onSoundPlaying}
               clock={reviewClock}
               version={version ?? null}
             />

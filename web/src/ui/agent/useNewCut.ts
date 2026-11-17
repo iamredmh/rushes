@@ -43,8 +43,12 @@ export function useNewCut({ film, versions, shown, busy, select, toast }: NewCut
   return unseenCut(unseen, film, shown, versions);
 }
 
-/** True while the desk's picture is playing: the video in `player` is neither paused nor ended nor gone. */
-export function usePlaying(player: { current: HTMLVideoElement | null }): boolean {
+/**
+ * True while the desk is playing: the picture's video in `player` is neither paused nor ended nor gone, or an audio tab's
+ * engine plays (I2: those tabs unmount Picture, so its player can't say). The setter is for the audio tab to report with.
+ */
+export function usePlaying(player: { current: HTMLVideoElement | null }): [boolean, (playing: boolean) => void] {
+  const [sound, setSound] = useState(false);
   const [on, setOn] = useState(false);
   useEffect(() => {
     const look = (e: Event) => {
@@ -57,5 +61,5 @@ export function usePlaying(player: { current: HTMLVideoElement | null }): boolea
     return () => names.forEach((n) => document.removeEventListener(n, look, true));
   }, []);
   const el = player.current;
-  return on && !!el && el.isConnected && !el.paused && !el.ended;
+  return [sound || (on && !!el && el.isConnected && !el.paused && !el.ended), setSound];
 }

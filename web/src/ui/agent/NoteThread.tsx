@@ -18,8 +18,8 @@ export interface NotesAgent {
 /** How long after Fixed in <v> is pressed its version may come on screen and still be sought. */
 const JUMP_WAIT_MS = 2000;
 
-/** The Timeline's player, whose file a jump to another version swaps. */
-const player = (): HTMLVideoElement | null => document.querySelector<HTMLVideoElement>(".frame video");
+/** The Timeline's player, whose file a jump to another version swaps; never an audio tab's preview (`.spreview`, I2). */
+const player = (): HTMLVideoElement | null => document.querySelector<HTMLVideoElement>(".monitor:not(.spreview) .frame video");
 
 /** The badge line: Needs you, what the agent is doing (spinning), With <A>, or Fixed in <v> (a button to the fix). */
 export function NoteBadge({ n, agent, version, onSeek }: { n: Note; agent: NotesAgent; version: string | null; onSeek?(t: number, note: Note): void }) {

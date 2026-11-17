@@ -25,13 +25,15 @@ export interface VoiceProps {
   onChanged(): void;
   /** A half-typed note is waiting: the caller refuses a film switch meanwhile. */
   onPendingChange?(pending: boolean): void;
+  /** The tab's sound is playing (final review I2). */
+  onPlayingChange?(playing: boolean): void;
   /** The film's one playhead across the Review tabs (final review I3). */
   clock?: ReviewClock;
   /** The cut chosen in the Cut menu, which the monitor shows (final review I5); the film's default cut without one. */
   version?: Version | null;
 }
 
-export function Voice({ state, assets, video, toast, onChanged, onPendingChange, clock, version }: VoiceProps) {
+export function Voice({ state, assets, video, toast, onChanged, onPendingChange, onPlayingChange, clock, version }: VoiceProps) {
   const [blind, setBlindState] = useState(blindSession);
   const setBlind = (on: boolean) => {
     blindSession = on;
@@ -84,6 +86,7 @@ export function Voice({ state, assets, video, toast, onChanged, onPendingChange,
       toast={toast}
       onChanged={onChanged}
       onPendingChange={onPendingChange}
+      onPlayingChange={onPlayingChange}
       clock={clock}
     />
   );

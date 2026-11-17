@@ -5,7 +5,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { Locator, Page } from "@playwright/test";
 import { rulesPath } from "../src/server/agent/rules.js";
-import { cutButton, expect, openPlanPage, pickFilm, pickVersion, readAgentLog, sendButton, sentDialog, test, videoReady, type AgentRushes } from "./agentFixture.js";
+import { cutButton, expect, openPlanPage, openReviewTab, pickFilm, pickVersion, readAgentLog, sendButton, sentDialog, test, videoReady, type AgentRushes } from "./agentFixture.js";
 
 /** The top bar's chip: what the agent is doing. Clicking it opens Activity. */
 const chip = (page: Page): Locator => page.locator("header.top .achip");
@@ -1826,6 +1826,40 @@ test("a new cut waits while playing", async ({ page, rushes }) => {
   await expect(cutButton(page)).toHaveAttribute("data-version", "v3");
   await expect(cutDot(page)).toHaveCount(0);
 });
+
+for (const tab of ["Music", "Voice"] as const) {
+  test(`a new cut waits while the ${tab} tab plays, and Show and the dot offer it (I2)`, async ({ page, rushes }) => {
+    await rushes.addCut("first cut");
+    await rushes.addCut("second cut");
+    if (tab === "Music") await rushes.addVariant("music", "Bed", { seconds: 20, freq: 220 });
+    else await rushes.addVariant("voice", "Read 1", { seconds: 20, freq: 220, round: "Round 1", video: "hero" });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    // ?test=1 gives the page window.__rushesAudio, to see the engine play.
+    await page.goto(rushes.testUrl());
+    await openReviewTab(page, tab);
+    const engine = () => page.evaluate(() => (window as unknown as { __rushesAudio: { inspect(): { playing: boolean; media: string[] } | null } }).__rushesAudio.inspect());
+    await expect.poll(async () => (await engine())?.media.length ?? 0, { timeout: 10_000 }).toBe(1);
+    await expect(cutButton(page)).toHaveAttribute("data-version", "v2");
+    const preview = page.locator(".spreview video");
+    const before = await preview.evaluate((v: HTMLVideoElement) => v.currentSrc);
+    await page.keyboard.press(" ");
+    await expect.poll(async () => (await engine())?.playing).toBe(true);
+    await rushes.addCut("third cut");
+    await expect(toastEl(page)).toContainText("v3 is in");
+    await expect(toastEl(page).getByRole("button", { name: "Show" })).toBeVisible();
+    // The cut on screen stays, and so does the preview's file, while the sound plays on.
+    await expect(cutButton(page)).toHaveAttribute("data-version", "v2");
+    expect(await preview.evaluate((v: HTMLVideoElement) => v.currentSrc)).toBe(before);
+    expect((await engine())?.playing).toBe(true);
+    await expect(cutDot(page)).toBeVisible();
+    await dotOnButton(page);
+    await page.screenshot({ path: test.info().outputPath(`newcut-offered-${tab.toLowerCase()}-1440.png`), clip: { x: 0, y: 0, width: 1440, height: 120 } });
+    // Show goes to it.
+    await toastEl(page).getByRole("button", { name: "Show" }).click();
+    await expect(cutButton(page)).toHaveAttribute("data-version", "v3");
+    await expect(cutDot(page)).toHaveCount(0);
+  });
+}
 
 test("Show switches to the new cut and clears the dot", async ({ page, rushes }) => {
   await rushes.addCut("first cut");
