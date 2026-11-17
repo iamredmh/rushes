@@ -131,7 +131,8 @@ describe("MCP tools", () => {
     const todo = (await api.post("/api/notes", { stage: "picture", scope: "whole", text: "Not sent" })).note;
     const r = await t.call("rushes_working_on", { note: sent.id, doing: "Holding the logo half a second longer" });
     expect(r.isError).toBe(false);
-    expect((await api.get("/api/agent")).status.current).toEqual({ note: sent.id, doing: "Holding the logo half a second longer" });
+    // M2: accepted, but with no turn in flight (the prompt was copied) nothing shows.
+    expect((await api.get("/api/agent")).status.current).toEqual({ note: null, doing: null });
     const refused = await t.call("rushes_working_on", { note: todo.id, doing: "Something" });
     expect(refused.isError).toBe(true);
     expect(refused.text).toMatch(/note_not_sent/);
