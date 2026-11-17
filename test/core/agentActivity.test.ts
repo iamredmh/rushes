@@ -104,3 +104,51 @@ describe("activityLine", () => {
     expect(activityLine("text", root)).toBeNull();
   });
 });
+
+describe("activityLine masks secrets in a command (M3)", () => {
+  const cmd = (command: string) => activityLine({ sessionUpdate: "tool_call", title: "Bash", rawInput: { command } }, root);
+  const title = (t: string) => activityLine({ sessionUpdate: "tool_call", title: t }, root);
+
+  it("a bearer token", () => {
+    expect(cmd("curl -H 'X: Bearer sk-abc123' https://api.example.com")).toBe("Ran a command: curl -H 'X: Bearer •••' https://api.example.com");
+  });
+
+  it("an Authorization header, whatever its scheme", () => {
+    expect(cmd(`curl -H "Authorization: Basic dXNlcjpwYXNz" https://x.test`)).toBe(`Ran a command: curl -H "Authorization: •••" https://x.test`);
+    expect(cmd(`curl -H "authorization:abc123" https://x.test`)).toBe(`Ran a command: curl -H "authorization:•••" https://x.test`);
+    expect(cmd(`curl -H "Authorization: Bearer abc123" https://x.test`)).toBe(`Ran a command: curl -H "Authorization: •••" https://x.test`);
+  });
+
+  it("--token and --password, with a space or an equals sign, quoted or not", () => {
+    expect(cmd("gh auth login --token ghp_abc123 --hostname x")).toBe("Ran a command: gh auth login --token ••• --hostname x");
+    expect(cmd("tool --token=ghp_abc123 run")).toBe("Ran a command: tool --token=••• run");
+    expect(cmd(`mysql --password "hunter 2" -u me`)).toBe("Ran a command: mysql --password ••• -u me");
+    expect(cmd("mysql --password=hunter2 -u me")).toBe("Ran a command: mysql --password=••• -u me");
+  });
+
+  it("password=, token=, api_key= and apikey= anywhere, a URL's query included", () => {
+    expect(cmd("curl 'https://x.test/a?token=abc123&page=2'")).toBe("Ran a command: curl 'https://x.test/a?token=•••&page=2'");
+    expect(cmd("login password=hunter2 user=me")).toBe("Ran a command: login password=••• user=me");
+    expect(cmd("curl https://x.test/?api_key=abc123")).toBe("Ran a command: curl https://x.test/?api_key=•••");
+    expect(cmd("curl https://x.test/?apikey=abc123")).toBe("Ran a command: curl https://x.test/?apikey=•••");
+    expect(cmd("curl https://x.test/?APIKEY=abc123")).toBe("Ran a command: curl https://x.test/?APIKEY=•••");
+  });
+
+  it("an environment variable named _KEY, _TOKEN or _SECRET", () => {
+    expect(cmd("OPENAI_API_KEY=sk-abc123 node run.js")).toBe("Ran a command: OPENAI_API_KEY=••• node run.js");
+    expect(cmd("GITHUB_TOKEN=ghp_abc123 gh pr list")).toBe("Ran a command: GITHUB_TOKEN=••• gh pr list");
+    expect(cmd(`export AWS_SECRET="abc 123"; aws s3 ls`)).toBe("Ran a command: export AWS_SECRET=•••; aws s3 ls");
+  });
+
+  it("in a tool's title too, and before the line is cut, so no part of a secret is left", () => {
+    expect(title("Run curl -H 'Authorization: Bearer abc123' https://x.test")).toBe("Run curl -H 'Authorization: •••' https://x.test");
+    const long = cmd(`${"x".repeat(70)} --token abcdefghijklmnopqrstuvwxyz0123456789`)!;
+    expect(long).not.toMatch(/abcdef/);
+  });
+
+  it("leaves a command with no secret as it is", () => {
+    for (const c of ["npm test", "git commit -m 'add token support'", "ls --tokens-dir out", "echo password reset", "MONKEY=1 node a.js", "ffprobe -v error a.mp4"]) {
+      expect(cmd(c)).toBe(`Ran a command: ${c}`);
+    }
+  });
+});

@@ -35,6 +35,29 @@ function withoutRoot(text: string, root: string): string {
   return text.replace(at, (m) => (m.endsWith("/") && m.length > base.length ? "" : "."));
 }
 
+/** What a masked secret reads as. */
+const MASK = "•••";
+/** A secret's value: a quoted string (quotes and all), or a run up to a space, a quote or a shell separator. */
+const VALUE = String.raw`(?:"[^"]*"|'[^']*'|[^\s'"&|;]+)`;
+/** M3: the common shapes of a secret in a command, each with the part kept before its value. */
+const SECRETS: readonly RegExp[] = [
+  // An Authorization header, whatever its scheme: "Authorization: Bearer x", "Authorization: Basic x", "authorization:x".
+  new RegExp(String.raw`(\bAuthorization:\s*)(?:[A-Za-z]+\s+(?=[^\s'"]))?[^\s'"]+`, "gi"),
+  new RegExp(String.raw`(\bBearer\s+)[^\s'"]+`, "g"),
+  new RegExp(String.raw`((?<![\w-])--(?:token|password)(?:=|\s+))${VALUE}`, "gi"),
+  new RegExp(String.raw`((?<![\w-])(?:password|token|api_key|apikey)=)${VALUE}`, "gi"),
+  new RegExp(String.raw`(\b[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)*_(?:KEY|TOKEN|SECRET)=)${VALUE}`, "g"),
+];
+
+/**
+ * `text` with the value of each secret it shows replaced by •••: a bearer token, an Authorization header, --token and
+ * --password, password=, token=, api_key= and apikey=, and a NAME_KEY, NAME_TOKEN or NAME_SECRET variable. For the
+ * Activity line only: the ask card shows the command as it is, since that is what the user is asked to allow.
+ */
+export function maskSecrets(text: string): string {
+  return SECRETS.reduce((t, re) => t.replace(re, `$1${MASK}`), text);
+}
+
 /**
  * One session/update as an Activity line, or null when it isn't worth one: a tool call is its title, a plan
  * its number of steps. Message chunks are too chatty, and kinds this build doesn't know are left out.
@@ -47,11 +70,12 @@ export function activityLine(update: unknown, root: string): string | null {
       if (typeof u.title !== "string") return null;
       const title = u.title.trim();
       if (OWN_TOOL.test(title) || HOUSEKEEPING.has(title)) return null;
-      let text = u.title;
+      // Secrets are masked before anything is cut, so a cut can't leave part of one showing.
+      let text = maskSecrets(u.title);
       if (SHELL.has(title)) {
         const raw = u.rawInput as { command?: unknown } | null | undefined;
         const first = typeof raw?.command === "string" ? raw.command.split(/\r\n|\r|\n/).map((l) => l.trim()).find((l) => l !== "") : undefined;
-        text = first ? `Ran a command: ${oneLine(withoutRoot(first, root), COMMAND_MAX)}` : "Ran a command";
+        text = first ? `Ran a command: ${oneLine(withoutRoot(maskSecrets(first), root), COMMAND_MAX)}` : "Ran a command";
       }
       const line = oneLine(withoutRoot(text, root), ACTIVITY_LINE_MAX);
       return line === "" || line === "…" ? null : line;
