@@ -46,26 +46,52 @@ export const SAFE_COMMAND = /^[A-Za-z0-9 \t_.\/:=@%+,'"-]*$/;
 
 /** Shells (and env): any of them runs whatever script follows it. broker.ts unwraps `[shell, -c|-lc, script]` by this list. */
 export const SHELLS: ReadonlySet<string> = new Set(["sh", "bash", "zsh", "fish", "dash", "ksh", "csh", "tcsh", "rbash", "mksh", "pwsh", "env"]);
-/** Programs that run another program given after them. */
+/** Programs that run another program given after them, so the program and subcommand would be the next words. */
 export const WRAPPERS: ReadonlySet<string> = new Set([
   "exec", "command", "builtin", "nohup", "time", "nice", "timeout", "xargs", "sudo", "doas", "caffeinate", "arch", "eval", "source",
+  "noglob", "nocorrect", "coproc", "repeat", "trap", "watch", "stdbuf", "unbuffer", "chroot", "taskpolicy", "sandbox-exec", "corepack",
 ]);
 
-const bare = (word: string) => basename(word.replace(/['"]/g, ""));
+/** Subcommands that run any package or program named after them (`npm x`, `npm exec`, `pnpm dlx`), whatever the program. */
+export const RUNNER_SUBCOMMANDS: ReadonlySet<string> = new Set(["x", "exec", "dlx"]);
+/** Programs whose `run` runs any program or package named after it (`uv run perl`), not a project script. */
+export const RUN_ANY_PROGRAM: ReadonlySet<string> = new Set(["uv", "pipx", "poetry", "pdm", "hatch", "conda", "docker", "podman", "mise"]);
+
+/** A word a rule may be made of: no quotes, no `=`, nothing a shell reads as more than the word itself. */
+const RULE_WORD = /^[A-Za-z0-9_.\/@:+-]+$/;
+
+/** A word's basename for the lists, lower-cased: macOS volumes are case-insensitive, so `NOHUP` runs nohup. */
+const name = (word: string) => basename(word).toLowerCase();
+
+function ruleWord(word: string): boolean {
+  if (!RULE_WORD.test(word) || word.startsWith("-") || word.split("/").includes("..")) return false;
+  return !SHELLS.has(name(word)) && !WRAPPERS.has(name(word));
+}
 
 /**
- * R6: a command an Always rule may be offered for, stored from and honoured on: a plain program and subcommand.
- * Refused when the command isn't plain (SAFE_COMMAND), when any word is a shell or a wrapper (quotes stripped,
- * by basename), when the first word is an environment assignment, or when either of the rule's two words
- * (the first two) is a flag: `npx -y` would allow any package.
+ * R7: the words an Always rule names, the program and its subcommand (the command's first two whitespace-separated
+ * words), or null when they are not an exact identity of one program and subcommand: a word that is quoted, holds
+ * `=`, climbs a `..` path, is a flag, a shell or a wrapper, or a subcommand that runs any package or program.
+ * The shell reads quote-free words exactly as split here, so these are the program and subcommand it runs.
+ */
+export function alwaysWords(command: string): string[] | null {
+  const words = command.trim().split(/\s+/).filter(Boolean).slice(0, 2);
+  // `.` as the program is the shell's source; as the subcommand (`find .`) it is a path.
+  if (words.length === 0 || words[0] === "." || !words.every(ruleWord)) return null;
+  if (words.length === 2) {
+    const sub = words[1].toLowerCase();
+    if (RUNNER_SUBCOMMANDS.has(sub)) return null;
+    if (sub === "run" && RUN_ANY_PROGRAM.has(name(words[0]))) return null;
+  }
+  return words;
+}
+
+/**
+ * A command an Always rule may be offered for and honoured on: plain (SAFE_COMMAND) as a whole, with its first two
+ * words an exact program and subcommand (alwaysWords). Later words are that program's arguments.
  */
 export function plainCommand(command: string): boolean {
-  const c = command.trim();
-  if (c === "" || !SAFE_COMMAND.test(c)) return false;
-  const words = c.split(/\s+/);
-  if (words[0].includes("=")) return false;
-  if (words.some((w) => SHELLS.has(bare(w)) || WRAPPERS.has(bare(w)))) return false;
-  return !words.slice(0, 2).some((w) => w.replace(/['"]/g, "").startsWith("-"));
+  return command.trim() !== "" && SAFE_COMMAND.test(command) && alwaysWords(command) !== null;
 }
 
 function matches(rule: AlwaysRule, req: PermissionRequest, root: string): boolean {
@@ -74,9 +100,11 @@ function matches(rule: AlwaysRule, req: PermissionRequest, root: string): boolea
   if (PROJECT_KINDS.has(rule.kind)) return inProject(req, root);
   if (rule.kind !== "execute") return true;
   if (rule.command === null || req.command === null) return false;
-  // The stored rule and the request both: an old file's rule for a shell or wrapper is never honoured.
-  if (!plainCommand(rule.command) || !plainCommand(req.command)) return false;
-  return req.command === rule.command || req.command.startsWith(rule.command + " ");
+  // The stored rule as well as the request: an old file's rule of a shape R7 refuses is never honoured.
+  if (rule.command.trim().split(/\s+/).length > 2) return false;
+  const want = alwaysWords(rule.command);
+  const got = plainCommand(req.command) ? alwaysWords(req.command) : null;
+  return want !== null && got !== null && want.length === got.length && want.every((w, i) => w === got[i]);
 }
 
 /**

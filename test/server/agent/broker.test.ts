@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { PermissionBroker, allowOutcome, toRequest } from "../../../src/server/agent/broker.js";
 import type { AcpPermissionParams } from "../../../src/server/agent/acp.js";
 import { NotFoundError } from "../../../src/core/errors.js";
+import { decide } from "../../../src/core/agentRules.js";
 
 const ROOT = "/projects/demo";
 const OPTIONS: AcpPermissionParams["options"] = [
@@ -36,6 +37,28 @@ describe("toRequest", () => {
     // Other argv shapes are joined as before.
     expect(toRequest(params({ kind: "execute", rawInput: { command: ["bash", "script.sh"] } }), ROOT).command).toBe("bash script.sh");
     expect(toRequest(params({ kind: "execute", rawInput: { command: ["python", "-c", "print(1)"] } }), ROOT).command).toBe("python -c print(1)");
+  });
+
+  it("quotes a program or subcommand element with a space, a quote or nothing in it, so no Always rule can be made from it", () => {
+    const cmd = (command: unknown) => toRequest(params({ kind: "execute", rawInput: { command } }), ROOT).command;
+    expect(cmd(["/Volumes/4TB OWC 1M2/Developer/tool", "render"])).toBe(`"/Volumes/4TB OWC 1M2/Developer/tool" render`);
+    expect(cmd(["tool", "a b", "c d"])).toBe(`tool "a b" c d`);
+    expect(cmd(["it's", "x"])).toBe(`"it's" x`);
+    expect(cmd(['a"b', "x"])).toBe(`"a\\"b" x`);
+    expect(cmd(["", "npm", "run"])).toBe(`"" npm run`);
+    expect(cmd(["tool\tx", "y"])).toBe(`"tool\\tx" y`);
+    // Later elements are arguments and are joined as before.
+    expect(cmd(["npx", "hyperframes", "render", "--out", "out/v 8.mp4"])).toBe("npx hyperframes render --out out/v 8.mp4");
+    // A shell running a script is still unwrapped.
+    expect(cmd(["/bin/bash", "-lc", "npm run build"])).toBe("npm run build");
+  });
+
+  it("an argv whose program has a space never matches an old rule made from it", () => {
+    const old = { permissions: "project-edits" as const, always: [{ kind: "execute", command: "/Volumes/4TB OWC" }] };
+    const perl = toRequest(params({ kind: "execute", rawInput: { command: ["/Volumes/4TB OWC 1M2/../../usr/bin/perl", "-e", "system qw,touch X,"] } }), ROOT);
+    expect(decide(perl, old, ROOT)).toBe("ask");
+    const tool = toRequest(params({ kind: "execute", rawInput: { command: ["/Volumes/4TB OWC 1M2/Developer/tool", "render"] } }), ROOT);
+    expect(decide(tool, old, ROOT)).toBe("ask");
   });
 
   it("resolves relative locations against the project root, not the process cwd", () => {
@@ -120,6 +143,48 @@ describe("PermissionBroker", () => {
       expect(ask.always, JSON.stringify(command)).toBe("");
       expect(b.answer(ask.id, "always")).toBeNull();
       expect(await outcome).toEqual({ outcome: "selected", optionId: "allow-once" });
+    }
+  });
+
+  it("offers no Always for a quoted, spaced or climbing program, or a package runner, and Always there keeps nothing (R7)", async () => {
+    const b = broker();
+    for (const command of [
+      `"/Volumes/4TB OWC 1M2/Developer/tool" render out.mp4`,
+      `'/Volumes/4TB OWC 1M2/Developer/tool' render`,
+      `"./My Tools v2/run" x`,
+      ["/Volumes/4TB OWC 1M2/Developer/tool", "render"],
+      ["./My Tools v2/run", "x"],
+      "npm x -y pkg",
+      "npm exec -- pkg",
+      "pnpm dlx pkg",
+      "yarn dlx pkg",
+      "pipx run pkg",
+      "uv run perl",
+      ["uv", "run", "perl"],
+      `"/bin/bash" -c x`,
+      "../bin/tool run",
+      "tools/../../bin/x y",
+    ]) {
+      const outcome = b.ask(params({ kind: "execute", rawInput: { command } }));
+      const [ask] = b.pending();
+      expect(ask.always, JSON.stringify(command)).toBe("");
+      expect(b.answer(ask.id, "always"), JSON.stringify(command)).toBeNull();
+      expect(await outcome).toEqual({ outcome: "selected", optionId: "allow-once" });
+    }
+  });
+
+  it("still offers and keeps Always for a plain program and subcommand (R7)", async () => {
+    const b = broker();
+    for (const [command, label, rule] of [
+      [`npx hyperframes render --out "out/v 8.mp4"`, "Always for npx hyperframes here", "npx hyperframes"],
+      [["npx", "hyperframes", "render", "--out", "out/v 8.mp4"], "Always for npx hyperframes here", "npx hyperframes"],
+      ["npm run build", "Always for npm run here", "npm run"],
+      [`git commit -m "fix the time display"`, "Always for git commit here", "git commit"],
+    ] as const) {
+      void b.ask(params({ kind: "execute", rawInput: { command } }));
+      const [ask] = b.pending();
+      expect(ask.always, JSON.stringify(command)).toBe(label);
+      expect(b.answer(ask.id, "always")).toEqual({ kind: "execute", command: rule });
     }
   });
 

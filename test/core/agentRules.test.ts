@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mkdtemp, mkdir, realpath, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SAFE_COMMAND, SHELLS, WRAPPERS, alwaysLabel, canAlways, decide, inside, plainCommand, ruleFor } from "../../src/core/agentRules.js";
+import { RUNNER_SUBCOMMANDS, RUN_ANY_PROGRAM, SAFE_COMMAND, SHELLS, WRAPPERS, alwaysLabel, canAlways, decide, inside, plainCommand, ruleFor } from "../../src/core/agentRules.js";
 
 const root = "/tmp/rushes test/My Project";
 const s = { permissions: "project-edits" as const, always: [] };
@@ -122,7 +122,6 @@ describe("plain program and subcommand (R6)", () => {
     "sudo npm run build",
     "timeout 5 npm run build",
     "caffeinate -i npm run build",
-    "npm run build -- bash",
     "/opt/homebrew/bin/pwsh -c ls",
     "rbash -c ls",
     "mksh -c ls",
@@ -141,9 +140,7 @@ describe("plain program and subcommand (R6)", () => {
       const rule = ruleFor(req("execute", cmd));
       const t = { ...s, always: [rule] };
       expect(decide(req("execute", cmd), t, root), cmd).toBe("ask");
-      // A rule taken from one of these is never honoured, unless its two words are themselves plain
-      // (`npm run build -- bash` gives `npm run`; the command itself still asks, above).
-      if (!plainCommand(rule.command ?? "")) expect(decide(req("execute", `${rule.command} anything else`), t, root), cmd).toBe("ask");
+      expect(decide(req("execute", `${rule.command} anything else`), t, root), cmd).toBe("ask");
     }
     for (const command of ["FOO=1 bash", "nohup bash", "xargs -I", "npm exec", "npx -y", "tcsh -c", "csh -c", "exec bash", "command bash", "time bash", "nice bash"]) {
       const t = { ...s, always: [{ kind: "execute", command }] };
@@ -162,6 +159,101 @@ describe("plain program and subcommand (R6)", () => {
   it("exports the shell and wrapper lists", () => {
     for (const sh of ["sh", "bash", "zsh", "fish", "dash", "ksh", "csh", "tcsh", "rbash", "mksh", "pwsh", "env"]) expect(SHELLS.has(sh), sh).toBe(true);
     for (const w of ["exec", "command", "builtin", "nohup", "time", "nice", "timeout", "xargs", "sudo", "doas", "caffeinate", "arch", "eval", "source"]) expect(WRAPPERS.has(w), w).toBe(true);
+  });
+});
+
+describe("exact program and subcommand (R7)", () => {
+  // Rules that, before R7, were stored from a quoted or spaced first word and then allowed another program.
+  const PERL_D = `"/Volumes/4TB OWC 1M2/../../usr/bin/perl" -e "system qw,touch X,"`;
+  const PERL_S = `'/Volumes/4TB OWC 1M2/../../usr/bin/perl' -e 'system qw,touch X,'`;
+  const PERL_P = `"./My Tools v2/../../../../../usr/bin/perl" -e "print 1"`;
+  const spaced: Array<[string, string[]]> = [
+    [`"/Volumes/4TB OWC 1M2/Developer/tool" render out.mp4`, [PERL_D, PERL_S]],
+    [`'/Volumes/4TB OWC 1M2/Developer/tool' render`, [PERL_S, PERL_D]],
+    [`"./My Tools v2/run" x`, [PERL_P]],
+  ];
+  const runners = [
+    "npm x -y pkg", "npm exec -- pkg", "pnpm dlx pkg", "yarn dlx pkg", "pipx run pkg", "uv run perl",
+    "/opt/homebrew/bin/uv run perl", "bun x pkg", "pnpm exec pkg", "yarn exec pkg", "mise exec -- perl", "mise x perl",
+    "poetry run perl", "pdm run perl", "hatch run perl", "conda run perl", "docker run img", "podman run img", "mise run task",
+  ];
+  // macOS volumes are case-insensitive: `NOHUP` and `UV` run nohup and uv. `.` is source.
+  const cased = ["NOHUP npm run build", "Nice npm run", "/usr/bin/NoHup npm", "UV run perl", "/opt/homebrew/bin/Uv run perl", "npm X cowsay", "PNPM DLX pkg", "Bash x.sh", "/BIN/ZSH x.sh", ". ./env.sh"];
+  // More programs that run the next word as a program, so `watch npm x pkg` would get past the subcommand check.
+  const wrappers = ["watch npm run build", "noglob npm run", "nocorrect npm run", "repeat 1 npm", "stdbuf npm run", "unbuffer npm run", "corepack pnpm install", "taskpolicy npm run"];
+  const others = [...cased, ...wrappers, `"/bin/bash" -c x`, "../bin/tool run", "tools/../../bin/x y", "./tools/.. run", "a=b run", "npm -x y", "npm 'run' build", "tool\\x y"];
+
+  it("offers no Always when the program or subcommand is quoted, spaced, climbs a path, or runs any package", () => {
+    for (const [cmd] of spaced) {
+      expect(plainCommand(cmd), cmd).toBe(false);
+      expect(canAlways(req("execute", cmd)), cmd).toBe(false);
+    }
+    for (const cmd of [...runners, ...others]) {
+      expect(plainCommand(cmd), cmd).toBe(false);
+      expect(canAlways(req("execute", cmd)), cmd).toBe(false);
+    }
+  });
+
+  it("never honours an old stored rule of those shapes", () => {
+    for (const [cmd, later] of spaced) {
+      const rule = ruleFor(req("execute", cmd));
+      const t = { ...s, always: [rule] };
+      for (const l of [cmd, ...later]) expect(decide(req("execute", l), t, root), `${rule.command} | ${l}`).toBe("ask");
+    }
+    // The rule an argv with a space joined to before R7.
+    const argvRule = { ...s, always: [{ kind: "execute", command: "/Volumes/4TB OWC" }] };
+    for (const l of [PERL_D, PERL_S]) expect(decide(req("execute", l), argvRule, root), l).toBe("ask");
+    for (const cmd of [...runners, ...others]) {
+      const rule = ruleFor(req("execute", cmd));
+      const t = { ...s, always: [rule] };
+      expect(decide(req("execute", cmd), t, root), cmd).toBe("ask");
+      expect(decide(req("execute", `${rule.command} anything else`), t, root), cmd).toBe("ask");
+    }
+  });
+
+  it("still offers and honours Always for a plain program and subcommand, whatever its later arguments", () => {
+    const hf = req("execute", `npx hyperframes render --out "out/v 8.mp4"`);
+    expect(canAlways(hf)).toBe(true);
+    expect(alwaysLabel(ruleFor(hf))).toBe("Always for npx hyperframes here");
+    const t = { ...s, always: [ruleFor(hf)] };
+    expect(decide(req("execute", "npx hyperframes render --out out/v9.mp4"), t, root)).toBe("allow");
+    expect(decide(req("execute", "npx  hyperframes\trender"), t, root)).toBe("allow");
+    expect(decide(req("execute", `npx "hyperframes" render`), t, root)).toBe("ask");
+    expect(decide(req("execute", "npx hyperframes/../evil render"), t, root)).toBe("ask");
+
+    const build = req("execute", "npm run build");
+    expect(canAlways(build)).toBe(true);
+    const n = { ...s, always: [ruleFor(build)] };
+    expect(decide(req("execute", "npm run build -- --watch"), n, root)).toBe("allow");
+    // Later words are arguments to that program: a shell or wrapper name there is just a word.
+    expect(decide(req("execute", "npm run build -- bash"), n, root)).toBe("allow");
+    expect(canAlways(req("execute", "npm run build -- bash"))).toBe(true);
+
+    const commit = req("execute", `git commit -m "fix the time display"`);
+    expect(canAlways(commit)).toBe(true);
+    expect(decide(commit, { ...s, always: [{ kind: "execute", command: "git commit" }] }, root)).toBe("allow");
+
+    // `.` as a later word, or the subcommand, is a path: only the program `.` is source.
+    expect(decide(req("execute", "find . -name x.mp4"), { ...s, always: [{ kind: "execute", command: "find ." }] }, root)).toBe("allow");
+    for (const ok of ["find .", "git add .", "./tools/render.sh out","bin/tool.v2 run", "@scope/cli:dev build+1", "uvx ruff", "cargo run", "npm run"])
+      expect(canAlways(req("execute", ok)), ok).toBe(true);
+  });
+
+  it("a one-word rule allows that word alone", () => {
+    const t = { ...s, always: [ruleFor(req("execute", "ls"))] };
+    expect(decide(req("execute", "ls"), t, root)).toBe("allow");
+    expect(decide(req("execute", "ls foo"), t, root)).toBe("ask");
+    expect(decide(req("execute", "lsx"), t, root)).toBe("ask");
+  });
+
+  it("a stored rule longer than two words is never honoured", () => {
+    const t = { ...s, always: [{ kind: "execute", command: "npm run build" }] };
+    expect(decide(req("execute", "npm run build"), t, root)).toBe("ask");
+  });
+
+  it("exports the runner subcommands", () => {
+    for (const w of ["x", "exec", "dlx"]) expect(RUNNER_SUBCOMMANDS.has(w), w).toBe(true);
+    for (const p of ["uv", "pipx", "poetry", "pdm", "hatch", "conda", "docker", "podman", "mise"]) expect(RUN_ANY_PROGRAM.has(p), p).toBe(true);
   });
 });
 

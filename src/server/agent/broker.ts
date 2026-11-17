@@ -24,10 +24,12 @@ const CANCELLED: AcpPermissionOutcome = { outcome: "cancelled" };
 /**
  * An argv as one command. A shell running a script (`["bash", "-lc", "npm run build"]`, as Codex sends commands)
  * is the script itself, so an Always rule names the real command and never "bash -lc". Other argvs are joined.
+ * A program or subcommand element (the first two) that is empty or holds whitespace or a quote is JSON-quoted:
+ * joined bare, its words would not be the program the argv runs, and quoted it can never make an Always rule (R7).
  */
 function argvCommand(argv: string[]): string {
   if (argv.length >= 3 && SHELLS.has(basename(argv[0])) && (argv[1] === "-c" || argv[1] === "-lc")) return argv[2];
-  return argv.join(" ");
+  return argv.map((a, i) => (i < 2 && (a === "" || /[\s'"]/.test(a)) ? JSON.stringify(a) : a)).join(" ");
 }
 
 /** The request in Rushes's terms. Relative locations are read against the project root, as the agent means them. */
