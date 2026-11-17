@@ -23,6 +23,8 @@ export interface Live {
   /** §28: the agent's status, from GET /api/agent and then the SSE `agent` events. Null until the first answer,
    *  and from a server older than Send to AI (404). */
   agent: AgentStatus | null;
+  /** Folds in a status an agent route just returned (setup, fresh, a rule removed), ahead of any SSE event. */
+  noteAgent(status: AgentStatus): void;
 }
 
 declare global {
@@ -170,5 +172,10 @@ export function useRushes(): Live {
 
   const noteProxyJob = (job: ProxyJob) => setProxyJobs((jobs) => mergeProxyJob(jobs, proxyProgress(job, performance.now())));
 
-  return { state, assets, problem, wrongProject, refresh, proxyJobs, noteProxyJob, agent };
+  const noteAgent = (status: AgentStatus) => {
+    agentSeq.current++;
+    setAgent(status);
+  };
+
+  return { state, assets, problem, wrongProject, refresh, proxyJobs, noteProxyJob, agent, noteAgent };
 }

@@ -1,8 +1,9 @@
 // Send to AI in the desk (§28): what the chip, a note's badge, the who-line and the live strip say, and what the
 // desk does after Send. Pure: the words come from the agent's status (GET /api/agent and the SSE `agent` event)
 // and the notes the desk already holds, so every tab says the same thing.
+import { alwaysLabel } from "../../src/core/alwaysLabel.js";
 import { noteState } from "../../src/core/noteState.js";
-import type { ActivityLine, AgentId, AgentPhase, AgentStatus, Note, SendHandOver } from "./types.js";
+import type { ActivityLine, AgentId, AgentInfo, AgentPhase, AgentRules, AgentStatus, AlwaysRule, Note, SendHandOver } from "./types.js";
 
 /** A note as these helpers read it. The desk's notes carry `needsYou` from the server's `withState`. */
 export type NoteLite = Pick<Note, "id" | "batch" | "status" | "fixVersion"> & { needsYou?: boolean };
@@ -69,7 +70,7 @@ export function chipTone(phase: AgentPhase): "busy" | "todo" | "done" | "over" {
 /** Stop shows while the agent is starting, on a turn, or waiting on an ask: the phases a Stop can end. */
 export const canStop = (phase: AgentPhase): boolean => RUNNING.has(phase);
 
-export type NoteBadge ={ kind: "working" | "needsYou" | "with" | "fixed"; text: string };
+export type NoteBadge = { kind: "working" | "needsYou" | "with" | "fixed"; text: string };
 
 /** The badge on a note's card, by priority: needs you, being worked on, with the agent, fixed. Null for none. */
 export function noteAgentBadge(n: NoteLite, s: AgentStatus | null): NoteBadge | null {
@@ -104,3 +105,45 @@ export function whoLine(s: AgentStatus): string {
 
 /** The live strip: the last `max` activity lines, newest first. */
 export const liveLines = (s: AgentStatus, max = 20): ActivityLine[] => (max > 0 ? s.lines.slice(-max).reverse() : []);
+
+// ---- the Send to AI row above Send, and the agent menu (task 3) ----
+
+/** The row: the agent it sends to, or the way in when none is chosen. */
+export const rowText = (s: AgentStatus): string => (s.agent ? `Send to AI · ${agentName(s.agent)}` : "Set up Send to AI");
+
+/** Under Send: the who-line while Send to AI is on, what Send does while it is off. */
+export const footLine = (s: AgentStatus): string => (s.on ? whoLine(s) : "Copies a prompt for your own chat");
+
+/** The agent menu's words, as the plan gives them. */
+export const MENU_WORDS = {
+  sendTo: "Send notes to",
+  signedIn: "Signed in",
+  notSignedIn: "Not signed in",
+  signIn: "Sign in in Terminal",
+  fresh: "Start a fresh conversation",
+  may: "What it may do without asking",
+  always: "Always rules",
+  noRules: "No Always rules yet",
+  remove: "Remove",
+  footer: "Switch off: Send copies a prompt, as now",
+} as const;
+
+export const PERMISSION_CHOICES: readonly { value: AgentRules["permissions"]; label: string }[] = [
+  { value: "project-edits", label: "Edit files in this project" },
+  { value: "ask-all", label: "Ask me for everything" },
+];
+
+export interface MenuAgent { id: AgentId; name: string; signedIn: boolean; current: boolean }
+
+/** "Send notes to": each agent detection found installed, in its order, the one Send to AI uses ticked. */
+export function menuAgents(detected: readonly AgentInfo[] | null, s: AgentStatus): MenuAgent[] {
+  return (detected ?? []).filter((a) => a.installed).map((a) => ({ id: a.id, name: a.name, signedIn: a.signedIn, current: a.id === s.agent }));
+}
+
+/** The Always rules, each by its label, with the rule itself for Remove (DELETE names a rule by kind and command). */
+export const ruleRows = (s: AgentStatus): { rule: AlwaysRule; label: string }[] => s.always.map((rule) => ({ rule, label: alwaysLabel(rule) }));
+
+/** How many rows the menu's arrows move through: each agent and its Sign in, Start fresh, the two permissions, each Remove. */
+export function menuRowCount(s: AgentStatus, agents: readonly MenuAgent[]): number {
+  return agents.reduce((n, a) => n + (a.signedIn ? 1 : 2), 0) + (s.session ? 1 : 0) + PERMISSION_CHOICES.length + s.always.length;
+}

@@ -195,10 +195,5 @@ export function ruleFor(req: PermissionRequest): AlwaysRule {
   return { kind, command: words.length ? words.slice(0, 2).join(" ") : null };
 }
 
-const WORDS: Record<string, string> = { read: "reads", edit: "edits", delete: "deletes", move: "moves", search: "searches" };
-
-export function alwaysLabel(rule: AlwaysRule): string {
-  if (rule.kind === "execute") return `Always for ${rule.command ?? "commands"} here`;
-  if (rule.kind === "fetch") return "Always for web requests here";
-  return `Always for ${WORDS[rule.kind] ?? "this"} here`;
-}
+// The label lives in its own pure file, so the desk can bundle it.
+export { alwaysLabel } from "./alwaysLabel.js";

@@ -1,8 +1,11 @@
 // Send to AI in the desk (plan 2, task 1): the pure helpers behind the chip, the note badges, the who-line,
 // the live strip and what the desk does after Send. Every string is the plan's own.
 import { describe, expect, it } from "vitest";
-import { afterSend, agentName, canStop, chipShows, chipText, chipTone, liveLines, noteAgentBadge, whoLine, type NoteLite } from "../../web/src/agent.js";
-import type { AgentStatus } from "../../web/src/types.js";
+import {
+  MENU_WORDS, PERMISSION_CHOICES, afterSend, agentName, canStop, chipShows, chipText, chipTone, footLine, liveLines, menuAgents, menuRowCount, noteAgentBadge, rowText, ruleRows, whoLine,
+  type NoteLite,
+} from "../../web/src/agent.js";
+import type { AgentInfo, AgentStatus } from "../../web/src/types.js";
 
 const status = (over: Partial<AgentStatus> = {}): AgentStatus => ({
   on: true, agent: "claude", phase: "idle", batches: [], current: { note: null, doing: null }, asks: [], lines: [], error: null, session: null,
@@ -215,5 +218,72 @@ describe("the chip (task 2)", () => {
 
   it("canStop: while starting, working or waiting only", () => {
     expect((["off", "idle", "starting", "working", "waiting", "question", "finished", "failed"] as const).filter(canStop)).toEqual(["starting", "working", "waiting"]);
+  });
+});
+
+describe("the Send to AI row and the agent menu (task 3)", () => {
+  const info = (id: "claude" | "codex", over: Partial<AgentInfo> = {}): AgentInfo => ({
+    id, name: id === "claude" ? "Claude Code" : "Codex", installed: true, signedIn: true, path: `/usr/local/bin/${id}`, signIn: `${id} login`, ...over,
+  });
+
+  it("rowText: the agent by name, or Set up Send to AI with none chosen", () => {
+    expect(rowText(status())).toBe("Send to AI · Claude Code");
+    expect(rowText(status({ agent: "codex", on: false }))).toBe("Send to AI · Codex");
+    expect(rowText(status({ agent: null, on: false }))).toBe("Set up Send to AI");
+  });
+
+  it("footLine: the who-line while on, what Send does while off", () => {
+    expect(footLine(status())).toBe("Edits files in this project, asks before commands");
+    expect(footLine(status({ permissions: "ask-all", session: "s1" }))).toBe("Asks before everything · next Send continues the conversation");
+    expect(footLine(status({ on: false }))).toBe("Copies a prompt for your own chat");
+    expect(footLine(status({ on: false, agent: null }))).toBe("Copies a prompt for your own chat");
+  });
+
+  it("menuAgents: installed agents only, in order, the current one ticked", () => {
+    const got = menuAgents([info("claude"), info("codex", { signedIn: false })], status({ agent: "codex" }));
+    expect(got).toEqual([
+      { id: "claude", name: "Claude Code", signedIn: true, current: false },
+      { id: "codex", name: "Codex", signedIn: false, current: true },
+    ]);
+    expect(menuAgents([info("claude", { installed: false, signedIn: false }), info("codex")], status())).toEqual([
+      { id: "codex", name: "Codex", signedIn: true, current: false },
+    ]);
+    expect(menuAgents(null, status())).toEqual([]);
+  });
+
+  it("ruleRows: each Always rule by its label, and the rule to remove", () => {
+    const always = [{ kind: "execute", command: "npx hyperframes" }, { kind: "fetch", command: null }];
+    expect(ruleRows(status({ always }))).toEqual([
+      { rule: always[0], label: "Always for npx hyperframes here" },
+      { rule: always[1], label: "Always for web requests here" },
+    ]);
+    expect(ruleRows(status())).toEqual([]);
+  });
+
+  it("menuRowCount: every row the arrows reach", () => {
+    const agents = menuAgents([info("claude"), info("codex", { signedIn: false })], status());
+    // Two agents, Codex's Sign in, the two permissions.
+    expect(menuRowCount(status(), agents)).toBe(5);
+    // A conversation to start fresh from, and a rule's Remove.
+    expect(menuRowCount(status({ session: "s1", always: [{ kind: "execute", command: "npx hyperframes" }] }), agents)).toBe(7);
+  });
+
+  it("the menu's fixed words", () => {
+    expect(PERMISSION_CHOICES).toEqual([
+      { value: "project-edits", label: "Edit files in this project" },
+      { value: "ask-all", label: "Ask me for everything" },
+    ]);
+    expect(MENU_WORDS).toEqual({
+      sendTo: "Send notes to",
+      signedIn: "Signed in",
+      notSignedIn: "Not signed in",
+      signIn: "Sign in in Terminal",
+      fresh: "Start a fresh conversation",
+      may: "What it may do without asking",
+      always: "Always rules",
+      noRules: "No Always rules yet",
+      remove: "Remove",
+      footer: "Switch off: Send copies a prompt, as now",
+    });
   });
 });

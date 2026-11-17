@@ -2,9 +2,12 @@
 // box with its target line) and Activity (the Change Log), and at its foot Send, with what is waiting. It is as tall as
 // the work area, 360 px wide until its divider is dragged (remembered per browser), and `\` hides or shows it; under
 // 1100 px it is a drawer over the work area. One component, mounted by every view that has notes: what they share (the
-// tab chosen, Activity, Send, whether it is shown and how wide) comes from the desk through PanelContext.
+// tab chosen, Activity, Send, whether it is shown and how wide) comes from the desk through PanelContext. §28: above Send,
+// the Send to AI row (AgentRow); under it, what Send does now (footLine).
 import { createContext, type RefObject } from "preact";
 import { useContext, useEffect, useRef, useState } from "preact/hooks";
+import { footLine } from "../../agent.js";
+import { AgentRow, type AgentPanel } from "../agent/AgentRow.js";
 import type { ChangeLogState } from "../ChangeLog.js";
 import { Icon } from "../Icon.js";
 import { type Filter, NoteFilterMenu, Notes, type NotesProps } from "../Notes.js";
@@ -23,6 +26,8 @@ export interface PanelShared {
   /** What Send sends that is still waiting, and Send itself. `always`: shown even with nothing waiting (on its own Brief or
    *  Storyboard page, Send always carries that page's line). */
   send: { count: number; always?: boolean; onSend(): void };
+  /** §28: the Send to AI row, from the agent's status; null before the first answer and from a server without Send to AI. */
+  agent: AgentPanel | null;
   /** On screen: not hidden (wide), or the drawer open (narrow). */
   shown: boolean;
   /** Under 1100 px: the panel is a drawer. */
@@ -154,7 +159,10 @@ export function NotesPanel(props: NotesPanelProps) {
     el.focus();
   }, [desk?.reveal, desk?.shown]);
   if (!desk) return <Notes {...props} />;
-  const { log, activity, send, shown, narrow } = desk;
+  const { log, activity, send, shown, narrow, agent } = desk;
+  // Send shows while something waits. With Send to AI on, the foot stays for its row (the menu, the switch) when nothing
+  // does; off, with nothing waiting, the panel is as it was.
+  const sendShown = send.count > 0 || !!send.always;
   const tab = log.open ? "activity" : "notes";
   const todo = props.notes.filter((n) => n.status === "todo").length;
   const choose = (to: "notes" | "activity", focusList = true) => {
@@ -258,11 +266,15 @@ export function NotesPanel(props: NotesPanelProps) {
           <ActivityList {...activity} log={log} onEscape={() => activityTab.current?.focus()} />
         </div>
       )}
-      {(send.count > 0 || send.always) && (
-        <div class="nfoot">
-          <button ref={sendRef} type="button" class="btn primary sendbtn" aria-label={send.count > 0 ? `Send ${send.count}` : "Send"} data-tip="Notes and edits not sent yet, from every tab and film" onClick={send.onSend}>
-            Send{send.count > 0 && <span class="count">{send.count}</span>}
-          </button>
+      {(sendShown || agent?.status.on) && (
+        <div class={`nfoot${agent ? " agentfoot" : ""}`}>
+          {agent && <AgentRow {...agent} />}
+          {sendShown && (
+            <button ref={sendRef} type="button" class="btn primary sendbtn" aria-label={send.count > 0 ? `Send ${send.count}` : "Send"} data-tip="Notes and edits not sent yet, from every tab and film" onClick={send.onSend}>
+              Send{send.count > 0 && <span class="count">{send.count}</span>}
+            </button>
+          )}
+          {agent && <p class="awho">{footLine(agent.status)}</p>}
         </div>
       )}
     </aside>

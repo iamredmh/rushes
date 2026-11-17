@@ -110,7 +110,9 @@ function PlanNotesPanel({ onPendingChange, ...props }: NotesPanelProps & { onPen
 }
 
 export function App() {
-  const { state, assets, problem, wrongProject, refresh, proxyJobs, noteProxyJob, agent } = useRushes();
+  const { state, assets, problem, wrongProject, refresh, proxyJobs, noteProxyJob, agent, noteAgent } = useRushes();
+  // §28: the agent menu's opener, which the Send to AI row puts here.
+  const agentMenu = useRef<(() => void) | null>(null);
   const [stage, setStage] = useState<View | null>(null);
   const [videoId, setVideoId] = useState<string | null>(null);
   const [versionId, setVersionId] = useState<string | null>(null);
@@ -615,6 +617,8 @@ export function App() {
     },
     // On its own page Send always carries the brief's or storyboard's line (send()), so it shows there whenever that file exists.
     send: { count: unsent, always: (stage === "brief" && state.brief.exists) || (stage === "storyboard" && state.storyboard.exists), onSend: () => void send() },
+    // §28: Set up Send to AI opens the agent menu until the first-Send sheet (task 4) is built.
+    agent: agent && { status: agent, onSetUp: () => agentMenu.current?.(), menu: agentMenu, onStatus: noteAgent, toast },
     shown: panel.shown,
     narrow: panel.narrow,
     setShown: panel.setShown,

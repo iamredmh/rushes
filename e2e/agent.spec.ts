@@ -1,5 +1,9 @@
-// §28, Send to AI (plan 2): the run's chip in the top bar, and Stop. The agent is the fake (e2e/agentFixture.ts).
+// §28, Send to AI (plan 2): the run's chip in the top bar, and Stop; the Send to AI row above Send and the agent menu.
+// The agent is the fake (e2e/agentFixture.ts).
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import type { Locator, Page } from "@playwright/test";
+import { rulesPath } from "../src/server/agent/rules.js";
 import { expect, test, videoReady, type AgentRushes } from "./agentFixture.js";
 
 /** The top bar's chip: what the agent is doing. Clicking it opens Activity. */
@@ -148,4 +152,211 @@ test("a failed run's chip says why in its tooltip, and has no Stop", async ({ pa
   // The tooltip fades in.
   await expect.poll(() => chip(page).evaluate((el) => getComputedStyle(el, "::after").opacity)).toBe("1");
   await page.screenshot({ path: test.info().outputPath("chip-failed-hover-1440.png"), clip: { x: 640, y: 0, width: 800, height: 140 } });
+});
+
+// ---- the Send to AI row and the agent menu (task 3) ----
+
+const panel = (page: Page): Locator => page.getByRole("complementary", { name: "Notes panel" });
+const foot = (page: Page): Locator => panel(page).locator(".nfoot");
+const row = (page: Page): Locator => foot(page).locator(".agentrow");
+const toggle = (page: Page): Locator => foot(page).getByRole("switch", { name: "Send to AI" });
+const who = (page: Page): Locator => foot(page).locator(".awho");
+const sendBtn = (page: Page): Locator => foot(page).locator(".sendbtn");
+const agentMenu = (page: Page): Locator => page.getByRole("menu", { name: "Send to AI" });
+
+/** A cut and one note to send; Send to AI on for Claude Code unless `on` is false. */
+async function withNote(rushes: AgentRushes, on = true): Promise<void> {
+  await rushes.addCut("first cut");
+  if (on) await rushes.api("POST", "/api/agent/setup", { on: true, agent: "claude" });
+  await rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 0.5, text: "Hold the end card." });
+}
+
+/** A picture of the notes panel's foot (and the menu above it, when open), kept with the test's results, to look at. */
+async function shootFoot(page: Page, name: string): Promise<void> {
+  const p = (await panel(page).boundingBox())!;
+  const f = (await foot(page).boundingBox())!;
+  const m = (await agentMenu(page).count()) ? (await agentMenu(page).boundingBox())! : null;
+  const top = Math.max(0, Math.min(f.y, m?.y ?? f.y) - 12);
+  await page.screenshot({ path: test.info().outputPath(`${name}.png`), clip: { x: p.x, y: top, width: p.width, height: f.y + f.height - top + 4 } });
+}
+
+/** `inner` lies wholly inside `outer` (to the pixel's rounding). */
+function inside(inner: { x: number; y: number; width: number; height: number }, outer: { x: number; y: number; width: number; height: number }): void {
+  expect(inner.x).toBeGreaterThanOrEqual(outer.x - 0.5);
+  expect(inner.y).toBeGreaterThanOrEqual(outer.y - 0.5);
+  expect(inner.x + inner.width).toBeLessThanOrEqual(outer.x + outer.width + 0.5);
+  expect(inner.y + inner.height).toBeLessThanOrEqual(outer.y + outer.height + 0.5);
+}
+
+const overlap = (a: { x: number; y: number; width: number; height: number }, b: { x: number; y: number; width: number; height: number }): boolean =>
+  a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+
+/** The row, Send and the who-line are on screen, inside the foot, one above the other with no overlap; nothing spills. */
+async function footFits(page: Page): Promise<void> {
+  const f = (await foot(page).boundingBox())!;
+  const boxes = [(await row(page).boundingBox())!, (await sendBtn(page).boundingBox())!, (await who(page).boundingBox())!];
+  for (const b of boxes) {
+    expect(b.width).toBeGreaterThan(40);
+    expect(b.height).toBeGreaterThan(8);
+    inside(b, f);
+  }
+  expect(overlap(boxes[0], boxes[1])).toBe(false);
+  expect(overlap(boxes[1], boxes[2])).toBe(false);
+  expect(overlap(boxes[0], boxes[2])).toBe(false);
+  // Row above Send above the who-line.
+  expect(boxes[0].y + boxes[0].height).toBeLessThanOrEqual(boxes[1].y + 0.5);
+  expect(boxes[1].y + boxes[1].height).toBeLessThanOrEqual(boxes[2].y + 0.5);
+  inside(f, (await panel(page).boundingBox())!);
+  // No word cut off or pushed out of its box.
+  expect(await foot(page).evaluate((el) => [el, ...el.querySelectorAll("*")].filter((e) => e.scrollWidth > e.clientWidth + 1 && getComputedStyle(e).overflow !== "visible").map((e) => e.className))).toEqual([]);
+  expect(await row(page).evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+}
+
+/** The open menu is on screen, inside the notes panel (never cut off by its edge or the window's). */
+async function menuFits(page: Page): Promise<void> {
+  const m = (await agentMenu(page).boundingBox())!;
+  inside(m, (await panel(page).boundingBox())!);
+  const vp = page.viewportSize()!;
+  inside(m, { x: 0, y: 0, width: vp.width, height: vp.height });
+  // Its rows are inside it, not scrolled past its edges unseen.
+  expect(m.height).toBeGreaterThan(120);
+}
+
+test("switch row shows the agent and turns off", async ({ page, startWithAgent }) => {
+  const rushes = await startWithAgent({ turns: [] });
+  await withNote(rushes);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await expect(row(page)).toBeVisible();
+  await expect(row(page).getByRole("button", { name: "Send to AI · Claude Code" })).toBeVisible();
+  await expect(row(page).getByRole("button", { name: "Send to AI · Claude Code" }).locator("svg.ic")).toBeVisible();
+  await expect(toggle(page)).toBeVisible();
+  await expect(toggle(page)).toHaveAttribute("aria-checked", "true");
+  await expect(who(page)).toHaveText("Edits files in this project, asks before commands");
+  await expect(who(page)).toBeVisible();
+  expect(await who(page).evaluate((el) => getComputedStyle(el).fontSize)).toBe("12px");
+  await footFits(page);
+  await shootFoot(page, "row-on-1440");
+  await toggle(page).click();
+  await expect(toggle(page)).toHaveAttribute("aria-checked", "false");
+  await expect(who(page)).toHaveText("Copies a prompt for your own chat");
+  expect((await rushes.api("GET", "/api/agent")).status.on).toBe(false);
+  // Off, the row still names the agent, and Send is as it was.
+  await expect(row(page).getByRole("button", { name: "Send to AI · Claude Code" })).toBeVisible();
+  await expect(sendBtn(page)).toHaveAccessibleName("Send 1");
+  await footFits(page);
+  await shootFoot(page, "row-off-1440");
+});
+
+test("agent menu changes permissions and removes a rule", async ({ page, startWithAgent }) => {
+  const rushes = await startWithAgent({ turns: [] });
+  // No ask card yet (task 5): the rule is written to the user's rules file, where an answered Always would put it.
+  const rules = rulesPath(rushes.root, rushes.configDir);
+  await mkdir(dirname(rules), { recursive: true });
+  await writeFile(rules, JSON.stringify({ permissions: "project-edits", always: [{ kind: "execute", command: "npx hyperframes" }] }));
+  await withNote(rushes);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await row(page).getByRole("button", { name: "Send to AI · Claude Code" }).click();
+  const menu = agentMenu(page);
+  await expect(menu).toBeVisible();
+  await expect(menu.getByText("Send notes to", { exact: true })).toBeVisible();
+  await expect(menu.getByRole("menuitemradio", { name: /Claude Code/ })).toHaveAttribute("aria-checked", "true");
+  await expect(menu.getByRole("menuitemradio", { name: /Codex/ })).toHaveAttribute("aria-checked", "false");
+  await expect(menu.getByRole("menuitemradio", { name: /Claude Code/ })).toContainText("Signed in");
+  // No conversation yet: nothing to start fresh.
+  await expect(menu.getByRole("menuitem", { name: "Start a fresh conversation" })).toHaveCount(0);
+  await expect(menu.getByText("What it may do without asking", { exact: true })).toBeVisible();
+  await expect(menu.getByRole("menuitemradio", { name: "Edit files in this project" })).toHaveAttribute("aria-checked", "true");
+  await expect(menu.getByText("Always rules", { exact: true })).toBeVisible();
+  await expect(menu.getByText("Always for npx hyperframes here", { exact: true })).toBeVisible();
+  await expect(menu.getByText("Switch off: Send copies a prompt, as now", { exact: true })).toBeVisible();
+  await menuFits(page);
+  await shootFoot(page, "menu-open-1440");
+  await menu.getByRole("menuitemradio", { name: "Ask me for everything" }).click();
+  await expect(menu.getByRole("menuitemradio", { name: "Ask me for everything" })).toHaveAttribute("aria-checked", "true");
+  await expect(menu.getByRole("menuitemradio", { name: "Edit files in this project" })).toHaveAttribute("aria-checked", "false");
+  await expect(who(page)).toHaveText("Asks before everything");
+  await menu.getByRole("menuitem", { name: "Remove Always for npx hyperframes here" }).click();
+  await expect(menu.getByText("No Always rules yet", { exact: true })).toBeVisible();
+  await expect(menu.getByText("Always for npx hyperframes here", { exact: true })).toHaveCount(0);
+  await shootFoot(page, "menu-after-1440");
+  expect(JSON.parse(await readFile(rules, "utf8"))).toEqual({ permissions: "ask-all", always: [] });
+  await page.keyboard.press("Escape");
+  await expect(menu).toHaveCount(0);
+});
+
+test("row fits at 900 px", async ({ page, startWithAgent }) => {
+  const rushes = await startWithAgent({ turns: [] });
+  await withNote(rushes);
+  await page.setViewportSize({ width: 900, height: 700 });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await page.getByRole("button", { name: "Show the notes panel · \\" }).click();
+  await expect(row(page)).toBeVisible();
+  await footFits(page);
+  await shootFoot(page, "row-on-900");
+  await row(page).getByRole("button", { name: "Send to AI · Claude Code" }).click();
+  await expect(agentMenu(page)).toBeVisible();
+  await menuFits(page);
+  await shootFoot(page, "menu-open-900");
+});
+
+test("Set up Send to AI opens the agent menu, and picking an agent turns it on", async ({ page, startWithAgent }) => {
+  const rushes = await startWithAgent({ turns: [] });
+  await withNote(rushes, false);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  const setUp = row(page).getByRole("button", { name: "Set up Send to AI" });
+  await expect(setUp).toBeVisible();
+  await expect(toggle(page)).toHaveCount(0);
+  await expect(who(page)).toHaveText("Copies a prompt for your own chat");
+  await footFits(page);
+  await shootFoot(page, "row-setup-1440");
+  await setUp.click();
+  const menu = agentMenu(page);
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole("menuitemradio", { name: /Claude Code/ })).toHaveAttribute("aria-checked", "false");
+  await menu.getByRole("menuitemradio", { name: /Claude Code/ }).click();
+  await expect(menu).toHaveCount(0);
+  await expect(row(page).getByRole("button", { name: "Send to AI · Claude Code" })).toBeVisible();
+  await expect(toggle(page)).toHaveAttribute("aria-checked", "true");
+  await expect(who(page)).toHaveText("Edits files in this project, asks before commands");
+  expect((await rushes.api("GET", "/api/agent")).status).toMatchObject({ on: true, agent: "claude" });
+});
+
+test("an agent that isn't signed in says so, and picking it shows why under its row", async ({ page, startWithAgent }) => {
+  const rushes = await startWithAgent({ turns: [] }, { agents: [{ id: "claude", installed: true, signedIn: true }, { id: "codex", installed: true, signedIn: false }] });
+  await withNote(rushes);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await row(page).getByRole("button", { name: "Send to AI · Claude Code" }).click();
+  const menu = agentMenu(page);
+  const codex = menu.getByRole("menuitemradio", { name: /Codex/ });
+  await expect(codex).toContainText("Not signed in");
+  await expect(menu.getByRole("menuitem", { name: "Sign in in Terminal" })).toBeVisible();
+  await codex.click();
+  const why = menu.getByRole("alert");
+  await expect(why).toHaveText("Codex is not signed in. Choose Sign in in Terminal, then try again.");
+  await expect(why).toBeVisible();
+  // Under Codex's row, and the agent is unchanged.
+  expect((await why.boundingBox())!.y).toBeGreaterThanOrEqual((await codex.boundingBox())!.y + (await codex.boundingBox())!.height - 0.5);
+  await expect(menu.getByRole("menuitemradio", { name: /Claude Code/ })).toHaveAttribute("aria-checked", "true");
+  await menuFits(page);
+  await shootFoot(page, "menu-not-signed-in-1440");
+});
+
+test("Start a fresh conversation shows once there is one, and drops it", async ({ page, startWithAgent }) => {
+  const rushes = await startWithAgent({ turns: [[{ stop: "end_turn" }]] });
+  await withNote(rushes);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await rushes.api("POST", "/api/batches", {});
+  await expect(who(page)).toHaveText("Edits files in this project, asks before commands · next Send continues the conversation", { timeout: 10_000 });
+  await row(page).getByRole("button", { name: "Send to AI · Claude Code" }).click();
+  const fresh = agentMenu(page).getByRole("menuitem", { name: "Start a fresh conversation" });
+  await expect(fresh).toBeVisible();
+  await fresh.click();
+  await expect(who(page)).toHaveText("Edits files in this project, asks before commands");
+  expect((await rushes.api("GET", "/api/agent")).status.session).toBeNull();
 });

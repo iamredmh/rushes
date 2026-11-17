@@ -14,7 +14,13 @@ const FAKE = fileURLToPath(new URL("../test/helpers/fake-acp.mjs", import.meta.u
 export type AgentRushes = Rushes & {
   /** The fake's log (FAKE_ACP_LOG): every message it received, one JSON object per line. Poll it with readAgentLog. */
   agentLog: string;
+  /** The server's XDG_CONFIG_HOME, a temp folder: the user's rules file (src/server/agent/rules.ts rulesPath) lives
+   *  under it, never in the real ~/.config. */
+  configDir: string;
 };
+
+/** What detection answers, as RUSHES_TEST_AGENT's `agents` (src/server/start.ts): an agent left out is not installed. */
+export type TestAgents = { id: "claude" | "codex"; installed: boolean; signedIn: boolean }[];
 
 /** A port free right now, so the fake's `http` steps can be told the server's address before it starts. */
 function freePort(): Promise<number> {
@@ -34,31 +40,35 @@ export async function readAgentLog(path: string): Promise<any[]> {
   return text.split("\n").filter(Boolean).map((l) => JSON.parse(l));
 }
 
-export const test = base.extend<{ startWithAgent: (scenario: object) => Promise<AgentRushes> }>({
+export const test = base.extend<{ startWithAgent: (scenario: object, opts?: { agents?: TestAgents }) => Promise<AgentRushes> }>({
   /**
    * Starts a server whose agent is the fake playing `scenario` (see fake-acp.mjs for its shape). Both agents are installed
    * and signed in, and the fake offers each agent's ask mode unless the scenario names its own `modes`. Send to AI is not
    * turned on: a test does that (POST /api/agent/setup) or goes through the desk. `http` steps reach this server.
+   * `opts.agents` stands in for detection (installed, signed in). The server's XDG_CONFIG_HOME is a temp folder.
    */
   startWithAgent: async ({ noFfmpeg, browserName }, use) => {
     const opened: OpenRushes[] = [];
     const dirs: string[] = [];
-    await use(async (scenario) => {
+    await use(async (scenario, opts = {}) => {
       const dir = await mkdtemp(join(tmpdir(), "rushes agent "));
       dirs.push(dir);
       const file = join(dir, "scenario.json");
       const log = join(dir, "fake-log.jsonl");
       await writeFile(file, JSON.stringify({ modes: ["default", "read-only"], ...scenario }));
+      const configDir = join(dir, "config");
       const port = await freePort();
       const hook = {
         command: process.execPath,
         args: [FAKE],
         env: { FAKE_ACP_SCENARIO: file, FAKE_ACP_LOG: log, FAKE_ACP_BASE: `http://127.0.0.1:${port}` },
+        ...(opts.agents ? { agents: opts.agents } : {}),
       };
-      const o = await openRushes({ noFfmpeg, browserName, port, env: { RUSHES_TEST_AGENT: JSON.stringify(hook), RUSHES_E2E: "1" } });
+      const env = { RUSHES_TEST_AGENT: JSON.stringify(hook), RUSHES_E2E: "1", XDG_CONFIG_HOME: configDir };
+      const o = await openRushes({ noFfmpeg, browserName, port, env });
       opened.push(o);
       // Onto the handle itself, so its url, base and root stay live (swapProject).
-      return Object.assign(o.rushes, { agentLog: log });
+      return Object.assign(o.rushes, { agentLog: log, configDir });
     });
     for (const o of opened) await o.close();
     for (const d of dirs) await rm(d, { recursive: true, force: true });
