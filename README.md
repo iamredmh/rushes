@@ -303,7 +303,7 @@ If the agent fails to start, the notes go back in to do and nothing is copied. I
 
 The agent's name opens a menu to choose another agent, **Start a fresh conversation**, change what it may do without asking, and see the "Always" rules. **Stop** ends a run and gives its unfinished notes back.
 
-**New cuts.** When the agent adds a version, a toast offers it, and the **Cut** menu shows a dot until you look. The agent only adds a version when the picture or sound changed, and it is asked to wait for its commands to finish before it replies, so a run does not leave work going in the background.
+**New cuts.** When the agent adds a version and nothing holds the picture, the desk switches to it and a toast says so, such as "v3 is in". When something does (a cut or a sound playing on any tab, a note or mark you are making, or a locked picture), the picture stays where it is: the toast offers the cut with **Show**, and the **Cut** menu shows a dot until you look. The agent only adds a version when the picture or sound changed, and it is asked to wait for its commands to finish before it replies, so a run does not leave work going in the background.
 
 **Permissions.** There are two levels:
 
