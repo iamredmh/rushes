@@ -2148,11 +2148,16 @@ test("a take's details button opens its details as a line under its row, pushing
     const wave = (await takeRow(page, name).locator("canvas.wave").boundingBox())!;
     expect(box.y + box.height <= wave.y + 0.5 || box.y >= wave.y + wave.height - 0.5).toBe(true);
   }
-  // Several can be open, and the keyboard reaches each: Tab from Gerald's name to his details button, Enter opens it.
+  // Several can be open, and the keyboard reaches each: Tab from Gerald's name to Archive, which shows with focus in the
+  // row just before the details (in the order they are on screen), then to his details button; Enter opens it.
   // (WebKit's Tab skips buttons unless the system's "every control" setting is on, so there it is focused directly.)
   await takeName(page, "Gerald · bright").focus();
   if (browserName === "webkit") await gerald.focus();
-  else await page.keyboard.press("Tab");
+  else {
+    await page.keyboard.press("Tab");
+    await expect(takeRow(page, "Gerald · bright").getByRole("button", { name: "Archive", exact: true })).toBeFocused();
+    await page.keyboard.press("Tab");
+  }
   await expect(gerald).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(gerald).toHaveAttribute("aria-expanded", "true");

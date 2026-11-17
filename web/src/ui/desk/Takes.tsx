@@ -41,6 +41,7 @@ export interface TakeItem {
   clip: Clip | null;
   /** An effects pass's cues, labelled on its block. Empty on Voice and Music. */
   cues: Cue[];
+  /** Which films it is on: no button on the row (Red, 17 Nov 2026), but Archive reads it (archiveTakesOff). */
   films?: FilmsControl;
 }
 
@@ -120,7 +121,8 @@ function measureCut(root: HTMLElement): Cut {
   const out: Cut = {};
   const over = (el: Element | null) => el !== null && el.scrollWidth > el.clientWidth;
   for (const row of root.querySelectorAll<HTMLElement>(".take[data-take]")) {
-    if (over(row.querySelector("[data-name]"))) out[row.dataset.take!] = "n";
+    const name = row.querySelector<HTMLElement>("[data-name]");
+    if (over(name) || (name !== null && cutWhenSlotShows(row, name))) out[row.dataset.take!] = "n";
   }
   for (const row of root.querySelectorAll<HTMLElement>(".take[data-loose]")) {
     const flags = (over(row.querySelector("[data-name]")) ? "n" : "") + (over(row.querySelector("[data-meta-text]")) ? "m" : "");
@@ -128,6 +130,19 @@ function measureCut(root: HTMLElement): Cut {
   }
   for (const h of root.querySelectorAll<HTMLElement>(".khd[data-h]")) if (over(h)) out[`h:${h.dataset.h}`] = "h";
   return out;
+}
+/**
+ * A name that fits until the row's Archive (or Unpick) slot shows: on the row under the pointer the slot takes its room
+ * from the free space and then from the name, which is cut short there, so its tooltip carries it in full. Hidden, the
+ * slot is out of the flow but still laid out, so its width can be read.
+ */
+function cutWhenSlotShows(row: HTMLElement, name: HTMLElement): boolean {
+  const head = row.querySelector<HTMLElement>(".khead");
+  const slot = row.querySelector<HTMLElement>(".kslot");
+  const free = row.querySelector<HTMLElement>(".khead > .sp");
+  if (!head || !slot || !free || getComputedStyle(slot).position !== "absolute") return false;
+  const gap = parseFloat(getComputedStyle(head).columnGap) || 0;
+  return name.scrollWidth > name.clientWidth + free.offsetWidth - slot.offsetWidth - gap;
 }
 const sameCut = (a: Cut, b: Cut) => Object.keys(a).length === Object.keys(b).length && Object.keys(a).every((k) => a[k] === b[k]);
 
@@ -281,6 +296,28 @@ export function Takes(props: TakesProps) {
               <span data-name>{it.name}</span>
               {it.missing && <Missing />}
             </button>
+            {/* Red, 17 Nov 2026: no Films count on these rows (he knows where they're used), and the details and version at
+                the right-hand end, so the name has the rest of the width. */}
+            <span class="sp" />
+            {/* Archive, Restore, or Unpick on the take in use, just before the details and version. It shows on the row under
+                the pointer or with focus inside it, taking its room from the free space, then from a long name; hidden, it
+                takes no room and no clicks (cutWhenSlotShows). */}
+            <span class="kslot">
+              {put === null ? (
+                <button type="button" class="btn ghost sm kput" onClick={() => onUnpick(it)}>Unpick</button>
+              ) : (
+                <button
+                  type="button"
+                  class="btn ghost sm kput tip-end"
+                  aria-label={put === "away" ? "Archive" : "Restore"}
+                  // Red, 16 Nov 2026: "Archive", not "Put away". On a take several films share, it takes it off this film only.
+                  data-tip={put === "away" && shared ? "Takes it off this film; it stays on its other films" : undefined}
+                  onClick={() => onPutAway(it, put === "away")}
+                >
+                  {put === "away" ? "Archive" : "Restore"}
+                </button>
+              )}
+            </span>
             {streamed && <span class="smk" data-tip="Long file: switching isn't sample-exact"><Icon name="stream" /></span>}
             {details !== "" && (
               <button
@@ -300,26 +337,6 @@ export function Takes(props: TakesProps) {
                 {take.madeFor}
               </span>
             )}
-            <span class="sp" />
-            {it.films && <FilmsMenu name={it.name} control={it.films} />}
-            {/* Its own slot, as wide whatever it holds: Put away, Bring back, or Unpick on the take in use. It shows on the
-                row under the pointer, with focus inside it, or selected; hidden, it takes no clicks. */}
-            <span class="kslot">
-              {put === null ? (
-                <button type="button" class="btn ghost sm kput" onClick={() => onUnpick(it)}>Unpick</button>
-              ) : (
-                <button
-                  type="button"
-                  class="btn ghost sm kput tip-end"
-                  aria-label={put === "away" ? "Archive" : "Restore"}
-                  // Red, 16 Nov 2026: "Archive", not "Put away". On a take several films share, it takes it off this film only.
-                  data-tip={put === "away" && shared ? "Takes it off this film; it stays on its other films" : undefined}
-                  onClick={() => onPutAway(it, put === "away")}
-                >
-                  {put === "away" ? "Archive" : "Restore"}
-                </button>
-              )}
-            </span>
           </div>
           <div class="tlane" onClick={(e) => onSelect(it, timeAt(e))}>
             {/* The block holds no words but a state in place of a waveform (a file not found, or one that won't play). */}

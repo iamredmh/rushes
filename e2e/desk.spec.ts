@@ -1497,29 +1497,63 @@ test.describe("a tab per sound", () => {
     expect((await rushes.api("GET", "/api/notes?stage=music")).notes[0]).toMatchObject({ on: "round-1/pulse", scope: "whole", t: null });
   });
 
-  test("Films opens on a take that is not in use, and Put away has its own place: their boxes never overlap", async ({ page, rushes }) => {
+  // Red, 17 Nov 2026: two passes named "Pass 3A felt" and "Pass 3B pillow" both read "Pass 3…" beside a "1 film" chip. The
+  // rows on this film have no Films count now, the details and version sit at the right-hand end, and the name has the rest.
+  test("a take's row has no Films count, its details and version at the right-hand end, and two names that differ only at the end both read in full", async ({ page, rushes }) => {
     await rushes.addCut("hero", "Hero");
     await rushes.addCut("cutdown", "Cutdown");
-    await rushes.addVariant("music", "Pulse", { seconds: 2, freq: 220, round: "Round 1", video: ["Hero", "Cutdown"] });
-    const drift = await rushes.addVariant("music", "Drift", { seconds: 2, freq: 330, round: "Round 2", video: ["Hero", "Cutdown"] });
-    await rushes.api("PUT", "/api/picks", { video: "hero", lanes: { [drift.lane.id]: drift.variant.id } });
+    const felt = "Whoosh and taps, soft, felt";
+    const pillow = "Whoosh and taps, soft, pillow";
+    await rushes.addVariant("sfx", felt, { seconds: 2, freq: 220, round: "Round 1", video: ["Hero", "Cutdown"], meta: { description: "Felt mallet on the taps" } });
+    const used = await rushes.addVariant("sfx", pillow, { seconds: 2, freq: 330, round: "Round 1", video: ["Hero", "Cutdown"], meta: { description: "Pillow hits on the taps" } });
+    await rushes.addVariant("sfx", "Cutdown only", { seconds: 2, freq: 440, round: "Round 1", video: "Cutdown" });
+    await rushes.api("PUT", "/api/picks", { video: "hero", lanes: { [used.lane.id]: used.variant.id } });
     await page.goto(rushes.url);
     await videoReady(page);
-    await openReviewTab(page, "Music");
-    const films = takeRow(page, "Pulse").getByRole("button", { name: /^Films for Pulse/ });
-    // A mouse on the row: Put away shows, beside Films, not over it.
-    await takeRow(page, "Pulse").hover();
-    await expect(putAwayButton(page, "Pulse")).toBeVisible();
-    const f = (await films.boundingBox())!;
-    const p = (await putAwayButton(page, "Pulse").boundingBox())!;
-    expect(f.x + f.width <= p.x || p.x + p.width <= f.x).toBe(true);
+    await openReviewTab(page, "Effects");
+    await expect(takeRows(page).locator("[data-name]")).toHaveText([pillow, felt]);
+    await expect(takeRows(page).getByRole("button", { name: /^Films for/ })).toHaveCount(0);
+    await page.mouse.move(1430, 890);
+    for (const name of [felt, pillow]) {
+      const row = takeRow(page, name);
+      // The whole name on screen, measured: not cut short by its column, nothing over it, and its box clear of the details.
+      const text = row.locator(".knm [data-name]");
+      expect(await text.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+      await expect(putAwayButton(page, name, name === pillow ? "Unpick" : "Archive")).toBeHidden();
+      const head = (await row.locator(".khead").boundingBox())!;
+      const nm = (await text.boundingBox())!;
+      const info = (await row.getByRole("button", { name: `Details for ${name}` }).boundingBox())!;
+      const tag = (await takeTag(page, name).boundingBox())!;
+      expect(nm.x + nm.width).toBeLessThanOrEqual(info.x);
+      expect(info.x + info.width).toBeLessThanOrEqual(tag.x);
+      // The version is the last thing in the head, against its right-hand padding.
+      expect(head.x + head.width - (tag.x + tag.width)).toBeLessThanOrEqual(12);
+    }
+    // A mouse on a row: Archive (Unpick on the take in use) shows just before the details, never over them or the version.
+    for (const [name, kind] of [[felt, "Archive"], [pillow, "Unpick"]] as const) {
+      await takeRow(page, name).hover();
+      const btn = putAwayButton(page, name, kind);
+      await expect(btn).toBeVisible();
+      const b = (await btn.boundingBox())!;
+      const info = (await takeRow(page, name).getByRole("button", { name: `Details for ${name}` }).boundingBox())!;
+      expect(b.x + b.width).toBeLessThanOrEqual(info.x);
+      expect(await page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest(".kput") !== null, [b.x + b.width / 2, b.y + b.height / 2])).toBe(true);
+      // Its room came from the name, never from the details or version: they haven't moved, and the name it cut short
+      // has its full name first in its tooltip.
+      const tag = (await takeTag(page, name).boundingBox())!;
+      const head = (await takeRow(page, name).locator(".khead").boundingBox())!;
+      expect(head.x + head.width - (tag.x + tag.width)).toBeLessThanOrEqual(12);
+      const text = takeRow(page, name).locator(".knm [data-name]");
+      expect(await text.evaluate((el) => el.getBoundingClientRect().right)).toBeLessThanOrEqual(b.x);
+      if (await text.evaluate((el) => el.scrollWidth > el.clientWidth)) await expect(takeName(page, name)).toHaveAttribute("data-tip", new RegExp(`^${name}\\n`));
+    }
+    // A take not on this film keeps its Films button, the only way to put it here, with no count on it.
+    await foldToggle(page, "Not on this film").click();
+    const films = takesList(page).getByRole("button", { name: /^Films for Cutdown only/ });
+    await expect(films).toHaveText("Films");
+    await expect(films).toHaveAttribute("data-tip", "On Cutdown");
     await films.click();
-    await expect(page.getByRole("group", { name: "Films for Pulse" })).toBeVisible();
-    // Nothing was put away by reaching for Films.
-    await expect(takeHeadings(page)).toHaveText(["In use · Round 2", "Earlier · Round 1"]);
-    // The take in use has Unpick in the same place.
-    await takeRow(page, "Drift").hover();
-    await expect(putAwayButton(page, "Drift", "Unpick")).toBeVisible();
+    await expect(page.getByRole("group", { name: "Films for Cutdown only" })).toBeVisible();
   });
 
   test("Archive on a take two films share takes it off this film only, never archiving it on the other", async ({ page, rushes }) => {

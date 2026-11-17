@@ -1,4 +1,4 @@
-// The Films button on a read, bed or pass: which films it is on. Ticking a film puts it there and
+// The Films button on a read, bed or pass under "Not on this film" (the rows on this film have none): which films it is on. Ticking a film puts it there and
 // unticking takes it off (dropping that film's pick of it), saved at once. One bed is often on
 // several films. Every film's tab keeps the ones not on it folded under "Not on this film" (Takes).
 import { useLayoutEffect, useRef, useState } from "preact/hooks";
@@ -32,7 +32,8 @@ export function FilmsMenu({ name, control }: { name: string; control: FilmsContr
   }, [open]);
   const { on, films } = control;
   const names = films.filter((f) => on.includes(f.id)).map((f) => f.name);
-  const label = on.length === 0 ? "No film" : on.length === 1 ? "1 film" : `${on.length} films`;
+  // Red, 17 Nov 2026: no count on the button. Which films stays in its tooltip; one on no film keeps the to-do colour.
+  const label = "Films";
   const toggle = (id: string) => control.onChange(on.includes(id) ? on.filter((x) => x !== id) : films.filter((f) => f.id === id || on.includes(f.id)).map((f) => f.id));
 
   return (

@@ -814,8 +814,8 @@ export async function textOverWaveform(row: Locator): Promise<string> {
 }
 
 /**
- * A row's slot button: Put away, Bring back on a put-away take, or Unpick on the take in use. It shows on the row under the
- * pointer, with focus inside it, or selected (pressRowButton hovers the row first).
+ * A row's slot button: Archive, Restore on an archived take, or Unpick on the take in use. It shows on the row under the
+ * pointer or with focus inside it (pressRowButton hovers the row first).
  */
 export function putAwayButton(page: Page, name: string, kind: "Archive" | "Restore" | "Unpick" = "Archive"): Locator {
   return takeRow(page, name).getByRole("button", { name: kind, exact: true });

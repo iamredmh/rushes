@@ -442,11 +442,13 @@ span.knm, span.knm:hover { cursor: default; background: none; }
 .take.picked .sblock { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 .ktag { flex: none; padding: 0 5px; border-radius: 4px; background: var(--raised); color: var(--text-3); font-size: var(--t-small); line-height: 18px; }
 .ktag.stale { background: var(--todo-soft); color: var(--todo); }
-/* Put away, Bring back or Unpick: a slot of its own at the end of the head, its width kept so nothing moves when it shows.
-   It shows on the row under the pointer, with focus inside it, or selected; hidden, it takes no clicks. */
-.take .kslot { flex: none; display: flex; justify-content: flex-end; width: 84px; }
-.take .kput { height: 22px; padding: 0 8px; font-size: var(--t-ui); visibility: hidden; }
-.take:hover .kput, .take:focus-within .kput, .take.picked .kput { visibility: visible; }
+/* Archive, Restore or Unpick (Red, 17 Nov 2026): hidden, it is out of the flow, so the name has the head's width up to the
+   details and version at the right-hand end. On the row under the pointer or with focus inside it, it shows just before
+   them, its room taken from the free space and then from a long name (cut short, its tooltip in full): the details and
+   version never move. Hidden, it takes no clicks; still laid out, so Takes can read its width. */
+.take .kslot { flex: none; display: flex; position: absolute; visibility: hidden; }
+.take:hover .kslot, .take:focus-within .kslot { position: static; visibility: visible; }
+.take .kput { height: 22px; padding: 0 8px; font-size: var(--t-ui); }
 .take .filmsbtn { height: 22px; font-size: var(--t-ui); }
 .take .sblock { border-left: 2px solid var(--c); overflow: visible; }
 .kfold .fdot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--todo); }
