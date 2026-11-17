@@ -1,7 +1,11 @@
 import { createServer, type Server } from "node:http";
+import { existsSync } from "node:fs";
 import { mkdir, realpath } from "node:fs/promises";
-import { basename, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { getRequestListener } from "@hono/node-server";
+import { z } from "zod";
+import { AGENTS } from "../core/schema.js";
 import { Store } from "../core/store.js";
 import { ensureProjectIdOnce } from "../core/project.js";
 import { createApp, type AppOptions } from "./app.js";
@@ -17,8 +21,70 @@ import type { ScanLimits } from "../core/found.js";
 import type { VideoProber } from "../core/media.js";
 import { AgentRunner, type RunnerOptions } from "./agent/runner.js";
 import type { Notifier } from "./agent/notify.js";
+import type { AgentInfo } from "./agent/detect.js";
+import { rushesMcp } from "./agent/adapters.js";
+import { RUSHES_SERVER } from "./agent/ownTools.js";
+import type { McpServerSpec } from "./agent/acp.js";
 
 export const DEFAULT_PORT = 4580;
+
+/*
+ * Browser tests only: RUSHES_TEST_AGENT starts the fake agent (test/helpers/fake-acp.mjs) in place of a real adapter,
+ * so no test ever reaches a model. Read only when NODE_ENV is "test" or RUSHES_E2E is "1"; anywhere else it is
+ * ignored and the server detects and starts the user's own agents. Options passed to startServer (`agent`) win over it.
+ *
+ *   RUSHES_TEST_AGENT='{ "command": "node", "args": ["test/helpers/fake-acp.mjs"], "env": { "FAKE_ACP_SCENARIO": "…" },
+ *                        "agents": [{ "id": "claude", "installed": true, "signedIn": true }] }'
+ *
+ * `command`, `args` and `env` start the adapter for either agent, in the project folder. `agents` (optional) stands in
+ * for detection: an agent it leaves out is not installed. Without it, Claude Code and Codex are both installed and
+ * signed in. The fake's scenario must offer the mode each agent asks Rushes in (ASK_MODE), or the start fails:
+ * "default" for Claude Code, "read-only" for Codex, as `"modes": ["default", "read-only"]` in the scenario or
+ * FAKE_ACP_MODES=default,read-only in `env`.
+ */
+const TestAgentShape = z.object({
+  command: z.string().min(1),
+  args: z.array(z.string()).default([]),
+  env: z.record(z.string(), z.string()).default({}),
+  agents: z.array(z.object({ id: z.enum(AGENTS), installed: z.boolean(), signedIn: z.boolean() })).optional(),
+});
+
+const TEST_AGENT_INFO: Record<AgentInfo["id"], Pick<AgentInfo, "name" | "signIn"> & { bin: string }> = {
+  claude: { name: "Claude Code", signIn: "claude auth login", bin: "claude" },
+  codex: { name: "Codex", signIn: "codex login", bin: "codex" },
+};
+
+/** The Rushes MCP server for the fake agent: the built CLI when there is one, as a real run has, else the source under tsx. */
+function testMcp(root: string): McpServerSpec {
+  // src/server/ and dist/server/ are both two folders below the package root.
+  const pkg = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+  if (existsSync(join(pkg, "dist", "cli", "index.js"))) return rushesMcp(root);
+  return { name: RUSHES_SERVER, command: join(pkg, "node_modules", ".bin", "tsx"), args: [join(pkg, "src", "cli", "index.ts"), "mcp", root, "--pinned"], env: [] };
+}
+
+/** The runner options RUSHES_TEST_AGENT asks for, or undefined when it is unset or not allowed here. */
+export function testAgentOptions(env: NodeJS.ProcessEnv = process.env): RunnerOptions | undefined {
+  const raw = env.RUSHES_TEST_AGENT;
+  if (!raw || !(env.NODE_ENV === "test" || env.RUSHES_E2E === "1")) return undefined;
+  let hook: z.infer<typeof TestAgentShape>;
+  try {
+    hook = TestAgentShape.parse(JSON.parse(raw));
+  } catch (e) {
+    throw new Error(`RUSHES_TEST_AGENT is not valid: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  // As detectAgents answers: every agent, in its order, and only an installed one can be signed in.
+  const agents: AgentInfo[] = AGENTS.map((id) => {
+    const given = hook.agents ? hook.agents.find((a) => a.id === id) : { installed: true, signedIn: true };
+    const installed = given?.installed ?? false;
+    const { name, signIn, bin } = TEST_AGENT_INFO[id];
+    return { id, name, installed, signedIn: installed && (given?.signedIn ?? false), path: installed ? `/usr/local/bin/${bin}` : null, signIn };
+  });
+  return {
+    detect: async () => structuredClone(agents),
+    spec: (_agent, root) => ({ command: hook.command, args: [...hook.args], env: { ...hook.env }, cwd: root }),
+    mcp: testMcp,
+  };
+}
 
 export interface Running {
   url: string;
@@ -101,10 +167,12 @@ export async function startServer(rootDir: string, opts: StartOptions = {}): Pro
   const brief = new BriefService(store);
   const storyboard = new StoryboardService(store);
   // §28: one agent runner per server, on the root it serves, made before the app so every route has it.
-  const runner = new AgentRunner(store, opts.agent);
+  // Browser tests drive the fake agent through RUSHES_TEST_AGENT (ignored outside tests).
+  const agentOpts = opts.agent ?? testAgentOptions();
+  const runner = new AgentRunner(store, agentOpts);
   const appOpts: AppOptions = {
     brief, storyboard, webDir: opts.webDir, onShutdown: () => void close(), reveal: opts.reveal, proxyJobs, peakJobs, found, formatProbe: opts.formats?.probe,
-    agent: runner, detect: opts.agent?.detect, notify: opts.notify,
+    agent: runner, detect: agentOpts?.detect, notify: opts.notify,
   };
   const app = createApp(store, appOpts);
   const listener = getRequestListener(app.fetch);

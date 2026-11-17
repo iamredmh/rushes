@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { api, ApiError, eventsUrl, projectId } from "./api.js";
 import { mergeProxyJob, proxyProgress, settleProxyJobs, testFlags, type ProxyJobs } from "./lib.js";
 import { connectLive, type LiveRole } from "./live.js";
-import type { Asset, ProxyEvent, ProxyJob, State } from "./types.js";
+import type { AgentStatus, Asset, ProxyEvent, ProxyJob, State } from "./types.js";
 
 export interface Live {
   state: State | null;
@@ -20,6 +20,9 @@ export interface Live {
   proxyJobs: ProxyJobs;
   /** Folds a job a route just returned (Create proxy, Cancel) in, ahead of its SSE event. */
   noteProxyJob(job: ProxyJob): void;
+  /** §28: the agent's status, from GET /api/agent and then the SSE `agent` events. Null until the first answer,
+   *  and from a server older than Send to AI (404). */
+  agent: AgentStatus | null;
 }
 
 declare global {
@@ -37,7 +40,10 @@ export function useRushes(): Live {
   const [problem, setProblem] = useState<string | null>(null);
   const [wrongProject, setWrongProject] = useState(false);
   const [proxyJobs, setProxyJobs] = useState<ProxyJobs>({});
+  const [agent, setAgent] = useState<AgentStatus | null>(null);
   const timer = useRef<number | undefined>(undefined);
+  // Every status is numbered when asked for or heard, so a slow GET can't overwrite a newer SSE event.
+  const agentSeq = useRef(0);
   // Number each request so a slow one that lands after a newer one can't overwrite it.
   const seq = useRef(0);
   const applied = useRef(0);
@@ -102,8 +108,21 @@ export function useRushes(): Live {
     }
   };
 
+  // The SSE stream doesn't replay, so the agent's status is fetched on first load and whenever events may have been
+  // missed (open, resync). A server older than Send to AI answers 404: no agent. Any other failure keeps what we have.
+  const loadAgent = async () => {
+    const id = ++agentSeq.current;
+    try {
+      const { status } = await api.get<{ status: AgentStatus }>("/api/agent");
+      if (id === agentSeq.current) setAgent(status);
+    } catch (e) {
+      if (id === agentSeq.current && e instanceof ApiError && e.status === 404) setAgent(null);
+    }
+  };
+
   useEffect(() => {
     void refresh();
+    void loadAgent();
     const live = connectLive(projectId() ?? "", eventsUrl(), {
       change() {
         // Several files often change together; fetch once.
@@ -118,6 +137,10 @@ export function useRushes(): Live {
         const { file } = JSON.parse(data) as { file: string };
         setProblem(`${file} has an error and wasn't loaded. Fix or restore it, and Rushes will pick it up.`);
       },
+      agent(data) {
+        agentSeq.current++;
+        setAgent(JSON.parse(data) as AgentStatus);
+      },
       // The stream's state, heard by every tab (relayed from the leader's): a follower notices a
       // server that's gone the same way, and its refresh() failures drive the same backoff.
       error() {
@@ -129,10 +152,12 @@ export function useRushes(): Live {
       open() {
         refreshingFromError.current = false;
         void refresh();
+        void loadAgent();
       },
       // The leader went quiet (a frozen tab) and this one took over, or this page was frozen.
       resync() {
         void refresh();
+        void loadAgent();
       },
     });
     if (testFlags(location.search).test) window.__rushesLive = { role: () => live.role() };
@@ -145,5 +170,5 @@ export function useRushes(): Live {
 
   const noteProxyJob = (job: ProxyJob) => setProxyJobs((jobs) => mergeProxyJob(jobs, proxyProgress(job, performance.now())));
 
-  return { state, assets, problem, wrongProject, refresh, proxyJobs, noteProxyJob };
+  return { state, assets, problem, wrongProject, refresh, proxyJobs, noteProxyJob, agent };
 }

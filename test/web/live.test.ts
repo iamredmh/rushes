@@ -81,6 +81,7 @@ function handlers(): LiveHandlers & { seen: string[] } {
     change: (d) => seen.push(`change ${d}`),
     proxy: (d) => seen.push(`proxy ${d}`),
     corrupt: (d) => seen.push(`corrupt ${d}`),
+    agent: (d) => seen.push(`agent ${d}`),
     open: () => seen.push("open"),
     error: () => seen.push("error"),
     resync: () => seen.push("resync"),
@@ -143,6 +144,17 @@ describe("connectLive (§19.8)", () => {
     await flush();
     const expected = ["open", 'change {"file":"notes"}', 'proxy {"id":"j1"}', 'corrupt {"file":"notes"}', "error"];
     for (const h of hs) expect(h.seen).toEqual(expected);
+  });
+
+  it("relays the agent's status to the other tabs, as the raw JSON", async () => {
+    const hs = [handlers(), handlers()];
+    const tabs = hs.map((h) => connectLive("abcd2345", "/e", h, deps()));
+    await flush();
+    expect(tabs.map((t) => t.role())).toEqual(["leader", "follower"]);
+    const status = '{"on":true,"agent":"claude","phase":"working","batches":["b1"]}';
+    open()[0].emit("agent", status);
+    await flush();
+    for (const h of hs) expect(h.seen).toEqual([`agent ${status}`]);
   });
 
   it("hands the stream to another tab when the leader closes", async () => {

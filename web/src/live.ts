@@ -13,7 +13,7 @@
 // BroadcastChannel, every tab opens its own stream.
 
 /** The events the server sends that the page acts on. */
-export const RELAYED = ["change", "proxy", "corrupt"] as const;
+export const RELAYED = ["change", "proxy", "corrupt", "agent"] as const;
 export type Relayed = (typeof RELAYED)[number];
 
 /** The relay's message format. Tabs from another version of Rushes use other names and are ignored. */
@@ -30,6 +30,8 @@ export interface LiveHandlers {
   change(data: string): void;
   proxy(data: string): void;
   corrupt(data: string): void;
+  /** §28: the agent's status (AgentStatus as JSON), sent on every change of it. */
+  agent(data: string): void;
   /** The stream (re)connected. */
   open(): void;
   /** The stream failed; the browser retries it. */

@@ -12,6 +12,10 @@ export type { LogHead } from "../../src/server/logbook.js";
 export type { BriefSectionView, BriefView } from "../../src/server/brief.js";
 export type { StoryboardShotView, StoryboardView } from "../../src/server/storyboard.js";
 export type { BuildState } from "../../src/core/plan.js";
+export type { AgentId } from "../../src/core/schema.js";
+export type { ActivityLine, AgentPhase, AgentStatus, SendResult } from "../../src/server/agent/runner.js";
+export type { PendingAsk } from "../../src/server/agent/broker.js";
+export type { SendHandOver } from "../../src/server/app.js";
 
 import type { BatchesFile, NotesFile, Picks, Project as StoredProject, Script, Version as StoredVersion, Video as StoredVideo, VisualsFile } from "../../src/core/schema.js";
 import type { TabState } from "../../src/core/tabs.js";
