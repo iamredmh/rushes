@@ -24,13 +24,14 @@
 .agentchip.over .achip[data-tip]::after { white-space: normal; width: max-content; max-width: 320px; line-height: 1.35; text-align: left; }
 @media (prefers-reduced-motion: reduce) { .achip svg.ic.aspin { animation: none; } }
 
-/* ---- the Send to AI row above Send, and the who-line under it (AgentRow). The foot stacks them: row, Send, who-line. ---- */
-.nfoot.agentfoot { flex-direction: column; align-items: stretch; gap: 6px; }
+/* ---- the Send to AI row above Send, and the who-line under it (AgentRow). The foot stacks them: row, Send, who-line,
+   kept tight (92 px with Send) so the notes list above keeps its room: three marked notes in full at 1440x900. ---- */
+.nfoot.agentfoot { flex-direction: column; align-items: stretch; gap: 4px; padding-top: 6px; }
 .agentfoot .sendbtn { flex: none; }
-.agentrow { position: relative; display: flex; align-items: center; gap: 8px; min-width: 0; height: 28px; }
+.agentrow { position: relative; display: flex; align-items: center; gap: 8px; min-width: 0; height: 24px; }
 /* The menu is placed against the whole row, so it is as wide as the foot and never runs past the panel's edge. */
 .agentrow .mwrap { position: static; flex: 1; min-width: 0; }
-.aname { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; height: 28px; margin-left: -6px; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; color: var(--text-2); font: 500 var(--t-small)/1 var(--sans); white-space: nowrap; cursor: pointer; }
+.aname { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; height: 24px; margin-left: -6px; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; color: var(--text-2); font: 500 var(--t-small)/1 var(--sans); white-space: nowrap; cursor: pointer; }
 .aname .alabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .aname svg.ic { flex: none; width: 14px; height: 14px; }
 .aname:hover, .aname[aria-expanded="true"] { background: var(--hover); color: var(--text); }
@@ -41,7 +42,7 @@
 .aswitch[aria-checked="true"] { background: var(--accent); }
 .aswitch[aria-checked="true"]::before { transform: translateX(12px); background: var(--on-accent); }
 .aswitch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.awho { margin: 0; color: var(--text-3); font: 12px/1.35 var(--sans); }
+.awho { margin: 0; color: var(--text-3); font: 12px/14px var(--sans); }
 @media (prefers-reduced-motion: reduce) { .aswitch, .aswitch::before { transition: none; } }
 
 /* ---- the agent menu, opening upward from the row ---- */
