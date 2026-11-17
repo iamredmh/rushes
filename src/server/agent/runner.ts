@@ -1,27 +1,31 @@
 // §28.2, §28.3: one run of the user's own agent per project. The runner owns the adapter process, the
-// conversation, the turn queue, progress and Stop. Permission asks come in with the broker (Task 6).
+// conversation, the turn queue, progress, permission asks (§28.4), answers on notes (§28.5) and Stop.
 //
 // How it moves:
 //   idle/finished/question/failed --send--> starting (adapter up, initialize, load or new session)
-//   starting --ready--> working (one session/prompt per batch, queued batches in order)
+//   starting --ready--> working (one session/prompt per turn: batches and follow-ups, in order of arrival)
 //   starting --fails--> failed (notes of every waiting batch recalled; send says why)
+//   working --an ask the rules don't allow--> waiting (until the user answers; never by time) --> working
 //   working --turn ends, more queued--> working;  --turn ends, none--> question | finished (idle timer armed)
 //   working --adapter exits--> failed (notes recalled);  any busy phase --stop--> idle (notes recalled)
+//   Stop, close and an adapter exit answer every pending ask cancelled.
 //
 // `gen` counts stops and closes. Anything that awaited (a start, a turn's end) checks it afterwards, so
 // work begun before a Stop never changes the state after it.
-import { AGENT_LINES, ACTIVITY_LINE_MAX, activityLine } from "../../core/agentActivity.js";
+import { ACTIVITY_LINE_MAX, activityLine } from "../../core/agentActivity.js";
+import { alwaysLabel, decide } from "../../core/agentRules.js";
 import { NotFoundError, RushesError } from "../../core/errors.js";
 import { oneLine } from "../../core/labels.js";
 import { lineEvent } from "../../core/logEvents.js";
 import { needsYou, noteState, recallNotes } from "../../core/noteState.js";
-import type { AgentId, AgentSettings, Batch } from "../../core/schema.js";
+import type { AgentId, AgentSettings, AlwaysRule, Batch } from "../../core/schema.js";
 import type { ChangeEvent, Store } from "../../core/store.js";
 import { logBookFor } from "../logbook.js";
-import { AcpConnection, type AdapterSpec, type McpServerSpec } from "./acp.js";
+import { AcpConnection, type AcpPermissionOutcome, type AcpPermissionParams, type AdapterSpec, type McpServerSpec } from "./acp.js";
 import { adapterSpec, rushesMcp } from "./adapters.js";
-import type { PendingAsk } from "./broker.js";
+import { PermissionBroker, addRule, allowOutcome, dropRule, toRequest, type AskChoice, type PendingAsk } from "./broker.js";
 import { detectAgents, type AgentInfo } from "./detect.js";
+import { CarriedBatches, batchJob, followUpFor, type TurnJob } from "./followUp.js";
 
 export type AgentPhase = "off" | "idle" | "starting" | "working" | "waiting" | "question" | "finished" | "failed";
 
@@ -59,6 +63,7 @@ export const STOP_WAIT_MS = 5000;
 export const AGENT_LINES_KEPT = 200;
 /** Long enough for AcpConnection.kill's SIGKILL (2 s) to land. */
 const EXIT_WAIT_MS = 4000;
+const CANCELLED: AcpPermissionOutcome = { outcome: "cancelled" };
 
 const NAMES: Record<AgentId, string> = { claude: "Claude Code", codex: "Codex" };
 
@@ -120,10 +125,16 @@ export class AgentRunner {
   private lines: ActivityLine[] = [];
   private current: { note: string | null; doing: string | null } = { note: null, doing: null };
 
-  /** Batches waiting for their turn, in the order they were sent. */
-  private queue: Batch[] = [];
-  /** The batch whose session/prompt is in flight; `done` settles when that prompt does. */
-  private turn: { batch: Batch; done: Promise<void> } | null = null;
+  /** Batches and follow-ups waiting for their turn, in the order they came in. */
+  private queue: TurnJob[] = [];
+  /** The job whose session/prompt is in flight; `done` settles when that prompt does. */
+  private turn: { job: TurnJob; done: Promise<void> } | null = null;
+  /** Permission asks waiting for the user. */
+  private readonly broker: PermissionBroker;
+  /** Batches handed to the agent in this process: only their notes' answers become follow-ups (R3). */
+  private readonly carried = new CarriedBatches();
+  /** The latest Always rule write; a permission ask waits for it before reading the rules. */
+  private ruleWrite: Promise<void> = Promise.resolve();
   /** A turn has ended and the runner is reading the notes to choose question or finished. */
   private ending = false;
 
@@ -149,6 +160,10 @@ export class AgentRunner {
   private readonly onChange = (e: ChangeEvent) => {
     if (e.file === "agent" && !this.closed) this.track(this.loadSettings());
   };
+  /** The user answered on a note: a follow-up turn when R3 allows one (followUp.ts). */
+  private readonly onUserReply = (e: { note: string; text: string }) => {
+    if (!this.closed) this.track(this.hand(() => followUpFor(this.store, this.carried, e)));
+  };
 
   constructor(private readonly store: Store, opts: RunnerOptions = {}) {
     this.detect = opts.detect ?? (() => detectAgents());
@@ -156,28 +171,31 @@ export class AgentRunner {
     this.mcp = opts.mcp ?? rushesMcp;
     this.idleMs = opts.idleMs ?? AGENT_IDLE_MS;
     this.now = opts.now ?? (() => new Date());
+    this.broker = new PermissionBroker(store.root, { now: this.now, onChange: () => this.asksChanged() });
     store.on("change", this.onChange);
+    store.on("user-reply", this.onUserReply);
     this.track(this.loadSettings());
   }
 
   status(): AgentStatus {
     const on = this.settings?.on ?? false;
+    const jobs = [...(this.turn ? [this.turn.job] : []), ...this.queue];
     return {
       on,
       agent: this.settings?.agent ?? null,
-      phase: !on && !this.busy() ? "off" : this.phase,
-      batches: [...(this.turn ? [this.turn.batch.id] : []), ...this.queue.map((b) => b.id)],
+      phase: !on && !this.busy() ? "off" : this.broker.size > 0 ? "waiting" : this.phase,
+      batches: jobs.filter((j) => j.kind === "batch").map((j) => j.batchId),
       current: { ...this.current },
-      asks: [],
+      asks: this.broker.pending(),
       lines: this.lines.slice(),
       error: this.error,
       session: this.settings?.session?.id ?? null,
     };
   }
 
-  /** From the first send until the queue is empty (and, from Task 6, no ask is waiting). */
+  /** From the first send until the queue is empty and no ask is waiting. */
   busy(): boolean {
-    return this.starting !== null || this.stopping !== null || this.turn !== null || this.ending || this.queue.length > 0;
+    return this.starting !== null || this.stopping !== null || this.turn !== null || this.ending || this.queue.length > 0 || this.broker.size > 0;
   }
 
   /**
@@ -185,14 +203,25 @@ export class AgentRunner {
    * flight. Never rejects: when the batch can't be handed over it says why, so the desk can copy the prompt.
    */
   async send(batch: Batch): Promise<SendResult> {
-    const accepting = this.sendLock.then(() => this.accept(batch));
+    return (await this.hand(async () => batchJob(batch)))!;
+  }
+
+  /** Queues the job `make` gives (none: nothing to do, null back), then starts the adapter or pumps the queue. */
+  private async hand(make: () => Promise<TurnJob | null>): Promise<SendResult | null> {
+    const accepting = this.sendLock.then(async () => {
+      // A follow-up is dropped if a Stop lands after its note was read: the Stop may have taken the note back.
+      const gen = this.gen;
+      const job = await make();
+      return job ? this.accept(job, job.kind === "followUp" ? gen : null) : null;
+    });
     this.sendLock = accepting.catch(() => undefined);
-    let accepted: { info: AgentInfo } | { why: string };
+    let accepted: { info: AgentInfo } | { why: string } | null;
     try {
       accepted = await accepting;
     } catch (e) {
       return { handedTo: null, why: messageOf(e) };
     }
+    if (accepted === null) return null;
     if ("why" in accepted) return { handedTo: null, why: accepted.why };
     try {
       await this.ensureStarted();
@@ -205,8 +234,8 @@ export class AgentRunner {
     return { handedTo: accepted.info.id };
   }
 
-  /** Checks the switch, the agent and its sign-in, then queues the batch. Runs one send at a time. */
-  private async accept(batch: Batch): Promise<{ info: AgentInfo } | { why: string }> {
+  /** Checks the switch, the agent and its sign-in, then queues the job. Runs one at a time. */
+  private async accept(job: TurnJob, sinceGen: number | null): Promise<{ info: AgentInfo } | { why: string }> {
     while (this.stopping) await this.stopping;
     if (this.closed) return { why: "Rushes is closing" };
     const settings = await this.loadSettings();
@@ -218,6 +247,7 @@ export class AgentRunner {
     // A Stop or close may have begun while this send was checking.
     while (this.stopping) await this.stopping;
     if (this.closed) return { why: "Rushes is closing" };
+    if (sinceGen !== null && sinceGen !== this.gen) return { why: "Stopped" };
     const queued = this.busy();
     if (!queued && this.conn) {
       // An idle adapter for another agent, another conversation or another permission level is replaced.
@@ -226,7 +256,7 @@ export class AgentRunner {
     }
     if (!queued) this.info = info;
     this.clearIdle();
-    this.queue.push(batch);
+    this.queue.push(job);
     // Queued behind a run: say so now. Otherwise the start or the turn about to begin says it.
     if (queued) this.announce();
     return { info };
@@ -318,16 +348,67 @@ export class AgentRunner {
     this.live.add(conn);
     conn.on("update", (u: unknown) => this.onUpdate(conn, u));
     conn.on("exit", (e: { code: number | null; stderr: string }) => this.onExit(conn, e));
+    conn.onPermission((p) => this.onPermission(conn, p));
   }
 
-  /** Lets go of the adapter and asks it to exit. Its exit event is then ignored. */
+  /** Lets go of the adapter and asks it to exit. Its exit event is then ignored, and its asks are cancelled. */
   private dropConn(): AcpConnection | null {
     const c = this.conn;
     this.conn = null;
     this.sessionId = null;
     this.connPermissions = null;
+    this.broker.cancelAll();
     c?.kill();
     return c;
+  }
+
+  /**
+   * The agent asks to do something. Allowed by the project's rules: yes at once, no ask shown. Otherwise the
+   * ask waits in the broker for the user. Asks from an adapter that is going (Stop, close, replaced) get "cancelled".
+   */
+  private async onPermission(conn: AcpConnection, p: AcpPermissionParams): Promise<AcpPermissionOutcome> {
+    const live = () => !this.closed && !this.stopping && conn === this.conn && !conn.hasExited;
+    if (!live()) return CANCELLED;
+    // The adapter hears "yes" before an Always rule is written: wait for that write, then read the rules.
+    await this.ruleWrite;
+    const settings = await this.loadSettings();
+    if (!live()) return CANCELLED;
+    if (decide(toRequest(p, this.store.root), settings, this.store.root) === "allow") return allowOutcome(p.options);
+    return this.broker.ask(p);
+  }
+
+  private asksChanged(): void {
+    this.announce();
+    // The last ask answered with nothing else going on: the adapter's idle time starts again.
+    if (!this.busy() && !this.closed) this.armIdle();
+  }
+
+  /** The user's answer to a pending ask. "always" also keeps the rule in agent.json. */
+  async answer(askId: string, choice: AskChoice): Promise<void> {
+    const rule = this.broker.answer(askId, choice);
+    if (!rule) return;
+    const writing = this.keepRule(rule);
+    this.ruleWrite = writing.catch(() => undefined);
+    await writing;
+  }
+
+  /** Takes an Always rule out of agent.json by its index there. */
+  async removeRule(index: number): Promise<void> {
+    const { data } = await this.store.update("agent", (f) => dropRule(f.always, index));
+    this.applySettings(data);
+    this.announce();
+  }
+
+  /** Keeps the rule in agent.json (once; the oldest goes at the cap) and says so in Activity and the Change Log. */
+  private async keepRule(rule: AlwaysRule): Promise<void> {
+    const { data, result: added } = await this.store.update("agent", (f) => addRule(f.always, rule));
+    this.applySettings(data);
+    if (added) {
+      const text = `Always allowed: ${alwaysLabel(rule)}`;
+      this.addLine(text, null);
+      await this.writeMilestone(text);
+    }
+    this.announce();
   }
 
   /** Starts the next queued batch when nothing else is in flight. */
@@ -340,45 +421,46 @@ export class AgentRunner {
       this.ensureStarted().then(() => this.pump(), () => undefined);
       return;
     }
-    const batch = this.queue.shift()!;
+    const job = this.queue.shift()!;
     const gen = this.gen;
     const name = this.info?.name ?? "The agent";
+    if (job.kind === "batch") this.carried.add(job.batchId);
     this.clearIdle();
     let done!: () => void;
-    this.turn = { batch, done: new Promise<void>((r) => (done = r)) };
+    this.turn = { job, done: new Promise<void>((r) => (done = r)) };
     this.phase = "working";
     this.error = null;
     this.current = { note: null, doing: null };
-    this.milestone(`${name} started on ${batch.id}`);
+    this.milestone(`${name} started on ${job.label}`);
     this.announce();
     this.track(
-      conn.prompt(sessionId, batch.prompt + "\n\n" + AGENT_LINES).then(
+      conn.prompt(sessionId, job.prompt).then(
         (r) => {
           done();
-          return this.turnEnded(gen, batch, r.stopReason);
+          return this.turnEnded(gen, job, r.stopReason);
         },
         (err: unknown) => {
           done();
-          this.turnFailed(gen, conn, batch, err);
+          this.turnFailed(gen, conn, job, err);
         },
       ),
     );
   }
 
-  private async turnEnded(gen: number, batch: Batch, stopReason: string): Promise<void> {
-    // Stopped, closed or failed meanwhile: whoever did that has already settled this batch.
-    if (gen !== this.gen || this.turn?.batch !== batch) return;
+  private async turnEnded(gen: number, job: TurnJob, stopReason: string): Promise<void> {
+    // Stopped, closed or failed meanwhile: whoever did that has already settled this job.
+    if (gen !== this.gen || this.turn?.job !== job) return;
     const name = this.info?.name ?? "The agent";
     this.turn = null;
     this.ending = true;
-    this.milestone(stopReason === "end_turn" ? `${name} finished ${batch.id}` : `${name} ended ${batch.id} (${stopReason})`);
+    this.milestone(stopReason === "end_turn" ? `${name} finished ${job.label}` : `${name} ended ${job.label} (${stopReason})`);
     this.announce();
     // Still busy while the notes are read, so a send now queues and is picked up below. The phase follows
-    // the batch this turn carried: a question on one of its notes makes it "question".
+    // the batch this turn worked on: a question on one of its notes makes it "question".
     let question = false;
     try {
       const notes = await this.store.read("notes");
-      question = notes.notes.some((n) => n.batch === batch.id && needsYou(n));
+      question = notes.notes.some((n) => n.batch === job.batchId && needsYou(n));
     } catch (e) {
       console.error(`Rushes: couldn't read the notes after a turn: ${messageOf(e)}`);
     }
@@ -392,11 +474,11 @@ export class AgentRunner {
   }
 
   /** The prompt failed while the adapter stayed up (an RPC error): the run fails and the adapter is replaced. */
-  private turnFailed(gen: number, conn: AcpConnection, batch: Batch, err: unknown): void {
-    if (gen !== this.gen || this.turn?.batch !== batch) return;
+  private turnFailed(gen: number, conn: AcpConnection, job: TurnJob, err: unknown): void {
+    if (gen !== this.gen || this.turn?.job !== job) return;
     if (this.conn === conn) this.dropConn();
     const name = this.info?.name ?? "The agent";
-    this.track(this.failRun(`${name} could not finish ${batch.id}: ${messageOf(err)}`));
+    this.track(this.failRun(`${name} could not finish ${job.label}: ${messageOf(err)}`));
   }
 
   private onUpdate(conn: AcpConnection, update: unknown): void {
@@ -419,6 +501,7 @@ export class AgentRunner {
     this.sessionId = null;
     this.connPermissions = null;
     this.clearIdle();
+    this.broker.cancelAll();
     if (!this.turn) return; // it went between turns; the next send starts a fresh one
     const line = lastLine(e.stderr);
     const name = this.info?.name ?? "The agent";
@@ -427,7 +510,8 @@ export class AgentRunner {
 
   /** The run failed: every batch in flight or waiting gives its notes back. The state changes at once; the writes follow. */
   private failRun(why: string): Promise<void> {
-    const ids = [...(this.turn ? [this.turn.batch.id] : []), ...this.queue.map((b) => b.id)];
+    const ids = this.batchIds();
+    this.broker.cancelAll();
     this.turn = null;
     this.ending = false;
     this.queue = [];
@@ -458,9 +542,15 @@ export class AgentRunner {
   private async halt(): Promise<void> {
     this.gen += 1;
     this.clearIdle();
+    // First, and let the cancelled answers reach the adapter's stdin before session/cancel does.
+    if (this.broker.size > 0) {
+      this.broker.cancelAll();
+      await new Promise((r) => setImmediate(r));
+    }
     const name = this.info?.name ?? "the agent";
     const turn = this.turn;
-    const ids = [...(turn ? [turn.batch.id] : []), ...this.queue.map((b) => b.id)];
+    // Follow-ups in flight or queued are dropped; only batches give notes back.
+    const ids = this.batchIds();
     this.queue = [];
     const conn = this.conn;
     const sessionId = this.sessionId;
@@ -510,7 +600,9 @@ export class AgentRunner {
     this.closed = true;
     this.gen += 1;
     this.store.off("change", this.onChange);
+    this.store.off("user-reply", this.onUserReply);
     this.clearIdle();
+    this.broker.cancelAll();
     const conn = this.conn;
     if (this.turn && conn && this.sessionId && !conn.hasExited) conn.cancel(this.sessionId);
     this.dropConn();
@@ -558,6 +650,12 @@ export class AgentRunner {
     this.settings = next;
     this.applied = seq;
     if (changed) this.announce();
+  }
+
+  /** The batches in flight and queued, by id: the ones whose notes go back on Stop or failure. */
+  private batchIds(): string[] {
+    const jobs = [...(this.turn ? [this.turn.job] : []), ...this.queue];
+    return jobs.filter((j) => j.kind === "batch").map((j) => j.batchId);
   }
 
   private recall(ids: string[]): Promise<void> {
