@@ -138,8 +138,11 @@ interface Started {
   tmpDir: string;
 }
 
-/** Start `rushes serve` on a fresh project folder (with a space in its path) and wait for its dashboard URL. */
-async function start(port = 0, noFfmpeg = false): Promise<Started> {
+/**
+ * Start `rushes serve` on a fresh project folder (with a space in its path) and wait for its dashboard URL. `env` is added
+ * to the server's environment (the fake agent's RUSHES_TEST_AGENT, e2e/agentFixture.ts).
+ */
+async function start(port = 0, noFfmpeg = false, env: Record<string, string> = {}): Promise<Started> {
   const tmpDir = await mkdtemp(join(tmpdir(), "rushes e2e "));
   const root = join(tmpDir, "My Film");
   await mkdir(join(root, "renders"), { recursive: true });
@@ -151,7 +154,7 @@ async function start(port = 0, noFfmpeg = false): Promise<Started> {
   const idleMinutes = process.env.RUSHES_E2E_IDLE_MINUTES ?? "5";
   const child = spawn(process.execPath, [CLI, "serve", root, "--port", String(port), "--idle-minutes", idleMinutes], {
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, RUSHES_NO_REVEAL: "1", ...(noFfmpeg ? { PATH: pathWithoutFfmpeg() } : {}) },
+    env: { ...process.env, RUSHES_NO_REVEAL: "1", ...(noFfmpeg ? { PATH: pathWithoutFfmpeg() } : {}), ...env },
   });
   const url = await new Promise<string>((ok, fail) => {
     let out = "";
@@ -183,10 +186,10 @@ async function stop(child: ChildProcess): Promise<void> {
  * N+1), kill that child and try again, up to ~5 s. Node sets SO_REUSEADDR by
  * default, so this is usually a no-op after the first attempt.
  */
-async function startOnPort(port: number, noFfmpeg = false): Promise<Started> {
+async function startOnPort(port: number, noFfmpeg = false, env: Record<string, string> = {}): Promise<Started> {
   const deadline = Date.now() + 5000;
   for (;;) {
-    const attempt = await start(port, noFfmpeg);
+    const attempt = await start(port, noFfmpeg, env);
     if (attempt.port === port) return attempt;
     await stop(attempt.child);
     await rm(attempt.tmpDir, { recursive: true, force: true });
@@ -255,6 +258,203 @@ function silenceAudio(): void {
   };
 }
 
+export interface OpenOptions {
+  noFfmpeg: boolean;
+  browserName: string;
+  /** Start on exactly this port (0, the default: any free one). */
+  port?: number;
+  /** Added to the server's environment. */
+  env?: Record<string, string>;
+}
+
+export interface OpenRushes {
+  rushes: Rushes;
+  /** Stops the server and removes its project folders. */
+  close(): Promise<void>;
+}
+
+/** Starts a server on a fresh project and gives the test's handle on it: the `rushes` fixture, and e2e/agentFixture.ts. */
+export async function openRushes({ noFfmpeg, browserName, port = 0, env = {} }: OpenOptions): Promise<OpenRushes> {
+  const tmpDirs: string[] = [];
+  const started = port === 0 ? await start(0, noFfmpeg, env) : await startOnPort(port, noFfmpeg, env);
+  tmpDirs.push(started.tmpDir);
+  let child = started.child;
+  let url = started.url;
+  let origin = started.base;
+  let root = started.root;
+  // Counted per video, so cuts to different films never collide on the same render filename.
+  const cutsByVideo = new Map<string, number>();
+
+  const api = async (method: string, path: string, body?: unknown) => {
+    const res = await fetch(origin + path, {
+      method,
+      headers: body === undefined ? {} : { "content-type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(`${method} ${path} → ${res.status} ${JSON.stringify(json)}`);
+    return json;
+  };
+  const addCut = async (note?: string, video = "Hero") => {
+    needsH264(browserName);
+    const slug = video.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+    const n = (cutsByVideo.get(slug) ?? 0) + 1;
+    cutsByVideo.set(slug, n);
+    const file = `renders/${slug}_v${n}.mp4`;
+    await copyFile(CLIP, join(root, file));
+    return api("POST", "/api/versions", { video, file, note });
+  };
+  const addVerticalCut = async (note?: string) => {
+    needsH264(browserName);
+    const n = (cutsByVideo.get("hero") ?? 0) + 1;
+    cutsByVideo.set("hero", n);
+    const file = `renders/hero_v${n}.mp4`;
+    await copyFile(VERTICAL, join(root, file));
+    return api("POST", "/api/versions", { video: "Hero", file, note });
+  };
+  const addProResCut = async (opts: ProResOptions = {}, note?: string) => {
+    // Its proxy is H.264, and every proxy test plays or offers to play one.
+    needsH264(browserName);
+    const n = (cutsByVideo.get("hero") ?? 0) + 1;
+    cutsByVideo.set("hero", n);
+    const file = `renders/hero_v${n}.${opts.codec === "h264" ? "mp4" : "mov"}`;
+    const out = join(root, file);
+    const tone = opts.audio
+      ? ["-f", "lavfi", "-i", `sine=frequency=440:sample_rate=48000:duration=${opts.seconds ?? 6}`, "-c:a", "aac", "-b:a", "64k", "-shortest"]
+      : [];
+    if (opts.codec === "h264") {
+      await ffmpeg([
+        "-f", "lavfi", "-i", `testsrc=size=${opts.width ?? 640}x${opts.height ?? 360}:rate=30:duration=${opts.seconds ?? 6}`,
+        ...tone,
+        "-c:v", "libx264", "-preset", "ultrafast", "-g", "30", "-pix_fmt", "yuv420p", out,
+      ]);
+    } else if (opts.long) {
+      const one = join(root, "renders", `.hero_v${n}_one.mov`);
+      await ffmpeg([
+        "-f", "lavfi", "-i", `testsrc=size=${opts.width ?? 160}x${opts.height ?? 90}:rate=30:duration=1`,
+        "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=1",
+        "-ac", "2", "-c:v", "prores_ks", "-profile:v", "0", "-c:a", "aac", "-b:a", "32k", "-shortest", one,
+      ]);
+      await ffmpeg(["-stream_loop", String((opts.seconds ?? 300) - 1), "-i", one, "-c", "copy", out]);
+      await rm(one, { force: true });
+    } else {
+      await ffmpeg([
+        "-f", "lavfi", "-i", `testsrc=size=${opts.width ?? 640}x${opts.height ?? 360}:rate=30:duration=${opts.seconds ?? 6}`,
+        ...tone,
+        "-c:v", "prores_ks", "-profile:v", "0", out,
+      ]);
+    }
+    return api("POST", "/api/versions", { video: "Hero", file, note });
+  };
+  const render = async (slug: string, n: number, s: FormatSize, tag: string, audio = false) => {
+    const mpeg2 = s.codec === "mpeg2";
+    const file = `renders/${slug}_v${n}_${s.width}x${s.height}${tag}.${mpeg2 ? "mkv" : "mp4"}`;
+    const seconds = s.seconds ?? 4;
+    const tone = audio ? ["-f", "lavfi", "-i", `sine=frequency=440:sample_rate=48000:duration=${seconds}`, "-c:a", "aac", "-b:a", "64k", "-shortest"] : [];
+    const codec = mpeg2 ? ["-c:v", "mpeg2video", "-q:v", "5"] : ["-c:v", "libx264", "-preset", "ultrafast", "-g", "30"];
+    await ffmpeg([
+      "-f", "lavfi", "-i", `testsrc=size=${s.width}x${s.height}:rate=30:duration=${seconds}`,
+      ...tone,
+      ...codec, "-pix_fmt", "yuv420p", join(root, file),
+    ]);
+    return file;
+  };
+  const slugOf = (video: string) => video.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+  const addFormatsCut = async (sizes: FormatSize[], opts: { video?: string; note?: string; label?: string; audio?: boolean } = {}) => {
+    needsH264(browserName);
+    const video = opts.video ?? "Hero";
+    const slug = slugOf(video);
+    const n = (cutsByVideo.get(slug) ?? 0) + 1;
+    cutsByVideo.set(slug, n);
+    const files = await Promise.all(sizes.map((s, i) => render(slug, n, s, "", opts.audio && i === 0)));
+    return api("POST", "/api/versions", { video, file: files[0], note: opts.note, label: opts.label, formats: files.slice(1).map((file) => ({ file })) });
+  };
+  const addFormatFile = async (size: FormatSize, opts: { video?: string; version?: string } = {}) => {
+    needsH264(browserName);
+    const video = opts.video ?? "Hero";
+    const slug = slugOf(video);
+    const file = await render(slug, cutsByVideo.get(slug) ?? 1, size, "_extra");
+    return api("POST", "/api/formats", { file, video, ...(opts.version ? { version: opts.version } : {}) });
+  };
+  let wavs = 0;
+  const addVariant = async (stage: "voice" | "music" | "sfx", name: string, opts: VariantOptions) => {
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+    const file = `audio/${stage}-${++wavs}-${slug}.wav`;
+    await mkdir(join(root, "audio"), { recursive: true });
+    await writeFile(join(root, file), makeWav({ seconds: opts.seconds, freq: opts.freq }));
+    return api("POST", "/api/variants", { stage, name, file, lane: opts.lane, round: opts.round, meta: opts.meta, cues: opts.cues, video: opts.video });
+  };
+  const writeFiles = async (files: TreeFile[]) => {
+    for (const f of files) {
+      const abs = join(root, ...f.path.split("/"));
+      await mkdir(dirname(abs), { recursive: true });
+      if (f.video) await copyFile(CLIP, abs);
+      else if (f.text !== undefined) await writeFile(abs, f.text);
+      else await writeFile(abs, makeWav({ seconds: f.seconds ?? 2, freq: f.freq ?? 330 }));
+    }
+  };
+  const scan = async () => {
+    // A scan asked for while another's first pass is running joins it, and a walk that began before
+    // the test wrote its files (the one at start-up, slow on a busy machine) has not seen them. Let
+    // any walk already running finish first, so the scan asked for here is a fresh look.
+    for (let i = 0; i < 400; i++) {
+      const { found } = await api("GET", "/api/state");
+      if (!found.scanning) break;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    const result = await api("POST", "/api/found/scan", { wait: true });
+    // The first pass and the adoption are done; the other lengths arrive in the background.
+    if (!noFfmpeg && hasFfmpeg) {
+      const deadline = Date.now() + 10_000;
+      for (;;) {
+        const { files } = await api("GET", "/api/found");
+        const unknown = files.filter((f: { duration: number | null }) => f.duration === null).map((f: { path: string }) => f.path);
+        if (unknown.length === 0) break;
+        // Never carry on with lengths missing: a test that reads them would flake. Say which, loudly.
+        if (Date.now() > deadline) throw new Error(`scan(): ffprobe had not given a length for ${unknown.length} file(s) after 10 s: ${unknown.slice(0, 5).join(", ")}`);
+        await new Promise((r) => setTimeout(r, 50));
+      }
+    }
+    return result;
+  };
+  const swapProject = async () => {
+    const port = Number(new URL(url).port);
+    await stop(child);
+    const next = await startOnPort(port, noFfmpeg, env);
+    tmpDirs.push(next.tmpDir);
+    child = next.child;
+    url = next.url;
+    origin = next.base;
+    root = next.root;
+    cutsByVideo.clear();
+  };
+
+  const rushes: Rushes = {
+    get url() { return url; },
+    testUrl: (extra = "") => `${url}?test=1${extra ? `&${extra}` : ""}`,
+    get base() { return origin; },
+    get root() { return root; },
+    api,
+    addCut,
+    addVerticalCut,
+    addProResCut,
+    addFormatsCut,
+    addFormatFile,
+    addVariant,
+    writeFiles,
+    scan,
+    swapProject,
+  };
+
+  return {
+    rushes,
+    async close() {
+      await stop(child);
+      for (const dir of tmpDirs) await rm(dir, { recursive: true, force: true });
+    },
+  };
+}
+
 export const test = base.extend<{ rushes: Rushes; noFfmpeg: boolean }>({
   context: async ({ context }, use) => {
     await context.addInitScript(silenceAudio);
@@ -263,179 +463,9 @@ export const test = base.extend<{ rushes: Rushes; noFfmpeg: boolean }>({
   /** Start the server without ffmpeg or ffprobe on its PATH (`test.use({ noFfmpeg: true })`). */
   noFfmpeg: [false, { option: true }],
   rushes: async ({ noFfmpeg, browserName }, use) => {
-    const tmpDirs: string[] = [];
-    let started = await start(0, noFfmpeg);
-    tmpDirs.push(started.tmpDir);
-    let child = started.child;
-    let url = started.url;
-    let origin = started.base;
-    let root = started.root;
-    // Counted per video, so cuts to different films never collide on the same render filename.
-    const cutsByVideo = new Map<string, number>();
-
-    const api = async (method: string, path: string, body?: unknown) => {
-      const res = await fetch(origin + path, {
-        method,
-        headers: body === undefined ? {} : { "content-type": "application/json" },
-        body: body === undefined ? undefined : JSON.stringify(body),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(`${method} ${path} → ${res.status} ${JSON.stringify(json)}`);
-      return json;
-    };
-    const addCut = async (note?: string, video = "Hero") => {
-      needsH264(browserName);
-      const slug = video.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
-      const n = (cutsByVideo.get(slug) ?? 0) + 1;
-      cutsByVideo.set(slug, n);
-      const file = `renders/${slug}_v${n}.mp4`;
-      await copyFile(CLIP, join(root, file));
-      return api("POST", "/api/versions", { video, file, note });
-    };
-    const addVerticalCut = async (note?: string) => {
-      needsH264(browserName);
-      const n = (cutsByVideo.get("hero") ?? 0) + 1;
-      cutsByVideo.set("hero", n);
-      const file = `renders/hero_v${n}.mp4`;
-      await copyFile(VERTICAL, join(root, file));
-      return api("POST", "/api/versions", { video: "Hero", file, note });
-    };
-    const addProResCut = async (opts: ProResOptions = {}, note?: string) => {
-      // Its proxy is H.264, and every proxy test plays or offers to play one.
-      needsH264(browserName);
-      const n = (cutsByVideo.get("hero") ?? 0) + 1;
-      cutsByVideo.set("hero", n);
-      const file = `renders/hero_v${n}.${opts.codec === "h264" ? "mp4" : "mov"}`;
-      const out = join(root, file);
-      const tone = opts.audio
-        ? ["-f", "lavfi", "-i", `sine=frequency=440:sample_rate=48000:duration=${opts.seconds ?? 6}`, "-c:a", "aac", "-b:a", "64k", "-shortest"]
-        : [];
-      if (opts.codec === "h264") {
-        await ffmpeg([
-          "-f", "lavfi", "-i", `testsrc=size=${opts.width ?? 640}x${opts.height ?? 360}:rate=30:duration=${opts.seconds ?? 6}`,
-          ...tone,
-          "-c:v", "libx264", "-preset", "ultrafast", "-g", "30", "-pix_fmt", "yuv420p", out,
-        ]);
-      } else if (opts.long) {
-        const one = join(root, "renders", `.hero_v${n}_one.mov`);
-        await ffmpeg([
-          "-f", "lavfi", "-i", `testsrc=size=${opts.width ?? 160}x${opts.height ?? 90}:rate=30:duration=1`,
-          "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=1",
-          "-ac", "2", "-c:v", "prores_ks", "-profile:v", "0", "-c:a", "aac", "-b:a", "32k", "-shortest", one,
-        ]);
-        await ffmpeg(["-stream_loop", String((opts.seconds ?? 300) - 1), "-i", one, "-c", "copy", out]);
-        await rm(one, { force: true });
-      } else {
-        await ffmpeg([
-          "-f", "lavfi", "-i", `testsrc=size=${opts.width ?? 640}x${opts.height ?? 360}:rate=30:duration=${opts.seconds ?? 6}`,
-          ...tone,
-          "-c:v", "prores_ks", "-profile:v", "0", out,
-        ]);
-      }
-      return api("POST", "/api/versions", { video: "Hero", file, note });
-    };
-    const render = async (slug: string, n: number, s: FormatSize, tag: string, audio = false) => {
-      const mpeg2 = s.codec === "mpeg2";
-      const file = `renders/${slug}_v${n}_${s.width}x${s.height}${tag}.${mpeg2 ? "mkv" : "mp4"}`;
-      const seconds = s.seconds ?? 4;
-      const tone = audio ? ["-f", "lavfi", "-i", `sine=frequency=440:sample_rate=48000:duration=${seconds}`, "-c:a", "aac", "-b:a", "64k", "-shortest"] : [];
-      const codec = mpeg2 ? ["-c:v", "mpeg2video", "-q:v", "5"] : ["-c:v", "libx264", "-preset", "ultrafast", "-g", "30"];
-      await ffmpeg([
-        "-f", "lavfi", "-i", `testsrc=size=${s.width}x${s.height}:rate=30:duration=${seconds}`,
-        ...tone,
-        ...codec, "-pix_fmt", "yuv420p", join(root, file),
-      ]);
-      return file;
-    };
-    const slugOf = (video: string) => video.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
-    const addFormatsCut = async (sizes: FormatSize[], opts: { video?: string; note?: string; label?: string; audio?: boolean } = {}) => {
-      needsH264(browserName);
-      const video = opts.video ?? "Hero";
-      const slug = slugOf(video);
-      const n = (cutsByVideo.get(slug) ?? 0) + 1;
-      cutsByVideo.set(slug, n);
-      const files = await Promise.all(sizes.map((s, i) => render(slug, n, s, "", opts.audio && i === 0)));
-      return api("POST", "/api/versions", { video, file: files[0], note: opts.note, label: opts.label, formats: files.slice(1).map((file) => ({ file })) });
-    };
-    const addFormatFile = async (size: FormatSize, opts: { video?: string; version?: string } = {}) => {
-      needsH264(browserName);
-      const video = opts.video ?? "Hero";
-      const slug = slugOf(video);
-      const file = await render(slug, cutsByVideo.get(slug) ?? 1, size, "_extra");
-      return api("POST", "/api/formats", { file, video, ...(opts.version ? { version: opts.version } : {}) });
-    };
-    let wavs = 0;
-    const addVariant = async (stage: "voice" | "music" | "sfx", name: string, opts: VariantOptions) => {
-      const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
-      const file = `audio/${stage}-${++wavs}-${slug}.wav`;
-      await mkdir(join(root, "audio"), { recursive: true });
-      await writeFile(join(root, file), makeWav({ seconds: opts.seconds, freq: opts.freq }));
-      return api("POST", "/api/variants", { stage, name, file, lane: opts.lane, round: opts.round, meta: opts.meta, cues: opts.cues, video: opts.video });
-    };
-    const writeFiles = async (files: TreeFile[]) => {
-      for (const f of files) {
-        const abs = join(root, ...f.path.split("/"));
-        await mkdir(dirname(abs), { recursive: true });
-        if (f.video) await copyFile(CLIP, abs);
-        else if (f.text !== undefined) await writeFile(abs, f.text);
-        else await writeFile(abs, makeWav({ seconds: f.seconds ?? 2, freq: f.freq ?? 330 }));
-      }
-    };
-    const scan = async () => {
-      // A scan asked for while another's first pass is running joins it, and a walk that began before
-      // the test wrote its files (the one at start-up, slow on a busy machine) has not seen them. Let
-      // any walk already running finish first, so the scan asked for here is a fresh look.
-      for (let i = 0; i < 400; i++) {
-        const { found } = await api("GET", "/api/state");
-        if (!found.scanning) break;
-        await new Promise((r) => setTimeout(r, 25));
-      }
-      const result = await api("POST", "/api/found/scan", { wait: true });
-      // The first pass and the adoption are done; the other lengths arrive in the background.
-      if (!noFfmpeg && hasFfmpeg) {
-        const deadline = Date.now() + 10_000;
-        for (;;) {
-          const { files } = await api("GET", "/api/found");
-          const unknown = files.filter((f: { duration: number | null }) => f.duration === null).map((f: { path: string }) => f.path);
-          if (unknown.length === 0) break;
-          // Never carry on with lengths missing: a test that reads them would flake. Say which, loudly.
-          if (Date.now() > deadline) throw new Error(`scan(): ffprobe had not given a length for ${unknown.length} file(s) after 10 s: ${unknown.slice(0, 5).join(", ")}`);
-          await new Promise((r) => setTimeout(r, 50));
-        }
-      }
-      return result;
-    };
-    const swapProject = async () => {
-      const port = Number(new URL(url).port);
-      await stop(child);
-      const next = await startOnPort(port, noFfmpeg);
-      tmpDirs.push(next.tmpDir);
-      child = next.child;
-      url = next.url;
-      origin = next.base;
-      root = next.root;
-      cutsByVideo.clear();
-    };
-
-    await use({
-      get url() { return url; },
-      testUrl: (extra = "") => `${url}?test=1${extra ? `&${extra}` : ""}`,
-      get base() { return origin; },
-      get root() { return root; },
-      api,
-      addCut,
-      addVerticalCut,
-      addProResCut,
-      addFormatsCut,
-      addFormatFile,
-      addVariant,
-      writeFiles,
-      scan,
-      swapProject,
-    });
-
-    await stop(child);
-    for (const dir of tmpDirs) await rm(dir, { recursive: true, force: true });
+    const opened = await openRushes({ noFfmpeg, browserName });
+    await use(opened.rushes);
+    await opened.close();
   },
 });
 

@@ -58,6 +58,10 @@ const PATHS: Record<string, string> = {
   zoomin: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M20 20l-5-5M8 10.5h5M10.5 8v5"/>',
   zoomout: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M20 20l-5-5M8 10.5h5"/>',
   info: '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5M12 7.8h.01"/>',
+  // §28: Stop the agent's run, a filled square as on a player.
+  stop: '<rect x="6.5" y="6.5" width="11" height="11" rx="2" fill="currentColor" stroke="none"/>',
+  // §28: the agent is busy. Three quarters of a ring; the chip turns it (agent.css).
+  spin: '<path d="M12 3.5a8.5 8.5 0 1 0 8.5 8.5"/>',
 };
 
 export function Icon({ name, class: cls }: { name: keyof typeof PATHS | string; class?: string }) {

@@ -30,6 +30,7 @@ import { NotesPanel, PanelContext, PanelToggle, usePanelPlace, type NotesPanelPr
 import { ReviewTabs, type ReviewTabRow } from "./desk/ReviewTabs.js";
 import { StatusBar } from "./desk/StatusBar.js";
 import { TopBar } from "./desk/TopBar.js";
+import { AgentChip } from "./agent/AgentChip.js";
 import { Workspaces } from "./desk/Workspaces.js";
 import type { ReviewClock } from "./desk/frame.js";
 import type { MixView } from "./desk/useMix.js";
@@ -109,7 +110,7 @@ function PlanNotesPanel({ onPendingChange, ...props }: NotesPanelProps & { onPen
 }
 
 export function App() {
-  const { state, assets, problem, wrongProject, refresh, proxyJobs, noteProxyJob } = useRushes();
+  const { state, assets, problem, wrongProject, refresh, proxyJobs, noteProxyJob, agent } = useRushes();
   const [stage, setStage] = useState<View | null>(null);
   const [videoId, setVideoId] = useState<string | null>(null);
   const [versionId, setVersionId] = useState<string | null>(null);
@@ -715,6 +716,19 @@ export function App() {
             assetsUnlocked={assetsUnlocked}
             found={foundUnseen ? { count: foundTotal(state.found?.counts), text: chip! } : null}
             onPick={(ws) => (ws === "plan" ? planKey() : ws === "assets" ? showAssets() : ws === "visuals" ? show("visuals") : show(reviewLast as Stage))}
+          />
+        }
+        agent={
+          <AgentChip
+            status={agent}
+            notes={state.notes.notes}
+            onOpen={() => {
+              // §28: the run's lines are in Activity, in the notes panel (Review's when this page has none).
+              if (!panelHere) show(reviewLast as Stage);
+              panel.setShown(true);
+              changeLog.setOpen(true, false);
+            }}
+            onStop={() => void api.post("/api/agent/stop", {}).catch((e) => toast((e as Error).message))}
           />
         }
         notesToggle={panelHere ? <PanelToggle shown={panel.shown} onToggle={panel.toggle} buttonRef={panelToggle} /> : null}

@@ -1,5 +1,6 @@
 // §27, 5.2: the top bar, one line of 44 px. Left to right: the logo and the project's name, the Film menu, the Cut menu;
-// the workspaces centred; the notes panel's toggle and More at the right. Nothing else (Share waits for review links).
+// the workspaces centred; at the right, the agent's chip while it has a run (§28), the notes panel's toggle and More.
+// Nothing else (Share waits for review links).
 import type { ComponentChildren, RefObject } from "preact";
 import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
 
@@ -40,12 +41,14 @@ export interface TopBarProps {
   film: ComponentChildren;
   cut: ComponentChildren;
   workspaces: ComponentChildren;
+  /** §28: the agent's chip (AgentChip), before the notes toggle. */
+  agent?: ComponentChildren;
   /** §27, 5.7: hides and shows the notes panel, in the workspaces that have one. */
   notesToggle?: ComponentChildren;
   more: ComponentChildren;
 }
 
-export function TopBar({ barRef, project, projectId, film, cut, workspaces, notesToggle, more }: TopBarProps) {
+export function TopBar({ barRef, project, projectId, film, cut, workspaces, agent, notesToggle, more }: TopBarProps) {
   const left = useRef<HTMLDivElement>(null);
   useTight(left, barRef);
   return (
@@ -60,7 +63,7 @@ export function TopBar({ barRef, project, projectId, film, cut, workspaces, note
         {cut}
       </div>
       {workspaces}
-      <div class="tright">{notesToggle}{more}</div>
+      <div class="tright">{agent}{notesToggle}{more}</div>
     </header>
   );
 }

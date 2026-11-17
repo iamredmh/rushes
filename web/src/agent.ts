@@ -43,7 +43,33 @@ export function chipText(s: AgentStatus, notes: readonly NoteLite[]): string | n
   return s.batches.length > 1 ? `${text} · ${s.batches.length} batches` : text;
 }
 
-export type NoteBadge = { kind: "working" | "needsYou" | "with" | "fixed"; text: string };
+/** How long an ended run's chip stays, after its newest Activity line (plan 2, decision 2). */
+export const CHIP_KEEP_MS = 600_000;
+
+/**
+ * Whether the top bar shows the chip at `now`: never off or idle; always while the run goes; an ended run (finished,
+ * failed) until its newest line is ten minutes old. An ended run with no lines to date it still shows.
+ */
+export function chipShows(s: AgentStatus, now: number): boolean {
+  if (s.phase === "off" || s.phase === "idle") return false;
+  if (s.phase !== "finished" && s.phase !== "failed") return true;
+  if (s.lines.length === 0) return true;
+  const newest = Math.max(...s.lines.map((l) => Date.parse(l.at)));
+  return !(now - newest > CHIP_KEEP_MS);
+}
+
+/** The chip's look: a spinner while busy, the to-do colour while it waits on you, done, and over for a failure. */
+export function chipTone(phase: AgentPhase): "busy" | "todo" | "done" | "over" {
+  if (phase === "waiting" || phase === "question") return "todo";
+  if (phase === "finished") return "done";
+  if (phase === "failed") return "over";
+  return "busy";
+}
+
+/** Stop shows while the agent is starting, on a turn, or waiting on an ask: the phases a Stop can end. */
+export const canStop = (phase: AgentPhase): boolean => RUNNING.has(phase);
+
+export type NoteBadge ={ kind: "working" | "needsYou" | "with" | "fixed"; text: string };
 
 /** The badge on a note's card, by priority: needs you, being worked on, with the agent, fixed. Null for none. */
 export function noteAgentBadge(n: NoteLite, s: AgentStatus | null): NoteBadge | null {

@@ -1,7 +1,7 @@
 // Send to AI in the desk (plan 2, task 1): the pure helpers behind the chip, the note badges, the who-line,
 // the live strip and what the desk does after Send. Every string is the plan's own.
 import { describe, expect, it } from "vitest";
-import { afterSend, agentName, chipText, liveLines, noteAgentBadge, whoLine, type NoteLite } from "../../web/src/agent.js";
+import { afterSend, agentName, canStop, chipShows, chipText, chipTone, liveLines, noteAgentBadge, whoLine, type NoteLite } from "../../web/src/agent.js";
 import type { AgentStatus } from "../../web/src/types.js";
 
 const status = (over: Partial<AgentStatus> = {}): AgentStatus => ({
@@ -173,5 +173,47 @@ describe("liveLines", () => {
     const s = status({ lines: [line(1), line(2)] });
     liveLines(s);
     expect(s.lines.map((l) => l.text)).toEqual(["line 1", "line 2"]);
+  });
+});
+
+describe("the chip (task 2)", () => {
+  const at = (iso: string) => ({ at: iso, text: "a line", note: null });
+  const now = Date.parse("2026-11-17T12:00:00Z");
+
+  it("chipShows: never for off or idle", () => {
+    expect(chipShows(status({ phase: "off" }), now)).toBe(false);
+    expect(chipShows(status({ phase: "idle" }), now)).toBe(false);
+  });
+
+  it("chipShows: always while the run is going", () => {
+    for (const phase of ["starting", "working", "waiting", "question"] as const) {
+      expect(chipShows(status({ phase, lines: [at("2026-11-17T09:00:00Z")] }), now)).toBe(true);
+    }
+  });
+
+  it("chipShows: an ended run for 10 minutes after its newest line, then not", () => {
+    for (const phase of ["finished", "failed"] as const) {
+      expect(chipShows(status({ phase, lines: [at("2026-11-17T11:40:00Z"), at("2026-11-17T11:50:00Z")] }), now)).toBe(true);
+      expect(chipShows(status({ phase, lines: [at("2026-11-17T11:49:59Z")] }), now)).toBe(false);
+      // The newest line counts, wherever it sits.
+      expect(chipShows(status({ phase, lines: [at("2026-11-17T11:55:00Z"), at("2026-11-17T11:00:00Z")] }), now)).toBe(true);
+    }
+  });
+
+  it("chipShows: an ended run with no lines to date it still shows", () => {
+    expect(chipShows(status({ phase: "finished" }), now)).toBe(true);
+  });
+
+  it("chipTone: busy while starting or working, to do while it waits on you, done, and over for a failure", () => {
+    expect(chipTone("starting")).toBe("busy");
+    expect(chipTone("working")).toBe("busy");
+    expect(chipTone("waiting")).toBe("todo");
+    expect(chipTone("question")).toBe("todo");
+    expect(chipTone("finished")).toBe("done");
+    expect(chipTone("failed")).toBe("over");
+  });
+
+  it("canStop: while starting, working or waiting only", () => {
+    expect((["off", "idle", "starting", "working", "waiting", "question", "finished", "failed"] as const).filter(canStop)).toEqual(["starting", "working", "waiting"]);
   });
 });

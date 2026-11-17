@@ -9,6 +9,7 @@ import "./styles.css";
 import "./changes.css";
 import "./cues.css";
 import "./desk.css";
+import "./agent.css";
 import { watchFocusOrigin } from "./lib.js";
 import { applyTheme, readTheme, safeStorage } from "./theme.js";
 import { App } from "./ui/App.js";
