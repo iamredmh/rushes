@@ -91,6 +91,9 @@ export const AGENT_NAMES: Readonly<Record<AgentId, string>> = { claude: "Claude 
 const NAMES = AGENT_NAMES;
 
 /** A start-up ended by Stop or close, not by a failure. */
+/** The session could not be put in the mode in which the agent asks Rushes (R14, R15): the start fails with this. */
+class ModeError extends Error {}
+
 class Halted extends Error {
   constructor() {
     super("Stopped before the agent started");
@@ -141,8 +144,11 @@ async function within(p: Promise<unknown>, ms: number): Promise<void> {
 export class AgentRunner {
   private readonly detect: () => Promise<AgentInfo[]>;
   private readonly specFor: (a: AgentInfo, root: string) => AdapterSpec;
-  /** Per adapter: which agent it runs, and (Codex only) its MCP calls by tool call id (R16). */
-  private readonly adapters = new WeakMap<AcpConnection, { agent: AgentId; calls: McpCalls }>();
+  /**
+   * Per adapter: which agent it runs, (Codex only) its MCP calls by tool call id (R16), and its session's mode as
+   * last reported (round 2, item 3).
+   */
+  private readonly adapters = new WeakMap<AcpConnection, { agent: AgentId; calls: McpCalls; mode: string | null; modeReported: boolean }>();
   private readonly mcp: (root: string) => McpServerSpec;
   private readonly idleMs: number;
   private readonly startMs: number;
@@ -423,7 +429,11 @@ export class AgentRunner {
       if (e instanceof Halted || gen !== this.gen) throw e instanceof Halted ? e : new Halted();
       if (conn && this.conn === conn) this.dropConn();
       const tail = conn && !timedOut ? lastLine(this.exits.get(conn)?.stderr ?? "") : "";
-      const why = timedOut ? `${info.name} did not start within ${spell(this.startMs)}` : `${info.name} could not start: ${tail || messageOf(e)}`;
+      const why = timedOut
+        ? `${info.name} did not start within ${spell(this.startMs)}`
+        : e instanceof ModeError
+          ? e.message
+          : `${info.name} could not start: ${tail || messageOf(e)}`;
       await this.failRun(why);
       throw new Error(why);
     } finally {
@@ -445,9 +455,10 @@ export class AgentRunner {
     const kept = settings.session;
     let sessionId: string | null = null;
     let modes: string[] = [];
+    let current: string | null = null;
     if (kept && kept.agent === info.id && loadSession) {
       try {
-        ({ modes } = await c.loadSession(kept.id, root, mcp, setup));
+        ({ modes, current } = await c.loadSession(kept.id, root, mcp, setup));
         sessionId = kept.id;
       } catch (e) {
         // An agent prunes old conversations. With the adapter still up, start a new one rather than fail
@@ -458,9 +469,10 @@ export class AgentRunner {
       }
     }
     if (sessionId === null) {
-      const { sessionId: made, modes: offered } = await c.newSession(root, mcp, setup);
+      const opened = await c.newSession(root, mcp, setup);
+      const made = opened.sessionId;
       sessionId = made;
-      modes = offered;
+      ({ modes, current } = opened);
       check();
       const startedAt = this.now().toISOString();
       const { data } = await this.store.update("agent", (f) => {
@@ -469,7 +481,7 @@ export class AgentRunner {
       this.applySettings(data);
     }
     check();
-    await this.askMode(c, info, sessionId, modes);
+    await this.askMode(c, info, sessionId, modes, current);
     check();
     if (c.hasExited) throw new Error("the adapter exited as it started");
     this.sessionId = sessionId;
@@ -477,21 +489,27 @@ export class AgentRunner {
 
   /**
    * R14/R15: every opened or loaded session goes into the mode in which the agent asks Rushes before it acts
-   * (ASK_MODE), before the first prompt. Not offered, or refused: one Activity line, and the run carries on.
+   * (ASK_MODE), before the first prompt. Fails closed (round 2, item 3): the start fails with a ModeError, and its
+   * notes go back, when the mode isn't offered (or no modes are reported), when set_mode throws, or when the
+   * session's mode isn't the ask mode afterwards. That mode is the setup response's currentModeId, then the
+   * ask mode once set_mode succeeds, unless a current_mode_update during set_mode reports another one (as
+   * claude-agent-acp's setSessionMode does when it falls back).
    */
-  private async askMode(c: AcpConnection, info: AgentInfo, sessionId: string, modes: string[]): Promise<void> {
+  private async askMode(c: AcpConnection, info: AgentInfo, sessionId: string, modes: string[], current: string | null): Promise<void> {
     const want = ASK_MODE[info.id];
-    if (!want) return;
-    if (!modes.includes(want)) {
-      this.addLine(`${info.name} didn't offer a mode where Rushes can approve actions`, null);
-      return;
-    }
+    const refused = new ModeError(`${info.name} could not be put in a mode where Rushes approves actions`);
+    const adapter = this.adapters.get(c);
+    if (!adapter || !modes.includes(want)) throw refused;
+    adapter.mode = current;
+    adapter.modeReported = false;
     try {
       await c.setMode(sessionId, want);
     } catch (e) {
       if (c.hasExited) throw e;
-      this.addLine(`${info.name} could not be put in a mode where Rushes can approve actions: ${messageOf(e)}`, null);
+      throw refused;
     }
+    if (!adapter.modeReported) adapter.mode = want;
+    if (adapter.mode !== want) throw refused;
   }
 
   /** Makes `conn` the runner's adapter and listens to it. */
@@ -501,9 +519,15 @@ export class AgentRunner {
     this.live.add(conn);
     // R16: Codex names an MCP call's server and tool only in its tool_call update, before the approval comes.
     const calls: McpCalls = new Map();
-    this.adapters.set(conn, { agent, calls });
+    const adapter = { agent, calls, mode: null as string | null, modeReported: false };
+    this.adapters.set(conn, adapter);
     conn.on("update", (u: unknown) => {
       if (agent === "codex") noteMcpCall(calls, u);
+      const m = u as { sessionUpdate?: unknown; currentModeId?: unknown } | null;
+      if (m?.sessionUpdate === "current_mode_update" && typeof m.currentModeId === "string") {
+        adapter.mode = m.currentModeId;
+        adapter.modeReported = true;
+      }
       this.onUpdate(conn, u);
     });
     conn.on("exit", (e: { code: number | null; stderr: string }) => this.onExit(conn, e));

@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fakeModesEnv } from "../../helpers/fakeModes.js";
 import { tmpProject } from "../../helpers/tmp.js";
 import { AcpConnection, type AdapterSpec, type McpServerSpec } from "../../../src/server/agent/acp.js";
 import { AGENT_START_MS, AgentRunner, type AgentStatus, type RunnerOptions } from "../../../src/server/agent/runner.js";
@@ -67,7 +68,7 @@ async function rig(scenario: object, opts: { agents?: AgentInfo[]; settings?: Pa
   await settings({ on: true, agent: "claude", ...opts.settings });
   const runner = new AgentRunner(store, {
     detect: async () => opts.agents ?? [claude(), codex],
-    spec: (_a, r) => ({ command: process.execPath, args: [FAKE], env: { FAKE_ACP_SCENARIO: scenarioPath, FAKE_ACP_LOG: logPath }, cwd: r }),
+    spec: (a, r) => ({ command: process.execPath, args: [FAKE], env: { FAKE_ACP_SCENARIO: scenarioPath, FAKE_ACP_LOG: logPath, ...fakeModesEnv(a) }, cwd: r }),
     mcp: MCP,
     ...opts.runner,
   });
@@ -141,7 +142,7 @@ describe("AgentRunner", () => {
     expect(await r.runner.send(b)).toEqual({ handedTo: "claude" });
     await r.phase("finished");
     const log = r.log();
-    expect(log.map((m) => m.method).filter(Boolean)).toEqual(["initialize", "session/new", "session/prompt"]);
+    expect(log.map((m) => m.method).filter(Boolean)).toEqual(["initialize", "session/new", "session/set_mode", "session/prompt"]);
     const created = log.find((m) => m.method === "session/new");
     expect(created.params.cwd).toBe(r.root);
     expect(created.params.mcpServers[0].name).toBe("rushes");

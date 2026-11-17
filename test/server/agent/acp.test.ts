@@ -53,16 +53,16 @@ describe("AcpConnection", () => {
     expect(await c2.initialize()).toEqual({ loadSession: false });
   });
 
-  it("newSession and loadSession return the available mode ids", async () => {
+  it("newSession and loadSession return the available mode ids and the current one", async () => {
     const { c, log } = await start({ loadSession: true, modes: ["default", "plan"], turns: [] });
     await c.initialize();
-    expect(await c.newSession("/tmp", [])).toEqual({ sessionId: "fake-session-1", modes: ["default", "plan"] });
-    expect(await c.loadSession("old-1", "/tmp", [])).toEqual({ modes: ["default", "plan"] });
+    expect(await c.newSession("/tmp", [])).toEqual({ sessionId: "fake-session-1", modes: ["default", "plan"], current: "default" });
+    expect(await c.loadSession("old-1", "/tmp", [], { configOptions: [{ configId: "mode", value: "plan" }] })).toEqual({ modes: ["default", "plan"], current: "plan" });
     await c.setMode("fake-session-1", "plan");
     expect((await log()).some((m) => m.loaded === "old-1")).toBe(true);
     const { c: c2 } = await start({ turns: [] });
     await c2.initialize();
-    expect(await c2.newSession("/tmp", [])).toEqual({ sessionId: "fake-session-1", modes: [] });
+    expect(await c2.newSession("/tmp", [])).toEqual({ sessionId: "fake-session-1", modes: [], current: null });
   });
 
   it("a prompt streams updates and ends with the stop reason", async () => {

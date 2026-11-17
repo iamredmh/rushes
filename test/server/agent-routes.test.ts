@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { fakeModesEnv } from "../helpers/fakeModes.js";
 import { tmpProject } from "../helpers/tmp.js";
 import { sse } from "../helpers/sse.js";
 import { createApp, type AppOptions } from "../../src/server/app.js";
@@ -37,7 +38,7 @@ function fakeAgent(store: Store, agents: () => AgentInfo[]): { opts: RunnerOptio
   return {
     opts: {
       detect: async () => agents(),
-      spec: (_a, r) => ({ command: process.execPath, args: [FAKE], env: { FAKE_ACP_SCENARIO: scenarioPath, FAKE_ACP_LOG: logPath }, cwd: r }),
+      spec: (a, r) => ({ command: process.execPath, args: [FAKE], env: { FAKE_ACP_SCENARIO: scenarioPath, FAKE_ACP_LOG: logPath, ...fakeModesEnv(a) }, cwd: r }),
       mcp: (root) => ({ name: "rushes", command: process.execPath, args: ["-e", "", root], env: [] }),
     },
     scenario: (s) => writeFile(scenarioPath, JSON.stringify(s)),

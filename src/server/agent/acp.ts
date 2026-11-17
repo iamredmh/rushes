@@ -22,6 +22,12 @@ function modeIds(result: any): string[] {
   return Array.isArray(list) ? list.map((m: any) => String(m.id)) : [];
 }
 
+/** The session's current mode as the setup response reports it, or null. */
+function currentMode(result: any): string | null {
+  const id = result?.modes?.currentModeId;
+  return typeof id === "string" ? id : null;
+}
+
 /** One running ACP adapter child process and the JSON-RPC conversation with it. */
 export class AcpConnection extends EventEmitter {
   private rpc: RpcPeer;
@@ -87,14 +93,14 @@ export class AcpConnection extends EventEmitter {
   }
 
   /** `extra` is merged into the request's params (an adapter's own setup fields, such as Claude's configOptions). */
-  async newSession(cwd: string, mcp: McpServerSpec[], extra: Record<string, unknown> = {}): Promise<{ sessionId: string; modes: string[] }> {
+  async newSession(cwd: string, mcp: McpServerSpec[], extra: Record<string, unknown> = {}): Promise<{ sessionId: string; modes: string[]; current: string | null }> {
     const r = await this.rpc.request<any>("session/new", { cwd, mcpServers: mcp, ...extra });
-    return { sessionId: String(r.sessionId), modes: modeIds(r) };
+    return { sessionId: String(r.sessionId), modes: modeIds(r), current: currentMode(r) };
   }
 
-  async loadSession(id: string, cwd: string, mcp: McpServerSpec[], extra: Record<string, unknown> = {}): Promise<{ modes: string[] }> {
+  async loadSession(id: string, cwd: string, mcp: McpServerSpec[], extra: Record<string, unknown> = {}): Promise<{ modes: string[]; current: string | null }> {
     const r = await this.rpc.request<any>("session/load", { sessionId: id, cwd, mcpServers: mcp, ...extra });
-    return { modes: modeIds(r) };
+    return { modes: modeIds(r), current: currentMode(r) };
   }
 
   async setMode(sessionId: string, modeId: string): Promise<void> {

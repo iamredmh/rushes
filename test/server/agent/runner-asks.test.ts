@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fakeModesEnv } from "../../helpers/fakeModes.js";
 import { tmpProject } from "../../helpers/tmp.js";
 import { AcpConnection, type AdapterSpec, type McpServerSpec } from "../../../src/server/agent/acp.js";
 import { AgentRunner, type AgentStatus, type RunnerOptions } from "../../../src/server/agent/runner.js";
@@ -50,7 +51,7 @@ async function rig(scenario: object, opts: { settings?: Partial<AgentSettings>; 
   const makeRunner = () => {
     const r = new AgentRunner(store, {
       detect: async () => [claude],
-      spec: (_a, at) => (opts.wrapSpec ?? ((b) => b))({ command: process.execPath, args: [FAKE], env: { FAKE_ACP_SCENARIO: scenarioPath, FAKE_ACP_LOG: logPath }, cwd: at }),
+      spec: (a, at) => (opts.wrapSpec ?? ((b) => b))({ command: process.execPath, args: [FAKE], env: { FAKE_ACP_SCENARIO: scenarioPath, FAKE_ACP_LOG: logPath, ...fakeModesEnv(a) }, cwd: at }),
       mcp: MCP,
       ...opts.runner,
     });
@@ -584,6 +585,10 @@ const sessionSteps = (log: any[]) =>
     .filter((m) => typeof m.method === "string" && m.method.startsWith("session/") && m.method !== "session/update")
     .map((m) => (m.method === "session/set_mode" ? `${m.method}:${m.params.modeId}` : m.method));
 const CLAUDE_MODES = ["auto", "default", "acceptEdits", "plan", "bypassPermissions", "dontAsk"];
+const CODEX: Parameters<typeof rig>[1] = {
+  settings: { agent: "codex" },
+  runner: { detect: async () => [{ id: "codex", name: "Codex", installed: true, signedIn: true, path: "/opt/homebrew/bin/codex", signIn: "codex login" }] },
+};
 const SELF_APPROVING = ["auto", "acceptEdits", "bypassPermissions", "dontAsk"];
 
 describe("AgentRunner session mode (R14, R15)", () => {
@@ -623,14 +628,28 @@ describe("AgentRunner session mode (R14, R15)", () => {
     }
   });
 
-  it("Claude: with no default mode offered, one Activity line says so and the run carries on", async () => {
-    const r = await rig({ modes: ["auto", "acceptEdits", "plan"], turns: [] });
-    await r.runner.send(await r.batch("One"));
-    await r.phase("finished");
-    expect(r.log().some((m) => m.method === "session/set_mode")).toBe(false);
-    const said = r.runner.status().lines.filter((l) => l.text === "Claude Code didn't offer a mode where Rushes can approve actions");
-    expect(said).toHaveLength(1);
-    expect(prompts(r.log())).toHaveLength(1);
+  it("fails the start, and gives the notes back, when the ask mode can't be set (round 2, item 3)", async () => {
+    const cases: [string, object, Parameters<typeof rig>[1]?][] = [
+      ["Claude: default not offered", { modes: ["auto", "acceptEdits", "plan"], turns: [] }],
+      ["Claude: no modes reported at all", { modes: [], turns: [] }],
+      ["Claude: set_mode throws", { modes: CLAUDE_MODES, setModeFails: "Invalid Mode", turns: [] }],
+      ["Claude: the mode stays auto", { modes: CLAUDE_MODES, ignoreModeChanges: true, turns: [] }],
+      ["Codex: the mode stays agent (an unknown INITIAL_AGENT_MODE falls back to it)", { ignoreModeChanges: true, turns: [] }, CODEX],
+      ["Codex: set_mode throws", { setModeFails: "boom", turns: [] }, CODEX],
+    ];
+    for (const [what, scenario, opts] of cases) {
+      const r = await rig(scenario, opts);
+      const name = opts ? "Codex" : "Claude Code";
+      const why = `${name} could not be put in a mode where Rushes approves actions`;
+      const b = await r.batch("One");
+      expect(await r.runner.send(b), what).toEqual({ handedTo: null, why, recalled: true });
+      const s = r.runner.status();
+      expect(s.phase, what).toBe("failed");
+      expect(s.error, what).toBe(why);
+      expect(prompts(r.log()), what).toHaveLength(0);
+      expect((await r.store.read("notes")).notes.filter((n) => b.noteIds.includes(n.id)).map(noteState), what).toEqual(["todo"]);
+      await r.waitFor(`${what}: the adapter to be stopped`, () => started.at(-1)?.hasExited);
+    }
   });
 
   it("Codex: set_mode read-only after session/new and after session/load, when offered", async () => {

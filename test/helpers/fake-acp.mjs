@@ -7,15 +7,23 @@
 //   FAKE_ACP_LOG       path; every received message (requests, notifications and
 //                      responses) is appended as one JSON line
 //   FAKE_ACP_BASE      base URL used by `http` steps
+//   FAKE_ACP_MODES     modes offered when the scenario names none (see `modes`)
 //
-// Scenario: { loadSession?: boolean, loadFails?: string, exitOnCancel?: boolean, modes?: string[], exitOnStart?: number,
+// Scenario: { loadSession?: boolean, loadFails?: string, exitOnCancel?: boolean, modes?: string[], ignoreModeChanges?: boolean,
+//             setModeFails?: string, exitOnStart?: number,
 //             ignoreSigterm?: boolean, hangOnInitialize?: boolean, turns: Step[][] }
 //   loadSession  advertised as agentCapabilities.loadSession (default false)
 //   loadFails    session/load answers a JSON-RPC error with this message (still logged as { loaded: id }),
 //                as an agent does for a session it has pruned
 //   exitOnCancel on session/cancel during a turn, exit with code 0 instead of ending the turn
 //   modes        when given, session/new and session/load answer
-//                { modes: { currentModeId: modes[0], availableModes: modes.map(id => ({ id, name: id })) } }
+//                { modes: { currentModeId, availableModes: modes.map(id => ({ id, name: id })) } }; currentModeId is
+//                modes[0], or the request's configOptions "mode" value when offered. session/set_mode to an offered
+//                mode changes it; to one not offered it answers an error. Without `modes`, FAKE_ACP_MODES
+//                (comma-separated) is used; without either, no modes. Each session/prompt logs { promptMode }.
+//   ignoreModeChanges  configOptions and set_mode leave the mode as it is; set_mode then sends a
+//                current_mode_update with the mode it stayed in before it answers, as an adapter that falls back does
+//   setModeFails session/set_mode answers a JSON-RPC error with this message
 //   exitOnStart  exit with that code before reading anything
 //   hangOnInitialize  never answer initialize (an adapter that stalls as it starts)
 //   ignoreSigterm  trap SIGTERM and carry on, so only SIGKILL ends the process
@@ -62,8 +70,18 @@ let sessions = 0;
 let promptCount = 0;
 let openTurn = null; // { id, sessionId, cancelled, wake }
 
-const modesBlock = () =>
-  scenario.modes ? { modes: { currentModeId: scenario.modes[0], availableModes: scenario.modes.map((id) => ({ id, name: id })) } } : {};
+// The modes offered: the scenario's, else FAKE_ACP_MODES (comma-separated, set by the rigs per agent), else none.
+const offered = scenario.modes ?? (process.env.FAKE_ACP_MODES ? process.env.FAKE_ACP_MODES.split(",") : null);
+const modeOf = new Map(); // sessionId -> current mode id
+/** A setup request's mode: modes[0], or the configOptions "mode" entry when offered (unless ignoreModeChanges). */
+function openMode(sessionId, params) {
+  let mode = offered?.[0];
+  const asked = Array.isArray(params?.configOptions) ? params.configOptions.find((o) => o?.configId === "mode")?.value : undefined;
+  if (!scenario.ignoreModeChanges && offered?.includes(asked)) mode = asked;
+  modeOf.set(sessionId, mode);
+}
+const modesBlock = (sessionId) =>
+  offered ? { modes: { currentModeId: modeOf.get(sessionId), availableModes: offered.map((id) => ({ id, name: id })) } } : {};
 
 const sleep = (ms, turn) =>
   new Promise((resolve) => {
@@ -140,18 +158,34 @@ function onMessage(msg) {
       if (scenario.hangOnInitialize) break;
       send({ id: msg.id, result: { protocolVersion: 1, agentCapabilities: { loadSession: !!scenario.loadSession }, authMethods: [] } });
       break;
-    case "session/new":
-      send({ id: msg.id, result: { sessionId: `fake-session-${++sessions}`, ...modesBlock() } });
+    case "session/new": {
+      const sessionId = `fake-session-${++sessions}`;
+      openMode(sessionId, msg.params);
+      send({ id: msg.id, result: { sessionId, ...modesBlock(sessionId) } });
       break;
+    }
     case "session/load":
       log({ loaded: msg.params?.sessionId });
       if (typeof scenario.loadFails === "string") send({ id: msg.id, error: { code: -32603, message: scenario.loadFails } });
-      else send({ id: msg.id, result: { ...modesBlock() } });
+      else {
+        openMode(msg.params?.sessionId, msg.params);
+        send({ id: msg.id, result: { ...modesBlock(msg.params?.sessionId) } });
+      }
       break;
-    case "session/set_mode":
-      send({ id: msg.id, result: {} });
+    case "session/set_mode": {
+      const { sessionId, modeId } = msg.params ?? {};
+      if (typeof scenario.setModeFails === "string") send({ id: msg.id, error: { code: -32603, message: scenario.setModeFails } });
+      else if (!offered?.includes(modeId)) send({ id: msg.id, error: { code: -32602, message: `Mode ${modeId} is not available in this session` } });
+      else {
+        // Like claude-agent-acp's setSessionMode: an adapter that ends in another mode than asked says so first.
+        if (!scenario.ignoreModeChanges) modeOf.set(sessionId, modeId);
+        if (modeOf.get(sessionId) !== modeId) send({ method: "session/update", params: { sessionId, update: { sessionUpdate: "current_mode_update", currentModeId: modeOf.get(sessionId) } } });
+        send({ id: msg.id, result: {} });
+      }
       break;
+    }
     case "session/prompt": {
+      log({ promptMode: modeOf.get(msg.params?.sessionId) ?? null });
       const turn = { id: msg.id, sessionId: msg.params?.sessionId, index: promptCount++, cancelled: false, wake: null };
       openTurn = turn;
       void runTurn(turn);
