@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { existsSync } from "node:fs";
 import { mkdtemp, mkdir, realpath, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -374,6 +375,36 @@ describe("protected paths (R10)", () => {
         expect(decide(req(kind, null, [`${root}/a.txt`, `${root}/${p}`]), t, root), `${kind} a.txt + ${p}`).toBe("ask");
       }
     }
+  });
+  it("matches a protected name as the volume folds it: ſ (long s) is s, and NFKC forms count (Residual 1)", () => {
+    const always = ["read", "edit", "delete", "move", "search"].map((kind) => ({ kind, command: null }));
+    const t = { permissions: "project-edits" as const, always };
+    for (const p of [".ruſhes/agent.json", ".mcp.jſon", ".vſcode/settings.json", ".RUſHES/agent.json", "sub/.giT/hooks/x", ".ｃｌａｕｄｅ/settings.json"]) {
+      for (const kind of ["read", "edit", "delete", "move", "search"]) {
+        const r = req(kind, null, [`${root}/${p}`]);
+        expect(decide(r, s, root), `${kind} ${p}`).toBe("ask");
+        expect(decide(r, t, root), `${kind} ${p} with Always`).toBe("ask");
+        expect(canAlways(r, root), `${kind} ${p} offers Always`).toBe(false);
+      }
+    }
+    for (const p of ["src/a.ts", ".gitignore", "ſrc/a.ts"]) {
+      expect(decide(req("edit", null, [`${root}/${p}`]), s, root), p).toBe("allow");
+      expect(canAlways(req("edit", null, [`${root}/${p}`]), root), p).toBe(true);
+    }
+  });
+  it("a shell, wrapper or runner spelt with ſ or full-width letters is never offered Always (Residual 1)", () => {
+    for (const cmd of ["ſudo rm x", "baſh x", "ｓｕｄｏ rm", "npx ｂａｓｈ", "npm ｅｘｅｃ x", "uv ｒｕｎ perl", "npx @ſcope/baſh"]) {
+      expect(canAlways(req("execute", cmd), root), cmd).toBe(false);
+      expect(decide(req("execute", cmd), { ...s, always: [ruleFor(req("execute", cmd))] }, root), cmd).toBe("ask");
+    }
+  });
+  it("on this volume the ſ spelling opens the real .rushes, and it is protected (skipped on a case-sensitive volume)", async () => {
+    const proj = await realpath(await mkdtemp(join(tmpdir(), "rushes-fold-")));
+    await mkdir(join(proj, ".rushes"));
+    expect(existsSync(join(proj, ".rushes"))).toBe(true);
+    const folds = existsSync(join(proj, ".RUSHES"));
+    if (folds) expect(existsSync(join(proj, ".ruſhes"))).toBe(true);
+    expect(decide(req("edit", null, [join(proj, ".ruſhes", "agent.json")]), s, proj)).toBe("ask");
   });
   it("a normal edit inside the project is still allowed, and so are look-alike names", () => {
     for (const p of ["compositions/a.html", ".gitignore", ".rushes-notes.md", ".claude.md", "git/x", "my.mcp.json"]) {

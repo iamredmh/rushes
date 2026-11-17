@@ -42,10 +42,17 @@ const PROJECT_KINDS = new Set(["read", "edit", "search", "move", "delete"]);
 export const PROTECTED_PATHS: readonly string[] = [".rushes", ".git", ".claude", ".codex", ".mcp.json", ".vscode", ".idea"];
 const PROTECTED = new Set(PROTECTED_PATHS);
 
+/**
+ * A name as a case-insensitive volume compares it, for the security checks here: NFKC, then lower-cased. APFS opens
+ * `.ruſhes` (U+017F, the long s) as `.rushes`, which `toLowerCase` alone would miss; NFKC maps ſ to s (and
+ * full-width letters to plain ones, which only makes the checks stricter).
+ */
+export const fold = (s: string): string => s.normalize("NFKC").toLowerCase();
+
 /** True when `path`, under `root`, is or is inside a protected folder or file (after symlinks are resolved). */
 export function isProtected(root: string, path: string): boolean {
   const rel = relative(real(root), real(path));
-  return rel.split(sep).some((part) => PROTECTED.has(part.toLowerCase()));
+  return rel.split(sep).some((part) => PROTECTED.has(fold(part)));
 }
 
 /** Kinds that change where a path is: never for the project folder itself (M5). */
@@ -98,15 +105,15 @@ export const RUNNER_PAIRS: ReadonlyMap<string, string> = new Map([["uv", "tool"]
 /** A word a rule may be made of: no quotes, no `=`, nothing a shell reads as more than the word itself. */
 const RULE_WORD = /^[A-Za-z0-9_.\/@:+-]+$/;
 
-/** A word's basename for the lists, lower-cased: macOS volumes are case-insensitive, so `NOHUP` runs nohup. */
-const name = (word: string) => basename(word).toLowerCase();
+/** A word's basename for the lists, folded: macOS volumes are case-insensitive, so `NOHUP` and `ſudo` run nohup and sudo. */
+const name = (word: string) => fold(basename(word));
 
 /**
  * The names the lists know a subcommand word by (R8). Run by a package runner it is a package spec, so a leading
  * `@scope/` and a trailing `@version` are cut, and the scope counts too: `pnpm@9` is pnpm, `@pnpm/exe` is exe and pnpm.
  */
 function names(word: string): string[] {
-  const lower = word.toLowerCase();
+  const lower = fold(word);
   const scoped = /^@([^/]+)\/(.+)$/.exec(lower);
   const bare = name(scoped ? scoped[2] : lower).replace(/(.)@[^@]*$/, "$1");
   return scoped ? [scoped[1], bare] : [bare];
