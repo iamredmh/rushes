@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ADAPTERS, adapterSpec, rushesMcp } from "../../../src/server/agent/adapters.js";
+import { ADAPTERS, ASK_MODE, adapterSpec, rushesMcp } from "../../../src/server/agent/adapters.js";
 import type { AgentInfo } from "../../../src/server/agent/detect.js";
 
 const root = "/tmp/some project";
@@ -23,6 +23,13 @@ describe("adapterSpec", () => {
     expect(spec.args).toEqual(["-y", `${ADAPTERS.codex.pkg}@${ADAPTERS.codex.version}`]);
     expect(spec.env.CODEX_PATH).toBe("/opt/homebrew/bin/codex");
     expect(spec.env.CLAUDE_CODE_EXECUTABLE).toBeUndefined();
+  });
+  it("starts Codex in read-only, where its approvals come to Rushes, never in its self-reviewing modes (R15)", () => {
+    const env = adapterSpec(codex, root).env;
+    expect(env.INITIAL_AGENT_MODE).toBe("read-only");
+    expect(ASK_MODE.codex).toBe("read-only");
+    expect(["agent", "agent-full-access"]).not.toContain(env.INITIAL_AGENT_MODE);
+    expect(adapterSpec(claude, root).env.INITIAL_AGENT_MODE).toBeUndefined();
   });
   it("gives both adapters the extended PATH, deduplicated", () => {
     for (const agent of [claude, codex]) {

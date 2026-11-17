@@ -632,4 +632,23 @@ describe("AgentRunner session mode (R14, R15)", () => {
     expect(said).toHaveLength(1);
     expect(prompts(r.log())).toHaveLength(1);
   });
+
+  it("Codex: set_mode read-only after session/new and after session/load, when offered", async () => {
+    const codex: AgentInfo = { id: "codex", name: "Codex", installed: true, signedIn: true, path: "/opt/homebrew/bin/codex", signIn: "codex login" };
+    const r = await rig(
+      { loadSession: true, modes: ["agent", "read-only", "workspace-write", "agent-full-access"], turns: [] },
+      { settings: { agent: "codex" }, runner: { idleMs: 30, detect: async () => [codex] } },
+    );
+    await r.runner.send(await r.batch("One"));
+    await r.phase("finished");
+    await r.waitFor("the first adapter to exit", () => started[0]?.hasExited);
+    await r.runner.send(await r.batch("Two"));
+    await r.waitFor("the second prompt", () => prompts(r.log()).length === 2);
+    expect(sessionSteps(r.log())).toEqual([
+      "session/new", "session/set_mode:read-only", "session/prompt",
+      "session/load", "session/set_mode:read-only", "session/prompt",
+    ]);
+    // configOptions is the Claude adapter's; Codex gets its mode from INITIAL_AGENT_MODE at launch.
+    for (const m of r.log().filter((x) => x.method === "session/new" || x.method === "session/load")) expect(m.params.configOptions).toBeUndefined();
+  });
 });

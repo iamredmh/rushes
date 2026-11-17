@@ -39,8 +39,29 @@ export const ADAPTERS: Record<AgentId, { pkg: string; version: string }> = {
  *     selectSessionConfigOption :5753, config id "mode" = MODE_CONFIG_ID, dist/session-mode.js:5). So no prompt
  *     ever runs in `auto`; the set_mode after it is the second guard.
  */
-export const ASK_MODE: Partial<Record<AgentId, string>> = {
+export const ASK_MODE: Record<AgentId, string> = {
   claude: "default",
+  /*
+   * Codex (codex-acp 2.7.0, read 17 Nov 2026; docs/permission-profiles.md is not in the published package, so this
+   * is from its README and dist/index.js):
+   *   - README:76 names INITIAL_AGENT_MODE: read-only, workspace-write, agent, agent-full-access, permission-profile:<id>.
+   *     dist/index.js:42225-42229 reads it at every session open; an unknown id falls back to `agent`.
+   *   - The default is `agent` (dist/index.js:42151), "Auto review": approvalsReviewer "auto_review" (:42125-42140),
+   *     the Guardian Review seen in F2 (:35577). `agent-full-access` has approvalPolicy "never". Neither asks Rushes.
+   *   - `read-only` (:42096-42108): approvalPolicy "on-request", approvalsReviewer "user", read-only sandbox,
+   *     "Requires approval to edit files and access the internet." (:42099). With reviewer "user" the app-server's
+   *     approval requests reach CodexApprovalHandler (:40127), which sends session/request_permission for commands
+   *     (:40138) and file changes (:40166, :40211-40216). A file change arrives as kind "edit" with its paths as
+   *     locations (FileChangeReporter.permission, :35234), so Rushes allows edits inside the project under
+   *     project-edits and asks under ask-all. Each turn passes the mode's own approvalPolicy and approvalsReviewer
+   *     (:43888-43889), so the user's Codex config can't turn Guardian back on for a built-in mode.
+   *   - Chosen over `workspace-write` (also on-request, reviewer "user", :42109-42124): there the sandbox lets Codex
+   *     write anywhere in the project with no ask at all, so Rushes would never see in-project edits, even under
+   *     ask-all. In read-only every write, by patch or by command, needs an approval, and that approval is Rushes's.
+   *   - Limit: no built-in mode uses the `untrusted` policy. A command that only reads, inside the read-only sandbox,
+   *     still runs with no ask (the sandbox lets it read outside the project).
+   */
+  codex: "read-only",
 };
 
 /** Extra params for session/new and session/load: Claude's initial mode, so the session is never in `auto` (R14). */
@@ -56,6 +77,8 @@ export function adapterSpec(agent: AgentInfo, root: string): AdapterSpec {
   const env: Record<string, string> = { PATH: searchPath() };
   if (agent.id === "claude" && agent.path) env.CLAUDE_CODE_EXECUTABLE = agent.path;
   if (agent.id === "codex" && agent.path) env.CODEX_PATH = agent.path;
+  // R15: Codex starts in the mode whose approvals go to Rushes, not to Codex's own reviewer (see ASK_MODE.codex).
+  if (agent.id === "codex") env.INITIAL_AGENT_MODE = ASK_MODE.codex;
   return { command: "npx", args: ["-y", `${pkg}@${version}`], env, cwd: root };
 }
 
