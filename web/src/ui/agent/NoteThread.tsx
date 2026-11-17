@@ -140,7 +140,7 @@ export function ReplyBox({ n, status, toast, onChanged }: { n: Note; status: Age
       setBusy(false);
     }
   };
-  const label = answerPlaceholder(status);
+  const label = answerPlaceholder(noteLite(n), status);
   return (
     <div class="nreply">
       <textarea

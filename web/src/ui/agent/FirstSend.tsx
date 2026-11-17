@@ -3,24 +3,29 @@
 // (ruling P2-R3): who gets the notes (an agent, or copying a prompt as now, which skips step 2), then what that agent may
 // do without asking. Confirming posts setup, then the desk's own Send runs when notes are waiting.
 import { useLayoutEffect, useRef, useState } from "preact/hooks";
-import { MENU_WORDS, PERMISSION_CHOICES, SHEET_WORDS, mayQuestion, notSignedInWhy, sheetDefault, sheetPrimary, sheetRows, whoNext, type Sheet, type SheetPick } from "../../agent.js";
+import { MENU_WORDS, PERMISSION_CHOICES, SHEET_WORDS, mayQuestion, notSignedInWhy, sheetDefault, sheetPrimary, sheetRows, whoNext, type SendFollow, type Sheet, type SheetPick } from "../../agent.js";
 import { api, ApiError } from "../../api.js";
-import type { AgentId, AgentInfo, AgentRules, AgentStatus } from "../../types.js";
-import { askNotificationsOnce } from "./sendFollow.js";
+import type { AgentId, AgentInfo, AgentRules, AgentStatus, SendHandOver } from "../../types.js";
+import { actOnSend, askNotificationsOnce } from "./sendFollow.js";
 
 // The desk takes everything of Send to AI's first Send from here (one import in App).
 export { actOnSend, askNotificationsOnce } from "./sendFollow.js";
 export { planLead } from "../../agent.js";
 
+/** What the setup route answers: the status, and, when it handed the dialog's batch over (I3), what became of it. */
+interface SetupAnswer { status: AgentStatus; agent?: SendHandOver }
+
 export interface FirstSendProps {
   status: AgentStatus;
   /** Notes wait to be sent: confirming sends them once Send to AI is set up. */
   waiting: boolean;
+  /** I3: the filed batch the copy dialog showed when its Set up opened the sheet; setup hands it to the agent. */
+  batch: string | null;
   /** A status the setup route just answered with. */
   onStatus(status: AgentStatus): void;
   toast(message: string): void;
-  /** The sheet goes; `done` when it was answered (setup posted), not cancelled. */
-  onClose(done: boolean): void;
+  /** The sheet goes; `done` when it was answered (setup posted), not cancelled, with what setup answered. */
+  onClose(done: boolean, answer?: SetupAnswer): void;
   /** Runs the desk's Send with the status setup answered. */
   onSend(status: AgentStatus): void;
 }
@@ -31,7 +36,7 @@ const isRefusal = (e: unknown): e is ApiError => e instanceof ApiError && e.stat
 const detect = (fresh: boolean): Promise<AgentInfo[]> =>
   api.get<{ agents: AgentInfo[] }>(`/api/agent/detect${fresh ? "?fresh=1" : ""}`).then((r) => r.agents, () => []);
 
-export function FirstSend({ status, waiting, onStatus, toast, onClose, onSend }: FirstSendProps) {
+export function FirstSend({ status, waiting, batch, onStatus, toast, onClose, onSend }: FirstSendProps) {
   const [detected, setDetected] = useState<AgentInfo[] | null>(null);
   // Step 1 once detection answers (the rows to pick from are known then).
   const [sheet, setSheet] = useState<Sheet | null>(null);
@@ -46,10 +51,10 @@ export function FirstSend({ status, waiting, onStatus, toast, onClose, onSend }:
   const opener = useRef<Element | null>(document.activeElement);
   const rows = sheetRows(detected);
 
-  const close = (done: boolean) => {
+  const close = (done: boolean, answer?: SetupAnswer) => {
     if (closed.current) return;
     closed.current = true;
-    onClose(done);
+    onClose(done, answer);
     const back = opener.current;
     if (back instanceof HTMLElement && back.isConnected) back.focus();
   };
@@ -80,11 +85,11 @@ export function FirstSend({ status, waiting, onStatus, toast, onClose, onSend }:
   }, [step]);
 
   /** Posts setup; a refusal for an agent goes back to step 1 and says why under its row. */
-  const setup = async (body: { on: boolean; agent?: AgentId; permissions?: AgentRules["permissions"] }): Promise<AgentStatus | null> => {
+  const setup = async (body: { on: boolean; agent?: AgentId; permissions?: AgentRules["permissions"]; batch?: string }): Promise<SetupAnswer | null> => {
     try {
-      const s = (await api.post<{ status: AgentStatus }>("/api/agent/setup", body)).status;
-      onStatus(s);
-      return s;
+      const answer = await api.post<SetupAnswer>("/api/agent/setup", body);
+      onStatus(answer.status);
+      return answer;
     } catch (e) {
       if (isRefusal(e) && body.agent) {
         setSheet({ step: "who", pick: body.agent });
@@ -93,10 +98,10 @@ export function FirstSend({ status, waiting, onStatus, toast, onClose, onSend }:
       return null;
     }
   };
-  const finish = (s: AgentStatus | null) => {
-    if (!s || closed.current) return;
-    close(true);
-    if (waiting) onSend(s);
+  const finish = (a: SetupAnswer | null) => {
+    if (!a || closed.current) return;
+    close(true, a);
+    if (waiting) onSend(a.status);
   };
   const may = (agent: AgentId): Sheet => ({ step: "may", agent, permissions: status.permissions });
 
@@ -107,7 +112,7 @@ export function FirstSend({ status, waiting, onStatus, toast, onClose, onSend }:
     busy.current = true;
     setPending(true);
     try {
-      if (sheet.step === "may") return finish(await setup({ on: true, agent: sheet.agent, permissions: sheet.permissions }));
+      if (sheet.step === "may") return finish(await setup({ on: true, agent: sheet.agent, permissions: sheet.permissions, ...(batch ? { batch } : {}) }));
       setRefused(null);
       const next = whoNext(sheet.pick, rows);
       if (next === "copy") return finish(await setup({ on: false }));
@@ -194,7 +199,7 @@ export function FirstSend({ status, waiting, onStatus, toast, onClose, onSend }:
             {SHEET_WORDS.cancel}
           </button>
           <button type="button" class="btn primary" disabled={pending} onClick={() => void confirm()}>
-            {sheetPrimary(sheet)}
+            {sheetPrimary(sheet, waiting || batch !== null)}
           </button>
         </div>
       )}
@@ -215,25 +220,28 @@ export function WhyLine({ why, onSetUp }: { why: string; onSetUp(): void }) {
 }
 
 /**
- * The desk's hold on the sheet: whether it is open, opening it (Send, Set up Send to AI, the dialog's Set up), and the
- * sheet itself for the desk to place. `onAnswered`: setup went through (the copy dialog drops its stale reason).
+ * The desk's hold on the sheet: whether it is open, opening it (Send, Set up Send to AI, the dialog's Set up with its
+ * batch), and the sheet itself for the desk to place. `onAnswered`: setup went through; with what became of the dialog's
+ * batch when setup handed it over (a toast says so, as after Send), else null (the dialog drops its stale reason).
  */
-export function useFirstSend(agent: AgentStatus | null, onStatus: (s: AgentStatus) => void, toast: (m: string) => void, onAnswered: () => void) {
-  const [shown, setShown] = useState(false);
-  const open = () => setShown(true);
+export function useFirstSend(agent: AgentStatus | null, onStatus: (s: AgentStatus) => void, toast: (m: string, ms?: number) => void, onAnswered: (f: SendFollow | null) => void) {
+  const [shown, setShown] = useState<{ batch: string | null } | null>(null);
+  // A click handler may pass its event: only a batch id names a batch.
+  const open = (batch?: unknown) => setShown({ batch: typeof batch === "string" ? batch : null });
   const sheet = (waiting: boolean, send: (status: AgentStatus) => void) =>
     shown && agent ? (
       <FirstSend
         status={agent}
         waiting={waiting}
+        batch={shown.batch}
         onStatus={onStatus}
         toast={toast}
-        onClose={(done) => {
-          setShown(false);
-          if (done) onAnswered();
+        onClose={(done, answer) => {
+          setShown(null);
+          if (done) onAnswered(answer?.agent ? actOnSend(answer.agent, answer.status, toast) : null);
         }}
         onSend={send}
       />
     ) : null;
-  return { shown, open, sheet };
+  return { shown: shown !== null, open, sheet };
 }

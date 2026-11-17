@@ -180,6 +180,39 @@ describe("the user's consent lives in their own rules file, never in the project
   });
 });
 
+describe("setup hands over the batch the copy dialog was opened for (I3)", () => {
+  it("a batch refused for want of sign-in goes to the agent once setup goes through, and only once", async () => {
+    const r = await rig({ settings: { on: true, agent: "claude" }, agents: [claude({ signedIn: false }), codex()], scenario: { turns: [[{ stop: "end_turn" }]] } });
+    await r.note("Tighten the opening");
+    const sent = await r.call("POST", "/api/batches", {});
+    expect(sent.json.agent).toEqual({ handedTo: null, why: "Claude Code is not signed in" });
+    const batch = sent.json.batch.id as string;
+    // The user signs in, then confirms the sheet opened from the dialog's Set up.
+    r.setAgents([claude(), codex()]);
+    const set = await r.call("POST", "/api/agent/setup", { on: true, agent: "claude", batch });
+    expect(set.status).toBe(200);
+    expect(set.json.agent).toEqual({ handedTo: "claude" });
+    await waitFor("the agent to be handed the batch", () => r.log().some((m) => m.method === "session/prompt" && JSON.stringify(m).includes(batch)));
+    await waitFor("the run to finish", () => !r.runner.busy());
+    // Its notes are no longer waiting with it: setup again hands nothing over.
+    const again = await r.call("POST", "/api/agent/setup", { on: true, agent: "claude", batch });
+    expect(again.json.agent).toBeUndefined();
+    expect(r.log().filter((m) => m.method === "session/prompt")).toHaveLength(1);
+  });
+
+  it("a batch is handed over only when Send to AI goes on; an unknown one is refused before anything is written", async () => {
+    const r = await rig({ settings: { on: true, agent: "claude" }, agents: [claude({ signedIn: false }), codex()] });
+    await r.note("Tighten the opening");
+    const batch = (await r.call("POST", "/api/batches", {})).json.batch.id as string;
+    const off = await r.call("POST", "/api/agent/setup", { on: false, batch });
+    expect(off.status).toBe(200);
+    expect(off.json.agent).toBeUndefined();
+    expect(r.log()).toEqual([]);
+    const unknown = await r.call("POST", "/api/agent/setup", { on: false, batch: "b_99" });
+    expect(unknown.status).toBe(404);
+  });
+});
+
 describe("agent routes", () => {
   it("GET /api/agent gives the status and /api/agent/detect the agents found", async () => {
     const r = await rig({ agents: [claude(), codex({ installed: false, signedIn: false, path: null })] });

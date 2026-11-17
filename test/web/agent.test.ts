@@ -383,10 +383,17 @@ describe("the first-Send sheet (task 4)", () => {
     expect(whoNext("claude", sheetRows([]))).toBe("missing");
   });
 
-  it("sheetPrimary: Next for an agent, Copy a prompt for the copy row, Send to <A> on step 2", () => {
-    expect(sheetPrimary({ step: "who", pick: "claude" })).toBe("Next");
-    expect(sheetPrimary({ step: "who", pick: "copy" })).toBe("Copy a prompt");
-    expect(sheetPrimary({ step: "may", agent: "codex", permissions: "ask-all" })).toBe("Send to Codex");
+  it("sheetPrimary: Next for an agent, Copy a prompt for the copy row, Send to <A> on step 2 when notes wait", () => {
+    expect(sheetPrimary({ step: "who", pick: "claude" }, true)).toBe("Next");
+    expect(sheetPrimary({ step: "who", pick: "copy" }, true)).toBe("Copy a prompt");
+    expect(sheetPrimary({ step: "may", agent: "codex", permissions: "ask-all" }, true)).toBe("Send to Codex");
+  });
+
+  it("sheetPrimary with nothing waiting: Use <A>, since it sends nothing (I3)", () => {
+    expect(sheetPrimary({ step: "may", agent: "claude", permissions: "project-edits" }, false)).toBe("Use Claude Code");
+    expect(sheetPrimary({ step: "may", agent: "codex", permissions: "ask-all" }, false)).toBe("Use Codex");
+    expect(sheetPrimary({ step: "who", pick: "claude" }, false)).toBe("Next");
+    expect(sheetPrimary({ step: "who", pick: "copy" }, false)).toBe("Copy a prompt");
   });
 });
 
@@ -535,6 +542,44 @@ describe("noteAgentBadge priority (task 6)", () => {
     expect(noteAgentBadge(note("n1", { batch: "b1", status: "done", fixVersion: "v8" }), null)).toEqual({ kind: "fixed", text: "Fixed in v8" });
   });
 
+  it("with Send to AI on, a sent note the agent was never handed is with your agent, with no box (I3)", () => {
+    // Refused (not signed in), or sent by copying a prompt before the switch went on: no run holds its batch.
+    const on = status({ phase: "idle", batches: [] });
+    expect(noteAgentBadge(note("n1", { batch: "b1" }), on)).toEqual({ kind: "with", text: "With your agent" });
+    expect(replyBoxShows(note("n1", { batch: "b1" }), on)).toBe(false);
+    expect(answerPlaceholder(note("n1", { batch: "b1" }), on)).toBe("Answer your agent");
+    // Another batch held is not this one.
+    const other = status({ phase: "working", batches: ["b2"], current: { note: "n9", doing: null } });
+    expect(noteAgentBadge(note("n1", { batch: "b1" }), other)).toEqual({ kind: "with", text: "With your agent" });
+    expect(replyBoxShows(note("n1", { batch: "b1" }), other)).toBe(false);
+  });
+
+  it("the agent is named while its run holds the note's batch, or is on the note", () => {
+    const queued = status({ phase: "starting", batches: ["b1"] });
+    expect(noteAgentBadge(note("n1", { batch: "b1" }), queued)).toEqual({ kind: "with", text: "With Claude Code" });
+    expect(replyBoxShows(note("n1", { batch: "b1" }), queued)).toBe(true);
+    expect(answerPlaceholder(note("n1", { batch: "b1" }), queued)).toBe("Answer Claude Code");
+    // A follow-up's turn on the note (its batch's own turn over).
+    const followUp = status({ phase: "working", batches: [], current: { note: "n1", doing: null } });
+    expect(replyBoxShows(note("n1", { batch: "b1" }), followUp)).toBe(true);
+    expect(answerPlaceholder(note("n1", { batch: "b1" }), followUp)).toBe("Answer Claude Code");
+  });
+
+  it("an answer to the agent's question names it while Send to AI is on with the conversation kept: the answer goes there", () => {
+    const asked = note("n1", { batch: "b1", needsYou: true });
+    expect(answerPlaceholder(asked, status({ phase: "question", session: "s-1" }))).toBe("Answer Claude Code");
+    expect(answerPlaceholder(asked, status({ phase: "question", session: null }))).toBe("Answer your agent");
+    expect(answerPlaceholder(asked, status({ on: false, session: "s-1" }))).toBe("Answer your agent");
+    expect(answerPlaceholder(asked, null)).toBe("Answer your agent");
+  });
+
+  it("switched off mid-run: the badge still names the agent that holds the batch, but no box, since an answer wouldn't go", () => {
+    const off = status({ on: false, phase: "working", batches: ["b1"] });
+    expect(noteAgentBadge(note("n1", { batch: "b1" }), off)).toEqual({ kind: "with", text: "With Claude Code" });
+    expect(replyBoxShows(note("n1", { batch: "b1" }), off)).toBe(false);
+    expect(answerPlaceholder(note("n1", { batch: "b1", needsYou: true }), off)).toBe("Answer your agent");
+  });
+
   it("with Send to AI off, a sent note is with your agent (a copied prompt went to a chat Rushes can't name)", () => {
     expect(noteAgentBadge(note("n1", { batch: "b1" }), status({ on: false }))).toEqual({ kind: "with", text: "With your agent" });
     // Unless the agent still holds its batch (switched off mid-run).
@@ -595,8 +640,9 @@ describe("replyBoxShows and its placeholder", () => {
     expect(replyBoxShows(note("n1", { batch: "b1", needsYou: true }), null)).toBe(true);
   });
 
-  it("shows on any sent note while Send to AI is on, and not while it is off", () => {
-    expect(replyBoxShows(note("n1", { batch: "b1" }), status())).toBe(true);
+  it("shows on a sent note while the agent holds its batch, and not otherwise", () => {
+    expect(replyBoxShows(note("n1", { batch: "b1" }), status({ phase: "working", batches: ["b1"] }))).toBe(true);
+    expect(replyBoxShows(note("n1", { batch: "b1" }), status())).toBe(false);
     expect(replyBoxShows(note("n1", { batch: "b1" }), status({ on: false }))).toBe(false);
     expect(replyBoxShows(note("n1", { batch: "b1" }), null)).toBe(false);
   });
@@ -606,10 +652,11 @@ describe("replyBoxShows and its placeholder", () => {
     expect(replyBoxShows(note("n1", { batch: "b1", status: "done" }), status())).toBe(false);
   });
 
-  it("Answer <A>", () => {
-    expect(answerPlaceholder(status())).toBe("Answer Claude Code");
-    expect(answerPlaceholder(status({ agent: "codex" }))).toBe("Answer Codex");
-    expect(answerPlaceholder(null)).toBe("Answer your agent");
+  it("Answer <A> for a note the agent holds", () => {
+    const held = note("n1", { batch: "b1" });
+    expect(answerPlaceholder(held, status({ phase: "working", batches: ["b1"] }))).toBe("Answer Claude Code");
+    expect(answerPlaceholder(held, status({ agent: "codex", phase: "working", batches: ["b1"] }))).toBe("Answer Codex");
+    expect(answerPlaceholder(held, null)).toBe("Answer your agent");
   });
 });
 

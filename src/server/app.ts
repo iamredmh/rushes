@@ -8,7 +8,7 @@ import { addTake, editSection, setSections } from "../core/script.js";
 import { addNote, addUserReply, applyReply, applyUserEdit, checkNoteFormat, filterNotes } from "../core/notes.js";
 import { FORMAT_ID_RE, MAX_FORMATS, isPictureSize, labelOfId, versionFormats } from "../core/formats.js";
 import { createBatch, latestBatch } from "../core/batches.js";
-import { markSent, NOTE_STATES, withState, type NoteState } from "../core/noteState.js";
+import { markSent, noteState, NOTE_STATES, withState, type NoteState } from "../core/noteState.js";
 import { exportFileName, notesMarkdown } from "../core/exportNotes.js";
 import { tabStates } from "../core/tabs.js";
 import { addVisualVersion, checkVisualNote, registerVisual, visualNoteView, visualRatios, type PageInput, type PictureInput } from "../core/visuals.js";
@@ -198,7 +198,9 @@ const LevelsBody = z.object({ voice: LevelValue.nullable(), music: LevelValue.nu
 const PutAwayBody = z.object({ away: z.boolean() });
 const PicksBody = z.object({ video: z.string().min(1).max(200).optional(), lanes: PickMap.optional(), sections: PickMap.optional(), levels: LevelsBody.optional() });
 // §28: the Send to AI switch, the agent and what it may do unasked.
-const AgentSetupBody = z.object({ on: z.boolean(), agent: z.enum(AGENTS).optional(), permissions: AgentPermissionsSchema.optional() });
+// `batch` (I3): the filed batch the copy dialog was showing when its Set up opened the sheet. Once Send to AI is on, it is
+// handed to the agent, as Send would have.
+const AgentSetupBody = z.object({ on: z.boolean(), agent: z.enum(AGENTS).optional(), permissions: AgentPermissionsSchema.optional(), batch: z.string().min(1).optional() });
 
 // No stage: every tab's open notes (Send). A stage: that tab's only.
 const BatchBody = z.object({ stage: StageSchema.optional() });
@@ -1477,6 +1479,17 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   // the prompt). The hand-over starts inside the queue, so two Sends reach the runner in the order they were
   // filed, but the queue doesn't wait for it: an agent starting up never holds the next Send's filing.
   let batchQueue: Promise<unknown> = Promise.resolve();
+  /**
+   * What a hand-over says to the desk. It never fails because of the agent: an error becomes the reason it wasn't
+   * handed over, and an agent still starting after sendWaitMs never holds the answer (it says so, and the run carries on).
+   */
+  const handOverOf = async (handing: Promise<SendResult>): Promise<SendHandOver> => {
+    const handed = handing.catch((e: unknown): SendResult => ({ handedTo: null, why: e instanceof Error ? e.message : String(e) }));
+    let timer: NodeJS.Timeout | undefined;
+    const waited = new Promise<null>((ok) => { timer = setTimeout(() => ok(null), sendWaitMs); });
+    const settled = await Promise.race([handed, waited]).finally(() => clearTimeout(timer));
+    return settled ?? { handedTo: agent.status().agent, starting: true };
+  };
   app.post("/api/batches", async (c) => {
     const { stage } = await body(c, BatchBody);
     let handing: Promise<SendResult> | undefined;
@@ -1499,14 +1512,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     });
     batchQueue = run;
     const batch = await run;
-    // The Send never fails because of the agent: an error becomes the reason it wasn't handed over, and an
-    // agent still starting after sendWaitMs never holds the answer (it says so, and the run carries on).
-    const handed = handing!.catch((e: unknown): SendResult => ({ handedTo: null, why: e instanceof Error ? e.message : String(e) }));
-    let timer: NodeJS.Timeout | undefined;
-    const waited = new Promise<null>((ok) => { timer = setTimeout(() => ok(null), sendWaitMs); });
-    const settled = await Promise.race([handed, waited]).finally(() => clearTimeout(timer));
-    const result: SendHandOver = settled ?? { handedTo: agent.status().agent, starting: true };
-    return c.json({ batch, agent: result }, 201);
+    return c.json({ batch, agent: await handOverOf(handing!) }, 201);
   });
 
   app.get("/api/batches/:id", async (c) => {
@@ -1594,6 +1600,8 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   });
   app.post("/api/agent/setup", async (c) => {
     const b = await body(c, AgentSetupBody);
+    const filed = b.batch === undefined ? null : (await store.read("batches")).batches.find((x) => x.id === b.batch);
+    if (filed === undefined) throw new NotFoundError("batch", b.batch!);
     let checked: AgentId | null = null;
     if (b.on) {
       const id = b.agent ?? (await store.read("agent")).agent;
@@ -1624,6 +1632,15 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
         f.session = null;
       }
     });
+    // I3: the batch the dialog showed goes to the agent now, while notes of it still wait with no run holding it (a
+    // second setup, or a batch already handed over or finished, hands nothing).
+    if (b.on && filed) {
+      const waits = (await store.read("notes")).notes.some((n) => n.batch === filed.id && noteState(n) === "sent");
+      if (waits && !(await agent.reload()).batches.includes(filed.id)) {
+        const handed = await handOverOf((async () => agent.send(filed))());
+        return c.json({ ...(await agentStatusOf()), agent: handed });
+      }
+    }
     return c.json(await agentStatusOf());
   });
   // Start a fresh conversation: the next Send starts a new session.

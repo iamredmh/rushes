@@ -378,10 +378,12 @@ test("with nothing waiting the foot keeps the row: Set up, then off and on again
   await expect(who(page)).toHaveText("Copies a prompt for your own chat");
   await footFits(page);
   await shootFoot(page, "empty-setup-1440");
-  // Nothing waits: the sheet sets Send to AI up and sends nothing.
+  // Nothing waits: the sheet sets Send to AI up and sends nothing, and its button says so (I3).
   await setUp.click();
   await primary(page, "Next").click();
-  await primary(page, "Send to Claude Code").click();
+  await expect(primary(page)).toHaveText("Use Claude Code");
+  await expect(sheet(page).getByRole("button", { name: "Send to Claude Code" })).toHaveCount(0);
+  await primary(page, "Use Claude Code").click();
   await expect(sheet(page)).toHaveCount(0);
   await expect(toggle(page)).toHaveAttribute("aria-checked", "true");
   expect((await rushes.api("GET", "/api/batches/latest").catch(() => null))?.batch ?? null).toBeNull();
@@ -761,6 +763,42 @@ test("not signed in falls back to the dialog with Set up", async ({ page, startW
   await sheet(page).getByRole("button", { name: "Cancel" }).click();
   await expect(sheet(page)).toHaveCount(0);
   await expect(sentPop(page).getByRole("button", { name: "Copy prompt" })).toBeVisible();
+});
+
+test("signed out, Send's dialog and its Set up end with the filed notes at the agent, and no note names it before then (I3)", async ({ page, startWithAgent }) => {
+  const rushes = await startWithAgent({ turns: [[{ sleep: 4000 }, { stop: "end_turn" }]] });
+  await rushes.addCut("first cut");
+  // Set up while Claude Code was signed in, then signed out.
+  await rushes.api("POST", "/api/agent/setup", { on: true, agent: "claude" });
+  await rushes.setAgents([{ id: "claude", installed: true, signedIn: false }, { id: "codex", installed: true, signedIn: true }]);
+  const { note } = await rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 0.5, text: "Hold the end card." });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await sendBtn(page).click();
+  const why = sentPop(page).locator(".swhy");
+  await expect(why).toContainText("Claude Code is not signed in");
+  // The note is filed but no agent has it: it doesn't claim one, and has no Answer box.
+  const c = card(page, note.id);
+  await expect(badgeOf(c)).toHaveText("With your agent");
+  await expect(replyBox(c)).toHaveCount(0);
+  await why.getByRole("button", { name: "Set up" }).click();
+  await expect(sheet(page)).toBeVisible();
+  await expect(whoRow(page, "Claude Code")).toContainText("Not signed in");
+  // The user signs in in Terminal (here: the fake is signed in), then goes on with Claude Code.
+  await rushes.setAgents([{ id: "claude", installed: true, signedIn: true }, { id: "codex", installed: true, signedIn: true }]);
+  await whoRadio(page, "Claude Code").check();
+  await primary(page, "Next").click();
+  // The filed notes will go to it: the button says so.
+  await expect(primary(page)).toHaveText("Send to Claude Code");
+  await primary(page, "Send to Claude Code").click();
+  await expect(sheet(page)).toHaveCount(0);
+  await expect(toastEl(page)).toHaveText(/^(Sent to|Starting) Claude Code$/);
+  // The dialog is done with: the notes are with the agent now.
+  await expect(sentPop(page)).toHaveCount(0);
+  await expect.poll(async () => (await prompts(rushes)).length, { timeout: 10_000 }).toBe(1);
+  expect((await prompts(rushes))[0]).toContain("b_1");
+  await expect(badgeOf(c)).toHaveText(/^(With Claude Code|Working on it)$/);
+  await expect(replyBox(c)).toHaveAttribute("placeholder", "Answer Claude Code");
 });
 
 test("an agent that isn't installed can't be picked; keys move, Escape closes and asks nothing", async ({ page, startWithAgent }) => {

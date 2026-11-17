@@ -75,14 +75,23 @@ export const canStop = (phase: AgentPhase): boolean => RUNNING.has(phase);
 
 export type NoteBadge = { kind: "working" | "needsYou" | "with" | "fixed"; text: string };
 
+/**
+ * I3: the agent Send to AI uses really has this sent note: a run holds its batch (queued, starting or on it), or a turn
+ * is on the note itself (a follow-up). A note sent by copying a prompt, or in a batch whose hand-over was refused, is
+ * with "your agent", whatever the switch says.
+ */
+export function agentHolds(n: NoteLite, s: AgentStatus | null): boolean {
+  if (!s || noteState(n) !== "sent") return false;
+  return (n.batch !== null && s.batches.includes(n.batch)) || (RUNNING.has(s.phase) && s.current.note === n.id);
+}
+
 /** The badge on a note's card, by priority: needs you, being worked on, with the agent, fixed. Null for none. */
 export function noteAgentBadge(n: NoteLite, s: AgentStatus | null): NoteBadge | null {
   if (n.needsYou) return { kind: "needsYou", text: "Needs you" };
   if (s && s.current.note === n.id && RUNNING.has(s.phase)) return { kind: "working", text: s.current.doing ?? "Working on it" };
   const state = noteState(n);
-  // Off, Send copies a prompt into a chat Rushes can't name: the note is with "your agent", unless the agent Send to AI
-  // used still holds its batch (switched off mid-run).
-  const named = s && (s.on || (n.batch !== null && s.batches.includes(n.batch))) ? s.agent : null;
+  // Named only while the agent has the note (agentHolds); otherwise it is with "your agent".
+  const named = agentHolds(n, s) ? s!.agent : null;
   if (state === "sent") return { kind: "with", text: `With ${agentName(named)}` };
   if (state === "done" && n.fixVersion) return { kind: "fixed", text: `Fixed in ${n.fixVersion}` };
   return null;
@@ -197,8 +206,10 @@ export const SHEET_WORDS = {
 
 /** Step 2's question. */
 export const mayQuestion = (id: AgentId): string => `What may ${agentName(id)} do without asking?`;
-/** Step 2's button. */
+/** Step 2's button when notes will go to the agent once it is set up. */
 export const sendToLabel = (id: AgentId): string => `Send to ${agentName(id)}`;
+/** Step 2's button when nothing waits (I3): it sets the agent up and sends nothing. */
+export const useLabel = (id: AgentId): string => `Use ${agentName(id)}`;
 
 /** A row of step 1: an agent, or copying a prompt as now. */
 export type SheetPick = AgentId | "copy";
@@ -232,9 +243,9 @@ export const notSignedInWhy = (id: AgentId): string => `${agentName(id)} is not 
 /** Where the sheet is: step 1 with its row picked, or step 2 for an agent with its choice. */
 export type Sheet = { step: "who"; pick: SheetPick } | { step: "may"; agent: AgentId; permissions: AgentRules["permissions"] };
 
-/** The sheet's primary button. */
-export const sheetPrimary = (s: Sheet): string =>
-  s.step === "may" ? sendToLabel(s.agent) : s.pick === "copy" ? SHEET_WORDS.copyButton : SHEET_WORDS.next;
+/** The sheet's primary button. `sends`: confirming hands notes to the agent (notes wait, or a filed batch does). */
+export const sheetPrimary = (s: Sheet, sends: boolean): string =>
+  s.step === "may" ? (sends ? sendToLabel(s.agent) : useLabel(s.agent)) : s.pick === "copy" ? SHEET_WORDS.copyButton : SHEET_WORDS.next;
 
 /**
  * What the desk does after Send, from `afterSend`: a toast for a hand-over, a start or a recall (no dialog, nothing
@@ -346,12 +357,18 @@ export function noteThread(n: Pick<Note, "reply" | "replies">, all = false): { l
 
 /**
  * Whether a card has the reply box: on a note that needs you (the agent asked; the answer is kept, and handed on as R11
- * says), and on any note with the agent while Send to AI is on. Never on a to-do or a done note.
+ * says), and, while Send to AI is on, on a note the agent has now (agentHolds, I3). Never on a to-do or a done note.
  */
-export const replyBoxShows = (n: NoteLite, s: AgentStatus | null): boolean => !!n.needsYou || (noteState(n) === "sent" && !!s?.on);
+export const replyBoxShows = (n: NoteLite, s: AgentStatus | null): boolean => !!n.needsYou || (!!s?.on && agentHolds(n, s));
 
-/** The reply box's placeholder. */
-export const answerPlaceholder = (s: AgentStatus | null): string => `Answer ${agentName(s?.agent ?? null)}`;
+/**
+ * The reply box's placeholder: the agent by name where the answer goes to it (R11: only while Send to AI is on), on a
+ * note it has now, or on its question with the conversation kept. Otherwise "your agent".
+ */
+export function answerPlaceholder(n: NoteLite, s: AgentStatus | null): string {
+  const goes = !!s?.on && (agentHolds(n, s) || (!!n.needsYou && s.session !== null));
+  return `Answer ${agentName(goes ? s!.agent : null)}`;
+}
 
 /**
  * Where "Fixed in <v>" goes: on that version, to the fix's time; on another version of the cut, to that version (through

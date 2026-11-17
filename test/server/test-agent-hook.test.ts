@@ -129,6 +129,22 @@ describe("RUSHES_TEST_AGENT", () => {
     expect(codex.json.error).toBe("agent_not_installed");
   });
 
+  it("agentsFile is read at every detection, so a test can sign an agent in while the server runs", async () => {
+    const { root: dir } = await tmpProject();
+    const file = join(dir, "agents.json");
+    await writeFile(file, JSON.stringify([{ id: "claude", installed: true, signedIn: false }]));
+    const p = await project({ agentsFile: file });
+    vi.stubEnv("NODE_ENV", "test");
+    vi.stubEnv("RUSHES_TEST_AGENT", p.hook);
+    const s = await start(p.root);
+    const signedIn = async () => (await call(s, "GET", "/api/agent/detect")).json.agents.map((a: { id: string; signedIn: boolean }) => [a.id, a.signedIn]);
+    expect(await signedIn()).toEqual([["claude", false], ["codex", false]]);
+    expect((await call(s, "POST", "/api/agent/setup", { on: true, agent: "claude" })).status).toBe(409);
+    await writeFile(file, JSON.stringify([{ id: "claude", installed: true, signedIn: true }]));
+    expect(await signedIn()).toEqual([["claude", true], ["codex", false]]);
+    expect((await call(s, "POST", "/api/agent/setup", { on: true, agent: "claude" })).status).toBe(200);
+  });
+
   it("is ignored outside NODE_ENV=test and RUSHES_E2E=1: the server detects as usual", async () => {
     const p = await project();
     vi.stubEnv("NODE_ENV", "production");

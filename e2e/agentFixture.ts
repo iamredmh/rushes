@@ -20,6 +20,8 @@ export type AgentRushes = Rushes & {
   /** Replaces the scenario. The fake reads it as it starts, at the first Send, so a test whose steps name a note (an
    *  `http` step's body) adds the note, then sets the scenario, then sends. */
   setScenario(scenario: object): Promise<void>;
+  /** Replaces what detection answers from now on, as if the user signed an agent in or out while Rushes runs. */
+  setAgents(agents: TestAgents): Promise<void>;
 };
 
 /** What detection answers, as RUSHES_TEST_AGENT's `agents` (src/server/start.ts): an agent left out is not installed. */
@@ -62,17 +64,21 @@ export const test = base.extend<{ startWithAgent: (scenario: object, opts?: { ag
       await write(scenario);
       const configDir = join(dir, "config");
       const port = await freePort();
+      // Detection reads this file each time (RUSHES_TEST_AGENT `agentsFile`), so setAgents takes effect at once.
+      const agentsFile = join(dir, "agents.json");
+      const setAgents = (agents: TestAgents) => writeFile(agentsFile, JSON.stringify(agents));
+      await setAgents(opts.agents ?? [{ id: "claude", installed: true, signedIn: true }, { id: "codex", installed: true, signedIn: true }]);
       const hook = {
         command: process.execPath,
         args: [FAKE],
         env: { FAKE_ACP_SCENARIO: file, FAKE_ACP_LOG: log, FAKE_ACP_BASE: `http://127.0.0.1:${port}` },
-        ...(opts.agents ? { agents: opts.agents } : {}),
+        agentsFile,
       };
       const env = { RUSHES_TEST_AGENT: JSON.stringify(hook), RUSHES_E2E: "1", XDG_CONFIG_HOME: configDir };
       const o = await openRushes({ noFfmpeg, browserName, port, env });
       opened.push(o);
       // Onto the handle itself, so its url, base and root stay live (swapProject).
-      return Object.assign(o.rushes, { agentLog: log, configDir, setScenario: write });
+      return Object.assign(o.rushes, { agentLog: log, configDir, setScenario: write, setAgents });
     });
     for (const o of opened) await o.close();
     for (const d of dirs) await rm(d, { recursive: true, force: true });

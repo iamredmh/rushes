@@ -1,5 +1,5 @@
 import { createServer, type Server } from "node:http";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, realpath } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,7 +37,8 @@ export const DEFAULT_PORT = 4580;
  *                        "agents": [{ "id": "claude", "installed": true, "signedIn": true }] }'
  *
  * `command`, `args` and `env` start the adapter for either agent, in the project folder. `agents` (optional) stands in
- * for detection: an agent it leaves out is not installed. Without it, Claude Code and Codex are both installed and
+ * for detection: an agent it leaves out is not installed. `agentsFile` (optional) is a JSON file holding the same list,
+ * read at every detection, so a test can sign an agent in or out while the server runs; it wins over `agents`. Without it, Claude Code and Codex are both installed and
  * signed in. The fake's scenario must offer the mode each agent asks Rushes in (ASK_MODE), or the start fails:
  * "default" for Claude Code, "read-only" for Codex, as `"modes": ["default", "read-only"]` in the scenario or
  * FAKE_ACP_MODES=default,read-only in `env`.
@@ -47,7 +48,9 @@ const TestAgentShape = z.object({
   args: z.array(z.string()).default([]),
   env: z.record(z.string(), z.string()).default({}),
   agents: z.array(z.object({ id: z.enum(AGENTS), installed: z.boolean(), signedIn: z.boolean() })).optional(),
+  agentsFile: z.string().optional(),
 });
+const TestAgentsShape = TestAgentShape.shape.agents.unwrap();
 
 const TEST_AGENT_INFO: Record<AgentInfo["id"], Pick<AgentInfo, "name" | "signIn"> & { bin: string }> = {
   claude: { name: "Claude Code", signIn: "claude auth login", bin: "claude" },
@@ -73,14 +76,16 @@ export function testAgentOptions(env: NodeJS.ProcessEnv = process.env): RunnerOp
     throw new Error(`RUSHES_TEST_AGENT is not valid: ${e instanceof Error ? e.message : String(e)}`);
   }
   // As detectAgents answers: every agent, in its order, and only an installed one can be signed in.
-  const agents: AgentInfo[] = AGENTS.map((id) => {
-    const given = hook.agents ? hook.agents.find((a) => a.id === id) : { installed: true, signedIn: true };
+  const answer = (list: z.infer<typeof TestAgentsShape> | undefined): AgentInfo[] => AGENTS.map((id) => {
+    const given = list ? list.find((a) => a.id === id) : { installed: true, signedIn: true };
     const installed = given?.installed ?? false;
     const { name, signIn, bin } = TEST_AGENT_INFO[id];
     return { id, name, installed, signedIn: installed && (given?.signedIn ?? false), path: installed ? `/usr/local/bin/${bin}` : null, signIn };
   });
+  const agents = answer(hook.agents);
+  const file = hook.agentsFile;
   return {
-    detect: async () => structuredClone(agents),
+    detect: async () => (file ? answer(TestAgentsShape.parse(JSON.parse(readFileSync(file, "utf8")))) : structuredClone(agents)),
     spec: (_agent, root) => ({ command: hook.command, args: [...hook.args], env: { ...hook.env }, cwd: root }),
     mcp: testMcp,
   };

@@ -188,7 +188,8 @@ export function App() {
       setToastAction(null);
     }, ms);
   };
-  const firstSend = useFirstSend(agent, noteAgent, toast, () => setSent((s) => s && { ...s, why: null }));
+  // I3: a batch handed over from the dialog's Set up closes the dialog (a toast says what became of it).
+  const firstSend = useFirstSend(agent, noteAgent, toast, (f) => setSent((s) => s && (f && !f.dialog ? null : { ...s, why: f?.why ?? null })));
   useAskNotify(agent);
   // §20.5: a request to open Assets › Found (the header chip), and what the chip last said while Found was open.
   const [foundRequest, setFoundRequest] = useState<FoundRequest>({ n: 0, pending: false });
@@ -774,7 +775,7 @@ export function App() {
             <span class="sp" />
             <button class="btn ghost ib sm" aria-label="Close" data-tip="Close" onClick={() => setSent(null)}><Icon name="x" /></button>
           </div>
-          {sent.why && <WhyLine why={sent.why} onSetUp={firstSend.open} />}
+          {sent.why && <WhyLine why={sent.why} onSetUp={() => firstSend.open(sent.id)} />}
           {sent.lead && <p class="slead">{sent.lead}</p>}
           <pre>{sent.prompt}</pre>
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
