@@ -1,10 +1,11 @@
-// §28, Send to AI (plan 2): the run's chip in the top bar, and Stop; the Send to AI row above Send and the agent menu.
+// §28, Send to AI (plan 2): the run's chip in the top bar, and Stop; the Send to AI row above Send and the agent menu;
+// the first-Send sheet and what Send does with the answer.
 // The agent is the fake (e2e/agentFixture.ts).
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import type { Locator, Page } from "@playwright/test";
 import { rulesPath } from "../src/server/agent/rules.js";
-import { expect, test, videoReady, type AgentRushes } from "./agentFixture.js";
+import { expect, readAgentLog, test, videoReady, type AgentRushes } from "./agentFixture.js";
 
 /** The top bar's chip: what the agent is doing. Clicking it opens Activity. */
 const chip = (page: Page): Locator => page.locator("header.top .achip");
@@ -302,8 +303,8 @@ test("row fits at 900 px", async ({ page, startWithAgent }) => {
   await shootFoot(page, "menu-open-900");
 });
 
-test("Set up Send to AI opens the agent menu, and picking an agent turns it on", async ({ page, startWithAgent }) => {
-  const rushes = await startWithAgent({ turns: [] });
+test("Set up Send to AI opens the first-Send sheet, and picking an agent turns it on and sends what waits", async ({ page, startWithAgent }) => {
+  const rushes = await startWithAgent({ turns: [[{ stop: "end_turn" }]] });
   await withNote(rushes, false);
   await page.goto(rushes.url);
   await videoReady(page);
@@ -314,15 +315,19 @@ test("Set up Send to AI opens the agent menu, and picking an agent turns it on",
   await footFits(page);
   await shootFoot(page, "row-setup-1440");
   await setUp.click();
-  const menu = agentMenu(page);
-  await expect(menu).toBeVisible();
-  await expect(menu.getByRole("menuitemradio", { name: /Claude Code/ })).toHaveAttribute("aria-checked", "false");
-  await menu.getByRole("menuitemradio", { name: /Claude Code/ }).click();
-  await expect(menu).toHaveCount(0);
+  await expect(sheet(page)).toBeVisible();
+  await expect(agentMenu(page)).toHaveCount(0);
+  await expect(whoRadio(page, "Claude Code")).toBeChecked();
+  await primary(page).click();
+  await primary(page, "Send to Claude Code").click();
+  await expect(sheet(page)).toHaveCount(0);
   await expect(row(page).getByRole("button", { name: "Send to AI · Claude Code" })).toBeVisible();
   await expect(toggle(page)).toHaveAttribute("aria-checked", "true");
-  await expect(who(page)).toHaveText("Edits files in this project, asks before commands");
-  expect((await rushes.api("GET", "/api/agent")).status).toMatchObject({ on: true, agent: "claude" });
+  await expect(who(page)).toHaveText(/^Edits files in this project, asks before commands/);
+  expect((await rushes.api("GET", "/api/agent")).status).toMatchObject({ on: true, agent: "claude", asked: true });
+  // A note was waiting, and the sheet's button says Send: it went to the agent.
+  await expect(page.locator(".toast")).toHaveText(/^(Sent to|Starting) Claude Code$/);
+  await expect(page.getByRole("dialog", { name: "Sent to agent" })).toHaveCount(0);
 });
 
 test("an agent that isn't signed in says so, and picking it shows why under its row", async ({ page, startWithAgent }) => {
@@ -373,9 +378,13 @@ test("with nothing waiting the foot keeps the row: Set up, then off and on again
   await expect(who(page)).toHaveText("Copies a prompt for your own chat");
   await footFits(page);
   await shootFoot(page, "empty-setup-1440");
+  // Nothing waits: the sheet sets Send to AI up and sends nothing.
   await setUp.click();
-  await agentMenu(page).getByRole("menuitemradio", { name: /Claude Code/ }).click();
+  await primary(page, "Next").click();
+  await primary(page, "Send to Claude Code").click();
+  await expect(sheet(page)).toHaveCount(0);
   await expect(toggle(page)).toHaveAttribute("aria-checked", "true");
+  expect((await rushes.api("GET", "/api/batches/latest").catch(() => null))?.batch ?? null).toBeNull();
   // Off with nothing waiting: the row stays where it was, so the switch can turn it on again.
   const before = (await toggle(page).boundingBox())!;
   await toggle(page).click();
@@ -443,4 +452,268 @@ test("Remove by keyboard keeps focus in the menu", async ({ page, startWithAgent
   await expect.poll(focused).toMatch(/^menuitemradio: .*Codex/);
   await expect(menu).toBeVisible();
   await shootFoot(page, "menu-keyboard-remove-1440");
+});
+
+// ---- the first Send, and what Send does with the answer (task 4) ----
+
+/** The first-Send sheet, at either step. */
+const sheet = (page: Page): Locator => page.locator(".pop.firstsend");
+/** Step 1's radio for a row, by its name ("Claude Code", "Copy a prompt, as now"). */
+const whoRadio = (page: Page, name: string): Locator => sheet(page).getByRole("radio", { name: new RegExp(`^${name}`) });
+/** Step 1's row (the radio's box and whatever sits beside or under it), by its name. */
+const whoRow = (page: Page, name: string): Locator => sheet(page).locator(".fsrow", { has: page.getByRole("radio", { name: new RegExp(`^${name}`) }) });
+/** The sheet's primary button, by its words when given. */
+const primary = (page: Page, name?: string): Locator => (name ? sheet(page).getByRole("button", { name, exact: true }) : sheet(page).locator(".btn.primary"));
+const sentPop = (page: Page): Locator => page.getByRole("dialog", { name: "Sent to agent" });
+const toastEl = (page: Page): Locator => page.locator(".toast");
+
+/** The sheet lies inside the window, nothing in it is cut off, it doesn't scroll, and its buttons are on screen. */
+async function sheetFits(page: Page): Promise<void> {
+  const vp = page.viewportSize()!;
+  // Measured once its rows are in (the title shows at once; the rows follow detection).
+  await expect(primary(page)).toBeVisible();
+  const d = (await sheet(page).boundingBox())!;
+  inside(d, { x: 0, y: 0, width: vp.width, height: vp.height });
+  expect(d.width).toBeGreaterThan(300);
+  expect(await sheet(page).evaluate((el) => el.scrollHeight <= el.clientHeight + 1)).toBe(true);
+  expect(await sheet(page).evaluate((el) => [...el.querySelectorAll("*")].filter((e) => e.scrollWidth > e.clientWidth + 1 && getComputedStyle(e).overflow !== "visible").map((e) => e.className))).toEqual([]);
+  // The primary button and every row are wholly on screen, inside the sheet.
+  for (const el of [primary(page), ...(await sheet(page).locator(".fsopt").all())]) {
+    await expect(el).toBeVisible();
+    const b = (await el.boundingBox())!;
+    expect(b.height).toBeGreaterThan(20);
+    inside(b, d);
+  }
+  // Rows one above the next, none overlapping (read at one moment, so a step changing can't mix two steps' rows).
+  const rows = await sheet(page).locator(".fsopt").evaluateAll((els) => els.map((e) => e.getBoundingClientRect()).map((r) => ({ y: r.y, height: r.height })));
+  for (let i = 0; i + 1 < rows.length; i++) expect(rows[i].y + rows[i].height).toBeLessThanOrEqual(rows[i + 1].y + 0.5);
+}
+
+/** A picture of the sheet (with a little room round it), kept with the test's results, to look at. */
+async function shootSheet(page: Page, name: string): Promise<void> {
+  const d = (await sheet(page).boundingBox())!;
+  const vp = page.viewportSize()!;
+  const x = Math.max(0, d.x - 16);
+  const y = Math.max(0, d.y - 16);
+  await page.screenshot({ path: test.info().outputPath(`${name}.png`), clip: { x, y, width: Math.min(vp.width - x, d.width + 32), height: Math.min(vp.height - y, d.height + 32) } });
+}
+
+/** The name of whatever has focus: a radio by its label, a button by its words. */
+const focusedName = (page: Page) =>
+  page.evaluate(() => {
+    const el = document.activeElement as HTMLElement | null;
+    if (!el) return null;
+    if (el instanceof HTMLInputElement) return `radio: ${el.labels?.[0]?.querySelector("b")?.textContent ?? ""}`;
+    return `${el.tagName.toLowerCase()}: ${el.getAttribute("aria-label") ?? el.textContent?.trim()}`;
+  });
+
+/** Records every write to the clipboard, so a test can say nothing was copied. */
+async function watchClipboard(page: Page): Promise<() => Promise<string[]>> {
+  await page.addInitScript(() => {
+    const writes: string[] = [];
+    (window as unknown as { __copied: string[] }).__copied = writes;
+    if (navigator.clipboard) navigator.clipboard.writeText = async (t: string) => void writes.push(t);
+  });
+  return () => page.evaluate(() => (window as unknown as { __copied: string[] }).__copied);
+}
+
+test("off: Send opens the old dialog", async ({ page, startWithAgent }) => {
+  const rushes = await startWithAgent({ turns: [] });
+  await withNote(rushes, false);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await sendBtn(page).click();
+  // The first Send asks, and posts nothing until it is answered.
+  await expect(sheet(page)).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Who should get these notes?" })).toBeVisible();
+  await expect(sentPop(page)).toHaveCount(0);
+  await expect(whoRadio(page, "Claude Code")).toBeChecked();
+  await expect.poll(() => focusedName(page)).toBe("radio: Claude Code");
+  await expect(whoRadio(page, "Claude Code").locator("xpath=..")).toContainText("Signed in");
+  await expect(whoRadio(page, "Codex")).toBeVisible();
+  await expect(primary(page)).toHaveText("Next");
+  await sheetFits(page);
+  await shootSheet(page, "sheet-who-1440");
+  expect(await rushes.api("GET", "/api/batches/latest").catch(() => null)).toBeNull();
+  await sheet(page).getByText("Copy a prompt, as now", { exact: true }).click();
+  await expect(whoRadio(page, "Copy a prompt, as now")).toBeChecked();
+  await expect(primary(page)).toHaveText("Copy a prompt");
+  await primary(page).click();
+  // Copy skips step 2: today's dialog, exactly as it was.
+  await expect(sheet(page)).toHaveCount(0);
+  await expect(sentPop(page)).toBeVisible();
+  await expect(sentPop(page)).toContainText("picture batch b_1");
+  await expect(sentPop(page).getByRole("button", { name: "Copy prompt" })).toBeVisible();
+  await expect(sentPop(page).locator(".swhy")).toHaveCount(0);
+  expect((await rushes.api("GET", "/api/agent")).status).toMatchObject({ on: false, asked: true });
+  expect(await readAgentLog(rushes.agentLog)).toEqual([]);
+  await page.keyboard.press("Escape");
+  await expect(sentPop(page)).toHaveCount(0);
+  // Asked once: the next Send goes straight to the dialog.
+  await rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 1, text: "Softer cut." });
+  await expect(sendBtn(page)).toHaveAccessibleName("Send 1");
+  await sendBtn(page).click();
+  await expect(sentPop(page)).toContainText("picture batch b_2");
+  await expect(sheet(page)).toHaveCount(0);
+});
+
+test("first Send to Claude Code", async ({ page, startWithAgent }) => {
+  // A turn long enough to see the note with the agent (a finished turn gives back the notes it left untouched, M3).
+  const rushes = await startWithAgent({ turns: [[{ sleep: 4000 }, { stop: "end_turn" }]] });
+  await withNote(rushes, false);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await sendBtn(page).click();
+  await expect(whoRadio(page, "Claude Code")).toBeChecked();
+  await primary(page, "Next").click();
+  // Step 2, one question.
+  const may = page.getByRole("dialog", { name: "What may Claude Code do without asking?" });
+  await expect(may).toBeVisible();
+  await expect(may.getByRole("radio", { name: "Edit files in this project" })).toBeChecked();
+  await expect(may.getByRole("radio", { name: "Ask me for everything" })).not.toBeChecked();
+  await expect.poll(() => focusedName(page)).toBe("radio: Edit files in this project");
+  await expect(may.getByText("Rushes never sees a password or key. The agent uses your own sign-in.", { exact: true })).toBeVisible();
+  await expect(primary(page)).toHaveText("Send to Claude Code");
+  await sheetFits(page);
+  await shootSheet(page, "sheet-may-1440");
+  // Back goes to step 1, as it was left.
+  await may.getByRole("button", { name: "Back" }).click();
+  await expect(page.getByRole("dialog", { name: "Who should get these notes?" })).toBeVisible();
+  await expect(whoRadio(page, "Claude Code")).toBeChecked();
+  await primary(page, "Next").click();
+  await primary(page, "Send to Claude Code").click();
+  await expect(sheet(page)).toHaveCount(0);
+  await expect(toastEl(page)).toHaveText(/^(Sent to|Starting) Claude Code$/);
+  await expect(sentPop(page)).toHaveCount(0);
+  expect((await rushes.api("GET", "/api/agent")).status).toMatchObject({ on: true, agent: "claude", asked: true, permissions: "project-edits" });
+  // The note is with the agent, and the agent was handed the batch. (Its "With Claude Code" badge is task 6's.)
+  await expect(panel(page).locator(".note .chk")).toHaveAccessibleName("With your agent · Mark done");
+  await expect(panel(page).locator(".note .chk")).toBeVisible();
+  await expect.poll(async () => (await readAgentLog(rushes.agentLog)).some((m) => m.method === "session/prompt"), { timeout: 10_000 }).toBe(true);
+  await expect(row(page).getByRole("button", { name: "Send to AI · Claude Code" })).toBeVisible();
+});
+
+test("a start failure recalls and does not copy", async ({ page, startWithAgent }) => {
+  const rushes = await startWithAgent({ exitOnStart: 3 });
+  await withNote(rushes);
+  const copied = await watchClipboard(page);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await sendBtn(page).click();
+  await expect(toastEl(page)).toHaveText(/^Claude Code couldn't start: .+ The notes are back in to do\.$/, { timeout: 10_000 });
+  // The agent is named once.
+  await expect(toastEl(page)).not.toContainText("could not start");
+  await expect(toastEl(page)).toBeVisible();
+  await expect(sentPop(page)).toHaveCount(0);
+  await expect(sheet(page)).toHaveCount(0);
+  const { notes } = await rushes.api("GET", "/api/notes");
+  expect(notes.map((n: { status: string }) => n.status)).toEqual(["todo"]);
+  await expect(sendBtn(page)).toHaveAccessibleName("Send 1");
+  expect(await copied()).toEqual([]);
+  await page.screenshot({ path: test.info().outputPath("recalled-toast-1440.png"), clip: { x: 320, y: 0, width: 800, height: 120 } });
+  // It stays long enough to read (6 s), not the usual glance.
+  await page.waitForTimeout(3500);
+  await expect(toastEl(page)).toBeVisible();
+});
+
+test("not signed in falls back to the dialog with Set up", async ({ page, startWithAgent }) => {
+  const rushes = await startWithAgent({ turns: [] }, { agents: [{ id: "claude", installed: true, signedIn: false }, { id: "codex", installed: true, signedIn: true }] });
+  await rushes.addCut("first cut");
+  // Set up while Claude Code was signed in (the setup route refuses it now), then signed out.
+  await writeFile(join(rushes.root, ".rushes", "agent.json"), JSON.stringify({ schema: 1, rev: 1, on: true, agent: "claude", session: null, asked: true }));
+  await rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 0.5, text: "Hold the end card." });
+  const copied = await watchClipboard(page);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await expect(toggle(page)).toHaveAttribute("aria-checked", "true");
+  await sendBtn(page).click();
+  // Nothing was started: today's dialog, with why above the prompt.
+  await expect(sentPop(page)).toBeVisible();
+  const why = sentPop(page).locator(".swhy");
+  await expect(why).toContainText("Claude Code is not signed in");
+  await expect(why).toBeVisible();
+  await expect(sentPop(page).getByRole("button", { name: "Copy prompt" })).toBeVisible();
+  expect((await why.boundingBox())!.y + (await why.boundingBox())!.height).toBeLessThanOrEqual((await sentPop(page).locator("pre").boundingBox())!.y + 0.5);
+  inside((await sentPop(page).boundingBox())!, { x: 0, y: 0, width: 1440, height: 900 });
+  await page.screenshot({ path: test.info().outputPath("dialog-why-1440.png"), clip: { x: 900, y: 40, width: 540, height: 420 } });
+  expect(await copied()).toEqual([]);
+  // Set up opens the sheet: Claude Code says it isn't signed in, and offers Terminal.
+  await why.getByRole("button", { name: "Set up" }).click();
+  await expect(sheet(page)).toBeVisible();
+  await expect(sentPop(page)).toHaveCount(0);
+  const claudeRow = whoRow(page, "Claude Code");
+  await expect(claudeRow).toContainText("Not signed in");
+  await expect(claudeRow.getByRole("button", { name: "Sign in in Terminal" })).toBeVisible();
+  await expect(whoRadio(page, "Codex")).toBeChecked();
+  await sheetFits(page);
+  await shootSheet(page, "sheet-not-signed-in-1440");
+  await whoRadio(page, "Claude Code").check();
+  await primary(page, "Next").click();
+  const alert = claudeRow.getByRole("alert");
+  await expect(alert).toHaveText("Claude Code is not signed in. Choose Sign in in Terminal, then try again.");
+  await expect(alert).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Who should get these notes?" })).toBeVisible();
+  await sheetFits(page);
+  await shootSheet(page, "sheet-not-signed-in-next-1440");
+  await page.setViewportSize({ width: 900, height: 700 });
+  await sheetFits(page);
+  await shootSheet(page, "sheet-not-signed-in-900");
+  // Cancel goes back to the dialog, with its prompt still there to copy.
+  await sheet(page).getByRole("button", { name: "Cancel" }).click();
+  await expect(sheet(page)).toHaveCount(0);
+  await expect(sentPop(page).getByRole("button", { name: "Copy prompt" })).toBeVisible();
+});
+
+test("an agent that isn't installed can't be picked; keys move, Escape closes and asks nothing", async ({ page, startWithAgent }) => {
+  const rushes = await startWithAgent({ turns: [] }, { agents: [{ id: "claude", installed: false, signedIn: false }, { id: "codex", installed: true, signedIn: true }] });
+  await withNote(rushes, false);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await sendBtn(page).focus();
+  await page.keyboard.press("Enter");
+  await expect(sheet(page)).toBeVisible();
+  await expect(whoRadio(page, "Claude Code")).toBeDisabled();
+  await expect(whoRow(page, "Claude Code")).toContainText("Not installed");
+  await expect(whoRadio(page, "Codex")).toBeChecked();
+  await expect.poll(() => focusedName(page)).toBe("radio: Codex");
+  await sheetFits(page);
+  await shootSheet(page, "sheet-not-installed-1440");
+  // The arrows move through the rows that can be picked; Enter goes on.
+  await page.keyboard.press("ArrowDown");
+  await expect(whoRadio(page, "Copy a prompt, as now")).toBeChecked();
+  await expect(primary(page)).toHaveText("Copy a prompt");
+  await page.keyboard.press("ArrowUp");
+  await expect(whoRadio(page, "Codex")).toBeChecked();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("dialog", { name: "What may Codex do without asking?" })).toBeVisible();
+  await expect.poll(() => focusedName(page)).toBe("radio: Edit files in this project");
+  await page.keyboard.press("ArrowDown");
+  await expect(sheet(page).getByRole("radio", { name: "Ask me for everything" })).toBeChecked();
+  await page.setViewportSize({ width: 900, height: 700 });
+  await page.getByRole("button", { name: "Show the notes panel · \\" }).click().catch(() => undefined);
+  await expect(sheet(page)).toBeVisible();
+  await sheetFits(page);
+  await shootSheet(page, "sheet-may-900");
+  await page.keyboard.press("Escape");
+  await expect(sheet(page)).toHaveCount(0);
+  // Nothing was set up or sent: the next Send asks again.
+  expect((await rushes.api("GET", "/api/agent")).status).toMatchObject({ on: false, agent: null, asked: false });
+  expect(await rushes.api("GET", "/api/batches/latest").catch(() => null)).toBeNull();
+});
+
+test("the sheet's step 1 fits at 900 px", async ({ page, startWithAgent }) => {
+  const rushes = await startWithAgent({ turns: [] });
+  await withNote(rushes, false);
+  await page.setViewportSize({ width: 900, height: 700 });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await page.getByRole("button", { name: "Show the notes panel · \\" }).click();
+  await sendBtn(page).click();
+  await expect(sheet(page)).toBeVisible();
+  await sheetFits(page);
+  await shootSheet(page, "sheet-who-900");
+  await primary(page, "Next").click();
+  await expect(page.getByRole("dialog", { name: "What may Claude Code do without asking?" })).toBeVisible();
+  await sheetFits(page);
+  await shootSheet(page, "sheet-may-claude-900");
 });

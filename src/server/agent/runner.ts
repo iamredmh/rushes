@@ -44,6 +44,8 @@ export interface AgentStatus {
   lines: ActivityLine[];
   error: string | null;
   session: string | null;
+  /** The first-Send sheet has been answered (any setup): Send no longer opens it. */
+  asked: boolean;
   /** What the agent may do without asking, from the user's own rules file (R10), for the agent menu. */
   permissions: AgentRules["permissions"];
   always: AlwaysRule[];
@@ -235,6 +237,7 @@ export class AgentRunner {
       lines: this.lines.slice(),
       error: this.error,
       session: this.settings?.session?.id ?? null,
+      asked: this.settings?.asked ?? false,
       permissions: this.rules.permissions,
       always: this.rules.always.map((r) => ({ ...r })),
     };
@@ -885,7 +888,7 @@ export class AgentRunner {
   }
 
   private applySettings(next: AgentSettings, seq = ++this.reads): void {
-    const key = (s: AgentSettings | null) => JSON.stringify(s ? [s.on, s.agent, s.session?.id ?? null] : null);
+    const key = (s: AgentSettings | null) => JSON.stringify(s ? [s.on, s.agent, s.session?.id ?? null, s.asked] : null);
     const changed = key(next) !== key(this.settings);
     this.settings = next;
     this.applied = seq;

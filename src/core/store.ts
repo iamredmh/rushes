@@ -30,7 +30,7 @@ function defaults(key: FileKey, name: string): FileData[FileKey] {
     case "visuals":
       return { schema: 1, rev: 0, visuals: [] };
     case "agent":
-      return { schema: 1, rev: 0, on: false, agent: null, session: null };
+      return { schema: 1, rev: 0, on: false, agent: null, session: null, asked: false };
   }
 }
 

@@ -600,6 +600,8 @@ const AgentSettingsShape = fileObject({
   on: z.boolean().default(false),
   agent: z.enum(AGENTS).nullable().default(null),
   session: fileObject({ id: z.string(), agent: z.enum(AGENTS), startedAt: z.string() }).nullable().default(null),
+  /** Whether the first-Send sheet has been answered: false until any setup, so the first Send asks who gets the notes. */
+  asked: z.boolean().default(false),
 });
 export type AgentSettings = z.infer<typeof AgentSettingsShape>;
 /**

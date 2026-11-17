@@ -56,3 +56,35 @@
 .amenu .arule .nm { flex: 1; min-width: 0; padding: 5px 8px; overflow-wrap: anywhere; }
 .amenu .anote { margin: 0; padding: 6px 8px; color: var(--text-3); font-size: var(--t-small); line-height: 1.35; }
 .amenu .aerr { margin: 0 0 4px; padding: 0 8px 4px 31px; color: var(--todo); font-size: var(--t-small); line-height: 1.35; }
+
+/* ---- the first-Send sheet (FirstSend): a .pop dialog in two small steps, each a question. A row is a radio with its
+   name and state; the picked one takes the accent, as a picked row does in the agent menu. ---- */
+.pop.firstsend { width: min(420px, calc(100% - 40px)); max-height: calc(100vh - 80px); overflow-y: auto; gap: 14px; }
+.fsopts { display: grid; gap: 6px; }
+.fsrow { position: relative; }
+.fsopt { display: flex; align-items: center; gap: 10px; min-height: 46px; padding: 7px 12px; border: 1px solid var(--line); border-radius: var(--r-lg); cursor: pointer; }
+.fsopt:hover { background: var(--hover); }
+.fsopt.on { border-color: var(--accent); background: var(--accent-soft); }
+.fsopt.off { cursor: default; background: transparent; color: var(--text-3); }
+.fsopt.signin { padding-right: 168px; }
+.fsopt input { flex: none; width: 16px; height: 16px; margin: 0; accent-color: var(--accent); cursor: inherit; }
+/* Focus shows on the whole row (a ring round a native radio comes out square). */
+.fsopt input:focus-visible { outline: none; }
+.fsopt:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.fstext { display: grid; gap: 2px; min-width: 0; }
+.fstext b { font: 600 var(--t-ui)/1.3 var(--sans); color: var(--text); }
+.fsopt.off .fstext b { color: var(--text-3); }
+.fstext small { font: 12px/1.3 var(--sans); color: var(--text-3); }
+.fstext small.todo { color: var(--todo); }
+/* Sign in in Terminal sits inside its row's box, on the right, level with the name. */
+.fsrow .fssign { position: absolute; top: 8px; right: 8px; height: 30px; padding: 0 10px; font-size: var(--t-small); color: var(--accent); }
+.fsrow .fssign:hover { color: var(--accent); }
+.fsrow .fssign:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.fserr { margin: 6px 0 0; padding: 0 12px; color: var(--todo); font-size: var(--t-small); line-height: 1.35; }
+.fsline { margin: 0; color: var(--text-3); font-size: var(--t-small); line-height: 1.4; }
+.fsacts { display: flex; align-items: center; gap: 8px; }
+
+/* The copy dialog's line when Send to AI is on but nothing was started: why, and Set up. */
+.pop .swhy { display: flex; align-items: center; gap: 10px; margin: 0; padding: 6px 6px 6px 12px; border: 1px solid var(--todo-line); border-radius: var(--r); background: var(--todo-soft); color: var(--text); font-size: var(--t-small); line-height: 1.35; }
+.pop .swhy span { flex: 1; min-width: 0; }
+.pop .swhy .btn { flex: none; height: 30px; padding: 0 12px; font-size: var(--t-small); }

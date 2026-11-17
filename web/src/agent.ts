@@ -159,3 +159,84 @@ export function focusAfterRemove(s: AgentStatus, agents: readonly MenuAgent[], i
   if (left > 0) return first + left - 1;
   return 0;
 }
+
+// ---- the first-Send sheet, and what the desk does with Send's answer (task 4) ----
+
+/** The sheet's words, as the plan gives them; two small steps, each a question (ruling P2-R3). */
+export const SHEET_WORDS = {
+  who: "Who should get these notes?",
+  copy: "Copy a prompt, as now",
+  copyButton: "Copy a prompt",
+  next: "Next",
+  back: "Back",
+  cancel: "Cancel",
+  notInstalled: "Not installed",
+  noKey: "Rushes never sees a password or key. The agent uses your own sign-in.",
+  setUp: "Set up",
+} as const;
+
+/** Step 2's question. */
+export const mayQuestion = (id: AgentId): string => `What may ${agentName(id)} do without asking?`;
+/** Step 2's button. */
+export const sendToLabel = (id: AgentId): string => `Send to ${agentName(id)}`;
+
+/** A row of step 1: an agent, or copying a prompt as now. */
+export type SheetPick = AgentId | "copy";
+export interface SheetRow { pick: SheetPick; name: string; state: "ready" | "signedOut" | "missing" | "copy"; note: string | null }
+
+/** Step 1's rows: every agent detection knows, in its order, by state (one not installed can't be picked), then the copy row. */
+export function sheetRows(detected: readonly AgentInfo[] | null): SheetRow[] {
+  const agents = (detected ?? []).map((a): SheetRow => {
+    if (!a.installed) return { pick: a.id, name: a.name, state: "missing", note: SHEET_WORDS.notInstalled };
+    return a.signedIn ? { pick: a.id, name: a.name, state: "ready", note: MENU_WORDS.signedIn } : { pick: a.id, name: a.name, state: "signedOut", note: MENU_WORDS.notSignedIn };
+  });
+  return [...agents, { pick: "copy", name: SHEET_WORDS.copy, state: "copy", note: null }];
+}
+
+/** The row picked when the sheet opens: the current agent if it is ready, else the first ready agent, else copy. */
+export function sheetDefault(rows: readonly SheetRow[], current: AgentId | null): SheetPick {
+  const ready = rows.filter((r) => r.state === "ready");
+  return (ready.find((r) => r.pick === current) ?? ready[0])?.pick ?? "copy";
+}
+
+/** What step 1's button does with the row picked: copy now, go on to step 2, or say the agent can't be used yet. */
+export function whoNext(pick: SheetPick, rows: readonly SheetRow[]): "copy" | "may" | "signedOut" | "missing" {
+  if (pick === "copy") return "copy";
+  const state = rows.find((r) => r.pick === pick)?.state;
+  return state === "ready" ? "may" : state === "signedOut" ? "signedOut" : "missing";
+}
+
+/** Under an agent's row when step 1 goes on with it not signed in: the server's own words for that refusal. */
+export const notSignedInWhy = (id: AgentId): string => `${agentName(id)} is not signed in. Choose ${MENU_WORDS.signIn}, then try again.`;
+
+/** Where the sheet is: step 1 with its row picked, or step 2 for an agent with its choice. */
+export type Sheet = { step: "who"; pick: SheetPick } | { step: "may"; agent: AgentId; permissions: AgentRules["permissions"] };
+
+/** The sheet's primary button. */
+export const sheetPrimary = (s: Sheet): string =>
+  s.step === "may" ? sendToLabel(s.agent) : s.pick === "copy" ? SHEET_WORDS.copyButton : SHEET_WORDS.next;
+
+/**
+ * What the desk does after Send, from `afterSend`: a toast for a hand-over, a start or a recall (no dialog, nothing
+ * copied), nothing after a Stop, and today's dialog otherwise. `why` is the line above the dialog's prompt, given only
+ * while Send to AI is on (off, the dialog is exactly today's). `handed`: the notes went to an agent.
+ */
+export interface SendFollow { toast: { text: string; ms: number } | null; dialog: boolean; why: string | null; handed: boolean }
+
+export function followSend(r: SendHandOver | undefined, s: AgentStatus | null): SendFollow {
+  const none: SendFollow = { toast: null, dialog: false, why: null, handed: false };
+  const said = r && "why" in r ? r.why : null;
+  switch (afterSend(r)) {
+    case "handed": return { ...none, toast: { text: `Sent to ${agentName(r!.handedTo)}`, ms: 2400 }, handed: true };
+    case "starting": return { ...none, toast: { text: `Starting ${agentName(r!.handedTo)}`, ms: 2400 }, handed: true };
+    case "recalled": {
+      const name = agentName(s?.agent ?? null);
+      // The runner's reason may say "<A> could not start: …" itself; the toast names the agent once.
+      const lead = `${name} could not start: `;
+      const why = (said ?? "").replace(/\.$/, "");
+      return { ...none, toast: { text: `${name} couldn't start: ${why.startsWith(lead) ? why.slice(lead.length) : why}. The notes are back in to do.`, ms: 6000 } };
+    }
+    case "stopped": return none;
+    default: return { ...none, dialog: true, why: s?.on && said ? said : null };
+  }
+}

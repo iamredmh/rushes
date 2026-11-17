@@ -7,7 +7,7 @@ import {
 } from "../lib.js";
 import { onLabel } from "../../../src/core/notes.js";
 import { deskPlace, deskView, noteTarget, takeCount, takeGroups, unsentCount, unsentEdits, viewForKey, type DeskView } from "../desk.js";
-import type { Batch, BriefView, FoundCounts, FoundKind, Note, Stage, StoryboardView, Video } from "../types.js";
+import type { Batch, BriefView, FoundCounts, FoundKind, Note, SendHandOver, Stage, StoryboardView, Video } from "../types.js";
 import { useRushes } from "../useRushes.js";
 import { Assets, type FoundRequest } from "./Assets.js";
 import { Brief } from "./Brief.js";
@@ -31,6 +31,8 @@ import { ReviewTabs, type ReviewTabRow } from "./desk/ReviewTabs.js";
 import { StatusBar } from "./desk/StatusBar.js";
 import { TopBar } from "./desk/TopBar.js";
 import { AgentChip } from "./agent/AgentChip.js";
+import { FirstSend, WhyLine } from "./agent/FirstSend.js";
+import { actOnSend } from "./agent/sendFollow.js";
 import { Workspaces } from "./desk/Workspaces.js";
 import type { ReviewClock } from "./desk/frame.js";
 import type { MixView } from "./desk/useMix.js";
@@ -54,7 +56,7 @@ const REVIEW_TABS: { view: Exclude<Stage, "script" | "visuals" | "mix">; label: 
 // Assets isn't a review stage (§15.3): it's a dashboard-only view, kept out of Stage and handled as its own case throughout this file.
 type View = DeskView;
 /** What Send shows: a batch, or (from the Brief page) a message that is not recorded anywhere. */
-type Sent = Pick<Batch, "id" | "prompt"> & { title?: string };
+type Sent = Pick<Batch, "id" | "prompt"> & { title?: string; why?: string | null };
 const typing = (el: EventTarget | null) => el instanceof HTMLElement && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
 
 /** §19.1: a locked tab's own page -- what it's for, what unlocks it, and a prompt to copy for your agent. */
@@ -120,6 +122,7 @@ export function App() {
   // §26: a toast may carry one action (Undo after shelving a film).
   const [toastAction, setToastAction] = useState<{ label: string; run(): void } | null>(null);
   const [sent, setSent] = useState<Sent | null>(null);
+  const [firstSend, setFirstSend] = useState(false);
   // §24: the planning page you were last on, which key 1 returns to (Script, the old key 1, until you open Brief).
   const [planLast, setPlanLast] = useState<PlanPage>("script");
   // §27, 5.3: the Review tab you were last on, which the Review workspace opens on.
@@ -472,9 +475,11 @@ export function App() {
   // Send sends the whole project from whichever tab it is pressed on: every tab's open notes
   // on every film in play and the changed script lines (one batch), plus what changed in the brief and
   // the storyboard. Those two have no batch: their files are the record, so they are only lines to paste.
-  const send = async () => {
+  // §28: the first Send asks who gets the notes (FirstSend), which then sends with the status its setup answered.
+  const send = async (asked = agent?.asked !== false, status = agent) => {
     if (!state || !stage) return;
     setKeysOpen(false);
+    if (!asked && unsent > 0) return setFirstSend(true);
     // The Brief or Storyboard page waits for what you just typed to be saved, and is read as the server then has it.
     const settled = stage === "brief" || stage === "storyboard" ? await planSettle.current?.() : undefined;
     const brief = (stage === "brief" ? (settled as BriefView | undefined) : undefined) ?? state.brief;
@@ -485,17 +490,25 @@ export function App() {
       board.exists && (stage === "storyboard" || board.changed > 0) ? storySendPrompt(state.project.name, video?.name ?? null, board) : null,
     ].filter((line): line is string => line !== null);
     let batch: Batch | null = null;
+    let handOver: SendHandOver | undefined;
     try {
-      batch = (await api.post<{ batch: Batch }>("/api/batches", {})).batch;
+      ({ batch, agent: handOver } = await api.post<{ batch: Batch; agent?: SendHandOver }>("/api/batches", {}));
     } catch (e) {
       if (!(e instanceof ApiError && e.code === "empty_batch")) return toast((e as Error).message);
+    }
+    // §28: the agent has the batch, or Stop or a failed start took it back: no dialog, only planning lines left to paste.
+    const follow = batch ? actOnSend(handOver, status, toast) : null;
+    if (follow && !follow.dialog) {
+      void refresh();
+      if (planning.length === 0) return;
+      batch = null;
     }
     if (!batch && planning.length === 0) {
       if (stage === "brief" && !brief.exists) return toast("There's no brief yet: copy the prompt on this page for your agent");
       if (stage === "storyboard" && !board.exists) return toast("There's no storyboard yet: copy the prompt on this page for your agent");
       return toast("Nothing open to send on any tab");
     }
-    setSent(batch ? { id: batch.id, prompt: [batch.prompt, ...planning].join("\n\n") } : { id: "plan", title: "Message for your agent", prompt: planning.join("\n\n") });
+    setSent(batch ? { id: batch.id, prompt: [batch.prompt, ...planning].join("\n\n"), why: follow?.why } : { id: "plan", title: "Message for your agent", prompt: planning.join("\n\n") });
     setCopied(false);
     if (batch) void refresh();
   };
@@ -617,8 +630,8 @@ export function App() {
     },
     // On its own page Send always carries the brief's or storyboard's line (send()), so it shows there whenever that file exists.
     send: { count: unsent, always: (stage === "brief" && state.brief.exists) || (stage === "storyboard" && state.storyboard.exists), onSend: () => void send() },
-    // §28: Set up Send to AI opens the agent menu until the first-Send sheet (task 4) is built.
-    agent: agent && { status: agent, onSetUp: () => agentMenu.current?.(), menu: agentMenu, onStatus: noteAgent, toast },
+    // §28: Set up Send to AI opens the first-Send sheet.
+    agent: agent && { status: agent, onSetUp: () => setFirstSend(true), menu: agentMenu, onStatus: noteAgent, toast },
     shown: panel.shown,
     narrow: panel.narrow,
     setShown: panel.setShown,
@@ -753,13 +766,17 @@ export function App() {
         }
       />
 
-      {sent && (
+      {firstSend && agent && (
+        <FirstSend status={agent} waiting={unsent > 0} onStatus={noteAgent} toast={toast} onClose={(done) => { setFirstSend(false); if (done) setSent((s) => s && { ...s, why: null }); }} onSend={(s) => void send(true, s)} />
+      )}
+      {sent && !firstSend && (
         <div class="pop" role="dialog" aria-label="Sent to agent">
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
             <h3>{sent.title ?? `Batch ${sent.id} is ready`}</h3>
             <span class="sp" />
             <button class="btn ghost ib sm" aria-label="Close" data-tip="Close" onClick={() => setSent(null)}><Icon name="x" /></button>
           </div>
+          {sent.why && <WhyLine why={sent.why} onSetUp={() => setFirstSend(true)} />}
           <pre>{sent.prompt}</pre>
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
             <button class="btn primary" onClick={() => void copy()}><Icon name="copy" />{copied ? "Copied" : "Copy prompt"}</button>

@@ -2,13 +2,13 @@
 // the live strip and what the desk does after Send. Every string is the plan's own.
 import { describe, expect, it } from "vitest";
 import {
-  MENU_WORDS, PERMISSION_CHOICES, afterSend, focusAfterRemove, agentName, canStop, chipShows, chipText, chipTone, footLine, liveLines, menuAgents, menuRowCount, noteAgentBadge, rowText, ruleRows, whoLine,
+  MENU_WORDS, PERMISSION_CHOICES, SHEET_WORDS, afterSend, focusAfterRemove, followSend, mayQuestion, notSignedInWhy, sendToLabel, sheetDefault, sheetPrimary, sheetRows, whoNext, agentName, canStop, chipShows, chipText, chipTone, footLine, liveLines, menuAgents, menuRowCount, noteAgentBadge, rowText, ruleRows, whoLine,
   type NoteLite,
 } from "../../web/src/agent.js";
 import type { AgentInfo, AgentStatus } from "../../web/src/types.js";
 
 const status = (over: Partial<AgentStatus> = {}): AgentStatus => ({
-  on: true, agent: "claude", phase: "idle", batches: [], current: { note: null, doing: null }, asks: [], lines: [], error: null, session: null,
+  on: true, agent: "claude", phase: "idle", batches: [], current: { note: null, doing: null }, asks: [], lines: [], error: null, session: null, asked: true,
   permissions: "project-edits", always: [], ...over,
 });
 
@@ -298,5 +298,108 @@ describe("the Send to AI row and the agent menu (task 3)", () => {
       remove: "Remove",
       footer: "Switch off: Send copies a prompt, as now",
     });
+  });
+});
+
+// ---- the first-Send sheet and what Send does with the answer (task 4) ----
+
+describe("the first-Send sheet (task 4)", () => {
+  const info = (id: "claude" | "codex", installed: boolean, signedIn: boolean): AgentInfo => ({
+    id, name: id === "claude" ? "Claude Code" : "Codex", installed, signedIn: installed && signedIn, path: installed ? `/bin/${id}` : null, signIn: `${id} login`,
+  });
+
+  it("its fixed words, as the plan and ruling P2-R3 give them", () => {
+    expect(SHEET_WORDS).toEqual({
+      who: "Who should get these notes?",
+      copy: "Copy a prompt, as now",
+      copyButton: "Copy a prompt",
+      next: "Next",
+      back: "Back",
+      cancel: "Cancel",
+      notInstalled: "Not installed",
+      noKey: "Rushes never sees a password or key. The agent uses your own sign-in.",
+      setUp: "Set up",
+    });
+    expect(mayQuestion("claude")).toBe("What may Claude Code do without asking?");
+    expect(mayQuestion("codex")).toBe("What may Codex do without asking?");
+    expect(sendToLabel("claude")).toBe("Send to Claude Code");
+    expect(notSignedInWhy("claude")).toBe("Claude Code is not signed in. Choose Sign in in Terminal, then try again.");
+  });
+
+  it("sheetRows: every agent detection knows, in its order, by state, then the copy row", () => {
+    const rows = sheetRows([info("claude", true, false), info("codex", false, false)]);
+    expect(rows).toEqual([
+      { pick: "claude", name: "Claude Code", state: "signedOut", note: "Not signed in" },
+      { pick: "codex", name: "Codex", state: "missing", note: "Not installed" },
+      { pick: "copy", name: "Copy a prompt, as now", state: "copy", note: null },
+    ]);
+    expect(sheetRows([info("claude", true, true)])[0]).toEqual({ pick: "claude", name: "Claude Code", state: "ready", note: "Signed in" });
+  });
+
+  it("sheetRows: detection not back yet, or failed: the copy row alone", () => {
+    expect(sheetRows(null).map((r) => r.pick)).toEqual(["copy"]);
+    expect(sheetRows([]).map((r) => r.pick)).toEqual(["copy"]);
+  });
+
+  it("sheetDefault: the current agent if it is ready, else the first ready one, else copy", () => {
+    const both = sheetRows([info("claude", true, true), info("codex", true, true)]);
+    expect(sheetDefault(both, null)).toBe("claude");
+    expect(sheetDefault(both, "codex")).toBe("codex");
+    const codexOnly = sheetRows([info("claude", true, false), info("codex", true, true)]);
+    expect(sheetDefault(codexOnly, "claude")).toBe("codex");
+    expect(sheetDefault(sheetRows([info("claude", true, false), info("codex", false, false)]), null)).toBe("copy");
+    expect(sheetDefault(sheetRows(null), "claude")).toBe("copy");
+  });
+
+  it("whoNext: what step 1's primary does with the row picked", () => {
+    const rows = sheetRows([info("claude", true, true), info("codex", true, false)]);
+    expect(whoNext("copy", rows)).toBe("copy");
+    expect(whoNext("claude", rows)).toBe("may");
+    expect(whoNext("codex", rows)).toBe("signedOut");
+    expect(whoNext("codex", sheetRows([info("codex", false, false)]))).toBe("missing");
+    // An agent detection no longer lists is missing.
+    expect(whoNext("claude", sheetRows([]))).toBe("missing");
+  });
+
+  it("sheetPrimary: Next for an agent, Copy a prompt for the copy row, Send to <A> on step 2", () => {
+    expect(sheetPrimary({ step: "who", pick: "claude" })).toBe("Next");
+    expect(sheetPrimary({ step: "who", pick: "copy" })).toBe("Copy a prompt");
+    expect(sheetPrimary({ step: "may", agent: "codex", permissions: "ask-all" })).toBe("Send to Codex");
+  });
+});
+
+describe("followSend (task 4)", () => {
+  const off = status({ on: false, agent: null });
+
+  it("handed: a toast naming the agent, no dialog, and notifications asked for", () => {
+    expect(followSend({ handedTo: "claude" }, status())).toEqual({ toast: { text: "Sent to Claude Code", ms: 2400 }, dialog: false, why: null, handed: true });
+  });
+
+  it("starting: Starting <A>; one starting with no agent is afterSend's dialog, with no reason to give", () => {
+    expect(followSend({ handedTo: "codex", starting: true }, status())).toEqual({ toast: { text: "Starting Codex", ms: 2400 }, dialog: false, why: null, handed: true });
+    expect(followSend({ handedTo: null, starting: true }, status())).toEqual({ toast: null, dialog: true, why: null, handed: false });
+  });
+
+  it("recalled: why, for 6 seconds, with no dialog and nothing to copy", () => {
+    expect(followSend({ handedTo: null, why: "the adapter exited (code 3)", recalled: true }, status())).toEqual({
+      toast: { text: "Claude Code couldn't start: the adapter exited (code 3). The notes are back in to do.", ms: 6000 }, dialog: false, why: null, handed: false,
+    });
+    // A reason that names the agent's failure to start itself is not said twice.
+    expect(followSend({ handedTo: null, why: "Claude Code could not start: Agent adapter exited with code 3", recalled: true }, status())!.toast!.text).toBe(
+      "Claude Code couldn't start: Agent adapter exited with code 3. The notes are back in to do.",
+    );
+    // A reason that ends its own sentence isn't given a second full stop.
+    expect(followSend({ handedTo: null, why: "It timed out.", recalled: true }, status({ agent: "codex" }))!.toast!.text).toBe("Codex couldn't start: It timed out. The notes are back in to do.");
+  });
+
+  it("stopped: nothing at all", () => {
+    expect(followSend({ handedTo: null, why: "Stopped", stopped: true }, status())).toEqual({ toast: null, dialog: false, why: null, handed: false });
+  });
+
+  it("a refusal where nothing started: today's dialog, with the reason only while Send to AI is on", () => {
+    expect(followSend({ handedTo: null, why: "Claude Code is not signed in" }, status())).toEqual({ toast: null, dialog: true, why: "Claude Code is not signed in", handed: false });
+    // Off is today's Send: the dialog exactly as it was, no reason line.
+    expect(followSend({ handedTo: null, why: "Send to AI is off" }, off)).toEqual({ toast: null, dialog: true, why: null, handed: false });
+    expect(followSend(undefined, null)).toEqual({ toast: null, dialog: true, why: null, handed: false });
   });
 });

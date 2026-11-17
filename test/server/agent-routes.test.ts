@@ -212,6 +212,21 @@ describe("agent routes", () => {
     expect(await r.store.read("agent")).toMatchObject({ on: false, agent: "codex" });
   });
 
+  it("asked starts false and turns true after any setup, {on:false} included; a refused setup leaves it false", async () => {
+    const r = await rig({ agents: [claude({ signedIn: false }), codex()] });
+    expect((await r.call("GET", "/api/agent")).json.status.asked).toBe(false);
+    expect(await r.store.read("agent")).toMatchObject({ asked: false });
+    // A refusal settles nothing: the first Send still asks.
+    expect((await r.call("POST", "/api/agent/setup", { on: true, agent: "claude" })).status).toBe(409);
+    expect((await r.call("GET", "/api/agent")).json.status.asked).toBe(false);
+    const off = await r.call("POST", "/api/agent/setup", { on: false });
+    expect(off.json.status).toMatchObject({ on: false, asked: true });
+    expect(await r.store.read("agent")).toMatchObject({ on: false, asked: true });
+    // Another project's first setup turning Send to AI on says so too.
+    const s = await rig();
+    expect((await s.call("POST", "/api/agent/setup", { on: true, agent: "codex" })).json.status).toMatchObject({ on: true, agent: "codex", asked: true });
+  });
+
   it("setup with a new agent clears the kept session; the same agent keeps it", async () => {
     const session = { id: "fake-session-9", agent: "claude" as const, startedAt: "2026-11-17T09:00:00.000Z" };
     const r = await rig({ settings: { on: true, agent: "claude", session } });

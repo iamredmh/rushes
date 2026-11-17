@@ -13,7 +13,7 @@ import { AgentMenu } from "./AgentMenu.js";
 /** What the desk gives the notes panel for the row (PanelShared.agent). */
 export interface AgentPanel {
   status: AgentStatus;
-  /** "Set up Send to AI": opens the first-Send sheet (task 4). Until that is built, the desk opens the agent menu. */
+  /** "Set up Send to AI": the desk opens the first-Send sheet (FirstSend). */
   onSetUp(): void;
   /** The row puts its menu's opener here, so the desk can open the menu. */
   menu: MutableRef<(() => void) | null>;

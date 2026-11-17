@@ -171,6 +171,12 @@ async function start(port = 0, noFfmpeg = false, env: Record<string, string> = {
     child.on("exit", (code) => fail(new Error(`rushes serve exited (${code}):\n${out}`)));
   });
   const u = new URL(url);
+  // §28: the first Send in a fresh project asks who gets the notes. Projects these tests open have answered it with Send
+  // to AI off, so Send is as it always was (batch filed, copy dialog). e2e/agentFixture.ts (the fake agent) starts fresh.
+  if (!env.RUSHES_TEST_AGENT) {
+    const res = await fetch(`${u.origin}/api/agent/setup`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ on: false }) });
+    if (!res.ok) throw new Error(`answering the first-Send sheet failed: ${res.status} ${await res.text()}`);
+  }
   return { child, url, base: u.origin, port: Number(u.port), root, tmpDir };
 }
 

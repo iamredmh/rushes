@@ -380,9 +380,10 @@ export type SendHandOver = SendResult | { handedTo: AgentId | null; starting: tr
 /** How long Send's response waits for the agent to take the batch (a first start can take minutes). */
 export const SEND_WAIT_MS = 5_000;
 
+// `asked`: with no runner there is nothing to set up, so Send never opens the first-Send sheet.
 const OFF_STATUS: AgentStatus = {
   on: false, agent: null, phase: "off", batches: [], current: { note: null, doing: null }, asks: [], lines: [], error: null, session: null,
-  permissions: "project-edits", always: [],
+  asked: true, permissions: "project-edits", always: [],
 };
 
 /** The stand-in when no runner is given: Send to AI is off, and nothing can drive an agent. */
@@ -1609,6 +1610,8 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
       // Turned on only for the agent that was checked: one changed meanwhile (another tab) is refused.
       if (b.on && (b.agent ?? f.agent) !== checked) throw new RushesError("The agent changed. Try again.", 409, "agent_changed");
       f.on = b.on;
+      // Any setup answers the first-Send sheet, Copy a prompt ({on:false}) included.
+      f.asked = true;
       // Another agent can't continue this one's conversation.
       if (b.agent !== undefined && b.agent !== f.agent) {
         f.agent = b.agent;
