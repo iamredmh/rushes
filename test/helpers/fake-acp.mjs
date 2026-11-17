@@ -24,8 +24,8 @@
 //
 // Steps (run in order within a turn)
 //   { update: object }      send session/update { sessionId, update }
-//   { permission: { toolCall: object, options?: object[] }, record?: string }
-//                           send session/request_permission and wait for the answer, which
+//   { permission: { toolCall: object, options?: object[], meta?: object }, record?: string }
+//                           send session/request_permission (with `meta` as the request's _meta) and wait for the answer, which
 //                           is logged (as a received response) and, when `record` is given,
 //                           also appended to the log as { recorded: record, outcome }.
 //                           Default options: allow_once, allow_always, reject_once.
@@ -93,7 +93,9 @@ async function runTurn(turn) {
         { optionId: "allow-always", name: "Allow always", kind: "allow_always" },
         { optionId: "reject-once", name: "Reject", kind: "reject_once" },
       ];
-      const res = await askClient("session/request_permission", { sessionId: turn.sessionId, toolCall: step.permission.toolCall, options }, turn);
+      const params = { sessionId: turn.sessionId, toolCall: step.permission.toolCall, options };
+      if (step.permission.meta) params._meta = step.permission.meta;
+      const res = await askClient("session/request_permission", params, turn);
       if (step.record) log({ recorded: step.record, outcome: res.result?.outcome ?? null });
     } else if (step.http) {
       const { method, path, body } = step.http;

@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import type { AgentId } from "../../core/schema.js";
 import type { AdapterSpec, McpServerSpec } from "./acp.js";
 import { searchPath, type AgentInfo } from "./detect.js";
+import { RUSHES_SERVER } from "./ownTools.js";
 
 /*
  * Checked 17 Nov 2026 with `npm view <pkg> version`:
@@ -90,5 +91,5 @@ function cliPath(): string {
 /** dist/cli/index.js exists only after `npm run build`; callers under tsx pass RunnerOptions.mcp (Task 5). */
 /** The Rushes MCP server, handed to the agent so it can call rushes_reply. */
 export function rushesMcp(root: string): McpServerSpec {
-  return { name: "rushes", command: process.execPath, args: [cliPath(), "mcp", root], env: [] };
+  return { name: RUSHES_SERVER, command: process.execPath, args: [cliPath(), "mcp", root], env: [] };
 }

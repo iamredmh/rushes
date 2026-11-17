@@ -23,6 +23,7 @@ import type { ChangeEvent, Store } from "../../core/store.js";
 import { logBookFor } from "../logbook.js";
 import { AcpConnection, type AcpPermissionOutcome, type AcpPermissionParams, type AdapterSpec, type McpServerSpec } from "./acp.js";
 import { ASK_MODE, adapterSpec, rushesMcp, sessionSetup } from "./adapters.js";
+import { isOwnRushesTool, noteMcpCall, type McpCalls } from "./ownTools.js";
 import { PermissionBroker, addRule, allowOutcome, dropRule, toRequest, type AskChoice, type PendingAsk } from "./broker.js";
 import { detectAgents, type AgentInfo } from "./detect.js";
 import { agentRulesFor, type AgentRulesFile } from "./rules.js";
@@ -140,6 +141,8 @@ async function within(p: Promise<unknown>, ms: number): Promise<void> {
 export class AgentRunner {
   private readonly detect: () => Promise<AgentInfo[]>;
   private readonly specFor: (a: AgentInfo, root: string) => AdapterSpec;
+  /** Codex's MCP calls by tool call id, per adapter (R16). */
+  private readonly mcpCalls = new WeakMap<AcpConnection, McpCalls>();
   private readonly mcp: (root: string) => McpServerSpec;
   private readonly idleMs: number;
   private readonly startMs: number;
@@ -496,7 +499,13 @@ export class AgentRunner {
     this.conn = conn;
     this.sessionId = null;
     this.live.add(conn);
-    conn.on("update", (u: unknown) => this.onUpdate(conn, u));
+    // R16: Codex names an MCP call's server and tool only in its tool_call update, before the approval comes.
+    const calls: McpCalls = new Map();
+    this.mcpCalls.set(conn, calls);
+    conn.on("update", (u: unknown) => {
+      noteMcpCall(calls, u);
+      this.onUpdate(conn, u);
+    });
     conn.on("exit", (e: { code: number | null; stderr: string }) => this.onExit(conn, e));
     conn.onPermission((p) => this.onPermission(conn, p));
   }
@@ -518,6 +527,8 @@ export class AgentRunner {
   private async onPermission(conn: AcpConnection, p: AcpPermissionParams): Promise<AcpPermissionOutcome> {
     const live = () => !this.closed && !this.stopping && conn === this.conn && !conn.hasExited;
     if (!live()) return CANCELLED;
+    // R16: Rushes's own MCP tools never ask, under any permission level.
+    if (isOwnRushesTool(p, this.mcpCalls.get(conn) ?? new Map())) return allowOutcome(p.options);
     // The adapter hears "yes" before an Always rule is written: wait for that write, then read the rules.
     await this.ruleWrite;
     const rules = await this.loadRules();
