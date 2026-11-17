@@ -29,7 +29,7 @@ import { osRevealer, osOpener, OPEN_SAFE_EXT, type Revealer, type Opener } from 
 import type { CorruptEvent } from "./watch.js";
 import { inUse, setInUse } from "../core/picks.js";
 import { filmTakes, putAway } from "../core/takes.js";
-import { AGENTS, AgentPermissionsSchema, LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, PinSchema, FileKindSchema, MarkSchema, ProjectIdSchema, ShotSchema, LEVEL_MIN, LEVEL_MAX, LEVEL_STEP, lanesForVideo, picksForVideo, variantFilms, type InUse, type Levels, type Batch, type Note, type Picks, type Project, type VisualsFile } from "../core/schema.js";
+import { AGENTS, AgentPermissionsSchema, AlwaysRuleSchema, LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, PinSchema, FileKindSchema, MarkSchema, ProjectIdSchema, ShotSchema, LEVEL_MIN, LEVEL_MAX, LEVEL_STEP, lanesForVideo, picksForVideo, variantFilms, type InUse, type Levels, type Batch, type Note, type Picks, type Project, type VisualsFile } from "../core/schema.js";
 import { LABEL_MAX, oneLineOf } from "../core/labels.js";
 import { byOf, logBookFor } from "./logbook.js";
 import { BriefService } from "./brief.js";
@@ -1626,10 +1626,10 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     await agent.answer(c.req.param("id"), choice);
     return c.json(await agentStatusOf());
   });
-  app.delete("/api/agent/always/:index", async (c) => {
-    const index = c.req.param("index");
-    if (!/^\d{1,4}$/.test(index)) throw new InvalidError("The rule's index must be a whole number");
-    await agent.removeRule(Number(index));
+  // T6: a rule is named by what it is, so two tabs removing rules never take out the wrong one.
+  app.delete("/api/agent/always", async (c) => {
+    const rule = await body(c, AlwaysRuleSchema);
+    await agent.removeRule(rule);
     return c.json(await agentStatusOf());
   });
   // The command is the agent's own login command from detection, never text from the request.

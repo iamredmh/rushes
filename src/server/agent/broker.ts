@@ -66,10 +66,11 @@ export function addRule(always: AlwaysRule[], rule: AlwaysRule): boolean {
   return true;
 }
 
-/** Takes the rule at `index` out of the list; one that isn't there is not found. */
-export function dropRule(always: AlwaysRule[], index: number): void {
-  if (!Number.isInteger(index) || index < 0 || index >= always.length) throw new NotFoundError("rule", String(index));
-  always.splice(index, 1);
+/** Takes the rule with this kind and command out of the list (T6); one that isn't there is not found. */
+export function dropRule(always: AlwaysRule[], rule: AlwaysRule): void {
+  const at = always.findIndex((r) => r.kind === rule.kind && r.command === rule.command);
+  if (at < 0) throw new NotFoundError("rule", alwaysLabel(rule));
+  always.splice(at, 1);
 }
 
 interface Open {

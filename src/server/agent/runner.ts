@@ -479,10 +479,10 @@ export class AgentRunner {
     if (rule) await this.ruleWriting(this.keepRule(rule));
   }
 
-  /** Takes an Always rule out of the user's rules file by its index there. */
-  async removeRule(index: number): Promise<void> {
+  /** Takes an Always rule out of the user's rules file by its kind and command (T6). One not there is not found. */
+  async removeRule(rule: { kind: string; command: string | null }): Promise<void> {
     await this.ruleWriting(
-      this.rulesFile.update((f) => dropRule(f.always, index)).then(({ data }) => {
+      this.rulesFile.update((f) => dropRule(f.always, { kind: rule.kind, command: rule.command })).then(({ data }) => {
         this.applyRules(data);
       }),
     );

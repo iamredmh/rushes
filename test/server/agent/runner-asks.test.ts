@@ -208,16 +208,20 @@ describe("AgentRunner permission asks", () => {
     await r.phase("finished");
   });
 
-  it("removeRule takes a rule out by index and refuses one that isn't there", async () => {
+  it("removeRule takes a rule out by kind and command, and refuses one that isn't there (T6)", async () => {
     const rules = [{ kind: "execute", command: "npm run" }, { kind: "fetch", command: null }, { kind: "execute", command: "git status" }];
     const r = await rig({ turns: [] }, { rules: { always: rules } });
     const heard: AgentStatus[] = [];
     r.store.on("agent", (s: AgentStatus) => heard.push(s));
-    await r.runner.removeRule(1);
+    await r.runner.removeRule({ kind: "fetch", command: null });
     expect((await agentRulesFor(r.store).read()).always).toEqual([rules[0], rules[2]]);
     expect(heard.length).toBeGreaterThan(0);
-    for (const bad of [2, -1, 0.5]) await expect(r.runner.removeRule(bad)).rejects.toBeInstanceOf(NotFoundError);
-    expect((await agentRulesFor(r.store).read()).always).toEqual([rules[0], rules[2]]);
+    expect(r.runner.status().always).toEqual([rules[0], rules[2]]);
+    for (const bad of [{ kind: "fetch", command: null }, { kind: "execute", command: "npm" }, { kind: "edit", command: "npm run" }]) {
+      await expect(r.runner.removeRule(bad), JSON.stringify(bad)).rejects.toBeInstanceOf(NotFoundError);
+    }
+    await r.runner.removeRule({ kind: "execute", command: "git status" });
+    expect((await agentRulesFor(r.store).read()).always).toEqual([rules[0]]);
   });
 
   it("No answers reject_once", async () => {

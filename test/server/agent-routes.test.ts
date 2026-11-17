@@ -268,14 +268,22 @@ describe("agent routes", () => {
     expect((await agentRulesFor(r.store).read()).always).toEqual([]);
   });
 
-  it("always/:index removes a kept rule; an unknown index is 404", async () => {
-    const always = [{ kind: "execute", command: "git commit" }, { kind: "execute", command: "npx hyperframes" }];
+  it("DELETE always removes a kept rule by kind and command; an unknown one is 404 (T6)", async () => {
+    const always = [{ kind: "execute", command: "git commit" }, { kind: "execute", command: "npx hyperframes" }, { kind: "fetch", command: null }];
     const r = await rig({ settings: { on: true, agent: "claude" }, rules: { always } });
-    const res = await r.call("DELETE", "/api/agent/always/0");
+    const res = await r.call("DELETE", "/api/agent/always", { kind: "execute", command: "git commit" });
     expect(res.status).toBe(200);
+    expect(res.json.status.always).toEqual([always[1], always[2]]);
+    expect((await agentRulesFor(r.store).read()).always).toEqual([always[1], always[2]]);
+    expect((await r.call("DELETE", "/api/agent/always", { kind: "fetch", command: null })).status).toBe(200);
     expect((await agentRulesFor(r.store).read()).always).toEqual([always[1]]);
-    expect((await r.call("DELETE", "/api/agent/always/5")).status).toBe(404);
-    expect((await r.call("DELETE", "/api/agent/always/x")).status).toBe(400);
+    expect((await r.call("DELETE", "/api/agent/always", { kind: "execute", command: "git commit" })).status).toBe(404);
+    expect((await r.call("DELETE", "/api/agent/always", { kind: "execute" })).status).toBe(400);
+    expect((await r.call("DELETE", "/api/agent/always", {})).status).toBe(400);
+    // Rules are no longer addressed by index.
+    const app = createApp(r.store, { agent: r.runner });
+    expect((await app.request("/api/agent/always/0", { method: "DELETE", headers: { "content-type": "application/json" }, body: "{}" })).status).toBe(404);
+    expect((await agentRulesFor(r.store).read()).always).toEqual([always[1]]);
   });
 
   it("working-on marks a sent note, is refused for a note that is not sent, and 404s an unknown one", async () => {
