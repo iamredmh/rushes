@@ -414,10 +414,16 @@ describe("AgentRunner", () => {
   it("an adapter that fails to start fails the send, which says why, and recalls its notes", async () => {
     const r = await rig({ exitOnStart: 7, turns: [] });
     const b = await r.batch("One");
-    const result = await r.runner.send(b);
+    const b2 = await r.batch("Two");
+    // A second Send joins the start in flight, and is refused with it.
+    const [result, second] = await Promise.all([r.runner.send(b), r.runner.send(b2)]);
     expect(result.handedTo).toBeNull();
     const why = (result as { why: string }).why;
     expect(why).toMatch(/Claude Code/);
+    // R12: a refusal after a start began carries recalled, so the desk doesn't copy the prompt.
+    expect(result).toEqual({ handedTo: null, why, recalled: true });
+    expect(second).toEqual({ handedTo: null, why, recalled: true });
+    expect((await notesOf(r.store, b2.noteIds)).map(noteState)).toEqual(["todo"]);
     const s = r.runner.status();
     expect(s.phase).toBe("failed");
     expect(s.error).toBe(why);
@@ -431,7 +437,8 @@ describe("AgentRunner", () => {
     const t0 = Date.now();
     const result = await r.runner.send(b);
     expect(Date.now() - t0).toBeLessThan(3000);
-    expect(result).toEqual({ handedTo: null, why: "Claude Code did not start within 0.3 seconds" });
+    // R12: the notes were recalled, so the desk doesn't copy the prompt.
+    expect(result).toEqual({ handedTo: null, why: "Claude Code did not start within 0.3 seconds", recalled: true });
     const s = r.runner.status();
     expect(s.phase).toBe("failed");
     expect(s.error).toBe("Claude Code did not start within 0.3 seconds");
@@ -455,7 +462,7 @@ describe("AgentRunner", () => {
       await vi.advanceTimersByTimeAsync(119_000);
       expect(r.runner.status().phase).toBe("starting");
       await vi.advanceTimersByTimeAsync(1_000);
-      expect(await sending).toEqual({ handedTo: null, why: "Claude Code did not start within 2 minutes" });
+      expect(await sending).toEqual({ handedTo: null, why: "Claude Code did not start within 2 minutes", recalled: true });
     } finally {
       vi.useRealTimers();
     }

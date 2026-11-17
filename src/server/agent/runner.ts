@@ -58,8 +58,13 @@ export interface RunnerOptions {
   now?: () => Date;
 }
 
-/** `stopped` is set when the batch was not handed over because the user pressed Stop: the desk then doesn't copy the prompt. */
-export type SendResult = { handedTo: AgentId } | { handedTo: null; why: string; stopped?: true };
+/**
+ * Why a batch was not handed over. `stopped`: the user pressed Stop. `recalled` (R12): a start began and failed,
+ * timed out, or was cut short by Rushes closing, and the batch's notes went back to to do. The desk copies the
+ * prompt only for a refusal with neither flag (Send to AI off, no agent, not installed, not signed in), where
+ * nothing was started and the notes stay sent.
+ */
+export type SendResult = { handedTo: AgentId } | { handedTo: null; why: string; stopped?: true; recalled?: true };
 
 /** A follow-up parked by R11: its note goes back to to do, and Activity names the agent to Send to. */
 type Park = { name: string; batch: string };
@@ -290,7 +295,8 @@ export class AgentRunner {
     } catch (e) {
       // Halted by the user's Stop (not by close): flagged, so the desk doesn't fall back to copying the prompt.
       if (e instanceof Halted && !this.closed) return { handedTo: null, why: e.message, stopped: true };
-      return { handedTo: null, why: messageOf(e) };
+      // The job was queued before the start: the failure (failRun) or the close (shutdown) gave its notes back.
+      return { handedTo: null, why: messageOf(e), recalled: true };
     }
     this.pump();
     return { handedTo: accepted.info.id };
