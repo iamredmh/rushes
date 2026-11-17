@@ -177,7 +177,7 @@ export async function startServer(rootDir: string, opts: StartOptions = {}): Pro
       found.close();
       // A running proxy's ffmpeg must not outlive the server; its partial file is deleted too.
       // From here no new job starts either (a POST or an autoProxy cut racing the close).
-      // The agent's adapter goes too (its pending asks are cancelled); notes stay as they are.
+      // The agent's adapter goes too (its pending asks are cancelled); the notes it had go back to to do.
       await Promise.all([proxyJobs.close(), peakJobs.close(), runner.close()]);
       server.closeAllConnections?.();
       await new Promise<void>((ok) => server.close(() => ok()));

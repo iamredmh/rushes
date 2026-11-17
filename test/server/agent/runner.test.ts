@@ -507,15 +507,20 @@ describe("AgentRunner", () => {
     expect(texts.some((t) => t.includes("Ran the render"))).toBe(false);
   });
 
-  it("close ends the adapter without recalling notes", async () => {
+  it("close during a turn ends the adapter and puts the in-flight and queued batches' notes back in to do (I3)", async () => {
     const r = await rig({ turns: [[{ sleep: 60000 }]] });
-    const b = await r.batch("One");
+    const b = await r.batch("One", "Two");
     await r.runner.send(b);
     await r.phase("working");
+    const queued = await r.batch("Three");
+    await r.runner.send(queued);
+    // A note the agent already finished stays done.
+    await r.store.update("notes", (f) => void applyReply(f, { id: b.noteIds[1], reply: "Done.", status: "done" }));
     await r.runner.close();
     expect(started[0].hasExited).toBe(true);
-    expect((await notesOf(r.store, b.noteIds)).map(noteState)).toEqual(["sent"]);
-    expect(await r.runner.send(await r.batch("Two"))).toMatchObject({ handedTo: null });
+    expect((await notesOf(r.store, b.noteIds)).map(noteState)).toEqual(["todo", "done"]);
+    expect((await notesOf(r.store, queued.noteIds)).map(noteState)).toEqual(["todo"]);
+    expect(await r.runner.send(await r.batch("Four"))).toMatchObject({ handedTo: null });
   });
 
   it("status reads the switch and the agent from agent.json", async () => {

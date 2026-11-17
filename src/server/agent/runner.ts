@@ -677,7 +677,10 @@ export class AgentRunner {
     this.announce();
   }
 
-  /** Server shutdown: cancels, kills the adapter and clears the timers. Notes stay as they are. */
+  /**
+   * Server shutdown: cancels, kills the adapter and clears the timers. The notes of the batches and follow-ups in
+   * flight or queued go back to to do (I3), so none is left with an agent that is gone.
+   */
   close(): Promise<void> {
     this.closing ??= this.shutdown();
     return this.closing;
@@ -690,10 +693,12 @@ export class AgentRunner {
     this.store.off("user-reply", this.onUserReply);
     this.clearIdle();
     this.broker.cancelAll();
+    const back = this.unfinished();
     const conn = this.conn;
     if (this.turn && conn && this.sessionId && !conn.hasExited) conn.cancel(this.sessionId);
     this.dropConn();
     this.queue = [];
+    this.track(this.recall(back));
     this.turn = null;
     this.ending = false;
     const all = [...this.live];
