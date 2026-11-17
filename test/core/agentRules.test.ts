@@ -381,3 +381,47 @@ describe("protected paths (R10)", () => {
     }
   });
 });
+
+describe("runner spellings and more runners (I1, R8)", () => {
+  const refused = [
+    // A package runner's package, with a version or a scope, is still that runner.
+    "npx pnpm@9", "npx pnpm@9 dlx x", "npx @pnpm/exe", "npx @pnpm/exe dlx x", "npx corepack@latest", "npx corepack@latest pnpm",
+    "npx npm@10 exec x", "bunx yarn@1 dlx x", "pnpx @yarnpkg/cli@4", "npx uv@0.4 run perl", "npx bash@5", "npx @scope/bash",
+    "npx nohup@1", "npx @x/sudo",
+    // uvx runs a package; poetry, hatch and pdm run anything.
+    "uvx uv", "uvx pipx run x", "npx uvx ruff", "npx poetry", "npx hatch run x", "npx pdm run x", "uvx poetry run perl",
+    // open and osascript run another program.
+    "open -a Terminal x", "open x", "/usr/bin/open x", "osascript x.scpt", "osascript run",
+    // npm's abbreviations of exec.
+    "npm exe -c x", "npm exe x", "npm exec x", "npm x x", "NPM EXE x",
+    // Rule words that are a runner's own runner.
+    "uv tool run perl", "uv tool", "docker container run img", "docker container", "podman container run img", "/opt/homebrew/bin/UV Tool run x",
+  ];
+
+  it("offers no Always for these spellings", () => {
+    for (const cmd of refused) expect(canAlways(req("execute", cmd)), cmd).toBe(false);
+  });
+
+  it("never honours a stored rule of these spellings", () => {
+    for (const cmd of refused) {
+      const rule = ruleFor(req("execute", cmd));
+      const t = { ...s, always: [rule] };
+      expect(decide(req("execute", cmd), t, root), cmd).toBe("ask");
+      expect(decide(req("execute", `${rule.command} anything`), t, root), cmd).toBe("ask");
+    }
+  });
+
+  it("still offers and honours npx hyperframes, npm run build and bun run build", () => {
+    for (const cmd of ["npx hyperframes render", "npm run build", "bun run build", "uvx ruff check", "git commit -m x", "npx @hyperframes/cli@1 render"]) {
+      expect(canAlways(req("execute", cmd)), cmd).toBe(true);
+      expect(decide(req("execute", `${cmd} --more`), { ...s, always: [ruleFor(req("execute", cmd))] }, root), cmd).toBe("allow");
+    }
+  });
+
+  it("exports the new list entries", () => {
+    expect(PACKAGE_RUNNERS.has("uvx")).toBe(true);
+    for (const p of ["poetry", "hatch", "pdm"]) expect(RUNNER_PROGRAMS.has(p), p).toBe(true);
+    for (const p of ["open", "osascript"]) expect(WRAPPERS.has(p), p).toBe(true);
+    for (const w of ["exe", "exec", "x"]) expect(RUNNER_SUBCOMMANDS.has(w), w).toBe(true);
+  });
+});

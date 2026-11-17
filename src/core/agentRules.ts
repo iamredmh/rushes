@@ -65,18 +65,21 @@ export const SHELLS: ReadonlySet<string> = new Set(["sh", "bash", "zsh", "fish",
 export const WRAPPERS: ReadonlySet<string> = new Set([
   "exec", "command", "builtin", "nohup", "time", "nice", "timeout", "xargs", "sudo", "doas", "caffeinate", "arch", "eval", "source",
   "noglob", "nocorrect", "coproc", "repeat", "trap", "watch", "stdbuf", "unbuffer", "chroot", "taskpolicy", "sandbox-exec", "corepack",
+  "open", "osascript",
 ]);
 
-/** Subcommands that run any package or program named after them (`npm x`, `npm exec`, `pnpm dlx`), whatever the program. */
-export const RUNNER_SUBCOMMANDS: ReadonlySet<string> = new Set(["x", "exec", "dlx"]);
+/** Subcommands that run any package or program named after them (`npm x`, `npm exec`, `npm exe`, `pnpm dlx`), whatever the program. */
+export const RUNNER_SUBCOMMANDS: ReadonlySet<string> = new Set(["x", "exe", "exec", "dlx"]);
 /** Programs whose `run` runs any program or package named after it (`uv run perl`), not a project script. */
 export const RUN_ANY_PROGRAM: ReadonlySet<string> = new Set(["uv", "pipx", "poetry", "pdm", "hatch", "conda", "docker", "podman", "mise", "deno", "nix"]);
 /** Programs that run the package named as their subcommand (`npx hyperframes`), so that package is the real program. */
-export const PACKAGE_RUNNERS: ReadonlySet<string> = new Set(["npx", "bunx", "pnpx", "yarn"]);
+export const PACKAGE_RUNNERS: ReadonlySet<string> = new Set(["npx", "bunx", "pnpx", "yarn", "uvx"]);
 /** Package runners and managers: run by a PACKAGE_RUNNER, their own subcommand (`npx npm exec x`) would go unchecked. */
 export const RUNNER_PROGRAMS: ReadonlySet<string> = new Set([
-  "npm", "npx", "pnpm", "pnpx", "yarn", "bun", "bunx", "uv", "uvx", "pipx", "deno", "corepack",
+  "npm", "npx", "pnpm", "pnpx", "yarn", "bun", "bunx", "uv", "uvx", "pipx", "deno", "corepack", "poetry", "hatch", "pdm", "yarnpkg",
 ]);
+/** A program and subcommand that is itself a runner of anything (`uv tool run perl`, `docker container run img`). */
+export const RUNNER_PAIRS: ReadonlyMap<string, string> = new Map([["uv", "tool"], ["docker", "container"], ["podman", "container"]]);
 
 /** A word a rule may be made of: no quotes, no `=`, nothing a shell reads as more than the word itself. */
 const RULE_WORD = /^[A-Za-z0-9_.\/@:+-]+$/;
@@ -84,9 +87,20 @@ const RULE_WORD = /^[A-Za-z0-9_.\/@:+-]+$/;
 /** A word's basename for the lists, lower-cased: macOS volumes are case-insensitive, so `NOHUP` runs nohup. */
 const name = (word: string) => basename(word).toLowerCase();
 
-function ruleWord(word: string): boolean {
+/**
+ * The names the lists know a subcommand word by (R8). Run by a package runner it is a package spec, so a leading
+ * `@scope/` and a trailing `@version` are cut, and the scope counts too: `pnpm@9` is pnpm, `@pnpm/exe` is exe and pnpm.
+ */
+function names(word: string): string[] {
+  const lower = word.toLowerCase();
+  const scoped = /^@([^/]+)\/(.+)$/.exec(lower);
+  const bare = name(scoped ? scoped[2] : lower).replace(/(.)@[^@]*$/, "$1");
+  return scoped ? [scoped[1], bare] : [bare];
+}
+
+function ruleWord(word: string, ids: string[]): boolean {
   if (!RULE_WORD.test(word) || word.startsWith("-") || word.split("/").includes("..")) return false;
-  return !SHELLS.has(name(word)) && !WRAPPERS.has(name(word));
+  return !ids.some((n) => SHELLS.has(n) || WRAPPERS.has(n));
 }
 
 /**
@@ -98,12 +112,16 @@ function ruleWord(word: string): boolean {
 export function alwaysWords(command: string): string[] | null {
   const words = command.trim().split(/\s+/).filter(Boolean).slice(0, 2);
   // `.` as the program is the shell's source; as the subcommand (`find .`) it is a path.
-  if (words.length === 0 || words[0] === "." || !words.every(ruleWord)) return null;
+  if (words.length === 0 || words[0] === ".") return null;
+  const program = name(words[0]);
+  if (!ruleWord(words[0], [program])) return null;
   if (words.length === 2) {
-    const sub = words[1].toLowerCase();
-    if (RUNNER_SUBCOMMANDS.has(sub)) return null;
-    if (sub === "run" && RUN_ANY_PROGRAM.has(name(words[0]))) return null;
-    if (PACKAGE_RUNNERS.has(name(words[0])) && RUNNER_PROGRAMS.has(name(words[1]))) return null;
+    const sub = names(words[1]);
+    if (!ruleWord(words[1], sub)) return null;
+    if (sub.some((n) => RUNNER_SUBCOMMANDS.has(n))) return null;
+    if (sub.includes("run") && RUN_ANY_PROGRAM.has(program)) return null;
+    if (PACKAGE_RUNNERS.has(program) && sub.some((n) => RUNNER_PROGRAMS.has(n))) return null;
+    if (sub.includes(RUNNER_PAIRS.get(program) ?? "\0")) return null;
   }
   return words;
 }
