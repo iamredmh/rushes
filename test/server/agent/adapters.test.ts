@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { homedir } from "node:os";
+import { delimiter, dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ADAPTERS, adapterSpec, rushesMcp } from "../../../src/server/agent/adapters.js";
 import type { AgentInfo } from "../../../src/server/agent/detect.js";
@@ -17,10 +18,18 @@ describe("adapterSpec", () => {
     expect(ADAPTERS.claude.version).toMatch(/^\d+\.\d+\.\d+$/);
     expect(ADAPTERS.codex.version).toMatch(/^\d+\.\d+\.\d+$/);
   });
-  it("does not set the Claude variable for Codex", () => {
+  it("gives Codex its detected binary and not the Claude variable", () => {
     const spec = adapterSpec(codex, root);
     expect(spec.args).toEqual(["-y", `${ADAPTERS.codex.pkg}@${ADAPTERS.codex.version}`]);
+    expect(spec.env.CODEX_PATH).toBe("/opt/homebrew/bin/codex");
     expect(spec.env.CLAUDE_CODE_EXECUTABLE).toBeUndefined();
+  });
+  it("gives both adapters the extended PATH, deduplicated", () => {
+    for (const agent of [claude, codex]) {
+      const parts = adapterSpec(agent, root).env.PATH.split(delimiter);
+      for (const dir of ["/opt/homebrew/bin", "/usr/local/bin", join(homedir(), ".local", "bin")]) expect(parts).toContain(dir);
+      expect(new Set(parts).size).toBe(parts.length);
+    }
   });
 });
 

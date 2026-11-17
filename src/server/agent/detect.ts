@@ -10,7 +10,7 @@ export type CommandRunner = (
 ) => Promise<{ code: number | null; stdout: string; stderr: string }>;
 
 /** The user's PATH plus the usual install folders, which a server started from a desktop shortcut may lack. */
-function searchPath(): string {
+export function searchPath(): string {
   const parts = [...(process.env.PATH ?? "").split(delimiter), "/opt/homebrew/bin", "/usr/local/bin", join(homedir(), ".local", "bin")];
   return [...new Set(parts.filter(Boolean))].join(delimiter);
 }
