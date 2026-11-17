@@ -669,13 +669,15 @@ export class AgentRunner {
 
   /**
    * rushes_working_on: the agent says which note it is on and what it is doing. Refused for a note that isn't
-   * with the agent (sent), as the store has it now.
+   * with the agent (sent), as the store has it now. Shown only while a turn is in flight (M2): an agent the
+   * user pasted the prompt into, or a call after its turn, changes nothing.
    */
   async workingOn(note: string, doing: string): Promise<void> {
     const file = await this.store.read("notes");
     const n = file.notes.find((x) => x.id === note);
     if (!n) throw new NotFoundError("note", note);
     if (noteState(n) !== "sent") throw new RushesError(`Note "${note}" is not with the agent`, 409, "note_not_sent", { id: note });
+    if (!this.turn || this.closed) return;
     const text = oneLine(doing, ACTIVITY_LINE_MAX);
     const line = text === "" || text === "…" ? "Working on a note" : text;
     this.current = { note, doing: line };

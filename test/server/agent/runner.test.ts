@@ -285,6 +285,28 @@ describe("AgentRunner", () => {
     expect(r.runner.status().current.note).toBe(b.noteIds[0]);
   });
 
+  it("workingOn outside a turn changes nothing, and still refuses a note that is not sent (M2)", async () => {
+    const r = await rig({ turns: [] });
+    const b = await r.batch("One");
+    await r.store.update("notes", (f) => void applyReply(f, { id: b.noteIds[0], reply: "Up or down?" }));
+    await r.store.update("notes", (f) => void addNote(f, { stage: "picture", scope: "whole", text: "Not sent" }));
+    const unsent = (await r.store.read("notes")).notes.find((n) => n.text === "Not sent")!;
+    const heard: AgentStatus[] = [];
+    r.store.on("agent", (s: AgentStatus) => heard.push(s));
+    // Before any run, and after one has finished.
+    await r.runner.workingOn(b.noteIds[0], "Moving the title up");
+    await r.runner.send(b);
+    await r.phase("question");
+    const lines = r.runner.status().lines.length;
+    heard.length = 0;
+    await r.runner.workingOn(b.noteIds[0], "Moving the title up");
+    expect(r.runner.status().current).toEqual({ note: null, doing: null });
+    expect(r.runner.status().lines).toHaveLength(lines);
+    expect(r.runner.status().lines.some((l) => l.text === "Moving the title up")).toBe(false);
+    expect(heard).toEqual([]);
+    await expect(r.runner.workingOn(unsent.id, "Something")).rejects.toMatchObject({ status: 409, code: "note_not_sent" });
+  });
+
   it("a turn that leaves a question ends in phase question; one without ends finished", async () => {
     const r = await rig({ turns: [] });
     const b = await r.batch("Move the title");

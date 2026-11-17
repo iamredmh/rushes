@@ -291,7 +291,9 @@ describe("agent routes", () => {
     expect((await r.call("POST", "/api/agent/working-on", { note: sent, doing: "x".repeat(201) })).status).toBe(400);
     const ok = await r.call("POST", "/api/agent/working-on", { note: sent, doing: "Moving the title" });
     expect(ok.status).toBe(204);
-    expect(r.runner.status().current).toEqual({ note: sent, doing: "Moving the title" });
+    // M2: no turn is in flight (the batch was copied, not handed over), so nothing shows.
+    expect(r.runner.status().current).toEqual({ note: null, doing: null });
+    expect(r.runner.status().lines).toEqual([]);
   });
 
   it("sign-in opens Terminal with the agent's own login command and nothing else", async () => {
