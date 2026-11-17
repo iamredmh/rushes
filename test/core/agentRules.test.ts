@@ -34,7 +34,16 @@ describe("decide", () => {
     expect(decide(req("execute", "npx hyperframesx"), t, root)).toBe("ask");
     expect(decide(req("execute", "rm -rf out"), t, root)).toBe("ask");
   });
-  it("a non-execute Always rule allows that kind anywhere", () => {
+  it("a path Always rule stays inside the project", () => {
+    for (const kind of ["edit", "delete"]) {
+      const t = { ...s, always: [{ kind, command: null }] };
+      expect(decide(req(kind, null, [`${root}/a`]), t, root)).toBe("allow");
+      expect(decide(req(kind, null, ["/etc/hosts"]), t, root)).toBe("ask");
+      expect(decide(req(kind, null, [`${root}/a`, "/etc/hosts"]), t, root)).toBe("ask");
+      expect(decide(req(kind, null), t, root)).toBe("ask");
+    }
+  });
+  it("a path-less Always rule (fetch) is kind-only", () => {
     const t = { ...s, always: [ruleFor(req("fetch", null))] };
     expect(decide(req("fetch", null), t, root)).toBe("allow");
     expect(decide(req("execute", "ls"), t, root)).toBe("ask");

@@ -32,6 +32,20 @@ describe("Store", () => {
     await access(store.path("agent"));
   });
 
+  it("init adds missing ignore lines to an old .gitignore, once, keeping the rest", async () => {
+    const { store } = await tmpProject("old-ignore");
+    const f = join(store.dir, ".gitignore");
+    await writeFile(f, "mine/\nserver.json\nproxies/", "utf8");
+    await store.init("old-ignore");
+    const text = await readFile(f, "utf8");
+    const lines = text.split("\n").filter(Boolean);
+    expect(lines.slice(0, 3)).toEqual(["mine/", "server.json", "proxies/"]);
+    expect(lines.filter((l) => l === "agent.json")).toHaveLength(1);
+    expect(lines.filter((l) => l === "server.json")).toHaveLength(1);
+    await store.init("old-ignore");
+    expect(await readFile(f, "utf8")).toBe(text);
+  });
+
   it("init does not overwrite existing files", async () => {
     const { store } = await tmpProject("first");
     await store.update("project", (p) => { p.fps = 60; });

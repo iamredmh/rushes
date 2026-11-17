@@ -67,7 +67,7 @@ export class Store extends EventEmitter {
 
   async init(name: string): Promise<void> {
     await mkdir(join(this.dir, "grabs"), { recursive: true });
-    await writeIfMissing(join(this.dir, ".gitignore"), GITIGNORE);
+    await ensureIgnoreLines(join(this.dir, ".gitignore"), GITIGNORE);
     for (const key of Object.keys(FILES) as FileKey[]) {
       if (CREATED_ON_WRITE.has(key)) continue;
       await writeIfMissing(this.path(key), serialise(defaults(key, name)));
@@ -159,6 +159,22 @@ async function atomicWrite(path: string, text: string): Promise<void> {
   const tmp = `${path}.${process.pid}.${Date.now()}.${++writes}.tmp`;
   await writeFile(tmp, text, "utf8");
   await rename(tmp, path);
+}
+
+/** Write the ignore file, or append the lines an older one lacks. Other lines and their order are kept. */
+async function ensureIgnoreLines(path: string, wanted: string): Promise<void> {
+  let have: string;
+  try {
+    have = await readFile(path, "utf8");
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+    await writeFile(path, wanted, "utf8");
+    return;
+  }
+  const present = new Set(have.split(/\r?\n/).map((l) => l.trim()));
+  const missing = wanted.split("\n").filter((l) => l && !present.has(l));
+  if (!missing.length) return;
+  await writeFile(path, (have === "" || have.endsWith("\n") ? have : have + "\n") + missing.join("\n") + "\n", "utf8");
 }
 
 async function writeIfMissing(path: string, text: string): Promise<void> {

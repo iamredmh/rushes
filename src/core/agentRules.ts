@@ -1,9 +1,6 @@
 import { realpathSync } from "node:fs";
 import { dirname, resolve, sep, relative, isAbsolute } from "node:path";
-import { AGENTS, type AgentId, type AgentSettings, type AlwaysRule } from "./schema.js";
-
-export { AGENTS, type AgentId, type AgentSettings, type AlwaysRule };
-export { AgentSettingsSchema, AlwaysRuleSchema } from "./schema.js";
+import type { AgentSettings, AlwaysRule } from "./schema.js";
 
 export type PermissionRequest = { kind: string | null; title: string; command: string | null; paths: string[] };
 
@@ -36,8 +33,13 @@ export function inside(root: string, path: string): boolean {
 
 const PROJECT_KINDS = new Set(["read", "edit", "search", "move", "delete"]);
 
-function matches(rule: AlwaysRule, req: PermissionRequest): boolean {
+function inProject(req: PermissionRequest, root: string): boolean {
+  return req.paths.length > 0 && req.paths.every((p) => inside(root, p));
+}
+
+function matches(rule: AlwaysRule, req: PermissionRequest, root: string): boolean {
   if (rule.kind !== (req.kind ?? "other")) return false;
+  if (PROJECT_KINDS.has(rule.kind)) return inProject(req, root);
   if (rule.kind !== "execute") return true;
   if (rule.command === null || req.command === null) return false;
   return req.command === rule.command || req.command.startsWith(rule.command + " ");
@@ -45,8 +47,8 @@ function matches(rule: AlwaysRule, req: PermissionRequest): boolean {
 
 export function decide(req: PermissionRequest, s: Pick<AgentSettings, "permissions" | "always">, root: string): "allow" | "ask" {
   if (s.permissions === "ask-all") return "ask";
-  if (s.always.some((r) => matches(r, req))) return "allow";
-  if (req.kind && PROJECT_KINDS.has(req.kind) && req.paths.length > 0 && req.paths.every((p) => inside(root, p))) return "allow";
+  if (s.always.some((r) => matches(r, req, root))) return "allow";
+  if (req.kind && PROJECT_KINDS.has(req.kind) && inProject(req, root)) return "allow";
   return "ask";
 }
 
