@@ -2,10 +2,10 @@
 // the live strip and what the desk does after Send. Every string is the plan's own.
 import { describe, expect, it } from "vitest";
 import {
-  ASK_ARM_MS, ASK_WORDS, askArmKey, askChoices, askLead, revealParts, revealText, MENU_WORDS, PERMISSION_CHOICES, SHEET_WORDS, afterSend, focusAfterRemove, followSend, mayQuestion, notSignedInWhy, sendToLabel, sheetDefault, sheetPrimary, sheetRows, whoNext, agentName, canStop, chipShows, chipText, chipTone, footLine, liveLines, menuAgents, menuRowCount, noteAgentBadge, rowText, ruleRows, whoLine,
+  ASK_ARM_MS, ASK_WORDS, askArmKey, askChoices, askLead, revealParts, revealText, MENU_WORDS, PERMISSION_CHOICES, SHEET_WORDS, afterSend, focusAfterRemove, followSend, mayQuestion, notSignedInWhy, sendToLabel, sheetDefault, sheetPrimary, sheetRows, whoNext, agentName, canStop, chipShows, chipText, chipTone, footLine, liveLines, menuAgents, menuRowCount, noteAgentBadge, rowText, ruleRows, whoLine, answerPlaceholder, fixGo, noteLite, noteThread, replyBoxShows,
   type NoteLite,
 } from "../../web/src/agent.js";
-import type { AgentInfo, AgentStatus, PendingAsk } from "../../web/src/types.js";
+import type { AgentInfo, AgentStatus, Note, PendingAsk } from "../../web/src/types.js";
 
 const status = (over: Partial<AgentStatus> = {}): AgentStatus => ({
   on: true, agent: "claude", phase: "idle", batches: [], current: { note: null, doing: null }, asks: [], lines: [], error: null, session: null, asked: true,
@@ -479,5 +479,117 @@ describe("when a card's buttons may be pressed (task 5, fix 1)", () => {
     // A new ask below changes nothing above it.
     expect(askArmKey(["ask_1", "ask_2", "ask_4"], 1)).toBe(askArmKey(["ask_1", "ask_2"], 1));
     expect(ASK_ARM_MS).toBeGreaterThanOrEqual(400);
+  });
+});
+
+// ---- a note's badge, thread and reply box (task 6) ----
+
+describe("noteAgentBadge priority (task 6)", () => {
+  it("needs you beats working, even on the note being worked on", () => {
+    const s = status({ phase: "working", batches: ["b1"], current: { note: "n1", doing: "Measuring the cut" } });
+    expect(noteAgentBadge(note("n1", { batch: "b1", needsYou: true }), s)?.kind).toBe("needsYou");
+    expect(noteAgentBadge(note("n1", { batch: "b1" }), s)).toEqual({ kind: "working", text: "Measuring the cut" });
+  });
+
+  it("a done note with fixVersion v8 says Fixed in v8", () => {
+    expect(noteAgentBadge(note("n1", { batch: "b1", status: "done", fixVersion: "v8" }), status())).toEqual({ kind: "fixed", text: "Fixed in v8" });
+    expect(noteAgentBadge(note("n1", { batch: "b1", status: "done", fixVersion: "v8" }), null)).toEqual({ kind: "fixed", text: "Fixed in v8" });
+  });
+
+  it("with Send to AI off, a sent note is with your agent (a copied prompt went to a chat Rushes can't name)", () => {
+    expect(noteAgentBadge(note("n1", { batch: "b1" }), status({ on: false }))).toEqual({ kind: "with", text: "With your agent" });
+    // Unless the agent still holds its batch (switched off mid-run).
+    expect(noteAgentBadge(note("n1", { batch: "b1" }), status({ on: false, batches: ["b1"] }))).toEqual({ kind: "with", text: "With Claude Code" });
+  });
+});
+
+describe("noteThread", () => {
+  const at = (m: number) => new Date(2026, 10, 17, 14, m).toISOString();
+  const r = (by: "agent" | "user", text: string, m: number) => ({ by, text, at: at(m) });
+
+  it("each reply on a line, oldest first, with its local time", () => {
+    const t = noteThread({ reply: "", replies: [r("agent", "Full stop?", 5), r("user", "No full stop.", 7)] });
+    expect(t.lines).toEqual([
+      { by: "agent", text: "Full stop?", time: "14:05" },
+      { by: "user", text: "No full stop.", time: "14:07" },
+    ]);
+    expect(t.more).toBeNull();
+  });
+
+  it("the last three, with Show all (n) when there are more; all of them once asked", () => {
+    const replies = [r("agent", "a", 1), r("user", "b", 2), r("agent", "c", 3), r("user", "d", 4), r("agent", "e", 5)];
+    const t = noteThread({ reply: "", replies });
+    expect(t.lines.map((l) => l.text)).toEqual(["c", "d", "e"]);
+    expect(t.more).toBe("Show all (5)");
+    const all = noteThread({ reply: "", replies }, true);
+    expect(all.lines.map((l) => l.text)).toEqual(["a", "b", "c", "d", "e"]);
+    expect(all.more).toBeNull();
+    expect(noteThread({ reply: "", replies: replies.slice(0, 3) }).more).toBeNull();
+  });
+
+  it("a legacy note with only its old reply text still shows it, as the agent's, with no time", () => {
+    expect(noteThread({ reply: "Lifted the shadows.", replies: [] }).lines).toEqual([{ by: "agent", text: "Lifted the shadows.", time: "" }]);
+    expect(noteThread({ reply: "  ", replies: [] }).lines).toEqual([]);
+    // Once migrated, the thread is the one source: the old text isn't shown twice.
+    expect(noteThread({ reply: "Lifted.", replies: [r("agent", "Lifted.", 1)] }).lines).toHaveLength(1);
+  });
+
+  it("a time that doesn't parse shows as --:--", () => {
+    expect(noteThread({ reply: "", replies: [{ by: "agent", text: "x", at: "soon" }] }).lines[0].time).toBe("--:--");
+  });
+});
+
+describe("noteLite: needs you, worked out in the desk", () => {
+  const full = (over: Partial<Note>) => ({ id: "n1", batch: "b1", status: "todo", fixVersion: null, replies: [], ...over }) as unknown as Note;
+  it("a note with the agent whose last word is the agent's needs you; GET /api/state sends notes as stored, without it", () => {
+    expect(noteLite(full({ replies: [{ by: "agent", text: "Which?", at: "" }] })).needsYou).toBe(true);
+    expect(noteLite(full({ replies: [{ by: "agent", text: "Which?", at: "" }, { by: "user", text: "This.", at: "" }] })).needsYou).toBe(false);
+    expect(noteLite(full({ batch: null, replies: [{ by: "agent", text: "Which?", at: "" }] })).needsYou).toBe(false);
+    expect(noteLite(full({ status: "done", replies: [{ by: "agent", text: "Done.", at: "" }] })).needsYou).toBe(false);
+  });
+});
+
+describe("replyBoxShows and its placeholder", () => {
+  it("shows on a note that needs you, whatever the switch", () => {
+    expect(replyBoxShows(note("n1", { batch: "b1", needsYou: true }), status())).toBe(true);
+    expect(replyBoxShows(note("n1", { batch: "b1", needsYou: true }), status({ on: false }))).toBe(true);
+    expect(replyBoxShows(note("n1", { batch: "b1", needsYou: true }), null)).toBe(true);
+  });
+
+  it("shows on any sent note while Send to AI is on, and not while it is off", () => {
+    expect(replyBoxShows(note("n1", { batch: "b1" }), status())).toBe(true);
+    expect(replyBoxShows(note("n1", { batch: "b1" }), status({ on: false }))).toBe(false);
+    expect(replyBoxShows(note("n1", { batch: "b1" }), null)).toBe(false);
+  });
+
+  it("never on a to-do or a done note", () => {
+    expect(replyBoxShows(note("n1"), status())).toBe(false);
+    expect(replyBoxShows(note("n1", { batch: "b1", status: "done" }), status())).toBe(false);
+  });
+
+  it("Answer <A>", () => {
+    expect(answerPlaceholder(status())).toBe("Answer Claude Code");
+    expect(answerPlaceholder(status({ agent: "codex" }))).toBe("Answer Codex");
+    expect(answerPlaceholder(null)).toBe("Answer your agent");
+  });
+});
+
+describe("fixGo: where Fixed in <v> goes", () => {
+  const fixed = (over: Partial<Parameters<typeof fixGo>[0]> = {}) => ({ stage: "picture" as const, video: "hero", status: "done" as const, fixVersion: "v8", fixT: 2.1, ...over });
+
+  it("on the fix's version: seeks to fixT", () => {
+    expect(fixGo(fixed(), "v8")).toEqual({ kind: "seek", t: 2.1 });
+  });
+
+  it("on another version of a cut: opens the fix's version, then seeks", () => {
+    expect(fixGo(fixed(), "v7")).toEqual({ kind: "jump", to: { tab: "picture", video: "hero", version: "v8" }, t: 2.1 });
+    expect(fixGo(fixed({ fixT: null }), "v7")).toEqual({ kind: "jump", to: { tab: "picture", video: "hero", version: "v8" }, t: null });
+  });
+
+  it("nowhere to go: not done, no fix version, no time on this version, or not a cut", () => {
+    expect(fixGo(fixed({ status: "todo" }), "v7")).toBeNull();
+    expect(fixGo(fixed({ fixVersion: null }), "v7")).toBeNull();
+    expect(fixGo(fixed({ fixT: null }), "v8")).toBeNull();
+    expect(fixGo(fixed({ stage: "visuals", video: null }), "v7")).toBeNull();
   });
 });

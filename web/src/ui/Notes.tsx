@@ -4,6 +4,8 @@ import { api, mediaUrl } from "../api.js";
 import { MARK_DB, type MarkKind, marksLabel, noteTime, placeNote, setMarkDb, shotLabel, toggleMark } from "../lib.js";
 import type { Mark, Note } from "../types.js";
 import { markTitle, noteState } from "../desk.js";
+import { noteLite } from "../agent.js";
+import { NoteBadge, NoteThread, type NotesAgent, ReplyBox } from "./agent/NoteThread.js";
 import { FormatScope } from "./FormatScope.js";
 import { Icon } from "./Icon.js";
 
@@ -52,6 +54,8 @@ export interface NotesProps {
   instead?: string;
   /** The filter, when it is shown elsewhere (the notes panel's tab row, Red round 2): no filter row of its own then. */
   filter?: Filter;
+  /** §28.5: from the notes panel, each card's badge and reply box (its thread shows without). */
+  agent?: NotesAgent;
 }
 
 /** All, To do and Done as one menu, for the notes panel's tab row (Red, round 2), where the Notes tab already counts to-dos. */
@@ -129,7 +133,7 @@ const MARK_KINDS: { kind: MarkKind; label: string }[] = [
 /** The notes column used on every tab: list, filter, done circles and the note box. */
 export function Notes({
   notes, version, placeholder, attachments, inputRef, toast, onAdd, onSeek, onChanged, onTextChange, target, marks, onLabel, fixedTimes, selectedId,
-  formatTag, cardExtra, formatScope, listFooter, readOnly, instead, filter: shownFilter,
+  formatTag, cardExtra, formatScope, listFooter, readOnly, instead, filter: shownFilter, agent,
 }: NotesProps) {
   const [ownFilter, setFilter] = useState<Filter>("all");
   const filter = shownFilter ?? ownFilter;
@@ -180,7 +184,7 @@ export function Notes({
         {placed.length === 0 && <div class="none">{filter !== "all" ? "Nothing here." : footer ? "None on this format." : "No notes yet."}</div>}
         {placed.map(({ n, at }) => (
           // Keyed (review M3): a card that shows on the next format keeps its node, and its focus.
-          <div key={n.id} class={`note${noteState(n) === "todo" ? "" : ` ${noteState(n)}`}`} data-note={n.id} aria-current={selectedId === n.id ? "true" : undefined}>
+          <div key={n.id} class={`note${noteState(n) === "todo" ? "" : ` ${noteState(n)}`}${agent && noteLite(n).needsYou ? " needs" : ""}`} data-note={n.id} aria-current={selectedId === n.id ? "true" : undefined}>
             <button class="chk" aria-label={dotName(n)} data-tip={dotName(n)} onClick={() => void toggle(n)}>
               <Icon name="check" />
             </button>
@@ -201,12 +205,9 @@ export function Notes({
                 <img class="thumb" src={mediaUrl(n.grab)} alt="Frame grab" />
               </div>
             )}
-            {n.reply && (
-              <div class="rp">
-                <Icon name="reply" />
-                <span>{n.reply}</span>
-              </div>
-            )}
+            {agent && <NoteBadge n={n} agent={agent} version={version} onSeek={onSeek} />}
+            <NoteThread n={n} />
+            {agent && !readOnly && <ReplyBox n={n} status={agent.status} toast={toast} onChanged={onChanged} />}
             {selectedId === n.id && cardExtra && <div class="nfmt">{cardExtra(n)}</div>}
           </div>
         ))}

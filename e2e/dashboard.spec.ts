@@ -242,7 +242,7 @@ test("an agent's reply appears live, and ticking the circle marks a note done", 
   await page.goto(rushes.url);
   await expect(page.locator(".note")).toHaveCount(1);
   await rushes.api("POST", "/api/replies", { replies: [{ id: note.id, reply: "Lifted the shadows.", status: "done" }] });
-  await expect(page.locator(".note .rp")).toHaveText("Lifted the shadows.");
+  await expect(page.locator(".note .nthread .ntext")).toHaveText("Lifted the shadows.");
   await expect(page.locator(".note")).toHaveClass(/done/);
   await page.getByRole("button", { name: "Reopen" }).click();
   await expect(page.locator(".note")).not.toHaveClass(/done/);

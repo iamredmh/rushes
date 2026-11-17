@@ -2,10 +2,13 @@
 // desk does after Send. Pure: the words come from the agent's status (GET /api/agent and the SSE `agent` event)
 // and the notes the desk already holds, so every tab says the same thing.
 import { alwaysLabel } from "../../src/core/alwaysLabel.js";
-import { noteState } from "../../src/core/noteState.js";
+import { clock } from "../../src/core/logText.js";
+import { needsYou, noteState } from "../../src/core/noteState.js";
+import type { JumpTarget } from "./changelog.js";
 import type { ActivityLine, AgentId, AgentInfo, AgentPhase, AgentRules, AgentStatus, AlwaysRule, AskChoice, Note, PendingAsk, SendHandOver } from "./types.js";
 
-/** A note as these helpers read it. The desk's notes carry `needsYou` from the server's `withState`. */
+/** A note as these helpers read it. `needsYou` comes from the server's `withState`, or from noteLite for the notes
+ *  GET /api/state sends as stored. */
 export type NoteLite = Pick<Note, "id" | "batch" | "status" | "fixVersion"> & { needsYou?: boolean };
 
 const NAMES: Readonly<Record<AgentId, string>> = { claude: "Claude Code", codex: "Codex" };
@@ -77,7 +80,10 @@ export function noteAgentBadge(n: NoteLite, s: AgentStatus | null): NoteBadge | 
   if (n.needsYou) return { kind: "needsYou", text: "Needs you" };
   if (s && s.current.note === n.id && RUNNING.has(s.phase)) return { kind: "working", text: s.current.doing ?? "Working on it" };
   const state = noteState(n);
-  if (state === "sent") return { kind: "with", text: `With ${agentName(s?.agent ?? null)}` };
+  // Off, Send copies a prompt into a chat Rushes can't name: the note is with "your agent", unless the agent Send to AI
+  // used still holds its batch (switched off mid-run).
+  const named = s && (s.on || (n.batch !== null && s.batches.includes(n.batch))) ? s.agent : null;
+  if (state === "sent") return { kind: "with", text: `With ${agentName(named)}` };
   if (state === "done" && n.fixVersion) return { kind: "fixed", text: `Fixed in ${n.fixVersion}` };
   return null;
 }
@@ -292,3 +298,50 @@ export function revealParts(s: string): ({ text: string } | { hidden: string })[
 
 /** The same as one string, for a label read aloud or a title. */
 export const revealText = (s: string): string => s.replace(HIDDEN_ALL, codeOf);
+
+// ---- a note's thread, its reply box and its Fixed in <v> (task 6) ----
+
+/** A note as the badge and the reply box read it, with `needsYou` worked out here: GET /api/state sends notes as stored. */
+export const noteLite = (n: Note): NoteLite => ({ id: n.id, batch: n.batch, status: n.status, fixVersion: n.fixVersion, needsYou: needsYou(n) });
+
+/** How many of a thread's last replies a card shows before Show all. */
+export const THREAD_SHOWN = 3;
+
+/** A line of a note's thread: who said it, its plain text, and its local time ("" for a legacy reply with none). */
+export interface ThreadLine { by: "agent" | "user"; text: string; time: string }
+
+/**
+ * A note's thread as its card shows it: the last THREAD_SHOWN replies, oldest first, with "Show all (n)" when there are
+ * more (all of them once `all`). A note from before threads, with its old `reply` and nothing in `replies`, shows that
+ * text as the agent's (the server migrates it into replies[0] when it reads a file, so this is a fallback).
+ */
+export function noteThread(n: Pick<Note, "reply" | "replies">, all = false): { lines: ThreadLine[]; more: string | null } {
+  const lines: ThreadLine[] = n.replies.length > 0
+    ? n.replies.map((r) => ({ by: r.by, text: r.text, time: clock(new Date(r.at)) }))
+    : n.reply.trim() !== "" ? [{ by: "agent", text: n.reply.trim(), time: "" }] : [];
+  if (all || lines.length <= THREAD_SHOWN) return { lines, more: null };
+  return { lines: lines.slice(-THREAD_SHOWN), more: `Show all (${lines.length})` };
+}
+
+/**
+ * Whether a card has the reply box: on a note that needs you (the agent asked; the answer is kept, and handed on as R11
+ * says), and on any note with the agent while Send to AI is on. Never on a to-do or a done note.
+ */
+export const replyBoxShows = (n: NoteLite, s: AgentStatus | null): boolean => !!n.needsYou || (noteState(n) === "sent" && !!s?.on);
+
+/** The reply box's placeholder. */
+export const answerPlaceholder = (s: AgentStatus | null): string => `Answer ${agentName(s?.agent ?? null)}`;
+
+/**
+ * Where "Fixed in <v>" goes: on that version, to the fix's time; on another version of the cut, to that version (through
+ * the desk's jump, as a Change Log row goes) and then its time. Null when there is nowhere to go, and the badge is text.
+ */
+export function fixGo(
+  n: Pick<Note, "stage" | "video" | "status" | "fixVersion" | "fixT">,
+  version: string | null,
+): { kind: "seek"; t: number } | { kind: "jump"; to: JumpTarget; t: number | null } | null {
+  if (n.status !== "done" || !n.fixVersion) return null;
+  if (n.fixVersion === version) return n.fixT !== null ? { kind: "seek", t: n.fixT } : null;
+  if (n.stage === "picture" && n.video) return { kind: "jump", to: { tab: "picture", video: n.video, version: n.fixVersion }, t: n.fixT };
+  return null;
+}

@@ -321,8 +321,6 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .shotref { grid-column: 2; font-size: 15px; color: var(--text-3); }
 .nx { grid-column: 2; font-size: 15px; color: var(--text); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
 .note.done .nx { color: var(--text-3); }
-.rp { grid-column: 2; display: flex; gap: 6px; align-items: flex-start; font-size: 15px; color: var(--text-2); margin-top: 4px; }
-.rp svg.ic { width: 15px; height: 15px; color: var(--done); margin-top: 2px; }
 .att { grid-column: 2; display: flex; gap: 8px; margin-top: 6px; }
 .thumb { width: 96px; aspect-ratio: 16 / 9; border-radius: 6px; object-fit: cover; background: var(--black); }
 .comp { padding: 12px; display: grid; gap: 10px; border-top: 1px solid var(--line); }

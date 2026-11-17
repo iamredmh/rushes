@@ -262,7 +262,7 @@ export function NotesPanel(props: NotesPanelProps) {
       {agent && <AskCards {...agent} />}
       {/* Hidden, never unmounted, while Activity shows: a half-typed note stays where it was. */}
       <div class="ntabpanel" role="tabpanel" id="npanel-notes" aria-labelledby="ntab-notes" hidden={tab !== "notes"}>
-        <Notes {...props} filter={noteFilter} />
+        <Notes {...props} filter={noteFilter} agent={{ status: agent?.status ?? null, onJump: activity.onJump }} />
       </div>
       {tab === "activity" && (
         <div class="ntabpanel" role="tabpanel" id="npanel-activity" aria-label="Activity">

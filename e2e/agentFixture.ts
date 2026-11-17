@@ -17,6 +17,9 @@ export type AgentRushes = Rushes & {
   /** The server's XDG_CONFIG_HOME, a temp folder: the user's rules file (src/server/agent/rules.ts rulesPath) lives
    *  under it, never in the real ~/.config. */
   configDir: string;
+  /** Replaces the scenario. The fake reads it as it starts, at the first Send, so a test whose steps name a note (an
+   *  `http` step's body) adds the note, then sets the scenario, then sends. */
+  setScenario(scenario: object): Promise<void>;
 };
 
 /** What detection answers, as RUSHES_TEST_AGENT's `agents` (src/server/start.ts): an agent left out is not installed. */
@@ -55,7 +58,8 @@ export const test = base.extend<{ startWithAgent: (scenario: object, opts?: { ag
       dirs.push(dir);
       const file = join(dir, "scenario.json");
       const log = join(dir, "fake-log.jsonl");
-      await writeFile(file, JSON.stringify({ modes: ["default", "read-only"], ...scenario }));
+      const write = (s: object) => writeFile(file, JSON.stringify({ modes: ["default", "read-only"], ...s }));
+      await write(scenario);
       const configDir = join(dir, "config");
       const port = await freePort();
       const hook = {
@@ -68,7 +72,7 @@ export const test = base.extend<{ startWithAgent: (scenario: object, opts?: { ag
       const o = await openRushes({ noFfmpeg, browserName, port, env });
       opened.push(o);
       // Onto the handle itself, so its url, base and root stay live (swapProject).
-      return Object.assign(o.rushes, { agentLog: log, configDir });
+      return Object.assign(o.rushes, { agentLog: log, configDir, setScenario: write });
     });
     for (const o of opened) await o.close();
     for (const d of dirs) await rm(d, { recursive: true, force: true });
