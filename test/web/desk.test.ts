@@ -198,7 +198,7 @@ describe("defaultTake", () => {
 describe("rulerMarks", () => {
   const note = (id: string, t: number, tOut: number | null = null, status: "todo" | "done" = "todo"): Note => ({
     id, stage: "picture", video: "hero", version: "v1", on: null, scope: tOut === null ? "point" : "range", t, tOut, frame: null, text: "Tighter.",
-    box: null, pin: null, grab: null, shot: null, marks: [], format: null, status, reply: "", fixT: null, fixVersion: null, batch: null,
+    box: null, pin: null, grab: null, shot: null, marks: [], format: null, status, reply: "", replies: [], fixT: null, fixVersion: null, batch: null,
     createdAt: "2026-11-14T10:00:00.000Z", by: "user",
   });
   it("places a point note as a percentage of the length, with no width", () => {
@@ -281,7 +281,7 @@ describe("timecode", () => {
 describe("unsentCount", () => {
   const n = (over: Partial<Note>): Note => ({
     id: "n", stage: "picture", video: "hero", version: "v1", on: null, scope: "point", t: 1, tOut: null, frame: null, text: "x",
-    box: null, pin: null, grab: null, shot: null, marks: [], format: null, status: "todo", reply: "", fixT: null, fixVersion: null, batch: null,
+    box: null, pin: null, grab: null, shot: null, marks: [], format: null, status: "todo", reply: "", replies: [], fixT: null, fixVersion: null, batch: null,
     createdAt: "2026-11-14T10:00:00.000Z", by: "user", ...over,
   });
   const base = { inPlay: new Set(["hero"]), scriptTodo: 0, briefChanged: 0, storyboardChanged: 0 };
@@ -305,7 +305,7 @@ describe("unsentCount", () => {
 describe("unsentEdits", () => {
   const n = (over: Partial<Note>): Note => ({
     id: "n", stage: "script", video: null, version: null, on: "s1", scope: "whole", t: null, tOut: null, frame: null, text: "x",
-    box: null, pin: null, grab: null, shot: null, marks: [], format: null, status: "todo", reply: "", fixT: null, fixVersion: null, batch: null,
+    box: null, pin: null, grab: null, shot: null, marks: [], format: null, status: "todo", reply: "", replies: [], fixT: null, fixVersion: null, batch: null,
     createdAt: "2026-11-14T10:00:00.000Z", by: "user", ...over,
   });
   const base = { notes: [] as Note[], inPlay: new Set<string>(["hero"]), scriptTodo: 0, briefChanged: 0, storyboardChanged: 0 };

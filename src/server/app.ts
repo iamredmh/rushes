@@ -5,7 +5,7 @@ import type { Store, ChangeEvent } from "../core/store.js";
 import { RushesError, InvalidError, NotFoundError } from "../core/errors.js";
 import { addFile, addFormat, addVariant, addVersion, ensureProjectIdOnce, inPlay, lockPicture, noteInPlay, resolveCut, resolveVideo, setShots, setVariantFilms, shelveFilm, shotAt } from "../core/project.js";
 import { addTake, editSection, setSections } from "../core/script.js";
-import { addNote, applyReply, applyUserEdit, checkNoteFormat, filterNotes } from "../core/notes.js";
+import { addNote, addUserReply, applyReply, applyUserEdit, checkNoteFormat, filterNotes } from "../core/notes.js";
 import { FORMAT_ID_RE, MAX_FORMATS, isPictureSize, labelOfId, versionFormats } from "../core/formats.js";
 import { createBatch, latestBatch } from "../core/batches.js";
 import { markSent, NOTE_STATES, withState, type NoteState } from "../core/noteState.js";
@@ -907,6 +907,14 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     const check = project && visuals ? (next: Note, prev: Note) => (next.stage === "visuals" ? checkVisualNote(next, visuals) : checkNoteFormat({ next, prev, boxRedrawn: b.box !== undefined }, project)) : undefined;
     const { result } = await store.update("notes", (f) => applyUserEdit(f, { id: c.req.param("id"), ...b }, check));
     return c.json({ note: withState(result) });
+  });
+
+  app.post("/api/notes/:id/replies", async (c) => {
+    const b = await body(c, z.object({ text: z.string() }));
+    const id = c.req.param("id");
+    const { result } = await store.update("notes", (f) => addUserReply(f, id, b.text));
+    store.emit("user-reply", { note: id, text: b.text.trim() });
+    return c.json({ note: withState(result) }, 201);
   });
 
   app.post("/api/replies", async (c) => {

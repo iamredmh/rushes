@@ -236,7 +236,19 @@ export function markLabel(m: Mark): string {
   return m.db === undefined ? label : `${label} ${m.db} dB`;
 }
 
-export const NoteSchema = z
+/** One message in a note's thread: the agent's reply or the user's answer. */
+export const ReplySchema = z.object({ by: z.enum(["agent", "user"]), text: z.string().trim().min(1).max(4000), at: z.string() });
+export type NoteReply = z.infer<typeof ReplySchema>;
+
+/** A note from before threads: its one `reply` becomes the thread's first entry, stamped with the note's createdAt. */
+function withThread(raw: unknown): unknown {
+  if (typeof raw !== "object" || raw === null || "replies" in raw) return raw;
+  const o = raw as { reply?: unknown; createdAt?: unknown };
+  if (typeof o.reply !== "string" || o.reply.trim() === "" || typeof o.createdAt !== "string") return raw;
+  return { ...o, replies: [{ by: "agent", text: o.reply, at: o.createdAt }] };
+}
+
+export const NoteSchema = z.preprocess(withThread, z
   .object({
     id,
     stage: StageSchema,
@@ -267,6 +279,7 @@ export const NoteSchema = z
     format: z.string().max(16).regex(FORMAT_ID_RE).nullable().default(null),
     status: z.enum(["todo", "done"]).default("todo"),
     reply: z.string().default(""),
+    replies: z.array(ReplySchema).default([]),
     fixT: seconds.nullable().default(null),
     fixVersion: z.string().nullable().default(null),
     batch: z.string().nullable().default(null),
@@ -303,7 +316,7 @@ export const NoteSchema = z
       }
       seenKinds.add(m.kind);
     }
-  });
+  }));
 export type Note = z.infer<typeof NoteSchema>;
 
 export const NotesFileSchema = fileObject({

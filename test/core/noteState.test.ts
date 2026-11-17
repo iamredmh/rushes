@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { canMove, markSent, moveNote, NOTE_STATE_LABEL, NOTE_TRANSITIONS, noteState, withState } from "../../src/core/noteState.js";
+import { canMove, markSent, moveNote, NOTE_STATE_LABEL, NOTE_TRANSITIONS, needsYou, noteState, recallNotes, withState } from "../../src/core/noteState.js";
 import type { Note } from "../../src/core/schema.js";
 
 const note = (over: Partial<Note> = {}): Note => ({
   id: "n1", stage: "picture", video: null, version: null, on: null, scope: "point", t: 1, tOut: null, frame: null,
   text: "Hold longer", box: null, pin: null, grab: null, shot: null, marks: [], format: null,
-  status: "todo", reply: "", fixT: null, fixVersion: null, batch: null, createdAt: "2026-11-15T10:00:00.000Z", by: "user",
+  status: "todo", reply: "", replies: [], fixT: null, fixVersion: null, batch: null, createdAt: "2026-11-15T10:00:00.000Z", by: "user",
   ...over,
 });
 
@@ -19,7 +19,7 @@ describe("a note's state", () => {
   });
 
   it("moves only along the table: send a to-do, resolve a to-do or a sent note, reopen a done one", () => {
-    expect(NOTE_TRANSITIONS).toEqual({ todo: { send: "sent", resolve: "done" }, sent: { resolve: "done" }, done: { reopen: "todo" } });
+    expect(NOTE_TRANSITIONS).toEqual({ todo: { send: "sent", resolve: "done" }, sent: { resolve: "done", recall: "todo" }, done: { reopen: "todo" } });
     expect(canMove("todo", "send")).toBe(true);
     expect(canMove("sent", "send")).toBe(false);
     expect(canMove("done", "send")).toBe(false);
@@ -54,5 +54,26 @@ describe("a note's state", () => {
     const n = note({ batch: "b_1" });
     expect(withState(n)).toMatchObject({ id: "n1", state: "sent" });
     expect("state" in n).toBe(false);
+  });
+});
+
+describe("replies and recall", () => {
+  it("needsYou: a sent note whose last reply is the agent's", () => {
+    expect(needsYou({ status: "todo", batch: "b_1", replies: [{ by: "agent", text: "?", at: "t" }] })).toBe(true);
+    expect(needsYou({ status: "todo", batch: "b_1", replies: [{ by: "agent", text: "?", at: "t" }, { by: "user", text: "no", at: "t" }] })).toBe(false);
+    expect(needsYou({ status: "done", batch: "b_1", replies: [{ by: "agent", text: "fixed", at: "t" }] })).toBe(false);
+    expect(needsYou({ status: "todo", batch: null, replies: [{ by: "agent", text: "?", at: "t" }] })).toBe(false);
+  });
+
+  it("recall moves the batches' sent notes back to to do and leaves done ones", () => {
+    const notes = [{ id: "a", status: "todo", batch: "b_1" }, { id: "b", status: "done", batch: "b_1" }, { id: "c", status: "todo", batch: "b_2" }] as const;
+    const copy = notes.map((n) => ({ ...n }));
+    expect(recallNotes(copy, ["b_1"])).toEqual(["a"]);
+    expect(copy.map(noteState)).toEqual(["todo", "done", "sent"]);
+  });
+
+  it("withState adds needsYou", () => {
+    expect(withState(note({ batch: "b_1", replies: [{ by: "agent", text: "?", at: "t" }] })).needsYou).toBe(true);
+    expect(withState(note()).needsYou).toBe(false);
   });
 });

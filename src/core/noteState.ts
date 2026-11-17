@@ -7,6 +7,7 @@
 //   todo  --send-->    sent   Send filed it in a batch: the agent has it.
 //   todo  --resolve--> done   Fixed, or ticked off, before it was ever sent.
 //   sent  --resolve--> done   The agent (or the user) marked it done. It keeps its batch, as history.
+//   sent  --recall-->  todo   The send was stopped: the note leaves its batch, so the next Send takes it again.
 //   done  --reopen-->  todo   Not fixed after all. It leaves its batch, so the next Send takes it again.
 //
 // Prior art: a Review Board issue (open, resolved, dropped) and a Kitsu task (waiting for approval, retake,
@@ -16,12 +17,12 @@ import type { Note } from "./schema.js";
 export const NOTE_STATES = ["todo", "sent", "done"] as const;
 export type NoteState = (typeof NOTE_STATES)[number];
 
-export type NoteEvent = { type: "send"; batch: string } | { type: "resolve" } | { type: "reopen" };
+export type NoteEvent = { type: "send"; batch: string } | { type: "resolve" } | { type: "reopen" } | { type: "recall" };
 
 /** Every move a note can make: from a state, on an event, to a state. A move not listed is refused. */
 export const NOTE_TRANSITIONS: Readonly<Record<NoteState, Readonly<Partial<Record<NoteEvent["type"], NoteState>>>>> = {
   todo: { send: "sent", resolve: "done" },
-  sent: { resolve: "done" },
+  sent: { resolve: "done", recall: "todo" },
   done: { reopen: "todo" },
 };
 
@@ -41,6 +42,7 @@ export function moveNote(n: Pick<Note, "status" | "batch">, event: NoteEvent): v
   if (!canMove(from, event.type)) throw new Error(`can't ${event.type} a note that is ${from}`);
   if (event.type === "send") n.batch = event.batch;
   else if (event.type === "resolve") n.status = "done";
+  else if (event.type === "recall") n.batch = null;
   else {
     n.status = "todo";
     n.batch = null;
@@ -62,5 +64,23 @@ export function markSent(notes: Pick<Note, "id" | "status" | "batch">[], batch: 
   for (const n of notes) if (ids.has(n.id) && noteState(n) === "todo") moveNote(n, { type: "send", batch: batch.id });
 }
 
+/** Recall: every sent note of these batches goes back to to do. Done notes stay. Returns the ids moved. */
+export function recallNotes(notes: Pick<Note, "id" | "status" | "batch">[], batchIds: readonly string[]): string[] {
+  const batches = new Set(batchIds);
+  const moved: string[] = [];
+  for (const n of notes) {
+    if (n.batch !== null && batches.has(n.batch) && noteState(n) === "sent") {
+      moveNote(n, { type: "recall" });
+      moved.push(n.id);
+    }
+  }
+  return moved;
+}
+
+/** It is the user's turn: the note is with the agent and the last word in its thread is the agent's. */
+export function needsYou(n: Pick<Note, "status" | "batch" | "replies">): boolean {
+  return noteState(n) === "sent" && n.replies.at(-1)?.by === "agent";
+}
+
 /** The note with its state, as the server hands it out. A copy: the stored note never carries one. */
-export const withState = <T extends Pick<Note, "status" | "batch">>(n: T): T & { state: NoteState } => ({ ...n, state: noteState(n) });
+export const withState = <T extends Pick<Note, "status" | "batch" | "replies">>(n: T): T & { state: NoteState; needsYou: boolean } => ({ ...n, state: noteState(n), needsYou: needsYou(n) });

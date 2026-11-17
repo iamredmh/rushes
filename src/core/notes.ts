@@ -1,5 +1,5 @@
 import {
-  NoteSchema, type Lane, type LaneStage, type Note, type NotesFile, type Picks, type Project, type Script, type Stage, type Variant,
+  NoteSchema, ReplySchema, type Lane, type LaneStage, type Note, type NotesFile, type Picks, type Project, type Script, type Stage, type Variant,
 } from "./schema.js";
 import { InvalidError, NotFoundError, RushesError } from "./errors.js";
 import { labelOfId, versionFormats } from "./formats.js";
@@ -57,11 +57,24 @@ export interface Reply {
 
 export function applyReply(file: NotesFile, r: Reply): Note {
   const n = find(file, r.id);
-  if (r.reply !== undefined) n.reply = r.reply;
+  if (r.reply !== undefined) {
+    n.reply = r.reply;
+    const text = r.reply.trim();
+    if (text !== "") n.replies.push({ by: "agent", text, at: new Date().toISOString() });
+  }
   // A status is a move in the note's lifecycle (noteState.ts): done to todo reopens it, which leaves its batch.
   setStatus(n, r.status);
   if (r.fixT !== undefined) n.fixT = r.fixT;
   if (r.fixVersion !== undefined) n.fixVersion = r.fixVersion;
+  return n;
+}
+
+/** The user's answer to the agent's reply, added to the note's thread. */
+export function addUserReply(file: NotesFile, id: string, text: string, now = new Date()): Note {
+  const n = find(file, id);
+  const parsed = ReplySchema.safeParse({ by: "user", text, at: now.toISOString() });
+  if (!parsed.success) throw new InvalidError("Reply is invalid", parsed.error.issues);
+  n.replies.push(parsed.data);
   return n;
 }
 
