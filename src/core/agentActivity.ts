@@ -5,7 +5,9 @@ import { oneLine } from "./labels.js";
 /** Added after the batch prompt in what the runner sends. The prompt stored in batches.json never carries it. */
 export const AGENT_LINES =
   "Before you start on each note, call rushes_working_on with the note's id and what you are doing, in a few plain words.\n" +
-  "If you are not sure what a note means, ask on the note with rushes_reply (no status) and go on to the next one. The user answers on the note.";
+  "If you are not sure what a note means, ask on the note with rushes_reply (no status) and go on to the next one. The user answers on the note.\n" +
+  "Only add a new version when the picture or sound changed.\n" +
+  "Wait for each command to finish before you reply on a note; do not run work as a background task.";
 
 /** An Activity line is one line of at most this many characters. */
 export const ACTIVITY_LINE_MAX = 200;
