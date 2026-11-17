@@ -1,0 +1,137 @@
+import { spawn, type ChildProcess } from "node:child_process";
+import { EventEmitter } from "node:events";
+import { RpcPeer } from "./rpc.js";
+import { VERSION } from "../app.js";
+
+export interface AdapterSpec { command: string; args: string[]; env: Record<string, string>; cwd: string }
+export interface McpServerSpec { name: string; command: string; args: string[]; env: { name: string; value: string }[] }
+
+export type AcpPermissionParams = {
+  sessionId: string;
+  toolCall: { toolCallId: string; title?: string; kind?: string; rawInput?: unknown; locations?: { path: string }[] };
+  options: { optionId: string; name: string; kind: "allow_once" | "allow_always" | "reject_once" | "reject_always" }[];
+};
+export type AcpPermissionOutcome = { outcome: "selected"; optionId: string } | { outcome: "cancelled" };
+
+const STDERR_TAIL = 4096;
+const KILL_GRACE_MS = 2000;
+const CANCELLED: AcpPermissionOutcome = { outcome: "cancelled" };
+
+function modeIds(result: any): string[] {
+  const list = result?.modes?.availableModes;
+  return Array.isArray(list) ? list.map((m: any) => String(m.id)) : [];
+}
+
+/** One running ACP adapter child process and the JSON-RPC conversation with it. */
+export class AcpConnection extends EventEmitter {
+  private rpc: RpcPeer;
+  private stderr = "";
+  private exited = false;
+  private killTimer: NodeJS.Timeout | null = null;
+  private permissionHandler: ((p: AcpPermissionParams) => Promise<AcpPermissionOutcome>) | null = null;
+  private openAsks = new Map<string, Set<(o: AcpPermissionOutcome) => void>>();
+
+  private constructor(private child: ChildProcess) {
+    super();
+    this.rpc = new RpcPeer(child.stdout!, child.stdin!);
+    child.stderr!.setEncoding("utf8");
+    child.stderr!.on("data", (d: string) => {
+      this.stderr = (this.stderr + d).slice(-STDERR_TAIL);
+    });
+    this.rpc.onNotification("session/update", (p) => {
+      if (p?.update) this.emit("update", p.update);
+    });
+    this.rpc.onRequest("session/request_permission", (p) => this.askPermission(p));
+    let done = false;
+    const finish = (code: number | null, label: string) => {
+      if (done) return;
+      done = true;
+      this.exited = true;
+      if (this.killTimer) clearTimeout(this.killTimer);
+      this.killTimer = null;
+      this.rpc.close(new Error(`Agent adapter ${label}`));
+      this.emit("exit", { code, stderr: this.stderr });
+    };
+    child.on("exit", (code, signal) => finish(code, signal ? `was stopped by ${signal} (exit code ${code})` : `exited with code ${code}`));
+    child.on("error", (err) => finish(null, `failed to start: ${err.message} (exit code null)`));
+  }
+
+  static start(spec: AdapterSpec): AcpConnection {
+    const child = spawn(spec.command, spec.args, {
+      cwd: spec.cwd,
+      env: { ...process.env, ...spec.env },
+      stdio: ["pipe", "pipe", "pipe"],
+      detached: false,
+    });
+    return new AcpConnection(child);
+  }
+
+  async initialize(): Promise<{ loadSession: boolean }> {
+    const r = await this.rpc.request<any>("initialize", {
+      protocolVersion: 1,
+      clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
+      clientInfo: { name: "rushes", version: VERSION },
+    });
+    return { loadSession: r?.agentCapabilities?.loadSession === true };
+  }
+
+  async newSession(cwd: string, mcp: McpServerSpec[]): Promise<{ sessionId: string; modes: string[] }> {
+    const r = await this.rpc.request<any>("session/new", { cwd, mcpServers: mcp });
+    return { sessionId: String(r.sessionId), modes: modeIds(r) };
+  }
+
+  async loadSession(id: string, cwd: string, mcp: McpServerSpec[]): Promise<{ modes: string[] }> {
+    const r = await this.rpc.request<any>("session/load", { sessionId: id, cwd, mcpServers: mcp });
+    return { modes: modeIds(r) };
+  }
+
+  async setMode(sessionId: string, modeId: string): Promise<void> {
+    await this.rpc.request("session/set_mode", { sessionId, modeId });
+  }
+
+  async prompt(sessionId: string, text: string): Promise<{ stopReason: string }> {
+    const r = await this.rpc.request<any>("session/prompt", { sessionId, prompt: [{ type: "text", text }] });
+    return { stopReason: String(r?.stopReason ?? "end_turn") };
+  }
+
+  /** Sends session/cancel and answers every permission ask still open for that session as cancelled. */
+  cancel(sessionId: string): void {
+    this.rpc.notify("session/cancel", { sessionId });
+    const asks = this.openAsks.get(sessionId);
+    if (asks) for (const settle of [...asks]) settle(CANCELLED);
+  }
+
+  onPermission(fn: (p: AcpPermissionParams) => Promise<AcpPermissionOutcome>): void {
+    this.permissionHandler = fn;
+  }
+
+  /** SIGTERM now, SIGKILL after 2 s if the child is still there. */
+  kill(): void {
+    if (this.exited || this.killTimer) return;
+    this.child.kill("SIGTERM");
+    this.killTimer = setTimeout(() => {
+      this.killTimer = null;
+      if (!this.exited) this.child.kill("SIGKILL");
+    }, KILL_GRACE_MS);
+    this.killTimer.unref();
+  }
+
+  private askPermission(params: AcpPermissionParams): Promise<unknown> {
+    const sessionId = params.sessionId;
+    return new Promise((resolve) => {
+      let settled = false;
+      const settle = (o: AcpPermissionOutcome) => {
+        if (settled) return;
+        settled = true;
+        this.openAsks.get(sessionId)?.delete(settle);
+        resolve({ outcome: o });
+      };
+      let set = this.openAsks.get(sessionId);
+      if (!set) this.openAsks.set(sessionId, (set = new Set()));
+      set.add(settle);
+      const handler = this.permissionHandler;
+      if (!handler) return settle(CANCELLED);
+      handler(params).then(settle, () => settle(CANCELLED));
+    });
+  }
+}
