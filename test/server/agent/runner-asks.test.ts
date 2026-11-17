@@ -714,6 +714,9 @@ describe("AgentRunner: Rushes's own MCP tools (R16)", () => {
       claudeTool("mcp__rushes__rushes_x;rm", "semicolon"),
       claudeTool("mcp__rushes__rushes_reply", "wrong-server", { name: "rushes2", source: "dynamic" }),
       claudeTool("mcp__rushes__rushes_reply", "no-server", null),
+      claudeTool("mcp__rushes__rushes_reply", "user-scope", { name: "rushes", source: "user" }),
+      claudeTool("mcp__rushes__rushes_reply", "project-scope", { name: "rushes", source: "project" }),
+      claudeTool("mcp__rushes__rushes_reply", "local-scope", { name: "rushes", source: "local" }),
     ]);
   });
 

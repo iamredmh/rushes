@@ -33,6 +33,12 @@ describe("isOwnRushesTool", () => {
     }
   });
 
+  it("Claude: a server named rushes from any source but dynamic (--mcp-config, what session/new passes) asks", () => {
+    for (const source of ["user", "project", "local", "plugin", "managed", "enterprise", "claudeai", "agent", "sdk", "Dynamic", "", undefined]) {
+      expect(isOwnRushesTool("claude", claudeAsk("mcp__rushes__rushes_reply", { name: "rushes", ...(source === undefined ? {} : { source }) }), new Map()), String(source)).toBe(false);
+    }
+  });
+
   it("Claude: lookalikes ask", () => {
     const own = { name: "rushes", source: "dynamic" };
     const cases: [unknown, unknown][] = [
