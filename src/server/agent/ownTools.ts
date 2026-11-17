@@ -1,3 +1,4 @@
+import type { AgentId } from "../../core/schema.js";
 import type { AcpPermissionParams } from "./acp.js";
 
 /*
@@ -47,23 +48,25 @@ export function noteMcpCall(calls: McpCalls, update: unknown): void {
   while (calls.size > KEPT) calls.delete(calls.keys().next().value as string);
 }
 
-/** True only for an ask to run one of Rushes's own MCP tools, from the Claude or the Codex adapter. */
-export function isOwnRushesTool(p: AcpPermissionParams, calls: McpCalls): boolean {
+/**
+ * True only for an ask to run one of Rushes's own MCP tools. Only the branch of the agent that runs is read:
+ * a Codex-shaped request from Claude, or a Claude-shaped one from Codex, asks.
+ */
+export function isOwnRushesTool(agent: AgentId, p: AcpPermissionParams, calls: McpCalls): boolean {
   const tc = record(p.toolCall);
   if (!tc) return false;
-  // Claude
+  return agent === "claude" ? ownClaudeTool(tc) : agent === "codex" ? ownCodexTool(p, tc, calls) : false;
+}
+
+function ownClaudeTool(tc: Record<string, unknown>): boolean {
   const claude = record(record(tc._meta)?.claudeCode);
-  if (claude) {
-    const name = claude.toolName;
-    const server = record(claude.mcpServer);
-    return (
-      server?.name === RUSHES_SERVER &&
-      typeof name === "string" &&
-      name.startsWith(CLAUDE_PREFIX) &&
-      OWN_TOOL.test(name.slice(CLAUDE_PREFIX.length))
-    );
-  }
-  // Codex
+  if (!claude) return false;
+  const name = claude.toolName;
+  const server = record(claude.mcpServer);
+  return server?.name === RUSHES_SERVER && typeof name === "string" && name.startsWith(CLAUDE_PREFIX) && OWN_TOOL.test(name.slice(CLAUDE_PREFIX.length));
+}
+
+function ownCodexTool(p: AcpPermissionParams, tc: Record<string, unknown>, calls: McpCalls): boolean {
   if (record((p as { _meta?: unknown })._meta)?.is_mcp_tool_approval !== true) return false;
   if (tc.kind !== "execute" || typeof tc.toolCallId !== "string") return false;
   const call = calls.get(tc.toolCallId);

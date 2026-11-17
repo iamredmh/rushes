@@ -29,7 +29,7 @@ const withCalls = (...updates: unknown[]): McpCalls => {
 describe("isOwnRushesTool", () => {
   it("Claude: a rushes_ tool of the rushes server, by _meta.claudeCode.toolName and mcpServer.name", () => {
     for (const tool of ["rushes_reply", "rushes_working_on", "rushes_get_batch"]) {
-      expect(isOwnRushesTool(claudeAsk(`mcp__rushes__${tool}`, { name: "rushes", source: "dynamic" }), new Map()), tool).toBe(true);
+      expect(isOwnRushesTool("claude", claudeAsk(`mcp__rushes__${tool}`, { name: "rushes", source: "dynamic" }), new Map()), tool).toBe(true);
     }
   });
 
@@ -49,31 +49,40 @@ describe("isOwnRushesTool", () => {
       ["mcp__rushes__rushes__reply", own],
       [42, own],
     ];
-    for (const [toolName, server] of cases) expect(isOwnRushesTool(claudeAsk(toolName, server), new Map()), String(toolName)).toBe(false);
+    for (const [toolName, server] of cases) expect(isOwnRushesTool("claude", claudeAsk(toolName, server), new Map()), String(toolName)).toBe(false);
     // The tool name in the title alone (free text) is not enough.
-    expect(isOwnRushesTool({ sessionId: "s", toolCall: { toolCallId: "t", title: "mcp__rushes__rushes_reply" }, options: OPTIONS }, new Map())).toBe(false);
+    expect(isOwnRushesTool("claude", { sessionId: "s", toolCall: { toolCallId: "t", title: "mcp__rushes__rushes_reply" }, options: OPTIONS }, new Map())).toBe(false);
   });
 
   it("Codex: the approval of a call whose tool_call named server rushes and a rushes_ tool", () => {
-    expect(isOwnRushesTool(codexAsk(), withCalls(codexCall("rushes", "rushes_reply")))).toBe(true);
+    expect(isOwnRushesTool("codex", codexAsk(), withCalls(codexCall("rushes", "rushes_reply")))).toBe(true);
   });
 
   it("Codex: lookalikes, other ids and asks without the MCP approval marker all ask", () => {
-    expect(isOwnRushesTool(codexAsk(), withCalls(codexCall("rushes2", "rushes_reply")))).toBe(false);
-    expect(isOwnRushesTool(codexAsk(), withCalls(codexCall("rushes", "other")))).toBe(false);
-    expect(isOwnRushesTool(codexAsk(), withCalls(codexCall("rushes", "rushes_x;rm")))).toBe(false);
-    expect(isOwnRushesTool(codexAsk("item-2"), withCalls(codexCall("rushes", "rushes_reply")))).toBe(false);
-    expect(isOwnRushesTool(codexAsk("item-1", null), withCalls(codexCall("rushes", "rushes_reply")))).toBe(false);
-    expect(isOwnRushesTool(codexAsk("item-1", { is_mcp_tool_approval: "yes" }), withCalls(codexCall("rushes", "rushes_reply")))).toBe(false);
+    expect(isOwnRushesTool("codex", codexAsk(), withCalls(codexCall("rushes2", "rushes_reply")))).toBe(false);
+    expect(isOwnRushesTool("codex", codexAsk(), withCalls(codexCall("rushes", "other")))).toBe(false);
+    expect(isOwnRushesTool("codex", codexAsk(), withCalls(codexCall("rushes", "rushes_x;rm")))).toBe(false);
+    expect(isOwnRushesTool("codex", codexAsk("item-2"), withCalls(codexCall("rushes", "rushes_reply")))).toBe(false);
+    expect(isOwnRushesTool("codex", codexAsk("item-1", null), withCalls(codexCall("rushes", "rushes_reply")))).toBe(false);
+    expect(isOwnRushesTool("codex", codexAsk("item-1", { is_mcp_tool_approval: "yes" }), withCalls(codexCall("rushes", "rushes_reply")))).toBe(false);
     // A command approval that reuses the id (kind not execute is not the shape either).
     const cmd = { ...codexAsk(), toolCall: { toolCallId: "item-1", kind: "edit" } } as AcpPermissionParams;
-    expect(isOwnRushesTool(cmd, withCalls(codexCall("rushes", "rushes_reply")))).toBe(false);
+    expect(isOwnRushesTool("codex", cmd, withCalls(codexCall("rushes", "rushes_reply")))).toBe(false);
     // Codex's standalone form (no earlier tool call to tie it to): the tool is only in free text, so it asks.
     const standalone = {
       sessionId: "s", options: OPTIONS, _meta: { is_mcp_tool_approval: true },
       toolCall: { toolCallId: "mcp-rushes-1", kind: "execute", title: "MCP tool call approval", rawInput: { serverName: "rushes", description: 'Run tool "rushes_reply"?' } },
     } as AcpPermissionParams;
-    expect(isOwnRushesTool(standalone, new Map())).toBe(false);
+    expect(isOwnRushesTool("codex", standalone, new Map())).toBe(false);
+  });
+
+  it("each agent's shape counts only for that agent (round 2, item 4)", () => {
+    const calls = withCalls(codexCall("rushes", "rushes_reply"));
+    expect(isOwnRushesTool("claude", codexAsk(), calls)).toBe(false);
+    expect(isOwnRushesTool("codex", claudeAsk("mcp__rushes__rushes_reply", { name: "rushes", source: "dynamic" }), calls)).toBe(false);
+    // A Codex-shaped request whose toolCall also carries a Claude-shaped _meta: Codex reads only its own fields.
+    const both = { ...codexAsk(), toolCall: { toolCallId: "item-1", kind: "execute", _meta: { claudeCode: { toolName: "mcp__rushes__other" } } } } as AcpPermissionParams;
+    expect(isOwnRushesTool("codex", both, calls)).toBe(true);
   });
 
   it("noteMcpCall keeps only tool_call starts with a string server and tool, and only so many", () => {

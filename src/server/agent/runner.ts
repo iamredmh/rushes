@@ -141,8 +141,8 @@ async function within(p: Promise<unknown>, ms: number): Promise<void> {
 export class AgentRunner {
   private readonly detect: () => Promise<AgentInfo[]>;
   private readonly specFor: (a: AgentInfo, root: string) => AdapterSpec;
-  /** Codex's MCP calls by tool call id, per adapter (R16). */
-  private readonly mcpCalls = new WeakMap<AcpConnection, McpCalls>();
+  /** Per adapter: which agent it runs, and (Codex only) its MCP calls by tool call id (R16). */
+  private readonly adapters = new WeakMap<AcpConnection, { agent: AgentId; calls: McpCalls }>();
   private readonly mcp: (root: string) => McpServerSpec;
   private readonly idleMs: number;
   private readonly startMs: number;
@@ -406,7 +406,7 @@ export class AgentRunner {
     let timer: NodeJS.Timeout | undefined;
     try {
       conn = AcpConnection.start(this.specFor(info, root));
-      this.attach(conn);
+      this.attach(conn, info.id);
       const c = conn;
       const deadline = new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
@@ -495,15 +495,15 @@ export class AgentRunner {
   }
 
   /** Makes `conn` the runner's adapter and listens to it. */
-  private attach(conn: AcpConnection): void {
+  private attach(conn: AcpConnection, agent: AgentId): void {
     this.conn = conn;
     this.sessionId = null;
     this.live.add(conn);
     // R16: Codex names an MCP call's server and tool only in its tool_call update, before the approval comes.
     const calls: McpCalls = new Map();
-    this.mcpCalls.set(conn, calls);
+    this.adapters.set(conn, { agent, calls });
     conn.on("update", (u: unknown) => {
-      noteMcpCall(calls, u);
+      if (agent === "codex") noteMcpCall(calls, u);
       this.onUpdate(conn, u);
     });
     conn.on("exit", (e: { code: number | null; stderr: string }) => this.onExit(conn, e));
@@ -528,7 +528,8 @@ export class AgentRunner {
     const live = () => !this.closed && !this.stopping && conn === this.conn && !conn.hasExited;
     if (!live()) return CANCELLED;
     // R16: Rushes's own MCP tools never ask, under any permission level.
-    if (isOwnRushesTool(p, this.mcpCalls.get(conn) ?? new Map())) return allowOutcome(p.options);
+    const adapter = this.adapters.get(conn);
+    if (adapter && isOwnRushesTool(adapter.agent, p, adapter.calls)) return allowOutcome(p.options);
     // The adapter hears "yes" before an Always rule is written: wait for that write, then read the rules.
     await this.ruleWrite;
     const rules = await this.loadRules();

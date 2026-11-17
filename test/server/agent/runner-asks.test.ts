@@ -653,59 +653,82 @@ describe("AgentRunner session mode (R14, R15)", () => {
   });
 });
 
+const codexAgent: AgentInfo = { id: "codex", name: "Codex", installed: true, signedIn: true, path: "/opt/homebrew/bin/codex", signIn: "codex login" };
+/** A rig whose agent is Codex. */
+const codexRig = (scenario: object, opts: Parameters<typeof rig>[1] = {}) =>
+  rig(scenario, { ...opts, settings: { agent: "codex", ...opts.settings }, runner: { detect: async () => [codexAgent], ...opts.runner } });
+
 describe("AgentRunner: Rushes's own MCP tools (R16)", () => {
   const own = { name: "rushes", source: "dynamic" };
-  const claudeTool = (toolName: string, record: string, mcpServer: object | null = own) => ({
-    permission: { toolCall: { toolCallId: record, title: toolName, kind: "other", _meta: { claudeCode: { toolName, ...(mcpServer ? { mcpServer } : {}) } } } },
+  const claudeTool = (toolName: string, record: string, mcpServer: object | null = own, rawInput: object = {}) => ({
+    permission: { toolCall: { toolCallId: record, title: toolName, kind: "other", rawInput, _meta: { claudeCode: { toolName, ...(mcpServer ? { mcpServer } : {}) } } } },
     record,
   });
-  const codexStart = (server: string, tool: string, id: string) => ({
-    update: { sessionUpdate: "tool_call", toolCallId: id, kind: "execute", title: `mcp.${server}.${tool}`, status: "pending", rawInput: { server, tool, arguments: {} } },
+  const codexStart = (server: string, tool: string, id: string, args: object = {}) => ({
+    update: { sessionUpdate: "tool_call", toolCallId: id, kind: "execute", title: `mcp.${server}.${tool}`, status: "pending", rawInput: { server, tool, arguments: args } },
   });
   const codexAsk = (id: string) => ({ permission: { toolCall: { toolCallId: id, kind: "execute", status: "pending" }, meta: { is_mcp_tool_approval: true } }, record: id });
-
-  it("Claude- and Codex-shaped asks for rushes_ tools are allowed with no ask, under ask-all and project-edits", async () => {
-    for (const permissions of ["ask-all", "project-edits"] as const) {
-      const r = await rig({ turns: [] }, { rules: { permissions } });
-      await r.scenario({
-        turns: [[
-          claudeTool("mcp__rushes__rushes_working_on", "claude-working"),
-          claudeTool("mcp__rushes__rushes_reply", "claude-reply"),
-          codexStart("rushes", "rushes_reply", "codex-reply"),
-          codexAsk("codex-reply"),
-        ]],
-      });
-      const heard: AgentStatus[] = [];
-      r.store.on("agent", (s: AgentStatus) => heard.push(s));
-      await r.runner.send(await r.batch("Move the title"));
-      await r.phase("finished");
-      for (const label of ["claude-working", "claude-reply", "codex-reply"]) expect(recorded(r.log(), label), `${permissions} ${label}`).toEqual(ALLOW_ONCE);
-      expect(heard.every((s) => s.asks.length === 0), permissions).toBe(true);
-    }
-  });
-
-  it("each lookalike asks", async () => {
-    const r = await rig({ turns: [] }, { rules: { permissions: "project-edits" } });
-    const lookalikes = [
-      claudeTool("mcp__rushes2__rushes_reply", "rushes2", { name: "rushes2", source: "user" }),
-      claudeTool("mcp__rushes__other", "other"),
-      claudeTool("mcp__rushes__rushes_x;rm", "semicolon"),
-      claudeTool("mcp__rushes__rushes_reply", "wrong-server", { name: "rushes2", source: "user" }),
-      claudeTool("mcp__rushes__rushes_reply", "no-server", null),
-      codexStart("rushes2", "rushes_reply", "codex-rushes2"), codexAsk("codex-rushes2"),
-      codexStart("rushes", "other", "codex-other"), codexAsk("codex-other"),
-      codexStart("rushes", "rushes_x;rm", "codex-semicolon"), codexAsk("codex-semicolon"),
-      codexAsk("codex-unknown"),
-    ];
-    const labels = lookalikes.filter((s): s is typeof s & { record: string } => "record" in s).map((s) => s.record);
-    await r.scenario({ turns: [lookalikes] });
+  const labelsOf = (steps: object[]) => steps.filter((s): s is { record: string } => "record" in s).map((s) => s.record);
+  /** Runs the steps as one turn and answers "no" to each ask, in order; each must have asked. */
+  async function allAsk(r: Awaited<ReturnType<typeof rig>>, steps: object[]) {
+    await r.scenario({ turns: [steps] });
     await r.runner.send(await r.batch("Move the title"));
-    for (const label of labels) {
+    for (const label of labelsOf(steps)) {
       await r.waitFor(`the ask for ${label}`, () => r.runner.status().asks.length === 1);
       await r.runner.answer(r.runner.status().asks[0].id, "no");
       await r.waitFor(`the answer to ${label}`, () => recorded(r.log(), label));
       expect(recorded(r.log(), label), label).toEqual({ outcome: "selected", optionId: "reject-once" });
     }
     await r.phase("finished");
+  }
+  /** Runs the steps as one turn; each must be allowed with no ask shown. */
+  async function noneAsk(r: Awaited<ReturnType<typeof rig>>, steps: object[], what: string) {
+    await r.scenario({ turns: [steps] });
+    const heard: AgentStatus[] = [];
+    r.store.on("agent", (s: AgentStatus) => heard.push(s));
+    await r.runner.send(await r.batch("Move the title"));
+    await r.phase("finished");
+    for (const label of labelsOf(steps)) expect(recorded(r.log(), label), `${what} ${label}`).toEqual(ALLOW_ONCE);
+    expect(heard.every((s) => s.asks.length === 0), what).toBe(true);
+  }
+
+  it("Claude-shaped asks for rushes_ tools are allowed with no ask, under ask-all and project-edits", async () => {
+    for (const permissions of ["ask-all", "project-edits"] as const) {
+      const r = await rig({ turns: [] }, { rules: { permissions } });
+      await noneAsk(r, [claudeTool("mcp__rushes__rushes_working_on", "claude-working"), claudeTool("mcp__rushes__rushes_reply", "claude-reply")], permissions);
+    }
+  });
+
+  it("Codex-shaped asks for rushes_ tools are allowed with no ask, under ask-all and project-edits", async () => {
+    for (const permissions of ["ask-all", "project-edits"] as const) {
+      const r = await codexRig({ turns: [] }, { rules: { permissions } });
+      await noneAsk(r, [codexStart("rushes", "rushes_reply", "codex-reply"), codexAsk("codex-reply")], permissions);
+    }
+  });
+
+  it("Claude lookalikes ask", async () => {
+    const r = await rig({ turns: [] }, { rules: { permissions: "project-edits" } });
+    await allAsk(r, [
+      claudeTool("mcp__rushes2__rushes_reply", "rushes2", { name: "rushes2", source: "dynamic" }),
+      claudeTool("mcp__rushes__other", "other"),
+      claudeTool("mcp__rushes__rushes_x;rm", "semicolon"),
+      claudeTool("mcp__rushes__rushes_reply", "wrong-server", { name: "rushes2", source: "dynamic" }),
+      claudeTool("mcp__rushes__rushes_reply", "no-server", null),
+    ]);
+  });
+
+  it("Codex lookalikes ask", async () => {
+    const r = await codexRig({ turns: [] }, { rules: { permissions: "project-edits" } });
+    await allAsk(r, [
+      codexStart("rushes2", "rushes_reply", "codex-rushes2"), codexAsk("codex-rushes2"),
+      codexStart("rushes", "other", "codex-other"), codexAsk("codex-other"),
+      codexStart("rushes", "rushes_x;rm", "codex-semicolon"), codexAsk("codex-semicolon"),
+      codexAsk("codex-unknown"),
+    ]);
+  });
+
+  it("an agent's own-tool shape asks when it comes from the other agent", async () => {
+    await allAsk(await rig({ turns: [] }), [codexStart("rushes", "rushes_reply", "codex-in-claude"), codexAsk("codex-in-claude")]);
+    await allAsk(await codexRig({ turns: [] }), [claudeTool("mcp__rushes__rushes_reply", "claude-in-codex")]);
   });
 });
