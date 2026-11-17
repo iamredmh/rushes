@@ -448,7 +448,7 @@ describe("AgentRunner", () => {
     expect(b2.noteIds).toEqual([id]);
     const lines = texts().length;
     await r.runner.send(b2);
-    await r.waitFor("b_2 to end", () => texts().includes("Claude Code finished b_2"));
+    await r.waitFor("b_2 to end", () => texts().slice(lines).includes("Claude Code finished 1 note"));
     await r.phase("finished");
     expect((await notesOf(r.store, [id])).map((n) => [noteState(n), n.batch, n.replies.at(-1)?.by])).toEqual([["todo", null, "user"]]);
     expect(texts().slice(lines)).toContain("1 note was not picked up and is back in to do");
@@ -471,8 +471,9 @@ describe("AgentRunner", () => {
     expect((await notesOf(r.store, [id])).map(noteState)).toEqual(["todo"]);
     const b2 = await r.batch();
     expect(b2.noteIds).toEqual([id]);
+    const before = texts().length;
     await r.runner.send(b2);
-    await r.waitFor("b_2 to end", () => texts().includes("Claude Code finished b_2"));
+    await r.waitFor("b_2 to end", () => texts().slice(before).includes("Claude Code finished 1 note"));
     await r.phase("finished");
     expect((await notesOf(r.store, [id])).map(noteState)).toEqual(["todo"]);
     expect(r.runner.busy()).toBe(false);
@@ -760,8 +761,24 @@ describe("AgentRunner", () => {
       const t = await changeLog(r.store);
       return t.some((x) => x.includes("finished")) ? t : null;
     });
-    expect(texts.some((t) => t.includes("started") && t.includes("b_1"))).toBe(true);
+    expect(texts).toContain("Claude Code started on 1 note");
     expect(texts.some((t) => t.includes("Ran the render"))).toBe(false);
+  });
+
+  it("Activity names a batch's turn by how many notes it holds, never by the batch's id (M7)", async () => {
+    const r = await rig({ turns: [[], []] });
+    const texts = () => r.runner.status().lines.map((l) => l.text);
+    await r.runner.send(await r.batch("One"));
+    await r.waitFor("the first turn to end", () => texts().includes("Claude Code finished 1 note"));
+    expect(texts()).toContain("Claude Code started on 1 note");
+    await r.phase("finished");
+    // The first note, left untouched, is back in to do: the next batch takes it with the two new ones.
+    const b2 = await r.batch("Two", "Three");
+    expect(b2.noteIds).toHaveLength(3);
+    await r.runner.send(b2);
+    await r.waitFor("the second turn to end", () => texts().includes("Claude Code finished 3 notes"));
+    expect(texts()).toContain("Claude Code started on 3 notes");
+    expect(texts().some((t) => /\bb_\d/.test(t))).toBe(false);
   });
 
   it("close during a turn ends the adapter and puts the in-flight and queued batches' notes back in to do (I3)", async () => {

@@ -294,7 +294,7 @@ describe("AgentRunner answers on notes", () => {
     const b = await r.batch("Move the title");
     const promptsWhenB1Ended: number[] = [];
     r.store.on("agent", (s: AgentStatus) => {
-      if (s.lines.some((l) => l.text === "Claude Code finished b_1") && !promptsWhenB1Ended.length) promptsWhenB1Ended.push(prompts(r.log()).length);
+      if (s.lines.some((l) => l.text === "Claude Code finished 1 note") && !promptsWhenB1Ended.length) promptsWhenB1Ended.push(prompts(r.log()).length);
     });
     await r.runner.send(b);
     await r.phase("working");

@@ -21,7 +21,13 @@ export interface TurnJob {
 /** A follow-up quotes the note's text up to this many characters. */
 export const FOLLOW_UP_QUOTE_MAX = 200;
 
-export const batchJob = (b: Batch): TurnJob => ({ kind: "batch", batchId: b.id, note: null, label: b.id, prompt: b.prompt + "\n\n" + AGENT_LINES });
+const count = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
+
+/** A batch's turn by what it holds (M7): "3 notes", or its script lines when it holds no note. Never its id. */
+export const batchLabel = (b: Pick<Batch, "noteIds" | "sectionIds">): string =>
+  b.noteIds.length === 0 && b.sectionIds.length > 0 ? count(b.sectionIds.length, "script line", "script lines") : count(b.noteIds.length, "note", "notes");
+
+export const batchJob = (b: Batch): TurnJob => ({ kind: "batch", batchId: b.id, note: null, label: batchLabel(b), prompt: b.prompt + "\n\n" + AGENT_LINES });
 
 export function followUpText(note: string, noteText: string, answer: string): string {
   const quote = Array.from(noteText).slice(0, FOLLOW_UP_QUOTE_MAX).join("");
