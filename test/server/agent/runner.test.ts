@@ -9,7 +9,7 @@ import type { AgentInfo } from "../../../src/server/agent/detect.js";
 import { AGENT_LINES } from "../../../src/core/agentActivity.js";
 import { createBatch } from "../../../src/core/batches.js";
 import { addNote, addUserReply, applyReply } from "../../../src/core/notes.js";
-import { noteState } from "../../../src/core/noteState.js";
+import { noteState, recallNote } from "../../../src/core/noteState.js";
 import { RushesError } from "../../../src/core/errors.js";
 import type { AgentSettings, Batch } from "../../../src/core/schema.js";
 import type { Store } from "../../../src/core/store.js";
@@ -346,6 +346,86 @@ describe("AgentRunner", () => {
     await r.phase("question");
     expect(r.runner.status().lines.some((l) => l.text.includes("not picked up"))).toBe(false);
     expect((await notesOf(r.store, b.noteIds)).map(noteState)).toEqual(["sent"]);
+  });
+
+  /** A detect whose first call answers at once and every later one waits until `release()` (a follow-up held in accept). */
+  const heldDetect = () => {
+    let calls = 0;
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    const detect = async () => {
+      if (calls++ > 0) await held;
+      return [claude(), codex];
+    };
+    return { detect, release, calls: () => calls };
+  };
+  /** Every state `id` is written in, in order, as the store's notes updates write it. */
+  const watchNote = (store: Store, id: string) => {
+    const states: string[] = [];
+    const real = store.update.bind(store);
+    vi.spyOn(store, "update").mockImplementation((async (key: any, fn: any, rev?: number) => {
+      const out = await real(key, fn, rev);
+      if (key === "notes") {
+        const n = (out.data as any).notes.find((x: any) => x.id === id);
+        if (n) states.push(noteState(n));
+      }
+      return out;
+    }) as any);
+    return states;
+  };
+
+  it("a turn that ends while an answer's follow-up is still being accepted leaves that note to the follow-up (Residual 2)", async () => {
+    const d = heldDetect();
+    const r = await rig({ turns: [[{ sleep: 300 }], [{ sleep: 200 }]] }, { runner: { detect: d.detect } });
+    const b = await r.batch("Move the title", "Fix the colour");
+    const [asked, untouched] = b.noteIds;
+    const states = watchNote(r.store, asked);
+    await r.runner.send(b);
+    await r.phase("working");
+    await r.store.update("notes", (f) => void applyReply(f, { id: asked, reply: "Which title?" }));
+    // The user answers before the turn ends; the follow-up waits in accept (detect) past the turn's end.
+    await r.store.update("notes", (f) => void addUserReply(f, asked, "The top one"));
+    r.store.emit("user-reply", { note: asked, text: "The top one" });
+    await r.waitFor("the follow-up to reach detect", () => d.calls() >= 2);
+    await r.phase("finished");
+    expect((await notesOf(r.store, [asked, untouched])).map(noteState)).toEqual(["sent", "todo"]);
+    const texts = () => r.runner.status().lines.map((l) => l.text);
+    expect(texts()).toContain("1 note was not picked up and is back in to do");
+    expect(texts().some((t) => t.startsWith("2 notes"))).toBe(false);
+
+    d.release();
+    await r.waitFor("the follow-up to start", () => texts().includes(`Claude Code picked up your answer on ${asked}`));
+    expect((await notesOf(r.store, [asked])).map(noteState)).toEqual(["sent"]);
+    const sent = prompts(r.log());
+    expect(sent).toHaveLength(2);
+    expect(sent[1].params.prompt[0].text).toContain(`The user answered on note ${asked} ("Move the title"): The top one`);
+    expect(states).not.toContain("todo");
+    // The follow-up turn itself, left untouched, still gives its own note back (M3).
+    await r.waitFor("the follow-up to end", () => texts().includes(`Claude Code finished your answer on ${asked}`));
+    await r.phase("finished");
+    expect((await notesOf(r.store, [asked])).map(noteState)).toEqual(["todo"]);
+  });
+
+  it("a follow-up whose note was taken back while it was being accepted is dropped quietly: no turn, no line (Residual 2)", async () => {
+    const d = heldDetect();
+    const r = await rig({ turns: [] }, { runner: { detect: d.detect } });
+    const b = await r.batch("Move the title");
+    const id = b.noteIds[0];
+    await r.store.update("notes", (f) => void applyReply(f, { id, reply: "Which title?" }));
+    await r.runner.send(b);
+    await r.phase("question");
+    const lines = r.runner.status().lines.length;
+    await r.store.update("notes", (f) => void addUserReply(f, id, "The top one"));
+    r.store.emit("user-reply", { note: id, text: "The top one" });
+    await r.waitFor("the follow-up to reach detect", () => d.calls() >= 2);
+    // Another path takes the note back meanwhile.
+    await r.store.update("notes", (f) => void recallNote(f.notes, id));
+    d.release();
+    await new Promise((res) => setTimeout(res, 300));
+    expect(prompts(r.log())).toHaveLength(1);
+    expect(r.runner.status().lines.slice(lines)).toEqual([]);
+    expect(r.runner.busy()).toBe(false);
+    expect((await notesOf(r.store, [id])).map(noteState)).toEqual(["todo"]);
   });
 
   it("a turn that leaves a question ends in phase question; one without ends finished", async () => {

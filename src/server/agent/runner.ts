@@ -308,7 +308,7 @@ export class AgentRunner {
    * Checks the switch, the agent and its sign-in, then queues the job. Runs one at a time. A follow-up that can't
    * go now for want of a kept session or a signed-in agent is parked: its note goes back to to do (R11).
    */
-  private async accept(job: TurnJob, sinceGen: number | null): Promise<Accepted> {
+  private async accept(job: TurnJob, sinceGen: number | null): Promise<Accepted | null> {
     while (this.stopping) await this.stopping;
     if (this.closed) return { why: "Rushes is closing" };
     const settings = await this.loadSettings();
@@ -323,6 +323,9 @@ export class AgentRunner {
     const info = (await this.detect()).find((a) => a.id === agent);
     if (!info?.installed) return park(`${info?.name ?? NAMES[agent]} is not installed`, info?.name ?? NAMES[agent]);
     if (!info.signedIn) return park(`${info.name} is not signed in`, info.name);
+    // A follow-up's note may have left the agent while this was checking (recalled, done): then there is nothing to
+    // follow up, and it is dropped quietly, with no line and no turn.
+    if (job.kind === "followUp" && !(await this.stillSent(job))) return null;
     // A Stop or close may have begun while this send was checking.
     while (this.stopping) await this.stopping;
     if (this.closed) return { why: "Rushes is closing" };
@@ -339,6 +342,12 @@ export class AgentRunner {
     // Queued behind a run: say so now. Otherwise the start or the turn about to begin says it.
     if (queued) this.announce();
     return { info };
+  }
+
+  /** The follow-up's note is still with the agent, in the batch the follow-up was made for. */
+  private async stillSent(job: TurnJob): Promise<boolean> {
+    const n = (await this.store.read("notes")).notes.find((x) => x.id === job.note);
+    return n !== undefined && noteState(n) === "sent" && n.batch === job.batchId;
   }
 
   /** One start at a time: a second caller waits on the first one's promise. */
@@ -583,10 +592,15 @@ export class AgentRunner {
   /**
    * M3: a note the ended turn left with the agent: still sent in the turn's batch, no question waiting on it, and no
    * follow-up queued for it. A follow-up turn answers for its own note only.
+   *
+   * A note whose last reply is the user's belongs to R11 (its follow-up may still be in accept, not yet queued),
+   * which follows it up or parks it. Only the follow-up turn for that very answer gives it back, when it leaves it.
    */
   private leftOver(job: TurnJob, n: Note): boolean {
     if (n.batch !== job.batchId || noteState(n) !== "sent" || needsYou(n)) return false;
     if (job.kind === "followUp" && n.id !== job.note) return false;
+    const ownAnswer = job.kind === "followUp" && n.replies.length === job.replies;
+    if (n.replies.at(-1)?.by === "user" && !ownAnswer) return false;
     return !this.queue.some((q) => q.kind === "followUp" && q.note === n.id);
   }
 
