@@ -81,7 +81,7 @@ export class RpcPeer {
     const hasId = msg.id !== undefined && msg.id !== null;
     if (typeof msg.method === "string") {
       if (hasId) void this.answer(msg.id, msg.method, msg.params);
-      else this.notificationHandlers.get(msg.method)?.(msg.params);
+      else this.dispatchNotification(msg.method, msg.params);
       return;
     }
     if (hasId) {
@@ -90,6 +90,18 @@ export class RpcPeer {
       this.pending.delete(msg.id);
       if (msg.error) p.reject(new RpcError(String(msg.error.message ?? "rpc error"), Number(msg.error.code ?? -32000), msg.error.data));
       else p.resolve(msg.result);
+    }
+  }
+
+  /**
+   * A throwing notification handler must neither crash the host nor wedge the peer.
+   * The error is reported once on stderr with the method name, then ignored.
+   */
+  private dispatchNotification(method: string, params: unknown): void {
+    try {
+      this.notificationHandlers.get(method)?.(params);
+    } catch (err) {
+      console.error(`[rushes] notification handler for ${method} threw: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 

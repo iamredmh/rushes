@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AcpConnection, type AdapterSpec } from "../../../src/server/agent/acp.js";
 
 const FAKE = resolve(__dirname, "../../helpers/fake-acp.mjs");
@@ -9,7 +9,10 @@ const dirs: string[] = [];
 const conns: AcpConnection[] = [];
 
 afterEach(async () => {
-  for (const c of conns.splice(0)) c.kill();
+  const all = conns.splice(0);
+  const gone = all.map((c) => new Promise<void>((r) => (c.hasExited ? r() : c.once("exit", () => r()))));
+  for (const c of all) c.kill();
+  await Promise.all(gone);
   for (const d of dirs.splice(0)) await rm(d, { recursive: true, force: true });
 });
 
@@ -29,6 +32,16 @@ async function start(scenario: object) {
   const c = AcpConnection.start(f.spec);
   conns.push(c);
   return { c, ...f };
+}
+/** Polls the fake's log until `find` matches, up to 3 s. */
+async function waitLog(log: () => Promise<any[]>, find: (m: any) => boolean): Promise<any> {
+  const deadline = Date.now() + 3000;
+  for (;;) {
+    const hit = (await log()).find(find);
+    if (hit) return hit;
+    if (Date.now() > deadline) throw new Error("timed out waiting for a line in the fake log");
+    await new Promise((r) => setTimeout(r, 20));
+  }
 }
 const exitOf = (c: AcpConnection) => new Promise<{ code: number | null; stderr: string }>((r) => c.once("exit", r));
 
@@ -83,7 +96,7 @@ describe("AcpConnection", () => {
     await c.prompt(sessionId, "go");
     expect(seen.toolCall.toolCallId).toBe("t1");
     expect(seen.options.map((o: any) => o.kind)).toEqual(["allow_once", "allow_always", "reject_once"]);
-    expect((await log()).find((m) => m.recorded === "ask").outcome).toEqual({ outcome: "selected", optionId: "allow-once" });
+    expect((await waitLog(log, (m) => m.recorded === "ask")).outcome).toEqual({ outcome: "selected", optionId: "allow-once" });
   });
 
   it("cancel answers the open permission request cancelled and the prompt ends cancelled", async () => {
@@ -102,10 +115,9 @@ describe("AcpConnection", () => {
     await askedP;
     c.cancel(sessionId);
     expect((await prompt).stopReason).toBe("cancelled");
-    const entries = await log();
-    expect(entries.some((m) => m.method === "session/cancel")).toBe(true);
+    await waitLog(log, (m) => m.method === "session/cancel");
     // our reply to the agent's request was the cancelled outcome
-    expect(entries.find((m) => m.result?.outcome)?.result.outcome).toEqual({ outcome: "cancelled" });
+    expect((await waitLog(log, (m) => m.result?.outcome)).result.outcome).toEqual({ outcome: "cancelled" });
   });
 
   it("a late handler answer after cancel does not replace the cancelled outcome", async () => {
@@ -121,6 +133,8 @@ describe("AcpConnection", () => {
     c.cancel(sessionId);
     release({ outcome: "selected", optionId: "allow-once" });
     await prompt;
+    await waitLog(log, (m) => m.result?.outcome);
+    await new Promise((r) => setTimeout(r, 100)); // room for a (wrong) second answer
     const answers = (await log()).filter((m) => m.result?.outcome);
     expect(answers).toHaveLength(1);
     expect(answers[0].result.outcome).toEqual({ outcome: "cancelled" });
@@ -143,14 +157,106 @@ describe("AcpConnection", () => {
     await expect(c.initialize()).rejects.toThrow(/code 7/);
   });
 
-  it("kill stops the child and emits exit once", async () => {
+  it("exit carries the stderr text", async () => {
+    const { c } = await start({ turns: [[{ stderr: "adapter said: boom\n" }, { crash: 2 }]] });
+    await c.initialize();
+    const { sessionId } = await c.newSession("/tmp", []);
+    const exit = exitOf(c);
+    await expect(c.prompt(sessionId, "go")).rejects.toThrow();
+    const e = await exit;
+    expect(e.code).toBe(2);
+    expect(e.stderr).toBe("adapter said: boom\n");
+  });
+
+  it("stderr beyond 4 KB is trimmed to its last 4096 characters", async () => {
+    const text = "a".repeat(3000) + "b".repeat(3000) + "END";
+    const { c } = await start({ turns: [[{ stderr: text }, { crash: 1 }]] });
+    await c.initialize();
+    const { sessionId } = await c.newSession("/tmp", []);
+    const exit = exitOf(c);
+    await expect(c.prompt(sessionId, "go")).rejects.toThrow();
+    const e = await exit;
+    expect(e.stderr).toHaveLength(4096);
+    expect(e.stderr).toBe(text.slice(-4096));
+  });
+
+  it("kill ends an agent that ignores SIGTERM through SIGKILL, with one exit event", { timeout: 10000 }, async () => {
+    const { c } = await start({ ignoreSigterm: true, turns: [] });
+    await c.initialize();
+    let exits = 0;
+    c.on("exit", () => exits++);
+    const exit = exitOf(c);
+    const t0 = Date.now();
+    c.kill();
+    c.kill();
+    const e = await exit;
+    const took = Date.now() - t0;
+    expect(took).toBeGreaterThanOrEqual(1800);
+    expect(took).toBeLessThan(6000);
+    expect(e.code).toBeNull(); // killed by a signal
+    await new Promise((r) => setTimeout(r, 200));
+    expect(exits).toBe(1);
+  });
+
+  it("kill ends a normal agent at once", async () => {
     const { c } = await start({ turns: [] });
     await c.initialize();
     const exit = exitOf(c);
     c.kill();
+    await exit;
+  });
+
+  it("a throwing update listener does not crash the process and a later prompt completes", async () => {
+    const { c } = await start({
+      turns: [[{ update: { sessionUpdate: "x" } }, { stop: "end_turn" }], [{ update: { sessionUpdate: "y" } }, { stop: "end_turn" }]],
+    });
+    const errors: string[] = [];
+    const spy = vi.spyOn(console, "error").mockImplementation((m: unknown) => void errors.push(String(m)));
+    try {
+      let n = 0;
+      c.on("update", () => {
+        n++;
+        throw new Error("listener bug");
+      });
+      await c.initialize();
+      const { sessionId } = await c.newSession("/tmp", []);
+      expect((await c.prompt(sessionId, "one")).stopReason).toBe("end_turn");
+      expect((await c.prompt(sessionId, "two")).stopReason).toBe("end_turn");
+      expect(n).toBe(2);
+      expect(errors.some((e) => e.includes("listener bug"))).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("a permission handler that throws or rejects answers the agent cancelled", async () => {
+    for (const handler of [
+      () => { throw new Error("sync bug"); },
+      async () => { throw new Error("async bug"); },
+    ]) {
+      const { c, log } = await start({ turns: [[{ permission: { toolCall: { toolCallId: "t" } }, record: "ask" }, { stop: "end_turn" }]] });
+      c.onPermission(handler as any);
+      await c.initialize();
+      const { sessionId } = await c.newSession("/tmp", []);
+      await c.prompt(sessionId, "go");
+      expect((await waitLog(log, (m) => m.recorded === "ask")).outcome).toEqual({ outcome: "cancelled" });
+    }
+  });
+
+  it("an unanswered permission ask is settled when the agent exits", async () => {
+    const { c } = await start({ turns: [[{ permission: { toolCall: { toolCallId: "t" } } }, { sleep: 60000 }]] });
+    let asked!: () => void;
+    const askedP = new Promise<void>((r) => (asked = r));
+    c.onPermission(() => { asked(); return new Promise(() => {}); });
+    await c.initialize();
+    const { sessionId } = await c.newSession("/tmp", []);
+    const prompt = c.prompt(sessionId, "go").catch((e) => e);
+    await askedP;
+    const exit = exitOf(c);
     c.kill();
-    const e = await exit;
-    expect(e.code === null || typeof e.code === "number").toBe(true);
+    await exit;
+    expect(await prompt).toBeInstanceOf(Error);
+    expect((c as any).openAsks.size).toBe(0);
   });
 
   it("http steps call FAKE_ACP_BASE and wait", async () => {

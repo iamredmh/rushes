@@ -1,5 +1,5 @@
 import { PassThrough } from "node:stream";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { RpcPeer } from "../../../src/server/agent/rpc.js";
 
 function pair() {
@@ -45,5 +45,19 @@ describe("RpcPeer", () => {
     b.onRequest("boom", async () => { throw new Error("bad"); });
     await expect(a.request("boom", {})).rejects.toThrow("bad");
     expect(seen).toEqual([{ n: 1 }]);
+  });
+
+  it("a throwing notification handler does not stop later requests being answered", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const { a, b } = pair();
+      b.onNotification("bad", () => { throw new Error("handler bug"); });
+      b.onRequest("ok", async () => "fine");
+      a.notify("bad", {});
+      expect(await a.request("ok", {})).toBe("fine");
+      expect(spy.mock.calls.some((c) => String(c[0]).includes("bad"))).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

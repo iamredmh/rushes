@@ -8,11 +8,12 @@
 //                      responses) is appended as one JSON line
 //   FAKE_ACP_BASE      base URL used by `http` steps
 //
-// Scenario: { loadSession?: boolean, modes?: string[], exitOnStart?: number, turns: Step[][] }
+// Scenario: { loadSession?: boolean, modes?: string[], exitOnStart?: number, ignoreSigterm?: boolean, turns: Step[][] }
 //   loadSession  advertised as agentCapabilities.loadSession (default false)
 //   modes        when given, session/new and session/load answer
 //                { modes: { currentModeId: modes[0], availableModes: modes.map(id => ({ id, name: id })) } }
 //   exitOnStart  exit with that code before reading anything
+//   ignoreSigterm  trap SIGTERM and carry on, so only SIGKILL ends the process
 //   turns        turn i runs on the i-th session/prompt; with fewer turns than
 //                prompts the extra prompt ends at once with end_turn
 //
@@ -27,6 +28,7 @@
 //                           fetch(FAKE_ACP_BASE + path) with a JSON body and wait for it
 //                           (stands in for the agent's rushes_* tools)
 //   { sleep: ms }           wait
+//   { stderr: "text" }      write the text to stderr
 //   { crash: code }         exit the process with that code at once
 //   { stop: "end_turn" | "refusal" }
 //                           end the turn with that stopReason (default end_turn)
@@ -40,6 +42,7 @@ import { createInterface } from "node:readline";
 import { appendFileSync, readFileSync } from "node:fs";
 
 const scenario = JSON.parse(readFileSync(process.env.FAKE_ACP_SCENARIO, "utf8"));
+if (scenario.ignoreSigterm) process.on("SIGTERM", () => {});
 if (typeof scenario.exitOnStart === "number") process.exit(scenario.exitOnStart);
 
 const logPath = process.env.FAKE_ACP_LOG;
@@ -93,6 +96,8 @@ async function runTurn(turn) {
       await r.text();
     } else if (typeof step.sleep === "number") {
       await sleep(step.sleep, turn);
+    } else if (typeof step.stderr === "string") {
+      process.stderr.write(step.stderr);
     } else if (typeof step.crash === "number") {
       process.exit(step.crash);
     } else if (step.stop) {

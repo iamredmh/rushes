@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { RpcPeer } from "./rpc.js";
-import { VERSION } from "../app.js";
+import { VERSION } from "../../version.js";
 
 export interface AdapterSpec { command: string; args: string[]; env: Record<string, string>; cwd: string }
 export interface McpServerSpec { name: string; command: string; args: string[]; env: { name: string; value: string }[] }
@@ -27,6 +27,7 @@ export class AcpConnection extends EventEmitter {
   private rpc: RpcPeer;
   private stderr = "";
   private exited = false;
+  get hasExited(): boolean { return this.exited; }
   private killTimer: NodeJS.Timeout | null = null;
   private permissionHandler: ((p: AcpPermissionParams) => Promise<AcpPermissionOutcome>) | null = null;
   private openAsks = new Map<string, Set<(o: AcpPermissionOutcome) => void>>();
@@ -39,7 +40,13 @@ export class AcpConnection extends EventEmitter {
       this.stderr = (this.stderr + d).slice(-STDERR_TAIL);
     });
     this.rpc.onNotification("session/update", (p) => {
-      if (p?.update) this.emit("update", p.update);
+      if (!p?.update) return;
+      // A throwing "update" listener must never reach the host process: log once and carry on.
+      try {
+        this.emit("update", p.update);
+      } catch (err) {
+        console.error(`[rushes] an "update" listener threw: ${err instanceof Error ? err.message : String(err)}`);
+      }
     });
     this.rpc.onRequest("session/request_permission", (p) => this.askPermission(p));
     let done = false;
@@ -50,9 +57,13 @@ export class AcpConnection extends EventEmitter {
       if (this.killTimer) clearTimeout(this.killTimer);
       this.killTimer = null;
       this.rpc.close(new Error(`Agent adapter ${label}`));
+      // Nobody is left to answer these; settle them and drop the bookkeeping.
+      for (const set of [...this.openAsks.values()]) for (const settle of [...set]) settle(CANCELLED);
+      this.openAsks.clear();
       this.emit("exit", { code, stderr: this.stderr });
     };
-    child.on("exit", (code, signal) => finish(code, signal ? `was stopped by ${signal} (exit code ${code})` : `exited with code ${code}`));
+    // "close", not "exit": stderr is fully read by then, so the tail is complete.
+    child.on("close", (code, signal) => finish(code, signal ? `was stopped by ${signal} (exit code ${code})` : `exited with code ${code}`));
     child.on("error", (err) => finish(null, `failed to start: ${err.message} (exit code null)`));
   }
 
@@ -123,7 +134,9 @@ export class AcpConnection extends EventEmitter {
       const settle = (o: AcpPermissionOutcome) => {
         if (settled) return;
         settled = true;
-        this.openAsks.get(sessionId)?.delete(settle);
+        const open = this.openAsks.get(sessionId);
+        open?.delete(settle);
+        if (open && open.size === 0) this.openAsks.delete(sessionId);
         resolve({ outcome: o });
       };
       let set = this.openAsks.get(sessionId);
@@ -131,7 +144,8 @@ export class AcpConnection extends EventEmitter {
       set.add(settle);
       const handler = this.permissionHandler;
       if (!handler) return settle(CANCELLED);
-      handler(params).then(settle, () => settle(CANCELLED));
+      // A handler that throws or rejects gives the agent "cancelled", never an RPC error.
+      Promise.resolve().then(() => handler(params)).then(settle, () => settle(CANCELLED));
     });
   }
 }
