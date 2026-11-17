@@ -8,7 +8,8 @@ import { createApp, type AppOptions } from "../../src/server/app.js";
 import { startServer, type Running } from "../../src/server/start.js";
 import { AgentRunner, type AgentStatus, type RunnerOptions } from "../../src/server/agent/runner.js";
 import type { AgentInfo } from "../../src/server/agent/detect.js";
-import type { AgentSettings } from "../../src/core/schema.js";
+import type { AgentRules, AgentSettings } from "../../src/core/schema.js";
+import { agentRulesFor } from "../../src/server/agent/rules.js";
 import type { Store } from "../../src/core/store.js";
 
 const FAKE = resolve(__dirname, "../helpers/fake-acp.mjs");
@@ -58,12 +59,13 @@ async function waitFor<T>(what: string, check: () => T | Promise<T>): Promise<No
   }
 }
 
-async function rig(o: { settings?: Partial<AgentSettings>; agents?: AgentInfo[]; scenario?: object; runner?: Partial<RunnerOptions>; app?: Partial<AppOptions> } = {}) {
+async function rig(o: { settings?: Partial<AgentSettings>; rules?: Partial<AgentRules>; agents?: AgentInfo[]; scenario?: object; runner?: Partial<RunnerOptions>; app?: Partial<AppOptions> } = {}) {
   const { root, store } = await tmpProject("lumen");
   let agents = o.agents ?? [claude(), codex()];
   const fake = fakeAgent(store, () => agents);
   await fake.scenario(o.scenario ?? { turns: [] });
   if (o.settings) await store.update("agent", (f) => void Object.assign(f, o.settings));
+  if (o.rules) await agentRulesFor(store).update((f) => void Object.assign(f, o.rules));
   const runner = new AgentRunner(store, { ...fake.opts, ...o.runner });
   runners.push(runner);
   const wantOn = o.settings?.on ?? false;
@@ -164,8 +166,11 @@ describe("agent routes", () => {
     const r = await rig();
     const res = await r.call("POST", "/api/agent/setup", { on: true, agent: "claude", permissions: "ask-all" });
     expect(res.status).toBe(200);
-    expect(res.json.status).toMatchObject({ on: true, agent: "claude" });
-    expect(await r.store.read("agent")).toMatchObject({ on: true, agent: "claude", permissions: "ask-all" });
+    expect(res.json.status).toMatchObject({ on: true, agent: "claude", permissions: "ask-all" });
+    expect(await r.store.read("agent")).toMatchObject({ on: true, agent: "claude" });
+    // R10: permissions are kept in the user's rules file, never in the project.
+    expect(await r.store.read("agent")).not.toHaveProperty("permissions");
+    expect((await agentRulesFor(r.store).read()).permissions).toBe("ask-all");
   });
 
   it("setup refuses an agent that is not signed in with agent_not_signed_in, and one not installed with agent_not_installed", async () => {
@@ -260,15 +265,15 @@ describe("agent routes", () => {
     expect(res.status).toBe(200);
     await waitFor("the answer to reach the agent", () => r.log().find((m) => m.recorded === "untyped"));
     expect(r.log().find((m) => m.recorded === "untyped").outcome).toEqual({ outcome: "selected", optionId: "allow-once" });
-    expect((await r.store.read("agent")).always).toEqual([]);
+    expect((await agentRulesFor(r.store).read()).always).toEqual([]);
   });
 
   it("always/:index removes a kept rule; an unknown index is 404", async () => {
     const always = [{ kind: "execute", command: "git commit" }, { kind: "execute", command: "npx hyperframes" }];
-    const r = await rig({ settings: { on: true, agent: "claude", always } });
+    const r = await rig({ settings: { on: true, agent: "claude" }, rules: { always } });
     const res = await r.call("DELETE", "/api/agent/always/0");
     expect(res.status).toBe(200);
-    expect((await r.store.read("agent")).always).toEqual([always[1]]);
+    expect((await agentRulesFor(r.store).read()).always).toEqual([always[1]]);
     expect((await r.call("DELETE", "/api/agent/always/5")).status).toBe(404);
     expect((await r.call("DELETE", "/api/agent/always/x")).status).toBe(400);
   });

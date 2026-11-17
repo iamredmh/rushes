@@ -583,23 +583,44 @@ export const VisualsFileSchema = fileObject({
 });
 export type VisualsFile = z.infer<typeof VisualsFileSchema>;
 
-// Send to AI: the agent's own settings. Holds no secret: only which agent, what it may do unasked, and the session to resume.
+// Send to AI: the agent's own settings in the project. Holds no secret: only whether it is on, which agent, and the
+// session to resume. What the agent may do unasked (AgentRules) is kept outside the project (R10), where the agent
+// can't change it.
 export const AGENTS = ["claude", "codex"] as const;
 export type AgentId = (typeof AGENTS)[number];
 /** What the agent may do without asking: edit files in the project (the default), or ask for everything. */
 export const AgentPermissionsSchema = z.enum(["project-edits", "ask-all"]);
 export const AlwaysRuleSchema = z.object({ kind: z.string().max(32), command: z.string().max(200).nullable() });
 export type AlwaysRule = z.infer<typeof AlwaysRuleSchema>;
-export const AgentSettingsSchema = fileObject({
+/** At most this many Always rules are kept; a longer list read from disk keeps its newest ones. */
+export const ALWAYS_KEPT = 50;
+const AgentSettingsShape = fileObject({
   schema: z.literal(1),
   rev: z.number().int(),
   on: z.boolean().default(false),
   agent: z.enum(AGENTS).nullable().default(null),
-  permissions: AgentPermissionsSchema.default("project-edits"),
-  always: z.array(AlwaysRuleSchema).max(50).default([]),
   session: fileObject({ id: z.string(), agent: z.enum(AGENTS), startedAt: z.string() }).nullable().default(null),
 });
-export type AgentSettings = z.infer<typeof AgentSettingsSchema>;
+export type AgentSettings = z.infer<typeof AgentSettingsShape>;
+/**
+ * R10: `always` and `permissions` in a project's agent.json (as an older build kept them) are never read: the agent
+ * could have written them. They are dropped on read, so the next write leaves them out.
+ */
+export const AgentSettingsSchema = AgentSettingsShape.transform((s): AgentSettings => {
+  const { always: _always, permissions: _permissions, ...rest } = s as AgentSettings & { always?: unknown; permissions?: unknown };
+  return rest;
+});
+/** R10: what the agent may do without asking, kept per user outside the project (server/agent/rules.ts). */
+export const AgentRulesSchema = z.object({
+  permissions: AgentPermissionsSchema.default("project-edits"),
+  always: z.array(AlwaysRuleSchema).max(ALWAYS_KEPT).default([]),
+});
+export type AgentRules = z.infer<typeof AgentRulesSchema>;
+/** Read leniently: a longer list keeps its newest ALWAYS_KEPT rules rather than failing (M8). */
+export const AgentRulesReadSchema = z.object({
+  permissions: AgentPermissionsSchema.default("project-edits"),
+  always: z.array(AlwaysRuleSchema).default([]).transform((a) => a.slice(-ALWAYS_KEPT)),
+});
 
 export const FILES = {
   project: { name: "project.json", schema: ProjectSchema },

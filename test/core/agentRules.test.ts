@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mkdtemp, mkdir, realpath, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PACKAGE_RUNNERS, RUNNER_PROGRAMS, RUNNER_SUBCOMMANDS, RUN_ANY_PROGRAM, SAFE_COMMAND, SHELLS, WRAPPERS, alwaysLabel, canAlways, decide, inside, plainCommand, ruleFor } from "../../src/core/agentRules.js";
+import { PACKAGE_RUNNERS, PROTECTED_PATHS, RUNNER_PROGRAMS, RUNNER_SUBCOMMANDS, RUN_ANY_PROGRAM, SAFE_COMMAND, SHELLS, WRAPPERS, alwaysLabel, canAlways, decide, inside, plainCommand, ruleFor } from "../../src/core/agentRules.js";
 
 const root = "/tmp/rushes test/My Project";
 const s = { permissions: "project-edits" as const, always: [] };
@@ -342,5 +342,42 @@ describe("inside", () => {
     expect(inside(proj, join(proj, "link-out"))).toBe(false);
     expect(inside(proj, join(proj, "link-out", "x"))).toBe(false);
     expect(inside(proj, join(proj, "link-out", "new", "x"))).toBe(false);
+  });
+});
+
+describe("protected paths (R10)", () => {
+  it("exports the list", () => {
+    expect([...PROTECTED_PATHS]).toEqual([".rushes", ".git", ".claude", ".codex", ".mcp.json", ".vscode", ".idea"]);
+  });
+  it("a read, edit, delete, move or search of a protected path asks, under project-edits and under any Always rule", () => {
+    const always = ["read", "edit", "delete", "move", "search"].map((kind) => ({ kind, command: null }));
+    const t = { permissions: "project-edits" as const, always };
+    for (const p of [
+      ".rushes/agent.json",
+      ".rushes",
+      ".claude/settings.json",
+      ".claude/settings.local.json",
+      ".git/hooks/pre-commit",
+      ".git/config",
+      ".codex/config.toml",
+      ".mcp.json",
+      ".vscode/settings.json",
+      ".idea/workspace.xml",
+      ".GIT/hooks/pre-commit",
+      ".Claude/settings.json",
+      "sub/.git/hooks/pre-commit",
+    ]) {
+      for (const kind of ["read", "edit", "delete", "move", "search"]) {
+        expect(decide(req(kind, null, [`${root}/${p}`]), s, root), `${kind} ${p}`).toBe("ask");
+        expect(decide(req(kind, null, [`${root}/${p}`]), t, root), `${kind} ${p} with Always`).toBe("ask");
+        // One protected path among ordinary ones still asks.
+        expect(decide(req(kind, null, [`${root}/a.txt`, `${root}/${p}`]), t, root), `${kind} a.txt + ${p}`).toBe("ask");
+      }
+    }
+  });
+  it("a normal edit inside the project is still allowed, and so are look-alike names", () => {
+    for (const p of ["compositions/a.html", ".gitignore", ".rushes-notes.md", ".claude.md", "git/x", "my.mcp.json"]) {
+      expect(decide(req("edit", null, [`${root}/${p}`]), s, root), p).toBe("allow");
+    }
   });
 });

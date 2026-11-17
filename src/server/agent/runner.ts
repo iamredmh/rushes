@@ -18,13 +18,14 @@ import { NotFoundError, RushesError } from "../../core/errors.js";
 import { oneLine } from "../../core/labels.js";
 import { lineEvent } from "../../core/logEvents.js";
 import { needsYou, noteState, recallNote, recallNotes } from "../../core/noteState.js";
-import type { AgentId, AgentSettings, AlwaysRule, Batch } from "../../core/schema.js";
+import type { AgentId, AgentRules, AgentSettings, AlwaysRule, Batch } from "../../core/schema.js";
 import type { ChangeEvent, Store } from "../../core/store.js";
 import { logBookFor } from "../logbook.js";
 import { AcpConnection, type AcpPermissionOutcome, type AcpPermissionParams, type AdapterSpec, type McpServerSpec } from "./acp.js";
 import { adapterSpec, rushesMcp } from "./adapters.js";
 import { PermissionBroker, addRule, allowOutcome, dropRule, toRequest, type AskChoice, type PendingAsk } from "./broker.js";
 import { detectAgents, type AgentInfo } from "./detect.js";
+import { agentRulesFor, type AgentRulesFile } from "./rules.js";
 import { CarriedBatches, batchJob, followUpFor, type TurnJob } from "./followUp.js";
 
 export type AgentPhase = "off" | "idle" | "starting" | "working" | "waiting" | "question" | "finished" | "failed";
@@ -42,6 +43,9 @@ export interface AgentStatus {
   lines: ActivityLine[];
   error: string | null;
   session: string | null;
+  /** What the agent may do without asking, from the user's own rules file (R10), for the agent menu. */
+  permissions: AgentRules["permissions"];
+  always: AlwaysRule[];
 }
 
 export interface RunnerOptions {
@@ -128,6 +132,11 @@ export class AgentRunner {
   private readonly now: () => Date;
 
   private settings: AgentSettings | null = null;
+  /** The user's rules for this project, kept outside it (R10). `rules` is the last read, for the status. */
+  private readonly rulesFile: AgentRulesFile;
+  private rules: AgentRules = { permissions: "project-edits", always: [] };
+  private ruleReads = 0;
+  private rulesApplied = 0;
   /** agent.json reads started, and the newest one applied (a write counts as one). */
   private reads = 0;
   private applied = 0;
@@ -151,9 +160,8 @@ export class AgentRunner {
 
   private conn: AcpConnection | null = null;
   private sessionId: string | null = null;
-  /** The agent and permission level the running adapter was started with. */
+  /** The agent the running adapter was started for. */
   private info: AgentInfo | null = null;
-  private connPermissions: AgentSettings["permissions"] | null = null;
   private exits = new WeakMap<AcpConnection, { code: number | null; stderr: string }>();
   /** Every adapter process not yet seen to exit, so close() leaves none behind. */
   private live = new Set<AcpConnection>();
@@ -184,9 +192,11 @@ export class AgentRunner {
     this.startMs = opts.startMs ?? AGENT_START_MS;
     this.now = opts.now ?? (() => new Date());
     this.broker = new PermissionBroker(store.root, { now: this.now, onChange: () => this.asksChanged() });
+    this.rulesFile = agentRulesFor(store);
     store.on("change", this.onChange);
     store.on("user-reply", this.onUserReply);
     this.track(this.loadSettings());
+    this.track(this.loadRules());
   }
 
   status(): AgentStatus {
@@ -202,12 +212,14 @@ export class AgentRunner {
       lines: this.lines.slice(),
       error: this.error,
       session: this.settings?.session?.id ?? null,
+      permissions: this.rules.permissions,
+      always: this.rules.always.map((r) => ({ ...r })),
     };
   }
 
-  /** Reads agent.json now and gives the status from it: for a route that has just changed the settings. */
+  /** Reads agent.json and the rules now and gives the status from them: for a route that has just changed either. */
   async reload(): Promise<AgentStatus> {
-    await this.loadSettings();
+    await Promise.all([this.loadSettings(), this.loadRules()]);
     return this.status();
   }
 
@@ -282,9 +294,9 @@ export class AgentRunner {
     if (sinceGen !== null && sinceGen !== this.gen) return { why: "Stopped", stopped: true };
     const queued = this.busy();
     if (!queued && this.conn) {
-      // An idle adapter for another agent, another conversation or another permission level is replaced.
+      // An idle adapter for another agent or another conversation is replaced.
       const kept = settings.session?.id ?? null;
-      if (this.info?.id !== info.id || this.sessionId !== kept || this.connPermissions !== settings.permissions) this.dropConn();
+      if (this.info?.id !== info.id || this.sessionId !== kept) this.dropConn();
     }
     if (!queued) this.info = info;
     this.clearIdle();
@@ -359,10 +371,9 @@ export class AgentRunner {
     const mcp = [this.mcp(root)];
     const kept = settings.session;
     let sessionId: string | null = null;
-    let modes: string[] = [];
     if (kept && kept.agent === info.id && loadSession) {
       try {
-        ({ modes } = await c.loadSession(kept.id, root, mcp));
+        await c.loadSession(kept.id, root, mcp);
         sessionId = kept.id;
       } catch (e) {
         // An agent prunes old conversations. With the adapter still up, start a new one rather than fail
@@ -373,8 +384,7 @@ export class AgentRunner {
       }
     }
     if (sessionId === null) {
-      let made: string;
-      ({ sessionId: made, modes } = await c.newSession(root, mcp));
+      const { sessionId: made } = await c.newSession(root, mcp);
       sessionId = made;
       check();
       const startedAt = this.now().toISOString();
@@ -384,13 +394,9 @@ export class AgentRunner {
       this.applySettings(data);
     }
     check();
-    if (settings.permissions === "project-edits" && modes.includes("acceptEdits")) {
-      await c.setMode(sessionId, "acceptEdits");
-      check();
-    }
+    // R10: the session's mode is never changed (no acceptEdits), so every edit comes to Rushes as an ask.
     if (c.hasExited) throw new Error("the adapter exited as it started");
     this.sessionId = sessionId;
-    this.connPermissions = settings.permissions;
   }
 
   /** Makes `conn` the runner's adapter and listens to it. */
@@ -408,7 +414,6 @@ export class AgentRunner {
     const c = this.conn;
     this.conn = null;
     this.sessionId = null;
-    this.connPermissions = null;
     this.broker.cancelAll();
     c?.kill();
     return c;
@@ -423,9 +428,9 @@ export class AgentRunner {
     if (!live()) return CANCELLED;
     // The adapter hears "yes" before an Always rule is written: wait for that write, then read the rules.
     await this.ruleWrite;
-    const settings = await this.loadSettings();
+    const rules = await this.loadRules();
     if (!live()) return CANCELLED;
-    if (decide(toRequest(p, this.store.root), settings, this.store.root) === "allow") return allowOutcome(p.options);
+    if (decide(toRequest(p, this.store.root), rules, this.store.root) === "allow") return allowOutcome(p.options);
     return this.broker.ask(p);
   }
 
@@ -435,18 +440,17 @@ export class AgentRunner {
     if (!this.busy() && !this.closed) this.armIdle();
   }
 
-  /** The user's answer to a pending ask. "always" also keeps the rule in agent.json. */
+  /** The user's answer to a pending ask. "always" also keeps the rule in the user's rules file. */
   async answer(askId: string, choice: AskChoice): Promise<void> {
     const rule = this.broker.answer(askId, choice);
     if (rule) await this.ruleWriting(this.keepRule(rule));
   }
 
-  /** Takes an Always rule out of agent.json by its index there. */
+  /** Takes an Always rule out of the user's rules file by its index there. */
   async removeRule(index: number): Promise<void> {
     await this.ruleWriting(
-      this.store.update("agent", (f) => dropRule(f.always, index)).then(({ data }) => {
-        this.applySettings(data);
-        this.announce();
+      this.rulesFile.update((f) => dropRule(f.always, index)).then(({ data }) => {
+        this.applyRules(data);
       }),
     );
   }
@@ -457,10 +461,10 @@ export class AgentRunner {
     return writing;
   }
 
-  /** Keeps the rule in agent.json (once; the oldest goes at the cap) and says so in Activity and the Change Log. */
+  /** Keeps the rule in the user's rules file (once; the oldest goes at the cap) and says so in Activity and the Change Log. */
   private async keepRule(rule: AlwaysRule): Promise<void> {
-    const { data, result: added } = await this.store.update("agent", (f) => addRule(f.always, rule));
-    this.applySettings(data);
+    const { data, result: added } = await this.rulesFile.update((f) => addRule(f.always, rule));
+    this.applyRules(data);
     if (added) {
       const text = `Always allowed: ${alwaysLabel(rule)}`;
       this.addLine(text, null);
@@ -557,7 +561,6 @@ export class AgentRunner {
     if (this.starting && !this.sessionId) return;
     this.conn = null;
     this.sessionId = null;
-    this.connPermissions = null;
     this.clearIdle();
     this.broker.cancelAll();
     if (!this.turn) return; // it went between turns; the next send starts a fresh one
@@ -700,6 +703,22 @@ export class AgentRunner {
     if (seq < this.applied) return next;
     this.applySettings(next, seq);
     return next;
+  }
+
+  /** Reads the user's rules into the cache, announcing when they changed. */
+  private async loadRules(): Promise<AgentRules> {
+    const seq = ++this.ruleReads;
+    const next = await this.rulesFile.read();
+    // As with agent.json: an older read never replaces what a newer one (or a write) put in.
+    if (seq >= this.rulesApplied) this.applyRules(next, seq);
+    return next;
+  }
+
+  private applyRules(next: AgentRules, seq = ++this.ruleReads): void {
+    const changed = JSON.stringify(next) !== JSON.stringify(this.rules);
+    this.rules = next;
+    this.rulesApplied = seq;
+    if (changed) this.announce();
   }
 
   private applySettings(next: AgentSettings, seq = ++this.reads): void {

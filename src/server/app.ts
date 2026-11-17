@@ -44,6 +44,7 @@ import type { AgentRunner, AgentStatus, SendResult } from "./agent/runner.js";
 import { clearDetectCache, detectAgents, type AgentInfo } from "./agent/detect.js";
 import type { AgentId } from "../core/schema.js";
 import { openInTerminal, type TerminalOpener } from "./agent/terminal.js";
+import { agentRulesFor } from "./agent/rules.js";
 
 import { VERSION } from "../version.js";
 export { VERSION };
@@ -373,7 +374,10 @@ export type SendHandOver = SendResult | { handedTo: AgentId | null; starting: tr
 /** How long Send's response waits for the agent to take the batch (a first start can take minutes). */
 export const SEND_WAIT_MS = 5_000;
 
-const OFF_STATUS: AgentStatus = { on: false, agent: null, phase: "off", batches: [], current: { note: null, doing: null }, asks: [], lines: [], error: null, session: null };
+const OFF_STATUS: AgentStatus = {
+  on: false, agent: null, phase: "off", batches: [], current: { note: null, doing: null }, asks: [], lines: [], error: null, session: null,
+  permissions: "project-edits", always: [],
+};
 
 /** The stand-in when no runner is given: Send to AI is off, and nothing can drive an agent. */
 function noAgent(): AgentControl {
@@ -1602,8 +1606,10 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
         f.agent = b.agent;
         f.session = null;
       }
-      if (b.permissions !== undefined) f.permissions = b.permissions;
     });
+    // R10: kept in the user's own rules file, outside the project, where the agent can't change it.
+    const permissions = b.permissions;
+    if (permissions !== undefined) await agentRulesFor(store).update((f) => void (f.permissions = permissions));
     return c.json(await agentStatusOf());
   });
   // Start a fresh conversation: the next Send starts a new session.

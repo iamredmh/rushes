@@ -211,24 +211,6 @@ describe("AgentRunner", () => {
     expect((await r.store.read("agent")).session).toMatchObject({ id: "fake-session-1", agent: "claude" });
   });
 
-  it("project-edits switches the session to acceptEdits when offered; ask-all does not", async () => {
-    const edits = await rig({ modes: ["default", "acceptEdits", "plan"], turns: [] }, { settings: { permissions: "project-edits" } });
-    await edits.runner.send(await edits.batch("One"));
-    await edits.phase("finished");
-    const setMode = edits.log().filter((m) => m.method === "session/set_mode");
-    expect(setMode.map((m) => m.params)).toEqual([{ sessionId: "fake-session-1", modeId: "acceptEdits" }]);
-
-    const askAll = await rig({ modes: ["default", "acceptEdits"], turns: [] }, { settings: { permissions: "ask-all" } });
-    await askAll.runner.send(await askAll.batch("One"));
-    await askAll.phase("finished");
-    expect(askAll.log().some((m) => m.method === "session/set_mode")).toBe(false);
-
-    const noMode = await rig({ modes: ["default"], turns: [] }, { settings: { permissions: "project-edits" } });
-    await noMode.runner.send(await noMode.batch("One"));
-    await noMode.phase("finished");
-    expect(noMode.log().some((m) => m.method === "session/set_mode")).toBe(false);
-  });
-
   it("a second send queues and runs after the first", async () => {
     const r = await rig({ turns: [[{ sleep: 200 }]] });
     const b1 = await r.batch("One");

@@ -1,6 +1,6 @@
 import { realpathSync } from "node:fs";
 import { basename, dirname, resolve, sep, relative, isAbsolute } from "node:path";
-import type { AgentSettings, AlwaysRule } from "./schema.js";
+import type { AgentRules, AlwaysRule } from "./schema.js";
 
 export type PermissionRequest = { kind: string | null; title: string; command: string | null; paths: string[] };
 
@@ -33,8 +33,23 @@ export function inside(root: string, path: string): boolean {
 
 const PROJECT_KINDS = new Set(["read", "edit", "search", "move", "delete"]);
 
+/**
+ * R10: folders and files in the project that hold the agent's and the editor's own settings, hooks or tokens.
+ * A read, edit, delete, move or search of one never goes through on its own, under project-edits or any Always
+ * rule: it always asks. Matched by name, case-insensitively, as any part of the path under the root (a nested
+ * repo's `.git/hooks` too).
+ */
+export const PROTECTED_PATHS: readonly string[] = [".rushes", ".git", ".claude", ".codex", ".mcp.json", ".vscode", ".idea"];
+const PROTECTED = new Set(PROTECTED_PATHS);
+
+/** True when `path`, under `root`, is or is inside a protected folder or file (after symlinks are resolved). */
+export function isProtected(root: string, path: string): boolean {
+  const rel = relative(real(root), real(path));
+  return rel.split(sep).some((part) => PROTECTED.has(part.toLowerCase()));
+}
+
 function inProject(req: PermissionRequest, root: string): boolean {
-  return req.paths.length > 0 && req.paths.every((p) => inside(root, p));
+  return req.paths.length > 0 && req.paths.every((p) => inside(root, p) && !isProtected(root, p));
 }
 
 /**
@@ -124,7 +139,7 @@ export function canAlways(req: PermissionRequest): boolean {
   return kind !== "execute" || plainCommand(req.command ?? "");
 }
 
-export function decide(req: PermissionRequest, s: Pick<AgentSettings, "permissions" | "always">, root: string): "allow" | "ask" {
+export function decide(req: PermissionRequest, s: AgentRules, root: string): "allow" | "ask" {
   if (s.permissions === "ask-all") return "ask";
   if (s.always.some((r) => matches(r, req, root))) return "allow";
   if (req.kind && PROJECT_KINDS.has(req.kind) && inProject(req, root)) return "allow";
