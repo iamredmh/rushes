@@ -600,30 +600,29 @@ const AgentSettingsShape = fileObject({
   on: z.boolean().default(false),
   agent: z.enum(AGENTS).nullable().default(null),
   session: fileObject({ id: z.string(), agent: z.enum(AGENTS), startedAt: z.string() }).nullable().default(null),
-  /**
-   * Legacy (I1): whether the first-Send sheet had been answered. Never read and no longer written: a project can arrive
-   * with it set. The user's own rules file keeps that answer instead (AgentRules.setUp).
-   */
-  asked: z.boolean().default(false),
 });
 export type AgentSettings = z.infer<typeof AgentSettingsShape>;
 /**
  * R10: `always` and `permissions` in a project's agent.json (as an older build kept them) are never read: the agent
- * could have written them. They are dropped on read, so the next write leaves them out.
+ * could have written them. Nor is `asked` (I1: the first-Send sheet's answer, kept by Plan 1 builds): the user's rules
+ * file keeps that now. All three are dropped on read, so the next write leaves them out.
  */
 export const AgentSettingsSchema = AgentSettingsShape.transform((s): AgentSettings => {
-  const { always: _always, permissions: _permissions, ...rest } = s as AgentSettings & { always?: unknown; permissions?: unknown };
+  const { always: _always, permissions: _permissions, asked: _asked, ...rest } = s as AgentSettings & { always?: unknown; permissions?: unknown; asked?: unknown };
   return rest;
 });
 /** R10: what the agent may do without asking, kept per user outside the project (server/agent/rules.ts). */
 export const AgentRulesSchema = z.object({
   permissions: AgentPermissionsSchema.default("project-edits"),
   always: z.array(AlwaysRuleSchema).max(ALWAYS_KEPT).default([]),
-  /**
-   * I1: the user answered the first-Send sheet for this project (any setup). Nothing is handed to an agent without it,
-   * whatever the project's agent.json says, since a project folder can arrive from someone else with that set.
-   */
+  /** I1: the user answered the first-Send sheet for this project (an agent, or Copy a prompt), so Send doesn't ask again. */
   setUp: z.boolean().default(false),
+  /**
+   * The consent (consent fix): the agent the user turned Send to AI on for, in the sheet, the menu or the switch. Null
+   * after Copy a prompt or switching off. Nothing is handed over, and the desk shows Send to AI off, unless the project's
+   * agent.json is on for this same agent: a project folder from someone else, or anything that writes it, can't choose.
+   */
+  agent: z.enum(AGENTS).nullable().default(null),
 });
 export type AgentRules = z.infer<typeof AgentRulesSchema>;
 /** Read leniently: a longer list keeps its newest ALWAYS_KEPT rules rather than failing (M8). */
@@ -631,6 +630,7 @@ export const AgentRulesReadSchema = z.object({
   permissions: AgentPermissionsSchema.default("project-edits"),
   always: z.array(AlwaysRuleSchema).default([]).transform((a) => a.slice(-ALWAYS_KEPT)),
   setUp: z.boolean().default(false),
+  agent: z.enum(AGENTS).nullable().default(null),
 });
 
 export const FILES = {

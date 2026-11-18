@@ -371,7 +371,7 @@ export interface AppOptions {
 }
 
 /** What the routes use of the agent runner. */
-export type AgentControl = Pick<AgentRunner, "status" | "reload" | "send" | "stop" | "answer" | "removeRule" | "workingOn">;
+export type AgentControl = Pick<AgentRunner, "status" | "reload" | "send" | "resend" | "stop" | "answer" | "removeRule" | "workingOn">;
 
 /**
  * What Send's response says about the agent: the runner's own result, or, when the agent is still starting after
@@ -395,6 +395,7 @@ function noAgent(): AgentControl {
     status: () => structuredClone(OFF_STATUS),
     reload: async () => structuredClone(OFF_STATUS),
     send: async () => ({ handedTo: null, why: "Send to AI is off" }),
+    resend: async () => null,
     stop: async () => undefined,
     answer: none,
     removeRule: none,
@@ -1483,12 +1484,13 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
    * What a hand-over says to the desk. It never fails because of the agent: an error becomes the reason it wasn't
    * handed over, and an agent still starting after sendWaitMs never holds the answer (it says so, and the run carries on).
    */
-  const handOverOf = async (handing: Promise<SendResult>): Promise<SendHandOver> => {
+  const handOverOf = async <T extends SendResult | null>(handing: Promise<T>): Promise<SendHandOver | Exclude<T, SendResult>> => {
     const handed = handing.catch((e: unknown): SendResult => ({ handedTo: null, why: e instanceof Error ? e.message : String(e) }));
     let timer: NodeJS.Timeout | undefined;
-    const waited = new Promise<null>((ok) => { timer = setTimeout(() => ok(null), sendWaitMs); });
+    const late = Symbol("late");
+    const waited = new Promise<typeof late>((ok) => { timer = setTimeout(() => ok(late), sendWaitMs); });
     const settled = await Promise.race([handed, waited]).finally(() => clearTimeout(timer));
-    return settled ?? { handedTo: agent.status().agent, starting: true };
+    return settled === late ? { handedTo: agent.status().agent, starting: true } : (settled as SendHandOver | Exclude<T, SendResult>);
   };
   app.post("/api/batches", async (c) => {
     const { stage } = await body(c, BatchBody);
@@ -1602,6 +1604,14 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     const b = await body(c, AgentSetupBody);
     const filed = b.batch === undefined ? null : (await store.read("batches")).batches.find((x) => x.id === b.batch);
     if (filed === undefined) throw new NotFoundError("batch", b.batch!);
+    const rules = agentRulesFor(store);
+    // Consent fix: a change of the level alone (the agent menu's, which names no agent) changes the level and nothing
+    // else. It never chooses an agent, never keeps one the user didn't choose, and leaves the switch as it is.
+    const permissions = b.permissions;
+    if (permissions !== undefined && b.agent === undefined) {
+      await rules.update((f) => void (f.permissions = permissions));
+      return c.json(await agentStatusOf());
+    }
     let checked: AgentId | null = null;
     if (b.on) {
       const id = b.agent ?? (await store.read("agent")).agent;
@@ -1614,14 +1624,6 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
       if (!info.signedIn) throw new RushesError(`${name} is not signed in. Choose Sign in in Terminal, then try again.`, 409, "agent_not_signed_in", { agent: id });
       checked = id;
     }
-    // R10 and I1: what the agent may do, and the user's answer to the first-Send sheet (any setup, Copy a prompt
-    // ({on:false}) included), are kept in the user's own rules file, outside the project, where neither the agent nor a
-    // project folder from someone else can set them. Written first, so a Send never sees the switch on without it.
-    const permissions = b.permissions;
-    await agentRulesFor(store).update((f) => {
-      f.setUp = true;
-      if (permissions !== undefined) f.permissions = permissions;
-    });
     await store.update("agent", (f) => {
       // Turned on only for the agent that was checked: one changed meanwhile (another tab) is refused.
       if (b.on && (b.agent ?? f.agent) !== checked) throw new RushesError("The agent changed. Try again.", 409, "agent_changed");
@@ -1632,14 +1634,20 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
         f.session = null;
       }
     });
-    // I3: the batch the dialog showed goes to the agent now, while notes of it still wait with no run holding it (a
-    // second setup, or a batch already handed over or finished, hands nothing).
-    if (b.on && filed) {
-      const waits = (await store.read("notes")).notes.some((n) => n.batch === filed.id && noteState(n) === "sent");
-      if (waits && !(await agent.reload()).batches.includes(filed.id)) {
-        const handed = await handOverOf((async () => agent.send(filed))());
-        return c.json({ ...(await agentStatusOf()), agent: handed });
-      }
+    // R10, I1 and the consent fix: the user's answer to the first-Send sheet, the agent they turned on (none after Copy a
+    // prompt or switching off) and what it may do are kept in their own rules file, outside the project, where neither
+    // the agent nor a project folder from someone else can set them. Written only once agent.json took the change, so a
+    // refused setup (409) leaves the file as it was.
+    await rules.update((f) => {
+      f.setUp = true;
+      f.agent = checked;
+      if (permissions !== undefined) f.permissions = permissions;
+    });
+    // I3: the batch the dialog showed goes to the agent now, if its hand-over was refused and it hasn't gone since (the
+    // runner takes it from its refused set once, under its send lock), while notes of it still wait.
+    if (b.on && filed && (await store.read("notes")).notes.some((n) => n.batch === filed.id && noteState(n) === "sent")) {
+      const handed = await handOverOf(agent.resend(filed));
+      if (handed) return c.json({ ...(await agentStatusOf()), agent: handed });
     }
     return c.json(await agentStatusOf());
   });

@@ -283,7 +283,7 @@ test("agent menu changes permissions and removes a rule", async ({ page, startWi
   await expect(menu.getByText("Always for npx hyperframes here", { exact: true })).toHaveCount(0);
   await shootFoot(page, "menu-after-1440");
   // I1: the file also keeps the user's answer to the first-Send sheet (withNote set Send to AI up through the route).
-  expect(JSON.parse(await readFile(rules, "utf8"))).toEqual({ permissions: "ask-all", always: [], setUp: true });
+  expect(JSON.parse(await readFile(rules, "utf8"))).toEqual({ permissions: "ask-all", always: [], setUp: true, agent: "claude" });
   await page.keyboard.press("Escape");
   await expect(menu).toHaveCount(0);
 });
@@ -679,19 +679,46 @@ test("a start failure recalls and does not copy", async ({ page, startWithAgent 
 const forgeAgentJson = (rushes: AgentRushes) =>
   writeFile(join(rushes.root, ".rushes", "agent.json"), JSON.stringify({ schema: 1, rev: 1, on: true, agent: "claude", session: null, asked: true }));
 
-/** The user's own answer to the first-Send sheet, in their rules file (I1), as the setup route writes it. */
-async function userSetUp(rushes: AgentRushes): Promise<void> {
+/** The user's own answer to the first-Send sheet, in their rules file (I1), as the setup route writes it: the agent they
+ *  turned on, or none (Copy a prompt). */
+async function userSetUp(rushes: AgentRushes, agent: "claude" | null = "claude"): Promise<void> {
   const path = rulesPath(rushes.root, rushes.configDir);
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  await writeFile(path, JSON.stringify({ permissions: "project-edits", always: [], setUp: true }), { mode: 0o600 });
+  await writeFile(path, JSON.stringify({ permissions: "project-edits", always: [], setUp: true, agent }), { mode: 0o600 });
 }
+
+test("after Copy a prompt, a project whose agent.json says on shows the switch off, and Send copies a prompt (consent fix)", async ({ page, startWithAgent }) => {
+  const rushes = await startWithAgent({ turns: [[{ stop: "end_turn" }]] });
+  await rushes.addCut("first cut");
+  // The user answered the sheet with Copy a prompt; then something wrote the project's switch on.
+  await userSetUp(rushes, null);
+  await forgeAgentJson(rushes);
+  await rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 0.5, text: "Hold the end card." });
+  expect((await rushes.api("GET", "/api/agent")).status).toMatchObject({ on: false, agent: "claude", asked: true });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await expect(toggle(page)).toHaveAttribute("aria-checked", "false");
+  await expect(who(page)).toHaveText("Copies a prompt for your own chat");
+  await footFits(page);
+  await shootFoot(page, "forged-on-reads-off-1440");
+  await sendBtn(page).click();
+  // Today's dialog, exactly: no sheet, no reason line, nothing handed over.
+  await expect(sentPop(page)).toBeVisible();
+  await expect(sentPop(page).getByRole("button", { name: "Copy prompt" })).toBeVisible();
+  await expect(sentPop(page).locator(".swhy")).toHaveCount(0);
+  await expect(sheet(page)).toHaveCount(0);
+  await expect(toastEl(page)).toHaveCount(0);
+  await page.waitForTimeout(500);
+  expect(await readAgentLog(rushes.agentLog)).toEqual([]);
+});
 
 test("a project that arrives set up asks first, and hands nothing over until the user sets it up (I1)", async ({ page, startWithAgent }) => {
   const rushes = await startWithAgent({ turns: [[{ stop: "end_turn" }]] });
   await rushes.addCut("first cut");
   await forgeAgentJson(rushes);
   await rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 0.5, text: "Hold the end card." });
-  expect((await rushes.api("GET", "/api/agent")).status).toMatchObject({ on: true, agent: "claude", asked: false });
+  // The project's switch is not the user's: it reads off.
+  expect((await rushes.api("GET", "/api/agent")).status).toMatchObject({ on: false, agent: "claude", asked: false });
   await page.goto(rushes.url);
   await videoReady(page);
   // Send asks who gets the notes, whatever the project's file says, and posts nothing.
@@ -713,7 +740,7 @@ test("a project that arrives set up asks first, and hands nothing over until the
   await primary(page, "Next").click();
   await primary(page, "Send to Claude Code").click();
   await expect(toastEl(page)).toHaveText(/^(Sent to|Starting) Claude Code$/);
-  expect(JSON.parse(await readFile(rulesPath(rushes.root, rushes.configDir), "utf8"))).toMatchObject({ setUp: true });
+  expect(JSON.parse(await readFile(rulesPath(rushes.root, rushes.configDir), "utf8"))).toMatchObject({ setUp: true, agent: "claude" });
   await expect.poll(async () => (await readAgentLog(rushes.agentLog)).some((m) => m.method === "session/prompt"), { timeout: 10_000 }).toBe(true);
 });
 

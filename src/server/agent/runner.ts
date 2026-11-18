@@ -89,6 +89,7 @@ const CANCELLED: AcpPermissionOutcome = { outcome: "cancelled" };
 const CLOSING = "Rushes is closing";
 /** I1: Send to AI is on in the project, but the user's own rules file has no answer to the first-Send sheet. */
 export const NOT_SET_UP = "Send to AI is not set up";
+const OFF = "Send to AI is off";
 
 /** Each agent by name, as Activity and the notification say it. */
 export const AGENT_NAMES: Readonly<Record<AgentId, string>> = { claude: "Claude Code", codex: "Codex" };
@@ -161,7 +162,9 @@ export class AgentRunner {
   private settings: AgentSettings | null = null;
   /** The user's rules for this project, kept outside it (R10). `rules` is the last read, for the status. */
   private readonly rulesFile: AgentRulesFile;
-  private rules: AgentRules = { permissions: "project-edits", always: [], setUp: false };
+  private rules: AgentRules = { permissions: "project-edits", always: [], setUp: false, agent: null };
+  /** I3: batches whose hand-over was refused while Send to AI was on (not signed in, not set up…); resend takes each once. */
+  private readonly refused = new Set<string>();
   private ruleReads = 0;
   private rulesApplied = 0;
   /** agent.json reads started, and the newest one applied (a write counts as one). */
@@ -226,8 +229,13 @@ export class AgentRunner {
     this.track(this.loadRules());
   }
 
+  /** Consent fix: on only when the project's switch is on for the agent the user chose, in their own rules file. */
+  private switchedOn(settings: AgentSettings | null, rules: AgentRules): boolean {
+    return !!settings?.on && rules.agent !== null && rules.agent === settings.agent;
+  }
+
   status(): AgentStatus {
-    const on = this.settings?.on ?? false;
+    const on = this.switchedOn(this.settings, this.rules);
     const jobs = [...(this.turn ? [this.turn.job] : []), ...this.queue];
     return {
       on,
@@ -264,7 +272,24 @@ export class AgentRunner {
   async send(batch: Batch): Promise<SendResult> {
     const r = (await this.hand(async () => batchJob(batch)))!;
     // A batch is never parked (only a follow-up is).
-    return "park" in r ? { handedTo: null, why: r.why } : r;
+    return this.noteRefusal(batch.id, "park" in r ? { handedTo: null, why: r.why } : r);
+  }
+
+  /**
+   * I3: hands over a batch whose hand-over was refused, once (the copy dialog's Set up, through the setup route). The id
+   * is taken from the refused set under the send lock, so two at once hand it over once. Null when it wasn't refused, or
+   * has gone already.
+   */
+  async resend(batch: Batch): Promise<SendResult | null> {
+    const r = await this.hand(async () => (this.refused.delete(batch.id) ? batchJob(batch) : null));
+    if (r === null) return null;
+    return this.noteRefusal(batch.id, "park" in r ? { handedTo: null, why: r.why } : r);
+  }
+
+  /** Records a batch refused while Send to AI was on and nothing started (its notes still wait with it), for resend. */
+  private noteRefusal(id: string, r: SendResult): SendResult {
+    if (r.handedTo === null && !r.stopped && !r.recalled && r.why !== OFF && r.why !== CLOSING) this.refused.add(id);
+    return r;
   }
 
   /**
@@ -352,13 +377,14 @@ export class AgentRunner {
     while (this.stopping) await this.stopping;
     if (this.closed) return { why: CLOSING };
     const [settings, rules] = await Promise.all([this.loadSettings(), this.loadRules()]);
-    if (!settings.on) return { why: "Send to AI is off" };
+    if (!settings.on) return { why: OFF };
     const agent = settings.agent;
     const park = (why: string, name: string): Accepted =>
       job.kind === "followUp" ? { why, park: { name, batch: job.batchId } } : { why };
-    // I1: the switch in the project's agent.json is not the user's consent; their own rules file is. Without it nothing
-    // is handed over and nothing starts: the desk opens the first-Send sheet, or the copy dialog says why, with Set up.
-    if (!rules.setUp) return park(NOT_SET_UP, agent ? NAMES[agent] : "your agent");
+    // I1 and the consent fix: the switch and the agent in the project's agent.json are not the user's consent; the agent
+    // they chose, in their own rules file, is. Unless the two name the same agent nothing is handed over and nothing
+    // starts: the desk shows Send to AI off and copies the prompt, or opens the first-Send sheet.
+    if (agent && !this.switchedOn(settings, rules)) return park(NOT_SET_UP, NAMES[agent]);
     if (job.kind === "followUp" && (!agent || settings.session?.agent !== agent)) {
       return park("No conversation to carry on", agent ? NAMES[agent] : "your agent");
     }

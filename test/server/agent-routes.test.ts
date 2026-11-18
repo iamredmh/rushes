@@ -66,12 +66,13 @@ async function rig(o: { settings?: Partial<AgentSettings>; rules?: Partial<Agent
   const fake = fakeAgent(store, () => agents);
   await fake.scenario(o.scenario ?? { turns: [] });
   if (o.settings) await store.update("agent", (f) => void Object.assign(f, o.settings));
-  // I1: a project turned on was set up by the user (their own rules file says so), unless a test says otherwise.
+  // I1: a project turned on was set up by the user for its agent (their own rules file says so), unless a test says otherwise.
   const consent = o.consent ?? o.settings?.on === true;
-  if (o.rules || consent) await agentRulesFor(store).update((f) => void Object.assign(f, consent ? { setUp: true } : {}, o.rules));
+  if (o.rules || consent) await agentRulesFor(store).update((f) => void Object.assign(f, consent ? { setUp: true, agent: o.settings?.agent ?? null } : {}, o.rules));
   const runner = new AgentRunner(store, { ...fake.opts, ...o.runner });
   runners.push(runner);
-  const wantOn = o.settings?.on ?? false;
+  // The switch reads on only for the agent the user chose (consent fix).
+  const wantOn = (o.settings?.on ?? false) && consent && !!o.settings?.agent;
   await waitFor("the runner to read agent.json", () => runner.status().on === wantOn);
   const opened: string[] = [];
   const app = createApp(store, { agent: runner, detect: async () => agents, terminal: async (command) => void opened.push(command), ...o.app });
@@ -157,8 +158,9 @@ describe("Send hands the batch to the agent", () => {
 
 describe("the user's consent lives in their own rules file, never in the project (I1)", () => {
   it("a project arriving with agent.json set up and on opens the sheet and hands nothing over; setup through the route does", async () => {
-    const r = await rig({ settings: { on: true, agent: "claude", asked: true }, consent: false, scenario: { turns: [[{ stop: "end_turn" }]] } });
-    expect((await r.call("GET", "/api/agent")).json.status).toMatchObject({ on: true, agent: "claude", asked: false });
+    const r = await rig({ settings: { on: true, agent: "claude" }, consent: false, scenario: { turns: [[{ stop: "end_turn" }]] } });
+    // The project's switch is not the user's: it reads off on the desk.
+    expect((await r.call("GET", "/api/agent")).json.status).toMatchObject({ on: false, agent: "claude", asked: false });
     await r.note("Tighten the opening");
     const res = await r.call("POST", "/api/batches", {});
     expect(res.status).toBe(201);
@@ -170,13 +172,101 @@ describe("the user's consent lives in their own rules file, never in the project
     const set = await r.call("POST", "/api/agent/setup", { on: true, agent: "claude" });
     expect(set.json.status).toMatchObject({ on: true, agent: "claude", asked: true });
     const file = agentRulesFor(r.store).path;
-    expect(JSON.parse(readFileSync(file, "utf8"))).toMatchObject({ setUp: true });
+    expect(JSON.parse(readFileSync(file, "utf8"))).toMatchObject({ setUp: true, agent: "claude" });
     expect(statSync(file).mode & 0o777).toBe(0o600);
     await r.note("Then the end card");
     const again = await r.call("POST", "/api/batches", {});
     expect(again.json.agent).toEqual({ handedTo: "claude" });
     await waitFor("the agent to be handed the batch", () => r.log().some((m) => m.method === "session/prompt"));
     await waitFor("the run to finish", () => !r.runner.busy());
+  });
+});
+
+describe("the agent the user chose is kept in their rules file; the project's switch alone hands nothing over (consent fix)", () => {
+  /** What the project's agent.json could be made to say by anything that writes the project (a pull, an allowed command). */
+  const forge = (r: Awaited<ReturnType<typeof rig>>, over: Partial<AgentSettings>) => r.store.update("agent", (f) => void Object.assign(f, over));
+  const handsNothing = async (r: Awaited<ReturnType<typeof rig>>) => {
+    expect((await r.call("GET", "/api/agent")).json.status.on).toBe(false);
+    await r.note("Tighten the opening");
+    expect((await r.call("POST", "/api/batches", {})).json.agent).toEqual({ handedTo: null, why: "Send to AI is not set up" });
+    await new Promise((ok) => setTimeout(ok, 100));
+    expect(r.log()).toEqual([]);
+    expect(r.runner.busy()).toBe(false);
+  };
+
+  it("(b) Copy a prompt answers the sheet but chooses no agent: a switch turned on in agent.json afterwards hands nothing over", async () => {
+    const r = await rig();
+    const copy = await r.call("POST", "/api/agent/setup", { on: false });
+    expect(copy.json.status).toMatchObject({ on: false, asked: true });
+    expect(await agentRulesFor(r.store).read()).toMatchObject({ setUp: true, agent: null });
+    await forge(r, { on: true, agent: "claude" });
+    expect((await r.call("GET", "/api/agent")).json.status).toMatchObject({ on: false, agent: "claude", asked: true });
+    await handsNothing(r);
+  });
+
+  it("(c) switched off, then switched on again in agent.json: nothing is handed over", async () => {
+    const r = await rig();
+    await r.call("POST", "/api/agent/setup", { on: true, agent: "claude" });
+    expect(await agentRulesFor(r.store).read()).toMatchObject({ agent: "claude" });
+    await r.call("POST", "/api/agent/setup", { on: false });
+    expect(await agentRulesFor(r.store).read()).toMatchObject({ setUp: true, agent: null });
+    await forge(r, { on: true });
+    await handsNothing(r);
+  });
+
+  it("(c) the other agent written into agent.json is not the one the user chose: off on the desk, nothing handed over", async () => {
+    const r = await rig();
+    await r.call("POST", "/api/agent/setup", { on: true, agent: "claude" });
+    await forge(r, { agent: "codex" });
+    expect((await r.call("GET", "/api/agent")).json.status).toMatchObject({ on: false, agent: "codex" });
+    await handsNothing(r);
+  });
+
+  it("(a) a prepared project: the menu's permission change chooses no agent, so nothing is handed over", async () => {
+    const r = await rig({ settings: { on: true, agent: "claude" }, consent: false });
+    // As the row posts it: the switch as the desk shows it (off now), and the level.
+    const asShown = await r.call("POST", "/api/agent/setup", { on: false, permissions: "ask-all" });
+    expect(asShown.status).toBe(200);
+    // As an older desk would post it, with the project's switch on and no agent named.
+    const asOn = await r.call("POST", "/api/agent/setup", { on: true, permissions: "ask-all" });
+    expect(asOn.status).toBe(200);
+    expect(await agentRulesFor(r.store).read()).toMatchObject({ permissions: "ask-all", agent: null });
+    await forge(r, { on: true, agent: "claude" });
+    await handsNothing(r);
+  });
+
+  it("a permission change keeps the agent the user chose, and Send still goes to it", async () => {
+    const r = await rig({ scenario: { turns: [[{ stop: "end_turn" }]] } });
+    await r.call("POST", "/api/agent/setup", { on: true, agent: "claude" });
+    const level = await r.call("POST", "/api/agent/setup", { on: true, permissions: "ask-all" });
+    expect(level.json.status).toMatchObject({ on: true, agent: "claude", permissions: "ask-all" });
+    expect(await agentRulesFor(r.store).read()).toMatchObject({ agent: "claude", permissions: "ask-all" });
+    await r.note("Tighten the opening");
+    expect((await r.call("POST", "/api/batches", {})).json.agent).toEqual({ handedTo: "claude" });
+    await waitFor("the run to finish", () => !r.runner.busy());
+  });
+
+  it("a setup refused with 409 (the agent changed) leaves the user's file as it was", async () => {
+    const r = await rig({ settings: { on: false, agent: "claude" } });
+    await r.call("POST", "/api/agent/setup", { on: false });
+    const before = readFileSync(agentRulesFor(r.store).path, "utf8");
+    const app = createApp(r.store, {
+      agent: r.runner,
+      detect: async () => {
+        await r.store.update("agent", (f) => { f.agent = "codex"; });
+        return [claude(), codex()];
+      },
+    });
+    const res = await app.request("/api/agent/setup", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ on: true }) });
+    expect(res.status).toBe(409);
+    expect(readFileSync(agentRulesFor(r.store).path, "utf8")).toBe(before);
+  });
+
+  it("agent.json no longer carries the legacy asked", async () => {
+    const r = await rig();
+    await writeFile(join(r.store.dir, "agent.json"), JSON.stringify({ schema: 1, rev: 1, on: false, agent: null, session: null, asked: true }));
+    await r.call("POST", "/api/agent/setup", { on: false });
+    expect(JSON.parse(readFileSync(join(r.store.dir, "agent.json"), "utf8"))).not.toHaveProperty("asked");
   });
 });
 
@@ -197,6 +287,46 @@ describe("setup hands over the batch the copy dialog was opened for (I3)", () =>
     // Its notes are no longer waiting with it: setup again hands nothing over.
     const again = await r.call("POST", "/api/agent/setup", { on: true, agent: "claude", batch });
     expect(again.json.agent).toBeUndefined();
+    expect(r.log().filter((m) => m.method === "session/prompt")).toHaveLength(1);
+  });
+
+  it("two setup posts with the same refused batch at once hand it over once", async () => {
+    const r = await rig({ settings: { on: true, agent: "claude" }, agents: [claude({ signedIn: false }), codex()], scenario: { turns: [[{ sleep: 300 }, { stop: "end_turn" }]] } });
+    await r.note("Tighten the opening");
+    const batch = (await r.call("POST", "/api/batches", {})).json.batch.id as string;
+    r.setAgents([claude(), codex()]);
+    // Each post reads the status slowly, so both are checking before either hands the batch over.
+    const reload = r.runner.reload.bind(r.runner);
+    vi.spyOn(r.runner, "reload").mockImplementation(async () => {
+      await new Promise((ok) => setTimeout(ok, 100));
+      return reload();
+    });
+    const [a, b] = await Promise.all([
+      r.call("POST", "/api/agent/setup", { on: true, agent: "claude", batch }),
+      r.call("POST", "/api/agent/setup", { on: true, agent: "claude", batch }),
+    ]);
+    expect([a.json.agent, b.json.agent].filter((x) => x !== undefined)).toEqual([{ handedTo: "claude" }]);
+    await waitFor("the run to finish", () => !r.runner.busy() && r.log().some((m) => m.method === "session/prompt"));
+    expect(r.log().filter((m) => m.method === "session/prompt")).toHaveLength(1);
+  });
+
+  it("a batch whose hand-over was never refused is not handed over: one handed already, or one copied while Send to AI was off", async () => {
+    const r = await rig({ scenario: { turns: [[{ stop: "end_turn" }], [{ stop: "end_turn" }]] } });
+    // Copied while off: the user chose to paste it themselves.
+    await r.note("Copied one");
+    const copied = (await r.call("POST", "/api/batches", {})).json.batch.id as string;
+    expect((await r.call("POST", "/api/agent/setup", { on: true, agent: "claude", batch: copied })).json.agent).toBeUndefined();
+    // Handed over, and its run left a question, so its note is still with the agent.
+    const handedNote = await r.note("Handed one");
+    const sent = await r.call("POST", "/api/batches", {});
+    expect(sent.json.agent).toEqual({ handedTo: "claude" });
+    await waitFor("the run to finish", () => !r.runner.busy());
+    await r.store.update("notes", (f) => {
+      const n = f.notes.find((x) => x.id === handedNote)!;
+      n.status = "todo";
+      n.batch = sent.json.batch.id;
+    });
+    expect((await r.call("POST", "/api/agent/setup", { on: true, agent: "claude", batch: sent.json.batch.id })).json.agent).toBeUndefined();
     expect(r.log().filter((m) => m.method === "session/prompt")).toHaveLength(1);
   });
 
@@ -283,7 +413,8 @@ describe("agent routes", () => {
     expect(off.json.status).toMatchObject({ on: false, asked: true });
     // I1: the answer is kept in the user's own rules file, not in the project.
     expect((await agentRulesFor(r.store).read()).setUp).toBe(true);
-    expect(await r.store.read("agent")).toMatchObject({ on: false, asked: false });
+    expect(await r.store.read("agent")).toMatchObject({ on: false });
+    expect(await r.store.read("agent")).not.toHaveProperty("asked");
     // Another project's first setup turning Send to AI on says so too.
     const s = await rig();
     expect((await s.call("POST", "/api/agent/setup", { on: true, agent: "codex" })).json.status).toMatchObject({ on: true, agent: "codex", asked: true });
@@ -422,8 +553,9 @@ describe("live agent status", () => {
     await events.until("event: hello");
     expect(s.store.listenerCount("agent")).toBe(before + 1);
     await fetch(`${s.url}/api/agent/setup`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ on: true, agent: "claude" }) });
-    const text = await events.until("event: agent");
-    const line = text.split("\n").find((l, i, all) => all[i - 1] === "event: agent" && l.startsWith("data: "))!;
+    // agent.json changes first, then the user's rules file (consent fix): the status reads on once both have.
+    const text = await events.until(`"on":true`);
+    const line = text.split("\n").find((l, i, all) => all[i - 1] === "event: agent" && l.startsWith("data: ") && l.includes(`"on":true`))!;
     const status = JSON.parse(line.slice("data: ".length)) as AgentStatus;
     expect(status).toMatchObject({ on: true, agent: "claude" });
     events.stop();
@@ -443,7 +575,7 @@ describe("the macOS notification when no desk is open (spec §5.4)", () => {
     const fake = fakeAgent(store, () => [claude(), codex()]);
     await fake.scenario({ turns: [[exec("npm test", "t")]] });
     await store.update("agent", (f) => void Object.assign(f, { on: true, agent: "claude" }));
-    await agentRulesFor(store).update((f) => void (f.setUp = true));
+    await agentRulesFor(store).update((f) => void Object.assign(f, { setUp: true, agent: "claude" }));
     const told: Array<[string, string]> = [];
     const s = await startServer(root, { port: 0, agent: fake.opts, notify: async (title, body) => void told.push([title, body]) });
     servers.push(s);

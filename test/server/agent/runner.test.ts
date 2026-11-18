@@ -68,7 +68,10 @@ async function rig(scenario: object, opts: { agents?: AgentInfo[]; settings?: Pa
   };
   await settings({ on: true, agent: "claude", ...opts.settings });
   // I1: the user set Send to AI up (their own rules file says so), unless a test is about a project that only claims it.
-  if (opts.consent !== false) await agentRulesFor(store).update((f) => void (f.setUp = true));
+  if (opts.consent !== false) {
+    const chosen = (await store.read("agent")).agent;
+    await agentRulesFor(store).update((f) => void Object.assign(f, { setUp: true, agent: chosen }));
+  }
   const runner = new AgentRunner(store, {
     detect: async () => opts.agents ?? [claude(), codex],
     spec: (a, r) => ({ command: process.execPath, args: [FAKE], env: { FAKE_ACP_SCENARIO: scenarioPath, FAKE_ACP_LOG: logPath, ...fakeModesEnv(a) }, cwd: r }),
@@ -106,8 +109,10 @@ async function rig(scenario: object, opts: { agents?: AgentInfo[]; settings?: Pa
     await waitFor(`phase ${p} (now ${runner.status().phase})`, () => runner.status().phase === p);
   };
   // The runner reads agent.json as it starts; wait for that, so a test hears only what it causes.
-  const wantOn = opts.settings?.on ?? true;
-  await waitFor("the runner to read agent.json", () => runner.status().on === wantOn && (!wantOn || runner.status().agent !== null || opts.settings?.agent === null));
+  // The switch reads on only for the agent the user chose (consent fix).
+  const wantOn = (opts.settings?.on ?? true) && opts.consent !== false && (await store.read("agent")).agent !== null;
+  const wantAgent = (await store.read("agent")).agent;
+  await waitFor("the runner to read agent.json", () => runner.status().on === wantOn && runner.status().agent === wantAgent);
   return { root, store, runner, log, scenario: writeScenario, batch, waitFor, phase, settings };
 }
 
@@ -130,15 +135,19 @@ describe("AgentRunner", () => {
   });
 
   it("a project's agent.json saying Send to AI is on hands nothing over until the user's own file says it was set up (I1)", async () => {
-    const r = await rig({ turns: [[{ stop: "end_turn" }]] }, { settings: { on: true, agent: "claude", asked: true }, consent: false });
-    expect(r.runner.status()).toMatchObject({ on: true, agent: "claude", asked: false });
+    const r = await rig({ turns: [[{ stop: "end_turn" }]] }, { settings: { on: true, agent: "claude" }, consent: false });
+    expect(r.runner.status()).toMatchObject({ on: false, agent: "claude", asked: false });
     const b = await r.batch("Move the title");
     expect(await r.runner.send(b)).toEqual({ handedTo: null, why: "Send to AI is not set up" });
     expect(started).toHaveLength(0);
     expect(r.log()).toEqual([]);
     expect(r.runner.busy()).toBe(false);
-    // The user's own file says it was set up: the next Send goes.
+    // The sheet answered with no agent chosen (Copy a prompt) is not consent either.
     await agentRulesFor(r.store).update((f) => void (f.setUp = true));
+    expect(await r.runner.send(await r.batch("Still"))).toEqual({ handedTo: null, why: "Send to AI is not set up" });
+    expect(started).toHaveLength(0);
+    // The user's own file names the agent: the next Send goes.
+    await agentRulesFor(r.store).update((f) => void (f.agent = "claude"));
     expect(await r.runner.send(await r.batch("Again"))).toEqual({ handedTo: "claude" });
     expect(r.runner.status().asked).toBe(true);
     await r.phase("finished");
@@ -149,6 +158,7 @@ describe("AgentRunner", () => {
     const b = await r.batch("Move the title");
     expect(await r.runner.send(b)).toEqual({ handedTo: null, why: "Claude Code is not signed in" });
     await r.settings({ agent: "codex" });
+    await agentRulesFor(r.store).update((f) => void (f.agent = "codex"));
     expect(await r.runner.send(b)).toEqual({ handedTo: null, why: "Codex is not installed" });
     expect(started).toHaveLength(0);
     expect(r.runner.status().phase).not.toBe("starting");

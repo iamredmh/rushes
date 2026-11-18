@@ -48,7 +48,8 @@ async function rig(scenario: object, opts: { settings?: Partial<AgentSettings>; 
   await writeScenario(scenario);
   await store.update("agent", (f) => Object.assign(f, { on: true, agent: "claude", ...opts.settings }));
   // I1: the user set Send to AI up, in their own rules file.
-  await agentRulesFor(store).update((f) => Object.assign(f, { setUp: true, ...opts.rules }));
+  const chosen = (await store.read("agent")).agent;
+  await agentRulesFor(store).update((f) => Object.assign(f, { setUp: true, agent: chosen, ...opts.rules }));
   const makeRunner = () => {
     const r = new AgentRunner(store, {
       detect: async () => [claude],
