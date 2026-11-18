@@ -15,7 +15,7 @@
 import { ACTIVITY_LINE_MAX, ActivityTracker } from "../../core/agentActivity.js";
 import { alwaysLabel, decide } from "../../core/agentRules.js";
 import { NotFoundError, RushesError } from "../../core/errors.js";
-import { oneLine, oneLineOf } from "../../core/labels.js";
+import { oneLine } from "../../core/labels.js";
 import { lineEvent } from "../../core/logEvents.js";
 import { needsYou, noteState, recallNote, recallNotes } from "../../core/noteState.js";
 import type { AgentId, AgentRules, AgentSettings, AlwaysRule, Batch, Note } from "../../core/schema.js";
@@ -90,6 +90,8 @@ const EXIT_WAIT_MS = 4000;
 const CANCELLED: AcpPermissionOutcome = { outcome: "cancelled" };
 /** Why a send or follow-up is refused once close() has begun. */
 const CLOSING = "Rushes is closing";
+/** A turn's failure in the adapter's words is kept to this many characters (the chip's tooltip). */
+const ERROR_MAX = 200;
 /** An answer's name in Activity (Task 10, 4): its follow-up's label, or "your answer on a note" when it was never read. */
 const answerOf = (job: TurnJob | null): string => job?.label ?? "your answer on a note";
 const capitalised = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
@@ -752,7 +754,8 @@ export class AgentRunner {
   private async turnFailedInPlace(gen: number, job: TurnJob, message: string): Promise<void> {
     if (gen !== this.gen || this.turn?.job !== job) return;
     const name = this.info?.name ?? "The agent";
-    const why = oneLineOf(message) || "it stopped with an error";
+    // Kept to a readable length for the chip's tooltip (Task 10 round 2, 4).
+    const why = oneLine(message, ERROR_MAX) || "it stopped with an error";
     this.turn = null;
     this.ending = true;
     const queued = this.queue;
@@ -780,6 +783,8 @@ export class AgentRunner {
     if (gen !== this.gen) return;
     if (back > 0) this.addLine(back === 1 ? "1 note was not picked up and is back in to do" : `${back} notes were not picked up and are back in to do`, null);
     this.ending = false;
+    // A Send accepted while this was being settled queued behind it: it runs now, as after any turn (round 2, 3).
+    if (this.queue.length) return this.pump();
     this.phase = "failed";
     this.error = why;
     this.current = { note: null, doing: null };

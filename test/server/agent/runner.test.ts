@@ -587,6 +587,46 @@ describe("AgentRunner", () => {
     expect(r.runner.busy()).toBe(false);
   });
 
+  it("a job queued while a failed turn is being settled runs next, as after any turn (Task 10 round 2, 3)", async () => {
+    const codexOn: AgentInfo = { ...codex, installed: true, signedIn: true, path: "/usr/local/bin/codex" };
+    const r = await rig({ turns: [[{ fail: "The model is busy." }], [{ stop: "end_turn" }]] }, { agents: [claude(), codexOn], settings: { agent: "codex" } });
+    const b1 = await r.batch("One");
+    // Hold the failure's read of the notes, so a Send lands while it is being settled.
+    let release!: () => void;
+    const held = new Promise<void>((ok) => (release = ok));
+    const read = r.store.read.bind(r.store);
+    let holding = true;
+    vi.spyOn(r.store, "read").mockImplementation((async (file: string) => {
+      if (file === "notes" && holding) {
+        holding = false;
+        await held;
+      }
+      return read(file as never);
+    }) as typeof r.store.read);
+    await r.runner.send(b1);
+    const texts = () => r.runner.status().lines.map((l) => l.text);
+    await r.waitFor("the failure's line", () => texts().includes("Codex couldn't finish: The model is busy."));
+    const b2 = await r.batch("Two");
+    expect(await r.runner.send(b2)).toEqual({ handedTo: "codex" });
+    release();
+    await r.waitFor("the queued batch's prompt", () => prompts(r.log()).length === 2);
+    await r.phase("finished");
+    expect(r.runner.busy()).toBe(false);
+  });
+
+  it("a failure's words are kept to about 200 characters, on one line (Task 10 round 2, 4)", async () => {
+    const codexOn: AgentInfo = { ...codex, installed: true, signedIn: true, path: "/usr/local/bin/codex" };
+    const long = "The service said no.\n" + "detail ".repeat(100);
+    const r = await rig({ turns: [[{ fail: long }]] }, { agents: [claude(), codexOn], settings: { agent: "codex" } });
+    await r.runner.send(await r.batch("One"));
+    await r.phase("failed");
+    const error = r.runner.status().error!;
+    expect(error.length).toBeLessThanOrEqual(200);
+    expect(error.startsWith("The service said no. detail")).toBe(true);
+    expect(error.endsWith("…")).toBe(true);
+    expect(r.runner.status().lines.map((l) => l.text)).toContain(`Codex couldn't finish: ${error}`);
+  });
+
   it("Claude Code is not told about AIR: its initialize is as before, and its ended turn finishes as before", async () => {
     const r = await rig({ turns: [[{ stop: "end_turn" }]] });
     await r.runner.send(await r.batch("One"));
