@@ -102,11 +102,11 @@ interface HeardCall { title: string | null; kind: string | null; raw: unknown; s
 
 /**
  * Task 10 (3): Activity lines from a session's updates, knowing each tool call's story. A tool call that runs a command
- * (a shell title, or an execute call whose input holds a command) says nothing as it is announced: both adapters
- * announce it `pending`, before any ask (Claude even before its input has streamed in). Its one line comes when it runs
- * (`in_progress`, as Codex reports an approved command starting, or `completed`, the one Claude sends), naming the
- * command's first line, clipped, with secrets masked; or, if it ends `failed` without having run, says so. Any other
- * tool call says its title at once, as activityLine does.
+ * (a shell title, or an execute call whose input holds a command) says nothing until it ends. Claude announces it
+ * `pending`, before any ask and before its input has streamed in; Codex announces it `in_progress` when the item starts
+ * (codex-acp 2.7.0 toToolStatus sends no pending), and an ask for that started command can come after. So its one line
+ * comes at `completed`, "Ran a command: <first line, clipped, secrets masked>", or at `failed`, which covers a refusal
+ * or a decline as well as a failed run. Any other tool call says its title at once, as activityLine does.
  */
 export class ActivityTracker {
   private readonly calls = new Map<string, HeardCall>();
@@ -129,7 +129,8 @@ export class ActivityTracker {
     if (!this.isCommand(call)) return u.sessionUpdate === "tool_call" && !known ? activityLine(update, this.root) : null;
     if (call.said) return null;
     const status = u.status;
-    if (status !== "in_progress" && status !== "completed" && status !== "failed") return null;
+    // Only the end counts: Codex reports a command in_progress when it starts, which can be before its approval.
+    if (status !== "completed" && status !== "failed") return null;
     call.said = true;
     const text = this.commandText(call);
     const lead = status === "failed" ? "A command failed or was not run" : "Ran a command";

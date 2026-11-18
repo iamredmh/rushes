@@ -166,11 +166,19 @@ describe("ActivityTracker: a command's line comes once it runs, and names it (Ta
     expect(t.line({ sessionUpdate: "tool_call_update", toolCallId: "b1", status: "completed" })).toBeNull();
   });
 
-  it("Codex: an approved command goes in_progress, then completed: one line, when it starts running", () => {
+  it("Codex: a command starts in_progress (codex-acp sends no pending), may then wait on an ask, then completes: one line, at completion", () => {
     const t = new ActivityTracker(root);
-    expect(t.line({ sessionUpdate: "tool_call", toolCallId: "c1", title: "Run ffprobe", kind: "execute", status: "pending", rawInput: { command: ["ffprobe", "-v", "error", `${root}/a.mp4`] } })).toBeNull();
-    expect(t.line({ sessionUpdate: "tool_call_update", toolCallId: "c1", status: "in_progress" })).toBe("Ran a command: ffprobe -v error a.mp4");
+    // item/started: toToolStatus gives in_progress; an ask for this started command can follow.
+    expect(t.line({ sessionUpdate: "tool_call", toolCallId: "c1", title: "ffprobe -v error a.mp4", kind: "execute", status: "in_progress", rawInput: { command: ["ffprobe", "-v", "error", `${root}/a.mp4`] } })).toBeNull();
+    expect(t.line({ sessionUpdate: "tool_call_update", toolCallId: "c1", status: "in_progress" })).toBeNull();
+    expect(t.line({ sessionUpdate: "tool_call_update", toolCallId: "c1", status: "completed" })).toBe("Ran a command: ffprobe -v error a.mp4");
     expect(t.line({ sessionUpdate: "tool_call_update", toolCallId: "c1", status: "completed" })).toBeNull();
+  });
+
+  it("a Codex command declined at its ask ends failed (declined maps to failed) and never says it ran", () => {
+    const t = new ActivityTracker(root);
+    t.line({ sessionUpdate: "tool_call", toolCallId: "d1", title: "rm -rf build", kind: "execute", status: "in_progress", rawInput: { command: "rm -rf build" } });
+    expect(t.line({ sessionUpdate: "tool_call_update", toolCallId: "d1", status: "failed" })).toBe("A command failed or was not run: rm -rf build");
   });
 
   it("a command refused at its ask, or that fails, never says it ran", () => {
