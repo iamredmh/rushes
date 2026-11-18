@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AGENT_LINES, activityLine } from "../../src/core/agentActivity.js";
+import { AGENT_LINES, ActivityTracker, activityLine } from "../../src/core/agentActivity.js";
 
 const root = "/Users/someone/Work/My Project";
 
@@ -150,5 +150,58 @@ describe("activityLine masks secrets in a command (M3)", () => {
     for (const c of ["npm test", "git commit -m 'add token support'", "ls --tokens-dir out", "echo password reset", "MONKEY=1 node a.js", "ffprobe -v error a.mp4"]) {
       expect(cmd(c)).toBe(`Ran a command: ${c}`);
     }
+  });
+});
+
+describe("ActivityTracker: a command's line comes once it runs, and names it (Task 10, 3)", () => {
+  const feed = (t: ActivityTracker, ...updates: object[]) => updates.map((u) => t.line(u));
+
+  it("Claude: the call starts pending with no input, gets its command, waits on an ask, then completes: one line, at completion", () => {
+    const t = new ActivityTracker(root);
+    expect(feed(t,
+      { sessionUpdate: "tool_call", toolCallId: "b1", title: "Terminal", kind: "execute", status: "pending", rawInput: {} },
+      { sessionUpdate: "tool_call_update", toolCallId: "b1", rawInput: { command: "for f in renders/*.mp4; do ffprobe -v error \"$f\"; done" } },
+    )).toEqual([null, null]);
+    expect(t.line({ sessionUpdate: "tool_call_update", toolCallId: "b1", status: "completed" })).toBe('Ran a command: for f in renders/*.mp4; do ffprobe -v error "$f"; done');
+    expect(t.line({ sessionUpdate: "tool_call_update", toolCallId: "b1", status: "completed" })).toBeNull();
+  });
+
+  it("Codex: an approved command goes in_progress, then completed: one line, when it starts running", () => {
+    const t = new ActivityTracker(root);
+    expect(t.line({ sessionUpdate: "tool_call", toolCallId: "c1", title: "Run ffprobe", kind: "execute", status: "pending", rawInput: { command: ["ffprobe", "-v", "error", `${root}/a.mp4`] } })).toBeNull();
+    expect(t.line({ sessionUpdate: "tool_call_update", toolCallId: "c1", status: "in_progress" })).toBe("Ran a command: ffprobe -v error a.mp4");
+    expect(t.line({ sessionUpdate: "tool_call_update", toolCallId: "c1", status: "completed" })).toBeNull();
+  });
+
+  it("a command refused at its ask, or that fails, never says it ran", () => {
+    const t = new ActivityTracker(root);
+    t.line({ sessionUpdate: "tool_call", toolCallId: "x", title: "Terminal", kind: "execute", status: "pending", rawInput: { command: "rm -rf build" } });
+    expect(t.line({ sessionUpdate: "tool_call_update", toolCallId: "x", status: "failed" })).toBe("A command failed or was not run: rm -rf build");
+  });
+
+  it("the command is its first line, clipped, with secrets masked and the project folder cut", () => {
+    const t = new ActivityTracker(root);
+    t.line({ sessionUpdate: "tool_call", toolCallId: "h", kind: "execute", title: "Terminal", rawInput: { command: `GITHUB_TOKEN=ghp_abc123 node ${root}/run.js\nsecond line` } });
+    expect(t.line({ sessionUpdate: "tool_call_update", toolCallId: "h", status: "completed" })).toBe("Ran a command: GITHUB_TOKEN=••• node run.js");
+    t.line({ sessionUpdate: "tool_call", toolCallId: "l", kind: "execute", title: "Terminal", rawInput: { command: "echo " + "x".repeat(300) } });
+    const long = t.line({ sessionUpdate: "tool_call_update", toolCallId: "l", status: "completed" })!;
+    expect(long.length).toBeLessThanOrEqual(120);
+    expect(long.endsWith("…")).toBe(true);
+  });
+
+  it("a command with no text in its input is named by its title when that is not a generic shell title", () => {
+    const t = new ActivityTracker(root);
+    t.line({ sessionUpdate: "tool_call", toolCallId: "n", kind: "execute", title: "npm test" });
+    expect(t.line({ sessionUpdate: "tool_call_update", toolCallId: "n", status: "completed" })).toBe("Ran a command: npm test");
+    t.line({ sessionUpdate: "tool_call", toolCallId: "m", kind: "execute", title: "Terminal" });
+    expect(t.line({ sessionUpdate: "tool_call_update", toolCallId: "m", status: "completed" })).toBe("Ran a command");
+  });
+
+  it("other tool calls say their title at once, as before; own Rushes tools and MCP calls are not commands", () => {
+    const t = new ActivityTracker(root);
+    expect(t.line({ sessionUpdate: "tool_call", toolCallId: "r", title: `Opened ${root}/a.html`, kind: "read" })).toBe("Opened a.html");
+    expect(t.line({ sessionUpdate: "tool_call", toolCallId: "o", title: "mcp.rushes.rushes_reply", kind: "execute", rawInput: { server: "rushes", tool: "rushes_reply" } })).toBeNull();
+    expect(t.line({ sessionUpdate: "tool_call_update", toolCallId: "o", status: "completed" })).toBeNull();
+    expect(t.line({ sessionUpdate: "plan", entries: [1, 2] })).toBe("Planned 2 steps");
   });
 });

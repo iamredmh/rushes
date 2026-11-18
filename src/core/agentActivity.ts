@@ -88,3 +88,73 @@ export function activityLine(update: unknown, root: string): string | null {
       return null;
   }
 }
+
+/** A command's text from a tool call's input: Claude's `command` string, or Codex's argv. Null when it has none. */
+function commandOf(raw: unknown): string | null {
+  const c = (raw as { command?: unknown } | null | undefined)?.command;
+  if (typeof c === "string") return c;
+  if (Array.isArray(c) && c.every((x) => typeof x === "string")) return c.join(" ");
+  return null;
+}
+
+/** A tool call as the tracker has heard it so far. */
+interface HeardCall { title: string | null; kind: string | null; raw: unknown; said: boolean }
+
+/**
+ * Task 10 (3): Activity lines from a session's updates, knowing each tool call's story. A tool call that runs a command
+ * (a shell title, or an execute call whose input holds a command) says nothing as it is announced: both adapters
+ * announce it `pending`, before any ask (Claude even before its input has streamed in). Its one line comes when it runs
+ * (`in_progress`, as Codex reports an approved command starting, or `completed`, the one Claude sends), naming the
+ * command's first line, clipped, with secrets masked; or, if it ends `failed` without having run, says so. Any other
+ * tool call says its title at once, as activityLine does.
+ */
+export class ActivityTracker {
+  private readonly calls = new Map<string, HeardCall>();
+
+  constructor(private readonly root: string) {}
+
+  line(update: unknown): string | null {
+    if (typeof update !== "object" || update === null) return null;
+    const u = update as Record<string, unknown>;
+    const id = typeof u.toolCallId === "string" ? u.toolCallId : null;
+    if ((u.sessionUpdate !== "tool_call" && u.sessionUpdate !== "tool_call_update") || id === null) return activityLine(update, this.root);
+    const known = this.calls.get(id);
+    const call: HeardCall = {
+      title: typeof u.title === "string" ? u.title : known?.title ?? null,
+      kind: typeof u.kind === "string" ? u.kind : known?.kind ?? null,
+      raw: u.rawInput !== undefined ? u.rawInput : known?.raw,
+      said: known?.said ?? false,
+    };
+    this.calls.set(id, call);
+    if (!this.isCommand(call)) return u.sessionUpdate === "tool_call" && !known ? activityLine(update, this.root) : null;
+    if (call.said) return null;
+    const status = u.status;
+    if (status !== "in_progress" && status !== "completed" && status !== "failed") return null;
+    call.said = true;
+    const text = this.commandText(call);
+    const lead = status === "failed" ? "A command failed or was not run" : "Ran a command";
+    return oneLine(text ? `${lead}: ${text}` : lead, ACTIVITY_LINE_MAX);
+  }
+
+  private isCommand(c: HeardCall): boolean {
+    const title = c.title?.trim() ?? "";
+    if (OWN_TOOL.test(title) || HOUSEKEEPING.has(title)) return false;
+    return SHELL.has(title) || (c.kind === "execute" && (commandOf(c.raw) !== null || (title !== "" && !/^mcp(__|\.)/.test(title) && !isMcpInput(c.raw))));
+  }
+
+  private commandText(c: HeardCall): string | null {
+    const raw = commandOf(c.raw);
+    const title = c.title?.trim() ?? "";
+    const source = raw ?? (title !== "" && !SHELL.has(title) ? title : null);
+    if (source === null) return null;
+    const first = source.split(/\r\n|\r|\n/).map((l) => l.trim()).find((l) => l !== "");
+    if (!first) return null;
+    const text = oneLine(withoutRoot(maskSecrets(first), this.root), COMMAND_MAX);
+    return text === "" || text === "…" ? null : text;
+  }
+}
+
+/** An MCP tool call's input, as Codex sends it ({ server, tool, arguments }): not a command. */
+function isMcpInput(raw: unknown): boolean {
+  return typeof raw === "object" && raw !== null && "server" in raw && "tool" in raw;
+}

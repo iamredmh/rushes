@@ -12,7 +12,7 @@
 //
 // `gen` counts stops and closes. Anything that awaited (a start, a turn's end) checks it afterwards, so
 // work begun before a Stop never changes the state after it.
-import { ACTIVITY_LINE_MAX, activityLine } from "../../core/agentActivity.js";
+import { ACTIVITY_LINE_MAX, ActivityTracker } from "../../core/agentActivity.js";
 import { alwaysLabel, decide } from "../../core/agentRules.js";
 import { NotFoundError, RushesError } from "../../core/errors.js";
 import { oneLine, oneLineOf } from "../../core/labels.js";
@@ -155,7 +155,7 @@ export class AgentRunner {
    * Per adapter: which agent it runs, (Codex only) its MCP calls by tool call id (R16), and its session's mode as
    * last reported (round 2, item 3).
    */
-  private readonly adapters = new WeakMap<AcpConnection, { agent: AgentId; calls: McpCalls; mode: string | null; modeReported: boolean }>();
+  private readonly adapters = new WeakMap<AcpConnection, { agent: AgentId; calls: McpCalls; mode: string | null; modeReported: boolean; activity: ActivityTracker }>();
   private readonly mcp: (root: string) => McpServerSpec;
   private readonly idleMs: number;
   private readonly startMs: number;
@@ -561,7 +561,8 @@ export class AgentRunner {
     this.live.add(conn);
     // R16: Codex names an MCP call's server and tool only in its tool_call update, before the approval comes.
     const calls: McpCalls = new Map();
-    const adapter = { agent, calls, mode: null as string | null, modeReported: false };
+    // Task 10 (3): each adapter's tool calls are followed from announced to run, so a command says it ran only then.
+    const adapter = { agent, calls, mode: null as string | null, modeReported: false, activity: new ActivityTracker(this.store.root) };
     this.adapters.set(conn, adapter);
     conn.on("update", (u: unknown) => {
       if (agent === "codex") noteMcpCall(calls, u);
@@ -787,7 +788,7 @@ export class AgentRunner {
 
   private onUpdate(conn: AcpConnection, update: unknown): void {
     if (conn !== this.conn || this.closed) return;
-    const text = activityLine(update, this.store.root);
+    const text = this.adapters.get(conn)?.activity.line(update) ?? null;
     if (!text) return;
     this.addLine(text, this.current.note);
     this.announce();

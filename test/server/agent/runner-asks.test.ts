@@ -276,6 +276,24 @@ describe("AgentRunner permission asks", () => {
     expect(r.runner.busy()).toBe(false);
   });
 
+  it("Activity says a command ran only once it has, and names it: nothing while its ask waits (Task 10, 3)", async () => {
+    const command = "for f in out/*.mp4; do ffprobe -v error \"$f\"; done";
+    const r = await rig({ turns: [[
+      { update: { sessionUpdate: "tool_call", toolCallId: "t1", title: "Terminal", kind: "execute", status: "pending", rawInput: {} } },
+      { update: { sessionUpdate: "tool_call_update", toolCallId: "t1", rawInput: { command } } },
+      exec(command, "t1"),
+      { update: { sessionUpdate: "tool_call_update", toolCallId: "t1", status: "completed" } },
+      { sleep: 200 },
+    ]] });
+    await r.runner.send(await r.batch("Measure the cuts"));
+    await r.phase("waiting");
+    const texts = () => r.runner.status().lines.map((l) => l.text);
+    expect(texts().some((t) => t.startsWith("Ran a command"))).toBe(false);
+    await r.runner.answer(r.runner.status().asks[0].id, "once");
+    await r.waitFor("the command's line", () => texts().includes(`Ran a command: ${command}`));
+    expect(texts().filter((t) => t.startsWith("Ran a command"))).toHaveLength(1);
+  });
+
   it("an ask is never answered by time passing", async () => {
     const r = await rig({ turns: [[exec("rm -rf build", "rm")]] }, { runner: { idleMs: 50 } });
     await r.runner.send(await r.batch("Move the title"));

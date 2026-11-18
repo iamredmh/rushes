@@ -1775,7 +1775,9 @@ test("Activity shows the run live", async ({ page, startWithAgent }) => {
       { update: { sessionUpdate: "tool_call", toolCallId: "t2", title: "mcp__rushes__rushes_reply" } },
       { update: { sessionUpdate: "tool_call", toolCallId: "t3", title: "mcp.rushes.rushes_working_on" } },
       { update: { sessionUpdate: "tool_call", toolCallId: "t4", title: "ToolSearch" } },
-      { update: { sessionUpdate: "tool_call", toolCallId: "t5", title: "Terminal", rawInput: { command: heredoc } } },
+      { update: { sessionUpdate: "tool_call", toolCallId: "t5", title: "Terminal", kind: "execute", status: "pending", rawInput: { command: heredoc } } },
+      // Task 10 (3): a command says it ran once it has, not as it is announced.
+      { update: { sessionUpdate: "tool_call_update", toolCallId: "t5", status: "completed" } },
       { update: { sessionUpdate: "tool_call", toolCallId: "t6", title: "Edit " + "a very long file name ".repeat(12) + "end" } },
       { sleep: 6000 },
       { stop: "end_turn" },
