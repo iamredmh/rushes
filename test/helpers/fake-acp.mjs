@@ -41,6 +41,12 @@
 //                           send every one of these session/request_permission at once (an agent asking for parallel
 //                           tool calls) and wait until all are answered; each answer is logged, and recorded as above
 //                           when it has `record` as soon as it comes. session/cancel answers all still open as cancelled.
+//   { startedAsk: { toolCall: object, permission: object }, record?: string }
+//                           an ask for a tool call that has already started, as codex-acp 2.7.0 sends it to a client
+//                           that advertised AIR (its "AIR tool-call contract"): first the session/update tool_call
+//                           with `toolCall` (its kind, title, status, rawInput…), then session/request_permission whose
+//                           toolCall is `{ toolCallId, ...permission }` and carries no kind or status of its own.
+//                           The answer is logged and recorded as for `permission`.
 //   { http: { method, path, body } }
 //                           fetch(FAKE_ACP_BASE + path) with a JSON body and wait for it
 //                           (stands in for the agent's rushes_* tools)
@@ -157,6 +163,11 @@ async function runTurn(turn) {
       send({ method: "session/update", params: { sessionId: turn.sessionId, update: step.update } });
     } else if (step.permission) {
       const res = await askClient("session/request_permission", permissionParams(step.permission, turn), turn);
+      if (step.record) log({ recorded: step.record, outcome: res.result?.outcome ?? null });
+    } else if (step.startedAsk) {
+      const { toolCall, permission } = step.startedAsk;
+      send({ method: "session/update", params: { sessionId: turn.sessionId, update: { sessionUpdate: "tool_call", ...toolCall } } });
+      const res = await askClient("session/request_permission", permissionParams({ toolCall: { toolCallId: toolCall.toolCallId, ...permission } }, turn), turn);
       if (step.record) log({ recorded: step.record, outcome: res.result?.outcome ?? null });
     } else if (Array.isArray(step.permissions)) {
       await askAll(step.permissions, turn);

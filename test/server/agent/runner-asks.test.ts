@@ -134,6 +134,64 @@ describe("AgentRunner permission asks", () => {
     expect(r.runner.status().asks).toEqual([]);
   });
 
+  // Task 10 round 2 (1): codex-acp under AIR sends a started item's ask with no kind (index.js 34489, 35238); the kind is
+  // in the tool_call it reported for that item when it started.
+  it("a started Codex edit inside the project, asked with no kind, is allowed under project-edits from its tool_call's kind", async () => {
+    const r = await rig({ turns: [] }, { rules: { permissions: "project-edits" } });
+    await r.scenario({ turns: [[{
+      startedAsk: {
+        toolCall: { toolCallId: "e1", title: "Editing files", kind: "edit", status: "in_progress" },
+        permission: { title: "Editing files", locations: [{ path: join(r.root, "a.html") }] },
+      },
+      record: "edit",
+    }]] });
+    await r.runner.send(await r.batch("Move the title"));
+    await r.phase("finished");
+    expect(recorded(r.log(), "edit")).toEqual(ALLOW_ONCE);
+    expect(r.runner.status().asks).toEqual([]);
+  });
+
+  it("a started Codex command, asked with no kind, matches its Always rule from its tool_call's kind", async () => {
+    const command = "npx hyperframes render out/film.mp4";
+    const r = await rig({ turns: [] }, { rules: { always: [{ kind: "execute", command: "npx hyperframes" }] } });
+    await r.scenario({ turns: [[{
+      startedAsk: {
+        toolCall: { toolCallId: "c1", title: command, kind: "execute", status: "in_progress", rawInput: { command, cwd: r.root } },
+        permission: { title: command, rawInput: { command, cwd: r.root } },
+      },
+      record: "render",
+    }]] });
+    await r.runner.send(await r.batch("Render it"));
+    await r.phase("finished");
+    expect(recorded(r.log(), "render")).toEqual(ALLOW_ONCE);
+  });
+
+  it("an ask with no kind whose tool_call never came, or came for another id, stays other and asks (fails closed)", async () => {
+    const r = await rig({ turns: [] }, { rules: { permissions: "project-edits" } });
+    await r.scenario({ turns: [[
+      { permission: { toolCall: { toolCallId: "lone", title: "Editing files", locations: [{ path: join(r.root, "a.html") }] } }, record: "lone" },
+      {
+        startedAsk: {
+          toolCall: { toolCallId: "e1", title: "Editing files", kind: "edit", status: "in_progress" },
+          permission: { title: "Editing files", locations: [{ path: join(r.root, "b.html") }] },
+        },
+        record: "e1",
+      },
+      { permission: { toolCall: { toolCallId: "e2", title: "Editing files", locations: [{ path: join(r.root, "c.html") }] } }, record: "other-id" },
+    ]] });
+    await r.runner.send(await r.batch("Move the title"));
+    await r.phase("waiting");
+    // No kind to go on: Rushes's rules read it as "other", so it asks.
+    expect(r.runner.status().asks.map((a) => a.kind)).toEqual([null]);
+    await r.runner.answer(r.runner.status().asks[0].id, "once");
+    // e1 borrows its own tool_call's kind and goes through; e2 can't borrow e1's.
+    await r.waitFor("e2's ask", () => r.runner.status().asks.length === 1 && recorded(r.log(), "e1"));
+    expect(recorded(r.log(), "e1")).toEqual(ALLOW_ONCE);
+    expect(r.runner.status().asks.map((a) => a.kind)).toEqual([null]);
+    await r.runner.answer(r.runner.status().asks[0].id, "no");
+    await r.phase("finished");
+  });
+
   it("a command asks; Allow once answers the agent and the run carries on", async () => {
     const r = await rig({ turns: [[exec("npm run build", "run"), { sleep: 150 }]] });
     const heard: AgentStatus[] = [];

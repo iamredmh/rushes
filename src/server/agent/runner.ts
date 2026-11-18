@@ -23,6 +23,7 @@ import type { ChangeEvent, Store } from "../../core/store.js";
 import { logBookFor } from "../logbook.js";
 import { AcpConnection, type AcpPermissionOutcome, type AcpPermissionParams, type AdapterSpec, type McpServerSpec } from "./acp.js";
 import { ASK_MODE, adapterSpec, clientMeta, rushesMcp, sessionSetup } from "./adapters.js";
+import { noteToolCall, withSeen, type SeenCalls } from "./seenCalls.js";
 import { isOwnRushesTool, noteMcpCall, type McpCalls } from "./ownTools.js";
 import { PermissionBroker, addRule, allowOutcome, dropRule, toRequest, type AskChoice, type PendingAsk } from "./broker.js";
 import { detectAgents, type AgentInfo } from "./detect.js";
@@ -158,7 +159,7 @@ export class AgentRunner {
    * Per adapter: which agent it runs, (Codex only) its MCP calls by tool call id (R16), and its session's mode as
    * last reported (round 2, item 3).
    */
-  private readonly adapters = new WeakMap<AcpConnection, { agent: AgentId; calls: McpCalls; mode: string | null; modeReported: boolean; activity: ActivityTracker }>();
+  private readonly adapters = new WeakMap<AcpConnection, { agent: AgentId; calls: McpCalls; seen: SeenCalls; mode: string | null; modeReported: boolean; activity: ActivityTracker }>();
   private readonly mcp: (root: string) => McpServerSpec;
   private readonly idleMs: number;
   private readonly startMs: number;
@@ -565,10 +566,13 @@ export class AgentRunner {
     // R16: Codex names an MCP call's server and tool only in its tool_call update, before the approval comes.
     const calls: McpCalls = new Map();
     // Task 10 (3): each adapter's tool calls are followed from announced to run, so a command says it ran only then.
-    const adapter = { agent, calls, mode: null as string | null, modeReported: false, activity: new ActivityTracker(this.store.root) };
+    // Task 10 round 2 (1): every tool call's kind, input and paths, so an ask that lacks them (Codex under AIR) gets them.
+    const seen: SeenCalls = new Map();
+    const adapter = { agent, calls, seen, mode: null as string | null, modeReported: false, activity: new ActivityTracker(this.store.root) };
     this.adapters.set(conn, adapter);
     conn.on("update", (u: unknown) => {
       if (agent === "codex") noteMcpCall(calls, u);
+      noteToolCall(seen, u);
       const m = u as { sessionUpdate?: unknown; currentModeId?: unknown } | null;
       if (m?.sessionUpdate === "current_mode_update" && typeof m.currentModeId === "string") {
         adapter.mode = m.currentModeId;
@@ -594,11 +598,13 @@ export class AgentRunner {
    * The agent asks to do something. Allowed by the project's rules: yes at once, no ask shown. Otherwise the
    * ask waits in the broker for the user. Asks from an adapter that is going (Stop, close, replaced) get "cancelled".
    */
-  private async onPermission(conn: AcpConnection, p: AcpPermissionParams): Promise<AcpPermissionOutcome> {
+  private async onPermission(conn: AcpConnection, asked: AcpPermissionParams): Promise<AcpPermissionOutcome> {
     const live = () => !this.closed && !this.stopping && conn === this.conn && !conn.hasExited;
     if (!live()) return CANCELLED;
-    // R16: Rushes's own MCP tools never ask, under any permission level.
     const adapter = this.adapters.get(conn);
+    // What the ask lacks (a kind, a command, paths) comes from the tool call this adapter reported for it (seenCalls.ts).
+    const p = adapter ? withSeen(asked, adapter.seen) : asked;
+    // R16: Rushes's own MCP tools never ask, under any permission level.
     if (adapter && isOwnRushesTool(adapter.agent, this.store.root, p, adapter.calls)) return allowOutcome(p.options);
     // The adapter hears "yes" before an Always rule is written: wait for that write, then read the rules.
     await this.ruleWrite;
