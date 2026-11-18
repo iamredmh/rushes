@@ -1243,8 +1243,10 @@ test("two asks stack and answer separately", async ({ page, startWithAgent }) =>
   await expect.poll(() => recorded(rushes)).toEqual({ chained: { outcome: "selected", optionId: "reject-once" }, hyperframes: { outcome: "selected", optionId: "allow-once" } });
   expect(answers).toEqual([{ id: "ask_1", body: { choice: c1.choice } }, { id: "ask_2", body: { choice: c2.choice } }]);
   const rule = { kind: "execute", command: "npx hyperframes" };
-  expect((await rushes.api("GET", "/api/agent")).status.always).toEqual([rule]);
-  expect(JSON.parse(await readFile(rulesPath(rushes.root, rushes.configDir), "utf8")).always).toEqual([rule]);
+  // The agent is told first and Rushes then writes the rule to the user's file, so the rule shows up a moment after the
+  // agent has its answer: wait for it, as the card does, rather than reading it at once.
+  await expect.poll(async () => (await rushes.api("GET", "/api/agent")).status.always).toEqual([rule]);
+  await expect.poll(async () => JSON.parse(await readFile(rulesPath(rushes.root, rushes.configDir), "utf8")).always).toEqual([rule]);
   await expect(chip(page)).toHaveText("Claude Code finished", { timeout: 10_000 });
 });
 
