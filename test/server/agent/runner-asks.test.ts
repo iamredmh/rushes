@@ -166,6 +166,42 @@ describe("AgentRunner permission asks", () => {
     expect(recorded(r.log(), "render")).toEqual(ALLOW_ONCE);
   });
 
+  // Round 3: codex-acp's tool_call for a started command takes its kind from the parsed action (read, search), but without
+  // AIR the ask for it is always kind "execute" (applyStandardFields, CommandReporter.permission). It stays a command.
+  for (const [kind, command, location] of [["read", "cat out/x.txt", "out/x.txt"], ["search", "rg foo", null]] as const) {
+    it(`a started command parsed as ${kind} (${command}) asks under project-edits: it is a command, not a ${kind}`, async () => {
+      const r = await rig({ turns: [] }, { rules: { permissions: "project-edits" } });
+      await r.scenario({ turns: [[{
+        startedAsk: {
+          toolCall: { toolCallId: "k1", title: kind === "read" ? "Read file 'out/x.txt'" : "Search foo", kind, status: "in_progress", ...(location ? { locations: [{ path: join(r.root, location) }] } : {}) },
+          permission: { title: command, rawInput: { command, cwd: r.root } },
+        },
+        record: "k1",
+      }]] });
+      await r.runner.send(await r.batch("Look"));
+      await r.phase("waiting");
+      expect(r.runner.status().asks).toMatchObject([{ kind: "execute", command }]);
+      await r.runner.answer(r.runner.status().asks[0].id, "no");
+      await r.phase("finished");
+    });
+  }
+
+  it("an execute Always rule still matches a started command parsed as a read, here of a file outside the project", async () => {
+    // Outside the project a read would ask, so only the execute rule can let it through.
+    const r = await rig({ turns: [] }, { rules: { permissions: "project-edits", always: [{ kind: "execute", command: "cat /etc/hosts" }] } });
+    await r.scenario({ turns: [[{
+      startedAsk: {
+        toolCall: { toolCallId: "k2", title: "Read file '/etc/hosts'", kind: "read", status: "in_progress", locations: [{ path: "/etc/hosts" }] },
+        permission: { title: "cat /etc/hosts", rawInput: { command: "cat /etc/hosts", cwd: r.root } },
+      },
+      record: "k2",
+    }]] });
+    await r.runner.send(await r.batch("Look"));
+    await r.phase("finished");
+    expect(recorded(r.log(), "k2")).toEqual(ALLOW_ONCE);
+    expect(r.runner.status().asks).toEqual([]);
+  });
+
   it("an ask with no kind whose tool_call never came, or came for another id, stays other and asks (fails closed)", async () => {
     const r = await rig({ turns: [] }, { rules: { permissions: "project-edits" } });
     await r.scenario({ turns: [[

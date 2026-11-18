@@ -6,13 +6,25 @@ import type { AcpPermissionParams } from "../../../src/server/agent/acp.js";
 const ask = (toolCall: AcpPermissionParams["toolCall"]): AcpPermissionParams => ({ sessionId: "s", toolCall, options: [] });
 
 describe("withSeen", () => {
-  it("fills a missing kind, command and paths from the same id's tool call and its updates", () => {
+  it("a started command whose tool call was parsed as a read is still a command: execute, with its command and no paths", () => {
     const seen: SeenCalls = new Map();
     noteToolCall(seen, { sessionUpdate: "tool_call", toolCallId: "c1", kind: "read", title: "Read file 'a.txt'", status: "in_progress", locations: [{ path: "/p/a.txt" }] });
     noteToolCall(seen, { sessionUpdate: "tool_call_update", toolCallId: "c1", rawInput: { command: "cat a.txt", cwd: "/p" } });
     expect(withSeen(ask({ toolCallId: "c1", title: "cat a.txt", rawInput: { cwd: "/p" }, locations: [] }), seen).toolCall).toEqual({
-      toolCallId: "c1", title: "cat a.txt", kind: "read", rawInput: { cwd: "/p", command: "cat a.txt" }, locations: [{ path: "/p/a.txt" }],
+      toolCallId: "c1", title: "cat a.txt", kind: "execute", rawInput: { cwd: "/p", command: "cat a.txt" }, locations: [],
     });
+  });
+
+  it("search, execute and an untyped tool call become execute; only an edit stays edit, with its paths", () => {
+    const seen: SeenCalls = new Map();
+    noteToolCall(seen, { sessionUpdate: "tool_call", toolCallId: "s", kind: "search", rawInput: { command: "rg foo" } });
+    noteToolCall(seen, { sessionUpdate: "tool_call", toolCallId: "x", kind: "execute", rawInput: { command: "make" } });
+    noteToolCall(seen, { sessionUpdate: "tool_call", toolCallId: "u", title: "Something" });
+    noteToolCall(seen, { sessionUpdate: "tool_call", toolCallId: "e", kind: "edit", title: "Editing files", locations: [{ path: "/p/b.txt" }] });
+    expect(withSeen(ask({ toolCallId: "s", title: "rg foo" }), seen).toolCall).toEqual({ toolCallId: "s", title: "rg foo", kind: "execute", rawInput: { command: "rg foo" } });
+    expect(withSeen(ask({ toolCallId: "x", title: "make" }), seen).toolCall.kind).toBe("execute");
+    expect(withSeen(ask({ toolCallId: "u", title: "Something" }), seen).toolCall.kind).toBe("execute");
+    expect(withSeen(ask({ toolCallId: "e", title: "Editing files" }), seen).toolCall).toEqual({ toolCallId: "e", title: "Editing files", kind: "edit", locations: [{ path: "/p/b.txt" }] });
   });
 
   it("never changes what the ask carries", () => {

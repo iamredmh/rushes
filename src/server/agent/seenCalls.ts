@@ -8,6 +8,13 @@
 // Without a kind Rushes's rules read the ask as "other": project-edits would ask for every edit in the project and no
 // Always rule would match. So an ask is completed from the tool_call the same adapter reported for the same
 // toolCallId: only fields the ask lacks, never one it carries. An ask with no such tool_call stays as it came.
+//
+// Round 3: the kind is not copied as it is. A started command's tool_call takes its kind from how Codex parsed the
+// command (commandActionFacts, 34541-34556: a read is "read" with the file as a location, a search "search", a listing
+// "read"), but the ask for it is a command: without AIR, applyStandardFields gives every command ask kind "execute"
+// (34208, 34292, CommandReporter.permission 34494-34503). Copied, a started `cat` or `rg` would become a read or a
+// search, which project-edits allows unasked. So only "edit" stays "edit" (a file change, with its paths); every other
+// started item is "execute", with its command, and never takes a read's paths.
 import type { AcpPermissionParams } from "./acp.js";
 
 type Seen = { kind?: string; rawInput?: unknown; locations?: { path: string }[] };
@@ -44,7 +51,9 @@ export function withSeen(p: AcpPermissionParams, seen: SeenCalls): AcpPermission
   const s = seen.get(p.toolCall.toolCallId);
   if (!s) return p;
   const tc = { ...p.toolCall };
-  if ((tc.kind === undefined || tc.kind === null || tc.kind === "") && s.kind) tc.kind = s.kind;
+  // A file change is an edit; anything else that started (a command, however Codex parsed it) is a command.
+  const edit = s.kind === "edit";
+  if (tc.kind === undefined || tc.kind === null || tc.kind === "") tc.kind = edit ? "edit" : "execute";
   const raw = record(tc.rawInput);
   const seenRaw = record(s.rawInput);
   if (tc.rawInput === undefined || tc.rawInput === null) {
@@ -52,6 +61,7 @@ export function withSeen(p: AcpPermissionParams, seen: SeenCalls): AcpPermission
   } else if (raw && raw.command === undefined && seenRaw?.command !== undefined) {
     tc.rawInput = { ...raw, command: seenRaw.command };
   }
-  if ((tc.locations === undefined || tc.locations.length === 0) && s.locations) tc.locations = s.locations;
+  // Only an edit's paths: a read's path would make a command look like a read in the project.
+  if (edit && (tc.locations === undefined || tc.locations.length === 0) && s.locations) tc.locations = s.locations;
   return { ...p, toolCall: tc };
 }

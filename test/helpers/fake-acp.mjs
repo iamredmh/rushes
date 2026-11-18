@@ -46,7 +46,9 @@
 //                           that advertised AIR (its "AIR tool-call contract"): first the session/update tool_call
 //                           with `toolCall` (its kind, title, status, rawInput…), then session/request_permission whose
 //                           toolCall is `{ toolCallId, ...permission }` and carries no kind or status of its own.
-//                           The answer is logged and recorded as for `permission`.
+//                           The answer is logged and recorded as for `permission`. For a command codex-acp parsed as a
+//                           read, search or listing, `toolCall` has that kind (read, search) and, for a read, the file as
+//                           a location; the ask still has no kind, and `rawInput.command` holds the command.
 //   { http: { method, path, body } }
 //                           fetch(FAKE_ACP_BASE + path) with a JSON body and wait for it
 //                           (stands in for the agent's rushes_* tools)
