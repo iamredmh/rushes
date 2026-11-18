@@ -126,6 +126,13 @@ export class ActivityTracker {
       said: known?.said ?? false,
     };
     this.calls.set(id, call);
+    if (this.isLookup(call) && !this.isCommand(call)) {
+      // Round 3: a read or a search (Codex's parse of a `cat` or `rg` it starts before its ask) says its title once it
+      // completes, the same rule as a command.
+      if (call.said || u.status !== "completed" || call.title === null) return null;
+      call.said = true;
+      return activityLine({ sessionUpdate: "tool_call", title: call.title }, this.root);
+    }
     if (!this.isCommand(call)) return u.sessionUpdate === "tool_call" && !known ? activityLine(update, this.root) : null;
     if (call.said) return null;
     const status = u.status;
@@ -135,6 +142,10 @@ export class ActivityTracker {
     const text = this.commandText(call);
     const lead = status === "failed" ? "A command failed or was not run" : "Ran a command";
     return oneLine(text ? `${lead}: ${text}` : lead, ACTIVITY_LINE_MAX);
+  }
+
+  private isLookup(c: HeardCall): boolean {
+    return c.kind === "read" || c.kind === "search";
   }
 
   private isCommand(c: HeardCall): boolean {

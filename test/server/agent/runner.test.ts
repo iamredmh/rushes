@@ -278,7 +278,8 @@ describe("AgentRunner", () => {
     const texts = r.runner.status().lines.map((l) => l.text);
     expect(texts).toContain("Opened compositions/engine-sizes.html");
     expect(texts).toContain("Planned 3 steps");
-    expect(texts.indexOf("Opened compositions/engine-sizes.html")).toBeLessThan(texts.indexOf("Planned 3 steps"));
+    // A read says its title once it completes (round 3), after the plan that came between.
+    expect(texts.indexOf("Planned 3 steps")).toBeLessThan(texts.indexOf("Opened compositions/engine-sizes.html"));
     expect(texts.some((t) => t.includes("Looking"))).toBe(false);
     expect(texts.some((t) => t.includes(r.root))).toBe(false);
     for (const l of r.runner.status().lines) expect(Number.isNaN(Date.parse(l.at))).toBe(false);

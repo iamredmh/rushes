@@ -205,9 +205,21 @@ describe("ActivityTracker: a command's line comes once it runs, and names it (Ta
     expect(t.line({ sessionUpdate: "tool_call_update", toolCallId: "m", status: "completed" })).toBe("Ran a command");
   });
 
+  it("a read or a search says its title once it completes, not as it starts: Codex reports a parsed `cat` or `rg` in_progress before its ask (round 3)", () => {
+    const t = new ActivityTracker(root);
+    expect(t.line({ sessionUpdate: "tool_call", toolCallId: "r", title: `Read file '${root}/out/x.txt'`, kind: "read", status: "in_progress", locations: [{ path: `${root}/out/x.txt` }] })).toBeNull();
+    expect(t.line({ sessionUpdate: "tool_call_update", toolCallId: "r", status: "in_progress" })).toBeNull();
+    expect(t.line({ sessionUpdate: "tool_call_update", toolCallId: "r", status: "completed" })).toBe("Read file 'out/x.txt'");
+    expect(t.line({ sessionUpdate: "tool_call_update", toolCallId: "r", status: "completed" })).toBeNull();
+    expect(t.line({ sessionUpdate: "tool_call", toolCallId: "s", title: "Search foo", kind: "search", status: "in_progress" })).toBeNull();
+    expect(t.line({ sessionUpdate: "tool_call_update", toolCallId: "s", status: "failed" })).toBeNull();
+  });
+
   it("other tool calls say their title at once, as before; own Rushes tools and MCP calls are not commands", () => {
     const t = new ActivityTracker(root);
-    expect(t.line({ sessionUpdate: "tool_call", toolCallId: "r", title: `Opened ${root}/a.html`, kind: "read" })).toBe("Opened a.html");
+    expect(t.line({ sessionUpdate: "tool_call", toolCallId: "r", title: `Opened ${root}/a.html`, kind: "read" })).toBeNull();
+    expect(t.line({ sessionUpdate: "tool_call_update", toolCallId: "r", status: "completed" })).toBe("Opened a.html");
+    expect(t.line({ sessionUpdate: "tool_call", toolCallId: "w", title: `Wrote ${root}/b.html`, kind: "edit" })).toBe("Wrote b.html");
     expect(t.line({ sessionUpdate: "tool_call", toolCallId: "o", title: "mcp.rushes.rushes_reply", kind: "execute", rawInput: { server: "rushes", tool: "rushes_reply" } })).toBeNull();
     expect(t.line({ sessionUpdate: "tool_call_update", toolCallId: "o", status: "completed" })).toBeNull();
     expect(t.line({ sessionUpdate: "plan", entries: [1, 2] })).toBe("Planned 2 steps");
