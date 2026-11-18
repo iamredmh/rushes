@@ -1538,6 +1538,27 @@ test("a question shows Needs you and the answer goes to the agent", async ({ pag
   await shootNote(page, c, "note-answered-1440");
 });
 
+test("while the agent works on an answer, the note says it is with the agent by name (Task 10, 2)", async ({ page, startWithAgent }) => {
+  const rushes = await startWithAgent({ turns: [] });
+  const id = await readyToSend(rushes);
+  await rushes.setScenario({ turns: [[{ http: { method: "POST", path: "/api/replies", body: { replies: [{ id, reply: "Which end card?" }] } } }, { stop: "end_turn" }], [{ sleep: 4000 }, { stop: "end_turn" }]] });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await rushes.api("POST", "/api/batches", {});
+  const c = card(page, id);
+  await expect(badgeOf(c)).toHaveText("Needs you", { timeout: 10_000 });
+  await replyBox(c).fill("The white one.");
+  await replyBox(c).press("Enter");
+  // The follow-up turn runs: the note is with Claude Code, by name, and the box still answers it.
+  await expect.poll(async () => (await prompts(rushes)).length, { timeout: 5_000 }).toBe(2);
+  await expect(badgeOf(c)).toHaveText("With Claude Code");
+  await expect(badgeOf(c)).toBeVisible();
+  await expect(replyBox(c)).toHaveAttribute("placeholder", "Answer Claude Code");
+  expect((await rushes.api("GET", "/api/agent")).status.followUps).toEqual([id]);
+  await noteFits(page, c);
+  await shootNote(page, c, "note-follow-up-1440");
+});
+
 test("working note shows what the agent is doing", async ({ page, startWithAgent }) => {
   const rushes = await startWithAgent({ turns: [] });
   const id = await readyToSend(rushes);

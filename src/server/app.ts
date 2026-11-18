@@ -384,7 +384,7 @@ export const SEND_WAIT_MS = 5_000;
 
 // `asked`: with no runner there is nothing to set up, so Send never opens the first-Send sheet.
 const OFF_STATUS: AgentStatus = {
-  on: false, agent: null, phase: "off", batches: [], current: { note: null, doing: null }, asks: [], lines: [], error: null, session: null,
+  on: false, agent: null, phase: "off", batches: [], followUps: [], current: { note: null, doing: null }, asks: [], lines: [], error: null, session: null,
   asked: true, permissions: "project-edits", always: [],
 };
 

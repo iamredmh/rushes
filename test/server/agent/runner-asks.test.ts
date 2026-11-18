@@ -291,6 +291,23 @@ describe("AgentRunner permission asks", () => {
 });
 
 describe("AgentRunner answers on notes", () => {
+  it("status.followUps lists the notes whose answer is queued or being worked on, and empties when it ends (Task 10, 2)", async () => {
+    const r = await rig({ turns: [[{ sleep: 300 }], [{ sleep: 600 }]] });
+    const b = await r.batch("Move the title");
+    const id = b.noteIds[0];
+    await r.runner.send(b);
+    await r.phase("working");
+    expect(r.runner.status().followUps).toEqual([]);
+    await r.asked(id);
+    await r.answerOn(id, "The top one");
+    // Queued behind the batch's turn, then its own.
+    await r.waitFor("the follow-up to be queued", () => r.runner.status().followUps.includes(id));
+    await r.waitFor("the follow-up's turn", () => prompts(r.log()).length === 2);
+    expect(r.runner.status()).toMatchObject({ phase: "working", batches: [], followUps: [id] });
+    await r.waitFor("the follow-up to end", () => !r.runner.busy());
+    expect(r.runner.status().followUps).toEqual([]);
+  });
+
   it("an answer on a note during a turn is sent after the turn ends", async () => {
     const r = await rig({ turns: [[{ sleep: 300 }], []] });
     const b = await r.batch("Move the title");

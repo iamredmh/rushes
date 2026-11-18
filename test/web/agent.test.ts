@@ -8,7 +8,7 @@ import {
 import type { AgentInfo, AgentStatus, Note, PendingAsk } from "../../web/src/types.js";
 
 const status = (over: Partial<AgentStatus> = {}): AgentStatus => ({
-  on: true, agent: "claude", phase: "idle", batches: [], current: { note: null, doing: null }, asks: [], lines: [], error: null, session: null, asked: true,
+  on: true, agent: "claude", phase: "idle", batches: [], followUps: [], current: { note: null, doing: null }, asks: [], lines: [], error: null, session: null, asked: true,
   permissions: "project-edits", always: [], ...over,
 });
 
@@ -568,6 +568,15 @@ describe("noteAgentBadge priority (task 6)", () => {
     const followUp = status({ phase: "working", batches: [], current: { note: "n1", doing: null } });
     expect(replyBoxShows(note("n1", { batch: "b1" }), followUp)).toBe(true);
     expect(answerPlaceholder(note("n1", { batch: "b1" }), followUp)).toBe("Answer Claude Code");
+  });
+
+  it("a follow-up queued or running for the note: the agent has it, before it says what it is doing (Task 10, 2)", () => {
+    const running = status({ phase: "working", batches: [], followUps: ["n1"], current: { note: null, doing: null } });
+    expect(noteAgentBadge(note("n1", { batch: "b1" }), running)).toEqual({ kind: "with", text: "With Claude Code" });
+    expect(replyBoxShows(note("n1", { batch: "b1" }), running)).toBe(true);
+    expect(answerPlaceholder(note("n1", { batch: "b1" }), running)).toBe("Answer Claude Code");
+    // Another note of the same batch, with no follow-up of its own, is not held by it.
+    expect(noteAgentBadge(note("n2", { batch: "b1" }), running)).toEqual({ kind: "with", text: "With your agent" });
   });
 
   it("an answer to the agent's question names it while Send to AI is on with the conversation kept: the answer goes there", () => {

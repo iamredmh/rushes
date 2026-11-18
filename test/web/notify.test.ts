@@ -5,7 +5,7 @@ import { NOTHING_HEARD, notices, outOfSight, type Heard } from "../../web/src/no
 import type { AgentStatus, PendingAsk } from "../../web/src/types.js";
 
 const status = (over: Partial<AgentStatus> = {}): AgentStatus => ({
-  on: true, agent: "claude", phase: "working", batches: ["b_1"], current: { note: null, doing: null }, asks: [], lines: [], error: null, session: null, asked: true,
+  on: true, agent: "claude", phase: "working", batches: ["b_1"], followUps: [], current: { note: null, doing: null }, asks: [], lines: [], error: null, session: null, asked: true,
   permissions: "project-edits", always: [], ...over,
 });
 const ask = (id: string): PendingAsk => ({ id, title: "Run ffprobe", kind: "execute", command: "ffprobe renders/a.mp4", always: "", at: "2026-11-17T10:00:00.000Z" });

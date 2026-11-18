@@ -39,6 +39,8 @@ export interface AgentStatus {
   phase: AgentPhase;
   /** The batch being worked on, then the ones queued behind it, by id. */
   batches: string[];
+  /** Task 10 (2): the notes whose answer the agent is working on or has queued (follow-up turns), by id. */
+  followUps: string[];
   current: { note: string | null; doing: string | null };
   asks: PendingAsk[];
   lines: ActivityLine[];
@@ -242,6 +244,7 @@ export class AgentRunner {
       agent: this.settings?.agent ?? null,
       phase: !on && !this.busy() ? "off" : this.broker.size > 0 ? "waiting" : this.phase,
       batches: jobs.filter((j) => j.kind === "batch").map((j) => j.batchId),
+      followUps: jobs.flatMap((j) => (j.kind === "followUp" && j.note ? [j.note] : [])),
       current: { ...this.current },
       asks: this.broker.pending(),
       lines: this.lines.slice(),

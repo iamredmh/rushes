@@ -76,13 +76,13 @@ export const canStop = (phase: AgentPhase): boolean => RUNNING.has(phase);
 export type NoteBadge = { kind: "working" | "needsYou" | "with" | "fixed"; text: string };
 
 /**
- * I3: the agent Send to AI uses really has this sent note: a run holds its batch (queued, starting or on it), or a turn
- * is on the note itself (a follow-up). A note sent by copying a prompt, or in a batch whose hand-over was refused, is
- * with "your agent", whatever the switch says.
+ * I3: the agent Send to AI uses really has this sent note: a run holds its batch (queued, starting or on it), a turn is
+ * on the note itself, or the user's answer on it is queued or being worked on (a follow-up, Task 10). A note sent by
+ * copying a prompt, or in a batch whose hand-over was refused, is with "your agent", whatever the switch says.
  */
 export function agentHolds(n: NoteLite, s: AgentStatus | null): boolean {
   if (!s || noteState(n) !== "sent") return false;
-  return (n.batch !== null && s.batches.includes(n.batch)) || (RUNNING.has(s.phase) && s.current.note === n.id);
+  return (n.batch !== null && s.batches.includes(n.batch)) || (RUNNING.has(s.phase) && s.current.note === n.id) || (s.followUps ?? []).includes(n.id);
 }
 
 /** The badge on a note's card, by priority: needs you, being worked on, with the agent, fixed. Null for none. */
