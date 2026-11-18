@@ -423,14 +423,14 @@ describe("AgentRunner", () => {
     expect(texts().some((t) => t.startsWith("2 notes"))).toBe(false);
 
     d.release();
-    await r.waitFor("the follow-up to start", () => texts().includes(`Claude Code picked up your answer on ${asked}`));
+    await r.waitFor("the follow-up to start", () => texts().includes("Claude Code picked up your answer on 'Move the title'"));
     expect((await notesOf(r.store, [asked])).map(noteState)).toEqual(["sent"]);
     const sent = prompts(r.log());
     expect(sent).toHaveLength(2);
     expect(sent[1].params.prompt[0].text).toContain(`The user answered on note ${asked} ("Move the title"): The top one`);
     expect(states).not.toContain("todo");
     // The follow-up turn itself, left untouched, still gives its own note back (M3).
-    await r.waitFor("the follow-up to end", () => texts().includes(`Claude Code finished your answer on ${asked}`));
+    await r.waitFor("the follow-up to end", () => texts().includes("Claude Code finished your answer on 'Move the title'"));
     await r.phase("finished");
     expect((await notesOf(r.store, [asked])).map(noteState)).toEqual(["todo"]);
   });
@@ -468,7 +468,7 @@ describe("AgentRunner", () => {
     // The follow-up is ignored: M3 gives the note back, with the user's answer as its last reply.
     await r.store.update("notes", (f) => void addUserReply(f, id, "The top one"));
     r.store.emit("user-reply", { note: id, text: "The top one" });
-    await r.waitFor("the follow-up to end", () => texts().includes(`Claude Code finished your answer on ${id}`));
+    await r.waitFor("the follow-up to end", () => texts().includes("Claude Code finished your answer on 'Move the title'"));
     await r.phase("finished");
     expect((await notesOf(r.store, [id])).map(noteState)).toEqual(["todo"]);
     // Sent again in b_2 and left untouched: back to to do, not stranded with the agent.
@@ -495,7 +495,7 @@ describe("AgentRunner", () => {
     await r.settings({ session: null });
     await r.store.update("notes", (f) => void addUserReply(f, id, "The top one"));
     r.store.emit("user-reply", { note: id, text: "The top one" });
-    await r.waitFor("the park", () => texts().includes(`Your answer on ${id} is saved. Press Send to hand it to Claude Code.`));
+    await r.waitFor("the park", () => texts().includes("Your answer on 'Move the title' is saved. Press Send to hand it to Claude Code."));
     expect((await notesOf(r.store, [id])).map(noteState)).toEqual(["todo"]);
     const b2 = await r.batch();
     expect(b2.noteIds).toEqual([id]);
@@ -529,7 +529,7 @@ describe("AgentRunner", () => {
     r.store.emit("user-reply", { note: id, text: "Up." });
     r.store.emit("user-reply", { note: id, text: "And bigger." });
     await r.waitFor("the second answer to reach detect", () => calls >= 3);
-    const finishedAnswers = () => r.runner.status().lines.filter((l) => l.text === `Claude Code finished your answer on ${id}`).length;
+    const finishedAnswers = () => r.runner.status().lines.filter((l) => l.text === "Claude Code finished your answer on 'Move the title'").length;
     // The batch turn ends, then the first answer's turn ends untouched while the second is still being accepted.
     await r.waitFor("the first answer's turn to end", () => finishedAnswers() === 1);
     await r.phase("finished");

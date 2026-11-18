@@ -89,6 +89,9 @@ const EXIT_WAIT_MS = 4000;
 const CANCELLED: AcpPermissionOutcome = { outcome: "cancelled" };
 /** Why a send or follow-up is refused once close() has begun. */
 const CLOSING = "Rushes is closing";
+/** An answer's name in Activity (Task 10, 4): its follow-up's label, or "your answer on a note" when it was never read. */
+const answerOf = (job: TurnJob | null): string => job?.label ?? "your answer on a note";
+const capitalised = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
 /** I1: Send to AI is on in the project, but the user's own rules file has no answer to the first-Send sheet. */
 export const NOT_SET_UP = "Send to AI is not set up";
 const OFF = "Send to AI is off";
@@ -330,7 +333,7 @@ export class AgentRunner {
     if ("park" in r) {
       await this.recall({ batches: [], notes: [{ id: e.note, batch: r.park.batch }] });
       if (this.closed) return;
-      this.addLine(`Your answer on ${e.note} is saved. Press Send to hand it to ${r.park.name}.`, e.note);
+      this.addLine(`${capitalised(answerOf(job as TurnJob | null))} is saved. Press Send to hand it to ${r.park.name}.`, e.note);
       this.announce();
       return;
     }
@@ -342,7 +345,7 @@ export class AgentRunner {
     }
     // Quiet when Send to AI is off, and when the user's own Stop cut it short.
     if (r.handedTo !== null || r.stopped || r.why === "Send to AI is off") return;
-    this.addLine(`Your answer on ${e.note} was not sent: ${r.why}`, e.note);
+    this.addLine(`${capitalised(answerOf(job as TurnJob | null))} was not sent: ${r.why}`, e.note);
     this.announce();
   }
 

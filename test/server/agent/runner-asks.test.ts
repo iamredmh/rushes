@@ -447,7 +447,7 @@ describe("AgentRunner answers on notes", () => {
     const b1 = await r.batch("One", "Two");
     expect((await r.store.read("agent")).session).toBeNull();
     await r.answerOn(b1.noteIds[0], "Yes");
-    const line = `Your answer on ${b1.noteIds[0]} is saved. Press Send to hand it to Claude Code.`;
+    const line = "Your answer on 'One' is saved. Press Send to hand it to Claude Code.";
     await r.waitFor("the Activity line", () => r.runner.status().lines.some((l) => l.text === line));
     expect(r.runner.status().lines.find((l) => l.text === line)?.note).toBe(b1.noteIds[0]);
     const [one, two] = await Promise.all(b1.noteIds.map(async (id) => (await r.store.read("notes")).notes.find((n) => n.id === id)!));
@@ -467,7 +467,7 @@ describe("AgentRunner answers on notes", () => {
     await r.phase("question");
     signedIn = false;
     await r.answerOn(b1.noteIds[0], "Yes");
-    const line = `Your answer on ${b1.noteIds[0]} is saved. Press Send to hand it to Claude Code.`;
+    const line = "Your answer on 'One' is saved. Press Send to hand it to Claude Code.";
     await r.waitFor("the Activity line", () => r.runner.status().lines.some((l) => l.text === line));
     await r.waitFor("the note to come back", async () => noteState((await r.store.read("notes")).notes.find((n) => n.id === b1.noteIds[0])!) === "todo");
 
@@ -488,6 +488,21 @@ describe("AgentRunner answers on notes", () => {
     expect([noteState(two), two.batch]).toEqual(["sent", "b_1"]);
   });
 
+  it("a follow-up's lines name the note by its words, cut at about 40 characters, never by its id (Task 10, 4)", async () => {
+    const r = await rig({ turns: [[], []] });
+    const b1 = await r.batch("Make the ending feel better, warmer and a little slower than the last cut");
+    const id = b1.noteIds[0];
+    await r.asked(id);
+    await r.runner.send(b1);
+    await r.phase("question");
+    await r.answerOn(id, "Slower.");
+    const texts = () => r.runner.status().lines.map((l) => l.text);
+    const quote = "'Make the ending feel better, warmer and…'";
+    await r.waitFor("the follow-up to end", () => texts().includes(`Claude Code finished your answer on ${quote}`));
+    expect(texts()).toContain(`Claude Code picked up your answer on ${quote}`);
+    expect(texts().some((t) => t.includes(id))).toBe(false);
+  });
+
   it("stop during a follow-up gives that note back and leaves the batch's other notes", async () => {
     const r = await rig({ turns: [[], [{ sleep: 60000 }]] });
     const b1 = await r.batch("One", "Two");
@@ -497,7 +512,7 @@ describe("AgentRunner answers on notes", () => {
     await r.answerOn(b1.noteIds[0], "Yes");
     await r.waitFor("the follow-up prompt", () => prompts(r.log()).length === 2);
     await r.phase("working");
-    expect(r.runner.status().lines.map((l) => l.text)).toContain(`Claude Code picked up your answer on ${b1.noteIds[0]}`);
+    expect(r.runner.status().lines.map((l) => l.text)).toContain("Claude Code picked up your answer on 'One'");
     await r.runner.stop();
     const [one, two] = (await r.store.read("notes")).notes.filter((n) => b1.noteIds.includes(n.id));
     expect([noteState(one), one.batch]).toEqual(["todo", null]);

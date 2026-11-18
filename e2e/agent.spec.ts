@@ -1601,7 +1601,7 @@ test("an answer with no conversation to carry on goes back to to do, with Press 
   // R11: the server keeps the answer, the note goes back to to do, and Activity says to press Send.
   await expect.poll(async () => (await rushes.api("GET", "/api/notes")).notes.map((n: { status: string; batch: string | null }) => [n.status, n.batch]), { timeout: 5_000 }).toEqual([["todo", null]]);
   const { status } = await rushes.api("GET", "/api/agent");
-  expect(status.lines.map((l: { text: string }) => l.text)).toContain(`Your answer on ${id} is saved. Press Send to hand it to Claude Code.`);
+  expect(status.lines.map((l: { text: string }) => l.text)).toContain("Your answer on 'Hold the end card.' is saved. Press Send to hand it to Claude Code.");
   expect(await prompts(rushes)).toHaveLength(1);
   // On the card: no badge or box now, the thread keeps both lines, and Send counts the note again.
   await expect(badgeOf(c)).toHaveCount(0);

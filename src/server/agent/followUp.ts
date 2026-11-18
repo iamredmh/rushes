@@ -2,6 +2,7 @@
 // the agent (sent). Ruling R11: the runner sends it when Send to AI is on, the agent is signed in and a session is
 // kept for it (loaded as Send loads it, so a restart loses nothing). Otherwise the note goes back to to do (runner.ts).
 import { AGENT_LINES } from "../../core/agentActivity.js";
+import { oneLine } from "../../core/labels.js";
 import { noteState } from "../../core/noteState.js";
 import type { Batch } from "../../core/schema.js";
 import type { Store } from "../../core/store.js";
@@ -17,6 +18,12 @@ export interface TurnJob {
   label: string;
   prompt: string;
 }
+
+/** How much of a note's words an Activity line about an answer on it quotes (Task 10, 4). */
+export const ANSWER_QUOTE_MAX = 40;
+
+/** "your answer on '<the note's first words…>'": how Activity names an answer on a note, as M7 names a batch by its notes. */
+export const answerLabel = (noteText: string): string => `your answer on '${oneLine(noteText, ANSWER_QUOTE_MAX) || "a note"}'`;
 
 /** A follow-up quotes the note's text up to this many characters. */
 export const FOLLOW_UP_QUOTE_MAX = 200;
@@ -40,5 +47,5 @@ export async function followUpFor(store: Store, e: { note: string; text: string 
   if (!answer) return null;
   const n = (await store.read("notes")).notes.find((x) => x.id === e.note);
   if (!n || noteState(n) !== "sent" || n.batch === null) return null;
-  return { kind: "followUp", batchId: n.batch, note: n.id, label: `your answer on ${n.id}`, prompt: followUpText(n.id, n.text, answer) };
+  return { kind: "followUp", batchId: n.batch, note: n.id, label: answerLabel(n.text), prompt: followUpText(n.id, n.text, answer) };
 }
