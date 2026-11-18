@@ -14,6 +14,13 @@ export type AcpPermissionParams = {
 export type AcpPermissionOutcome = { outcome: "selected"; optionId: string } | { outcome: "cancelled" };
 
 const STDERR_TAIL = 4096;
+
+/** A prompt response's AIR session failure (codex-acp), when it is an error with words: its title. */
+export function sessionFailureOf(response: unknown): string | null {
+  const f = (response as { _meta?: { jetbrains?: { air?: { sessionFailure?: { severity?: unknown; title?: unknown } } } } } | null)?._meta?.jetbrains?.air?.sessionFailure;
+  if (!f || f.severity !== "error" || typeof f.title !== "string" || f.title.trim() === "") return null;
+  return f.title;
+}
 const KILL_GRACE_MS = 2000;
 const CANCELLED: AcpPermissionOutcome = { outcome: "cancelled" };
 
@@ -83,10 +90,11 @@ export class AcpConnection extends EventEmitter {
     return new AcpConnection(child);
   }
 
-  async initialize(): Promise<{ loadSession: boolean }> {
+  /** `meta` goes in as clientCapabilities._meta, for an adapter's own extensions (adapters.ts clientMeta). */
+  async initialize(meta?: Record<string, unknown>): Promise<{ loadSession: boolean }> {
     const r = await this.rpc.request<any>("initialize", {
       protocolVersion: 1,
-      clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
+      clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false, ...(meta ? { _meta: meta } : {}) },
       clientInfo: { name: "rushes", version: VERSION },
     });
     return { loadSession: r?.agentCapabilities?.loadSession === true };
@@ -107,9 +115,14 @@ export class AcpConnection extends EventEmitter {
     await this.rpc.request("session/set_mode", { sessionId, modeId });
   }
 
-  async prompt(sessionId: string, text: string): Promise<{ stopReason: string }> {
+  /**
+   * `failure`: the turn failed although its stopReason says end_turn, as codex-acp 2.7.0 reports a model or service error
+   * to a client that takes AIR session failures: `_meta.jetbrains.air.sessionFailure` with severity "error" and its
+   * words as `title`. Null otherwise.
+   */
+  async prompt(sessionId: string, text: string): Promise<{ stopReason: string; failure: string | null }> {
     const r = await this.rpc.request<any>("session/prompt", { sessionId, prompt: [{ type: "text", text }] });
-    return { stopReason: String(r?.stopReason ?? "end_turn") };
+    return { stopReason: String(r?.stopReason ?? "end_turn"), failure: sessionFailureOf(r) };
   }
 
   /** Sends session/cancel and answers every permission ask still open for that session as cancelled. */

@@ -15,14 +15,14 @@
 import { ACTIVITY_LINE_MAX, activityLine } from "../../core/agentActivity.js";
 import { alwaysLabel, decide } from "../../core/agentRules.js";
 import { NotFoundError, RushesError } from "../../core/errors.js";
-import { oneLine } from "../../core/labels.js";
+import { oneLine, oneLineOf } from "../../core/labels.js";
 import { lineEvent } from "../../core/logEvents.js";
 import { needsYou, noteState, recallNote, recallNotes } from "../../core/noteState.js";
 import type { AgentId, AgentRules, AgentSettings, AlwaysRule, Batch, Note } from "../../core/schema.js";
 import type { ChangeEvent, Store } from "../../core/store.js";
 import { logBookFor } from "../logbook.js";
 import { AcpConnection, type AcpPermissionOutcome, type AcpPermissionParams, type AdapterSpec, type McpServerSpec } from "./acp.js";
-import { ASK_MODE, adapterSpec, rushesMcp, sessionSetup } from "./adapters.js";
+import { ASK_MODE, adapterSpec, clientMeta, rushesMcp, sessionSetup } from "./adapters.js";
 import { isOwnRushesTool, noteMcpCall, type McpCalls } from "./ownTools.js";
 import { PermissionBroker, addRule, allowOutcome, dropRule, toRequest, type AskChoice, type PendingAsk } from "./broker.js";
 import { detectAgents, type AgentInfo } from "./detect.js";
@@ -485,7 +485,7 @@ export class AgentRunner {
     const check = () => {
       if (gen !== this.gen || this.conn !== c) throw new Halted();
     };
-    const { loadSession } = await c.initialize();
+    const { loadSession } = await c.initialize(clientMeta(info.id));
     check();
     const settings = await this.loadSettings();
     check();
@@ -665,7 +665,7 @@ export class AgentRunner {
       conn.prompt(sessionId, job.prompt).then(
         (r) => {
           done();
-          return this.turnEnded(gen, job, r.stopReason);
+          return r.failure !== null ? this.turnFailedInPlace(gen, job, r.failure) : this.turnEnded(gen, job, r.stopReason);
         },
         (err: unknown) => {
           done();
@@ -728,6 +728,50 @@ export class AgentRunner {
 
   private followUpInFlight(note: string): boolean {
     return (this.answering.get(note) ?? 0) > 0 || this.queue.some((q) => q.kind === "followUp" && q.note === note);
+  }
+
+  /**
+   * Task 10 (1): the adapter answered the prompt but said the turn failed (Codex: a model it can't use, a service error).
+   * The run fails with the adapter's words, one line: "<A> couldn't finish: <words>" in Activity and the Change Log, and
+   * the words as the status's error. As when a turn ends (M3), the notes it left untouched go back to to do, and asked
+   * and done ones stay; the jobs queued behind it give their notes back, as a failure's do. The adapter stays up.
+   */
+  private async turnFailedInPlace(gen: number, job: TurnJob, message: string): Promise<void> {
+    if (gen !== this.gen || this.turn?.job !== job) return;
+    const name = this.info?.name ?? "The agent";
+    const why = oneLineOf(message) || "it stopped with an error";
+    this.turn = null;
+    this.ending = true;
+    const queued = this.queue;
+    this.queue = [];
+    this.milestone(`${name} couldn't finish: ${why}`);
+    this.announce();
+    let back = 0;
+    try {
+      const notes = await this.store.read("notes");
+      if (notes.notes.some((n) => this.leftOver(job, n))) {
+        const { result } = await this.store.update("notes", (f) => {
+          const left = f.notes.filter((n) => this.leftOver(job, n));
+          for (const n of left) recallNote(f.notes, n.id, job.batchId);
+          return left.length;
+        });
+        back = result;
+      }
+    } catch (e) {
+      console.error(`Rushes: couldn't read the notes after a turn: ${messageOf(e)}`);
+    }
+    await this.recall({
+      batches: queued.filter((j) => j.kind === "batch").map((j) => j.batchId),
+      notes: queued.flatMap((j) => (j.kind === "followUp" && j.note ? [{ id: j.note, batch: j.batchId }] : [])),
+    });
+    if (gen !== this.gen) return;
+    if (back > 0) this.addLine(back === 1 ? "1 note was not picked up and is back in to do" : `${back} notes were not picked up and are back in to do`, null);
+    this.ending = false;
+    this.phase = "failed";
+    this.error = why;
+    this.current = { note: null, doing: null };
+    this.announce();
+    this.armIdle();
   }
 
   /** The prompt failed while the adapter stayed up (an RPC error): the run fails and the adapter is replaced. */

@@ -564,6 +564,37 @@ describe("AgentRunner", () => {
     expect((await notesOf(r.store, [id])).map((n) => [noteState(n), n.batch])).toEqual([["todo", null]]);
   });
 
+  it("a Codex turn that ends in an error (a model it can't use) fails the run with the adapter's words (Task 10, 1)", async () => {
+    const message = "The 'gpt-6.2-astra' model is not supported when using Codex with a ChatGPT account.";
+    const codexOn: AgentInfo = { ...codex, installed: true, signedIn: true, path: "/usr/local/bin/codex" };
+    const r = await rig({ turns: [[{ fail: message }]] }, { agents: [claude(), codexOn], settings: { agent: "codex" } });
+    const b = await r.batch("One", "Two");
+    await r.store.update("notes", (f) => void applyReply(f, { id: b.noteIds[1], reply: "Up or down?" }));
+    expect(await r.runner.send(b)).toEqual({ handedTo: "codex" });
+    await r.phase("failed");
+    const s = r.runner.status();
+    expect(s.error).toBe(message);
+    const texts = s.lines.map((l) => l.text);
+    expect(texts).toContain(`Codex couldn't finish: ${message}`);
+    expect(texts.some((t) => t.includes("finished"))).toBe(false);
+    // The untouched note is back in to do; the one the agent asked on stays with it.
+    expect((await notesOf(r.store, b.noteIds)).map(noteState)).toEqual(["todo", "sent"]);
+    expect(texts).toContain("1 note was not picked up and is back in to do");
+    expect(await r.waitFor("the Change Log line", async () => (await changeLog(r.store)).find((t) => t.includes("couldn't finish")))).toBe(`Codex couldn't finish: ${message}`);
+    // Codex is told Rushes takes its typed failures (the AIR sessionFailure capability), which is how it says so.
+    const init = r.log().find((m) => m.method === "initialize");
+    expect(init.params.clientCapabilities._meta).toEqual({ jetbrains: { air: { version: 1, capabilities: ["sessionFailure"] } } });
+    expect(r.runner.busy()).toBe(false);
+  });
+
+  it("Claude Code is not told about AIR: its initialize is as before, and its ended turn finishes as before", async () => {
+    const r = await rig({ turns: [[{ stop: "end_turn" }]] });
+    await r.runner.send(await r.batch("One"));
+    await r.phase("finished");
+    const init = r.log().find((m) => m.method === "initialize");
+    expect(init.params.clientCapabilities).toEqual({ fs: { readTextFile: false, writeTextFile: false }, terminal: false });
+  });
+
   it("a turn that leaves a question ends in phase question; one without ends finished", async () => {
     const r = await rig({ turns: [] });
     const b = await r.batch("Move the title");

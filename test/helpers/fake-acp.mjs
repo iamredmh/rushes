@@ -49,6 +49,11 @@
 //   { crash: code }         exit the process with that code at once
 //   { stop: "end_turn" | "refusal" }
 //                           end the turn with that stopReason (default end_turn)
+//   { fail: "message" }     end the turn as codex-acp 2.7.0 ends a failed Codex turn (a model error): stopReason end_turn
+//                           all the same. A client that advertised the AIR "sessionFailure" capability at initialize
+//                           (clientCapabilities._meta.jetbrains.air) gets the error as the response's
+//                           _meta.jetbrains.air.sessionFailure { severity: "error", title }; any other client gets only an
+//                           agent_message_chunk with the text and no messageId, as codex-acp sends it
 //
 // Methods answered: initialize, session/new (sessions fake-session-1, -2, ...),
 // session/load (records the id in the log as { loaded: id }), session/set_mode,
@@ -73,6 +78,7 @@ let nextOutId = 1;
 let sessions = 0;
 let promptCount = 0;
 let openTurn = null; // { id, sessionId, cancelled, wake }
+let clientCaps = null; // initialize's clientCapabilities
 
 // The modes offered: the scenario's, else FAKE_ACP_MODES (comma-separated, set by the rigs per agent), else none.
 const offered = scenario.modes ?? (process.env.FAKE_ACP_MODES ? process.env.FAKE_ACP_MODES.split(",") : null);
@@ -144,6 +150,7 @@ function askAll(list, turn) {
 async function runTurn(turn) {
   const steps = scenario.turns?.[turn.index] ?? [];
   let stopReason = "end_turn";
+  let failure = null;
   for (const step of steps) {
     if (turn.cancelled) break;
     if (step.update) {
@@ -166,10 +173,22 @@ async function runTurn(turn) {
     } else if (step.stop) {
       stopReason = step.stop;
       break;
+    } else if (typeof step.fail === "string") {
+      failure = step.fail;
+      break;
     }
   }
   if (turn.cancelled) stopReason = "cancelled";
   if (openTurn === turn) openTurn = null;
+  if (failure !== null && !turn.cancelled) {
+    const air = clientCaps?._meta?.jetbrains?.air;
+    if (air && Array.isArray(air.capabilities) && air.capabilities.includes("sessionFailure")) {
+      const sessionFailure = { id: `turn-${turn.index}:error`, revision: 1, category: "service", severity: "error", title: failure, actions: [] };
+      send({ id: turn.id, result: { stopReason: "end_turn", _meta: { jetbrains: { air: { version: 1, sessionFailure } } } } });
+      return;
+    }
+    send({ method: "session/update", params: { sessionId: turn.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: `${failure}\n\n` } } } });
+  }
   send({ id: turn.id, result: { stopReason } });
 }
 
@@ -193,6 +212,7 @@ function onMessage(msg) {
   }
   switch (msg.method) {
     case "initialize":
+      clientCaps = msg.params?.clientCapabilities ?? null;
       if (scenario.hangOnInitialize) break;
       send({ id: msg.id, result: { protocolVersion: 1, agentCapabilities: { loadSession: !!scenario.loadSession }, authMethods: [] } });
       break;

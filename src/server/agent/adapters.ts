@@ -65,6 +65,18 @@ export const ASK_MODE: Record<AgentId, string> = {
   codex: "read-only",
 };
 
+/**
+ * clientCapabilities._meta for initialize. Codex (codex-acp 2.7.0, read 18 Nov 2026): a turn that fails on a model or
+ * service error (an unsupported model, an outage) still answers session/prompt with stopReason "end_turn". It says it
+ * failed only to a client that takes JetBrains' AIR "sessionFailure" extension, in the response's
+ * _meta.jetbrains.air.sessionFailure; any other client gets the error as plain agent text. So Rushes asks for that one
+ * capability and no other. (Advertising AIR also marks permission options and message phases with AIR _meta, which
+ * Rushes doesn't read.) Claude (claude-agent-acp 0.107.3) fails such a turn with a JSON-RPC error, so it gets nothing.
+ */
+export function clientMeta(agent: AgentId): Record<string, unknown> | undefined {
+  return agent === "codex" ? { jetbrains: { air: { version: 1, capabilities: ["sessionFailure"] } } } : undefined;
+}
+
 /** Extra params for session/new and session/load: Claude's initial mode, so the session is never in `auto` (R14). */
 export function sessionSetup(agent: AgentId): Record<string, unknown> {
   if (agent === "claude") return { configOptions: [{ configId: "mode", value: ASK_MODE.claude }] };

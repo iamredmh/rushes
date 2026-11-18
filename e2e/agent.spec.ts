@@ -155,6 +155,29 @@ test("a failed run's chip says why in its tooltip, and has no Stop", async ({ pa
   await page.screenshot({ path: test.info().outputPath("chip-failed-hover-1440.png"), clip: { x: 640, y: 0, width: 800, height: 140 } });
 });
 
+test("a Codex turn that ends in an error shows failed, with Codex's words in the chip's tooltip, not finished (Task 10, 1)", async ({ page, startWithAgent }) => {
+  const message = "The 'gpt-6.2-astra' model is not supported when using Codex with a ChatGPT account.";
+  const rushes = await startWithAgent({ turns: [[{ fail: message }]] });
+  await rushes.addCut("first cut");
+  await rushes.api("POST", "/api/agent/setup", { on: true, agent: "codex" });
+  await rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 0.5, text: "Hold the end card." });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await rushes.api("POST", "/api/batches", {});
+  await expect(chip(page)).toHaveText("Codex didn't finish", { timeout: 10_000 });
+  await expect(chip(page)).toHaveAttribute("data-tip", message);
+  await expect(chip(page)).not.toContainText("finished");
+  const { status } = await rushes.api("GET", "/api/agent");
+  expect(status).toMatchObject({ phase: "failed", error: message });
+  expect(status.lines.map((l: { text: string }) => l.text)).toContain(`Codex couldn't finish: ${message}`);
+  // The note it never touched is back in to do.
+  await expect(sendBtn(page)).toHaveAccessibleName("Send 1");
+  await chipFits(page);
+  await chip(page).hover();
+  await expect.poll(() => chip(page).evaluate((el) => getComputedStyle(el, "::after").opacity)).toBe("1");
+  await page.screenshot({ path: test.info().outputPath("chip-codex-failed-1440.png"), clip: { x: 640, y: 0, width: 800, height: 140 } });
+});
+
 // ---- the Send to AI row and the agent menu (task 3) ----
 
 const panel = (page: Page): Locator => page.getByRole("complementary", { name: "Notes panel" });
