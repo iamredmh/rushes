@@ -12,7 +12,7 @@
 //   shown as their code, <U+202E>, in their own style; the command block is laid out left to right, isolated. Display
 //   only: the server holds the real command and never takes it from the desk.
 import { type MutableRef, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { ASK_ARM_MS, askArmKey, askChoices, askLead, revealParts, revealText } from "../../agent.js";
+import { ASK_ARM_MS, askArmKey, askChoices, askHeading, askLead, revealParts, revealText } from "../../agent.js";
 import { api, ApiError } from "../../api.js";
 import type { AgentStatus, AskChoice, PendingAsk } from "../../types.js";
 import type { AgentPanel } from "./AgentRow.js";
@@ -44,7 +44,7 @@ function AskCard({ ask, place, latest, status, onStatus, toast }: AskCardProps) 
   const sent = useRef(false);
   const { ready, armed } = useArmed(place);
   const lead = askLead(status.agent);
-  const title = revealText(ask.title);
+  const title = askHeading(ask);
   const answer = async (choice: AskChoice) => {
     if (sent.current || !ready.current) return;
     sent.current = true;

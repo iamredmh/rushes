@@ -1102,6 +1102,26 @@ const tokenColour = (page: Page, token: string) =>
     return c;
   }, token);
 
+test("an ask whose title is only its command shows Run a command, and the command once (Task 10, 5)", async ({ page, startWithAgent }) => {
+  const command = "for f in renders/*.mp4; do ffprobe -v error \"$f\"; done";
+  const toolCall = { toolCallId: "t9", kind: "execute", title: ` ${command.replace("; do", ";  do")} `, rawInput: { command } };
+  const rushes = await startWithAgent({ turns: [[{ permission: { toolCall }, record: "loop" }, { stop: "end_turn" }]] });
+  await readyToSend(rushes);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await rushes.api("POST", "/api/batches", {});
+  const card = askCards(page);
+  await expect(card).toHaveCount(1);
+  await expect(card.locator(".asktitle")).toHaveText("Run a command");
+  await expect(card.locator(".askcmd")).toHaveText(command);
+  expect((await card.textContent())!.split("ffprobe").length - 1).toBe(1);
+  await expect(card).toHaveAccessibleName("Claude Code wants to: Run a command");
+  await cardFits(page, card);
+  await page.screenshot({ path: test.info().outputPath("ask-run-a-command-1440.png"), clip: { ...(await card.boundingBox())! } });
+  await rushes.api("POST", "/api/agent/permission/ask_1", { choice: "no" });
+});
+
 test("an ask shows and Allow once lets the run go on", async ({ page, startWithAgent }) => {
   const rushes = await startWithAgent({ turns: [[{ permission: { toolCall: FFPROBE }, record: "ffprobe" }, { stop: "end_turn" }]] });
   await readyToSend(rushes);

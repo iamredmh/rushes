@@ -291,6 +291,20 @@ export const ASK_WORDS = { once: "Allow once", no: "No" } as const;
 /** The card's first line. */
 export const askLead = (id: AgentId | null): string => `${agentName(id)} wants to:`;
 
+/** The card's bold line when the ask's title is only its command, which the mono block below already shows. */
+export const ASK_RUN_HEADING = "Run a command";
+
+const sameCommand = (s: string): string => s.trim().replace(/^`+|`+$/g, "").replace(/\s+/g, " ").trim();
+
+/**
+ * The card's bold line (Task 10, 5): the ask's title, with hidden characters spelled out, or "Run a command" when the
+ * title is the command itself (after trimming, whitespace runs and wrapping backticks), so the command isn't shown twice.
+ */
+export function askHeading(ask: Pick<PendingAsk, "title" | "command">): string {
+  if (ask.command && sameCommand(ask.title) === sameCommand(ask.command)) return ASK_RUN_HEADING;
+  return revealText(ask.title);
+}
+
 /**
  * The card's buttons, in order: Allow once, then Always only when the server offers one (a non-blank label: never for
  * a chained command, an untyped call or a path outside the project), then No. Each is a choice the answer route takes.

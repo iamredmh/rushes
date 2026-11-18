@@ -2,7 +2,7 @@
 // the live strip and what the desk does after Send. Every string is the plan's own.
 import { describe, expect, it } from "vitest";
 import {
-  ASK_ARM_MS, ASK_WORDS, askArmKey, askChoices, askLead, revealParts, revealText, MENU_WORDS, PERMISSION_CHOICES, SHEET_WORDS, afterSend, focusAfterRemove, followSend, planLead, mayQuestion, notSignedInWhy, sendToLabel, sheetDefault, sheetPrimary, sheetRows, whoNext, agentName, canStop, chipShows, chipText, chipTone, footLine, liveLines, stripMode, stripLine, runLabel, menuAgents, menuRowCount, noteAgentBadge, rowText, ruleRows, whoLine, answerPlaceholder, badgeText, fixGo, noteLite, noteThread, replyBoxShows, threadParts, newCutFor, stepCuts, cutAction, unseenCut,
+  ASK_ARM_MS, ASK_WORDS, askArmKey, askChoices, askHeading, askLead, revealParts, revealText, MENU_WORDS, PERMISSION_CHOICES, SHEET_WORDS, afterSend, focusAfterRemove, followSend, planLead, mayQuestion, notSignedInWhy, sendToLabel, sheetDefault, sheetPrimary, sheetRows, whoNext, agentName, canStop, chipShows, chipText, chipTone, footLine, liveLines, stripMode, stripLine, runLabel, menuAgents, menuRowCount, noteAgentBadge, rowText, ruleRows, whoLine, answerPlaceholder, badgeText, fixGo, noteLite, noteThread, replyBoxShows, threadParts, newCutFor, stepCuts, cutAction, unseenCut,
   type NoteLite,
 } from "../../web/src/agent.js";
 import type { AgentInfo, AgentStatus, Note, PendingAsk } from "../../web/src/types.js";
@@ -452,6 +452,22 @@ describe("planLead (I4)", () => {
     expect(planLead(followSend({ handedTo: null, why: "x", recalled: true }, status()), status())).toBeNull();
     expect(planLead(followSend({ handedTo: null, why: "Stopped", stopped: true }, status()), status())).toBeNull();
     expect(planLead(null, status())).toBeNull();
+  });
+});
+
+describe("askHeading: the card's bold line never repeats its command (Task 10, 5)", () => {
+  const ask = (title: string, command: string | null) => ({ title, command });
+
+  it("a title that is the command, whitespace and backticks aside, gives way to Run a command", () => {
+    expect(askHeading(ask("ffprobe -v error renders/a.mp4", "ffprobe -v error renders/a.mp4"))).toBe("Run a command");
+    expect(askHeading(ask("  for f in *.mp4;\n  do ffprobe \"$f\"; done ", "for f in *.mp4; do ffprobe \"$f\"; done"))).toBe("Run a command");
+    expect(askHeading(ask("`npm test`", "npm test"))).toBe("Run a command");
+  });
+
+  it("a title that says something of its own stays, with hidden characters spelled out", () => {
+    expect(askHeading(ask("Run ffprobe", "ffprobe -v error renders/a.mp4"))).toBe("Run ffprobe");
+    expect(askHeading(ask("Edit a\u202Eb", null))).toBe("Edit a<U+202E>b");
+    expect(askHeading(ask("Read src/a.ts", null))).toBe("Read src/a.ts");
   });
 });
 
