@@ -282,7 +282,8 @@ test("agent menu changes permissions and removes a rule", async ({ page, startWi
   await expect(menu.getByText("No Always rules yet", { exact: true })).toBeVisible();
   await expect(menu.getByText("Always for npx hyperframes here", { exact: true })).toHaveCount(0);
   await shootFoot(page, "menu-after-1440");
-  expect(JSON.parse(await readFile(rules, "utf8"))).toEqual({ permissions: "ask-all", always: [] });
+  // I1: the file also keeps the user's answer to the first-Send sheet (withNote set Send to AI up through the route).
+  expect(JSON.parse(await readFile(rules, "utf8"))).toEqual({ permissions: "ask-all", always: [], setUp: true });
   await page.keyboard.press("Escape");
   await expect(menu).toHaveCount(0);
 });
