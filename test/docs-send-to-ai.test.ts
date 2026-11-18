@@ -26,7 +26,7 @@ describe("shipped docs: Send to AI", () => {
   });
 
   it("describes the row, the who-line and the first-Send questions as the desk shows them", () => {
-    expect(rowText({ agent: "claude" } as never).startsWith("Send to AI")).toBe(true);
+    expect(rowText({ agent: "claude", asked: true } as never).startsWith("Send to AI")).toBe(true);
     expect(section).toContain("**Send to AI**");
     expect(section).toContain(whoLine({ permissions: "project-edits", session: null } as never));
     expect(section).toContain(whoLine({ permissions: "ask-all", session: null } as never));

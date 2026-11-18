@@ -286,9 +286,13 @@ export class AgentRunner {
     return this.noteRefusal(batch.id, "park" in r ? { handedTo: null, why: r.why } : r);
   }
 
-  /** Records a batch refused while Send to AI was on and nothing started (its notes still wait with it), for resend. */
+  /**
+   * Records a batch refused while Send to AI really was on (the user's agent, switched on) and nothing started, its notes
+   * still waiting with it (not signed in, not installed), for resend. Not one refused because it only looked on (not set
+   * up, no agent chosen) or was off: the desk offers no Set up for those, and the user may have copied the prompt.
+   */
   private noteRefusal(id: string, r: SendResult): SendResult {
-    if (r.handedTo === null && !r.stopped && !r.recalled && r.why !== OFF && r.why !== CLOSING) this.refused.add(id);
+    if (r.handedTo === null && !r.stopped && !r.recalled && r.why !== CLOSING && this.switchedOn(this.settings, this.rules)) this.refused.add(id);
     return r;
   }
 

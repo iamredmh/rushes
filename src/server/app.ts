@@ -1612,6 +1612,11 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
       await rules.update((f) => void (f.permissions = permissions));
       return c.json(await agentStatusOf());
     }
+    // The row's switch names no agent: it turns on the one agent.json names, so it can't stand in for the sheet's "who"
+    // and "what may it do" until the user has answered the sheet once (a prepared project shows Set up, not a switch).
+    if (b.on && b.agent === undefined && !(await rules.read()).setUp) {
+      throw new RushesError("Choose who should get the notes first: Set up Send to AI.", 409, "agent_not_set_up");
+    }
     let checked: AgentId | null = null;
     if (b.on) {
       const id = b.agent ?? (await store.read("agent")).agent;
@@ -1624,6 +1629,17 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
       if (!info.signedIn) throw new RushesError(`${name} is not signed in. Choose Sign in in Terminal, then try again.`, 409, "agent_not_signed_in", { agent: id });
       checked = id;
     }
+    // R10, I1 and the consent fix: the user's answer to the first-Send sheet, the agent they turned on (none after Copy a
+    // prompt or switching off) and what it may do are kept in their own rules file, outside the project, where neither
+    // the agent nor a project folder from someone else can set them. Revoke first, grant last: switching off clears the
+    // agent before agent.json is written, so a failure between the two leaves nothing chosen; turning on writes it only
+    // once agent.json took the change, so a refused setup (409) leaves the file as it was.
+    const consent = () => rules.update((f) => {
+      f.setUp = true;
+      f.agent = checked;
+      if (permissions !== undefined) f.permissions = permissions;
+    });
+    if (!b.on) await consent();
     await store.update("agent", (f) => {
       // Turned on only for the agent that was checked: one changed meanwhile (another tab) is refused.
       if (b.on && (b.agent ?? f.agent) !== checked) throw new RushesError("The agent changed. Try again.", 409, "agent_changed");
@@ -1634,15 +1650,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
         f.session = null;
       }
     });
-    // R10, I1 and the consent fix: the user's answer to the first-Send sheet, the agent they turned on (none after Copy a
-    // prompt or switching off) and what it may do are kept in their own rules file, outside the project, where neither
-    // the agent nor a project folder from someone else can set them. Written only once agent.json took the change, so a
-    // refused setup (409) leaves the file as it was.
-    await rules.update((f) => {
-      f.setUp = true;
-      f.agent = checked;
-      if (permissions !== undefined) f.permissions = permissions;
-    });
+    if (b.on) await consent();
     // I3: the batch the dialog showed goes to the agent now, if its hand-over was refused and it hasn't gone since (the
     // runner takes it from its refused set once, under its send lock), while notes of it still wait.
     if (b.on && filed && (await store.read("notes")).notes.some((n) => n.batch === filed.id && noteState(n) === "sent")) {

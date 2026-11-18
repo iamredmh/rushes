@@ -687,6 +687,30 @@ async function userSetUp(rushes: AgentRushes, agent: "claude" | null = "claude")
   await writeFile(path, JSON.stringify({ permissions: "project-edits", always: [], setUp: true, agent }), { mode: 0o600 });
 }
 
+test("a prepared project naming an agent shows Set up Send to AI, with no switch, until the sheet is answered (consent fix)", async ({ page, startWithAgent }) => {
+  const rushes = await startWithAgent({ turns: [] });
+  await rushes.addCut("first cut");
+  await writeFile(join(rushes.root, ".rushes", "agent.json"), JSON.stringify({ schema: 1, rev: 1, on: true, agent: "codex", session: null }));
+  expect((await rushes.api("GET", "/api/agent")).status).toMatchObject({ on: false, agent: "codex", asked: false });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  const setUp = row(page).getByRole("button", { name: "Set up Send to AI" });
+  await expect(setUp).toBeVisible();
+  await expect(row(page)).not.toContainText("Codex");
+  await expect(toggle(page)).toHaveCount(0);
+  await expect(setUp).not.toHaveAttribute("aria-haspopup", "menu");
+  await footFits(page);
+  await shootFoot(page, "prepared-setup-1440");
+  // It opens the sheet, which asks who and then what it may do; no menu.
+  await setUp.click();
+  await expect(page.getByRole("dialog", { name: "Who should get these notes?" })).toBeVisible();
+  await expect(agentMenu(page)).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(sheet(page)).toHaveCount(0);
+  // Nothing was set up on the way.
+  expect((await rushes.api("GET", "/api/agent")).status).toMatchObject({ on: false, asked: false });
+});
+
 test("after Copy a prompt, a project whose agent.json says on shows the switch off, and Send copies a prompt (consent fix)", async ({ page, startWithAgent }) => {
   const rushes = await startWithAgent({ turns: [[{ stop: "end_turn" }]] });
   await rushes.addCut("first cut");

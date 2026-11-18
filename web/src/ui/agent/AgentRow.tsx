@@ -3,7 +3,7 @@
 // Every change goes to the server, and the status it answers is folded in at once (the SSE event follows).
 import type { MutableRef } from "preact/hooks";
 import { useEffect, useRef, useState } from "preact/hooks";
-import { focusAfterRemove, menuAgents, menuRowCount, rowText } from "../../agent.js";
+import { focusAfterRemove, menuAgents, menuRowCount, rowReady, rowText } from "../../agent.js";
 import { api, ApiError } from "../../api.js";
 import type { AgentId, AgentInfo, AgentRules, AgentStatus, AlwaysRule } from "../../types.js";
 import { Icon } from "../Icon.js";
@@ -101,6 +101,8 @@ export function AgentRow({ status, onSetUp, menu: opener, onStatus, toast }: Age
   };
 
   const text = rowText(status);
+  // Until the sheet is answered the row is only the way in: no menu, no switch.
+  const ready = rowReady(status);
   return (
     <div class="agentrow">
       <span class="mwrap" ref={menu.wrap}>
@@ -108,12 +110,12 @@ export function AgentRow({ status, onSetUp, menu: opener, onStatus, toast }: Age
           ref={menu.button}
           type="button"
           class="aname"
-          aria-haspopup={status.agent ? "menu" : undefined}
+          aria-haspopup={ready ? "menu" : undefined}
           aria-expanded={menu.open}
-          onClick={() => (menu.open ? menu.close(false) : status.agent ? show() : onSetUp())}
+          onClick={() => (menu.open ? menu.close(false) : ready ? show() : onSetUp())}
         >
           <span class="alabel">{text}</span>
-          {status.agent && <Icon name="chev" />}
+          {ready && <Icon name="chev" />}
         </button>
         {menu.open && (
           <AgentMenu
@@ -129,7 +131,7 @@ export function AgentRow({ status, onSetUp, menu: opener, onStatus, toast }: Age
           />
         )}
       </span>
-      {status.agent && (
+      {ready && (
         <button type="button" role="switch" class="aswitch" aria-label="Send to AI" aria-checked={status.on} onClick={() => void setup({ on: !status.on }, status.agent)} />
       )}
     </div>

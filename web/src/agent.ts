@@ -137,8 +137,12 @@ export const stripLine = (l: ActivityLine): string => revealText(l.text);
 
 // ---- the Send to AI row above Send, and the agent menu (task 3) ----
 
-/** The row: the agent it sends to, or the way in when none is chosen. */
-export const rowText = (s: AgentStatus): string => (s.agent ? `Send to AI · ${agentName(s.agent)}` : "Set up Send to AI");
+/** The row has the agent's name and its switch: an agent is named and the user has answered the sheet (a project's own
+ *  agent.json can't turn "Set up Send to AI" into a ready switch). */
+export const rowReady = (s: AgentStatus): boolean => s.asked && s.agent !== null;
+
+/** The row: the agent it sends to, or the way in when none is chosen or the sheet has not been answered. */
+export const rowText = (s: AgentStatus): string => (rowReady(s) ? `Send to AI · ${agentName(s.agent)}` : "Set up Send to AI");
 
 /** Under Send: the who-line while Send to AI is on, what Send does while it is off. */
 export const footLine = (s: AgentStatus): string => (s.on ? whoLine(s) : "Copies a prompt for your own chat");

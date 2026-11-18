@@ -254,6 +254,11 @@ describe("the Send to AI row and the agent menu (task 3)", () => {
     expect(rowText(status({ agent: null, on: false }))).toBe("Set up Send to AI");
   });
 
+  it("rowText: Set up Send to AI until the user has answered the sheet, whatever agent the project names", () => {
+    expect(rowText(status({ agent: "codex", on: false, asked: false }))).toBe("Set up Send to AI");
+    expect(rowText(status({ agent: "claude", on: false, asked: false }))).toBe("Set up Send to AI");
+  });
+
   it("footLine: the who-line while on, what Send does while off", () => {
     expect(footLine(status())).toBe("Edits files in this project, asks before commands");
     expect(footLine(status({ permissions: "ask-all", session: "s1" }))).toBe("Asks before everything · next Send continues the conversation");
