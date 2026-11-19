@@ -287,7 +287,11 @@ export function NotesPanel(props: NotesPanelProps) {
       </div>
       {tab === "activity" && (
         <div class="ntabpanel" role="tabpanel" id="npanel-activity" aria-label="Activity">
-          <ActivityList {...activity} log={log} live={<LiveStrip status={agent?.status ?? null} notes={props.notes} onNote={showNote} />} onEscape={() => activityTab.current?.focus()} />
+          <ActivityList {...activity} log={log} live={<LiveStrip status={agent?.status ?? null} notes={props.notes} onNote={showNote} elsewhere={(id) => {
+            const film = activity.film;
+            const v = activity.notes.find((n) => n.id === id)?.video;
+            return film !== null && activity.project.videos.length > 1 && !!v && v !== film;
+          }} />} onEscape={() => activityTab.current?.focus()} />
         </div>
       )}
       {(sendShown || agent || again) && (

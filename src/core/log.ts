@@ -40,7 +40,8 @@ function mergeTarget(entries: LogEntry[], event: LogEvent, by: LogBy, t: number)
     // in everything until its time came round (I2). Look past it.
     if (age < -window) continue;
     if (!(age <= window)) return -1; // older than the window, and so is everything before it
-    if (e.kind === event.kind && e.area === event.area && e.by === by) return i;
+    // §30: and about the same film, so one film's line never takes in another film's count or text.
+    if (e.kind === event.kind && e.area === event.area && e.by === by && (e.video ?? null) === (event.video ?? null)) return i;
   }
   return -1;
 }

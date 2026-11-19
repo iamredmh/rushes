@@ -178,7 +178,7 @@ export function filmEvent(video: Pick<Video, "id" | "name">, shelved: boolean): 
 }
 
 /** "3 notes sent from Picture"; on Script, "1 note and 2 script edits sent from Script"; from more than one tab, "5 notes sent from several tabs". */
-export function notesSentEvent(batch: Pick<Batch, "stage" | "noteIds" | "sectionIds">): LogEvent {
+export function notesSentEvent(batch: Pick<Batch, "stage" | "noteIds" | "sectionIds">, video: string | null = null): LogEvent {
   const tab = batch.stage === null ? "" : TAB_NAMES[batch.stage];
   const notes = batch.noteIds.length;
   const edits = batch.sectionIds.length;
@@ -186,7 +186,7 @@ export function notesSentEvent(batch: Pick<Batch, "stage" | "noteIds" | "section
     ? `${plural(notes, "note", "notes")} and ${plural(edits, "script edit", "script edits")}`
     : edits ? plural(edits, "script edit", "script edits") : plural(notes, "note", "notes");
   return {
-    area: "notes", kind: "notes-sent", merge: "count", count: Math.max(1, notes + edits), subject: tab, tab: batch.stage,
+    area: "notes", kind: "notes-sent", merge: "count", count: Math.max(1, notes + edits), subject: tab, tab: batch.stage, video,
     text: `${what} sent from ${tab || "several tabs"}`,
     many: (n, subject) => `${plural(n, "note", "notes")} sent from ${subject || "several tabs"}`,
   };
@@ -208,12 +208,12 @@ function replyKey(ids: string[]): string {
 const doneIn = (text: string) => Number(/\((\d+) done\)/.exec(text)?.[1] ?? 0);
 
 /** "Agent replied to 3 notes (2 done)"; replies in a burst are one line that counts every note (R4, final review I1). */
-export function repliesEvent(notes: Pick<Note, "id" | "status" | "stage">[]): LogEvent {
+export function repliesEvent(notes: Pick<Note, "id" | "status" | "stage">[], video: string | null = null): LogEvent {
   const said = (n: number, done: number) => `Agent replied to ${plural(n, "note", "notes")}${done ? ` (${done} done)` : ""}`;
   const done = notes.filter((n) => n.status === "done").length;
   const stages = new Set(notes.map((n) => n.stage));
   return {
-    area: "notes", kind: "replies", merge: "count", count: Math.max(1, notes.length), tab: stages.size === 1 ? [...stages][0] : null,
+    area: "notes", kind: "replies", merge: "count", count: Math.max(1, notes.length), tab: stages.size === 1 ? [...stages][0] : null, video,
     ref: replyKey(notes.map((n) => n.id)),
     text: said(notes.length, done),
     // The line says how many were done as it stood, so this call's are added to that.

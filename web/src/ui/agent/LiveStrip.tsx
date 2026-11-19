@@ -11,9 +11,11 @@ export interface LiveStripProps {
   notes: readonly NoteLite[];
   /** Takes the desk to the note: its card on the Notes tab. */
   onNote(id: string): void;
+  /** §30: true for a note on another film than the one on screen: the run's lines about it are left out here. */
+  elsewhere?(id: string): boolean;
 }
 
-export function LiveStrip({ status, notes, onNote }: LiveStripProps) {
+export function LiveStrip({ status, notes, onNote, elsewhere }: LiveStripProps) {
   const [open, setOpen] = useState(false);
   const mode = status ? stripMode(status) : null;
   if (!status || !mode) return null;
@@ -25,7 +27,7 @@ export function LiveStrip({ status, notes, onNote }: LiveStripProps) {
       </div>
     );
   }
-  const lines = liveLines(status, 20);
+  const lines = liveLines(status, 20).filter((l) => l.note === null || !elsewhere?.(l.note));
   return (
     <section class="lstrip" aria-label="The run">
       <h3 class="lhead">

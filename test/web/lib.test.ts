@@ -1490,3 +1490,30 @@ describe("one film's audio lists", () => {
   });
 });
 
+
+describe("lineFilms / onFilm (§30)", () => {
+  // Lazy import keeps this block self-contained at the end of the file.
+  const lanes = [{ id: "music", stage: "music" as const, name: "Music", variants: [{ id: "only-hero", name: "A", file: "a.wav", meta: {}, cues: [], videos: ["hero"] }, { id: "both", name: "B", file: "b.wav", meta: {}, cues: [], videos: ["hero", "teaser"] }] }];
+  const project = { lanes, videos: [{ id: "hero" }, { id: "teaser" }] } as never;
+  const notes = [{ id: "n1", video: "hero" }, { id: "n2", video: "teaser" }];
+  const line = (video: string | null, ref: string | null = null) => ({ video, ref });
+
+  it("tells a line's film from its own film, the notes it names or its take", async () => {
+    const { lineFilms } = await import("../../web/src/lib.js");
+    expect(lineFilms(line("hero"), project, notes)).toEqual(["hero"]);
+    expect(lineFilms(line(null, "notes:n2"), project, notes)).toEqual(["teaser"]);
+    expect(lineFilms(line(null, "notes:n1,n2"), project, notes).sort()).toEqual(["hero", "teaser"]);
+    expect(lineFilms(line(null, "music/only-hero"), project, notes)).toEqual(["hero"]);
+    expect(lineFilms(line(null, null), project, notes)).toEqual([]);
+  });
+
+  it("shows a film its own lines and the project's, never another film's; with one film, every line", async () => {
+    const { onFilm } = await import("../../web/src/lib.js");
+    expect(onFilm(line("hero"), "teaser", project, notes)).toBe(false);
+    expect(onFilm(line(null, "notes:n1"), "teaser", project, notes)).toBe(false);
+    expect(onFilm(line(null, "music/both"), "teaser", project, notes)).toBe(true);
+    expect(onFilm(line(null, null), "teaser", project, notes)).toBe(true);
+    expect(onFilm(line("hero"), null, project, notes)).toBe(true);
+    expect(onFilm(line("hero"), "teaser", { lanes, videos: [{ id: "teaser" }] } as never, notes)).toBe(true);
+  });
+});

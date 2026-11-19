@@ -656,6 +656,9 @@ export function App() {
       projectId: projectId() ?? "",
       head: state.log,
       project: state.project,
+      // §30: Activity on a film shows its own lines and the project's.
+      film: video?.id ?? null,
+      notes: state.notes.notes,
       // The Change Log has no Brief or Storyboard area: a line added from either goes under Script, its neighbour in Plan.
       stage: stage === "brief" || stage === "storyboard" ? "script" : stage,
       toast,

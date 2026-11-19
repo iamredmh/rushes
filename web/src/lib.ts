@@ -1,5 +1,5 @@
 // Pure helpers for the dashboard. No DOM, so they're unit-tested in Node.
-import type { Asset, AssetKind, BriefSectionView, BriefView, Cue, FoundCounts, FoundItem, FoundKind, FoundSummary, InUse, Lane, LaneStage, LoudnessResult, Mark, Note, Picks, Project, ProxyEvent, ProxyJob, Section, Shot, Stage, StoryboardView, TabState, Variant, Video, Version } from "./types.js";
+import type { Asset, AssetKind, BriefSectionView, BriefView, Cue, FoundCounts, FoundItem, FoundKind, FoundSummary, InUse, Lane, LaneStage, LogLine, LoudnessResult, Mark, Note, Picks, Project, ProxyEvent, ProxyJob, Section, Shot, Stage, StoryboardView, TabState, Variant, Video, Version } from "./types.js";
 export type { FoundItem } from "./types.js";
 
 /** 72.4 -> "1:12.40" (minutes, seconds, hundredths). */
@@ -1558,6 +1558,33 @@ export function balanceOwned(film: Pick<Picks, "levels" | "balanced">): boolean 
   const stages = ["voice", "music", "sfx"] as const;
   const b = film.balanced;
   return b ? stages.every((k) => (film.levels[k] ?? 0) === (b.levels[k] ?? 0)) : stages.every((k) => (film.levels[k] ?? 0) === 0);
+}
+
+/**
+ * §30: the films a Change Log line is about. Its own film when it has one; for a line written before lines carried one,
+ * the films of the notes it names (a reply line's `notes:<ids>`) or of the take it is about (`<lane>/<variant>`).
+ * Empty: the line is about the whole project (the script, the brief, a file), or its film can't be told.
+ */
+export function lineFilms(line: Pick<LogLine, "video" | "ref">, project: Pick<Project, "lanes">, notes: readonly Pick<Note, "id" | "video">[]): string[] {
+  if (line.video) return [line.video];
+  const ref = line.ref ?? "";
+  if (ref.startsWith("notes:")) {
+    const ids = new Set(ref.slice("notes:".length).split(","));
+    return [...new Set(notes.filter((n) => ids.has(n.id) && n.video).map((n) => n.video!))];
+  }
+  const slash = ref.indexOf("/");
+  if (slash > 0) {
+    const variant = project.lanes.find((l) => l.id === ref.slice(0, slash))?.variants.find((v) => v.id === ref.slice(slash + 1));
+    if (variant) return variantFilms(variant);
+  }
+  return [];
+}
+
+/** §30: whether Activity on `film` shows a line: its own and the project's. With one film (or none) every line. */
+export function onFilm(line: Pick<LogLine, "video" | "ref">, film: string | null, project: Pick<Project, "lanes" | "videos">, notes: readonly Pick<Note, "id" | "video">[]): boolean {
+  if (!film || project.videos.length < 2) return true;
+  const films = lineFilms(line, project, notes);
+  return films.length === 0 || films.includes(film);
 }
 
 /** A web copy of src/core/schema.ts's variantFilms: a variant's `videos`, or an older project's one `video`. */

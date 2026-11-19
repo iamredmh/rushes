@@ -17,6 +17,7 @@ import { alwaysLabel, decide } from "../../core/agentRules.js";
 import { NotFoundError, RushesError } from "../../core/errors.js";
 import { oneLine } from "../../core/labels.js";
 import { lineEvent } from "../../core/logEvents.js";
+import { byFilm } from "../../core/notes.js";
 import { needsYou, noteState, recallNote, recallNotes } from "../../core/noteState.js";
 import type { AgentId, AgentRules, AgentSettings, AlwaysRule, Batch, Note } from "../../core/schema.js";
 import type { ChangeEvent, Store } from "../../core/store.js";
@@ -28,7 +29,7 @@ import { isOwnRushesTool, noteMcpCall, type McpCalls } from "./ownTools.js";
 import { PermissionBroker, addRule, allowOutcome, dropRule, toRequest, type AskChoice, type PendingAsk } from "./broker.js";
 import { detectAgents, type AgentInfo } from "./detect.js";
 import { agentRulesFor, type AgentRulesFile } from "./rules.js";
-import { batchJob, followUpFor, type TurnJob } from "./followUp.js";
+import { batchJob, batchLabel, followUpFor, type TurnJob } from "./followUp.js";
 
 export type AgentPhase = "off" | "idle" | "starting" | "working" | "waiting" | "question" | "finished" | "failed";
 
@@ -690,7 +691,7 @@ export class AgentRunner {
     this.phase = "working";
     this.error = null;
     this.current = { note: null, doing: null };
-    this.milestone(job.kind === "batch" ? `${name} started on ${job.label}` : `${name} picked up ${job.label}`);
+    this.milestone(job.kind === "batch" ? `${name} started on ${job.label}` : `${name} picked up ${job.label}`, job, (label) => `${name} started on ${label}`);
     this.announce();
     this.track(
       conn.prompt(sessionId, job.prompt).then(
@@ -712,7 +713,8 @@ export class AgentRunner {
     const name = this.info?.name ?? "The agent";
     this.turn = null;
     this.ending = true;
-    this.milestone(stopReason === "end_turn" ? `${name} finished ${job.label}` : `${name} ended ${job.label} (${stopReason})`);
+    const ended = (label: string) => (stopReason === "end_turn" ? `${name} finished ${label}` : `${name} ended ${label} (${stopReason})`);
+    this.milestone(ended(job.label), job, ended);
     this.announce();
     // Still busy while the notes are read, so a send now queues and is picked up below. The phase follows
     // the batch this turn worked on: a question on one of its notes makes it "question".
@@ -776,7 +778,7 @@ export class AgentRunner {
     this.ending = true;
     const queued = this.queue;
     this.queue = [];
-    this.milestone(`${name} couldn't finish: ${why}`);
+    this.milestone(`${name} couldn't finish: ${why}`, job);
     this.announce();
     let back = 0;
     try {
@@ -1035,15 +1037,36 @@ export class AgentRunner {
       );
   }
 
-  /** An Activity line and a Change Log line, for a run starting, finishing, stopping or failing. */
-  private milestone(text: string): void {
+  /**
+   * An Activity line and a Change Log line, for a run starting, finishing, stopping or failing. §30: with the run's
+   * `job`, the Change Log line is written once per film its notes are on, each with that film, so a film's Activity
+   * never tells another film's work; `say` words a batch's line from that film's own count ("2 notes").
+   */
+  private milestone(text: string, job?: TurnJob, say?: (label: string) => string): void {
     this.addLine(text, null);
-    this.track(this.writeMilestone(text));
+    this.track(this.writeMilestone(text, job, say));
   }
 
-  private writeMilestone(text: string): Promise<unknown> {
+  private async writeMilestone(text: string, job?: TurnJob, say?: (label: string) => string): Promise<unknown> {
+    const at = this.now();
     // LogBook.add never throws: a line it can't write is reported and counted.
-    return logBookFor(this.store).add(lineEvent(text, "notes"), "rushes", this.now());
+    const book = logBookFor(this.store);
+    const parts = job ? await this.filmParts(job).catch(() => []) : [];
+    if (parts.length === 0) return book.add(lineEvent(text, "notes"), "rushes", at);
+    for (const p of parts) await book.add(lineEvent(say && job?.kind === "batch" ? say(p.label) : text, "notes", { video: p.film }), "rushes", at);
+    return undefined;
+  }
+
+  /** §30: the films a turn's notes are on, each with the label of its own share of them ("2 notes"). */
+  private async filmParts(job: TurnJob): Promise<{ film: string | null; label: string }[]> {
+    const notes = await this.store.read("notes");
+    if (job.kind === "followUp") return [{ film: notes.notes.find((n) => n.id === job.note)?.video ?? null, label: job.label }];
+    const b = (await this.store.read("batches")).batches.find((x) => x.id === job.batchId);
+    if (!b) return [];
+    const filmOf = new Map(notes.notes.map((n) => [n.id, n.video ?? null]));
+    const groups = byFilm(b.noteIds, (id) => filmOf.get(id));
+    if (groups.length === 0 || (b.sectionIds.length > 0 && !groups.some(([f]) => f === null))) groups.push([null, []]);
+    return groups.map(([film, ids]) => ({ film, label: batchLabel({ noteIds: ids, sectionIds: film === null ? b.sectionIds : [] }) }));
   }
 
   private addLine(text: string, note: string | null): void {

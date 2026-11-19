@@ -186,12 +186,12 @@ describe("appendEvent (§22.5, R4, Review Focus 3)", () => {
     appendEvent(f, variantEvent({ id: "other", stage: "music", name: "other" }, { id: "c", name: "C" }), "agent", at(0.2));
     expect(texts(f)[0]).toBe("Music: 2 variants added");
   });
-  it("two films' cuts in a burst say so, without naming either film", () => {
+  it("two films' cuts in a burst stay two lines, one per film (§30: a film's Activity never tells another's)", () => {
     const f = empty();
     appendEvent(f, cutEvent(2, { id: "hero", name: "Hero" }, { id: "v3", note: "v3: tighter", file: "h.mp4" }), "agent", at(0));
     appendEvent(f, cutEvent(2, { id: "teaser", name: "Teaser" }, { id: "v2", note: "v2: end card", file: "t.mp4" }), "agent", at(0.5));
-    expect(texts(f)).toEqual(["2 cuts added, the latest Teaser v2: end card"]);
-    expect(f.entries[0]).toMatchObject({ video: "teaser", version: "v2", subject: "" });
+    expect(texts(f)).toEqual(["Teaser v2 added: end card", "Hero v3 added: tighter"]);
+    expect(f.entries.map((e) => e.video).sort()).toEqual(["hero", "teaser"]);
   });
   it("replace keeps the newest line for the same subject only, and picks merge within ten minutes", () => {
     const f = empty();
@@ -276,7 +276,18 @@ describe("appendEvent (§22.5, R4, Review Focus 3)", () => {
     const f = empty();
     appendEvent(f, cutEvent(2, { id: "hero", name: "Hero" }, { id: "v4", note: "v4: slower", file: "h.mp4" }), "agent", at(0));
     appendEvent(f, cutEvent(2, { id: "teaser", name: "Teaser" }, { id: "v4", note: "v4: shorter", file: "t.mp4" }), "agent", at(0.5));
-    expect(texts(f)).toEqual(["2 cuts added, the latest Teaser v4: shorter"]);
+    expect(texts(f)).toEqual(["Teaser v4 added: shorter", "Hero v4 added: slower"]);
+  });
+
+  it("a film's lines merge only with that film's (§30)", () => {
+    const f = empty();
+    appendEvent(f, notesSentEvent({ stage: "picture", noteIds: ["a", "b"], sectionIds: [] }, "hero"), "user", at(0));
+    appendEvent(f, notesSentEvent({ stage: "picture", noteIds: ["c"], sectionIds: [] }, "teaser"), "user", at(0.1));
+    appendEvent(f, notesSentEvent({ stage: "picture", noteIds: ["d"], sectionIds: [] }, "hero"), "user", at(0.2));
+    expect(f.entries.map((e) => [e.video, e.text]).sort()).toEqual([
+      ["hero", "3 notes sent from Picture"],
+      ["teaser", "1 note sent from Picture"],
+    ]);
   });
   it("a retried cut, variant or take (the same version or ref again) isn't counted twice (§22.9)", () => {
     const f = empty();

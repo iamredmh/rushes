@@ -8,7 +8,8 @@ import {
   type Filter, type JumpTarget, type KeyStore,
 } from "../../changelog.js";
 import { Icon } from "../Icon.js";
-import type { LogHead, LogLine, LogView, Project, Stage } from "../../types.js";
+import type { LogHead, LogLine, LogView, Note, Project, Stage } from "../../types.js";
+import { onFilm } from "../../lib.js";
 import type { ChangeLogState } from "../ChangeLog.js";
 
 /** How many lines the list loads (R16): the footer says when there are more. */
@@ -40,6 +41,10 @@ export interface ActivityListProps {
   stage: Stage | "assets";
   toast(message: string): void;
   onJump(to: JumpTarget): void;
+  /** §30: the film on screen: Activity shows its lines and the project's, never another film's. Null: every line. */
+  film: string | null;
+  /** Every note in the project, to tell the film of an older line that names notes (lineFilms). */
+  notes: readonly Pick<Note, "id" | "video">[];
   /** §28: the agent's live strip, shown above the day groups (LiveStrip). */
   live?: ComponentChildren;
   /** Esc from inside the list: the panel takes focus back to its Activity tab. */
@@ -67,7 +72,7 @@ function Row({ entry: e, to, onGo }: { entry: LogLine; to: JumpTarget | null; on
   );
 }
 
-export function ActivityList({ log, projectId, head, project, stage, toast, onJump, live, onEscape }: ActivityListProps) {
+export function ActivityList({ log, projectId, head, project, stage, film, notes, toast, onJump, live, onEscape }: ActivityListProps) {
   const [filter, setFilter] = useState<Filter>(() => {
     const saved = recall(session(), storageKey(projectId, "log-filter"));
     return isFilter(saved) ? saved : "all";
@@ -199,9 +204,11 @@ export function ActivityList({ log, projectId, head, project, stage, toast, onJu
   // The rows are built once per fetched view (and when the project or the day changes), not on
   // every render of the page around them: a thousand of them is the most the list shows (R16).
   const today = localDate(new Date());
+  // §30: this film's lines and the project's.
+  const onScreen = useMemo(() => (view ? view.entries.filter((e) => onFilm(e, film, project, notes)) : []), [view, film, project, notes]);
   const rows = useMemo(() => {
     if (!view) return null;
-    return groupByDay(view.entries, new Date()).map((g) => (
+    return groupByDay(onScreen, new Date()).map((g) => (
       <div class="dgroup" key={g.key}>
         <h3 class="dday">{g.heading}</h3>
         <ul>
@@ -213,11 +220,11 @@ export function ActivityList({ log, projectId, head, project, stage, toast, onJu
         </ul>
       </div>
     ));
-  }, [view, project, today]);
+  }, [view, onScreen, project, today]);
 
   const fresh = view && waiting ? newCount(view.entries, waiting.entries) : 0;
   const nothing = view !== null && view.total === 0 && view.undated.length === 0;
-  const nothingHere = view !== null && !nothing && view.entries.length === 0 && view.undated.length === 0;
+  const nothingHere = view !== null && !nothing && onScreen.length === 0 && view.undated.length === 0;
   return (
     <div
       id="changelog"
@@ -274,7 +281,8 @@ export function ActivityList({ log, projectId, head, project, stage, toast, onJu
         </div>
       </div>
       <div class="dfoot">
-        <span>{view ? footText(view) : ""}</span>
+        {/* §30: the count is this film's lines (an older page beyond the newest LIMIT can't be told apart, so it is left out). */}
+        <span>{view ? footText(onScreen.length === view.entries.length ? view : { entries: onScreen, earlier: 0, dropped: view.dropped }) : ""}</span>
         <button type="button" class="btn" onClick={() => void exportMd()}>Export as Markdown</button>
       </div>
     </div>

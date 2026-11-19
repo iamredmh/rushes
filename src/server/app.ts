@@ -5,7 +5,7 @@ import type { Store, ChangeEvent } from "../core/store.js";
 import { RushesError, InvalidError, NotFoundError } from "../core/errors.js";
 import { addFile, addFormat, addVariant, addVersion, ensureProjectIdOnce, inPlay, lockPicture, noteInPlay, resolveCut, resolveVideo, setShots, setVariantFilms, shelveFilm, shotAt } from "../core/project.js";
 import { addTake, editSection, setSections } from "../core/script.js";
-import { addNote, addUserReply, applyReply, applyUserEdit, checkNoteFormat, filterNotes } from "../core/notes.js";
+import { addNote, addUserReply, applyReply, applyUserEdit, byFilm, checkNoteFormat, filterNotes } from "../core/notes.js";
 import { FORMAT_ID_RE, MAX_FORMATS, isPictureSize, labelOfId, versionFormats } from "../core/formats.js";
 import { createBatch, latestBatch } from "../core/batches.js";
 import { markSent, noteState, NOTE_STATES, withState, type NoteState } from "../core/noteState.js";
@@ -1000,7 +1000,8 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   app.post("/api/replies", async (c) => {
     const b = await body(c, RepliesBody);
     const { result } = await store.update("notes", (f) => b.replies.map((r) => applyReply(f, r)));
-    await log.add(() => repliesEvent(result), by(c));
+    // §30: one line per film, so each film's Activity counts only its own notes.
+    for (const [film, notes] of byFilm(result, (n) => n.video)) await log.add(() => repliesEvent(notes, film), by(c));
     return c.json({ notes: result.map(withState) });
   });
 
@@ -1595,7 +1596,19 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
       if (recent) result.prompt = `${result.prompt}\n\n${recent}`;
       await store.update("batches", (f) => { f.batches.push(result); });
       await store.update("notes", (f) => markSent(f.notes, result));
-      await log.add(() => notesSentEvent(result), by(c));
+      // §30: one line per film the batch's notes are on (its script edits go with the notes on no film).
+      const filmOf = new Map(notes.notes.map((n) => [n.id, n.video ?? null]));
+      const stageOf = new Map(notes.notes.map((n) => [n.id, n.stage]));
+      const groups = byFilm(result.noteIds, (id) => filmOf.get(id));
+      if (groups.length === 0 || (result.sectionIds.length > 0 && !groups.some(([f]) => f === null))) groups.push([null, []]);
+      for (const [film, ids] of groups) {
+        const sectionIds = film === null ? result.sectionIds : [];
+        // Each film's line names the tab its own notes came from ("from Picture"), not the whole batch's.
+        const stages = new Set([...ids.map((id) => stageOf.get(id)), ...(sectionIds.length ? ["script" as const] : [])]);
+        const stage = stages.size === 1 ? ([...stages][0] ?? result.stage) : result.stage;
+        const part = { ...result, stage, noteIds: ids, sectionIds };
+        await log.add(() => notesSentEvent(part, film), by(c));
+      }
       handing = (async () => agent.send(result))();
       return result;
     });

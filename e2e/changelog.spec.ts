@@ -450,15 +450,20 @@ test("Activity reopening with the page doesn't take focus (I3)", async ({ page, 
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
 });
 
-test("a row about another film switches to that film (R18, I3)", async ({ page, rushes }) => {
+test("Activity on a film shows its own lines and the project's, never another film's; a row still opens its cut (§30, R18)", async ({ page, rushes }) => {
   await rushes.addCut("hero cut");
   await rushes.addCut("cutdown first", "Cutdown");
   await rushes.addCut("cutdown second", "Cutdown");
   await rushes.api("POST", "/api/log", { text: "The cutdown's first ending was better", video: "cutdown", version: "v1" });
+  await rushes.api("POST", "/api/log", { text: "Whole project: new brand font" });
   await page.goto(rushes.url);
   await videoReady(page);
   await expect(currentFilm(page)).toHaveText("Hero");
   await logButton(page).click();
+  await expect(activity(page).getByText("Whole project: new brand font")).toBeVisible();
+  await expect(activity(page).getByText(/The cutdown's first ending was better/)).toHaveCount(0);
+  await pickFilm(page, "Cutdown");
+  await openActivity(page);
   await activity(page).getByRole("button", { name: /The cutdown's first ending was better/ }).click();
   await expect(currentFilm(page)).toHaveText("Cutdown");
   await expect(cutButton(page)).toHaveAttribute("data-version", "v1");

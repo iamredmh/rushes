@@ -246,3 +246,18 @@ export function filterNotes(notes: Note[], f: NoteFilter = {}): Note[] {
       (f.format === undefined || (n.stage === "picture" && (n.format === f.format || (!f.onlyThisFormat && n.format === null)))),
   );
 }
+
+/**
+ * §30: the notes of a batch (or a reply), by the film each is on, so a line about them is written per film and Activity
+ * on one film never counts another's. A note on no film (and a batch's script edits) is under null. In first-seen order.
+ */
+export function byFilm<T>(items: T[], filmOf: (item: T) => string | null | undefined): [string | null, T[]][] {
+  const out = new Map<string | null, T[]>();
+  for (const item of items) {
+    const film = filmOf(item) ?? null;
+    const group = out.get(film);
+    if (group) group.push(item);
+    else out.set(film, [item]);
+  }
+  return [...out];
+}

@@ -865,6 +865,32 @@ describe("AgentRunner", () => {
     expect(texts.some((t) => t.includes("Ran the render"))).toBe(false);
   });
 
+  it("§30: a batch with notes on two films writes its Change Log lines once per film, each with its own count", async () => {
+    const r = await rig({ turns: [[]] });
+    // Two notes on Hero and one on Teaser, then the batch that holds all three.
+    const b = await r.batch("One", "Two", "Three");
+    await r.store.update("notes", (f) => {
+      for (const n of f.notes) n.video = n.text === "Three" ? "teaser" : "hero";
+    });
+    await r.runner.send(b);
+    await r.phase("finished");
+    const lines = await r.waitFor("both films' finished lines", async () => {
+      const e = (await r.store.read("log")).entries.filter((x) => x.by === "rushes" && /finished/.test(x.text));
+      return e.length === 2 ? e : null;
+    });
+    expect(lines.map((e) => [e.video, e.text]).sort()).toEqual([
+      ["hero", "Claude Code finished 2 notes"],
+      ["teaser", "Claude Code finished 1 note"],
+    ]);
+    const started = (await r.store.read("log")).entries.filter((x) => /started on/.test(x.text)).map((e) => [e.video, e.text]).sort();
+    expect(started).toEqual([
+      ["hero", "Claude Code started on 2 notes"],
+      ["teaser", "Claude Code started on 1 note"],
+    ]);
+    // The live strip still tells the run as one: 3 notes.
+    expect(r.runner.status().lines.map((l) => l.text)).toContain("Claude Code finished 3 notes");
+  });
+
   it("Activity names a batch's turn by how many notes it holds, never by the batch's id (M7)", async () => {
     const r = await rig({ turns: [[], []] });
     const texts = () => r.runner.status().lines.map((l) => l.text);
