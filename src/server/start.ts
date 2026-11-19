@@ -13,6 +13,7 @@ import { removeLock, writeLock } from "./lock.js";
 import { watchStore } from "./watch.js";
 import { briefRecords, storyboardRecords } from "./plans.js";
 import { moveToFirstFilmOnce } from "./films.js";
+import { adoptAgentDefaultsOnce } from "./agent/setupOnce.js";
 import type { Revealer } from "./reveal.js";
 import { ProxyJobs, removePartials, type ProxyJobsOptions } from "./proxy.js";
 import { PeakJobs, removeOrphanPeaks, removePeakTemps, type PeakJobsOptions } from "./peaks.js";
@@ -237,6 +238,8 @@ export async function startServer(rootDir: string, opts: StartOptions = {}): Pro
   const stopWatching = await watchStore(store);
   // §31.4: what was on no film in a project with several becomes the first film's, once, before anything is shown.
   await moveToFirstFilmOnce(store).catch((e: unknown) => console.error(`Rushes: couldn't move what was on no film: ${(e as Error).message}`));
+  // §32: a project with no Send to AI rules of its own yet starts from the Mac-wide default.
+  await adoptAgentDefaultsOnce(store);
   const stopBrief = briefs.start();
   const stopStoryboard = storyboards.start();
   // §20.1: a first look through the folder on open. Never awaited, so it never delays start-up;

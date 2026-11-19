@@ -2041,3 +2041,50 @@ for (const width of [1440, 900]) {
     void note;
   });
 }
+
+// §32: Send to AI is set up once per Mac. The second project here is a new folder on a new server with the same
+// XDG_CONFIG_HOME, as a second project on the same Mac is.
+test("set up on one project, a new project's Send goes straight to the agent with no sheet (§32)", async ({ page, startWithAgent }) => {
+  const rushes = await startWithAgent({ turns: [[{ stop: "end_turn" }], [{ stop: "end_turn" }]] });
+  await withNote(rushes, false);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await sendBtn(page).click();
+  await primary(page, "Next").click();
+  await primary(page, "Send to Claude Code").click();
+  await expect(toastEl(page)).toHaveText(/^(Sent to|Starting) Claude Code$/);
+  expect(JSON.parse(await readFile(join(rushes.configDir, "rushes", "agent-defaults.json"), "utf8"))).toEqual({ agent: "claude", permissions: "project-edits" });
+  // Project B: a new folder, never set up.
+  await rushes.swapProject();
+  await withNote(rushes, false);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await expect(row(page).getByRole("button", { name: "Set up Send to AI" })).toHaveCount(0);
+  await expect(toggle(page)).toHaveAttribute("aria-checked", "true");
+  await sendBtn(page).click();
+  await expect(sheet(page)).toHaveCount(0);
+  await expect(toastEl(page)).toHaveText(/^(Sent to|Starting) Claude Code$/);
+  expect((await rushes.api("GET", "/api/agent")).status).toMatchObject({ on: true, agent: "claude", asked: true, always: [] });
+});
+
+test("Copy a prompt on one project: a new project asks nothing and Send copies a prompt (§32)", async ({ page, startWithAgent }) => {
+  const rushes = await startWithAgent({ turns: [] });
+  await withNote(rushes, false);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await sendBtn(page).click();
+  await whoRadio(page, "Copy a prompt").check();
+  await primary(page).click();
+  await expect(sheet(page)).toHaveCount(0);
+  await rushes.swapProject();
+  await withNote(rushes, false);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  // As after Copy a prompt on any project: off, with the row as the way back in.
+  await expect(who(page)).toHaveText("Copies a prompt for your own chat");
+  expect((await rushes.api("GET", "/api/agent")).status).toMatchObject({ on: false, asked: true });
+  await sendBtn(page).click();
+  await expect(sheet(page)).toHaveCount(0);
+  await expect(sentPop(page)).toBeVisible();
+  expect(await readAgentLog(rushes.agentLog)).toEqual([]);
+});

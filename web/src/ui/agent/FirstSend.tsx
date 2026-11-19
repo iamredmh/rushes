@@ -85,7 +85,7 @@ export function FirstSend({ status, waiting, batch, onStatus, toast, onClose, on
   }, [step]);
 
   /** Posts setup; a refusal for an agent goes back to step 1 and says why under its row. */
-  const setup = async (body: { on: boolean; agent?: AgentId; permissions?: AgentRules["permissions"]; batch?: string }): Promise<SetupAnswer | null> => {
+  const setup = async (body: { on: boolean; agent?: AgentId; permissions?: AgentRules["permissions"]; batch?: string; prompt?: boolean }): Promise<SetupAnswer | null> => {
     try {
       const answer = await api.post<SetupAnswer>("/api/agent/setup", body);
       onStatus(answer.status);
@@ -115,7 +115,8 @@ export function FirstSend({ status, waiting, batch, onStatus, toast, onClose, on
       if (sheet.step === "may") return finish(await setup({ on: true, agent: sheet.agent, permissions: sheet.permissions, ...(batch ? { batch } : {}) }));
       setRefused(null);
       const next = whoNext(sheet.pick, rows);
-      if (next === "copy") return finish(await setup({ on: false }));
+      // §32: Copy a prompt is the answer for new projects on this Mac too.
+      if (next === "copy") return finish(await setup({ on: false, prompt: true }));
       if (next === "missing") return;
       const agent = sheet.pick as AgentId;
       if (next === "may") return setSheet(may(agent));

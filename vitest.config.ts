@@ -6,6 +6,8 @@ export default defineConfig({
   test: {
     include: ["test/**/*.test.ts"],
     testTimeout: 15000,
+    // §32: a config folder per worker, and no Send to AI default at the start of any test.
+    setupFiles: ["test/helpers/configDir.ts"],
     env: {
       // Nothing a test does may open Finder/Explorer: osRevealer honours this instead of spawning.
       RUSHES_NO_REVEAL: "1",

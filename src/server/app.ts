@@ -52,6 +52,7 @@ import { clearDetectCache, detectAgents, type AgentInfo } from "./agent/detect.j
 import type { AgentId } from "../core/schema.js";
 import { openInTerminal, type TerminalOpener } from "./agent/terminal.js";
 import { agentRulesFor } from "./agent/rules.js";
+import { adoptAgentDefaultsOnce, rememberDefault } from "./agent/setupOnce.js";
 import { notifyWhenWaiting, osNotifier, type Notifier } from "./agent/notify.js";
 
 import { VERSION } from "../version.js";
@@ -213,7 +214,9 @@ const PicksBody = z.object({ video: z.string().min(1).max(200).optional(), lanes
 // §28: the Send to AI switch, the agent and what it may do unasked.
 // `batch` (I3): the filed batch the copy dialog was showing when its Set up opened the sheet. Once Send to AI is on, it is
 // handed to the agent, as Send would have.
-const AgentSetupBody = z.object({ on: z.boolean(), agent: z.enum(AGENTS).optional(), permissions: AgentPermissionsSchema.optional(), batch: z.string().min(1).optional() });
+// §32: `prompt`: the first-Send sheet's Copy a prompt (off, and no agent for new projects either). The switch turned off
+// sends no `prompt`, so it leaves the Mac-wide default as it is.
+const AgentSetupBody = z.object({ on: z.boolean(), agent: z.enum(AGENTS).optional(), permissions: AgentPermissionsSchema.optional(), batch: z.string().min(1).optional(), prompt: z.boolean().optional() });
 
 // No stage: every tab's open notes (Send). A stage: that tab's only. §31.2.2: `video`, the film Send is pressed on:
 // only its notes and its script go. Without one, every film in play (an older client).
@@ -1723,6 +1726,8 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   };
   app.post("/api/batches", async (c) => {
     const { stage, video } = await body(c, BatchBody);
+    // §32: a Send before the desk has read the agent still goes where the Mac-wide default says.
+    await adoptAgentDefaultsOnce(store);
     // §31.2.2: Send on a film sends that film's notes and script alone, and the batch carries the film.
     const film = video ? chooseFilm(await store.read("project"), video)!.id : null;
     let handing: Promise<SendResult> | undefined;
@@ -1865,7 +1870,11 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
 
   // ---- Send to AI (§28) ----
   const agentStatusOf = async () => ({ status: await agent.reload() });
-  app.get("/api/agent", async (c) => c.json(await agentStatusOf()));
+  // §32: the desk reads this as it loads: a project with no rules of its own starts from the Mac-wide default first.
+  app.get("/api/agent", async (c) => {
+    await adoptAgentDefaultsOnce(store);
+    return c.json(await agentStatusOf());
+  });
   // ?fresh=1 checks again now (after the user signs in), not from the last 30 s.
   app.get("/api/agent/detect", async (c) => {
     if (c.req.query("fresh") === "1") clearDetectCache();
@@ -1880,7 +1889,9 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     // else. It never chooses an agent, never keeps one the user didn't choose, and leaves the switch as it is.
     const permissions = b.permissions;
     if (permissions !== undefined && b.agent === undefined) {
-      await rules.update((f) => void (f.permissions = permissions));
+      const { data } = await rules.update((f) => void (f.permissions = permissions));
+      // §32: the menu's choice is the default for new projects too.
+      await rememberDefault({ permissions }, data);
       return c.json(await agentStatusOf());
     }
     // The row's switch names no agent: it turns on the one agent.json names, so it can't stand in for the sheet's "who"
@@ -1922,6 +1933,12 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
       }
     });
     if (b.on) await consent();
+    // §32: the user's choice is Send to AI's default for every new project on this Mac (last choice wins): the agent
+    // turned on, with what it may do, or no agent after Copy a prompt. Turning the switch off leaves it as it is.
+    if (b.on || b.prompt) {
+      const now = await rules.read();
+      await rememberDefault({ agent: b.on ? checked : null, ...(permissions !== undefined ? { permissions } : {}) }, now);
+    }
     // I3: the batch the dialog showed goes to the agent now, if its hand-over was refused and it hasn't gone since (the
     // runner takes it from its refused set once, under its send lock), while notes of it still wait.
     if (b.on && filed && (await store.read("notes")).notes.some((n) => n.batch === filed.id && noteState(n) === "sent")) {

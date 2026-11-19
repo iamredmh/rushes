@@ -8,12 +8,17 @@
 //   key: the first 16 hex characters of sha256(realpath.native(project root)), the name as the volume stores it
 //
 // The folder is 0700 and the file 0600. Writes are serialised and atomic (tmp + rename), like the project's own files.
+//
+// §32: Send to AI is set up once per Mac. Beside that folder is the Mac-wide default, <user config dir>/rushes/agent-
+// defaults.json: `{ agent, permissions }`, the user's last choice in the first-Send sheet, the agent menu or the switch
+// turned on. A project with no rules file yet starts from it (AgentRulesFile.adopt). It is the user's own file, outside
+// every project, so R10 holds: nothing inside a project can write it, or grant itself anything through it.
 import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
-import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
-import { AgentRulesReadSchema, AgentRulesSchema, type AgentRules } from "../../core/schema.js";
+import { AgentDefaultsSchema, AgentRulesReadSchema, AgentRulesSchema, type AgentDefaults, type AgentRules } from "../../core/schema.js";
 import type { Store } from "../../core/store.js";
 import { InvalidError } from "../../core/errors.js";
 
@@ -86,17 +91,108 @@ export class AgentRulesFile {
       const result = fn(draft);
       const checked = AgentRulesSchema.safeParse(draft);
       if (!checked.success) throw new InvalidError("Change to the agent's rules is invalid", checked.error.issues);
-      const dir = dirname(this.path);
-      await mkdir(dir, { recursive: true, mode: 0o700 });
-      await chmod(dir, 0o700);
-      const tmp = `${this.path}.${process.pid}.${Date.now()}.${++writes}.tmp`;
-      await writeFile(tmp, JSON.stringify(checked.data, null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
-      await rename(tmp, this.path);
+      await writePrivate(this.path, checked.data);
       return { data: checked.data, result };
     });
     this.queue = run;
     return run;
   }
+
+  /**
+   * §32: a project with no rules file yet starts from the Mac-wide default: set up, the default agent (none after Copy
+   * a prompt), the default permissions and no Always rules. Written in the queue and only while there is still no file,
+   * so it never overwrites rules made meanwhile. Null when the file was there already, or there is no default.
+   */
+  adopt(defaults: AgentDefaults | null): Promise<AgentRules | null> {
+    const run = this.queue.catch(() => undefined).then(async () => {
+      if (!defaults || (await exists(this.path))) return null;
+      const rules = AgentRulesSchema.parse({ setUp: true, agent: defaults.agent, permissions: defaults.permissions, always: [] });
+      await writePrivate(this.path, rules);
+      return rules;
+    });
+    this.queue = run;
+    return run;
+  }
+}
+
+async function exists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw e;
+  }
+}
+
+/** Writes JSON the user's own way: its folder 0700, the file 0600, atomically (tmp + rename). */
+async function writePrivate(path: string, data: unknown): Promise<void> {
+  const dir = dirname(path);
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  await chmod(dir, 0o700);
+  const tmp = `${path}.${process.pid}.${Date.now()}.${++writes}.tmp`;
+  await writeFile(tmp, JSON.stringify(data, null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
+  await rename(tmp, path);
+}
+
+/** §32: where the Mac-wide default is: <user config dir>/rushes/agent-defaults.json. */
+export function defaultsPath(configDir = userConfigDir()): string {
+  return join(configDir, "rushes", "agent-defaults.json");
+}
+
+/** §32: Send to AI's Mac-wide default. One per config dir, so every project's writes to it queue together. */
+export class AgentDefaultsFile {
+  readonly path: string;
+  private queue: Promise<unknown> = Promise.resolve();
+
+  constructor(configDir = userConfigDir()) {
+    this.path = defaultsPath(configDir);
+  }
+
+  /** The default, or null when there is none yet (the sheet asks once). A damaged file is no default: the sheet asks. */
+  async read(): Promise<AgentDefaults | null> {
+    let raw: string;
+    try {
+      raw = await readFile(this.path, "utf8");
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "ENOENT") console.error(`Rushes: couldn't read Send to AI's default at ${this.path}: ${(e as Error).message}.`);
+      return null;
+    }
+    try {
+      const parsed = AgentDefaultsSchema.safeParse(JSON.parse(raw));
+      if (parsed.success) return parsed.data;
+    } catch {
+      /* damaged: below */
+    }
+    console.error(`Rushes: Send to AI's default at ${this.path} is damaged. A new project asks who gets the notes until it is saved again.`);
+    return null;
+  }
+
+  /**
+   * Last choice wins: writes what the user just chose (an agent, null after Copy a prompt, or the permissions) and keeps
+   * the rest. With no default yet, the rest comes from `base` (the project's rules as they are now).
+   */
+  set(change: Partial<AgentDefaults>, base: AgentDefaults): Promise<AgentDefaults> {
+    const run = this.queue.catch(() => undefined).then(async () => {
+      const next = AgentDefaultsSchema.parse({ ...((await this.read()) ?? base), ...change });
+      await writePrivate(this.path, next);
+      return next;
+    });
+    this.queue = run;
+    return run;
+  }
+}
+
+const defaultFiles = new Map<string, AgentDefaultsFile>();
+
+/** The Mac-wide default's file for the user config dir now (tests point XDG_CONFIG_HOME at a temp folder). */
+export function agentDefaultsFile(configDir = userConfigDir()): AgentDefaultsFile {
+  let f = defaultFiles.get(configDir);
+  if (!f) {
+    f = new AgentDefaultsFile(configDir);
+    defaultFiles.set(configDir, f);
+  }
+  return f;
 }
 
 const files = new WeakMap<Store, AgentRulesFile>();

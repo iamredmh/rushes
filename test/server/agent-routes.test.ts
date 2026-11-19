@@ -10,7 +10,7 @@ import { startServer, type Running } from "../../src/server/start.js";
 import { AgentRunner, type AgentStatus, type RunnerOptions } from "../../src/server/agent/runner.js";
 import type { AgentInfo } from "../../src/server/agent/detect.js";
 import type { AgentRules, AgentSettings } from "../../src/core/schema.js";
-import { agentRulesFor } from "../../src/server/agent/rules.js";
+import { agentDefaultsFile, agentRulesFor, defaultsPath } from "../../src/server/agent/rules.js";
 import type { Store } from "../../src/core/store.js";
 
 const FAKE = resolve(__dirname, "../helpers/fake-acp.mjs");
@@ -728,5 +728,124 @@ describe("the macOS notification when no desk is open (spec §5.4)", () => {
     await new Promise((ok) => setTimeout(ok, 100));
     expect(r.told).toEqual([]);
     events.stop();
+  });
+});
+
+describe("Send to AI is set up once per Mac (§32)", () => {
+  const defaults = () => agentDefaultsFile();
+  const readDefault = () => JSON.parse(readFileSync(defaultsPath(), "utf8"));
+
+  it("with no default yet the sheet asks once, and its answer becomes the default (0600 in a 0700 folder)", async () => {
+    expect(existsSync(defaultsPath())).toBe(false);
+    const a = await rig();
+    expect((await a.call("GET", "/api/agent")).json.status).toMatchObject({ on: false, asked: false });
+    await a.call("POST", "/api/agent/setup", { on: true, agent: "claude", permissions: "ask-all" });
+    expect(readDefault()).toEqual({ agent: "claude", permissions: "ask-all" });
+    expect(statSync(defaultsPath()).mode & 0o777).toBe(0o600);
+    expect(statSync(dirname(defaultsPath())).mode & 0o777).toBe(0o700);
+  });
+
+  it("a new project starts from the default: set up, on for that agent, its permissions, no Always rules, and Send goes straight to the agent", async () => {
+    const a = await rig({ settings: { on: true, agent: "claude" } });
+    await a.call("POST", "/api/agent/setup", { on: true, agent: "claude", permissions: "ask-all" });
+    await agentRulesFor(a.store).update((f) => void f.always.push({ kind: "execute", command: "ffmpeg" }));
+    const b = await rig({ scenario: { turns: [[{ stop: "end_turn" }]] } });
+    expect(existsSync(agentRulesFor(b.store).path)).toBe(false);
+    expect((await b.call("GET", "/api/agent")).json.status).toMatchObject({ on: true, agent: "claude", asked: true, permissions: "ask-all", always: [] });
+    expect(await agentRulesFor(b.store).read()).toEqual({ setUp: true, agent: "claude", permissions: "ask-all", always: [] });
+    expect(await b.store.read("agent")).toMatchObject({ on: true, agent: "claude" });
+    // Always rules stay per project: A keeps its own.
+    expect((await agentRulesFor(a.store).read()).always).toHaveLength(1);
+    await b.note("Tighten the opening");
+    expect((await b.call("POST", "/api/batches", {})).json.agent).toEqual({ handedTo: "claude" });
+    await waitFor("the agent to be handed the batch", () => b.log().some((m) => m.method === "session/prompt"));
+    await waitFor("the run to finish", () => !b.runner.busy());
+  });
+
+  it("a Send before the desk has loaded still starts from the default", async () => {
+    const a = await rig();
+    await a.call("POST", "/api/agent/setup", { on: true, agent: "claude" });
+    const b = await rig({ scenario: { turns: [[{ stop: "end_turn" }]] } });
+    await b.note("Tighten the opening");
+    expect((await b.call("POST", "/api/batches", {})).json.agent).toEqual({ handedTo: "claude" });
+    await waitFor("the run to finish", () => !b.runner.busy());
+  });
+
+  it("Copy a prompt sets no agent: a new project is set up (no sheet) with Send to AI off", async () => {
+    const a = await rig();
+    await a.call("POST", "/api/agent/setup", { on: true, agent: "claude" });
+    await a.call("POST", "/api/agent/setup", { on: false, prompt: true });
+    expect(readDefault()).toMatchObject({ agent: null });
+    const b = await rig();
+    expect((await b.call("GET", "/api/agent")).json.status).toMatchObject({ on: false, asked: true });
+    expect((await b.store.read("agent")).on).toBe(false);
+  });
+
+  it("turning Send to AI off on one project leaves the default as it is", async () => {
+    const a = await rig();
+    await a.call("POST", "/api/agent/setup", { on: true, agent: "codex" });
+    await a.call("POST", "/api/agent/setup", { on: false });
+    expect(readDefault()).toMatchObject({ agent: "codex" });
+    const b = await rig();
+    expect((await b.call("GET", "/api/agent")).json.status).toMatchObject({ on: true, agent: "codex", asked: true });
+  });
+
+  it("the agent menu and the switch turned on are the default too: last choice wins", async () => {
+    const a = await rig();
+    await a.call("POST", "/api/agent/setup", { on: true, agent: "claude" });
+    await a.call("POST", "/api/agent/setup", { on: true, permissions: "ask-all" });
+    expect(readDefault()).toEqual({ agent: "claude", permissions: "ask-all" });
+    await a.call("POST", "/api/agent/setup", { on: true, agent: "codex", permissions: "project-edits" });
+    expect(readDefault()).toEqual({ agent: "codex", permissions: "project-edits" });
+    // Off, then the switch on again (no agent named): the agent agent.json names, kept as the default.
+    await a.call("POST", "/api/agent/setup", { on: false });
+    await a.call("POST", "/api/agent/setup", { on: true });
+    expect(readDefault()).toEqual({ agent: "codex", permissions: "project-edits" });
+  });
+
+  it("a project that has rules of its own keeps them; the default is only for a project with none", async () => {
+    const a = await rig({ rules: { setUp: true, agent: null, permissions: "ask-all" } });
+    await defaults().set({ agent: "claude", permissions: "project-edits" }, { agent: null, permissions: "project-edits" });
+    expect((await a.call("GET", "/api/agent")).json.status).toMatchObject({ on: false, asked: true, permissions: "ask-all" });
+    expect(await agentRulesFor(a.store).read()).toMatchObject({ agent: null, permissions: "ask-all" });
+  });
+
+  it("nothing in a project can fake consent: a default or rules file written inside it, with agent.json on, hands nothing over (R10)", async () => {
+    const r = await rig({ settings: { on: true, agent: "claude" }, consent: false });
+    const own = join(r.root, ".rushes");
+    await writeFile(join(own, "agent-defaults.json"), JSON.stringify({ agent: "claude", permissions: "project-edits" }));
+    await mkdir(join(own, "rushes", "agent-rules"), { recursive: true });
+    await writeFile(join(own, "rushes", "agent-rules", "x.json"), JSON.stringify({ setUp: true, agent: "claude" }));
+    expect((await r.call("GET", "/api/agent")).json.status).toMatchObject({ on: false, asked: false });
+    expect(existsSync(defaultsPath())).toBe(false);
+    await r.note("Tighten the opening");
+    expect((await r.call("POST", "/api/batches", {})).json.agent).toEqual({ handedTo: null, why: "Send to AI is not set up" });
+    expect(r.log()).toEqual([]);
+  });
+
+  it("a project whose agent.json names another agent goes to the user's default agent, never the project's", async () => {
+    await defaults().set({ agent: "claude" }, { agent: null, permissions: "project-edits" });
+    const r = await rig({ settings: { on: true, agent: "codex", session: { id: "s1", agent: "codex", startedAt: "2026-11-19T10:00:00Z" } }, consent: false });
+    expect((await r.call("GET", "/api/agent")).json.status).toMatchObject({ on: true, agent: "claude", session: null });
+  });
+
+  it("a default agent that isn't signed in is not swapped for another: Send is refused and waits for Send again", async () => {
+    await defaults().set({ agent: "claude" }, { agent: null, permissions: "project-edits" });
+    const r = await rig({ agents: [claude({ signedIn: false }), codex()] });
+    expect((await r.call("GET", "/api/agent")).json.status).toMatchObject({ on: true, agent: "claude" });
+    await r.note("Tighten the opening");
+    const sent = await r.call("POST", "/api/batches", {});
+    expect(sent.json.agent).toEqual({ handedTo: null, why: "Claude Code is not signed in" });
+    expect((await r.store.read("batches")).batches[0].undelivered).toBeTruthy();
+    expect(r.log()).toEqual([]);
+  });
+
+  it("a damaged default is no default: the sheet asks", async () => {
+    await mkdir(dirname(defaultsPath()), { recursive: true });
+    await writeFile(defaultsPath(), "{ not json");
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const r = await rig();
+    expect((await r.call("GET", "/api/agent")).json.status).toMatchObject({ on: false, asked: false });
+    expect(existsSync(agentRulesFor(r.store).path)).toBe(false);
   });
 });

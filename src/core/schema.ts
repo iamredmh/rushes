@@ -684,6 +684,17 @@ export const AgentRulesReadSchema = z.object({
   agent: z.enum(AGENTS).nullable().default(null),
 });
 
+/**
+ * §32: Send to AI's Mac-wide default, kept beside the per-project rules (server/agent/rules.ts), outside every project:
+ * the agent the user last chose (null after Copy a prompt) and what it may do. A project with no rules file yet starts
+ * from it, so Send to AI is set up once per Mac, not once per project. Always rules stay per project.
+ */
+export const AgentDefaultsSchema = z.object({
+  agent: z.enum(AGENTS).nullable().default(null),
+  permissions: AgentPermissionsSchema.default("project-edits"),
+});
+export type AgentDefaults = z.infer<typeof AgentDefaultsSchema>;
+
 export const FILES = {
   project: { name: "project.json", schema: ProjectSchema },
   script: { name: "script.json", schema: ScriptSchema },

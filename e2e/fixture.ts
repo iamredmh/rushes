@@ -155,7 +155,10 @@ async function start(port = 0, noFfmpeg = false, env: Record<string, string> = {
   const child = spawn(process.execPath, [CLI, "serve", root, "--port", String(port), "--idle-minutes", idleMinutes], {
     stdio: ["ignore", "pipe", "pipe"],
     // §29: auto-balance off, so a pick never moves a fader under a test; the Balance test turns it on by its env.
-    env: { ...process.env, RUSHES_NO_REVEAL: "1", RUSHES_AUTO_BALANCE: "0", ...(noFfmpeg ? { PATH: pathWithoutFfmpeg() } : {}), ...env },
+    // §32: the user's own Send to AI files (agent-rules/, agent-defaults.json) go in the test's own config folder, never
+    // the real ~/.config, so a default set on this Mac can't turn Send to AI on under a test. The fake agent's tests
+    // pass their own (e2e/agentFixture.ts).
+    env: { ...process.env, RUSHES_NO_REVEAL: "1", RUSHES_AUTO_BALANCE: "0", XDG_CONFIG_HOME: join(tmpDir, "config"), ...(noFfmpeg ? { PATH: pathWithoutFfmpeg() } : {}), ...env },
   });
   const url = await new Promise<string>((ok, fail) => {
     let out = "";
