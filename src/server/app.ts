@@ -40,6 +40,9 @@ import {
 } from "../core/logEvents.js";
 import { LOG_AREAS, LOG_MAX, changeLogFileName, logText, recentChanges } from "../core/logText.js";
 import { defaultRunner, measureMix, type LoudnessRunner } from "./loudness.js";
+import { balanceFilm, type FilmBalance } from "./balance.js";
+import { balanceSummary } from "../core/balance.js";
+import type { LogEvent } from "../core/log.js";
 import type { AgentRunner, AgentStatus, SendResult } from "./agent/runner.js";
 import { clearDetectCache, detectAgents, type AgentInfo } from "./agent/detect.js";
 import type { AgentId } from "../core/schema.js";
@@ -228,6 +231,7 @@ const LockBody = z.object({ version: z.string().nullable() });
 const ShelveBody = z.object({ shelved: z.boolean() });
 
 const MixLoudnessBody = z.object({ lanes: z.array(LaneStageSchema).min(1), video: z.string().min(1).max(200).optional() });
+const BalanceBody = z.object({ video: z.string().min(1).max(200).optional() });
 
 const SettingsBody = z.object({ autoProxy: z.boolean() }).strict();
 // A time in seconds, 0 to 24 h: an empty value, NaN, Infinity or anything huge is a 400.
@@ -341,6 +345,13 @@ export interface AppOptions {
   loudnessRunner?: LoudnessRunner;
   /** Kills a loudness ffmpeg run after this many ms, returning 504. Defaults to 60s; tests set it low. */
   loudnessTimeoutMs?: number;
+  /**
+   * §29: balance a film again by itself when the take in use for one of its sounds changes, while its levels are
+   * still the last balance's own (or unset). startServer turns it on; a bare createApp (most tests) leaves it off.
+   */
+  autoBalance?: boolean;
+  /** §29: told when an automatic balance has finished (null: it didn't write: ffmpeg missing, levels moved, a newer pick). */
+  onAutoBalance?(video: string | undefined, summary: string | null): void;
   /** §19.5's proxy jobs (and the ffmpeg/ffprobe they use). startServer passes its own so it can cancel them on close; tests inject fakes. */
   proxyJobs?: ProxyJobs;
   /** §19.9's waveform jobs. startServer passes its own so it can stop them on close; defaults to the proxy jobs' ffmpeg. */
@@ -1452,12 +1463,88 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     const usedNow = project ? filmUse(project, data, b.video) : {};
     const sameUse = (["voice", "music", "sfx"] as const).every((s) => usedBefore[s]?.lane === usedNow[s]?.lane && usedBefore[s]?.variant === usedNow[s]?.variant);
     const changed = Object.keys({ ...before, ...after }).some((k) => before[k] !== after[k]) || !sameUse;
+    // §29: a new take in use is balanced against the others by itself, unless a fader has been moved by hand.
+    if (opts.autoBalance && project && !sameUse && b.levels === undefined) {
+      const own = b.video ? data.videos[b.video] : data;
+      if (own && balanceOwned(own)) autoBalance(b.video, by(c));
+    }
     if (changed) {
       const inUseLanes = Object.fromEntries(Object.values(usedNow).map((u) => [u.lane, u.variant]));
       if (project) await log.add(() => picksEvent(project, inUseLanes, project.videos.find((v) => v.id === b.video)), by(c));
       else log.failures += 1;
     }
     return c.json(project ? withUse(project, data, b.video) : b.video ? picksForVideo(data, b.video) : data);
+  });
+
+  // ---- §29: balance ----
+  // Levels are the balance's own while none are set, or while they still equal what the last balance set
+  // (an unset level is 0 dB). Moving a fader by hand ends that until Balance is pressed again.
+  const sameLevels = (a: Levels, b: Levels) => (["voice", "music", "sfx"] as const).every((k) => (a[k] ?? 0) === (b[k] ?? 0));
+  const balanceOwned = (own: { levels: Levels; balanced?: { levels: Levels } }) =>
+    own.balanced ? sameLevels(own.levels, own.balanced.levels) : (["voice", "music", "sfx"] as const).every((k) => (own.levels[k] ?? 0) === 0);
+  /**
+   * Measures the film's takes in use and sets its levels to the house balance (core/balance.ts). `guard` (the
+   * automatic run) is asked again inside the write, against the picks as they are then: if a fader was moved or
+   * another take picked while ffmpeg ran, nothing is written.
+   */
+  const runBalance = async (
+    video: string | undefined,
+    who: ReturnType<typeof by>,
+    guard?: (own: { levels: Levels; balanced?: { levels: Levels } }, picks: Picks, project: Project) => boolean,
+  ): Promise<{ result: FilmBalance; written: boolean; project: Project; picks: Picks }> => {
+    const [project, picks] = await Promise.all([store.read("project"), store.read("picks")]);
+    const heard = { ...project, lanes: lanesForVideo(project.lanes, video, project.videos.length) };
+    const result = await balanceFilm(heard, picksForVideo(picks, video), store.root, opts.loudnessRunner ?? defaultRunner, opts.loudnessTimeoutMs);
+    if (!result.available) return { result, written: false, project, picks };
+    let written = false;
+    const { data } = await store.update("picks", (p) => {
+      const own = video ? (p.videos[video] ??= { lanes: {}, levels: {} }) : p;
+      if (guard && !guard(own, p, project)) return;
+      // Each sound in use takes its balanced level (0 dB is stored as unset, as a fader reset is); the others keep theirs.
+      for (const stage of ["voice", "music", "sfx"] as const) {
+        const v = result.levels[stage];
+        if (v === undefined) continue;
+        if (v === 0) delete own.levels[stage];
+        else own.levels[stage] = v;
+      }
+      own.balanced = { levels: { ...own.levels }, at: new Date().toISOString() };
+      written = true;
+    });
+    if (written) {
+      const film = project.videos.find((v) => v.id === video);
+      const event: LogEvent = { area: "mix", kind: "entry", merge: "replace", subject: `balance:${film?.id ?? ""}`, video: film?.id ?? null, version: null, text: `Mix balanced${film ? ` for ${film.name}` : ""}: ${balanceSummary(result.report)}` };
+      await log.add(() => event, who);
+    }
+    return { result, written, project, picks: data };
+  };
+  // The automatic run, one at a time per film: a pick arriving while one is measuring runs again after it.
+  const autoRuns = new Map<string, Promise<void>>();
+  const autoBalance = (video: string | undefined, who: ReturnType<typeof by>) => {
+    const key = video ?? "";
+    const prev = autoRuns.get(key) ?? Promise.resolve();
+    const run = prev.then(async () => {
+      const before = await store.read("picks").catch(() => null);
+      const project = await store.read("project").catch(() => null);
+      if (!before || !project) return opts.onAutoBalance?.(video, null);
+      const useAt = JSON.stringify(filmUse(project, before, video));
+      const { result, written } = await runBalance(video, who, (own, p, proj) => balanceOwned(own) && JSON.stringify(filmUse(proj, p, video)) === useAt);
+      opts.onAutoBalance?.(video, written && result.available ? balanceSummary(result.report) : null);
+    }).catch(() => opts.onAutoBalance?.(video, null));
+    autoRuns.set(key, run);
+    void run.finally(() => {
+      if (autoRuns.get(key) === run) autoRuns.delete(key);
+    });
+  };
+
+  app.post("/api/mix/balance", async (c) => {
+    const b = await body(c, BalanceBody);
+    if (b.video) {
+      const project = await store.read("project");
+      if (!project.videos.some((v) => v.id === b.video)) throw new RushesError(`No film "${b.video}"`, 404, "not_found");
+    }
+    const { result, project, picks } = await runBalance(b.video, by(c));
+    if (!result.available) return c.json({ available: false, summary: "Install ffmpeg to balance the mix." });
+    return c.json({ available: true, levels: result.levels, report: result.report, summary: balanceSummary(result.report), picks: withUse(project, picks, b.video) });
   });
 
   // ---- mix loudness (§17.6) ----

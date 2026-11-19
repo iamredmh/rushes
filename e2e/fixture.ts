@@ -154,7 +154,8 @@ async function start(port = 0, noFfmpeg = false, env: Record<string, string> = {
   const idleMinutes = process.env.RUSHES_E2E_IDLE_MINUTES ?? "5";
   const child = spawn(process.execPath, [CLI, "serve", root, "--port", String(port), "--idle-minutes", idleMinutes], {
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, RUSHES_NO_REVEAL: "1", ...(noFfmpeg ? { PATH: pathWithoutFfmpeg() } : {}), ...env },
+    // §29: auto-balance off, so a pick never moves a fader under a test; the Balance test turns it on by its env.
+    env: { ...process.env, RUSHES_NO_REVEAL: "1", RUSHES_AUTO_BALANCE: "0", ...(noFfmpeg ? { PATH: pathWithoutFfmpeg() } : {}), ...env },
   });
   const url = await new Promise<string>((ok, fail) => {
     let out = "";

@@ -242,6 +242,11 @@
 .tloud .measuring { align-self: center; display: inline-grid; }
 .tloud .measuring .ic { width: 13px; height: 13px; }
 .tloud.retry { cursor: pointer; }
+/* §29: Balance, after the readout. Pressed (accent) while the levels are still the balance's own. */
+.tloud .tbal { align-self: center; padding: 1px 8px; border: 1px solid var(--line); border-radius: 4px; background: transparent; color: var(--text-2); font: inherit; font-size: var(--t-small); cursor: pointer; }
+.tloud .tbal:hover { background: var(--hover); color: var(--text); }
+.tloud .tbal[aria-pressed="true"] { border-color: var(--accent-2); color: var(--accent-2); }
+.tloud .tbal:disabled { cursor: progress; opacity: 0.7; }
 /* A narrow transport keeps what matters most: music under VO goes first, then the true peak, never over the play button. */
 .transport { container-type: inline-size; }
 @container (max-width: 820px) { .tloud [data-cell="musicUnderVo"] { display: none; } }

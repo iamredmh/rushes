@@ -107,6 +107,8 @@ export interface Running {
 }
 
 export interface StartOptions {
+  /** §29: balance a film again when its take in use changes (default on; RUSHES_AUTO_BALANCE=0 turns it off). */
+  autoBalance?: boolean;
   port?: number;
   host?: string;
   name?: string;
@@ -178,6 +180,8 @@ export async function startServer(rootDir: string, opts: StartOptions = {}): Pro
   const appOpts: AppOptions = {
     brief, storyboard, webDir: opts.webDir, onShutdown: () => void close(), reveal: opts.reveal, proxyJobs, peakJobs, found, formatProbe: opts.formats?.probe,
     agent: runner, detect: agentOpts?.detect, notify: opts.notify,
+    // §29: on for a real server; RUSHES_AUTO_BALANCE=0 turns it off (the browser tests, whose fixtures are test tones).
+    autoBalance: opts.autoBalance ?? process.env.RUSHES_AUTO_BALANCE !== "0",
   };
   const app = createApp(store, appOpts);
   const listener = getRequestListener(app.fetch);

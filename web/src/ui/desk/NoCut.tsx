@@ -109,7 +109,7 @@ export function NoCutTimeline({ state, assets, video, notes, prompt, readOnly = 
           muted={sound.muted}
           onVolume={(level) => setSound({ level, muted: level === 0 ? sound.muted : false })}
           onMute={() => setSound({ ...sound, muted: !sound.muted })}
-          loudness={mix.inUse ? <LoudnessReadout loudness={mix.loudness} /> : null}
+          loudness={mix.inUse ? <LoudnessReadout loudness={mix.loudness} balance={mix.balance} /> : null}
         />
         <div class="tlpanel">
           <div class="trow rrow">

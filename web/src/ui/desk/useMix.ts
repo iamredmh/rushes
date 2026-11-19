@@ -9,7 +9,7 @@ import { assetRev, type Clip, laneGains, mediaKey } from "../../audio/timeline.j
 import { useFollower } from "../../audio/useFollower.js";
 import { takeCount, takeGroups, type TakeGroups, type TakeRow } from "../../desk.js";
 import {
-  clampLevel, filmLanes, filmPicks, loudnessLanes, type LoudnessState, MIX_LANES, type MixLane, type MixModel, mixNoteTarget, mixOnLabel, MIX_STAGE,
+  balanceOwned, clampLevel, filmLanes, filmPicks, loudnessLanes, type LoudnessState, MIX_LANES, type MixLane, type MixModel, mixNoteTarget, mixOnLabel, MIX_STAGE,
   takeInUse, variantRows, type VariantRow, WHOLE_MIX,
 } from "../../lib.js";
 import type { Asset, LoudnessResult, Note, State, Version, Video } from "../../types.js";
@@ -78,6 +78,11 @@ export interface Mix {
   /** Whether the <video> plays its own sound muted. */
   videoMuted: boolean;
   loudness: { state: LoudnessState; measuring: boolean; retry(): void };
+  /**
+   * §29: set music and effects against the voice (the house balance, measured on the server). `owned`: the levels are
+   * still the last balance's (or unset), so a new take in use is balanced again by itself.
+   */
+  balance: { run(): void; busy: boolean; owned: boolean; balanced: boolean };
   /** The engine and its length: the clock itself when there is no cut to follow. */
   engine: AudioEngine;
   length: number;
@@ -216,6 +221,28 @@ export function useMix({ state, assets, video, version, player, duration, monito
     timers[lane] = { id, send };
   };
 
+  // ---- §29: Balance. A fader save still waiting is dropped, not sent: the balance sets every level the server measures. ----
+  const [balancing, setBalancing] = useState(false);
+  const runBalance = () => {
+    if (balancing) return;
+    for (const lane of MIX_LANES) {
+      const pending = saveTimers.current[lane];
+      if (pending) window.clearTimeout(pending.id);
+      delete saveTimers.current[lane];
+    }
+    setBalancing(true);
+    void api
+      .post<{ available: boolean; summary: string }>("/api/mix/balance", { video: filmId })
+      .then(
+        (r) => {
+          toast(r.summary);
+          onChanged();
+        },
+        (e) => toast(e instanceof ApiError ? e.message : "Couldn't balance the mix"),
+      )
+      .finally(() => setBalancing(false));
+  };
+
   // What the mix is (mute, solo, levels), and what you hear of it (the transport's volume and mute on top).
   // Only a sound with a take in use can mute or solo anything, even before the view state above has let go.
   const gains = laneGains(MIX_LANES.map((id) => (live[id] ? { id, ...view[id], level: levels[id] } : { id, level: levels[id] })));
@@ -324,6 +351,7 @@ export function useMix({ state, assets, video, version, player, duration, monito
     toggleCut: () => setCutChoice(!cutMuted),
     videoMuted: cutMuted || anySolo,
     loudness: { state: loudness, measuring, retry: () => setRetries((n) => n + 1) },
+    balance: { run: runBalance, busy: balancing, owned: balanceOwned(filmState), balanced: filmState.balanced !== undefined },
     noteLabel: (n) => {
       if (n.stage === "mix") return mixOnLabel(model, n.on);
       const r = rowOfTake(n);

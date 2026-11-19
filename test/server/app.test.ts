@@ -572,15 +572,15 @@ describe("API", () => {
     // Out of range, and off the 0.5 dB step, are both refused -- nothing is saved either time.
     expect((await call("PUT", "/api/picks", { levels: { music: -30 } })).status).toBe(400);
     expect((await call("PUT", "/api/picks", { levels: { music: -13.3 } })).status).toBe(400);
-    expect((await call("PUT", "/api/picks", { levels: { voice: 6.5 } })).status).toBe(400);
+    expect((await call("PUT", "/api/picks", { levels: { voice: 12.5 } })).status).toBe(400);
     const unchanged = await store.read("picks");
     expect(unchanged.levels).toEqual({ music: -14 });
     // Other lanes, and a set and a clear sharing one request.
-    const more = await call("PUT", "/api/picks", { levels: { voice: 6, sfx: null, music: -24 } });
-    expect(more.json.levels).toEqual({ voice: 6, music: -24 });
+    const more = await call("PUT", "/api/picks", { levels: { voice: 12, sfx: null, music: -24 } });
+    expect(more.json.levels).toEqual({ voice: 12, music: -24 });
     // null resets to 0, which means the key is gone from disk -- same rule as lanes/sections.
     const cleared = await call("PUT", "/api/picks", { levels: { music: null } });
-    expect(cleared.json.levels).toEqual({ voice: 6 });
+    expect(cleared.json.levels).toEqual({ voice: 12 });
     const saved = await store.read("picks");
     expect(Object.keys(saved.levels)).toEqual(["voice"]);
   });

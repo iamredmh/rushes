@@ -903,7 +903,7 @@ describe("Mix", () => {
       expect(clampLevel(-14.2)).toBe(-14);
       expect(clampLevel(-14.3)).toBe(-14.5);
       expect(clampLevel(-30)).toBe(-24);
-      expect(clampLevel(20)).toBe(6);
+      expect(clampLevel(20)).toBe(12);
     });
     it("shows LUFS integrated, dBTP true peak and music under VO", () => {
       const cells = loudnessReadout(result());

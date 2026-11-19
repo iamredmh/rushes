@@ -1031,7 +1031,7 @@ export function mixOnOptions(m: MixModel): OnOption[] {
 // §19.6: a Mix lane's level slider, mirroring src/core/schema.ts's LEVEL_MIN/MAX/STEP exactly (not
 // imported -- the web bundle imports types only from src/).
 export const LEVEL_MIN = -24;
-export const LEVEL_MAX = 6;
+export const LEVEL_MAX = 12;
 export const LEVEL_STEP = 0.5;
 
 /** A level, clamped to the slider's range and snapped to its 0.5 dB step (§19.6) -- a guard before a
@@ -1547,7 +1547,17 @@ export function otherFormatAction(note: Pick<Note, "format" | "box">, viewsHere:
 export function filmPicks(picks: Picks, videoId: string | null | undefined): Picks {
   if (!videoId) return picks;
   const own = picks.videos?.[videoId];
-  return { ...picks, lanes: { ...(own?.lanes ?? {}) }, levels: { ...(own?.levels ?? {}) }, use: { ...(own?.use ?? {}) }, sections: {}, videos: {} };
+  return { ...picks, lanes: { ...(own?.lanes ?? {}) }, levels: { ...(own?.levels ?? {}) }, use: { ...(own?.use ?? {}) }, balanced: own?.balanced, sections: {}, videos: {} };
+}
+
+/**
+ * §29: whether a film's levels are still the last balance's own (or none are set): the Balance button shows pressed,
+ * and the server balances again by itself when the take in use changes. Mirrors app.ts's `balanceOwned`.
+ */
+export function balanceOwned(film: Pick<Picks, "levels" | "balanced">): boolean {
+  const stages = ["voice", "music", "sfx"] as const;
+  const b = film.balanced;
+  return b ? stages.every((k) => (film.levels[k] ?? 0) === (b.levels[k] ?? 0)) : stages.every((k) => (film.levels[k] ?? 0) === 0);
 }
 
 /** A web copy of src/core/schema.ts's variantFilms: a variant's `videos`, or an older project's one `video`. */

@@ -20,6 +20,9 @@ import { setup, type SetupEnv } from "../setup/setup.js";
 import { realSetupEnv } from "../setup/env.js";
 import { HARNESS_IDS, type HarnessId } from "../setup/harnesses.js";
 import { runDoctor, realDoctorEnv, type DoctorEnv } from "./doctor.js";
+import { balanceFiles } from "../server/balance.js";
+import { ffmpegAvailable } from "../server/loudness.js";
+import { balanceSummary } from "../core/balance.js";
 
 export interface Io {
   out(line: string): void;
@@ -75,6 +78,9 @@ Usage
   rushes log add <text> [--area A]                  add a line to the Change Log
                                                     flags first; text that starts with "-" goes after --:
                                                     rushes log add --area mix -- "-3 dB on the bed"
+  rushes balance [--voice F] [--music F] [--sfx F] [--json]
+                                                    the house balance for these files: how many dB to move the
+                                                    music and effects so they sit against the voice (no server)
 
 Options
   --dir DIR   project folder (default: current folder); where a command takes [dir], that wins
@@ -109,6 +115,10 @@ const OPTIONS = {
   only: { type: "string" },
   "dry-run": { type: "boolean" },
   "idle-minutes": { type: "string" },
+  // §29: `balance --voice F --music F --sfx F`.
+  voice: { type: "string" },
+  music: { type: "string" },
+  sfx: { type: "string" },
   // R17: `mcp --pinned`, the server Send to AI hands its agent: tools work on the given folder only.
   pinned: { type: "boolean" },
   help: { type: "boolean", short: "h" },
@@ -432,6 +442,22 @@ export async function main(argv: string[], io: Io): Promise<number> {
           return 0;
         }
         return usage(io, "rushes add version|format|variant|shots|file ...");
+      }
+      case "balance": {
+        // §29: the same rule the desk's Balance runs, on files, with no server: for the agent that makes the sound.
+        const files = Object.fromEntries((["voice", "music", "sfx"] as const).filter((k) => o[k]).map((k) => [k, resolve(io.cwd, o[k]!)]));
+        if (Object.keys(files).length === 0) return usage(io, "rushes balance [--voice FILE] [--music FILE] [--sfx FILE] [--json]");
+        if (!(await ffmpegAvailable())) {
+          io.err("ffmpeg isn't on PATH: install it to measure loudness.");
+          return 1;
+        }
+        const { levels, report } = await balanceFiles(files);
+        if (o.json) io.out(JSON.stringify({ levels, report, summary: balanceSummary(report) }, null, 2));
+        else {
+          for (const k of ["voice", "music", "sfx"] as const) if (levels[k] !== undefined) io.out(`${k.padEnd(6)} ${levels[k]! > 0 ? "+" : ""}${levels[k]} dB`);
+          io.out(balanceSummary(report));
+        }
+        return 0;
       }
       case "lock": {
         const [video, lockVersion] = rest;

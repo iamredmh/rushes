@@ -326,10 +326,10 @@ export const NotesFileSchema = fileObject({
 });
 export type NotesFile = z.infer<typeof NotesFileSchema>;
 
-// §19.6: a Mix lane's level, in dB. −24..6 in 0.5 dB steps; PUT /api/picks enforces the range and
+// §19.6: a Mix lane's level, in dB. −24..12 in 0.5 dB steps (§29: +12, so a quiet take can be brought up to the house balance); PUT /api/picks enforces the range and
 // step (a value outside it, or off the step, is a 400), so the stored file is never checked again here.
 export const LEVEL_MIN = -24;
-export const LEVEL_MAX = 6;
+export const LEVEL_MAX = 12;
 export const LEVEL_STEP = 0.5;
 
 export const LevelsSchema = fileObject({ voice: z.number(), music: z.number(), sfx: z.number() }).partial().default({});
@@ -347,10 +347,19 @@ export type Use = z.infer<typeof UseSchema>;
 export const InUseSchema = fileObject({ voice: UseSchema, music: UseSchema, sfx: UseSchema }).partial();
 export type InUse = z.infer<typeof InUseSchema>;
 
+/**
+ * §29: the levels the last balance set, and when. While a film's levels still equal these (or none are set), its
+ * levels are the balance's own: a new take in use is balanced again. Once a fader is moved by hand they differ, and
+ * nothing moves it back until Balance is pressed.
+ */
+export const BalancedSchema = fileObject({ levels: LevelsSchema, at: z.string() });
+export type Balanced = z.infer<typeof BalancedSchema>;
+
 export const VideoPicksSchema = fileObject({
   lanes: z.record(z.string(), z.string()).default({}),
   levels: LevelsSchema,
   use: InUseSchema.optional(),
+  balanced: BalancedSchema.optional(),
 });
 export type VideoPicks = z.infer<typeof VideoPicksSchema>;
 
@@ -366,6 +375,8 @@ export const PicksSchema = fileObject({
   // §27.6: the take in use per sound. In this top-level place only for the picks of one film as
   // picksForVideo hands them out (and a project from before picks were per film).
   use: InUseSchema.optional(),
+  // §29: the project-wide set's last balance, for a project with no cut yet.
+  balanced: BalancedSchema.optional(),
   // Each film's own picks and levels, keyed by video id. A film with no entry has picked nothing.
   videos: z.record(z.string(), VideoPicksSchema).default({}),
 });
@@ -375,7 +386,7 @@ export type Picks = z.infer<typeof PicksSchema>;
 export function picksForVideo(picks: Picks, videoId: string | null | undefined): Picks {
   if (!videoId) return picks;
   const own = picks.videos[videoId];
-  return { ...picks, lanes: { ...(own?.lanes ?? {}) }, levels: { ...(own?.levels ?? {}) }, use: { ...(own?.use ?? {}) }, sections: {}, videos: {} };
+  return { ...picks, lanes: { ...(own?.lanes ?? {}) }, levels: { ...(own?.levels ?? {}) }, use: { ...(own?.use ?? {}) }, balanced: own?.balanced, sections: {}, videos: {} };
 }
 
 /** The films a read, bed or pass is on: its `videos`, or an older project's one `video`, or none. */

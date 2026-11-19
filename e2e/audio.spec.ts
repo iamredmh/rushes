@@ -1554,6 +1554,30 @@ test("a level: drags live, saves on reload, resets on double-click, and re-measu
   await expect.poll(async () => (await rushes.api("GET", "/api/picks?video=hero")).levels).toEqual({});
 });
 
+test("Balance sets music and effects against the voice, and shows pressed until a fader is moved (§29)", async ({ page, rushes }) => {
+  await mixProject(page, rushes);
+  await openMix(page, rushes, 3);
+  const button = loudness(page).getByRole("button", { name: "Balance" });
+  await expect(button).toHaveAttribute("aria-pressed", "false");
+
+  const answered = page.waitForResponse((r) => r.url().endsWith("/api/mix/balance"));
+  await button.click();
+  const reply = await (await answered).json();
+  expect(reply.available).toBe(true);
+  // What it did is said, and the faders show the levels it set.
+  await expect(page.getByText(reply.summary)).toBeVisible();
+  const picks = await rushes.api("GET", "/api/picks?video=hero");
+  expect(picks.balanced.levels).toEqual(picks.levels);
+  const shown = (db: number | undefined) => `${(db ?? 0) < 0 ? "\u2212" : (db ?? 0) > 0 ? "+" : ""}${Math.abs(db ?? 0).toFixed(1)} dB`;
+  await expect(levelDb(page, "Music")).toHaveText(shown(reply.levels.music));
+  await expect(button).toHaveAttribute("aria-pressed", "true");
+
+  // Moving a fader by hand makes the levels yours: the button lets go.
+  await dragLevel(page, "Music level", -14);
+  await expect.poll(async () => (await rushes.api("GET", "/api/picks?video=hero")).levels.music).toBe(-14);
+  await expect(button).toHaveAttribute("aria-pressed", "false");
+});
+
 for (const how of ["hidden", "pagehide"] as const) {
   test(`a level changed and the page ${how === "hidden" ? "hidden" : "left"} within 300 ms is still saved, once`, async ({ page, rushes }) => {
     await mixProject(page, rushes);

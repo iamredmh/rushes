@@ -872,7 +872,7 @@ export function Picture({
           onVolume={(level) => setSound({ level, muted: level === 0 ? sound.muted : false })}
           onMute={() => setSound({ ...sound, muted: !sound.muted })}
           onFullScreen={fullScreen}
-          loudness={mix.inUse ? <LoudnessReadout loudness={mix.loudness} /> : null}
+          loudness={mix.inUse ? <LoudnessReadout loudness={mix.loudness} balance={mix.balance} /> : null}
         />
 
         <SplitDivider column={columnRef} split={split} />

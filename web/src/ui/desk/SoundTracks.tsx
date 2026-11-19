@@ -182,8 +182,11 @@ export function SoundTracks({ mix, duration, t, onSeek, notes = [], view: shown,
   );
 }
 
-/** §27, 5.5: the loudness of what you hear, in the transport while any take is in use. A timeout or an error asks again on a click. */
-export function LoudnessReadout({ loudness }: { loudness: Mix["loudness"] }) {
+/**
+ * §27, 5.5: the loudness of what you hear, in the transport while any take is in use. A timeout or an error asks again on
+ * a click. §29: with `balance`, the Balance button after it: pressed while the levels are still the balance's own.
+ */
+export function LoudnessReadout({ loudness, balance }: { loudness: Mix["loudness"]; balance?: Mix["balance"] }) {
   const retryable = loudness.state.kind === "timeout" || loudness.state.kind === "error";
   return (
     <div
@@ -203,6 +206,22 @@ export function LoudnessReadout({ loudness }: { loudness: Mix["loudness"] }) {
       {retryable && !loudness.measuring && (
         // The keyboard's way to the same retry; a click on it bubbles to the readout's own handler.
         <button type="button" class="btn ghost ib sm" data-tip="Measure again" aria-label="Measure again"><Icon name="gauge" /></button>
+      )}
+      {balance && (
+        <button
+          type="button"
+          class="tbal"
+          aria-pressed={balance.balanced && balance.owned}
+          aria-busy={balance.busy}
+          disabled={balance.busy}
+          data-tip={balance.balanced && balance.owned ? "Balanced: new takes are balanced too, until you move a fader" : "Set music and effects against the voice"}
+          onClick={(e) => {
+            e.stopPropagation();
+            balance.run();
+          }}
+        >
+          {balance.busy ? "Balancing" : "Balance"}
+        </button>
       )}
     </div>
   );
