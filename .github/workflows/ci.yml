@@ -80,3 +80,49 @@ jobs:
             playwright-report/
             test-results/
           retention-days: 14
+
+  # §34: Send to AI must work on a Windows laptop too. Typecheck, unit tests and a Chromium smoke run of the
+  # agent suite on windows-latest (Node 22, the oldest line the adapters support).
+  windows:
+    name: windows · chromium smoke · Node 22
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22.x"
+          cache: npm
+
+      - name: Install ffmpeg
+        run: choco install ffmpeg -y --no-progress
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npx vitest run
+
+      - name: Install Playwright's chromium
+        if: ${{ !cancelled() }}
+        run: npx playwright install --with-deps chromium
+
+      - name: Browser smoke test in chromium (Send to AI)
+        if: ${{ !cancelled() }}
+        run: npx playwright test e2e/agent.spec.ts --project=chromium --retries=0
+
+      - name: Upload the Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-windows
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 14
