@@ -1,9 +1,9 @@
 // §28.4: permission asks the agent makes that Rushes's rules didn't allow on their own. Each one waits for
 // the user's answer in the desk. Nothing here has a timer: an ask is answered by the user, or cancelled by
 // Stop, close or the adapter going away (cancelAll), never by time passing.
-import { basename, isAbsolute, resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import { NotFoundError } from "../../core/errors.js";
-import { SHELLS, alwaysLabel, canAlways, ruleFor, type PermissionRequest } from "../../core/agentRules.js";
+import { SHELLS, alwaysLabel, canAlways, programName, ruleFor, type PermissionRequest } from "../../core/agentRules.js";
 import { ALWAYS_KEPT, type AlwaysRule } from "../../core/schema.js";
 import type { AcpPermissionOutcome, AcpPermissionParams } from "./acp.js";
 
@@ -28,8 +28,34 @@ const CANCELLED: AcpPermissionOutcome = { outcome: "cancelled" };
  * joined bare, its words would not be the program the argv runs, and quoted it can never make an Always rule (R7).
  */
 function argvCommand(argv: string[]): string {
-  if (argv.length >= 3 && SHELLS.has(basename(argv[0])) && (argv[1] === "-c" || argv[1] === "-lc")) return argv[2];
+  const script = shellScript(argv);
+  if (script !== null) return script;
   return argv.map((a, i) => (i < 2 && (a === "" || /[\s'"]/.test(a)) ? JSON.stringify(a) : a)).join(" ");
+}
+
+/** PowerShell flags that take no value, so they may come before -Command without hiding anything. */
+const PS_PLAIN_FLAGS = new Set(["-noprofile", "-noninteractive", "-nologo", "-nop", "-noni", "-nol"]);
+
+/**
+ * The script a shell argv runs, or null when it isn't one this can read exactly. `[bash, -c|-lc, script]` as before;
+ * §34: `[cmd, (/d|/s|/q)…, /c|/k, …]` and `[powershell|pwsh, (-NoProfile|-NonInteractive|-NoLogo)…, -Command|-c|/c, …]`,
+ * whose script is the rest, joined. Any other shape stays the shell's own argv, which never gets an Always rule.
+ */
+export function shellScript(argv: string[]): string | null {
+  if (argv.length < 3) return null;
+  const shell = programName(argv[0]);
+  if (!SHELLS.has(shell)) return null;
+  if (shell === "cmd") {
+    let i = 1;
+    while (i < argv.length && /^\/[dsq]$/i.test(argv[i])) i++;
+    return i < argv.length - 1 && /^\/[ck]$/i.test(argv[i]) ? argv.slice(i + 1).join(" ") : null;
+  }
+  if (shell === "powershell" || shell === "pwsh") {
+    let i = 1;
+    while (i < argv.length && PS_PLAIN_FLAGS.has(argv[i].toLowerCase())) i++;
+    return i < argv.length - 1 && /^[-/](c|lc|command)$/i.test(argv[i]) ? argv.slice(i + 1).join(" ") : null;
+  }
+  return argv[1] === "-c" || argv[1] === "-lc" ? argv[2] : null;
 }
 
 /** The request in Rushes's terms. Relative locations are read against the project root, as the agent means them. */

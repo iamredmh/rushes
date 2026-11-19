@@ -1,5 +1,6 @@
+import { renameRetry } from "../core/fsRetry.js";
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { AUDIO_FORMATS } from "../core/media.js";
 import { fromManifestPath } from "../core/paths.js";
@@ -397,7 +398,7 @@ export class PeakJobs {
       });
       if (!(await realPeaksDir(this.dir))) throw new Error(".rushes/peaks isn't a folder Rushes can write to");
       await writeFile(tmp, JSON.stringify(record));
-      await rename(tmp, join(this.dir, item.name));
+      await renameRetry(tmp, join(this.dir, item.name));
     } catch (e) {
       await rm(tmp, { force: true }).catch(() => undefined);
       return this.remember(item.name, `Couldn't save the waveform: ${(e as Error).message}`);

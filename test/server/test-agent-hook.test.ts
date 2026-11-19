@@ -103,7 +103,10 @@ describe("RUSHES_TEST_AGENT", () => {
     vi.stubEnv("NODE_ENV", "test");
     vi.stubEnv("RUSHES_TEST_AGENT", p.hook);
     const s = await start(p.root);
-    const { agents } = (await call(s, "GET", "/api/agent/detect")).json;
+    const { agents: listed } = (await call(s, "GET", "/api/agent/detect")).json;
+    // §34: the fake agent needs no connector, so each reads ready.
+    expect(listed.map((a: { connector: unknown }) => a.connector)).toEqual([{ state: "ready" }, { state: "ready" }]);
+    const agents = listed.map(({ connector: _c, ...a }: { connector: unknown }) => a);
     expect(agents).toEqual([
       { id: "claude", name: "Claude Code", installed: true, signedIn: true, path: expect.any(String), signIn: "claude auth login" },
       { id: "codex", name: "Codex", installed: true, signedIn: true, path: expect.any(String), signIn: "codex login" },
@@ -116,7 +119,10 @@ describe("RUSHES_TEST_AGENT", () => {
     vi.stubEnv("NODE_ENV", "test");
     vi.stubEnv("RUSHES_TEST_AGENT", p.hook);
     const s = await start(p.root);
-    const { agents } = (await call(s, "GET", "/api/agent/detect")).json;
+    const { agents: listed } = (await call(s, "GET", "/api/agent/detect")).json;
+    // §34: the fake agent needs no connector, so each reads ready.
+    expect(listed.map((a: { connector: unknown }) => a.connector)).toEqual([{ state: "ready" }, { state: "ready" }]);
+    const agents = listed.map(({ connector: _c, ...a }: { connector: unknown }) => a);
     expect(agents).toEqual([
       { id: "claude", name: "Claude Code", installed: true, signedIn: false, path: expect.any(String), signIn: "claude auth login" },
       { id: "codex", name: "Codex", installed: false, signedIn: false, path: null, signIn: "codex login" },

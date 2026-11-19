@@ -68,10 +68,14 @@ describe("runDoctor", () => {
     const current = await runDoctor(fakeEnv(home, home, { nodeVersion: "v22.12.0" }));
     expect(find(current, "node")).toMatchObject({ ok: true, required: true });
 
+    // §34: Node 20 is no longer supported (Send to AI's Claude adapter needs 22).
     const lts = await runDoctor(fakeEnv(home, home, { nodeVersion: "v20.19.1" }));
-    expect(find(lts, "node")).toMatchObject({ ok: true, required: true });
+    expect(find(lts, "node")).toMatchObject({ ok: false, required: true });
+    expect(find(lts, "node")!.detail).toContain("22.12");
 
-    // 21.x is between the two supported lines and isn't covered by engines.
+    const early22 = await runDoctor(fakeEnv(home, home, { nodeVersion: "v22.11.0" }));
+    expect(find(early22, "node")).toMatchObject({ ok: false, required: true });
+
     const between = await runDoctor(fakeEnv(home, home, { nodeVersion: "v21.5.0" }));
     expect(find(between, "node")).toMatchObject({ ok: false, required: true });
   });

@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
-import { mkdir, readFile, rename, writeFile, copyFile, access } from "node:fs/promises";
+import { mkdir, readFile, writeFile, copyFile, access } from "node:fs/promises";
+import { renameRetry } from "./fsRetry.js";
 import { join } from "node:path";
 import { FILES, type FileData, type FileKey } from "./schema.js";
 import { CorruptFileError, InvalidError, RevConflictError } from "./errors.js";
@@ -158,7 +159,8 @@ let writes = 0;
 async function atomicWrite(path: string, text: string): Promise<void> {
   const tmp = `${path}.${process.pid}.${Date.now()}.${++writes}.tmp`;
   await writeFile(tmp, text, "utf8");
-  await rename(tmp, path);
+  // §34: on Windows a reader holding the file for a moment makes the rename fail with EPERM; it is tried again.
+  await renameRetry(tmp, path);
 }
 
 /** Write the ignore file, or append the lines an older one lacks. Other lines and their order are kept. */

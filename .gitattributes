@@ -1,0 +1,9 @@
+# §34: the same line endings on every OS, so a Windows checkout reads files exactly as macOS and Linux do.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.mp4 binary
+*.mov binary
+*.wav binary
+*.mp3 binary
+*.woff2 binary

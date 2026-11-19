@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: ["20.19.x", "22.x"]
+        node: ["22.12.x", "22.x"]
         browser: [chromium, webkit]
         include:
           - browser: chromium

@@ -7,6 +7,10 @@ import { realSetupEnv } from "../setup/env.js";
 import type { SetupEnv } from "../setup/setup.js";
 import { canonicalRoot } from "../server/lock.js";
 import { hasFpsMode, parseFfmpegVersion } from "../server/proxy.js";
+import { detectAgents, type AgentInfo } from "../server/agent/detect.js";
+import { connectorStatus, type ConnectorStatus } from "../server/agent/connectors.js";
+import { AGENT_HELP } from "../core/agentHelp.js";
+import type { AgentId } from "../core/schema.js";
 
 // §19.3: `rushes doctor` and the `rushes_doctor` MCP tool. Read-only: every check only looks,
 // it never writes a config, starts a server or changes a project file.
@@ -35,6 +39,10 @@ export interface DoctorEnv extends SetupEnv {
   cwd: string;
   /** Free bytes available at `path`, or null when it can't be read. Defaults to `fs.statfs`. */
   statfs(path: string): Promise<{ free: number } | null>;
+  /** §34: Send to AI's agents as the desk detects them. Without it (tests), the agent CLI checks are left out. */
+  agents?: () => Promise<AgentInfo[]>;
+  /** §34: whether each agent's connector is downloaded. */
+  connector?: (agent: AgentId) => ConnectorStatus;
 }
 
 export function realDoctorEnv(cwd: string): DoctorEnv {
@@ -42,6 +50,8 @@ export function realDoctorEnv(cwd: string): DoctorEnv {
     ...realSetupEnv(),
     nodeVersion: process.version,
     cwd,
+    agents: () => detectAgents(),
+    connector: (agent) => connectorStatus(agent),
     statfs: async (path) => {
       try {
         const s = await nodeStatfs(path);
@@ -64,9 +74,9 @@ function parseNodeVersion(v: string): { major: number; minor: number } | null {
   return m ? { major: Number(m[1]), minor: Number(m[2]) } : null;
 }
 
-/** Matches package.json's engines field exactly: "^20.19.0 || >=22.12.0" (21.x is not supported). */
+/** Matches package.json's engines field exactly: ">=22.12.0" (§34: Send to AI's Claude adapter needs Node 22). */
 function nodeSupported(major: number, minor: number): boolean {
-  return (major === 20 && minor >= 19) || major > 22 || (major === 22 && minor >= 12);
+  return major > 22 || (major === 22 && minor >= 12);
 }
 
 function nodeCheck(env: DoctorEnv): Check {
@@ -77,7 +87,7 @@ function nodeCheck(env: DoctorEnv): Check {
     label: "Node.js",
     ok,
     required: true,
-    detail: ok ? `${env.nodeVersion} is supported.` : `${env.nodeVersion} is too old. Rushes needs Node 20.19 or newer (or 22.12+ on the 22 line).`,
+    detail: ok ? `${env.nodeVersion} is supported.` : `${env.nodeVersion} is too old. Rushes needs Node 22.12 or newer.`,
     fix: ok ? undefined : "Install a current Node LTS: https://nodejs.org, or with nvm: nvm install --lts",
   };
 }
@@ -225,6 +235,34 @@ async function harnessCheck(h: Harness, env: DoctorEnv): Promise<Check & { unkno
 }
 
 /**
+ * §34: Send to AI's agents: each one installed, its version, signed in, and its connector downloaded. Recommended, not
+ * required: Rushes works without Send to AI. Nothing here signs in or downloads anything.
+ */
+async function sendToAiChecks(env: DoctorEnv): Promise<Check[]> {
+  if (!env.agents) return [];
+  let agents: AgentInfo[];
+  try {
+    agents = await env.agents();
+  } catch {
+    return [];
+  }
+  return agents.map((a): Check => {
+    const base = { id: `send:${a.id}`, label: `Send to AI: ${a.name}`, required: false };
+    const help = AGENT_HELP[a.id];
+    if (!a.installed) return { ...base, ok: false, detail: "not installed. Send to AI can't use it.", fix: `${help.install} (see ${help.url})` };
+    const v = a.version ? ` ${a.version}` : "";
+    if (a.outdated) return { ...base, ok: false, detail: `${a.name}${v} is older than ${help.min}, the oldest Send to AI is tested with.`, fix: help.update };
+    if (!a.signedIn) return { ...base, ok: false, detail: `${a.name}${v} is installed but not signed in.`, fix: a.signIn };
+    const c = env.connector?.(a.id);
+    if (c && c.state !== "ready") {
+      const why = c.state === "failed" && c.error ? ` (${c.error})` : "";
+      return { ...base, ok: false, detail: `${a.name}${v} is signed in. Its connector isn't downloaded yet${why}; opening a project starts it, and the first Send waits for it.`, fix: "rushes setup" };
+    }
+    return { ...base, ok: true, detail: `${a.name}${v} is installed and signed in${c ? ", and its connector is ready" : ""}.` };
+  });
+}
+
+/**
  * Whether a Rushes server is running for this folder: a health request to its port, checked
  * against this project's own canonical root (the same check `isRushesFor` in server/lock.ts
  * makes), falling back to a pid check when nothing answers. A server answering for a *different*
@@ -316,6 +354,8 @@ export async function runDoctor(env: DoctorEnv): Promise<Check[]> {
       checks.push({ id: "agents", label: "Agent harnesses", ok: false, required: false, detail: "No agent has Rushes yet.", fix: "Run rushes setup" });
     }
   }
+
+  checks.push(...(await sendToAiChecks(env)));
 
   if (!(await exists(join(env.cwd, RUSHES_DIR)))) {
     checks.push({ id: "project", label: "Rushes project", ok: true, required: false, detail: "No Rushes project in this folder." });

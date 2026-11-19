@@ -21,6 +21,8 @@ import { FoundScanner, ffprobeDuration, foundAnnouncer, type FoundProbe } from "
 import type { ScanLimits } from "../core/found.js";
 import type { VideoProber } from "../core/media.js";
 import { AgentRunner, type RunnerOptions } from "./agent/runner.js";
+import { connectorStatus, prepareConnectors } from "./agent/connectors.js";
+import { detectAgents } from "./agent/detect.js";
 import type { Notifier } from "./agent/notify.js";
 import type { AgentInfo } from "./agent/detect.js";
 import { rushesMcp } from "./agent/adapters.js";
@@ -182,6 +184,8 @@ export async function startServer(rootDir: string, opts: StartOptions = {}): Pro
   const appOpts: AppOptions = {
     briefs, storyboards, webDir: opts.webDir, onShutdown: () => void close(), reveal: opts.reveal, proxyJobs, peakJobs, found, formatProbe: opts.formats?.probe,
     agent: runner, detect: agentOpts?.detect, notify: opts.notify,
+    // §34: a real server reports its connectors' fetch; the fake agent needs none.
+    connectors: agentOpts ? undefined : (id) => connectorStatus(id),
     // §29: on for a real server; RUSHES_AUTO_BALANCE=0 turns it off (the browser tests, whose fixtures are test tones).
     autoBalance: opts.autoBalance ?? process.env.RUSHES_AUTO_BALANCE !== "0",
   };
@@ -249,6 +253,8 @@ export async function startServer(rootDir: string, opts: StartOptions = {}): Pro
     .scan()
     .then(() => found.adoptCurrentSet())
     .catch(() => undefined);
+  // §34: each installed agent's connector, fetched now in the background, so the first Send doesn't wait on a download.
+  if (!agentOpts) void prepareConnectors(() => detectAgents()).catch(() => undefined);
   let idleTimer: NodeJS.Timeout | undefined;
   let done: () => void = () => undefined;
   const closed = new Promise<void>((ok) => { done = ok; });

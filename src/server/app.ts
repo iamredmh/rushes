@@ -1,3 +1,4 @@
+import { renameRetry } from "../core/fsRetry.js";
 import { Hono, type Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
@@ -19,7 +20,7 @@ import { fromManifestPath, toManifestPath } from "../core/paths.js";
 import { AUDIO_FORMATS, PROBE_TIMEOUT_MS, VIDEO_EXT, giveUpAfter, probe, probeVideo, videoGaveUp, type VideoProbe, type VideoProber } from "../core/media.js";
 import { PROXY_PATH, ProxyJobs, type ProxyEvent } from "./proxy.js";
 import { PeakJobs } from "./peaks.js";
-import { lstat, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { basename, extname, join } from "node:path";
@@ -49,6 +50,8 @@ import { balanceSummary } from "../core/balance.js";
 import type { LogEvent } from "../core/log.js";
 import type { AgentRunner, AgentStatus, SendResult } from "./agent/runner.js";
 import { clearDetectCache, detectAgents, type AgentInfo } from "./agent/detect.js";
+import { AGENT_HELP, signInLabel } from "../core/agentHelp.js";
+import type { ConnectorStatus } from "./agent/connectors.js";
 import type { AgentId } from "../core/schema.js";
 import { openInTerminal, type TerminalOpener } from "./agent/terminal.js";
 import { agentRulesFor } from "./agent/rules.js";
@@ -394,7 +397,9 @@ export interface AppOptions {
   agent?: AgentControl;
   /** §28: which agents are installed and signed in, for setup and sign-in. Defaults to detectAgents; tests inject a fake. */
   detect?: () => Promise<AgentInfo[]>;
-  /** §28: opens Terminal with an agent's login command for "Sign in in Terminal". Defaults to openInTerminal; tests inject a fake. */
+  /** §34: each agent's connector fetch, for the desk's "Getting ready". Defaults to ready (no fetch: tests, the fake agent). */
+  connectors?: (agent: AgentId) => ConnectorStatus;
+  /** §28: opens a terminal with an agent's login command for "Sign in". Defaults to openInTerminal; tests inject a fake. */
   terminal?: TerminalOpener;
   /** §28: how long Send waits for the agent to take the batch before answering `starting: true`. Defaults to SEND_WAIT_MS. */
   sendWaitMs?: number;
@@ -466,6 +471,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   const sendWaitMs = opts.sendWaitMs ?? SEND_WAIT_MS;
   const detect = opts.detect ?? (() => detectAgents());
   const terminal = opts.terminal ?? openInTerminal;
+  const connectors = opts.connectors ?? ((): ConnectorStatus => ({ state: "ready" }));
   /** §24.12, §31.5: whether a film's plan (its brief, script and storyboard) is approved, from the files as they are now. */
   const planBuild = async (video?: string | null) => {
     const project = await store.read("project");
@@ -492,7 +498,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     await mkdir(dir, { recursive: true });
     const tmp = join(dir, `.${name}.${process.pid}.${randomUUID()}.tmp`);
     await writeFile(tmp, md, "utf8");
-    await rename(tmp, join(dir, name));
+    await renameRetry(tmp, join(dir, name));
     return `exports/${name}`;
   }
   const prober: VideoProber = opts.formatProbe ?? ((abs, signal) => probeVideo(abs, { signal }));
@@ -731,7 +737,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     // double-click on the camera) from sharing one temp file: the second rename would find it gone.
     const tmp = join(store.root, "screenshots", `.${name}.${process.pid}.${randomUUID()}.tmp`);
     await writeFile(tmp, bytes);
-    await rename(tmp, fromManifestPath(store.root, grab));
+    await renameRetry(tmp, fromManifestPath(store.root, grab));
     return c.json({ grab }, 201);
   });
 
@@ -834,7 +840,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     // and race each other's write. randomUUID() makes every export's temp name its own.
     const tmp = join(dir, `.${name}.${process.pid}.${randomUUID()}.tmp`);
     await writeFile(tmp, md, "utf8");
-    await rename(tmp, join(dir, name));
+    await renameRetry(tmp, join(dir, name));
     // §22.7: Export notes also writes the change log, newest first, one heading per day. The notes
     // are written by now, so a change log that can't be is left out (null), never a failed export.
     const changeLog = await exportChangeLog(now).catch((e: unknown) => {
@@ -1878,7 +1884,9 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   // ?fresh=1 checks again now (after the user signs in), not from the last 30 s.
   app.get("/api/agent/detect", async (c) => {
     if (c.req.query("fresh") === "1") clearDetectCache();
-    return c.json({ agents: await detect() });
+    const agents = await detect();
+    // §34: the platform names the sign-in button; each agent's connector says whether it is still downloading.
+    return c.json({ agents: agents.map((a) => ({ ...a, connector: connectors(a.id) })), platform: process.platform });
   });
   app.post("/api/agent/setup", async (c) => {
     const b = await body(c, AgentSetupBody);
@@ -1908,7 +1916,8 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
       const info = (await detect()).find((a) => a.id === id);
       const name = info?.name ?? (id === "claude" ? "Claude Code" : "Codex");
       if (!info?.installed) throw new RushesError(`${name} is not installed.`, 409, "agent_not_installed", { agent: id });
-      if (!info.signedIn) throw new RushesError(`${name} is not signed in. Choose Sign in in Terminal, then try again.`, 409, "agent_not_signed_in", { agent: id });
+      if (info.outdated) throw new RushesError(`${name} ${info.version} is too old for Send to AI. Update it with: ${AGENT_HELP[id].update}`, 409, "agent_outdated", { agent: id });
+      if (!info.signedIn) throw new RushesError(`${name} is not signed in. Choose ${signInLabel(process.platform)}, then try again.`, 409, "agent_not_signed_in", { agent: id });
       checked = id;
     }
     // R10, I1 and the consent fix: the user's answer to the first-Send sheet, the agent they turned on (none after Copy a
@@ -1972,7 +1981,8 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     const b = await body(c, z.object({ agent: z.enum(AGENTS) }));
     const info = (await detect()).find((a) => a.id === b.agent);
     if (!info) throw new InvalidError(`Rushes doesn't know how to sign in to ${b.agent}`);
-    await terminal(info.signIn);
+    // §34: the detected path, so the sign-in runs the same agent Send to AI will.
+    await terminal(info.signIn, info.path ? [info.path, ...AGENT_HELP[info.id].signInArgs] : undefined);
     return c.body(null, 204);
   });
   app.post("/api/agent/working-on", async (c) => {

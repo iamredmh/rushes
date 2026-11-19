@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import type { SetupEnv } from "./setup.js";
+import { findOnPath, spawnEnv } from "../server/agent/spawn.js";
 
 /**
  * Runs `cmd` and collects its output. With `timeout` (doctor's checks), the command gets no stdin
@@ -18,7 +19,7 @@ function run(cmd: string, args: string[], cwd?: string, opts: { timeout?: number
       ok(r);
     };
     const limited = opts.timeout !== undefined;
-    const child = spawn(cmd, args, { cwd, shell: process.platform === "win32", ...(limited ? { stdio: ["ignore", "pipe", "pipe"] as const } : {}) });
+    const child = spawn(cmd, args, { cwd, env: spawnEnv(), shell: process.platform === "win32", ...(limited ? { stdio: ["ignore", "pipe", "pipe"] as const } : {}) });
     const timer = limited
       ? setTimeout(() => {
           child.kill("SIGKILL");
@@ -38,7 +39,8 @@ export function realSetupEnv(): SetupEnv {
     home: homedir(),
     platform: process.platform,
     appData: process.env.APPDATA,
-    which: async (cmd) => (await run(process.platform === "win32" ? "where" : "which", [cmd])).code === 0,
+    // §34: looked up in Node, on the same wider search path Send to AI uses, rather than by running which or where.
+    which: async (cmd) => findOnPath(cmd) !== null,
     exec: run,
   };
 }

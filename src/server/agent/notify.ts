@@ -1,7 +1,8 @@
 // Spec §5.4: when the agent waits on the user (an ask, or a run that ends in a question) and no desk is open,
-// Rushes says so with a macOS notification. Fixed text only: never a command or anything the agent wrote.
+// Rushes says so with a notification (macOS, and since §34 Linux and Windows). Fixed text only: never a command or anything the agent wrote.
 import { execFile } from "node:child_process";
 import { basename } from "node:path";
+import { findOnPath } from "./spawn.js";
 import type { Store } from "../../core/store.js";
 import { AGENT_NAMES, type AgentStatus } from "./runner.js";
 
@@ -16,23 +17,54 @@ export function notificationScript(title: string, body: string): string {
   return `display notification ${quoted(body)} with title ${quoted(title)}`;
 }
 
-const run = (file: string, args: string[]) =>
+const run = (file: string, args: string[], env?: NodeJS.ProcessEnv) =>
   new Promise<void>((resolve, reject) => {
-    execFile(file, args, { timeout: 10_000 }, (e) => (e ? reject(e) : resolve()));
+    execFile(file, args, { timeout: 10_000, windowsHide: true, ...(env ? { env } : {}) }, (e) => (e ? reject(e) : resolve()));
   });
 
 /**
- * The default: `osascript -e 'display notification …'` on macOS, nothing on other platforms. RUSHES_NO_NOTIFY=1
- * turns it off (the test suite sets it, so no test shows a real notification).
+ * §34: a Windows toast through PowerShell. The title and body are read from environment variables, never written into
+ * the script, so no text can become code. Uses PowerShell's own app id, which every Windows 10 and 11 has registered.
  */
-export function osNotifier(o: { platform?: NodeJS.Platform; env?: NodeJS.ProcessEnv; run?: (file: string, args: string[]) => Promise<void> } = {}): Notifier {
+export const WINDOWS_TOAST_SCRIPT = [
+  "$ErrorActionPreference='Stop'",
+  "[Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notifications,ContentType=WindowsRuntime]|Out-Null",
+  "$x=[Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)",
+  "$t=$x.GetElementsByTagName('text')",
+  "$t.Item(0).AppendChild($x.CreateTextNode($env:RUSHES_NOTIFY_TITLE))|Out-Null",
+  "$t.Item(1).AppendChild($x.CreateTextNode($env:RUSHES_NOTIFY_BODY))|Out-Null",
+  "$id='{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe'",
+  "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($id).Show([Windows.UI.Notifications.ToastNotification]::new($x))",
+].join(";");
+
+/**
+ * The default: osascript on macOS, `notify-send` on Linux when it is installed, a PowerShell toast on Windows (§34).
+ * Anything else, or a failure, shows nothing (a failure is logged). RUSHES_NO_NOTIFY=1 turns it off (the test suite
+ * sets it, so no test shows a real notification).
+ */
+export function osNotifier(
+  o: { platform?: NodeJS.Platform; env?: NodeJS.ProcessEnv; run?: (file: string, args: string[], env?: NodeJS.ProcessEnv) => Promise<void>; find?: (bin: string) => string | null } = {},
+): Notifier {
   const platform = o.platform ?? process.platform;
   const env = o.env ?? process.env;
   const exec = o.run ?? run;
+  const find = o.find ?? ((bin: string) => findOnPath(bin));
   return async (title, body) => {
-    if (platform !== "darwin" || env.RUSHES_NO_NOTIFY === "1") return;
+    if (env.RUSHES_NO_NOTIFY === "1") return;
+    const line = (s: string) => s.replace(/[\r\n\t]+/g, " ");
     try {
-      await exec("osascript", ["-e", notificationScript(title, body)]);
+      if (platform === "darwin") {
+        await exec("osascript", ["-e", notificationScript(title, body)]);
+      } else if (platform === "win32") {
+        await exec("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", WINDOWS_TOAST_SCRIPT], {
+          ...process.env, RUSHES_NOTIFY_TITLE: line(title), RUSHES_NOTIFY_BODY: line(body),
+        });
+      } else {
+        const bin = find("notify-send");
+        if (!bin) return;
+        // `--` ends the options, so a title can never be read as one.
+        await exec(bin, ["--app-name=Rushes", "--", line(title), line(body)]);
+      }
     } catch (e) {
       console.error(`Rushes: couldn't show a notification: ${e instanceof Error ? e.message : String(e)}`);
     }

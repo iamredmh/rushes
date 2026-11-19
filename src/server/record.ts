@@ -1,5 +1,6 @@
+import { renameRetry } from "../core/fsRetry.js";
 import { constants } from "node:fs";
-import { lstat, open, rename, writeFile } from "node:fs/promises";
+import { lstat, open, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { hashText } from "../core/brief.js";
 import { InvalidError, NotFoundError, RushesError } from "../core/errors.js";
@@ -115,7 +116,7 @@ export abstract class RecordFile {
     if (again === null || hashText(again) !== hashText(prev)) throw this.changed();
     const tmp = join(dirname(this.path), `.${basename(this.path)}.${process.pid}.${Date.now()}.tmp`);
     await writeFile(tmp, next, "utf8");
-    await rename(tmp, this.path);
+    await renameRetry(tmp, this.path);
     const prevHash = hashText(prev);
     const nextHash = hashText(next);
     // If Rushes had not yet seen `prev`, it is the agent's version: keep it as the baseline before the edit lands.

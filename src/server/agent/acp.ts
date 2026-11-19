@@ -1,6 +1,7 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { RpcPeer } from "./rpc.js";
+import { killTree, spawnEnv, spawnProgram } from "./spawn.js";
 import { VERSION } from "../../version.js";
 
 export interface AdapterSpec { command: string; args: string[]; env: Record<string, string>; cwd: string }
@@ -81,11 +82,14 @@ export class AcpConnection extends EventEmitter {
   }
 
   static start(spec: AdapterSpec): AcpConnection {
-    const child = spawn(spec.command, spec.args, {
+    // §34: on macOS and Linux the adapter gets its own process group, so Stop ends the agent it started too (killTree).
+    // On Windows taskkill /T finds the tree without one, and a detached child would get its own console window.
+    const child = spawnProgram(spec.command, spec.args, {
       cwd: spec.cwd,
-      env: { ...process.env, ...spec.env },
+      env: spawnEnv(spec.env),
       stdio: ["pipe", "pipe", "pipe"],
-      detached: false,
+      detached: process.platform !== "win32",
+      windowsHide: true,
     });
     return new AcpConnection(child);
   }
@@ -136,13 +140,13 @@ export class AcpConnection extends EventEmitter {
     this.permissionHandler = fn;
   }
 
-  /** SIGTERM now, SIGKILL after 2 s if the child is still there. */
+  /** SIGTERM to the adapter's whole process tree now, SIGKILL after 2 s if it is still there (§34: taskkill /T /F on Windows). */
   kill(): void {
     if (this.exited || this.killTimer) return;
-    this.child.kill("SIGTERM");
+    killTree(this.child, "SIGTERM");
     this.killTimer = setTimeout(() => {
       this.killTimer = null;
-      if (!this.exited) this.child.kill("SIGKILL");
+      if (!this.exited) killTree(this.child, "SIGKILL");
     }, KILL_GRACE_MS);
     this.killTimer.unref();
   }

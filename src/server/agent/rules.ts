@@ -17,17 +17,43 @@
 // every project, so R10 holds: nothing inside a project can write it, or grant itself anything through it.
 import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
-import { chmod, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { renameRetry } from "../../core/fsRetry.js";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import { AgentDefaultsSchema, AgentRulesReadSchema, AgentRulesSchema, type AgentDefaults, type AgentRules } from "../../core/schema.js";
 import type { Store } from "../../core/store.js";
 import { InvalidError } from "../../core/errors.js";
 
-/** $XDG_CONFIG_HOME when set to an absolute path (as the XDG spec asks), else ~/.config. Tests point it at a temp folder. */
-export function userConfigDir(env: NodeJS.ProcessEnv = process.env): string {
+/**
+ * $XDG_CONFIG_HOME when set to an absolute path (as the XDG spec asks), else ~/.config; on Windows (§34) %APPDATA%.
+ * Tests point it at a temp folder.
+ */
+export function userConfigDir(env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform, home = homedir()): string {
   const x = env.XDG_CONFIG_HOME;
-  return x && isAbsolute(x) ? x : join(homedir(), ".config");
+  if (x && isAbsolute(x)) return x;
+  if (platform === "win32") return env.APPDATA || join(home, "AppData", "Roaming");
+  return join(home, ".config");
+}
+
+/**
+ * §34: where Windows kept these files before 0.13.0 (%USERPROFILE%\.config), still read when the new place has none.
+ * Null everywhere else, and whenever XDG_CONFIG_HOME is set: nothing moved there.
+ */
+export function legacyConfigDir(env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform, home = homedir()): string | null {
+  const x = env.XDG_CONFIG_HOME;
+  if ((x && isAbsolute(x)) || platform !== "win32") return null;
+  return join(home, ".config");
+}
+
+/** Reads `path`, or `legacy` when `path` isn't there (ENOENT). Other errors are thrown as they are. */
+async function readWithFallback(path: string, legacy: string | null): Promise<string> {
+  try {
+    return await readFile(path, "utf8");
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT" || !legacy) throw e;
+    return await readFile(legacy, "utf8");
+  }
 }
 
 /**
@@ -57,17 +83,21 @@ let writes = 0;
 
 export class AgentRulesFile {
   readonly path: string;
+  /** §34: the pre-0.13 Windows place, read when `path` isn't there yet. */
+  readonly legacyPath: string | null;
   private queue: Promise<unknown> = Promise.resolve();
 
-  constructor(root: string, configDir = userConfigDir()) {
-    this.path = rulesPath(root, configDir);
+  constructor(root: string, configDir?: string) {
+    this.path = rulesPath(root, configDir ?? userConfigDir());
+    const legacy = configDir === undefined || configDir === userConfigDir() ? legacyConfigDir() : null;
+    this.legacyPath = legacy ? rulesPath(root, legacy) : null;
   }
 
   /** The rules now. A missing file reads as the defaults; a damaged one as ask-all with no rules. */
   async read(): Promise<AgentRules> {
     let raw: string;
     try {
-      raw = await readFile(this.path, "utf8");
+      raw = await readWithFallback(this.path, this.legacyPath);
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code === "ENOENT") return DEFAULTS();
       console.error(`Rushes: couldn't read the agent's rules at ${this.path}: ${(e as Error).message}. Every action asks until they are saved again.`);
@@ -107,7 +137,7 @@ export class AgentRulesFile {
    */
   adopt(defaults: AgentDefaults | null): Promise<AgentRules | null> {
     const run = this.queue.catch(() => undefined).then(async () => {
-      if (!defaults || (await exists(this.path))) return null;
+      if (!defaults || (await exists(this.path)) || (this.legacyPath && (await exists(this.legacyPath)))) return null;
       // §33: Bypass is never adopted: a new project whose default is Bypass starts in Accept edits. Auto is adopted.
       const permissions = defaults.permissions === "bypass" ? "project-edits" : defaults.permissions;
       const rules = AgentRulesSchema.parse({ setUp: true, agent: defaults.agent, permissions, always: [] });
@@ -136,7 +166,7 @@ async function writePrivate(path: string, data: unknown): Promise<void> {
   await chmod(dir, 0o700);
   const tmp = `${path}.${process.pid}.${Date.now()}.${++writes}.tmp`;
   await writeFile(tmp, JSON.stringify(data, null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
-  await rename(tmp, path);
+  await renameRetry(tmp, path);
 }
 
 /** §32: where the Mac-wide default is: <user config dir>/rushes/agent-defaults.json. */
@@ -147,17 +177,20 @@ export function defaultsPath(configDir = userConfigDir()): string {
 /** §32: Send to AI's Mac-wide default. One per config dir, so every project's writes to it queue together. */
 export class AgentDefaultsFile {
   readonly path: string;
+  readonly legacyPath: string | null;
   private queue: Promise<unknown> = Promise.resolve();
 
-  constructor(configDir = userConfigDir()) {
-    this.path = defaultsPath(configDir);
+  constructor(configDir?: string) {
+    this.path = defaultsPath(configDir ?? userConfigDir());
+    const legacy = configDir === undefined || configDir === userConfigDir() ? legacyConfigDir() : null;
+    this.legacyPath = legacy ? defaultsPath(legacy) : null;
   }
 
   /** The default, or null when there is none yet (the sheet asks once). A damaged file is no default: the sheet asks. */
   async read(): Promise<AgentDefaults | null> {
     let raw: string;
     try {
-      raw = await readFile(this.path, "utf8");
+      raw = await readWithFallback(this.path, this.legacyPath);
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== "ENOENT") console.error(`Rushes: couldn't read Send to AI's default at ${this.path}: ${(e as Error).message}.`);
       return null;

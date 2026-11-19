@@ -10,17 +10,18 @@ const claude: AgentInfo = { id: "claude", name: "Claude Code", installed: true, 
 const codex: AgentInfo = { id: "codex", name: "Codex", installed: true, signedIn: true, path: "/opt/homebrew/bin/codex", signIn: "codex login" };
 
 describe("adapterSpec", () => {
-  it("pins the version and points the Claude adapter at the user's claude", () => {
-    expect(adapterSpec(claude, root)).toMatchObject({
-      command: "npx", args: ["-y", `${ADAPTERS.claude.pkg}@${ADAPTERS.claude.version}`], cwd: root,
-      env: { CLAUDE_CODE_EXECUTABLE: "/usr/local/bin/claude" },
-    });
+  it("§34: runs the cached connector with this Node, from outside the project, and points it at the user's claude", () => {
+    const entry = join("/cache", "rushes", "connectors", "claude-0.107.3", "node_modules", "x", "dist", "index.js");
+    const spec = adapterSpec(claude, root, "project-edits", entry);
+    expect(spec).toMatchObject({ command: process.execPath, args: [entry], cwd: dirname(entry), env: { CLAUDE_CODE_EXECUTABLE: "/usr/local/bin/claude" } });
+    expect(spec.command).not.toBe("npx");
+    expect(spec.cwd).not.toBe(root);
     expect(ADAPTERS.claude.version).toMatch(/^\d+\.\d+\.\d+$/);
     expect(ADAPTERS.codex.version).toMatch(/^\d+\.\d+\.\d+$/);
   });
   it("gives Codex its detected binary and not the Claude variable", () => {
-    const spec = adapterSpec(codex, root);
-    expect(spec.args).toEqual(["-y", `${ADAPTERS.codex.pkg}@${ADAPTERS.codex.version}`]);
+    const spec = adapterSpec(codex, root, "project-edits", "/c/codex-acp/dist/index.js");
+    expect(spec.args).toEqual(["/c/codex-acp/dist/index.js"]);
     expect(spec.env.CODEX_PATH).toBe("/opt/homebrew/bin/codex");
     expect(spec.env.CLAUDE_CODE_EXECUTABLE).toBeUndefined();
   });

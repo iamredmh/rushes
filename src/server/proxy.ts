@@ -1,6 +1,7 @@
+import { renameRetry } from "../core/fsRetry.js";
 import { spawn as nodeSpawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { access, constants, mkdir, readdir, rename, rm, stat } from "node:fs/promises";
+import { access, constants, mkdir, readdir, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { RushesError, NotFoundError } from "../core/errors.js";
 import { VIDEO_FORMATS, hasFfprobe, probe as ffprobe, proxyNeed, type Probe } from "../core/media.js";
@@ -513,7 +514,7 @@ export class ProxyJobs {
         return await fail("ffmpeg finished without writing the proxy");
       }
       // Rename first, record second: a record only ever points at a whole file.
-      await rename(partial, final);
+      await renameRetry(partial, final);
       // Not stopped by close(): a committing job runs to the end, and this probe is of a local file it just wrote.
       const out = await this.probeFile(final).catch(() => null);
       const size =

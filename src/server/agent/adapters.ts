@@ -2,23 +2,13 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AgentId, AgentPermissions } from "../../core/schema.js";
 import type { AdapterSpec, McpServerSpec } from "./acp.js";
-import { searchPath, type AgentInfo } from "./detect.js";
+import type { AgentInfo } from "./detect.js";
+import { cacheDir } from "./connectors.js";
+import { searchPath } from "./spawn.js";
 import { RUSHES_SERVER } from "./ownTools.js";
 
-/*
- * Checked 17 Nov 2026 with `npm view <pkg> version`:
- *   @agentclientprotocol/claude-agent-acp 0.107.3   (used)
- *   @agentclientprotocol/codex-acp        2.7.0     (used)
- *   older names, not used: @zed-industries/claude-code-acp 0.16.2, @zed-industries/claude-agent-acp 0.23.1,
- *                          @zed-industries/codex-acp 0.16.0
- * The Claude adapter's README says to set CLAUDE_CODE_EXECUTABLE to use a Claude CLI you already have.
- * The Codex adapter's README names CODEX_PATH for the same purpose.
- * Pinned exactly; run through `npx -y <pkg>@<version>`.
- */
-export const ADAPTERS: Record<AgentId, { pkg: string; version: string }> = {
-  claude: { pkg: "@agentclientprotocol/claude-agent-acp", version: "0.107.3" },
-  codex: { pkg: "@agentclientprotocol/codex-acp", version: "2.7.0" },
-};
+/** The adapters and their pinned versions live with the fetch that installs them (§34). */
+export { ADAPTERS } from "./connectors.js";
 
 /*
  * R14/R15: the session mode in which the agent asks Rushes (session/request_permission) before it acts, instead of
@@ -135,16 +125,18 @@ export function sessionSetup(agent: AgentId, level: AgentPermissions = "project-
   return {};
 }
 
-/** How to start the ACP adapter for an agent, in the project folder. */
-export function adapterSpec(agent: AgentInfo, root: string, level: AgentPermissions = "project-edits"): AdapterSpec {
-  const { pkg, version } = ADAPTERS[agent.id];
-  // The same PATH detection used, so npx and node are found even when the server has a thin PATH.
+/**
+ * How to start the ACP adapter for an agent: `node <entry>`, with the Node running Rushes, from the cache folder (§34).
+ * Never npx at run time, and never from the project folder, so nothing in the project can change what runs.
+ */
+export function adapterSpec(agent: AgentInfo, _root: string, level: AgentPermissions = "project-edits", entry = ""): AdapterSpec {
+  // The same PATH detection used, so the agent finds node and its own tools even when the server has a thin PATH.
   const env: Record<string, string> = { PATH: searchPath() };
   if (agent.id === "claude" && agent.path) env.CLAUDE_CODE_EXECUTABLE = agent.path;
   if (agent.id === "codex" && agent.path) env.CODEX_PATH = agent.path;
   // R15: Codex starts in the mode whose approvals go to Rushes (ASK_MODE.codex), unless the user picked Auto or Bypass (§33).
   if (agent.id === "codex") env.INITIAL_AGENT_MODE = modeFor("codex", level);
-  return { command: "npx", args: ["-y", `${pkg}@${version}`], env, cwd: root };
+  return { command: process.execPath, args: [entry], env, cwd: entry ? dirname(entry) : cacheDir() };
 }
 
 /** This package's built CLI. src/server/agent/ and dist/server/agent/ are both three folders below the package root. */

@@ -15,7 +15,7 @@
 <p align="center">
   <a href="https://www.npmjs.com/package/rushes"><img alt="npm" src="https://img.shields.io/npm/v/rushes?style=flat-square&color=7C93FF&labelColor=1C1E22"></a>
   <a href="LICENSE"><img alt="MIT licence" src="https://img.shields.io/badge/licence-MIT-7C93FF?style=flat-square&labelColor=1C1E22"></a>
-  <a href="https://nodejs.org"><img alt="Node.js 20.19 or newer" src="https://img.shields.io/badge/node-%E2%89%A5%2020.19-7C93FF?style=flat-square&labelColor=1C1E22"></a>
+  <a href="https://nodejs.org"><img alt="Node.js 22.12 or newer" src="https://img.shields.io/badge/node-%E2%89%A5%2022.12-7C93FF?style=flat-square&labelColor=1C1E22"></a>
   <img alt="Runs on your machine" src="https://img.shields.io/badge/runs-on%20your%20machine-4CC38A?style=flat-square&labelColor=1C1E22">
   <img alt="Works through MCP" src="https://img.shields.io/badge/works%20through-MCP-A78BFA?style=flat-square&labelColor=1C1E22">
 </p>
@@ -55,7 +55,7 @@ Already have a film? Tell your agent:
 
 If you started it in the chat, your agent writes the brief from the conversation and registers the script, stills and files you've already made, and says what it had to guess.
 
-It runs on your machine. There's no account, no API key and no server to sign up for. You need [Node.js](https://nodejs.org) 20.19 or newer (or 22.12+ on the 22 line).
+It runs on your machine. There's no account, no API key and no server to sign up for. You need [Node.js](https://nodejs.org) 22.12 or newer, on a Mac, Windows or Linux.
 
 No project to hand? `npx -y rushes demo` builds an example on your machine and opens it.
 
@@ -293,9 +293,13 @@ Hovering a locked tab shows a short tooltip, e.g. "Locked: ask your agent for mu
 
 ## Send to AI
 
-Send to AI hands your notes to an agent on this Mac, so there's no prompt to paste. It starts your own Claude Code or Codex in the project folder, signed in your way (a Claude or ChatGPT plan, or an API key), so every run is billed to that account, just as if you had typed the prompt yourself. The first run fetches a small adapter for that agent with `npx`.
+Send to AI hands your notes to an agent on your computer, so there's no prompt to paste. It works the same on a Mac, Windows and Linux. All you need is Node.js and the agent itself. It starts your own Claude Code or Codex in the project folder, signed in your way (a Claude or ChatGPT plan, or an API key), so every run is billed to that account, just as if you had typed the prompt yourself. Nothing goes through iCloud or any other cloud service.
 
-Rushes never sees a password or key, and never signs you in. When an agent isn't signed in, **Sign in in Terminal** opens Terminal with that agent's own login command (`claude auth login` or `codex login`) for you to run there.
+**The connector.** Rushes talks to each agent through a connector: the Agent Client Protocol adapter for Claude Code or Codex. It's about 80 MB for Claude Code and 20 MB for Codex, and it uses the agent you already have rather than a copy of its own. Rushes downloads it once per version, in the background, when you open a project with that agent installed, or when you run `rushes setup`. It's kept in your cache folder: `~/Library/Caches/rushes` on a Mac, `%LOCALAPPDATA%\rushes\Cache` on Windows, `~/.cache/rushes` on Linux, or `$XDG_CACHE_HOME/rushes`. Until it's ready, the sheet and the agent's menu say "Getting Claude Code ready…". A Send made meanwhile waits for it. The download goes through your own npm settings (registry, proxy). A project's own `.npmrc` is never used.
+
+**Installing an agent.** An agent that isn't installed shows its install command with a Copy button: `npm install -g @anthropic-ai/claude-code` for Claude Code, `npm install -g @openai/codex` for Codex. One older than Send to AI is tested with (Claude Code 2.0, Codex 0.163) shows its update command instead. `rushes doctor` checks each agent: installed, version, signed in, and connector downloaded.
+
+Rushes never sees a password or key, and never signs you in. When an agent isn't signed in, the sign-in button opens a terminal with that agent's own login command (`claude auth login` or `codex login`) for you to run there. It reads **Sign in in Terminal** on a Mac, **Sign in in Command Prompt** on Windows and **Sign in in a terminal** on Linux. Where no terminal can be opened, the desk shows the command to copy.
 
 **The switch.** Above **Send**, a row reads **Send to AI** with the agent's name and a switch. On, Send files the batch as always and hands it to the agent: what it is doing shows on each note and in Activity, its questions arrive as replies on the note, and your answer goes back to it. Off, Send copies the prompt, as before. Under Send, one line says what the agent may do: "Edits files in this project, asks before commands" or "Asks before everything", and "next Send continues the conversation" when there is one to continue.
 
@@ -318,13 +322,13 @@ A change of row applies from the next Send. A batch already running keeps the ro
 
 Under Manual and Accept edits, some folders and files in the project always ask, whatever "Always" rules you keep, even to read them: they hold settings, hooks or tokens. They are `.rushes/`, `.git/`, `.claude/`, `.codex/`, `.mcp.json`, `.vscode/` and `.idea/`. Moving or deleting the project folder itself always asks too.
 
-An ask shows what the agent wants to do and the exact command, with **Allow once**, **Always** and **No**. It waits until you answer. It never turns into a yes by itself. When the agent asks, or ends a run with a question, and no Rushes tab is open, your Mac shows a notification saying the agent is waiting in this project.
+An ask shows what the agent wants to do and the exact command, with **Allow once**, **Always** and **No**. It waits until you answer. It never turns into a yes by itself. When the agent asks, or ends a run with a question, and no Rushes tab is open, your computer shows a notification saying the agent is waiting in this project (on Linux when `notify-send` is installed).
 
 Rushes sees only what the agent asks it. The agent's own permission settings, such as allow rules in Claude Code's settings, can still approve actions without asking, and Rushes never sees those.
 
 With Codex under Manual or Accept edits, commands that write files or reach the network ask, but commands that only read, such as searches and listings, run without asking.
 
-**"Always" rules.** **Always** keeps a rule for this project, so the same request runs without asking next time. The button names the rule, such as "Always for npx hyperframes here". The agent's menu lists the rules, and you can remove any of them. Always rules are kept in your user settings, outside the project, so the agent cannot change them. The permission level, the rules, whether you have answered the first-Send sheet and which agent you turned Send to AI on for are in `~/.config/rushes/agent-rules/` (or under `$XDG_CONFIG_HOME`), one file per project. That agent is set only when you turn Send to AI on, in the sheet, the agent's menu or the switch. Copy a prompt and switching off clear it, and changing what it may do leaves it as it is. `.rushes/agent.json` keeps the project's switch, its agent and the conversation to continue. Nothing secret. Send hands notes to an agent only when that switch is on and its agent is the one in your file. Otherwise Send to AI shows as off and Send copies the prompt, so a project folder from someone else, or anything that writes `agent.json`, can't start an agent you didn't choose. A project set up with an earlier build asks once more. The default for new projects is `~/.config/rushes/agent-defaults.json` (the agent and what it may do, never Always rules, which stay per project). It is yours, outside every project, so nothing in a project can set it.
+**"Always" rules.** **Always** keeps a rule for this project, so the same request runs without asking next time. The button names the rule, such as "Always for npx hyperframes here". The agent's menu lists the rules, and you can remove any of them. Always rules are kept in your user settings, outside the project, so the agent cannot change them. The permission level, the rules, whether you have answered the first-Send sheet and which agent you turned Send to AI on for are in `~/.config/rushes/agent-rules/` (`%APPDATA%\rushes\agent-rules\` on Windows, or under `$XDG_CONFIG_HOME`), one file per project. That agent is set only when you turn Send to AI on, in the sheet, the agent's menu or the switch. Copy a prompt and switching off clear it, and changing what it may do leaves it as it is. `.rushes/agent.json` keeps the project's switch, its agent and the conversation to continue. Nothing secret. Send hands notes to an agent only when that switch is on and its agent is the one in your file. Otherwise Send to AI shows as off and Send copies the prompt, so a project folder from someone else, or anything that writes `agent.json`, can't start an agent you didn't choose. A project set up with an earlier build asks once more. The default for new projects is `~/.config/rushes/agent-defaults.json` (the agent and what it may do, never Always rules, which stay per project). It is yours, outside every project, so nothing in a project can set it.
 
 "Always" trusts one program and subcommand, such as `npx hyperframes`, `npm install` or `git commit`. Later commands that start with the same two words run without asking, whatever their other arguments. That trust covers whatever that program and subcommand can be told to run:
 

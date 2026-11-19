@@ -28,6 +28,7 @@ import { noteToolCall, withSeen, type SeenCalls } from "./seenCalls.js";
 import { isOwnRushesTool, noteMcpCall, type McpCalls } from "./ownTools.js";
 import { PermissionBroker, addRule, allowOutcome, dropRule, toRequest, type AskChoice, type PendingAsk } from "./broker.js";
 import { detectAgents, type AgentInfo } from "./detect.js";
+import { connectorEntry, ensureConnector } from "./connectors.js";
 import { agentRulesFor, type AgentRulesFile } from "./rules.js";
 import { batchJob, batchLabel, followUpFor, type TurnJob } from "./followUp.js";
 
@@ -57,7 +58,13 @@ export interface AgentStatus {
 
 export interface RunnerOptions {
   detect?: () => Promise<AgentInfo[]>;
-  spec?: (a: AgentInfo, root: string, level: AgentPermissions) => AdapterSpec;
+  /** `entry` is the adapter's start file from `connector`. */
+  spec?: (a: AgentInfo, root: string, level: AgentPermissions, entry: string) => AdapterSpec;
+  /**
+   * §34: the adapter's start file, fetched ahead of time (connectors.ts). Waited for before the start timeout begins.
+   * Defaults to ensureConnector; with a `spec` injected (tests), to nothing.
+   */
+  connector?: { ready: (agent: AgentId) => boolean; ensure: (agent: AgentId) => Promise<string> };
   mcp?: (root: string) => McpServerSpec;
   idleMs?: number;
   /** How long the adapter may take to start (spawn, initialize, new or loaded session). Defaults to AGENT_START_MS. */
@@ -80,7 +87,7 @@ type Accepted = { info: AgentInfo } | { why: string; stopped?: true } | { why: s
 
 /** How long the adapter stays up after its last turn (§5.2). */
 export const AGENT_IDLE_MS = 600_000;
-/** How long an adapter may take to start, from spawn to a ready session (a first `npx -y` fetch included). */
+/** How long an adapter may take to start, from spawn to a ready session. A connector fetch (§34) is not counted. */
 export const AGENT_START_MS = 120_000;
 /** How long Stop waits for a cancelled turn to end before it kills the adapter. */
 export const STOP_WAIT_MS = 5000;
@@ -107,6 +114,8 @@ const NAMES = AGENT_NAMES;
 /** A start-up ended by Stop or close, not by a failure. */
 /** The session could not be put in the mode in which the agent asks Rushes (R14, R15): the start fails with this. */
 class ModeError extends Error {}
+/** §34: the connector couldn't be fetched; its message says why in plain words. */
+class ConnectorError extends Error {}
 
 class Halted extends Error {
   constructor() {
@@ -157,7 +166,8 @@ async function within(p: Promise<unknown>, ms: number): Promise<void> {
 
 export class AgentRunner {
   private readonly detect: () => Promise<AgentInfo[]>;
-  private readonly specFor: (a: AgentInfo, root: string, level: AgentPermissions) => AdapterSpec;
+  private readonly specFor: (a: AgentInfo, root: string, level: AgentPermissions, entry: string) => AdapterSpec;
+  private readonly connector: NonNullable<RunnerOptions["connector"]>;
   /**
    * Per adapter: which agent it runs, (Codex only) its MCP calls by tool call id (R16), and its session's mode as
    * last reported (round 2, item 3).
@@ -226,6 +236,11 @@ export class AgentRunner {
   constructor(private readonly store: Store, opts: RunnerOptions = {}) {
     this.detect = opts.detect ?? (() => detectAgents());
     this.specFor = opts.spec ?? adapterSpec;
+    this.connector =
+      opts.connector ??
+      (opts.spec
+        ? { ready: () => true, ensure: async () => "" }
+        : { ready: (a) => connectorEntry(a) !== null, ensure: (a) => ensureConnector(a) });
     this.mcp = opts.mcp ?? rushesMcp;
     this.idleMs = opts.idleMs ?? AGENT_IDLE_MS;
     this.startMs = opts.startMs ?? AGENT_START_MS;
@@ -425,6 +440,7 @@ export class AgentRunner {
     if (job.kind === "batch") job.level = rules.permissions;
     const info = (await this.detect()).find((a) => a.id === agent);
     if (!info?.installed) return park(`${info?.name ?? NAMES[agent]} is not installed`, info?.name ?? NAMES[agent]);
+    if (info.outdated) return park(`${info.name} ${info.version} is too old for Send to AI: update it`, info.name);
     if (!info.signedIn) return park(`${info.name} is not signed in`, info.name);
     // A follow-up's note may have left the agent while this was checking (recalled, done): then there is nothing to
     // follow up, and it is dropped quietly, with no line and no turn.
@@ -480,8 +496,18 @@ export class AgentRunner {
     let timedOut = false;
     let timer: NodeJS.Timeout | undefined;
     try {
+      // §34: the connector is normally fetched when the desk starts. A Send made before that finished waits for it
+      // here, outside the start timeout; a fetch that failed is tried again once.
+      if (!this.connector.ready(info.id)) this.addLine(`Getting ${info.name} ready (a one-time download)`, null);
+      let entry: string;
+      try {
+        entry = await this.connector.ensure(info.id);
+      } catch (e) {
+        throw new ConnectorError(messageOf(e));
+      }
+      if (gen !== this.gen) throw new Halted();
       const level = this.startLevel();
-      conn = AcpConnection.start(this.specFor(info, root, level));
+      conn = AcpConnection.start(this.specFor(info, root, level, entry));
       this.attach(conn, info.id, level);
       const c = conn;
       const deadline = new Promise<never>((_, reject) => {
@@ -501,7 +527,7 @@ export class AgentRunner {
       const tail = conn && !timedOut ? lastLine(this.exits.get(conn)?.stderr ?? "") : "";
       const why = timedOut
         ? `${info.name} did not start within ${spell(this.startMs)}`
-        : e instanceof ModeError
+        : e instanceof ModeError || e instanceof ConnectorError
           ? e.message
           : `${info.name} could not start: ${tail || messageOf(e)}`;
       await this.failRun(why);

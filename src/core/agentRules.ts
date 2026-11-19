@@ -1,17 +1,27 @@
 import { realpathSync } from "node:fs";
-import { basename, dirname, resolve, sep, relative, isAbsolute } from "node:path";
+import { posix, win32 } from "node:path";
 import type { AgentRules, AlwaysRule } from "./schema.js";
+
+/**
+ * §34: the OS the rules judge paths and commands for. Always the real one, except in tests, which set "win32" to run
+ * the Windows cases on any computer.
+ */
+export const rulesOS: { platform: NodeJS.Platform } = { platform: process.platform };
+const onWindows = (): boolean => rulesOS.platform === "win32";
+const P = () => (onWindows() ? win32 : posix);
 
 export type PermissionRequest = { kind: string | null; title: string; command: string | null; paths: string[] };
 
 /** Resolve a path through symlinks. A path not there yet is judged by its longest existing ancestor, plus the rest. */
 export function real(p: string): string {
+  const { resolve, dirname, sep } = P();
   const abs = resolve(p);
   let cur = abs;
   const rest: string[] = [];
   for (;;) {
     try {
-      const r = realpathSync(cur);
+      // §34: .native, as the OS names it: on Windows that also expands 8.3 short names (GIT~1) to the long ones.
+      const r = realpathSync.native(cur);
       return rest.length ? resolve(r, ...rest.reverse()) : r;
     } catch {
       const up = dirname(cur);
@@ -22,13 +32,28 @@ export function real(p: string): string {
   }
 }
 
+/** On Windows paths compare case-insensitively, as its volumes do; elsewhere as given. */
+const same = (s: string): string => (onWindows() ? fold(s) : s);
+
 /** True only for `root` itself or a path under it, after symlinks are resolved. */
 export function inside(root: string, path: string): boolean {
+  const { relative, isAbsolute, sep } = P();
   const r = real(root);
   const p = real(path);
-  if (p === r) return true;
+  if (same(p) === same(r)) return true;
   const rel = relative(r, p);
-  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel) && p.startsWith(r.endsWith(sep) ? r : r + sep);
+  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel) && same(p).startsWith(same(r.endsWith(sep) ? r : r + sep));
+}
+
+/**
+ * §34: Windows names that may open something other than what they spell, so they always ask: a part ending in a dot or
+ * a space (`.git.` opens .git), one holding `:` (an NTFS stream, `.git::$DATA`) and an 8.3 short name (`GIT~1`).
+ * Checked on the path as given and as resolved, below the root.
+ */
+function windowsTrick(root: string, path: string): boolean {
+  const { relative, resolve } = win32;
+  const rels = [relative(resolve(root), resolve(path)), relative(real(root), real(path))];
+  return rels.some((rel) => rel.split(/[\\/]/).some((part) => part !== "" && part !== ".." && (/[. ]$/.test(part) || part.includes(":") || /~\d/.test(part))));
 }
 
 const PROJECT_KINDS = new Set(["read", "edit", "search", "move", "delete"]);
@@ -51,8 +76,8 @@ export const fold = (s: string): string => s.normalize("NFKC").toLowerCase();
 
 /** True when `path`, under `root`, is or is inside a protected folder or file (after symlinks are resolved). */
 export function isProtected(root: string, path: string): boolean {
-  const rel = relative(real(root), real(path));
-  return rel.split(sep).some((part) => PROTECTED.has(fold(part)));
+  const rel = P().relative(real(root), real(path));
+  return rel.split(/[\\/]/).some((part) => PROTECTED.has(fold(part)));
 }
 
 /** Kinds that change where a path is: never for the project folder itself (M5). */
@@ -66,7 +91,9 @@ function inProject(req: PermissionRequest, root: string): boolean {
   const notRoot = req.kind !== null && ROOT_CHANGES.has(req.kind);
   return (
     req.paths.length > 0 &&
-    req.paths.every((p) => inside(root, p) && !isProtected(root, p) && !(notRoot && real(p) === real(root)))
+    req.paths.every(
+      (p) => inside(root, p) && !isProtected(root, p) && !(notRoot && same(real(p)) === same(real(root))) && !(onWindows() && windowsTrick(root, p)),
+    )
   );
 }
 
@@ -79,14 +106,23 @@ const NEVER_ALWAYS = new Set(["other", "switch_mode"]);
  * globs, `~`, `$`), so a command with it always asks, whatever Always rules there are.
  */
 export const SAFE_COMMAND = /^[A-Za-z0-9 \t_.\/:=@%+,'"-]*$/;
+/** §34: the same without `%`, which cmd expands (`%PATH%`), for Windows. A backslash is refused on every OS. */
+export const SAFE_COMMAND_WIN32 = /^[A-Za-z0-9 \t_.\/:=@+,'"-]*$/;
+const safeCommand = (command: string): boolean => (onWindows() ? SAFE_COMMAND_WIN32 : SAFE_COMMAND).test(command);
 
 /** Shells (and env): any of them runs whatever script follows it. broker.ts unwraps `[shell, -c|-lc, script]` by this list. */
-export const SHELLS: ReadonlySet<string> = new Set(["sh", "bash", "zsh", "fish", "dash", "ksh", "csh", "tcsh", "rbash", "mksh", "pwsh", "env"]);
+export const SHELLS: ReadonlySet<string> = new Set([
+  "sh", "bash", "zsh", "fish", "dash", "ksh", "csh", "tcsh", "rbash", "mksh", "pwsh", "env",
+  // §34: Windows's own (and WSL's), each runs whatever script or command follows it.
+  "cmd", "powershell", "wsl", "cscript", "wscript", "mshta", "nu",
+]);
 /** Programs that run another program given after them, so the program and subcommand would be the next words. */
 export const WRAPPERS: ReadonlySet<string> = new Set([
   "exec", "command", "builtin", "nohup", "time", "nice", "timeout", "xargs", "sudo", "doas", "caffeinate", "arch", "eval", "source",
   "noglob", "nocorrect", "coproc", "repeat", "trap", "watch", "stdbuf", "unbuffer", "chroot", "taskpolicy", "sandbox-exec", "corepack",
   "open", "osascript",
+  // §34: Windows programs that start another program named after them.
+  "start", "call", "rundll32", "forfiles", "runas", "psexec", "conhost", "schtasks", "at", "explorer", "wt",
 ]);
 
 /** Subcommands that run any package or program named after them (`npm x`, `npm exec`, `npm exe`, `pnpm dlx`), whatever the program. */
@@ -105,8 +141,13 @@ export const RUNNER_PAIRS: ReadonlyMap<string, string> = new Map([["uv", "tool"]
 /** A word a rule may be made of: no quotes, no `=`, nothing a shell reads as more than the word itself. */
 const RULE_WORD = /^[A-Za-z0-9_.\/@:+-]+$/;
 
-/** A word's basename for the lists, folded: macOS volumes are case-insensitive, so `NOHUP` and `ſudo` run nohup and sudo. */
-const name = (word: string) => fold(basename(word));
+/**
+ * A word's basename for the lists, folded: macOS volumes are case-insensitive, so `NOHUP` and `ſudo` run nohup and sudo.
+ * §34: on every OS the basename takes `\` as well as `/`, and a Windows program extension is dropped, so `C:\x\CMD.EXE`
+ * and `bash.exe` are cmd and bash. Only ever stricter: these names are what the lists refuse.
+ */
+export const programName = (word: string): string => fold(win32.basename(word)).replace(/\.(exe|cmd|bat|com)$/, "");
+const name = programName;
 
 /**
  * The names the lists know a subcommand word by (R8). Run by a package runner it is a package spec, so a leading
@@ -121,6 +162,8 @@ function names(word: string): string[] {
 
 function ruleWord(word: string, ids: string[]): boolean {
   if (!RULE_WORD.test(word) || word.startsWith("-") || word.split("/").includes("..")) return false;
+  // §34: on Windows `/c` is a flag (`cmd /c`, `start /b`), never a program's subcommand.
+  if (onWindows() && word.startsWith("/")) return false;
   return !ids.some((n) => SHELLS.has(n) || WRAPPERS.has(n));
 }
 
@@ -152,7 +195,7 @@ export function alwaysWords(command: string): string[] | null {
  * words an exact program and subcommand (alwaysWords). Later words are that program's arguments.
  */
 export function plainCommand(command: string): boolean {
-  return command.trim() !== "" && SAFE_COMMAND.test(command) && alwaysWords(command) !== null;
+  return command.trim() !== "" && safeCommand(command) && alwaysWords(command) !== null;
 }
 
 function matches(rule: AlwaysRule, req: PermissionRequest, root: string): boolean {

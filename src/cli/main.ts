@@ -18,6 +18,8 @@ import { formatTag } from "../core/formats.js";
 import { onLabel, type OnContext } from "../core/notes.js";
 import { setup, type SetupEnv } from "../setup/setup.js";
 import { realSetupEnv } from "../setup/env.js";
+import { detectAgents } from "../server/agent/detect.js";
+import { connectorStatus, ensureConnector } from "../server/agent/connectors.js";
 import { HARNESS_IDS, type HarnessId } from "../setup/harnesses.js";
 import { runDoctor, realDoctorEnv, type DoctorEnv } from "./doctor.js";
 import { balanceFiles } from "../server/balance.js";
@@ -200,6 +202,26 @@ function extractAddVersionFlag(argv: string[]): { value: string | undefined; res
 }
 
 /** Run the CLI. Returns an exit code. Long-running commands (open, serve, mcp) resolve once started. */
+/** §34: fetches the connector of each installed agent, a line each. */
+async function fetchConnectors(io: { out: (l: string) => void }): Promise<void> {
+  const agents = (await detectAgents()).filter((a) => a.installed);
+  if (!agents.length) return;
+  io.out("");
+  for (const a of agents) {
+    if (connectorStatus(a.id).state === "ready") {
+      io.out(`= ${`${a.name} connector`.padEnd(15)} ready (Send to AI)`);
+      continue;
+    }
+    io.out(`~ ${`${a.name} connector`.padEnd(15)} downloading for Send to AI (one time)...`);
+    try {
+      await ensureConnector(a.id);
+      io.out(`+ ${`${a.name} connector`.padEnd(15)} ready`);
+    } catch (e) {
+      io.out(`! ${`${a.name} connector`.padEnd(15)} ${(e as Error).message}. Opening a project tries again.`);
+    }
+  }
+}
+
 export async function main(argv: string[], io: Io): Promise<number> {
   // The "add" command gets its own --version <value> pulled out before the real parse (see
   // extractAddVersionFlag); every other command's --version/-v stays the global boolean flag.
@@ -341,6 +363,9 @@ export async function main(argv: string[], io: Io): Promise<number> {
         const added = results.filter((r) => r.status === "added").length;
         if (added) io.out(`\nRestart ${added === 1 ? "that app" : "those apps"} so ${added === 1 ? "it picks" : "they pick"} up the rushes tools. Then ask your agent to "open Rushes".`);
         if (!results.some((r) => r.status !== "not-found")) io.out("No supported agent harness found. See https://github.com/iamredmh/rushes#other-harnesses");
+        // §34: Send to AI's connectors, downloaded now so the first Send doesn't wait. Only on the real machine (tests
+        // pass a fake setupEnv) and never on a dry run. A failure here isn't setup's: opening a project tries again.
+        if (!io.setupEnv && !o["dry-run"]) await fetchConnectors(io);
         return results.some((r) => r.status === "failed") ? 1 : 0;
       }
       case "mcp":
