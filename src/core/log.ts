@@ -5,7 +5,8 @@ import { newId } from "./ids.js";
 import { oneLineOf } from "./labels.js";
 import { STAGE_WORDS, cutEvent, fileEvent, notesSentEvent } from "./logEvents.js";
 import { LOG_MAX, MERGE_MS, logText, type LogArea, type LogBy, type LogKind, type UndatedLine } from "./logText.js";
-import type { BatchesFile, LogEntry, LogFile, Project, Script, Stage } from "./schema.js";
+import type { BatchesFile, LogEntry, LogFile, Project, Script, ScriptFile, Stage } from "./schema.js";
+import { sectionsOf } from "./script.js";
 
 /** One thing that happened, as a builder in logEvents.ts describes it. */
 export interface LogEvent {
@@ -128,7 +129,8 @@ function place(file: LogFile, event: LogEvent, by: LogBy, at: Date, id: string |
 export interface BackfillSource {
   project: Project;
   batches: BatchesFile;
-  script: Script;
+  /** script.json, or every film's sections (core/script.ts allSections). */
+  script: ScriptFile | Pick<Script, "sections">;
 }
 
 /**
@@ -170,17 +172,18 @@ export function backfillLog(file: LogFile, src: BackfillSource, before: number):
 }
 
 /** Every variant ("<lane>/<variant>") and take ("<section>:<take>") the project has. */
-export function undatedRefs(project: Pick<Project, "lanes">, script: Pick<Script, "sections">): string[] {
+export function undatedRefs(project: Pick<Project, "lanes">, script: ScriptFile | Pick<Script, "sections">): string[] {
   const refs = [
     ...project.lanes.flatMap((l) => l.variants.map((v) => `${l.id}/${v.id}`)),
-    ...script.sections.flatMap((s) => s.takes.map((t) => `${s.id}:${t.id}`)),
+    ...sectionsOf(script).flatMap((s) => s.takes.map((t) => `${s.id}:${t.id}`)),
   ];
   return refs.slice(0, LOG_MAX);
 }
 
 export interface UndatedContext {
   project: Pick<Project, "lanes">;
-  script: Pick<Script, "sections">;
+  /** script.json, or every film's sections. */
+  script: ScriptFile | Pick<Script, "sections">;
 }
 
 /** §22.6's "Before the log": one line per lane, and one for takes, computed now from the refs that still exist. */
@@ -196,7 +199,7 @@ export function undatedLines(refs: readonly string[], ctx: UndatedContext): Unda
     const name = oneLineOf(lane.name);
     out.push({ area: lane.stage, text: logText(name && name !== word ? `${word}: ${lane.name} (${n} ${noun})` : `${word}: ${n} ${noun}`) });
   }
-  const sections = ctx.script.sections.filter((s) => s.takes.some((t) => set.has(`${s.id}:${t.id}`))).length;
+  const sections = sectionsOf(ctx.script).filter((s) => s.takes.some((t) => set.has(`${s.id}:${t.id}`))).length;
   if (sections) out.push({ area: "voice", text: `Voiceover: ${sections} section${sections === 1 ? "" : "s"} with takes` });
   return out;
 }
@@ -206,6 +209,42 @@ export interface LogQuery {
   area?: LogArea;
   /** Only lines after this date and time. */
   since?: string;
+  /** §31.6: only the lines Activity shows on this film (lineOnFilm). Needs `ctx.films`. */
+  video?: string;
+}
+
+/** What placing a line on a film needs (§30.4): the films, the lanes (a take line's films) and the notes (a reply line's). */
+export interface FilmContext {
+  videos: readonly { id: string }[];
+  lanes: Project["lanes"];
+  notes: readonly { id: string; video: string | null }[];
+}
+
+/**
+ * §30: the films a Change Log line is about. Its own film when it has one; for a line written before lines carried
+ * one, the films of the notes it names (a reply line's `notes:<ids>`) or of the take it is about (`<lane>/<variant>`).
+ * Empty: the line is about the whole project, or its film can't be told. The dashboard's copy is web/src/lib.ts.
+ */
+export function lineFilms(line: Pick<LogEntry, "video" | "ref">, ctx: Pick<FilmContext, "lanes" | "notes">): string[] {
+  if (line.video) return [line.video];
+  const ref = line.ref ?? "";
+  if (ref.startsWith("notes:")) {
+    const ids = new Set(ref.slice("notes:".length).split(","));
+    return [...new Set(ctx.notes.filter((n) => ids.has(n.id) && n.video).map((n) => n.video!))];
+  }
+  const slash = ref.indexOf("/");
+  if (slash > 0) {
+    const variant = ctx.lanes.find((l) => l.id === ref.slice(0, slash))?.variants.find((v) => v.id === ref.slice(slash + 1));
+    if (variant) return variant.videos ?? (variant.video === undefined ? [] : [variant.video]);
+  }
+  return [];
+}
+
+/** §30, §31.5: whether Activity on `film` shows a line: its own and the project's. With one film (or none) every line. */
+export function lineOnFilm(line: Pick<LogEntry, "video" | "ref">, film: string | null | undefined, ctx: FilmContext): boolean {
+  if (!film || ctx.videos.length < 2) return true;
+  const films = lineFilms(line, ctx);
+  return films.length === 0 || films.includes(film);
 }
 
 export interface LogView {
@@ -220,7 +259,7 @@ export interface LogView {
 }
 
 /** §22.7: the newest `limit` lines (default 30), newest first, matching `area` and `since`. */
-export function logView(file: LogFile, q: LogQuery, ctx: UndatedContext): LogView {
+export function logView(file: LogFile, q: LogQuery, ctx: UndatedContext & { films?: FilmContext }): LogView {
   const asked = Number.isFinite(q.limit) ? Math.floor(q.limit as number) : 30;
   const limit = Math.min(LOG_MAX, Math.max(1, asked));
   const from = q.since === undefined ? null : Date.parse(q.since);
@@ -229,6 +268,7 @@ export function logView(file: LogFile, q: LogQuery, ctx: UndatedContext): LogVie
     const e = file.entries[i];
     if (q.area !== undefined && e.area !== q.area) continue;
     if (from !== null && !(Date.parse(e.at) > from)) continue;
+    if (q.video !== undefined && ctx.films && !lineOnFilm(e, q.video, ctx.films)) continue;
     matching.push(e);
   }
   const undated = from !== null ? [] : undatedLines(file.undated, ctx).filter((l) => q.area === undefined || l.area === q.area);

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { sectionsOf } from "../../src/core/script.js";
 import { execFileSync } from "node:child_process";
 import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -127,9 +128,9 @@ describe("makeDemo", () => {
     const mixNote = notes.notes.find((n) => n.stage === "mix")!;
     expect(mixNote.scope).toBe("whole");
 
-    const script = await store.read("script");
-    expect(script.sections).toHaveLength(4);
-    expect(script.sections.filter((s) => s.current.includes("Lumen")).length).toBeGreaterThan(0);
+    const script = sectionsOf(await store.read("script"));
+    expect(script).toHaveLength(4);
+    expect(script.filter((s) => s.current.includes("Lumen")).length).toBeGreaterThan(0);
   });
 
   // Final review I7: the demo's picks and level were written project-wide, so its film played nothing; its sound notes had
@@ -169,7 +170,7 @@ describe("makeDemo", () => {
     const [laneId, variantId] = voiceNote.on!.split("/");
     expect(project.lanes.find((l) => l.id === laneId)?.variants.some((v) => v.id === variantId)).toBe(true);
     expect(voiceNote.text).toContain("Voice A");
-    expect(onLabel(voiceNote, { project, script: await store.read("script") })).toBe("Round 1 · Voices · Voice A");
+    expect(onLabel(voiceNote, { project, script: { sections: sectionsOf(await store.read("script")) } })).toBe("Round 1 · Voices · Voice A");
   });
 
   it("names the placeholders, not voices, in the Voiceover note when there's no text-to-speech", async () => {

@@ -1,5 +1,8 @@
 import { statusAfterEdit } from "./approval.js";
-import type { Script, Section, Take } from "./schema.js";
+import type { Script, ScriptFile, Section, Take, Video } from "./schema.js";
+
+/** Anything that lists its films in order (a Project, or a test's stand-in). */
+type HasFilms = { videos: readonly Pick<Video, "id">[] };
 import { InvalidError, NotFoundError } from "./errors.js";
 import { uniqueId } from "./ids.js";
 
@@ -151,4 +154,76 @@ export function addTake(script: Script, sectionId: string, input: { file: string
   };
   s.takes.push(take);
   return take;
+}
+
+// ---- §31.3: one script per film ----
+
+const WPS = 2.6;
+
+/** A film with no script yet: nothing in it, at the usual reading speed. */
+export const emptyScript = (): Script => ({ wordsPerSecond: WPS, sections: [] });
+
+/**
+ * The film whose script a schema 1 file is: the project's first film, or none while there is no film (§31.3: a
+ * project with no film yet keeps its plan files as they are, and they become the first film's when it is made).
+ */
+const firstFilmId = (project: HasFilms): string | null => project.videos[0]?.id ?? null;
+
+/**
+ * One film's script, read from script.json. With no film named (a project with no film yet, or a caller that doesn't
+ * know one) it is the first film's. A schema 1 file is the first film's script; any other film has none until one is
+ * set. What comes back is the file's own object where there is one, so a caller inside a store update may change it;
+ * use filmScriptDraft to change a film's script, since it also makes the room.
+ */
+export function filmScript(file: ScriptFile, project: HasFilms, video?: string | null): Script {
+  const first = firstFilmId(project);
+  const film = video ?? first;
+  if (file.schema === 1) return film === null || film === first ? file : emptyScript();
+  if (film === null) return emptyScript();
+  return file.films[film] ?? emptyScript();
+}
+
+/**
+ * The script to change for a film, inside a store update of script.json. A schema 1 file becomes schema 2 here, its
+ * script kept as the first film's, once the project has a second film to tell it from (§31.3). With no film yet, or
+ * one film, it is changed as it is, so a one-film project keeps the very file it had (§31.7). A film with no script
+ * gets an empty one.
+ */
+export function filmScriptDraft(file: ScriptFile, project: HasFilms, video?: string | null): Script {
+  const first = firstFilmId(project);
+  const film = video ?? first;
+  if (file.schema === 1) {
+    if (first === null || (film === first && project.videos.length < 2)) return file;
+    toSchema2(file, first);
+  }
+  const v2 = file as Extract<ScriptFile, { schema: 2 }>;
+  if (film === null) throw new InvalidError("Name the film this script is for");
+  return (v2.films[film] ??= emptyScript());
+}
+
+/** Rewrites a schema 1 draft in place as schema 2, its script the first film's. */
+export function toSchema2(file: ScriptFile, first: string): void {
+  if (file.schema !== 1) return;
+  const { wordsPerSecond, sections, sectionCounter } = file;
+  const loose = file as unknown as Record<string, unknown>;
+  delete loose.wordsPerSecond;
+  delete loose.sections;
+  delete loose.sectionCounter;
+  loose.schema = 2;
+  loose.films = { [first]: { wordsPerSecond, sections, ...(sectionCounter === undefined ? {} : { sectionCounter }) } };
+}
+
+/** Every film's scripts, for what has to know every take whichever film it belongs to (media, the Assets list, the log). */
+export function scriptsOf(file: ScriptFile): { video: string | null; script: Script }[] {
+  return file.schema === 1 ? [{ video: null, script: file }] : Object.entries(file.films).map(([video, script]) => ({ video, script }));
+}
+
+/** The sections of one film's script, or of every film's when given the whole file. */
+export function sectionsOf(script: ScriptFile | Pick<Script, "sections">): Section[] {
+  return "sections" in script ? script.sections : allSections(script);
+}
+
+/** Every film's sections in one list (ids may repeat across films: each film numbers its own). */
+export function allSections(file: ScriptFile): Section[] {
+  return scriptsOf(file).flatMap((s) => s.script.sections);
 }

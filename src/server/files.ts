@@ -2,7 +2,8 @@ import { createReadStream } from "node:fs";
 import { lstat, realpath, stat } from "node:fs/promises";
 import { extname, isAbsolute, join, normalize, sep } from "node:path";
 import { Readable } from "node:stream";
-import type { Project, Script, VisualsFile } from "../core/schema.js";
+import type { Project, Script, ScriptFile, VisualsFile } from "../core/schema.js";
+import { sectionsOf } from "../core/script.js";
 import { cueFiles } from "../core/cues.js";
 import { VIDEO_EXT } from "../core/media.js";
 import { PROXY_PATH } from "./proxy.js";
@@ -74,7 +75,7 @@ export const GRAB_PATH = /^\.rushes\/grabs\/[a-z0-9][a-z0-9_-]*\.png$/;
 export const SCREENSHOT_PATH = /^screenshots\/[a-z0-9][a-z0-9._-]*\.png$/;
 
 /** Every media path the project has registered. Only these (and grabs) may be served. */
-export function registeredMedia(project: Project, script: Script, visuals?: Pick<VisualsFile, "visuals">): Set<string> {
+export function registeredMedia(project: Project, script: ScriptFile | Pick<Script, "sections">, visuals?: Pick<VisualsFile, "visuals">): Set<string> {
   const files = new Set<string>();
   for (const v of project.videos) {
     for (const ver of v.versions) {
@@ -89,7 +90,7 @@ export function registeredMedia(project: Project, script: Script, visuals?: Pick
   for (const l of project.lanes) for (const variant of l.variants) files.add(variant.file);
   // §23: each cue's sample, when it is an audio file; served only because it is registered.
   for (const f of cueFiles(project)) files.add(f);
-  for (const s of script.sections) for (const t of s.takes) files.add(t.file);
+  for (const s of sectionsOf(script)) for (const t of s.takes) files.add(t.file);
   for (const f of project.files) files.add(f.file);
   // §25.7: every picture of every version of every visual.
   for (const v of visuals?.visuals ?? []) for (const ver of v.versions) for (const p of ver.pages) for (const i of p.images) files.add(i.file);
@@ -133,10 +134,10 @@ export const OUTSIDE_MEDIA_EXT: ReadonlySet<string> = new Set([
 export const OUTSIDE_CUT_EXT: ReadonlySet<string> = new Set([...VIDEO_EXT, "wav", "mp3", "m4a", "aac", "aif", "aiff", "flac", "ogg", "opus"]);
 
 /** Every path registered as a cut or a cut's format, and as nothing else (a library file keeps its own rules). */
-export function cutOnlyFiles(project: Project, script: Script): Set<string> {
+export function cutOnlyFiles(project: Project, script: ScriptFile | Pick<Script, "sections">): Set<string> {
   const other = new Set<string>();
   for (const l of project.lanes) for (const variant of l.variants) other.add(variant.file);
-  for (const s of script.sections) for (const t of s.takes) other.add(t.file);
+  for (const s of sectionsOf(script)) for (const t of s.takes) other.add(t.file);
   for (const f of project.files) other.add(f.file);
   const cuts = new Set<string>();
   for (const v of project.videos) {

@@ -481,9 +481,11 @@ export async function main(argv: string[], io: Io): Promise<number> {
         const { notes } = await c.get(`/api/notes${q.size ? `?${q}` : ""}`);
         if (o.json) return io.out(JSON.stringify(notes, null, 2)), 0;
         // What an audio note is on (M4) and a Picture note's format (§21.4, R4), from the state.
-        const state: (OnContext & { project: Project }) | null = (notes as Note[]).some((n) => n.stage !== "script" || n.on != null) ? await c.get("/api/state") : null;
+        const state: (OnContext & { project: Project; films?: Record<string, { script: OnContext["script"] }> }) | null = (notes as Note[]).some((n) => n.stage !== "script" || n.on != null) ? await c.get("/api/state") : null;
         for (const n of notes) {
-          const label = state ? onLabel(n, state) : null;
+          // §31.3: a note on the script names a line of its own film's script.
+          const own = n.video ? state?.films?.[n.video]?.script : undefined;
+          const label = state ? onLabel(n, own ? { ...state, script: own } : state) : null;
           const on = label ? `${stripControl(label)}  ` : "";
           const tag = state ? formatTag(n, state.project?.videos ?? []) : null;
           const fmtCol = tag ? `${stripControl(tag)}  ` : "";

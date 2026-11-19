@@ -4,7 +4,9 @@ import { z } from "zod";
 import type { Store, ChangeEvent } from "../core/store.js";
 import { RushesError, InvalidError, NotFoundError } from "../core/errors.js";
 import { addFile, addFormat, addVariant, addVersion, ensureProjectIdOnce, inPlay, lockPicture, noteInPlay, resolveCut, resolveVideo, setShots, setVariantFilms, shelveFilm, shotAt } from "../core/project.js";
-import { addTake, editSection, setSections } from "../core/script.js";
+import { addTake, allSections, editSection, filmScript, filmScriptDraft, setSections } from "../core/script.js";
+import { chooseFilm, filmPlace, firstFilm, noteOnFilm } from "../core/films.js";
+import { moveToFirstFilmOnce } from "./films.js";
 import { addNote, addUserReply, applyReply, applyUserEdit, byFilm, checkNoteFormat, filterNotes } from "../core/notes.js";
 import { FORMAT_ID_RE, MAX_FORMATS, isPictureSize, labelOfId, versionFormats } from "../core/formats.js";
 import { createBatch, latestBatch } from "../core/batches.js";
@@ -32,8 +34,10 @@ import { filmTakes, putAway } from "../core/takes.js";
 import { AGENTS, AgentPermissionsSchema, AlwaysRuleSchema, LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, PinSchema, FileKindSchema, MarkSchema, ProjectIdSchema, ShotSchema, LEVEL_MIN, LEVEL_MAX, LEVEL_STEP, lanesForVideo, picksForVideo, variantFilms, type InUse, type Levels, type Batch, type Note, type Picks, type Project, type VisualsFile } from "../core/schema.js";
 import { LABEL_MAX, oneLineOf } from "../core/labels.js";
 import { byOf, logBookFor } from "./logbook.js";
-import { BriefService } from "./brief.js";
-import { StoryboardService } from "./storyboard.js";
+import { briefRecords, storyboardRecords, type BriefRecords, type StoryboardRecords } from "./plans.js";
+import type { BriefService } from "./brief.js";
+import type { StoryboardService } from "./storyboard.js";
+import { slugify, uniqueId } from "../core/ids.js";
 import { buildState, planWarning } from "../core/plan.js";
 import {
   broughtInEvent, cutEvent, fileEvent, filmEvent, formatEvent, lineEvent, lockEvent, notesSentEvent, picksEvent, repliesEvent, scriptEvent, takeEvent, variantEvent, variantFilmsEvent, visualEvent,
@@ -169,23 +173,29 @@ const VariantBody = z.object({
   cues: z.array(z.object({ name: z.string().min(1), t, file: z.string().min(1).optional() })).optional(),
 });
 const VariantFilmsBody = z.object({ videos: z.array(z.string().min(1).max(200)).max(100) });
+// §31.6: the script, brief and storyboard are a film's: a write names its film (`video`, an id or a name). With one
+// film it may be left out; with several, leaving it out is refused with the films listed.
+const filmRef = z.string().min(1).max(200).optional();
 const ScriptBody = z.object({
+  video: filmRef,
   wordsPerSecond: z.number().positive().optional(),
   replace: z.boolean().optional(),
   sections: z.array(z.object({ id: z.string().min(1).optional(), start: t, end: t, current: z.string() })),
 });
 const SectionEditBody = z.object({
+  video: filmRef,
   proposed: z.string().nullable().optional(),
   direction: z.string().optional(),
   status: SectionStatusSchema.optional(),
 });
-const TakeBody = z.object({ file: z.string().min(1) });
+const TakeBody = z.object({ file: z.string().min(1), video: filmRef });
 // §24 step 2: a save of one brief.md section, and the approval. `hash` proves the page saw the current file.
-const BriefSectionBody = z.object({ heading: z.string().min(1).max(200), text: z.string().max(100_000), hash: z.string().min(1).max(64) });
-const BriefStatusBody = z.object({ status: z.enum(["draft", "approved"]), hash: z.string().min(1).max(64) });
+const BriefSectionBody = z.object({ video: filmRef, heading: z.string().min(1).max(200), text: z.string().max(100_000), hash: z.string().min(1).max(64) });
+const BriefStatusBody = z.object({ video: filmRef, status: z.enum(["draft", "approved"]), hash: z.string().min(1).max(64) });
 // §24.12: a change to one storyboard shot: its words, its direction, its status, in any combination.
 const StoryboardShotBody = z
   .object({
+    video: filmRef,
     heading: z.string().min(1).max(200),
     description: z.string().max(100_000).optional(),
     direction: z.string().max(1000).optional(),
@@ -205,8 +215,9 @@ const PicksBody = z.object({ video: z.string().min(1).max(200).optional(), lanes
 // handed to the agent, as Send would have.
 const AgentSetupBody = z.object({ on: z.boolean(), agent: z.enum(AGENTS).optional(), permissions: AgentPermissionsSchema.optional(), batch: z.string().min(1).optional() });
 
-// No stage: every tab's open notes (Send). A stage: that tab's only.
-const BatchBody = z.object({ stage: StageSchema.optional() });
+// No stage: every tab's open notes (Send). A stage: that tab's only. §31.2.2: `video`, the film Send is pressed on:
+// only its notes and its script go. Without one, every film in play (an older client).
+const BatchBody = z.object({ stage: StageSchema.optional(), video: filmRef });
 
 const NoteQuery = z.object({
   stage: StageSchema.optional(),
@@ -219,7 +230,11 @@ const NoteQuery = z.object({
   onlyThisFormat: z.enum(["true", "false"]).optional(),
   // §26: the notes of a shelved film are left out unless asked for (or a batch is: it lists what it sent).
   includeShelved: z.enum(["true", "false"]).optional(),
+  // §31.6: one film's notes (and the visuals', which are on every film).
+  video: z.string().min(1).max(200).optional(),
 });
+// §31.6: the film a read is about, for the routes that take ?video= alone.
+const VideoQuery = z.object({ video: z.string().min(1).max(200).optional() });
 
 // ShotSchema's own limits (name trimmed 1-80 chars, tag at most 24) apply at the boundary; `n` is server-assigned.
 const ShotsBody = z.object({
@@ -296,6 +311,8 @@ const LogQuery = z.object({
     .string()
     .refine((s) => ISO_DATE.test(s) && Number.isFinite(Date.parse(s)), "since must be a date and time, e.g. 2026-10-07T09:00:00Z")
     .optional(),
+  // §31.6: the lines Activity shows on this film: its own and the project's.
+  video: z.string().min(1).max(200).optional(),
 });
 const LogLineBody = z.object({
   text: z.string().max(2000),
@@ -317,10 +334,14 @@ export const DEFAULT_WEB_DIR = fileURLToPath(new URL("../../web-dist/", import.m
 export const FOUND_WAIT_MS = 20_000;
 
 export interface AppOptions {
-  /** §24 step 2: brief.md's service. startServer passes its own so it can poll the file and stop on close. */
+  /** §24 step 2, §31.3: every film's brief.md service. startServer passes its own so it can poll the files and stop on close. */
+  briefs?: BriefRecords;
+  /** The root brief.md's service (the first film's), when the caller has made one (tests). */
   brief?: BriefService;
-  /** §24.12: storyboard.md's service, the same way. */
+  /** The root storyboard.md's service, the same way. */
   storyboard?: StoryboardService;
+  /** §24.12, §31.3: every film's storyboard.md service, the same way. */
+  storyboards?: StoryboardRecords;
   /** Overrides FOUND_WAIT_MS (tests). */
   foundWaitMs?: number;
   /** Folder with the built dashboard (index.html + assets/). */
@@ -435,25 +456,34 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   const jobs = opts.proxyJobs ?? new ProxyJobs(store);
   const peaks = opts.peakJobs ?? new PeakJobs(store, { run: jobs.run, available: () => jobs.available() });
   const found = opts.found ?? new FoundScanner({ store, probe: ffprobeDuration, announce: foundAnnouncer(store) });
-  const brief = opts.brief ?? new BriefService(store);
-  const storyboard = opts.storyboard ?? new StoryboardService(store);
+  const briefs = opts.briefs ?? briefRecords(store, opts.brief);
+  const storyboards = opts.storyboards ?? storyboardRecords(store, opts.storyboard);
   // §28: made before any route is reachable, so every agent route and Send has it.
   const agent = opts.agent ?? noAgent();
   const sendWaitMs = opts.sendWaitMs ?? SEND_WAIT_MS;
   const detect = opts.detect ?? (() => detectAgents());
   const terminal = opts.terminal ?? openInTerminal;
-  /** §24.12: whether the plan (brief, script, storyboard) is approved, from the files as they are now. */
-  const planBuild = async () => {
-    const [b, script, sb] = await Promise.all([brief.view(), store.read("script"), storyboard.view()]);
-    return buildState({ brief: b, script: script.sections, storyboard: sb });
+  /** §24.12, §31.5: whether a film's plan (its brief, script and storyboard) is approved, from the files as they are now. */
+  const planBuild = async (video?: string | null) => {
+    const project = await store.read("project");
+    const place = filmPlace(project, video);
+    const [b, script, sb] = await Promise.all([briefs.at(place).view(), store.read("script"), storyboards.at(place).view()]);
+    return buildState({ brief: b, script: filmScript(script, project, place.video).sections, storyboard: sb });
   };
+  /**
+   * §31.6: the film a request for a film's material is about: the one it names, or the only one. With several films
+   * and none named, a 400 that lists them. Null while the project has no film.
+   */
+  const filmOf = async (given: string | null | undefined, what?: string): Promise<string | null> => chooseFilm(await store.read("project"), given, what)?.id ?? null;
+  /** The whole script's sections, for what must know every take whichever film it is in (the log, refs). */
+  const everySection = (script: Awaited<ReturnType<typeof store.read<"script">>>) => ({ sections: allSections(script) });
   // §22: the Change Log, shared with the found scanner (logBookFor keeps one per store).
   const log = logBookFor(store);
   const by = (c: Context) => byOf(c.req.header("x-rushes-project"));
   /** R17: writes exports/change-log-YYYY-MM-DD.md (a same-day export replaces it) and returns its path. Written as Export notes writes. */
   async function exportChangeLog(now: Date): Promise<string> {
     const [project, script] = await Promise.all([store.read("project"), store.read("script")]);
-    const md = await log.markdown({ project, script }, now);
+    const md = await log.markdown({ project, script: everySection(script) }, now);
     const name = changeLogFileName(now);
     const dir = join(store.root, "exports");
     await mkdir(dir, { recursive: true });
@@ -615,7 +645,15 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     // §25.7: a registered visual's pictures. Read visuals.json only when the above missed, so a cut's seeks never touch it.
     if (!known && registeredMedia(project, script, await store.read("visuals")).has(path)) known = true;
     // §24.12: a picture storyboard.md names (a safe, project-relative image path) is served too, registered or not.
-    if (!known && (await storyboard.stills()).has(path)) known = true;
+    // §31.3: any film's storyboard.
+    if (!known) {
+      for (const sb of await storyboards.all()) {
+        if ((await sb.stills()).has(path)) {
+          known = true;
+          break;
+        }
+      }
+    }
     // The file on disk to send. For a found file it's exactly the path that was checked.
     let file = fromManifestPath(store.root, path);
     let viaFound = false;
@@ -696,10 +734,17 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
 
   // ---- assets: the Assets tab and rushes_list_assets ----
   app.get("/api/assets", async (c) => {
-    const [project, script] = await Promise.all([store.read("project"), store.read("script")]);
-    let assets = await listAssets(store, project, script);
+    const [project, script, visuals] = await Promise.all([store.read("project"), store.read("script"), store.read("visuals")]);
+    let assets = await listAssets(store, project, script, visuals);
     const kind = c.req.query("kind");
     if (kind) assets = assets.filter((a) => a.kind === kind);
+    // §31.6: one film's files: its own, the shared visuals, and (naming no film) the first film's.
+    const video = c.req.query("video");
+    if (video) {
+      const film = chooseFilm(project, video)!.id;
+      const first = firstFilm(project);
+      assets = assets.filter((a) => a.shared || (a.videos ? a.videos.includes(film) : a.video ? a.video === film : film === first));
+    }
     return c.json({ assets });
   });
 
@@ -763,7 +808,8 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   app.post("/api/files", async (c) => {
     const b = await body(c, AddFileBody);
     const file = toManifestPath(store.root, b.file);
-    const { result } = await store.update("project", (p) => addFile(p, { ...b, file }));
+    // §31.2.4: with several films, a file that names none is the first film's.
+    const { result } = await store.update("project", (p) => addFile(p, { ...b, file, video: b.video ?? (p.videos.length > 1 ? p.videos[0].id : undefined) }));
     await log.add(() => fileEvent(result), by(c));
     return c.json(result, 201);
   });
@@ -773,7 +819,8 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
       store.read("project"), store.read("notes"), store.read("script"), store.read("picks"), store.read("visuals"),
     ]);
     const now = new Date();
-    const md = notesMarkdown(project, notesFile.notes, now, script, picks, visuals);
+    // §31.3: a note on the script names a line of its own film's script.
+    const md = notesMarkdown(project, notesFile.notes, now, (video) => filmScript(script, project, video), picks, visuals);
     const name = exportFileName(project.name, now);
     const dir = join(store.root, "exports");
     await mkdir(dir, { recursive: true });
@@ -817,10 +864,36 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   app.get("/api/state", async (c) => {
     // §20.6: found is what the last scan left in memory; it never waits on a scan or a probe.
     // §22.8: the log's head is read-only, so a state request never writes (R6).
-    const [project, script, notes, picks, batches, ffmpeg, foundSummary, logHead, briefView, storyboardView, visuals] = await Promise.all([
-      store.read("project"), store.read("script"), store.read("notes"), store.read("picks"), store.read("batches"), jobs.available(), found.summary(), log.head(), brief.view(), storyboard.view(), store.read("visuals"),
+    const [project, scriptFile, notes, picks, batches, ffmpeg, foundSummary, logHead, visuals] = await Promise.all([
+      store.read("project"), store.read("script"), store.read("notes"), store.read("picks"), store.read("batches"), jobs.available(), found.summary(), log.head(), store.read("visuals"),
     ]);
-    const tabs = tabStates(project, script, notes, visuals);
+    // §31.5: everything Plan and Review show for each film: its script, brief, storyboard and plan state, its tabs
+    // (counts, to-do dots, unlocking) and its Activity head (the "new" dot). The desk picks the film on screen.
+    const heads = await log.filmHeads({ videos: project.videos, lanes: project.lanes, notes: notes.notes });
+    const planOf = async (video: string | null) => {
+      const place = filmPlace(project, video);
+      const [b, sb] = await Promise.all([briefs.at(place).view(), storyboards.at(place).view()]);
+      const s = filmScript(scriptFile, project, place.video);
+      return {
+        script: s,
+        brief: b,
+        storyboard: sb,
+        build: buildState({ brief: b, script: s.sections, storyboard: sb }),
+        tabs: tabStates(project, s, notes, visuals, place.video),
+        log: (place.video && heads[place.video]) ?? logHead,
+        // Where the agent finds this film's plan files.
+        paths: { brief: place.brief, storyboard: place.storyboard },
+      };
+    };
+    const films: Record<string, Awaited<ReturnType<typeof planOf>>> = {};
+    for (const v of project.videos) films[v.id] = await planOf(v.id);
+    // The first film's (or, with no film yet, the project's) plan, at the top level as before, with the whole
+    // project's tabs and Activity head.
+    const first = project.videos.length > 0 ? films[project.videos[0].id] : await planOf(null);
+    const script = first.script;
+    const briefView = first.brief;
+    const storyboardView = first.storyboard;
+    const tabs = tabStates(project, filmScript(scriptFile, project, null), notes, visuals);
     // §19.5: why each cut may play badly (or null). Never waits on a probe: an unprobed cut is
     // null until its background probe lands, which then announces a change (ruling B).
     const videos = await Promise.all(
@@ -829,7 +902,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
         versions: await Promise.all(v.versions.map(async (ver) => ({ ...ver, proxyNeed: await jobs.needNow(fromManifestPath(store.root, ver.file)) }))),
       })),
     );
-    return c.json({ version: VERSION, project: { ...project, videos }, script, notes, picks: withUse(project, picks), batches, tabs, visuals, proxies: { ffmpeg, jobs: jobs.list() }, found: foundSummary, log: logHead, brief: briefView, storyboard: storyboardView, build: buildState({ brief: briefView, script: script.sections, storyboard: storyboardView }) });
+    return c.json({ version: VERSION, project: { ...project, videos }, script, notes, picks: withUse(project, picks), batches, tabs, visuals, proxies: { ffmpeg, jobs: jobs.list() }, found: foundSummary, log: logHead, brief: briefView, storyboard: storyboardView, build: first.build, films });
   });
 
   // ---- found: the project's other files (§20) ----
@@ -917,37 +990,68 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     return c.json({ ok: true });
   });
 
+  // §31.6: ?video= is one film's: its tabs, its brief, storyboard and plan. Without one, the first film's plan (with
+  // one film, the same as ever) and the whole project's tabs.
   app.get("/api/tabs", async (c) => {
+    const q = VideoQuery.safeParse(c.req.query());
+    if (!q.success) throw new InvalidError("Query is invalid", q.error.issues);
     const [project, script, notes, visuals] = await Promise.all([store.read("project"), store.read("script"), store.read("notes"), store.read("visuals")]);
-    const [b, sb] = await Promise.all([brief.view(), storyboard.view()]);
+    const film = q.data.video ? chooseFilm(project, q.data.video)!.id : null;
+    const place = filmPlace(project, film);
+    const [b, sb] = await Promise.all([briefs.at(place).view(), storyboards.at(place).view()]);
+    const own = filmScript(script, project, place.video);
     return c.json({
-      tabs: tabStates(project, script, notes, visuals),
+      tabs: tabStates(project, film ? own : filmScript(script, project, null), notes, visuals, film),
       // §26: every film and whether it is shelved, so an agent leaves the shelved ones alone.
       films: project.videos.map((v) => ({ id: v.id, name: v.name, shelved: v.shelved ?? null })),
+      // §31.3: where each film's own brief and storyboard are.
+      plans: Object.fromEntries(project.videos.map((v) => {
+        const p = filmPlace(project, v.id);
+        return [v.id, { brief: p.brief, storyboard: p.storyboard }];
+      })),
+      ...(film ? { film } : {}),
       brief: { exists: b.exists, status: b.status, changed: b.changed },
       storyboard: { exists: sb.exists, shots: sb.total, approved: sb.approved, changed: sb.changed },
-      build: buildState({ brief: b, script: script.sections, storyboard: sb }),
+      build: buildState({ brief: b, script: own.sections, storyboard: sb }),
     });
   });
 
-  // ---- brief: brief.md is the file of record (§24 step 2) ----
+  // ---- brief: brief.md is the file of record (§24 step 2); §31.3: each film has its own ----
+  const videoQuery = (c: Context) => {
+    const q = VideoQuery.safeParse(c.req.query());
+    if (!q.success) throw new InvalidError("Query is invalid", q.error.issues);
+    return q.data.video;
+  };
+  app.get("/api/brief", async (c) => {
+    const film = await filmOf(videoQuery(c), "the brief");
+    const place = filmPlace(await store.read("project"), film);
+    return c.json({ brief: await briefs.at(place).view(), film, path: place.brief });
+  });
   app.put("/api/brief/sections/:index", async (c) => {
     const index = Number(c.req.param("index"));
     if (!Number.isInteger(index) || index < 0) throw new InvalidError("Section index must be a whole number from 0");
     const b = await body(c, BriefSectionBody);
+    const brief = await briefs.of(await filmOf(b.video, "the brief"));
     return c.json({ brief: await brief.setSection(index, b.heading, b.text, b.hash) });
   });
 
-  // ---- storyboard: storyboard.md is the file of record (§24.12) ----
+  // ---- storyboard: storyboard.md is the file of record (§24.12); §31.3: each film has its own ----
+  app.get("/api/storyboard", async (c) => {
+    const film = await filmOf(videoQuery(c), "the storyboard");
+    const place = filmPlace(await store.read("project"), film);
+    return c.json({ storyboard: await storyboards.at(place).view(), film, path: place.storyboard });
+  });
   app.put("/api/storyboard/shots/:index", async (c) => {
     const index = Number(c.req.param("index"));
     if (!Number.isInteger(index) || index < 0) throw new InvalidError("Shot index must be a whole number from 0");
     const b = await body(c, StoryboardShotBody);
+    const storyboard = await storyboards.of(await filmOf(b.video, "the storyboard"));
     return c.json({ storyboard: await storyboard.setShot(index, b.heading, { description: b.description, direction: b.direction, status: b.status }, b.hash) });
   });
 
   app.put("/api/brief/status", async (c) => {
     const b = await body(c, BriefStatusBody);
+    const brief = await briefs.of(await filmOf(b.video, "the brief"));
     return c.json({ brief: await brief.setStatus(b.status, b.hash) });
   });
 
@@ -956,7 +1060,8 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     const q = NoteQuery.safeParse(c.req.query());
     if (!q.success) throw new InvalidError("Query is invalid", q.error.issues);
     const [{ notes }, visuals, project] = await Promise.all([store.read("notes"), store.read("visuals"), store.read("project")]);
-    const listed = filterNotes(notes, { ...q.data, onlyThisFormat: q.data.onlyThisFormat === "true" }).filter((n) => q.data.includeShelved === "true" || q.data.batch !== undefined || noteInPlay(n, project));
+    const video = q.data.video ? chooseFilm(project, q.data.video)!.id : undefined;
+    const listed = filterNotes(notes, { ...q.data, video, videos: project.videos, onlyThisFormat: q.data.onlyThisFormat === "true" }).filter((n) => q.data.includeShelved === "true" || q.data.batch !== undefined || noteInPlay(n, project));
     return c.json({ notes: withVisualViews(listed, visuals) });
   });
 
@@ -975,7 +1080,14 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
         if (version) shot = shotAt(version.shots, b.t);
       }
     }
-    const { result } = await store.update("notes", (f) => addNote(f, { ...b, shot, by: "user" }));
+    // §31.2.4: nothing is made on no film. A note that names none, in a project with several films, is the first film's
+    // (a visual's is on every film and names none). With one film, or none yet, it is left as it is.
+    let video = b.video ?? null;
+    if (!video && b.stage !== "visuals") {
+      const project = await store.read("project");
+      if (project.videos.length > 1) video = project.videos[0].id;
+    }
+    const { result } = await store.update("notes", (f) => addNote(f, { ...b, video, shot, by: "user" }));
     return c.json({ note: withState(result) }, 201);
   });
 
@@ -1054,8 +1166,14 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     // before formats (a formats call was refused above).
     const size = read && isPictureSize(read.width, read.height) ? read : null;
     const formatWarnings: string[] = [];
-    // §24.12: the storyboard's shots, read before the write so the write itself waits for nothing.
-    const planned = await storyboard.cutShots();
+    // §24.12: the storyboard's shots, read before the write so the write itself waits for nothing. §31.3: the film's
+    // own storyboard, and only for its first cut: work out which film the cut is for, as addVersion will.
+    const before = await store.read("project");
+    const known = before.videos.find((v) => v.id === b.video || v.id === slugify(b.video));
+    const plannedFor = known?.id ?? uniqueId(slugify(b.video), before.videos.map((v) => v.id));
+    const planned = known && known.versions.length > 0
+      ? []
+      : await storyboards.at(filmPlace({ videos: known ? before.videos : [...before.videos, { id: plannedFor }] }, plannedFor)).cutShots();
     let lockedVersion: string | null = null;
     let autoProxy = false;
     let films = 1;
@@ -1081,7 +1199,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
         if (added.warning) formatWarnings.push(added.warning);
       }
       // A film's first cut starts with the storyboard's shots, once (never recomputed). Those at or past the cut's end are left out.
-      if (planned.length && out.video.versions.length === 1 && out.version.shots.length === 0) {
+      if (planned.length && out.video.id === plannedFor && out.video.versions.length === 1 && out.version.shots.length === 0) {
         const reachable = planned.filter((s) => out.version.duration === null || s.start < out.version.duration);
         if (reachable.length) setShots(p, out.video.id, out.version.id, reachable);
       }
@@ -1109,7 +1227,9 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
       if (autoProxy && !jobs.isClosing) proxy.proxyJob = jobs.start(result.video.id, result.version.id);
     }
     // §24.12: a soft nudge, never a refusal: the plan (brief, script, storyboard) is not all approved yet.
-    const planNote = planWarning(await planBuild());
+    const planNote = planWarning(await planBuild(result.video.id));
+    // §31.4: a project that has just gained its second film moves what was on no film to the first one.
+    if (films > 1) await moveToFirstFilmOnce(store, log).catch((e: unknown) => console.error(`Rushes: couldn't move what was on no film: ${(e as Error).message}`));
     const warnings = { ...(formatWarnings.length ? { formatWarnings } : {}), ...(planNote ? { planWarning: planNote } : {}) };
     const reply = { video: result.video, version: result.version, ...(restored ? { restored: true } : {}) };
     if (lockedVersion) return c.json({ ...reply, ...proxy, ...warnings, warning: `Picture is locked at ${lockedVersion}` }, 201);
@@ -1301,10 +1421,15 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     const cues = b.cues?.map((q) => (q.file === undefined ? q : { ...q, file: toManifestPath(store.root, q.file) }));
     const { result } = await store.update("project", (p) => {
       const added = addVariant(p, { ...b, cues, file: toManifestPath(store.root, b.file) });
-      // With more than one film, a variant on no film is listed on none of their tabs: say so, so the agent names one.
-      const warning = variantFilms(added.variant).length === 0 && p.videos.length > 1
-        ? `No film was named, and none could be told from the names, so this ${added.lane.stage === "voice" ? "read" : added.lane.stage === "music" ? "bed" : "pass"} is on no film: it waits, folded, under "Not on this film" on each film's tab. Pass \`video\` (a film's id or name, or a list of them) to put it on films.`
-        : undefined;
+      // §31.2.4: nothing is made on no film. With more than one film, one that names none and can't be told from its
+      // names goes on the first film: say so, so the agent names one next time (or moves it with rushes_set_films).
+      let warning: string | undefined;
+      if (variantFilms(added.variant).length === 0 && p.videos.length > 1) {
+        const first = p.videos[0];
+        added.variant.videos = [first.id];
+        const what = added.lane.stage === "voice" ? "read" : added.lane.stage === "music" ? "bed" : "pass";
+        warning = `No film was named, and none could be told from the names, so this ${what} is on ${first.name}, the project's first film. Pass \`video\` (a film's id or name, or a list of them) to put it on the films it was made for, or move it with rushes_set_films.`;
+      }
       return { ...added, ...(warning ? { warning } : {}) };
     });
     await log.add(() => variantEvent(result.lane, result.variant), by(c));
@@ -1347,31 +1472,47 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   });
 
   // ---- script ----
-  app.get("/api/script", async (c) => c.json({ script: await store.read("script") }));
+  // §31.3: each film has its own script. ?video= (or `video` in a write's body) names it: with one film it may be
+  // left out; with several, leaving it out is refused with the films listed (§31.6).
+  app.get("/api/script", async (c) => {
+    const [project, file] = await Promise.all([store.read("project"), store.read("script")]);
+    const film = chooseFilm(project, videoQuery(c), "the script")?.id ?? null;
+    const own = filmScript(file, project, film);
+    // The shape it always had (schema, rev, wordsPerSecond, sections), now one film's, with the film named.
+    return c.json({ script: { schema: file.schema === 1 && film === firstFilm(project) ? 1 : 2, rev: file.rev, ...own, ...(film ? { video: film } : {}) } });
+  });
 
   app.put("/api/script", async (c) => {
     const b = await body(c, ScriptBody);
-    const { result } = await store.update("script", (s) => {
+    const project = await store.read("project");
+    const film = chooseFilm(project, b.video, "the script")?.id ?? null;
+    const { result } = await store.update("script", (f) => {
+      const s = filmScriptDraft(f, project, film);
       if (b.wordsPerSecond) s.wordsPerSecond = b.wordsPerSecond;
       return setSections(s, b.sections, { replace: b.replace });
     });
-    await log.add(() => scriptEvent(result.length), by(c));
-    return c.json({ sections: result });
+    // The film is named on the line only with several films, so a one-film project's log reads as it always did.
+    await log.add(() => scriptEvent(result.length, project.videos.length > 1 ? film : null), by(c));
+    return c.json({ sections: result, ...(film ? { video: film } : {}) });
   });
 
   app.patch("/api/script/:id", async (c) => {
-    const b = await body(c, SectionEditBody);
-    const { result } = await store.update("script", (s) => editSection(s, c.req.param("id"), b));
+    const { video, ...b } = await body(c, SectionEditBody);
+    const project = await store.read("project");
+    const film = chooseFilm(project, video, "the script")?.id ?? null;
+    const { result } = await store.update("script", (f) => editSection(filmScriptDraft(f, project, film), c.req.param("id"), b));
     return c.json({ section: result });
   });
 
   app.post("/api/script/:id/takes", async (c) => {
     const b = await body(c, TakeBody);
+    const project = await store.read("project");
+    const film = chooseFilm(project, b.video, "the take")?.id ?? null;
     const file = toManifestPath(store.root, b.file);
     const info = await probe(fromManifestPath(store.root, file), { formats: AUDIO_FORMATS });
-    const { data, result } = await store.update("script", (s) => addTake(s, c.req.param("id"), { file, duration: info.duration }));
+    const { data, result } = await store.update("script", (f) => addTake(filmScriptDraft(f, project, film), c.req.param("id"), { file, duration: info.duration }));
     await log.add(() => {
-      const section = data.sections.find((s) => s.id === c.req.param("id"))!;
+      const section = filmScript(data, project, film).sections.find((s) => s.id === c.req.param("id"))!;
       return takeEvent(section, result, section.takes.findIndex((t) => t.id === result.id) + 1);
     }, by(c));
     return c.json({ take: result }, 201);
@@ -1384,7 +1525,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   // Always among the takes the film hears (lanesForVideo), which is what Mix plays and the readout
   // measures: a take that has left the film is never its take in use.
   const filmUse = (project: Project, picks: Picks, video: string | undefined): InUse =>
-    inUse({ lanes: lanesForVideo(project.lanes, video, project.videos.length) }, picksForVideo(picks, video));
+    inUse({ lanes: lanesForVideo(project.lanes, video, project.videos) }, picksForVideo(picks, video));
   const withUse = (project: Project, picks: Picks, video?: string): Picks => {
     if (video) return { ...picksForVideo(picks, video), use: filmUse(project, picks, video) };
     const videos: Picks["videos"] = {};
@@ -1494,7 +1635,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     guard?: (own: { levels: Levels; balanced?: { levels: Levels } }, picks: Picks, project: Project) => boolean,
   ): Promise<{ result: FilmBalance; written: boolean; project: Project; picks: Picks }> => {
     const [project, picks] = await Promise.all([store.read("project"), store.read("picks")]);
-    const heard = { ...project, lanes: lanesForVideo(project.lanes, video, project.videos.length) };
+    const heard = { ...project, lanes: lanesForVideo(project.lanes, video, project.videos) };
     const result = await balanceFilm(heard, picksForVideo(picks, video), store.root, opts.loudnessRunner ?? defaultRunner, opts.loudnessTimeoutMs);
     if (!result.available) return { result, written: false, project, picks };
     let written = false;
@@ -1554,7 +1695,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     const [project, picks] = await Promise.all([store.read("project"), store.read("picks")]);
     const run = opts.loudnessRunner ?? defaultRunner;
     // A film hears only its own reads, beds and passes, as its Mix tab plays them.
-    const heard = { ...project, lanes: lanesForVideo(project.lanes, b.video, project.videos.length) };
+    const heard = { ...project, lanes: lanesForVideo(project.lanes, b.video, project.videos) };
     const result = await measureMix(heard, picksForVideo(picks, b.video), b.lanes, store.root, run, opts.loudnessTimeoutMs);
     return c.json(result);
   });
@@ -1581,33 +1722,40 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     return settled === late ? { handedTo: agent.status().agent, starting: true } : (settled as SendHandOver | Exclude<T, SendResult>);
   };
   app.post("/api/batches", async (c) => {
-    const { stage } = await body(c, BatchBody);
+    const { stage, video } = await body(c, BatchBody);
+    // §31.2.2: Send on a film sends that film's notes and script alone, and the batch carries the film.
+    const film = video ? chooseFilm(await store.read("project"), video)!.id : null;
     let handing: Promise<SendResult> | undefined;
     const run = batchQueue.catch(() => undefined).then(async (): Promise<Batch> => {
       const [project, script, notes, batches] = await Promise.all([store.read("project"), store.read("script"), store.read("notes"), store.read("batches")]);
       // createBatch marks the notes it takes and files the batch in `batches`; on copies, it only
       // tells us what goes in.
-      const result = createBatch({ project, script, notes: structuredClone(notes), batches: structuredClone(batches) }, stage);
+      const result = createBatch({ project, script: filmScript(script, project, film), notes: structuredClone(notes), batches: structuredClone(batches), video: film }, stage);
       // R11: the prompt ends with the last five lines of the log, from before this send. A log that
-      // can't be read adds nothing: the batch must still be sent.
+      // can't be read adds nothing: the batch must still be sent. §31.5: with a film, the lines Activity shows on it.
       const recent = await Promise.all([store.read("project"), store.read("script")])
-        .then(async ([projectNow, scriptNow]) => recentChanges((await log.view({ limit: 5 }, { project: projectNow, script: scriptNow })).entries))
+        .then(async ([projectNow, scriptNow]) =>
+          recentChanges((await log.view({ limit: 5, ...(film ? { video: film } : {}) }, { project: projectNow, script: everySection(scriptNow), films: { videos: projectNow.videos, lanes: projectNow.lanes, notes: notes.notes } })).entries),
+        )
         .catch(() => "");
       if (recent) result.prompt = `${result.prompt}\n\n${recent}`;
       await store.update("batches", (f) => { f.batches.push(result); });
       await store.update("notes", (f) => markSent(f.notes, result));
-      // §30: one line per film the batch's notes are on (its script edits go with the notes on no film).
-      const filmOf = new Map(notes.notes.map((n) => [n.id, n.video ?? null]));
+      // §30: one line per film the batch's notes are on (its script edits go with the notes on no film). §31.2.2: a
+      // batch sent on a film is that film's alone: one line, script edits and the shared visuals' notes included.
+      const noteFilm = new Map(notes.notes.map((n) => [n.id, n.video ?? null]));
       const stageOf = new Map(notes.notes.map((n) => [n.id, n.stage]));
-      const groups = byFilm(result.noteIds, (id) => filmOf.get(id));
-      if (groups.length === 0 || (result.sectionIds.length > 0 && !groups.some(([f]) => f === null))) groups.push([null, []]);
-      for (const [film, ids] of groups) {
-        const sectionIds = film === null ? result.sectionIds : [];
+      const own = film && project.videos.length > 1 ? film : null;
+      const groups: [string | null, string[]][] = own ? [[own, result.noteIds]] : byFilm(result.noteIds, (id) => noteFilm.get(id));
+      const takesEdits = (f: string | null) => f === null || f === own;
+      if (groups.length === 0 || (result.sectionIds.length > 0 && !groups.some(([f]) => takesEdits(f)))) groups.push([own, []]);
+      for (const [lineFilm, ids] of groups) {
+        const sectionIds = takesEdits(lineFilm) ? result.sectionIds : [];
         // Each film's line names the tab its own notes came from ("from Picture"), not the whole batch's.
         const stages = new Set([...ids.map((id) => stageOf.get(id)), ...(sectionIds.length ? ["script" as const] : [])]);
         const stage = stages.size === 1 ? ([...stages][0] ?? result.stage) : result.stage;
         const part = { ...result, stage, noteIds: ids, sectionIds };
-        await log.add(() => notesSentEvent(part, film), by(c));
+        await log.add(() => notesSentEvent(part, lineFilm), by(c));
       }
       handing = (async () => agent.send(result))();
       return result;
@@ -1636,14 +1784,18 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   });
 
   app.get("/api/batches/:id", async (c) => {
-    const [batches, notes, script, visuals] = await Promise.all([store.read("batches"), store.read("notes"), store.read("script"), store.read("visuals")]);
+    const [batches, notes, script, visuals, project] = await Promise.all([store.read("batches"), store.read("notes"), store.read("script"), store.read("visuals"), store.read("project")]);
     const id = c.req.param("id");
     const batch = id === "latest" ? latestBatch(batches) : batches.batches.find((b) => b.id === id);
     if (!batch) throw new NotFoundError("batch", id);
+    // §31.6: a batch is about one film (its `video`): its sections are that film's script's, and the film is named so an
+    // agent working the batch passes it on. A batch from before names none: its sections are the first film's.
+    const film = batch.video ? project.videos.find((v) => v.id === batch.video) : undefined;
     return c.json({
       batch,
+      ...(film ? { film: { id: film.id, name: film.name } } : {}),
       notes: withVisualViews(notes.notes.filter((n) => batch.noteIds.includes(n.id)), visuals),
-      sections: script.sections.filter((s) => batch.sectionIds.includes(s.id)),
+      sections: filmScript(script, project, batch.video ?? null).sections.filter((s) => batch.sectionIds.includes(s.id)),
     });
   });
 
@@ -1668,8 +1820,9 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   app.get("/api/log", async (c) => {
     const q = LogQuery.safeParse(c.req.query());
     if (!q.success) throw new InvalidError(q.error.issues.map((i) => i.message).join("; "), q.error.issues);
-    const [project, script] = await Promise.all([store.read("project"), store.read("script")]);
-    return c.json(await log.view(q.data, { project, script }));
+    const [project, script, notes] = await Promise.all([store.read("project"), store.read("script"), store.read("notes")]);
+    const video = q.data.video ? chooseFilm(project, q.data.video)!.id : undefined;
+    return c.json(await log.view({ ...q.data, video }, { project, script: everySection(script), films: { videos: project.videos, lanes: project.lanes, notes: notes.notes } }));
   });
 
   app.post("/api/log", async (c) => {
@@ -1701,7 +1854,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
       const script = await store.read("script");
       const refs = new Set([
         ...project.lanes.flatMap((l) => l.variants.map((x) => `${l.id}/${x.id}`)),
-        ...script.sections.flatMap((s) => s.takes.map((x) => `${s.id}:${x.id}`)),
+        ...allSections(script).flatMap((s) => s.takes.map((x) => `${s.id}:${x.id}`)),
       ]);
       if (!refs.has(b.ref)) throw new NotFoundError("ref", shown(b.ref));
     }

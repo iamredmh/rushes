@@ -25,5 +25,5 @@ A line written before this has no film. Activity works it out where it can: a re
 
 ## 30.6 Found in testing, not changed
 
-- In a project that gains a second film, takes on no film stop being on any film (`onFilm` in core/schema.ts: on no film means on the only film, or on none). The first film's voice, music and effects then vanish until each is put on a film. That's an existing rule; raised with Red.
+- (Resolved by §31.2.4: what is on no film is the first film's.) In a project that gains a second film, takes on no film stop being on any film (`onFilm` in core/schema.ts: on no film means on the only film, or on none). The first film's voice, music and effects then vanish until each is put on a film. That's an existing rule; raised with Red.
 - "Before the log" (audio from before the log began) is still listed for the whole project.

@@ -1,4 +1,8 @@
 import { readFileSync } from "node:fs";
+import { sectionsOf } from "../../../src/core/script.js";
+import type { ScriptFile } from "../../../src/core/schema.js";
+/** §31.3: a one-film project's script.json is its film's script. */
+const sectionsScript = (f: ScriptFile) => ({ wordsPerSecond: 2.6, sections: sectionsOf(f) });
 import { writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -71,7 +75,7 @@ async function rig(scenario: object, opts: { settings?: Partial<AgentSettings>; 
     let made!: Batch;
     await store.update("notes", (notes) => {
       for (const text of texts) addNote(notes, { stage: "picture", scope: "whole", text });
-      made = createBatch({ project, script, notes, batches }, "picture");
+      made = createBatch({ project, script: sectionsScript(script), notes, batches }, "picture");
     });
     await store.update("batches", (f) => {
       f.batches = batches.batches;

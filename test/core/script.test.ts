@@ -124,7 +124,7 @@ describe("setSections", () => {
       const { ScriptSchema } = await import("../../src/core/schema.js");
       const s = empty();
       setSections(s, [{ start: 0, end: 10, current: "A" }, { start: 10, end: 20, current: "B" }]);
-      const back = ScriptSchema.parse(JSON.parse(JSON.stringify(s)));
+      const back = ScriptSchema.parse(JSON.parse(JSON.stringify(s))) as Script;
       setSections(back, [{ start: 0, end: 10, current: "A2" }], { replace: true });
       expect(back.sections.map((x) => x.id)).toEqual(["s3"]);
     });

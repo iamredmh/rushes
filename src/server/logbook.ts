@@ -4,7 +4,8 @@
 import { rename, stat } from "node:fs/promises";
 import { basename } from "node:path";
 import { CorruptFileError } from "../core/errors.js";
-import { appendEvent, backfillLog, logView, type LogEvent, type LogQuery, type LogView, type UndatedContext } from "../core/log.js";
+import { appendEvent, backfillLog, lineOnFilm, logView, type FilmContext, type LogEvent, type LogQuery, type LogView, type UndatedContext } from "../core/log.js";
+import { allSections } from "../core/script.js";
 import { LOG_MAX, logMarkdown, type LogBy } from "../core/logText.js";
 import type { LogEntry, LogFile, Project } from "../core/schema.js";
 import type { Store } from "../core/store.js";
@@ -103,7 +104,7 @@ export class LogBook {
       .update("log", (f) => {
         refuseNewer(f);
         if (f.backfilled) throw UNCHANGED;
-        backfillLog(f, { project, batches, script }, backfillBefore(f, this.since));
+        backfillLog(f, { project, batches, script: { sections: allSections(script) } }, backfillBefore(f, this.since));
       })
       .catch((e: unknown) => {
         if (e !== UNCHANGED) throw e;
@@ -184,7 +185,7 @@ export class LogBook {
   }
 
   /** §22.7: a page of the log, newest first. The first read backfills (R6). */
-  async view(q: LogQuery, ctx: UndatedContext): Promise<LogView> {
+  async view(q: LogQuery, ctx: UndatedContext & { films?: FilmContext }): Promise<LogView> {
     await this.ready();
     let file = await this.read(true);
     if (!file.backfilled && this.known) {
@@ -204,6 +205,30 @@ export class LogBook {
       return { rev: f.rev, mark: last ? `${last.id}@${last.at}` : null, total: f.entries.length };
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * §31.5: each film's head, for the Activity dot on that film: its newest line among those Activity shows there
+   * (lineOnFilm), so a line about another film never lights it. `total` stays the whole log's. Read-only, like head.
+   */
+  async filmHeads(films: FilmContext): Promise<Record<string, LogHead>> {
+    try {
+      const f = await this.read(false);
+      const out: Record<string, LogHead> = {};
+      for (const v of films.videos) {
+        let mark: string | null = null;
+        for (let i = f.entries.length - 1; i >= 0; i--) {
+          const e = f.entries[i];
+          if (!lineOnFilm(e, v.id, films)) continue;
+          mark = `${e.id}@${e.at}`;
+          break;
+        }
+        out[v.id] = { rev: f.rev, mark, total: f.entries.length };
+      }
+      return out;
+    } catch {
+      return {};
     }
   }
 

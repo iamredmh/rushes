@@ -22,7 +22,8 @@ import { slugify } from "../core/ids.js";
 import { AUDIO_FORMATS, probe as ffprobe } from "../core/media.js";
 import { fromManifestPath, toManifestPath } from "../core/paths.js";
 import { addFile, addVariant, addVersion, inPlay, resolveVideo } from "../core/project.js";
-import type { Project, Script, Version, Video } from "../core/schema.js";
+import type { Project, Script, ScriptFile, Version, Video } from "../core/schema.js";
+import { sectionsOf } from "../core/script.js";
 import type { ChangeEvent, Store } from "../core/store.js";
 import { cueFiles } from "../core/cues.js";
 import { logBookFor } from "./logbook.js";
@@ -371,7 +372,7 @@ export function foundAnnouncer(store: Store): () => void {
 }
 
 /** Every manifest path the project has registered: cuts and their formats, variants, cue samples, library files and script takes. */
-export function registeredPaths(project: Project, script: Script): string[] {
+export function registeredPaths(project: Project, script: ScriptFile | Pick<Script, "sections">): string[] {
   const out: string[] = [];
   for (const v of project.videos) {
     for (const ver of v.versions) {
@@ -384,7 +385,7 @@ export function registeredPaths(project: Project, script: Script): string[] {
   // §23: a cue's sample is part of its pass, not a pass of its own to bring in.
   for (const f of cueFiles(project)) out.push(f);
   for (const f of project.files) out.push(f.file);
-  for (const s of script.sections) for (const t of s.takes) out.push(t.file);
+  for (const s of sectionsOf(script)) for (const t of s.takes) out.push(t.file);
   return out;
 }
 

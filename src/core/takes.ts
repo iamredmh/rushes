@@ -67,7 +67,7 @@ const SOUNDS: readonly LaneStage[] = ["voice", "music", "sfx"];
 
 /** Every take one film hears (no film: the whole project), per sound, newest round first, with its state. */
 export function filmTakes(project: Pick<Project, "lanes" | "videos">, picks: Picks, videoId: string | undefined): Record<LaneStage, TakeView[]> {
-  const lanes = lanesForVideo(project.lanes, videoId, project.videos.length);
+  const lanes = lanesForVideo(project.lanes, videoId, project.videos);
   const use = inUse({ lanes }, picksForVideo(picks, videoId));
   const video = videoId ? project.videos.find((v) => v.id === videoId) : undefined;
   const out = { voice: [], music: [], sfx: [] } as Record<LaneStage, TakeView[]>;

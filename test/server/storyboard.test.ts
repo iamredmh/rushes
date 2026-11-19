@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { Script } from "../../src/core/schema.js";
 import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
@@ -161,7 +162,7 @@ describe("storyboard over HTTP", () => {
   async function app(opts: { board?: string | null; brief?: string | null; script?: boolean } = {}) {
     const s = await setup(opts.board === undefined ? AGENT : opts.board);
     if (opts.brief) await writeFile(join(s.root, "brief.md"), opts.brief);
-    if (opts.script) await s.store.update("script", (d) => { d.sections = [{ id: "s1", start: 0, end: 3, current: "x", proposed: null, direction: "", status: "approved", takes: [] }]; });
+    if (opts.script) await s.store.update("script", (d) => { (d as Script).sections = [{ id: "s1", start: 0, end: 3, current: "x", proposed: null, direction: "", status: "approved", takes: [] }]; });
     const server = createApp(s.store, { storyboard: s.board, brief: new BriefService(s.store) });
     const call = async (method: string, path: string, json?: unknown) => {
       const res = await server.request(path, { method, headers: json === undefined ? undefined : { "content-type": "application/json" }, body: json === undefined ? undefined : JSON.stringify(json) });
@@ -251,7 +252,9 @@ describe("storyboard over HTTP", () => {
       expect(r.json.version.shots).toEqual([]);
     });
 
-    it("copies the shots once: a second cut inherits the first's list, and another film's first cut takes the plan as it is then", async () => {
+    // §31.3 rewrote this: storyboard.md is the first film's; another film's first cut takes its own storyboard's shots
+    // (films/<film-id>/storyboard.md), never the first film's.
+    it("copies the shots once: a second cut inherits the first's list, and another film's first cut takes its own storyboard", async () => {
       const { call, root, board } = await app({ board: APPROVED });
       await post(call);
       await writeFile(join(root, "storyboard.md"), APPROVED.replace("Length: 3", "Length: 9"));
@@ -259,7 +262,11 @@ describe("storyboard over HTTP", () => {
       const second = await post(call);
       expect(second.json.version.shots.map((s: { start: number }) => s.start)).toEqual([0, 3]);
       const otherFilm = await post(call, "Teaser");
-      expect(otherFilm.json.version.shots.map((s: { start: number }) => s.start)).toEqual([0, 9]);
+      expect(otherFilm.json.version.shots).toEqual([]);
+      await mkdir(join(root, "films", "trailer"), { recursive: true });
+      await writeFile(join(root, "films", "trailer", "storyboard.md"), APPROVED.replace("Length: 3", "Length: 5"));
+      const trailer = await post(call, "Trailer");
+      expect(trailer.json.version.shots.map((s: { start: number }) => s.start)).toEqual([0, 5]);
     });
   });
 });

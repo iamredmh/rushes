@@ -1,13 +1,16 @@
 import { constants } from "node:fs";
 import { lstat, open, rename, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { hashText } from "../core/brief.js";
 import { InvalidError, NotFoundError, RushesError } from "../core/errors.js";
+import type { BriefState } from "../core/schema.js";
 import type { Store } from "../core/store.js";
 
 // §24 steps 2 and 3: brief.md and storyboard.md are files of record. The agent writes them with its own tools; the
 // dashboard writes them through a service built on this. Rushes keeps only `.rushes/<key>.json` for each: the agent's
 // last text (the "Current" column) and the hash it last saw, so it can tell the dashboard's writes from anyone else's.
+// §31.3: each film has its own: the first film's are the root file and the top-level baseline, every other film's are
+// films/<film-id>/<name> and the baseline kept under its id (core/films.ts filmPlace names them).
 
 /** A record is a page or two. Anything bigger than this is some other file, and is not read. */
 export const MAX_RECORD_BYTES = 1_000_000;
@@ -17,12 +20,31 @@ export abstract class RecordFile {
   private queue: Promise<unknown> = Promise.resolve();
 
   /**
-   * @param file    the file's name in the project folder's root
+   * @param file    the file's path in the project folder, forward slashes ("brief.md", "films/five-views/brief.md")
    * @param key     which `.rushes/*.json` holds its baseline and hash
    * @param changed the error a save gets when the file changed since the page loaded
+   * @param slot    where in that file: null for the top-level fields (the first film's), else a film's id under `films`
    */
-  constructor(protected readonly store: Store, protected readonly file: string, protected readonly key: "brief" | "storyboard", private readonly changed: () => RushesError) {
-    this.path = join(store.root, file);
+  constructor(
+    protected readonly store: Store,
+    protected readonly file: string,
+    protected readonly key: "brief" | "storyboard",
+    private readonly changed: () => RushesError,
+    protected readonly slot: string | null = null,
+  ) {
+    this.path = join(store.root, ...file.split("/"));
+  }
+
+  /** This file's baseline and hash, as `.rushes/<key>.json` holds them now. */
+  protected async state(): Promise<{ baseline: string; seen: string }> {
+    const d = await this.store.read(this.key);
+    return this.slot === null ? d : (d.films?.[this.slot] ?? { baseline: "", seen: "" });
+  }
+
+  /** The place in a draft of `.rushes/<key>.json` this file's baseline and hash are kept, made when missing. */
+  private own(d: BriefState): { baseline: string; seen: string } {
+    if (this.slot === null) return d;
+    return ((d.films ??= {})[this.slot] ??= { baseline: "", seen: "" });
   }
 
   /** One operation at a time, so a save and a look at the file can never interleave. */
@@ -78,10 +100,11 @@ export abstract class RecordFile {
       const text = await this.readText();
       if (text === null) return;
       const hash = hashText(text);
-      if ((await this.store.read(this.key)).seen === hash) return;
+      if ((await this.state()).seen === hash) return;
       await this.store.update(this.key, (d) => {
-        d.baseline = text;
-        d.seen = hash;
+        const o = this.own(d);
+        o.baseline = text;
+        o.seen = hash;
       });
     });
   }
@@ -90,22 +113,23 @@ export abstract class RecordFile {
     // One more look just before the file is replaced, so a write that landed since the check is refused, not overwritten.
     const again = await this.readText();
     if (again === null || hashText(again) !== hashText(prev)) throw this.changed();
-    const tmp = join(this.store.root, `.${this.file}.${process.pid}.${Date.now()}.tmp`);
+    const tmp = join(dirname(this.path), `.${basename(this.path)}.${process.pid}.${Date.now()}.tmp`);
     await writeFile(tmp, next, "utf8");
     await rename(tmp, this.path);
     const prevHash = hashText(prev);
     const nextHash = hashText(next);
     // If Rushes had not yet seen `prev`, it is the agent's version: keep it as the baseline before the edit lands.
     await this.store.update(this.key, (d) => {
-      if (d.seen !== prevHash) d.baseline = prev;
-      d.seen = nextHash;
+      const o = this.own(d);
+      if (o.seen !== prevHash) o.baseline = prev;
+      o.seen = nextHash;
     });
   }
 
   /** The file's text, once the page has proved it saw it: 404 with no file, 409 when it has changed since. */
   protected async current(expectHash: string): Promise<string> {
     const text = await this.readText();
-    if (text === null) throw new NotFoundError(this.file === "brief.md" ? "Brief" : "Storyboard", this.file);
+    if (text === null) throw new NotFoundError(this.key === "brief" ? "Brief" : "Storyboard", this.file);
     if (hashText(text) !== expectHash) throw this.changed();
     if (!(await this.isUtf8())) throw new InvalidError(`${this.file} isn't UTF-8 text, so Rushes won't save over it. Edit it in your editor.`);
     return text;
@@ -129,7 +153,7 @@ export abstract class RecordFile {
           // seen, which announces it, and which makes the same text coming back (git stash pop, say) a change to announce too.
           if (hadFile && (await this.run(() => this.readText())) === null) {
             await this.store.update(this.key, (d) => {
-              d.seen = "";
+              this.own(d).seen = "";
             });
           }
         }

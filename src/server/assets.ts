@@ -1,13 +1,16 @@
 import { readdir, stat } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
-import type { FileEntry, FileKind, LaneStage, Project, Script } from "../core/schema.js";
+import type { FileEntry, FileKind, LaneStage, Project, Script, ScriptFile } from "../core/schema.js";
+import { scriptsOf } from "../core/script.js";
+import { filmPlace } from "../core/films.js";
+import { variantFilms, type VisualsFile } from "../core/schema.js";
 import type { Store } from "../core/store.js";
 import { fromManifestPath } from "../core/paths.js";
 import { GRAB_PATH, SCREENSHOT_PATH, registeredMedia } from "./files.js";
 import { PROXY_PATH } from "./proxy.js";
 import { chipOrder, labelOfId, versionFormats } from "../core/formats.js";
 
-export type AssetKind = "screenshot" | "cut" | "proxy" | "take" | "music" | "sfx" | "voice" | FileKind;
+export type AssetKind = "screenshot" | "cut" | "proxy" | "take" | "music" | "sfx" | "voice" | "visual" | FileKind;
 
 export interface Asset {
   kind: AssetKind;
@@ -41,6 +44,10 @@ export interface Asset {
   /** §21: a cut's format row (its id), and the ratio label on a cut with formats. */
   format?: string;
   formatLabel?: string;
+  /** §31.5: a read, bed or pass on more than one film: every film it is on. One on a single film has `video`. */
+  videos?: string[];
+  /** §31.2.3: a visual's picture. Visuals are the project's, not a film's: on every film, shown as shared. */
+  shared?: true;
 }
 
 /**
@@ -141,7 +148,7 @@ async function fileAsset(
   store: Store,
   kind: AssetKind,
   path: string,
-  extra: Partial<Pick<Asset, "video" | "version" | "section" | "lane" | "variant" | "note" | "label" | "laneName" | "meta" | "width" | "height" | "format" | "formatLabel">>,
+  extra: Partial<Pick<Asset, "video" | "videos" | "version" | "section" | "lane" | "variant" | "note" | "label" | "laneName" | "meta" | "width" | "height" | "format" | "formatLabel" | "shared">>,
 ): Promise<Asset> {
   const abs = fromManifestPath(store.root, path);
   const info = await statInfo(abs);
@@ -196,14 +203,21 @@ async function dirFileNames(store: Store, dir: string, exts?: ReadonlySet<string
  * Hidden files, anything inside `.rushes/`, and anything in a deeper sub-folder never appear,
  * because this only ever reads one directory level.
  */
-async function discoveredLibraryPaths(store: Store): Promise<{ doc: string[]; caption: string[]; export: string[] }> {
+async function discoveredLibraryPaths(store: Store, project?: Pick<Project, "videos">): Promise<{ doc: string[]; caption: string[]; export: string[]; filmDocs: { path: string; video: string }[] }> {
   // One readdir of the project root serves both doc and caption (§16.2's two root extension
   // sets), rather than reading the same directory twice over just to apply a different filter.
   const [rootNames, exportNames] = await Promise.all([dirFileNames(store, "."), dirFileNames(store, "exports")]);
   const extOf = (n: string) => extname(n).toLowerCase().slice(1);
   const doc = rootNames.filter((n) => DOC_EXT.has(extOf(n)));
   const caption = rootNames.filter((n) => CAPTION_EXT.has(extOf(n)));
-  return { doc, caption, export: exportNames.map((n) => `exports/${n}`) };
+  // §31.3: every film but the first keeps its own brief.md and storyboard.md (and any other doc) in films/<film-id>/.
+  const filmDocs: { path: string; video: string }[] = [];
+  for (const v of project?.videos.slice(1) ?? []) {
+    const place = filmPlace(project!, v.id);
+    const dir = place.brief.slice(0, place.brief.lastIndexOf("/"));
+    for (const n of await dirFileNames(store, dir, DOC_EXT)) filmDocs.push({ path: `${dir}/${n}`, video: v.id });
+  }
+  return { doc, caption, export: exportNames.map((n) => `exports/${n}`), filmDocs };
 }
 
 /**
@@ -213,7 +227,7 @@ async function discoveredLibraryPaths(store: Store): Promise<{ doc: string[]; ca
  * listed once, with the registered metadata (§16.2).
  */
 async function libraryAssets(store: Store, project: Project): Promise<Asset[]> {
-  const discovered = await discoveredLibraryPaths(store);
+  const discovered = await discoveredLibraryPaths(store, project);
   const autoByKind: Partial<Record<FileKind, string[]>> = { doc: discovered.doc, caption: discovered.caption, export: discovered.export };
   const out: Asset[] = [];
   for (const kind of LIBRARY_KINDS) {
@@ -222,6 +236,10 @@ async function libraryAssets(store: Store, project: Project): Promise<Asset[]> {
     const registeredPaths = new Set(registered.map((f) => f.file));
     const auto = (autoByKind[kind] ?? []).filter((path) => !registeredPaths.has(path));
     out.push(...(await Promise.all(auto.map((path) => fileAsset(store, kind, path, {})))));
+    if (kind === "doc") {
+      const own = discovered.filmDocs.filter((d) => !registeredPaths.has(d.path));
+      out.push(...(await Promise.all(own.map((d) => fileAsset(store, "doc", d.path, { video: d.video })))));
+    }
   }
   return out;
 }
@@ -229,7 +247,7 @@ async function libraryAssets(store: Store, project: Project): Promise<Asset[]> {
 function variantEntries(
   project: Project,
   stage: LaneStage,
-): { lane: string; laneName: string; variant: string; label: string; meta: Record<string, string | number> | undefined; file: string }[] {
+): { lane: string; laneName: string; variant: string; label: string; meta: Record<string, string | number> | undefined; file: string; films: string[] }[] {
   return project.lanes
     .filter((lane) => lane.stage === stage)
     .flatMap((lane) =>
@@ -240,6 +258,7 @@ function variantEntries(
         label: variant.name,
         meta: Object.keys(variant.meta).length > 0 ? variant.meta : undefined,
         file: variant.file,
+        films: variantFilms(variant),
       })),
     );
 }
@@ -251,7 +270,7 @@ function variantEntries(
  * order. Callers never need to sort this themselves. Every file this returns has been `stat`ed,
  * in parallel within each group, so a large project doesn't pay for it one file at a time.
  */
-export async function listAssets(store: Store, project: Project, script: Script): Promise<Asset[]> {
+export async function listAssets(store: Store, project: Project, script: ScriptFile | Pick<Script, "sections">, visuals?: Pick<VisualsFile, "visuals">): Promise<Asset[]> {
   // §21.5: each cut, then its formats as sub-rows in chip order, each with the ratio it is.
   type CutEntry = { video: string; version: string; file: string; formatLabel?: string; format?: string; width?: number; height?: number };
   const cutEntries: CutEntry[] = project.videos.flatMap((video) =>
@@ -273,18 +292,29 @@ export async function listAssets(store: Store, project: Project, script: Script)
   // A take has no name of its own in script.json (just an id and the text it was read against),
   // so its label is its ordinal within the section -- "Take 1", "Take 2" -- rather than the file
   // name Download/Save-as still need under `name`.
-  const takeEntries = script.sections.flatMap((section) =>
-    section.takes.map((take, i) => ({ section: section.id, file: take.file, label: `Take ${i + 1}` })),
+  // §31.3: each take carries the film whose script it is in (a schema 1 script's are the first film's: no film named).
+  const takeEntries = ("sections" in script ? [{ video: null, script }] : scriptsOf(script)).flatMap(({ video, script: own }) =>
+    own.sections.flatMap((section) => section.takes.map((take, i) => ({ section: section.id, file: take.file, label: `Take ${i + 1}`, ...(video ? { video } : {}) }))),
   );
+  // §31.2.3: each visual's pictures as it stands now (its newest version), every page and ratio: shared by every film.
+  const visualEntries = (visuals?.visuals ?? []).flatMap((v) => {
+    const now = v.versions[v.versions.length - 1];
+    const many = now.pages.length > 1;
+    return now.pages.flatMap((page) =>
+      page.images.map((img) => ({ file: img.file, label: `${v.name}${many ? ` · page ${page.n}` : ""} · ${labelOfId(img.ratio)}`, version: now.id, width: img.width, height: img.height })),
+    );
+  });
 
-  const [[freshNames, oldNames], cuts, proxies, takes, voice, music, sfx] = await Promise.all([
+  const filmsOf = (films: string[]) => (films.length === 1 ? { video: films[0] } : films.length > 1 ? { videos: films } : {});
+  const [[freshNames, oldNames], cuts, proxies, takes, voice, music, sfx, pictures] = await Promise.all([
     Promise.all([pngNames(store, SCREENSHOT_DIRS[0][0]), pngNames(store, SCREENSHOT_DIRS[1][0])]),
     Promise.all(cutEntries.map((e) => fileAsset(store, "cut", e.file, { video: e.video, version: e.version, format: e.format, formatLabel: e.formatLabel, width: e.width, height: e.height }))),
     Promise.all(proxyEntries.map((e) => fileAsset(store, "proxy", e.proxy.file, { video: e.video, version: e.version, width: e.proxy.width, height: e.proxy.height }))),
-    Promise.all(takeEntries.map((e) => fileAsset(store, "take", e.file, { section: e.section, label: e.label }))),
-    Promise.all(variantEntries(project, "voice").map((e) => fileAsset(store, "voice", e.file, { lane: e.lane, laneName: e.laneName, variant: e.variant, label: e.label, meta: e.meta }))),
-    Promise.all(variantEntries(project, "music").map((e) => fileAsset(store, "music", e.file, { lane: e.lane, laneName: e.laneName, variant: e.variant, label: e.label, meta: e.meta }))),
-    Promise.all(variantEntries(project, "sfx").map((e) => fileAsset(store, "sfx", e.file, { lane: e.lane, laneName: e.laneName, variant: e.variant, label: e.label, meta: e.meta }))),
+    Promise.all(takeEntries.map((e) => fileAsset(store, "take", e.file, { section: e.section, label: e.label, ...("video" in e ? { video: e.video } : {}) }))),
+    Promise.all(variantEntries(project, "voice").map((e) => fileAsset(store, "voice", e.file, { lane: e.lane, laneName: e.laneName, variant: e.variant, label: e.label, meta: e.meta, ...filmsOf(e.films) }))),
+    Promise.all(variantEntries(project, "music").map((e) => fileAsset(store, "music", e.file, { lane: e.lane, laneName: e.laneName, variant: e.variant, label: e.label, meta: e.meta, ...filmsOf(e.films) }))),
+    Promise.all(variantEntries(project, "sfx").map((e) => fileAsset(store, "sfx", e.file, { lane: e.lane, laneName: e.laneName, variant: e.variant, label: e.label, meta: e.meta, ...filmsOf(e.films) }))),
+    Promise.all(visualEntries.map((e) => fileAsset(store, "visual", e.file, { label: e.label, version: e.version, width: e.width, height: e.height, shared: true }))),
   ]);
   const [fresh, old] = await Promise.all([
     scanScreenshotDir(store, freshNames, SCREENSHOT_DIRS[0][1], SCREENSHOT_DIRS[0][2], project),
@@ -293,7 +323,7 @@ export async function listAssets(store: Store, project: Project, script: Script)
   const screenshots = [...fresh, ...old].sort((a, b) => b.mtimeMs - a.mtimeMs).map((x) => x.asset);
   const library = await libraryAssets(store, project);
 
-  return [...screenshots, ...cuts, ...proxies, ...takes, ...voice, ...music, ...sfx, ...library];
+  return [...screenshots, ...cuts, ...proxies, ...takes, ...voice, ...music, ...sfx, ...library, ...pictures];
 }
 
 /**
@@ -304,8 +334,9 @@ export async function listAssets(store: Store, project: Project, script: Script)
  * list (§23.7). POST /api/reveal and /api/open use this to check a path cheaply, stat'ing only
  * the one file they actually need instead of every asset in the project.
  */
-export async function candidatePaths(store: Store, project: Project, script: Script): Promise<Set<string>> {
-  const paths = registeredMedia(project, script);
+export async function candidatePaths(store: Store, project: Project, script: ScriptFile | Pick<Script, "sections">): Promise<Set<string>> {
+  // §31.2.3: a visual's pictures are listed in Assets too, so they can be revealed and opened from there.
+  const paths = registeredMedia(project, script, await store.read("visuals").catch(() => undefined));
   const nameLists = await Promise.all(SCREENSHOT_DIRS.map(([dir]) => pngNames(store, dir)));
   for (let i = 0; i < SCREENSHOT_DIRS.length; i++) {
     const [, manifestPrefix, safe] = SCREENSHOT_DIRS[i];
@@ -314,7 +345,7 @@ export async function candidatePaths(store: Store, project: Project, script: Scr
       if (safe.test(path)) paths.add(path);
     }
   }
-  const discovered = await discoveredLibraryPaths(store);
-  for (const path of [...discovered.doc, ...discovered.caption, ...discovered.export]) paths.add(path);
+  const discovered = await discoveredLibraryPaths(store, project);
+  for (const path of [...discovered.doc, ...discovered.caption, ...discovered.export, ...discovered.filmDocs.map((d) => d.path)]) paths.add(path);
   return paths;
 }

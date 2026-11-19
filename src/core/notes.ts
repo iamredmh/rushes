@@ -3,6 +3,7 @@ import {
 } from "./schema.js";
 import { InvalidError, NotFoundError, RushesError } from "./errors.js";
 import { labelOfId, versionFormats } from "./formats.js";
+import { noteOnFilm } from "./films.js";
 import { newId } from "./ids.js";
 import { noteState, setStatus, type NoteState } from "./noteState.js";
 
@@ -233,11 +234,15 @@ export interface NoteFilter {
   version?: string;
   format?: string;
   onlyThisFormat?: boolean;
+  /** §31.6: one film's notes (the visuals' too: they are on every film). Needs `videos`, so a note on no film is the first film's. */
+  video?: string;
+  videos?: readonly { id: string }[];
 }
 
 export function filterNotes(notes: Note[], f: NoteFilter = {}): Note[] {
   return notes.filter(
     (n) =>
+      (f.video === undefined || noteOnFilm(n, f.video, f.videos ?? [])) &&
       (f.stage === undefined || n.stage === f.stage) &&
       (f.status === undefined || n.status === f.status) &&
       (f.state === undefined || noteState(n) === f.state) &&

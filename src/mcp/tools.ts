@@ -20,7 +20,7 @@ export interface ToolContext {
 const project = z.string().optional().describe("Project folder. Defaults to the current working directory.");
 const stage = z.enum(["script", "picture", "voice", "music", "sfx", "mix", "visuals"]);
 const fileKind = z.enum(["doc", "image", "caption", "export", "delivery", "edit"]);
-const assetKind = z.enum(["screenshot", "cut", "proxy", "take", "music", "sfx", "voice", "doc", "image", "caption", "export", "delivery", "edit"]);
+const assetKind = z.enum(["screenshot", "cut", "proxy", "take", "music", "sfx", "voice", "visual", "doc", "image", "caption", "export", "delivery", "edit"]);
 
 // §20.7: a file to bring in. The server checks everything else (inside the project, the kind, the limits).
 const film = z.string().min(1).max(200);
@@ -62,6 +62,38 @@ function fail(e: unknown) {
   const message =
     e instanceof ApiError ? (e.body.error === "not_json" ? e.message : `${e.message} (${e.body.error ?? e.status})${issuesOf(e.body)}`) : (e as Error).message;
   return { content: [{ type: "text" as const, text: message }], isError: true };
+}
+
+// §31.6: a film's material (its script, notes, Activity, files, tabs) is asked for by film: its id or its name.
+const filmArg = z
+  .string()
+  .min(1)
+  .max(200)
+  .optional()
+  .describe("The film (its id or name). With one film it may be left out; with several it is required (the error lists them). A batch names its film: use that.");
+
+interface FilmRow {
+  id: string;
+  name: string;
+  shelved?: string | null;
+  brief?: string;
+  storyboard?: string;
+}
+
+/**
+ * §31.6: the film to pass on for a tool that reads or writes a film's material. The one named; with one film (or none)
+ * nothing, so the call is the same as ever; with several and none named, an error that lists them.
+ */
+async function filmFor(c: RushesClient, film: string | undefined, what: string): Promise<string | undefined> {
+  if (film) return film;
+  let films: FilmRow[] = [];
+  try {
+    films = ((await c.get<{ films?: FilmRow[] }>("/api/tabs")).films ?? []);
+  } catch {
+    return undefined;
+  }
+  if (films.length < 2) return undefined;
+  throw new Error(`This project has ${films.length} films, so pass \`film\` to say which one ${what} is for: ${films.map((f) => (f.name === f.id ? f.id : `${f.name} (${f.id})`)).join(", ")}.`);
 }
 
 /** Wrap a handler so API errors come back as tool errors the agent can read. */
@@ -199,10 +231,20 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     "rushes_status",
     {
       title: "Rushes status",
-      description: "Which tabs are unlocked and how many open items each has (`todo`), and how many of those notes the user has already sent you (`sent`). Also `brief`: whether brief.md exists, its status (draft or approved, set when the user presses Approve) and how many sections the user changed; `storyboard`: whether storyboard.md exists, how many shots there are, how many are approved and how many the user changed; and `build`: whether planning has begun (`started`), whether the brief, every script section (when there is a script) and every shot are approved (`ready`), and what it is `waitingOn`. Also `films`: every film with `shelved` (the time the user shelved it, or null). A shelved film is one the user has set aside: leave it alone, make no new cuts of it and fix none of its notes unless the user says to. Its open notes are not counted in the tabs.",
-      inputSchema: { project },
+      description: "Which tabs are unlocked and how many open items each has (`todo`), and how many of those notes the user has already sent you (`sent`). Also `brief`: whether brief.md exists (the film's own: see `plans`), its status (draft or approved, set when the user presses Approve) and how many sections the user changed; `storyboard`: whether storyboard.md exists (the film's own), how many shots there are, how many are approved and how many the user changed; and `build`: whether planning has begun (`started`), whether the brief, every script section (when there is a script) and every shot are approved (`ready`), and what it is `waitingOn`. Also `films`: every film with `shelved` (the time the user shelved it, or null), and `plans`: where each film's own brief and storyboard are, by film id (the first film's are brief.md and storyboard.md at the project root, every other film's are films/<film-id>/brief.md and films/<film-id>/storyboard.md). A shelved film is one the user has set aside: leave it alone, make no new cuts of it and fix none of its notes unless the user says to. Its open notes are not counted in the tabs. Everything but `films` and `plans` is one film's: pass `film`. With several films and no `film`, you get the whole project's tabs, `films` and `plans` only.",
+      inputSchema: { project, film: filmArg },
     },
-    safe(async ({ project }) => (await ctx.client(project)).get("/api/tabs")),
+    safe(async ({ project, film }) => {
+      const c = await ctx.client(project);
+      if (film) return c.get(`/api/tabs?video=${encodeURIComponent(film)}`);
+      const r = await c.get("/api/tabs");
+      // §31.6: the brief, storyboard and build are a film's. With several films and none named, they are left out.
+      if (Array.isArray(r?.films) && r.films.length > 1) {
+        const { brief: _b, storyboard: _s, build: _p, ...rest } = r;
+        return { ...rest, note: `This project has ${r.films.length} films. Pass \`film\` for one film's tabs, brief, storyboard and build.` };
+      }
+      return r;
+    }),
   );
 
   server.registerTool(
@@ -330,7 +372,7 @@ export function createMcpServer(ctx: ToolContext): McpServer {
         video: z
           .union([z.string().min(1), z.array(z.string().min(1)).min(1)])
           .optional()
-          .describe("The film (id or name) this read, bed or pass is for, or a list of films when one bed is fitted to several: only those films' Voiceover, Music, Sound effects and Mix list it. Rushes works out one film when the name or file name starts with the film's first word (\"f3a SFX pass 3\" for \"f3a One phone\"), but always give it in a project with more than one film: one on no film is listed on none of their tabs (it waits, folded, under \"Not on this film\"), and the reply carries a `warning`. To move one later, use rushes_set_films."),
+          .describe("The film (id or name) this read, bed or pass is for, or a list of films when one bed is fitted to several: only those films' Voiceover, Music, Sound effects and Mix list it. Rushes works out one film when the name or file name starts with the film's first word (\"f3a SFX pass 3\" for \"f3a One phone\"), but always give it in a project with more than one film: one that names no film, and whose film can't be told from its names, goes on the project's first film, and the reply carries a `warning`. To move one later, use rushes_set_films."),
         cues: z
           .array(
             z.object({
@@ -374,25 +416,34 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     {
       title: "Set the VO script",
       description:
-        "Add or update VO script sections. By default this merges by id: send only the sections you changed, with their ids, and new sections without one. Sections you leave out stay as they are. A section that keeps its id keeps the user's edits, direction and takes. Returns the full list.",
+        "Add or update a film's VO script sections. Each film has its own script: pass `film` (required when the project has several films). By default this merges by id: send only the sections you changed, with their ids, and new sections without one. Sections you leave out stay as they are. A section that keeps its id keeps the user's edits, direction and takes. Returns the full list.",
       inputSchema: {
         project,
+        film: filmArg,
         sections: z.array(z.object({ id: z.string().min(1).optional(), start: z.number().nonnegative(), end: z.number().nonnegative(), current: z.string() })),
         wordsPerSecond: z.number().positive().optional(),
         replace: z.boolean().optional().describe("replace the whole script; default merges by id"),
       },
     },
-    safe(async ({ project, ...b }) => (await ctx.client(project)).put("/api/script", b)),
+    safe(async ({ project, film, ...b }) => {
+      const c = await ctx.client(project);
+      const video = await filmFor(c, film, "the script");
+      return c.put("/api/script", { ...b, ...(video ? { video } : {}) });
+    }),
   );
 
   server.registerTool(
     "rushes_get_script",
     {
       title: "Get the VO script",
-      description: "The whole script: every section with its current line, the user's proposed line, direction, status and takes, plus wordsPerSecond.",
-      inputSchema: { project },
+      description: "A film's whole script: every section with its current line, the user's proposed line, direction, status and takes, plus wordsPerSecond. Each film has its own: pass `film` (required when the project has several films).",
+      inputSchema: { project, film: filmArg },
     },
-    safe(async ({ project }) => (await ctx.client(project)).get("/api/script")),
+    safe(async ({ project, film }) => {
+      const c = await ctx.client(project);
+      const video = await filmFor(c, film, "the script");
+      return c.get(`/api/script${video ? `?video=${encodeURIComponent(video)}` : ""}`);
+    }),
   );
 
   server.registerTool(
@@ -401,9 +452,13 @@ export function createMcpServer(ctx: ToolContext): McpServer {
       title: "Add a VO take",
       description:
         "Compatibility only: attaches a file to a script section as a take, but the Voiceover tab and the mix ignore takes. For voiceover, register each whole read with rushes_add_variant (stage \"voice\", round).",
-      inputSchema: { project, section: z.string(), file: z.string() },
+      inputSchema: { project, section: z.string(), file: z.string(), film: filmArg },
     },
-    safe(async ({ project, section, file }) => (await ctx.client(project)).post(`/api/script/${encodeURIComponent(section)}/takes`, { file })),
+    safe(async ({ project, section, file, film }) => {
+      const c = await ctx.client(project);
+      const video = await filmFor(c, film, "the take");
+      return c.post(`/api/script/${encodeURIComponent(section)}/takes`, { file, ...(video ? { video } : {}) });
+    }),
   );
 
   server.registerTool(
@@ -411,9 +466,10 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     {
       title: "List notes",
       description:
-        "Notes left in Rushes, filtered by tab, state, status, batch or version. Each note has a `state`: \"todo\" (the user's, not sent yet), \"sent\" (in a batch the user sent: yours to fix) or \"done\". `state: \"sent\"` lists everything you have been given and not finished, whichever batch it came in. A note's `on` says what it's about: null on Picture or for the whole mix, \"<lane>/<variant>\" for a music bed, SFX pass or voice variant, \"<lane>/<variant>:<cue>\" for an SFX cue, \"vo\" for the VO lane on Mix. Older notes may carry a bare variant id, \"vo\" for the assembled read, \"<section>:<take>\" for a take, or a section id. On Picture, a note's `format` is null when it's for every format, or a format id such as \"9x16\" when it's for that shape only. Notes on a shelved film (one the user has set aside) are left out.",
+        "Notes left in Rushes, filtered by tab, state, status, batch or version. Each note has a `state`: \"todo\" (the user's, not sent yet), \"sent\" (in a batch the user sent: yours to fix) or \"done\". `state: \"sent\"` lists everything you have been given and not finished, whichever batch it came in. A note's `on` says what it's about: null on Picture or for the whole mix, \"<lane>/<variant>\" for a music bed, SFX pass or voice variant, \"<lane>/<variant>:<cue>\" for an SFX cue, \"vo\" for the VO lane on Mix. Older notes may carry a bare variant id, \"vo\" for the assembled read, \"<section>:<take>\" for a take, or a section id. On Picture, a note's `format` is null when it's for every format, or a format id such as \"9x16\" when it's for that shape only. Notes on a shelved film (one the user has set aside) are left out. One film's notes (and the visuals', which are on every film): pass `film`, required when the project has several films unless you name a `batch`.",
       inputSchema: {
         project,
+        film: filmArg,
         stage: stage.optional(),
         state: z.enum(NOTE_STATES).optional().describe('"todo": not sent yet; "sent": sent to you and not done; "done".'),
         status: z.enum(["todo", "done"]).optional().describe('"todo" is both unsent and sent notes; prefer `state`.'),
@@ -428,11 +484,14 @@ export function createMcpServer(ctx: ToolContext): McpServer {
         onlyThisFormat: z.boolean().optional().describe("With format: only that format's notes, not the all-format ones."),
       },
     },
-    safe(async ({ project, ...f }) => {
+    safe(async ({ project, film, ...f }) => {
+      const c = await ctx.client(project);
+      // A batch is about one film already.
+      const video = f.batch === undefined ? await filmFor(c, film, "the notes") : film;
       // The label "9:16" is the format "9x16".
-      const asked = { ...f, ...(f.format !== undefined ? { format: f.format.replace(":", "x") } : {}) };
+      const asked = { ...f, ...(f.format !== undefined ? { format: f.format.replace(":", "x") } : {}), ...(video ? { video } : {}) };
       const q = new URLSearchParams(Object.entries(asked).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)]));
-      const r = await (await ctx.client(project)).get(`/api/notes${q.size ? `?${q}` : ""}`);
+      const r = await c.get(`/api/notes${q.size ? `?${q}` : ""}`);
       // A Rushes from before formats ignores the filter and sends every note, none with a `format`.
       if (f.format !== undefined && Array.isArray(r?.notes) && r.notes.some((n: object) => !("format" in n))) return { ...r, note: OLDER_UNFILTERED };
       return r;
@@ -444,7 +503,7 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     {
       title: "Get a batch",
       description:
-        "The batch the user sent by pressing Send, at the foot of the notes panel (latest by default), with its notes and script sections. It holds every open note from every tab and every film in play: `stage` is the tab when they all came from one, or null when it spans tabs, and each note carries its own `stage` and `video`. A note's `on` says what it's about: null on Picture or for the whole mix, \"<lane>/<variant>\" for a music bed, SFX pass or voice variant, \"<lane>/<variant>:<cue>\" for an SFX cue, \"vo\" for the VO lane on Mix, and on a Script note, the section id of its line (null: the script as a whole). Older notes may carry a bare variant id, \"vo\" for the assembled read, \"<section>:<take>\" for a take, or a section id.",
+        "The batch the user sent by pressing Send, at the foot of the notes panel (latest by default), with its notes and script sections. A batch is about one film: the film the user was on when they pressed Send, named in `film` (and the batch's `video`); its notes are that film's (plus any on the shared Visuals) and its sections are that film's script's. Pass that film to every tool that asks for one while you work the batch. It holds every open note from every tab on that film: `stage` is the tab when they all came from one, or null when it spans tabs, and each note carries its own `stage` and `video`. A note's `on` says what it's about: null on Picture or for the whole mix, \"<lane>/<variant>\" for a music bed, SFX pass or voice variant, \"<lane>/<variant>:<cue>\" for an SFX cue, \"vo\" for the VO lane on Mix, and on a Script note, the section id of its line (null: the script as a whole). Older notes may carry a bare variant id, \"vo\" for the assembled read, \"<section>:<take>\" for a take, or a section id.",
       inputSchema: { project, id: z.string().optional() },
     },
     safe(async ({ project, id }) => (await ctx.client(project)).get(`/api/batches/${encodeURIComponent(id ?? "latest")}`)),
@@ -495,10 +554,17 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     "rushes_list_assets",
     {
       title: "List assets",
-      description: "Every file in the project: cuts, voice reads, older VO takes, music, SFX and screenshots, with absolute paths. Use it to find a screenshot the user grabbed.",
-      inputSchema: { project, kind: assetKind.optional() },
+      description: "A film's files: cuts, voice reads, older VO takes, music, SFX, screenshots, docs and the rest, with absolute paths, plus the project's visuals (`shared: true`: they belong to every film). Use it to find a screenshot the user grabbed. Pass `film` (required when the project has several films).",
+      inputSchema: { project, film: filmArg, kind: assetKind.optional() },
     },
-    safe(async ({ project, kind }) => (await ctx.client(project)).get(`/api/assets${kind ? `?kind=${encodeURIComponent(kind)}` : ""}`)),
+    safe(async ({ project, film, kind }) => {
+      const c = await ctx.client(project);
+      const video = await filmFor(c, film, "the files");
+      const q = new URLSearchParams();
+      if (kind) q.set("kind", kind);
+      if (video) q.set("video", video);
+      return c.get(`/api/assets${q.size ? `?${q}` : ""}`);
+    }),
   );
 
   server.registerTool(
@@ -517,7 +583,7 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     {
       title: "Add a file to the library",
       description:
-        "Register a project file (a doc, image, caption, export, delivery or edit file) in the Assets library, so it's listed, can be revealed, downloaded and opened. Docs, text and PDFs at the project root, captions at the root, and anything in exports/ are found automatically; other files need this.",
+        "Register a project file (a doc, image, caption, export, delivery or edit file) in the Assets library, so it's listed, can be revealed, downloaded and opened. Every file is a film's: pass `video` in a project with several films (one that names none is the first film's). Docs, text and PDFs at the project root, captions at the root, and anything in exports/ are found automatically; other files need this.",
       inputSchema: {
         project,
         kind: fileKind,
@@ -569,16 +635,20 @@ export function createMcpServer(ctx: ToolContext): McpServer {
         "Call this at the start of a session to catch up: what happened in the project, newest first. Cuts, reads, beds, passes and takes as they were added, the script, picks, notes sent, replies and lines people or agents wrote. Returns `entries` (each with `at`, `area`, `text`, `by`: user, agent or rushes), `earlier` (how many matching lines were left out), `undated` (audio from before the log) and `dropped` (lines removed past 5000).",
       inputSchema: {
         project,
+        film: filmArg.describe("The film (its id or name): its own lines and the project's, as Activity shows them on that film. Required when the project has several films."),
         limit: z.number().int().min(1).max(200).default(30).describe("How many lines, newest first. Default 30, at most 200."),
         area: area.optional().describe("Only this area."),
         since: z.string().optional().describe("Only lines after this date and time, e.g. 2026-10-07T09:00:00Z."),
       },
     },
-    safe(async ({ project, limit, area: a, since }) => {
+    safe(async ({ project, film, limit, area: a, since }) => {
+      const c = await ctx.client(project);
+      const video = await filmFor(c, film, "the Change Log");
       const q = new URLSearchParams({ limit: String(limit ?? 30) });
       if (a) q.set("area", a);
       if (since) q.set("since", since);
-      return (await ctx.client(project)).get(`/api/log?${q}`);
+      if (video) q.set("video", video);
+      return c.get(`/api/log?${q}`);
     }),
   );
 

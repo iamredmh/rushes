@@ -55,7 +55,9 @@ function continued(text: string, indent: string): string {
   return text.split("\n").join(`\n${indent}`);
 }
 
-function noteLines(n: Note, ctx: OnContext, videos: Project["videos"]): string[] {
+function noteLines(n: Note, base: OnContext & { scriptOf?: (video: string | null) => Pick<Script, "sections"> }, videos: Project["videos"]): string[] {
+  // §31.3: a note on the script names a line of its own film's script.
+  const ctx: OnContext = base.scriptOf ? { ...base, script: base.scriptOf(n.video) } : base;
   // What an audio note is on (M4): "Music · Warm keys", "S2 · Take 1", "Whole mix" ...
   const label = onLabel(n, ctx);
   const on = label ? ` · ${label}` : "";
@@ -106,11 +108,11 @@ export function notesMarkdown(
   project: Project,
   notes: Note[],
   now: Date,
-  script: Pick<Script, "sections"> = { sections: [] },
+  script: Pick<Script, "sections"> | ((video: string | null) => Pick<Script, "sections">) = { sections: [] },
   picks?: Pick<Picks, "lanes">,
   visuals?: Pick<VisualsFile, "visuals">,
 ): string {
-  const ctx: OnContext = { project, script, picks };
+  const ctx = typeof script === "function" ? { project, script: { sections: [] }, scriptOf: script, picks } : { project, script, picks };
   // §26: a shelved film has no section; its notes are kept in the project and come back when it is restored.
   notes = notes.filter((n) => noteInPlay(n, project));
   const lines: string[] = [`# ${project.name} — notes`, `Exported ${localDateTime(now)}`];

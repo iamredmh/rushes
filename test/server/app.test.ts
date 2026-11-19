@@ -220,7 +220,8 @@ describe("API", () => {
     expect((await call("GET", "/api/health")).json).toMatchObject({ ok: true, app: "rushes", root });
   });
 
-  it("a variant with no film is put on the film its name starts with, and warns when it can't be told in a multi-film project", async () => {
+  // §31.2.4 rewrote this: one whose film can't be told goes on the first film (nothing is on no film), with a warning.
+  it("a variant with no film is put on the film its name starts with, and on the first film, with a warning, when it can't be told in a multi-film project", async () => {
     const { call, root } = await setup();
     await call("POST", "/api/versions", { video: "f2a Ten colours", file: `${root}/renders/f2a.mp4` });
     // One film: nothing to warn about, whatever the name.
@@ -231,10 +232,10 @@ describe("API", () => {
     const named = await call("POST", "/api/variants", { stage: "sfx", name: "f3a SFX pass 3", file: "audio/sfx/f3a-sfx-v3.wav" });
     expect(named.json.variant.videos).toEqual(["f3a-one-phone"]);
     expect(named.json.warning).toBeUndefined();
-    // Nothing to go on: it is on no film, and the reply says so and how to fix it.
+    // Nothing to go on: it is on the first film, and the reply says so and how to fix it.
     const lost = await call("POST", "/api/variants", { stage: "sfx", name: "Pass X", file: "audio/sfx/x.wav" });
-    expect(lost.json.variant.videos).toBeUndefined();
-    expect(lost.json.warning).toMatch(/is on no film: it waits, folded, under "Not on this film".*Pass `video`/);
+    expect(lost.json.variant.videos).toEqual(["f2a-ten-colours"]);
+    expect(lost.json.warning).toMatch(/is on f2a Ten colours, the project's first film.*Pass `video`/);
   });
 
   it("state carries the version the server is running, the same one health reports", async () => {
@@ -422,9 +423,10 @@ describe("API", () => {
       await call("POST", "/api/variants", { stage: "voice", name: "Read two", file: "audio/two.wav", round: "Round 2" });
       await call("PUT", "/api/picks", { video: "hero", lanes: { "round-2": "read-two" } });
       await call("PUT", "/api/picks", { video: "hero", lanes: { "round-1": "read-one" } });
-      // A second film arrives, so both reads are on no film; round 2's is put back on Hero.
+      // A second film arrives: §31.4 puts both reads on Hero, the first film (before §31 they were left on no film, and
+      // so on none). Read one is then moved to Teaser, so it leaves Hero.
       await call("POST", "/api/versions", { video: "Teaser", file: `${root}/renders/b.mp4` });
-      await call("PUT", "/api/variants/round-2/read-two/films", { videos: ["Hero"] });
+      await call("PUT", "/api/variants/round-1/read-one/films", { videos: ["Teaser"] });
       const picks = (await call("GET", "/api/picks?video=hero")).json;
       expect(picks.use.voice).toMatchObject({ lane: "round-2", variant: "read-two" });
       expect((await call("GET", "/api/state")).json.picks.videos.hero.use.voice).toMatchObject({ lane: "round-2", variant: "read-two" });

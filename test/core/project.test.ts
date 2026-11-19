@@ -361,25 +361,28 @@ describe("lanesForVideo", () => {
     addVariant(p, { stage: "music", name: "Shared bed", file: "c.wav", video: ["f2a", "f3a"] });
     addVariant(p, { stage: "voice", round: "Round 1", name: "F2A read", file: "v.wav", video: "f2a" });
     addVariant(p, { stage: "sfx", name: "F3A pass", file: "s.wav", video: "f3a" });
-    const f3a = lanesForVideo(p.lanes, "f3a", p.videos.length);
+    const f3a = lanesForVideo(p.lanes, "f3a", p.videos);
     expect(f3a.map((l) => [l.id, l.variants.map((v) => v.id)])).toEqual([["music", ["shared-bed"]], ["sfx", ["f3a-pass"]]]);
-    expect(lanesForVideo(p.lanes, "loop", p.videos.length)).toEqual([]);
+    expect(lanesForVideo(p.lanes, "loop", p.videos)).toEqual([]);
+    // §31.2.4 (replacing "on no film is on none"): the loose bed is the first film's.
+    expect(lanesForVideo(p.lanes, "f2a", p.videos).find((l) => l.id === "music")!.variants.map((v) => v.id)).toEqual(["f2a-bed", "loose-bed", "shared-bed"]);
     // No film named: every lane as it is.
-    expect(lanesForVideo(p.lanes, null, p.videos.length)).toBe(p.lanes);
+    expect(lanesForVideo(p.lanes, null, p.videos)).toBe(p.lanes);
   });
 
   it("puts a variant on no film on the film when the project has only one", () => {
     const p = empty();
     addVersion(p, { video: "hero", file: "renders/hero.mp4" });
     addVariant(p, { stage: "music", name: "Bed", file: "b.wav" });
-    expect(lanesForVideo(p.lanes, "hero", p.videos.length)[0].variants.map((v) => v.id)).toEqual(["bed"]);
+    expect(lanesForVideo(p.lanes, "hero", p.videos)[0].variants.map((v) => v.id)).toEqual(["bed"]);
   });
 
   it("reads an older project's one `video` as its film", () => {
     const v = { id: "x", name: "X", file: "x.wav", meta: {}, cues: [], video: "f2a" };
     expect(variantFilms(v)).toEqual(["f2a"]);
-    expect(onFilm(v, "f2a", 3)).toBe(true);
-    expect(onFilm(v, "f3a", 3)).toBe(false);
+    const films = [{ id: "f3a" }, { id: "f2a" }, { id: "loop" }];
+    expect(onFilm(v, "f2a", films)).toBe(true);
+    expect(onFilm(v, "f3a", films)).toBe(false);
   });
 });
 

@@ -11,8 +11,8 @@ import { ensureProjectIdOnce } from "../core/project.js";
 import { createApp, type AppOptions } from "./app.js";
 import { removeLock, writeLock } from "./lock.js";
 import { watchStore } from "./watch.js";
-import { BriefService } from "./brief.js";
-import { StoryboardService } from "./storyboard.js";
+import { briefRecords, storyboardRecords } from "./plans.js";
+import { moveToFirstFilmOnce } from "./films.js";
 import type { Revealer } from "./reveal.js";
 import { ProxyJobs, removePartials, type ProxyJobsOptions } from "./proxy.js";
 import { PeakJobs, removeOrphanPeaks, removePeakTemps, type PeakJobsOptions } from "./peaks.js";
@@ -171,14 +171,15 @@ export async function startServer(rootDir: string, opts: StartOptions = {}): Pro
   const peakJobs = new PeakJobs(store, { available: () => proxyJobs.available(), ...opts.peaks });
   // §20: the project's other files. Its first scan starts once this server owns the project (below).
   const found = new FoundScanner({ store, probe: opts.found?.probe ?? ffprobeDuration, announce: foundAnnouncer(store), limits: opts.found?.limits });
-  const brief = new BriefService(store);
-  const storyboard = new StoryboardService(store);
+  // §31.3: every film's brief.md and storyboard.md.
+  const briefs = briefRecords(store);
+  const storyboards = storyboardRecords(store);
   // §28: one agent runner per server, on the root it serves, made before the app so every route has it.
   // Browser tests drive the fake agent through RUSHES_TEST_AGENT (ignored outside tests).
   const agentOpts = opts.agent ?? testAgentOptions();
   const runner = new AgentRunner(store, agentOpts);
   const appOpts: AppOptions = {
-    brief, storyboard, webDir: opts.webDir, onShutdown: () => void close(), reveal: opts.reveal, proxyJobs, peakJobs, found, formatProbe: opts.formats?.probe,
+    briefs, storyboards, webDir: opts.webDir, onShutdown: () => void close(), reveal: opts.reveal, proxyJobs, peakJobs, found, formatProbe: opts.formats?.probe,
     agent: runner, detect: agentOpts?.detect, notify: opts.notify,
     // §29: on for a real server; RUSHES_AUTO_BALANCE=0 turns it off (the browser tests, whose fixtures are test tones).
     autoBalance: opts.autoBalance ?? process.env.RUSHES_AUTO_BALANCE !== "0",
@@ -234,8 +235,10 @@ export async function startServer(rootDir: string, opts: StartOptions = {}): Pro
   appOpts.projectId = id;
   const url = `http://${host}:${port}`;
   const stopWatching = await watchStore(store);
-  const stopBrief = brief.start();
-  const stopStoryboard = storyboard.start();
+  // §31.4: what was on no film in a project with several becomes the first film's, once, before anything is shown.
+  await moveToFirstFilmOnce(store).catch((e: unknown) => console.error(`Rushes: couldn't move what was on no film: ${(e as Error).message}`));
+  const stopBrief = briefs.start();
+  const stopStoryboard = storyboards.start();
   // §20.1: a first look through the folder on open. Never awaited, so it never delays start-up;
   // the tabs hear a change when it lands.
   // Then §20.4's current set comes in (a no-op without a cut, or when it's already in).

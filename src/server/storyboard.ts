@@ -2,6 +2,7 @@ import { statusAfterEdit } from "../core/approval.js";
 import { hashText } from "../core/brief.js";
 import { InvalidError, RushesError } from "../core/errors.js";
 import { STORYBOARD_FILE, cutShots, editShot, parseStoryboard, type Shot, type ShotEdit } from "../core/storyboard.js";
+import { filmPlace, type FilmPlace } from "../core/films.js";
 import type { Store } from "../core/store.js";
 import { viaLink } from "./links.js";
 import { RecordFile } from "./record.js";
@@ -9,8 +10,8 @@ import { RecordFile } from "./record.js";
 // §24.12: storyboard.md is the file of record for the shots. See RecordFile for how it is kept.
 
 export class StoryboardChangedError extends RushesError {
-  constructor() {
-    super("storyboard.md changed since you loaded it. Showing the file as it is now.", 409, "storyboard_changed");
+  constructor(file = STORYBOARD_FILE) {
+    super(`${file} changed since you loaded it. Showing the file as it is now.`, 409, "storyboard_changed");
   }
 }
 
@@ -40,8 +41,9 @@ export interface StoryboardView {
 export const NO_STORYBOARD: StoryboardView = { exists: false, title: "", hash: "", shots: [], changed: 0, approved: 0, total: 0, plannedLength: 0 };
 
 export class StoryboardService extends RecordFile {
-  constructor(store: Store) {
-    super(store, STORYBOARD_FILE, "storyboard", () => new StoryboardChangedError());
+  /** §31.3: `place` is the film's (filmPlace); left out, the root storyboard.md, the first film's. */
+  constructor(store: Store, place: Pick<FilmPlace, "storyboard" | "slot"> = filmPlace({ videos: [] }, null)) {
+    super(store, place.storyboard, "storyboard", () => new StoryboardChangedError(place.storyboard), place.slot);
   }
 
   private build(text: string | null, state: { baseline: string; seen: string }): StoryboardView {
@@ -78,7 +80,7 @@ export class StoryboardService extends RecordFile {
   }
 
   view(): Promise<StoryboardView> {
-    return this.run(async () => this.safe(this.build(await this.readText(), await this.store.read("storyboard"))));
+    return this.run(async () => this.safe(this.build(await this.readText(), await this.state())));
   }
 
   /**
@@ -100,7 +102,7 @@ export class StoryboardService extends RecordFile {
         throw new InvalidError((e as Error).message);
       }
       if (next !== prev) await this.write(prev, next);
-      return this.safe(this.build(next, await this.store.read("storyboard")));
+      return this.safe(this.build(next, await this.state()));
     });
   }
 

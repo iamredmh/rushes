@@ -1,5 +1,6 @@
 import { chipOrder, versionFormats } from "./formats.js";
 import { STAGES, type Batch, type BatchesFile, type Note, type NotesFile, type Project, type Script, type Stage } from "./schema.js";
+import { noteOnFilm } from "./films.js";
 import { EmptyBatchError } from "./errors.js";
 import { noteInPlay } from "./project.js";
 import { moveNote, noteState } from "./noteState.js";
@@ -18,17 +19,23 @@ const STAGE_NAMES: Record<Stage, string> = {
 
 /**
  * Gather open, unsent items into a batch: to-do notes with no batch yet, and changed or flagged
- * script sections. With a stage, only that tab's; with none (Send), every tab's, on every
- * film in play. A batch whose items all come from one tab is that tab's batch; one that spans tabs
- * has no stage.
+ * script sections. With a stage, only that tab's; with none (Send), every tab's. A batch whose items
+ * all come from one tab is that tab's batch; one that spans tabs has no stage.
+ *
+ * §31.2.2: with a film, only that film's notes (and the visuals', which are on every film) and that film's script
+ * (`ctx.script` is that film's), and the batch carries the film. With none (a project with no film yet, or an older
+ * caller), every note on every film in play, as before.
  */
 export function createBatch(
-  ctx: { project: Project; script: Script; notes: NotesFile; batches: BatchesFile },
+  ctx: { project: Project; script: Script; notes: NotesFile; batches: BatchesFile; video?: string | null },
   stage?: Stage,
   now = new Date(),
 ): Batch {
+  const film = ctx.video ?? null;
   // §26: a shelved film is never asked about; its open notes stay unsent.
-  const notes = ctx.notes.notes.filter((n) => (stage === undefined || n.stage === stage) && noteState(n) === "todo" && noteInPlay(n, ctx.project));
+  const notes = ctx.notes.notes.filter(
+    (n) => (stage === undefined || n.stage === stage) && noteState(n) === "todo" && noteInPlay(n, ctx.project) && noteOnFilm(n, film, ctx.project.videos),
+  );
   const sections = stage === undefined || stage === "script" ? ctx.script.sections.filter((s) => isChanged(s) || s.status === "flagged") : [];
   if (notes.length === 0 && sections.length === 0) throw new EmptyBatchError(stage);
 
@@ -45,8 +52,9 @@ export function createBatch(
     sectionIds: sections.map((s) => s.id),
     sentAt: now.toISOString(),
     prompt: only
-      ? buildPrompt(ctx.project.name, only, id, notes.length, sections.length, only === "picture" ? formatLines(ctx.project, picture) : [])
-      : buildWidePrompt(ctx.project, id, notes, sections.length),
+      ? buildPrompt(ctx.project.name, only, id, notes.length, sections.length, only === "picture" ? formatLines(ctx.project, picture) : [], filmName(ctx.project, film))
+      : buildWidePrompt(ctx.project, id, notes, sections.length, film),
+    ...(film ? { video: film } : {}),
   };
   ctx.batches.batches.push(batch);
   return batch;
@@ -105,18 +113,29 @@ function stepsFor(stage: Stage): string {
           : "Use rushes_get_batch, fix each note, then rushes_reply with a fixT for each and rushes_add_version for the new cut.";
 }
 
-export function buildPrompt(project: string, stage: Stage, batchId: string, notes: number, sections: number, extra: string[] = []): string {
+/** §31.2.2: the film a batch is about, by name, in a project with more than one film (with one, nothing changes). */
+function filmName(project: Pick<Project, "videos">, film: string | null): string | null {
+  if (!film || project.videos.length < 2) return null;
+  return project.videos.find((v) => v.id === film)?.name ?? film;
+}
+
+/** The words that say which film a batch is about, and that it is about that film alone. */
+const filmLine = (name: string) => `This batch is about the film "${name}" only: its notes and script are that film's. Pass "${name}" as the film wherever a tool asks for one.`;
+
+export function buildPrompt(project: string, stage: Stage, batchId: string, notes: number, sections: number, extra: string[] = [], film: string | null = null): string {
   const parts: string[] = [];
   if (notes) parts.push(`${notes} note${notes === 1 ? "" : "s"}`);
   if (sections) parts.push(`${sections} script section${sections === 1 ? "" : "s"}`);
-  return `Work through ${STAGE_NAMES[stage]} batch ${batchId} on ${project}: ${parts.join(" and ")}.\n${[...extra, stepsFor(stage)].join("\n")}`;
+  const on = film ? `${project} › ${film}` : project;
+  return `Work through ${STAGE_NAMES[stage]} batch ${batchId} on ${on}: ${parts.join(" and ")}.\n${[...(film ? [filmLine(film)] : []), ...extra, stepsFor(stage)].join("\n")}`;
 }
 
 /**
  * The prompt for a batch that spans tabs: what is in it, tab by tab with the films each tab's notes
  * are on, then what to do on each tab.
  */
-export function buildWidePrompt(project: Pick<Project, "name" | "videos">, batchId: string, notes: Pick<Note, "stage" | "video" | "version" | "format">[], sections: number): string {
+export function buildWidePrompt(project: Pick<Project, "name" | "videos">, batchId: string, notes: Pick<Note, "stage" | "video" | "version" | "format">[], sections: number, video: string | null = null): string {
+  const film = filmName(project, video);
   const lines: string[] = [];
   const counts: string[] = [];
   for (const stage of STAGES) {
@@ -133,8 +152,10 @@ export function buildWidePrompt(project: Pick<Project, "name" | "videos">, batch
     lines.push(`${TAB_NAMES[stage]}: ${[...extra, stepsFor(stage)].join(" ")}`);
   }
   const total = notes.length + sections;
-  const head = `Work through batch ${batchId} on ${project.name}: ${total} item${total === 1 ? "" : "s"} across ${counts.length} tabs. Each note says its tab (stage) and film (video); on an audio tab, pass that film to rushes_get_picks.`;
-  return [head, ...counts.map((c) => `- ${c}`), ...lines].join("\n");
+  const head = film
+    ? `Work through batch ${batchId} on ${project.name} › ${film}: ${total} item${total === 1 ? "" : "s"} across ${counts.length} tabs. Each note says its tab (stage); on an audio tab, pass the film to rushes_get_picks.`
+    : `Work through batch ${batchId} on ${project.name}: ${total} item${total === 1 ? "" : "s"} across ${counts.length} tabs. Each note says its tab (stage) and film (video); on an audio tab, pass that film to rushes_get_picks.`;
+  return [head, ...(film ? [filmLine(film)] : []), ...counts.map((c) => `- ${c}`), ...lines].join("\n");
 }
 
 export function latestBatch(file: BatchesFile): Batch | undefined {

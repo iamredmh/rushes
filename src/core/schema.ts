@@ -193,9 +193,11 @@ export const SectionSchema = z
   .refine((s) => s.end > s.start, { message: "end must be after start", path: ["end"] });
 export type Section = z.infer<typeof SectionSchema>;
 
-export const ScriptSchema = fileObject({
-  schema: z.literal(1),
-  rev: z.number().int().nonnegative(),
+/**
+ * §31.3: one film's script: its reading speed, its sections and the highest s<n> number it ever gave. A schema 1
+ * script.json is this, with `schema` and `rev`; a schema 2 one keeps one of these per film.
+ */
+export const FilmScriptSchema = fileObject({
   wordsPerSecond: z.number().positive().default(2.6),
   sections: z.array(SectionSchema).default([]),
   // The highest s<n> number ever given to a section, so a removed section's id is never handed out
@@ -203,7 +205,36 @@ export const ScriptSchema = fileObject({
   // the ids it can see.
   sectionCounter: z.number().int().nonnegative().optional(),
 });
-export type Script = z.infer<typeof ScriptSchema>;
+/**
+ * One film's script (§31.3). Every function that reads or changes a script's sections takes one of these. A schema 1
+ * script.json is one too (the first film's), so it may carry its `schema` and `rev`.
+ */
+export type Script = z.infer<typeof FilmScriptSchema> & { schema?: 1; rev?: number };
+
+/** script.json as written before §31: one script for the project. Still how a project with no film yet keeps it. */
+export const ScriptV1Schema = fileObject({
+  schema: z.literal(1),
+  rev: z.number().int().nonnegative(),
+  wordsPerSecond: z.number().positive().default(2.6),
+  sections: z.array(SectionSchema).default([]),
+  sectionCounter: z.number().int().nonnegative().optional(),
+});
+export type ScriptV1 = z.infer<typeof ScriptV1Schema>;
+
+/** §31.3: script.json schema 2, one script per film, keyed by video id. */
+export const ScriptV2Schema = fileObject({
+  schema: z.literal(2),
+  rev: z.number().int().nonnegative(),
+  films: z.record(id, FilmScriptSchema).default({}),
+});
+export type ScriptV2 = z.infer<typeof ScriptV2Schema>;
+
+/**
+ * script.json. A schema 1 file is the first film's script (or, with no film yet, the project's); it is written back
+ * as schema 2 by the first change made once there is a film (core/script.ts: filmScriptDraft).
+ */
+export const ScriptSchema = z.discriminatedUnion("schema", [ScriptV1Schema, ScriptV2Schema]);
+export type ScriptFile = z.infer<typeof ScriptSchema>;
 
 export const BoxSchema = fileObject({
   x: z.number().min(0).max(1),
@@ -395,20 +426,20 @@ export function variantFilms(v: Pick<Variant, "videos" | "video">): string[] {
 }
 
 /**
- * Whether a read, bed or pass is on a film. One on no film is on it only in a project with one film
- * (there is nowhere else for it to be); with several, it is on none until it is put on one.
+ * §31.2.4: whether a read, bed or pass is on a film. One on no film is on the project's first film (`videos[0]`):
+ * nothing is on no film, and the one-time move (§31.4) writes that down.
  */
-export function onFilm(v: Pick<Variant, "videos" | "video">, videoId: string, filmCount: number): boolean {
+export function onFilm(v: Pick<Variant, "videos" | "video">, videoId: string, videos: readonly Pick<Video, "id">[]): boolean {
   const films = variantFilms(v);
-  return films.length === 0 ? filmCount <= 1 : films.includes(videoId);
+  return films.length === 0 ? videos.length === 0 || videos[0].id === videoId : films.includes(videoId);
 }
 
 /** The lanes one film hears: each keeps only the variants on that film (see onFilm), and a lane
  *  left with none is dropped. With no film named, every lane as it is. */
-export function lanesForVideo(lanes: Lane[], videoId: string | null | undefined, filmCount: number): Lane[] {
+export function lanesForVideo(lanes: Lane[], videoId: string | null | undefined, videos: readonly Pick<Video, "id">[]): Lane[] {
   if (!videoId) return lanes;
   return lanes
-    .map((l) => ({ ...l, variants: l.variants.filter((v) => onFilm(v, videoId, filmCount)) }))
+    .map((l) => ({ ...l, variants: l.variants.filter((v) => onFilm(v, videoId, videos)) }))
     .filter((l) => l.variants.length > 0);
 }
 
@@ -420,6 +451,8 @@ export const BatchSchema = fileObject({
   sectionIds: z.array(z.string()).default([]),
   sentAt: z.string(),
   prompt: z.string(),
+  // §31.2.2: the film whose notes Send sent. Absent on a batch from before, and on one sent with no film yet.
+  video: z.string().nullable().optional(),
   // I3: the hand-over was refused while Send to AI was on and nothing started (not signed in, not installed), so the
   // notes still wait in this batch for Send again. Kept in the file, not the server's memory, so a restart can't strand
   // them. Cleared when the batch is handed over again.
@@ -552,6 +585,9 @@ export const BriefStateSchema = fileObject({
   rev: z.number().int().nonnegative(),
   baseline: z.string().max(1_000_000).default(""),
   seen: z.string().max(64).default(""),
+  // §31.3: every other film's own baseline and hash, keyed by video id. The first film's are the top-level two, so a
+  // project with one film keeps the same file.
+  films: z.record(id, fileObject({ baseline: z.string().max(1_000_000).default(""), seen: z.string().max(64).default("") })).optional(),
 });
 export type BriefState = z.infer<typeof BriefStateSchema>;
 
@@ -666,7 +702,7 @@ export const FILES = {
 export type FileKey = keyof typeof FILES;
 export type FileData = {
   project: Project;
-  script: Script;
+  script: ScriptFile;
   notes: NotesFile;
   picks: Picks;
   batches: BatchesFile;

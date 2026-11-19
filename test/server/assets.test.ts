@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { Script } from "../../src/core/schema.js";
 import { mkdir, symlink, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
@@ -36,10 +37,10 @@ describe("listAssets", () => {
       addVersion(p, { video: "Hero", file: "renders/hero_v2.mp4" });
     });
     await store.update("script", (s) => {
-      setSections(s, [{ start: 0, end: 5, current: "Line one." }]);
+      setSections(s as Script, [{ start: 0, end: 5, current: "Line one." }]);
     });
     await store.update("script", (s) => {
-      addTake(s, "s1", { file: "audio/s1_take1.wav" });
+      addTake(s as Script, "s1", { file: "audio/s1_take1.wav" });
     });
     await store.update("project", (p) => {
       addVariant(p, { stage: "voice", name: "Red", file: "audio/voice.wav" });

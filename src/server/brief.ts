@@ -1,14 +1,15 @@
 import { statusAfterEdit } from "../core/approval.js";
 import { BRIEF_FILE, hashText, parseBrief, setSectionBody, setStatus, type BriefStatus } from "../core/brief.js";
 import { InvalidError, RushesError } from "../core/errors.js";
+import { filmPlace, type FilmPlace } from "../core/films.js";
 import type { Store } from "../core/store.js";
 import { RecordFile } from "./record.js";
 
 // §24 step 2: brief.md is the file of record. See RecordFile for how it is kept.
 
 export class BriefChangedError extends RushesError {
-  constructor() {
-    super("brief.md changed since you loaded it. Showing the file as it is now.", 409, "brief_changed");
+  constructor(file = BRIEF_FILE) {
+    super(`${file} changed since you loaded it. Showing the file as it is now.`, 409, "brief_changed");
   }
 }
 
@@ -37,8 +38,9 @@ export interface BriefView {
 export const NO_BRIEF: BriefView = { exists: false, title: "", status: null, hash: "", sections: [], changed: 0 };
 
 export class BriefService extends RecordFile {
-  constructor(store: Store) {
-    super(store, BRIEF_FILE, "brief", () => new BriefChangedError());
+  /** §31.3: `place` is the film's (filmPlace); left out, the root brief.md, the first film's. */
+  constructor(store: Store, place: Pick<FilmPlace, "brief" | "slot"> = filmPlace({ videos: [] }, null)) {
+    super(store, place.brief, "brief", () => new BriefChangedError(place.brief), place.slot);
   }
 
   private build(text: string | null, state: { baseline: string; seen: string }): BriefView {
@@ -59,7 +61,7 @@ export class BriefService extends RecordFile {
   }
 
   view(): Promise<BriefView> {
-    return this.run(async () => this.build(await this.readText(), await this.store.read("brief")));
+    return this.run(async () => this.build(await this.readText(), await this.state()));
   }
 
   /** Saves one section. A change to an approved brief's words reopens it: the status line goes back to draft. */
@@ -76,7 +78,7 @@ export class BriefService extends RecordFile {
       const was = parseBrief(next).status;
       if (was === "approved" && statusAfterEdit(was, { wordsChanged: next !== prev }) === "draft") next = setStatus(next, "draft");
       if (next !== prev) await this.write(prev, next);
-      return this.build(next, await this.store.read("brief"));
+      return this.build(next, await this.state());
     });
   }
 
@@ -86,7 +88,7 @@ export class BriefService extends RecordFile {
       const prev = await this.current(expectHash);
       const next = setStatus(prev, status);
       if (next !== prev) await this.write(prev, next);
-      return this.build(next, await this.store.read("brief"));
+      return this.build(next, await this.state());
     });
   }
 }

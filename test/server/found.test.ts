@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { Script } from "../../src/core/schema.js";
 import { access, mkdir, readFile, realpath, rm, symlink, utimes, writeFile } from "node:fs/promises";
 
 // Counts the folders a walk opens, so a test can tell a walk that stopped from one that ran on.
@@ -132,7 +133,7 @@ describe("FoundScanner", () => {
       p.files.push({ id: "f1", kind: "doc", file: "music/b.wav", name: "b", note: "", video: null, addedAt: new Date().toISOString() });
     });
     await store.update("script", (s) => {
-      s.sections.push({ id: "s1", start: 0, end: 2, current: "Hi", proposed: null, direction: "", status: "draft", takes: [{ id: "t1", file: "takes/t1.wav", duration: null, forText: "Hi" }] });
+      (s as Script).sections.push({ id: "s1", start: 0, end: 2, current: "Hi", proposed: null, direction: "", status: "draft", takes: [{ id: "t1", file: "takes/t1.wav", duration: null, forText: "Hi" }] });
     });
     await scanner.scan();
     expect(paths(await scanner.list())).toEqual(["keep/c.wav"]);
@@ -869,7 +870,7 @@ describe("bringing found files in", () => {
   it("a cut registered as a library file or a script take is already in the project too", async () => {
     const { store, scanner } = await setup({ files: ["takes/t1.wav", "renders/alt.mov"] });
     await store.update("script", (s) => {
-      s.sections.push({ id: "s1", start: 0, end: 2, current: "Hi", proposed: null, direction: "", status: "draft", takes: [{ id: "t1", file: "takes/t1.wav", duration: null, forText: "Hi" }] });
+      (s as Script).sections.push({ id: "s1", start: 0, end: 2, current: "Hi", proposed: null, direction: "", status: "draft", takes: [{ id: "t1", file: "takes/t1.wav", duration: null, forText: "Hi" }] });
     });
     await store.update("project", (p) => {
       p.files.push({ id: "f1", kind: "export", file: "renders/alt.mov", name: "alt", note: "", video: null, addedAt: new Date().toISOString() });

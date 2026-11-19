@@ -134,9 +134,9 @@ export function takeEvent(section: Pick<Section, "id" | "current">, take: Pick<T
   };
 }
 
-/** "Script set: 6 sections". */
-export function scriptEvent(sections: number): LogEvent {
-  return { area: "script", kind: "script", merge: "replace", text: `Script set: ${plural(sections, "section", "sections")}` };
+/** "Script set: 6 sections". §31.2.1: a film's script line is that film's (`video`), so Activity shows it only there. */
+export function scriptEvent(sections: number, video: string | null = null): LogEvent {
+  return { area: "script", kind: "script", merge: "replace", ...(video ? { video, subject: video } : {}), text: `Script set: ${plural(sections, "section", "sections")}` };
 }
 
 /** `Picks: voice “Vo Jules, full read”, music “Night drive, held back”`, the whole set after the change; for one film, `Picks for “Key”: …`. */

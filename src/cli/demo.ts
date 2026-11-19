@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { addVariant, addVersion, setShots, shotAt } from "../core/project.js";
 import { addNote } from "../core/notes.js";
 import { setInUse } from "../core/picks.js";
-import { setSections } from "../core/script.js";
+import { filmScriptDraft, setSections } from "../core/script.js";
 import { toManifestPath } from "../core/paths.js";
 import { Store } from "../core/store.js";
 
@@ -279,8 +279,9 @@ export async function makeDemo(dir: string, deps: DemoDeps): Promise<{ dir: stri
       { id: "s3", start: 15, end: 22.5, current: "Notes, picks and a locked cut travel with the project, not a chat log." },
       { id: "s4", start: 22.5, end: 30, current: `${PRODUCT}: fewer rounds, and a cut everyone signed off on.` },
     ];
+    const filmsNow = await store.read("project");
     await store.update("script", (s) => {
-      setSections(s, sections, { replace: true });
+      setSections(filmScriptDraft(s, filmsNow, videoId), sections, { replace: true });
     });
 
     // 3. Voice reads, two rounds: Round 1 compares two voices; Round 2 is one voice at a slower pace.
