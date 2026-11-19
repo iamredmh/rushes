@@ -751,7 +751,7 @@ describe("AgentRunner session mode (R14, R15)", () => {
     ]);
   });
 
-  it("Claude: the setup requests already ask for default through configOptions, so the session never starts in auto", async () => {
+  it("Claude: the setup requests ask for default mode, Sonnet and medium effort through configOptions, so the session never starts in auto", async () => {
     const r = await rig({ loadSession: true, modes: CLAUDE_MODES, turns: [] }, { runner: { idleMs: 30 } });
     await r.runner.send(await r.batch("One"));
     await r.phase("finished");
@@ -760,7 +760,7 @@ describe("AgentRunner session mode (R14, R15)", () => {
     await r.waitFor("the second prompt", () => prompts(r.log()).length === 2);
     const setups = r.log().filter((m) => m.method === "session/new" || m.method === "session/load");
     expect(setups).toHaveLength(2);
-    for (const m of setups) expect(m.params.configOptions, m.method).toEqual([{ configId: "mode", value: "default" }]);
+    for (const m of setups) expect(m.params.configOptions, m.method).toEqual([{ configId: "mode", value: "default" }, { configId: "model", value: "sonnet" }, { configId: "effort", value: "medium" }]);
   });
 
   it("each session is in its ask mode when its first prompt arrives, after new and after load (round 2, item 5)", async () => {

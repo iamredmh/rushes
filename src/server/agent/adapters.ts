@@ -77,9 +77,27 @@ export function clientMeta(agent: AgentId): Record<string, unknown> | undefined 
   return agent === "codex" ? { jetbrains: { air: { version: 1, capabilities: ["sessionFailure"] } } } : undefined;
 }
 
-/** Extra params for session/new and session/load: Claude's initial mode, so the session is never in `auto` (R14). */
+/**
+ * The model and effort a Claude session starts on: Sonnet at medium effort. Notes are mostly small edits to existing
+ * work, so the cheaper model is the default. "sonnet" is the adapter's family alias (resolveModelPreference,
+ * dist/session-model.js), the newest Sonnet the account offers. The adapter skips an entry it refuses (an unknown
+ * model, an effort level the model lacks: applyInitialConfigOptions, dist/initial-config-options.js) and the session
+ * keeps the user's own default, so a failure here never stops a Send. Model goes before effort: the levels depend on it.
+ */
+export const CLAUDE_MODEL = "sonnet";
+export const CLAUDE_EFFORT = "medium";
+
+/** Extra params for session/new and session/load: Claude's initial mode, so the session is never in `auto` (R14), then its model. */
 export function sessionSetup(agent: AgentId): Record<string, unknown> {
-  if (agent === "claude") return { configOptions: [{ configId: "mode", value: ASK_MODE.claude }] };
+  if (agent === "claude") {
+    return {
+      configOptions: [
+        { configId: "mode", value: ASK_MODE.claude },
+        { configId: "model", value: CLAUDE_MODEL },
+        { configId: "effort", value: CLAUDE_EFFORT },
+      ],
+    };
+  }
   return {};
 }
 

@@ -9,7 +9,9 @@ describe("AGENT_LINES", () => {
       "Before you start on each note, call rushes_working_on with the note's id and what you are doing, in a few plain words.\n" +
         "If you are not sure what a note means, ask on the note with rushes_reply (no status) and go on to the next one. The user answers on the note.\n" +
         "Only add a new version when the picture or sound changed.\n" +
-        "Wait for each command to finish before you reply on a note; do not run work as a background task.",
+        "Wait for each command to finish before you reply on a note; do not run work as a background task.\n" +
+        "Read and search files with your own file tools, not shell commands (no cat, head, grep, or python -c to read a file). " +
+        "Keep each shell command to one plain command; do not chain with && or ; or pipe, because a chained command can only be allowed once at a time.",
     );
   });
 });
