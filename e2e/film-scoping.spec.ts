@@ -171,9 +171,12 @@ test("Assets opens on the film in the top bar, with the visuals marked Shared on
   await expect(film).toHaveValue("five-views");
   await expect(page.locator(".amain").getByText(/Five views · v1/)).toBeVisible();
   await expect(page.locator(".amain").getByText(/Meet your agents · v1/)).toHaveCount(0);
+  // The folder's count is the film's too (found on Red's project copy: the counts stayed project-wide).
+  await expect(folders.getByRole("button", { name: /^Cuts/ }).locator(".count")).toHaveText("1");
   // "All films" is still there to choose.
   await film.selectOption({ label: "All films" });
   await expect(page.locator(".amain").getByText(/Meet your agents · v1/)).toBeVisible();
+  await expect(folders.getByRole("button", { name: /^Cuts/ }).locator(".count")).toHaveText("2");
   await folders.getByRole("button", { name: /^Visuals/ }).click();
   await expect(page.locator(".amain").getByText("Shared")).toBeVisible();
   await expect(page.getByRole("combobox", { name: "Film" })).toHaveValue("five-views");

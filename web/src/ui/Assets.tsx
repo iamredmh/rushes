@@ -357,7 +357,8 @@ export function Assets({ assets, videos, state, film: selectedFilm = null, found
     }
   };
 
-  const countFor = (f: FolderDef) => assets.filter((a) => f.kinds.includes(a.kind)).length;
+  // §31.5: a folder's count is what it lists on the film chosen (the one in the top bar, unless All films is picked).
+  const countFor = (f: FolderDef) => folderItems(assets, f, { film: filmFilterOn(f, videos.length) ? film : null, videos }).length;
 
   const renderGrid = () => {
     if (!folder) return null;
