@@ -639,8 +639,16 @@ export type VisualsFile = z.infer<typeof VisualsFileSchema>;
 // can't change it.
 export const AGENTS = ["claude", "codex"] as const;
 export type AgentId = (typeof AGENTS)[number];
-/** What the agent may do without asking: edit files in the project (the default), or ask for everything. */
-export const AgentPermissionsSchema = z.enum(["project-edits", "ask-all"]);
+/**
+ * What the agent may do without asking (§33), one menu row each. The first two ids are kept from before §33, so older
+ * rules files still read: "ask-all" is Manual (every action asks Rushes) and "project-edits" is Accept edits (the
+ * default: edits in the project go through, commands ask, Always rules apply). "auto" hands each decision to the
+ * agent's own safety reviewer and "bypass" checks nothing. Only the user picks those two, from the menu or the first-Send
+ * sheet; nothing in a project can set them (R10).
+ */
+export const AGENT_PERMISSIONS = ["ask-all", "project-edits", "auto", "bypass"] as const;
+export const AgentPermissionsSchema = z.enum(AGENT_PERMISSIONS);
+export type AgentPermissions = z.infer<typeof AgentPermissionsSchema>;
 export const AlwaysRuleSchema = z.object({ kind: z.string().max(32), command: z.string().max(200).nullable() });
 export type AlwaysRule = z.infer<typeof AlwaysRuleSchema>;
 /** At most this many Always rules are kept; a longer list read from disk keeps its newest ones. */

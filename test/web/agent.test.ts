@@ -2,7 +2,7 @@
 // the live strip and what the desk does after Send. Every string is the plan's own.
 import { describe, expect, it } from "vitest";
 import {
-  ASK_ARM_MS, ASK_WORDS, askArmKey, askChoices, askHeading, askLead, revealParts, revealText, MENU_WORDS, PERMISSION_CHOICES, SHEET_WORDS, afterSend, focusAfterRemove, followSend, planLead, mayQuestion, notSignedInWhy, sendToLabel, sheetDefault, sheetPrimary, sheetRows, whoNext, agentName, canStop, chipShows, chipText, chipTone, footLine, liveLines, stripMode, stripLine, runLabel, menuAgents, menuRowCount, noteAgentBadge, rowText, ruleRows, whoLine, answerPlaceholder, badgeText, fixGo, noteLite, noteThread, replyBoxShows, threadParts, newCutFor, stepCuts, cutAction, unseenCut,
+  ASK_ARM_MS, ASK_WORDS, BYPASS_WARNING, askArmKey, askChoices, askHeading, askLead, revealParts, revealText, MENU_WORDS, PERMISSION_CHOICES, SHEET_WORDS, afterSend, focusAfterRemove, followSend, planLead, mayQuestion, notSignedInWhy, sendToLabel, sheetDefault, sheetPrimary, sheetRows, whoNext, agentName, canStop, chipShows, chipText, chipTone, footLine, liveLines, stripMode, stripLine, runLabel, menuAgents, menuRowCount, noteAgentBadge, rowText, ruleRows, whoLine, answerPlaceholder, badgeText, fixGo, noteLite, noteThread, replyBoxShows, threadParts, newCutFor, stepCuts, cutAction, unseenCut,
   type NoteLite,
 } from "../../web/src/agent.js";
 import type { AgentInfo, AgentStatus, Note, PendingAsk } from "../../web/src/types.js";
@@ -141,6 +141,12 @@ describe("afterSend", () => {
 });
 
 describe("whoLine", () => {
+  it("auto and bypass (§33)", () => {
+    expect(whoLine(status({ permissions: "auto", agent: "claude" }))).toBe("Auto: Claude Code decides what to ask");
+    expect(whoLine(status({ permissions: "auto", agent: "codex" }))).toBe("Auto: Codex decides what to ask");
+    expect(whoLine(status({ permissions: "bypass" }))).toBe("Bypass: nothing asks, nothing is checked");
+  });
+
   it("ask-all", () => {
     expect(whoLine(status({ permissions: "ask-all" }))).toBe("Asks before everything");
   });
@@ -289,30 +295,37 @@ describe("the Send to AI row and the agent menu (task 3)", () => {
 
   it("menuRowCount: every row the arrows reach", () => {
     const agents = menuAgents([info("claude"), info("codex", { signedIn: false })], status());
-    // Two agents, Codex's Sign in, the two permissions.
-    expect(menuRowCount(status(), agents)).toBe(5);
+    // Two agents, Codex's Sign in, the four permission rows (§33).
+    expect(menuRowCount(status(), agents)).toBe(7);
     // A conversation to start fresh from, and a rule's Remove.
-    expect(menuRowCount(status({ session: "s1", always: [{ kind: "execute", command: "npx hyperframes" }] }), agents)).toBe(7);
+    expect(menuRowCount(status({ session: "s1", always: [{ kind: "execute", command: "npx hyperframes" }] }), agents)).toBe(9);
   });
 
   it("focusAfterRemove: the next rule's Remove, else the previous one's, else the menu's first row", () => {
     const agents = menuAgents([info("claude"), info("codex")], status());
     const r = (command: string) => ({ kind: "execute", command });
-    // Two agents and two permissions come first: the Removes start at row 4.
+    // Two agents and four permission rows come first: the Removes start at row 6.
     const three = status({ always: [r("a b"), r("c d"), r("e f")] });
-    expect(focusAfterRemove(three, agents, 0)).toBe(4);
-    expect(focusAfterRemove(three, agents, 1)).toBe(5);
-    expect(focusAfterRemove(three, agents, 2)).toBe(5);
+    expect(focusAfterRemove(three, agents, 0)).toBe(6);
+    expect(focusAfterRemove(three, agents, 1)).toBe(7);
+    expect(focusAfterRemove(three, agents, 2)).toBe(7);
     expect(focusAfterRemove(status({ always: [r("a b")] }), agents, 0)).toBe(0);
     // A conversation to start fresh from moves the Removes down a row.
-    expect(focusAfterRemove(status({ session: "s1", always: [r("a b"), r("c d")] }), agents, 1)).toBe(5);
+    expect(focusAfterRemove(status({ session: "s1", always: [r("a b"), r("c d")] }), agents, 1)).toBe(7);
   });
 
   it("the menu's fixed words", () => {
-    expect(PERMISSION_CHOICES).toEqual([
-      { value: "project-edits", label: "Edit files in this project" },
-      { value: "ask-all", label: "Ask me for everything" },
+    // §33: four rows, the same for both agents, Bypass last.
+    expect(PERMISSION_CHOICES.map((p) => [p.value, p.label])).toEqual([
+      ["ask-all", "Manual"],
+      ["project-edits", "Accept edits"],
+      ["auto", "Auto"],
+      ["bypass", "Bypass"],
     ]);
+    expect(PERMISSION_CHOICES.map((p) => p.hint.split(/[.:]/)[0])).toEqual(["Always ask", "Edit files in this project without asking", "The agent decides", "Accepts everything"]);
+    // Auto's and Bypass's help lines say plainly that Rushes no longer guards .rushes and .git.
+    for (const v of ["auto", "bypass"]) expect(PERMISSION_CHOICES.find((p) => p.value === v)!.hint).toMatch(/\.rushes and \.git/);
+    expect(BYPASS_WARNING).toMatch(/^Bypass: /);
     expect(MENU_WORDS).toEqual({
       sendTo: "Send notes to",
       signedIn: "Signed in",

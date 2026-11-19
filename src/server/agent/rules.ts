@@ -1,5 +1,7 @@
 // R10: what the agent may do without asking (permissions and Always rules) is kept per user, outside the project,
-// so an agent working in the project can never grant itself a rule by editing a file there. So are the user's answer to
+// so an agent working in the project can never grant itself a rule by editing a file there. §33: that includes the
+// Auto and Bypass rows, in which the agent's own mode decides and Rushes no longer guards .rushes and .git: they are
+// chosen only by the user, in the agent menu or the first-Send sheet, never from anything in the project. So are the user's answer to
 // the first-Send sheet (I1, `setUp`) and the agent they chose (`agent`): a project folder from someone else, or anything
 // that writes the project, can't turn Send to AI on for an agent.
 //
@@ -106,7 +108,9 @@ export class AgentRulesFile {
   adopt(defaults: AgentDefaults | null): Promise<AgentRules | null> {
     const run = this.queue.catch(() => undefined).then(async () => {
       if (!defaults || (await exists(this.path))) return null;
-      const rules = AgentRulesSchema.parse({ setUp: true, agent: defaults.agent, permissions: defaults.permissions, always: [] });
+      // §33: Bypass is never adopted: a new project whose default is Bypass starts in Accept edits. Auto is adopted.
+      const permissions = defaults.permissions === "bypass" ? "project-edits" : defaults.permissions;
+      const rules = AgentRulesSchema.parse({ setUp: true, agent: defaults.agent, permissions, always: [] });
       await writePrivate(this.path, rules);
       return rules;
     });

@@ -54,10 +54,12 @@ async function rig(scenario: object, opts: { settings?: Partial<AgentSettings>; 
   // I1: the user set Send to AI up, in their own rules file.
   const chosen = (await store.read("agent")).agent;
   await agentRulesFor(store).update((f) => Object.assign(f, { setUp: true, agent: chosen, ...opts.rules }));
+  /** §33: the row each adapter was started for, in start order. */
+  const levels: string[] = [];
   const makeRunner = () => {
     const r = new AgentRunner(store, {
       detect: async () => [claude],
-      spec: (a, at) => (opts.wrapSpec ?? ((b) => b))({ command: process.execPath, args: [FAKE], env: { FAKE_ACP_SCENARIO: scenarioPath, FAKE_ACP_LOG: logPath, ...fakeModesEnv(a) }, cwd: at }),
+      spec: (a, at, level) => (levels.push(level), (opts.wrapSpec ?? ((b) => b)))({ command: process.execPath, args: [FAKE], env: { FAKE_ACP_SCENARIO: scenarioPath, FAKE_ACP_LOG: logPath, ...fakeModesEnv(a) }, cwd: at }),
       mcp: MCP,
       ...opts.runner,
     });
@@ -102,7 +104,7 @@ async function rig(scenario: object, opts: { settings?: Partial<AgentSettings>; 
     store.emit("user-reply", { note: id, text: text.trim() });
   };
   await waitFor("the runner to read agent.json", () => runner.status().on && runner.status().agent !== null);
-  return { root, store, runner, makeRunner, log, scenario: writeScenario, batch, waitFor, phase, answerOn, asked };
+  return { root, store, runner, makeRunner, log, scenario: writeScenario, batch, waitFor, phase, answerOn, asked, levels };
 }
 
 const prompts = (log: any[]) => log.filter((m) => m.method === "session/prompt");
@@ -928,5 +930,124 @@ describe("AgentRunner: Rushes's own MCP tools (R16)", () => {
   it("an agent's own-tool shape asks when it comes from the other agent", async () => {
     await allAsk(await rig({ turns: [] }), [codexStart("rushes", "rushes_reply", "codex-in-claude"), codexAsk("codex-in-claude")]);
     await allAsk(await codexRig({ turns: [] }), [claudeTool("mcp__rushes__rushes_reply", "claude-in-codex")]);
+  });
+});
+
+describe("AgentRunner: the four permission rows (§33)", () => {
+  const edit = (id: string, path: string) => ({ permission: { toolCall: { toolCallId: id, title: `Edit ${path}`, kind: "edit", locations: [{ path }] } }, record: id });
+  const rowsClaude = [["ask-all", "default"], ["project-edits", "default"], ["auto", "auto"], ["bypass", "bypassPermissions"]] as const;
+  const rowsCodex = [["ask-all", "read-only"], ["project-edits", "read-only"], ["auto", "agent"], ["bypass", "agent-full-access"]] as const;
+
+  it("each row runs Claude Code in its mode: configOptions, set_mode and the mode at the first prompt", async () => {
+    for (const [permissions, want] of rowsClaude) {
+      const r = await rig({ modes: CLAUDE_MODES, turns: [] }, { rules: { permissions } });
+      await r.runner.send(await r.batch("One"));
+      await r.phase("finished");
+      expect(r.levels, permissions).toEqual([permissions]);
+      expect(r.log().find((m) => m.method === "session/new").params.configOptions[0], permissions).toEqual({ configId: "mode", value: want });
+      expect(r.log().filter((m) => m.method === "session/set_mode").map((m) => m.params.modeId), permissions).toEqual([want]);
+      expect(r.log().filter((m) => "promptMode" in m).map((m) => m.promptMode), permissions).toEqual([want]);
+    }
+  });
+
+  it("each row runs Codex in its mode", async () => {
+    for (const [permissions, want] of rowsCodex) {
+      const r = await rig({ turns: [] }, { ...CODEX, rules: { permissions } });
+      await r.runner.send(await r.batch("One"));
+      await r.phase("finished");
+      expect(r.levels, permissions).toEqual([permissions]);
+      expect(r.log().filter((m) => m.method === "session/set_mode").map((m) => m.params.modeId), permissions).toEqual([want]);
+    }
+  });
+
+  it("Auto and Bypass fail closed, notes back in to do, when the agent doesn't offer the mode", async () => {
+    for (const [permissions, name] of [["auto", "Auto"], ["bypass", "Bypass"]] as const) {
+      const r = await rig({ modes: ["default", "acceptEdits", "plan"], turns: [] }, { rules: { permissions } });
+      const b = await r.batch("One");
+      const why = `Claude Code could not be put in ${name} mode`;
+      expect(await r.runner.send(b), permissions).toEqual({ handedTo: null, why, recalled: true });
+      expect(prompts(r.log()), permissions).toHaveLength(0);
+      expect((await r.store.read("notes")).notes.filter((n) => b.noteIds.includes(n.id)).map(noteState), permissions).toEqual(["todo"]);
+    }
+  });
+
+  it("Auto: when Claude's model can't run auto and the session stays in acceptEdits, the Send runs and Activity says so", async () => {
+    // ignoreModeChanges with acceptEdits first: the session stays in acceptEdits, as the adapter's fallback leaves it.
+    const r = await rig({ modes: ["acceptEdits", "default", "auto"], ignoreModeChanges: true, turns: [] }, { rules: { permissions: "auto" } });
+    expect((await r.runner.send(await r.batch("One")))?.handedTo).toBe("claude");
+    await r.phase("finished");
+    expect(r.runner.status().lines.map((l) => l.text)).toContain("Claude Code can't use Auto with this model: file edits go through, commands ask here");
+  });
+
+  it("Bypass allows what the agent still asks; Auto treats its asks as Accept edits does", async () => {
+    const r = await rig({ modes: CLAUDE_MODES, turns: [] }, { rules: { permissions: "bypass" } });
+    await r.scenario({ modes: CLAUDE_MODES, turns: [[exec("rm -rf build", "cmd"), edit("git", join(r.root, ".git", "config"))]] });
+    await r.runner.send(await r.batch("One"));
+    await r.phase("finished");
+    expect(recorded(r.log(), "cmd")).toEqual(ALLOW_ONCE);
+    expect(recorded(r.log(), "git")).toEqual(ALLOW_ONCE);
+
+    const a = await rig({ modes: CLAUDE_MODES, turns: [] }, { rules: { permissions: "auto" } });
+    await a.scenario({ modes: CLAUDE_MODES, turns: [[edit("in", join(a.root, "a.html")), exec("rm -rf build", "cmd")]] });
+    await a.runner.send(await a.batch("One"));
+    await a.waitFor("the command's ask", () => a.runner.status().asks.length === 1);
+    expect(recorded(a.log(), "in")).toEqual(ALLOW_ONCE);
+    await a.runner.answer(a.runner.status().asks[0]!.id, "once");
+    await a.phase("finished");
+  });
+
+  it("a running batch keeps the row it started in; the next Send starts the agent again in the new one", async () => {
+    const r = await rig({ loadSession: true, modes: CLAUDE_MODES, turns: [] }, { rules: { permissions: "auto" } });
+    await r.scenario({ loadSession: true, modes: CLAUDE_MODES, turns: [[{ sleep: 400 }, edit("in", join(r.root, "a.html"))], []] });
+    await r.runner.send(await r.batch("One"));
+    await r.phase("working");
+    // Switched to Manual while the Auto batch runs: its own ask still goes by Auto's row.
+    await agentRulesFor(r.store).update((f) => void (f.permissions = "ask-all"));
+    // The adapter started again for the next Send reads the scenario afresh: its one turn ends at once.
+    await r.scenario({ loadSession: true, modes: CLAUDE_MODES, turns: [] });
+    await r.runner.send(await r.batch("Two"));
+    await r.waitFor("the second prompt", () => prompts(r.log()).length === 2);
+    await r.phase("finished");
+    expect(recorded(r.log(), "in")).toEqual(ALLOW_ONCE);
+    expect(sessionSteps(r.log())).toEqual([
+      "session/new", "session/set_mode:auto", "session/prompt",
+      "session/load", "session/set_mode:default", "session/prompt",
+    ]);
+    expect(r.levels).toEqual(["auto", "ask-all"]);
+  });
+
+  it("a switch to Bypass mid-run applies from the next Send: the running batch's command still asks", async () => {
+    const r = await rig({ modes: CLAUDE_MODES, turns: [] }, { rules: { permissions: "project-edits" } });
+    await r.scenario({ modes: CLAUDE_MODES, turns: [[{ sleep: 300 }, exec("rm -rf build", "cmd")]] });
+    await r.runner.send(await r.batch("One"));
+    await r.phase("working");
+    await agentRulesFor(r.store).update((f) => void (f.permissions = "bypass"));
+    await r.waitFor("the command's ask", () => r.runner.status().asks.length === 1);
+    await r.runner.answer(r.runner.status().asks[0]!.id, "no");
+    await r.phase("finished");
+    expect(r.levels).toEqual(["project-edits"]);
+  });
+
+  it("an idle agent from an earlier Send is started again when the row changed", async () => {
+    const r = await rig({ loadSession: true, modes: CLAUDE_MODES, turns: [] }, { rules: { permissions: "project-edits" } });
+    await r.runner.send(await r.batch("One"));
+    await r.phase("finished");
+    await agentRulesFor(r.store).update((f) => void (f.permissions = "auto"));
+    await r.runner.send(await r.batch("Two"));
+    await r.waitFor("the second prompt", () => prompts(r.log()).length === 2);
+    expect(r.levels).toEqual(["project-edits", "auto"]);
+    expect(r.log().filter((m) => "promptMode" in m).map((m) => m.promptMode)).toEqual(["default", "auto"]);
+  });
+
+  it("R10: nothing in the project sets Auto or Bypass: permissions in agent.json are never read", async () => {
+    const r = await rig({ modes: CLAUDE_MODES, turns: [] });
+    const path = join(r.store.dir, "agent.json");
+    const raw = JSON.parse(readFileSync(path, "utf8"));
+    await writeFile(path, JSON.stringify({ ...raw, permissions: "bypass", rev: raw.rev }));
+    await r.runner.send(await r.batch("One"));
+    await r.phase("finished");
+    expect(r.runner.status().permissions).toBe("project-edits");
+    expect(r.levels).toEqual(["project-edits"]);
+    expect(r.log().filter((m) => m.method === "session/set_mode").map((m) => m.params.modeId)).toEqual(["default"]);
   });
 });

@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ADAPTERS, ASK_MODE, adapterSpec, rushesMcp } from "../../../src/server/agent/adapters.js";
+import { ADAPTERS, AGENT_MODE, ASK_MODE, adapterSpec, modeFor, rushesMcp, sessionSetup } from "../../../src/server/agent/adapters.js";
 import type { AgentInfo } from "../../../src/server/agent/detect.js";
 
 const root = "/tmp/some project";
@@ -37,6 +37,32 @@ describe("adapterSpec", () => {
       for (const dir of ["/opt/homebrew/bin", "/usr/local/bin", join(homedir(), ".local", "bin")]) expect(parts).toContain(dir);
       expect(new Set(parts).size).toBe(parts.length);
     }
+  });
+});
+
+describe("§33: each menu row's agent mode", () => {
+  it("maps Manual and Accept edits to the ask modes, Auto and Bypass to the agent's own", () => {
+    expect(AGENT_MODE).toEqual({
+      "ask-all": { claude: "default", codex: "read-only" },
+      "project-edits": { claude: "default", codex: "read-only" },
+      auto: { claude: "auto", codex: "agent" },
+      bypass: { claude: "bypassPermissions", codex: "agent-full-access" },
+    });
+    expect(modeFor("claude", "auto")).toBe("auto");
+  });
+  it("starts Codex with the row's INITIAL_AGENT_MODE, read-only when no row is given", () => {
+    expect(adapterSpec(codex, root).env.INITIAL_AGENT_MODE).toBe("read-only");
+    expect(adapterSpec(codex, root, "ask-all").env.INITIAL_AGENT_MODE).toBe("read-only");
+    expect(adapterSpec(codex, root, "auto").env.INITIAL_AGENT_MODE).toBe("agent");
+    expect(adapterSpec(codex, root, "bypass").env.INITIAL_AGENT_MODE).toBe("agent-full-access");
+    expect(adapterSpec(claude, root, "auto").env.INITIAL_AGENT_MODE).toBeUndefined();
+  });
+  it("asks Claude for the row's mode in configOptions", () => {
+    const mode = (l?: Parameters<typeof sessionSetup>[1]) => (sessionSetup("claude", l).configOptions as { configId: string; value: string }[])[0];
+    expect(mode()).toEqual({ configId: "mode", value: "default" });
+    expect(mode("auto")).toEqual({ configId: "mode", value: "auto" });
+    expect(mode("bypass")).toEqual({ configId: "mode", value: "bypassPermissions" });
+    expect(sessionSetup("codex", "auto")).toEqual({});
   });
 });
 

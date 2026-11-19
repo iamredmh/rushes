@@ -291,15 +291,15 @@ test("agent menu changes permissions and removes a rule", async ({ page, startWi
   // No conversation yet: nothing to start fresh.
   await expect(menu.getByRole("menuitem", { name: "Start a fresh conversation" })).toHaveCount(0);
   await expect(menu.getByText("What it may do without asking", { exact: true })).toBeVisible();
-  await expect(menu.getByRole("menuitemradio", { name: "Edit files in this project" })).toHaveAttribute("aria-checked", "true");
+  await expect(menu.getByRole("menuitemradio", { name: "Accept edits" })).toHaveAttribute("aria-checked", "true");
   await expect(menu.getByText("Always rules", { exact: true })).toBeVisible();
   await expect(menu.getByText("Always for npx hyperframes here", { exact: true })).toBeVisible();
   await expect(menu.getByText("Switch off: Send copies a prompt, as now", { exact: true })).toBeVisible();
   await menuFits(page);
   await shootFoot(page, "menu-open-1440");
-  await menu.getByRole("menuitemradio", { name: "Ask me for everything" }).click();
-  await expect(menu.getByRole("menuitemradio", { name: "Ask me for everything" })).toHaveAttribute("aria-checked", "true");
-  await expect(menu.getByRole("menuitemradio", { name: "Edit files in this project" })).toHaveAttribute("aria-checked", "false");
+  await menu.getByRole("menuitemradio", { name: "Manual" }).click();
+  await expect(menu.getByRole("menuitemradio", { name: "Manual" })).toHaveAttribute("aria-checked", "true");
+  await expect(menu.getByRole("menuitemradio", { name: "Accept edits" })).toHaveAttribute("aria-checked", "false");
   await expect(who(page)).toHaveText("Asks before everything");
   await menu.getByRole("menuitem", { name: "Remove Always for npx hyperframes here" }).click();
   await expect(menu.getByText("No Always rules yet", { exact: true })).toBeVisible();
@@ -467,7 +467,7 @@ test("Remove by keyboard keeps focus in the menu", async ({ page, startWithAgent
   // Focus goes to the rule before it, and the arrows still move it.
   await expect.poll(focused).toBe("menuitem: Remove Always for npx hyperframes here");
   await page.keyboard.press("ArrowUp");
-  await expect.poll(focused).toBe("menuitemradio: Ask me for everything");
+  await expect.poll(focused).toBe("menuitemradio: Bypass");
   await page.keyboard.press("ArrowDown");
   await expect.poll(focused).toBe("menuitem: Remove Always for npx hyperframes here");
   // The last rule gone, focus goes to the menu's first row.
@@ -621,9 +621,9 @@ test("first Send to Claude Code", async ({ page, startWithAgent }) => {
   // Step 2, one question.
   const may = page.getByRole("dialog", { name: "What may Claude Code do without asking?" });
   await expect(may).toBeVisible();
-  await expect(may.getByRole("radio", { name: "Edit files in this project" })).toBeChecked();
-  await expect(may.getByRole("radio", { name: "Ask me for everything" })).not.toBeChecked();
-  await expect.poll(() => focusedName(page)).toBe("radio: Edit files in this project");
+  await expect(may.getByRole("radio", { name: "Accept edits" })).toBeChecked();
+  await expect(may.getByRole("radio", { name: "Manual" })).not.toBeChecked();
+  await expect.poll(() => focusedName(page)).toBe("radio: Accept edits");
   await expect(may.getByText("Rushes never sees a password or key. The agent uses your own sign-in.", { exact: true })).toBeVisible();
   await expect(primary(page)).toHaveText("Send to Claude Code");
   await sheetFits(page);
@@ -898,9 +898,9 @@ test("an agent that isn't installed can't be picked; keys move, Escape closes an
   await expect(whoRadio(page, "Codex")).toBeChecked();
   await page.keyboard.press("Enter");
   await expect(page.getByRole("dialog", { name: "What may Codex do without asking?" })).toBeVisible();
-  await expect.poll(() => focusedName(page)).toBe("radio: Edit files in this project");
-  await page.keyboard.press("ArrowDown");
-  await expect(sheet(page).getByRole("radio", { name: "Ask me for everything" })).toBeChecked();
+  await expect.poll(() => focusedName(page)).toBe("radio: Accept edits");
+  await page.keyboard.press("ArrowUp");
+  await expect(sheet(page).getByRole("radio", { name: "Manual" })).toBeChecked();
   await page.setViewportSize({ width: 900, height: 700 });
   await page.getByRole("button", { name: "Show the notes panel · \\" }).click().catch(() => undefined);
   await expect(sheet(page)).toBeVisible();
@@ -930,7 +930,7 @@ test("the sheet's step 1 fits at 900 px", async ({ page, startWithAgent }) => {
   await shootSheet(page, "sheet-may-claude-900");
 });
 
-test("Send to <A> asks to notify in the key press itself, and saves Ask me for everything", async ({ page, startWithAgent }) => {
+test("Send to <A> asks to notify in the key press itself, and saves Manual", async ({ page, startWithAgent }) => {
   const rushes = await startWithAgent({ turns: [[{ sleep: 4000 }, { stop: "end_turn" }]] });
   await withNote(rushes, false);
   const notifyAsked = await watchNotifications(page);
@@ -938,7 +938,7 @@ test("Send to <A> asks to notify in the key press itself, and saves Ask me for e
   await videoReady(page);
   await sendBtn(page).click();
   await primary(page, "Next").click();
-  const ask = sheet(page).getByRole("radio", { name: "Ask me for everything" });
+  const ask = sheet(page).getByRole("radio", { name: "Manual" });
   await ask.check();
   await expect(ask).toBeChecked();
   await ask.focus();
@@ -2087,4 +2087,75 @@ test("Copy a prompt on one project: a new project asks nothing and Send copies a
   await expect(sheet(page)).toHaveCount(0);
   await expect(sentPop(page)).toBeVisible();
   expect(await readAgentLog(rushes.agentLog)).toEqual([]);
+});
+
+// §33: one permission menu, four rows, the same in the agent menu and the sheet's second step.
+const ROWS = ["Manual", "Accept edits", "Auto", "Bypass"];
+const BYPASS_WARNING = "Bypass: the agent runs every command and edits any file with nothing asked or checked, .rushes and .git included.";
+
+test("the agent menu shows four permission rows, and picking Bypass shows its warning (§33)", async ({ page, startWithAgent }) => {
+  const rushes = await startWithAgent({ turns: [] });
+  await withNote(rushes);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await row(page).getByRole("button", { name: "Send to AI · Claude Code" }).click();
+  const menu = agentMenu(page);
+  const radios = menu.getByRole("menuitemradio").filter({ hasNotText: /Signed in|Not signed in/ });
+  await expect(radios).toHaveCount(4);
+  expect(await radios.evaluateAll((els) => els.map((e) => e.getAttribute("aria-label")))).toEqual(ROWS);
+  await expect(menu.getByRole("menuitemradio", { name: "Accept edits" })).toHaveAttribute("aria-checked", "true");
+  await expect(menu.getByText(/no longer guards \.rushes and \.git/)).toBeVisible();
+  await expect(menu.getByText(BYPASS_WARNING, { exact: true })).toHaveCount(0);
+  await menu.getByRole("menuitemradio", { name: "Auto" }).click();
+  await expect(menu.getByRole("menuitemradio", { name: "Auto" })).toHaveAttribute("aria-checked", "true");
+  await expect(who(page)).toHaveText("Auto: Claude Code decides what to ask");
+  await menu.getByRole("menuitemradio", { name: "Bypass" }).click();
+  await expect(menu.getByText(BYPASS_WARNING, { exact: true })).toBeVisible();
+  await expect(who(page)).toHaveText("Bypass: nothing asks, nothing is checked");
+  await menuFits(page);
+  await shootFoot(page, "menu-bypass-1440");
+  expect((await rushes.api("GET", "/api/agent")).status).toMatchObject({ permissions: "bypass" });
+  await menu.getByRole("menuitemradio", { name: "Accept edits" }).click();
+  await expect(menu.getByText(BYPASS_WARNING, { exact: true })).toHaveCount(0);
+});
+
+test("the sheet's second step offers the four rows, Accept edits picked and Bypass last; Bypass warns (§33)", async ({ page, startWithAgent }) => {
+  const rushes = await startWithAgent({ turns: [] });
+  await withNote(rushes, false);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await sendBtn(page).click();
+  await primary(page, "Next").click();
+  const may = page.getByRole("dialog", { name: "What may Claude Code do without asking?" });
+  const radios = may.getByRole("radio");
+  await expect(radios).toHaveCount(4);
+  expect(await radios.evaluateAll((els) => els.map((e) => e.getAttribute("aria-label")))).toEqual(ROWS);
+  await expect(may.getByRole("radio", { name: "Accept edits" })).toBeChecked();
+  await expect(may.getByText(BYPASS_WARNING, { exact: true })).toHaveCount(0);
+  await may.getByRole("radio", { name: "Bypass" }).check();
+  await expect(may.getByText(BYPASS_WARNING, { exact: true })).toBeVisible();
+  await sheetFits(page);
+  await shootSheet(page, "sheet-may-bypass-1440");
+  await may.getByRole("radio", { name: "Auto" }).check();
+  await expect(may.getByText(BYPASS_WARNING, { exact: true })).toHaveCount(0);
+});
+
+test("Auto chosen on one project is the default: a second project starts in Auto (§33 with §32)", async ({ page, startWithAgent }) => {
+  const rushes = await startWithAgent({ modes: ["default", "auto", "read-only", "agent"], turns: [[{ stop: "end_turn" }], [{ stop: "end_turn" }]] });
+  await withNote(rushes, false);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await sendBtn(page).click();
+  await primary(page, "Next").click();
+  await sheet(page).getByRole("radio", { name: "Auto" }).check();
+  await primary(page, "Send to Claude Code").click();
+  await expect(toastEl(page)).toHaveText(/^(Sent to|Starting) Claude Code$/);
+  expect(JSON.parse(await readFile(join(rushes.configDir, "rushes", "agent-defaults.json"), "utf8"))).toEqual({ agent: "claude", permissions: "auto" });
+  await rushes.swapProject();
+  await withNote(rushes, false);
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await expect(toggle(page)).toHaveAttribute("aria-checked", "true");
+  await expect(who(page)).toHaveText(/^Auto: Claude Code decides what to ask/);
+  expect((await rushes.api("GET", "/api/agent")).status).toMatchObject({ on: true, agent: "claude", asked: true, permissions: "auto" });
 });

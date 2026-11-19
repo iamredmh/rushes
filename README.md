@@ -307,18 +307,22 @@ The agent's name opens a menu to choose another agent, **Start a fresh conversat
 
 **New cuts.** When the agent adds a version and nothing holds the picture, the desk switches to it and a toast says so, such as "v3 is in". When something does (a cut or a sound playing on any tab, a note or mark you are making, or a locked picture), the picture stays where it is: the toast offers the cut with **Show**, and the **Cut** menu shows a dot until you look. The agent only adds a version when the picture or sound changed, and it is asked to wait for its commands to finish before it replies, so a run does not leave work going in the background.
 
-**Permissions.** There are two levels:
+**Permissions.** The agent's menu, and the sheet's second step, offer four rows, the same for Claude Code and Codex:
 
-- **Edit files in this project** (the default): the agent reads, edits, searches, moves and deletes files inside the project folder without asking. Commands, the network and anything outside the folder ask first.
-- **Ask me for everything**: every action asks.
+- **Manual** (always ask): every action asks.
+- **Accept edits** (the default): the agent reads, edits, searches, moves and deletes files inside the project folder without asking. Commands, the network and anything outside the folder ask first, unless an Always rule covers them. The line under Send reads "Edits files in this project, asks before commands"; under Manual it reads "Asks before everything".
+- **Auto** (the agent decides): the agent's own safety reviewer approves or refuses each step (Claude Code's auto mode, Codex's Auto review). Rushes sees only what the agent chooses to ask, and no longer guards `.rushes` and `.git`. If Claude Code's model can't run auto mode, Claude falls back to accepting edits and asking for commands, and Activity says so.
+- **Bypass** (accepts everything): nothing asks and nothing is checked, `.rushes` and `.git` included. Picking it shows a one-line warning. It is never a default: a new project never starts in Bypass.
 
-Some folders and files in the project always ask, at either level and whatever "Always" rules you keep, even to read them: they hold settings, hooks or tokens. They are `.rushes/`, `.git/`, `.claude/`, `.codex/`, `.mcp.json`, `.vscode/` and `.idea/`. Moving or deleting the project folder itself always asks too.
+A change of row applies from the next Send. A batch already running keeps the row it started in; the agent starts again (continuing the conversation) when the next Send needs another mode. Auto and Bypass are chosen only by you, in the menu or the sheet, never by anything in a project. Auto can be your default for new projects, like any row you pick; a brand-new Mac starts in Accept edits.
+
+Under Manual and Accept edits, some folders and files in the project always ask, whatever "Always" rules you keep, even to read them: they hold settings, hooks or tokens. They are `.rushes/`, `.git/`, `.claude/`, `.codex/`, `.mcp.json`, `.vscode/` and `.idea/`. Moving or deleting the project folder itself always asks too.
 
 An ask shows what the agent wants to do and the exact command, with **Allow once**, **Always** and **No**. It waits until you answer. It never turns into a yes by itself. When the agent asks, or ends a run with a question, and no Rushes tab is open, your Mac shows a notification saying the agent is waiting in this project.
 
 Rushes sees only what the agent asks it. The agent's own permission settings, such as allow rules in Claude Code's settings, can still approve actions without asking, and Rushes never sees those.
 
-With Codex, commands that write files or reach the network ask, but commands that only read, such as searches and listings, run without asking.
+With Codex under Manual or Accept edits, commands that write files or reach the network ask, but commands that only read, such as searches and listings, run without asking.
 
 **"Always" rules.** **Always** keeps a rule for this project, so the same request runs without asking next time. The button names the rule, such as "Always for npx hyperframes here". The agent's menu lists the rules, and you can remove any of them. Always rules are kept in your user settings, outside the project, so the agent cannot change them. The permission level, the rules, whether you have answered the first-Send sheet and which agent you turned Send to AI on for are in `~/.config/rushes/agent-rules/` (or under `$XDG_CONFIG_HOME`), one file per project. That agent is set only when you turn Send to AI on, in the sheet, the agent's menu or the switch. Copy a prompt and switching off clear it, and changing what it may do leaves it as it is. `.rushes/agent.json` keeps the project's switch, its agent and the conversation to continue. Nothing secret. Send hands notes to an agent only when that switch is on and its agent is the one in your file. Otherwise Send to AI shows as off and Send copies the prompt, so a project folder from someone else, or anything that writes `agent.json`, can't start an agent you didn't choose. A project set up with an earlier build asks once more. The default for new projects is `~/.config/rushes/agent-defaults.json` (the agent and what it may do, never Always rules, which stay per project). It is yours, outside every project, so nothing in a project can set it.
 

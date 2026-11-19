@@ -77,3 +77,38 @@ describe("the agent's rules file (R10)", () => {
     quiet.mockRestore();
   });
 });
+
+describe("§33: the four rows in the rules and the Mac-wide default", () => {
+  it("reads the ids kept from before §33 and the two new ones; refuses any other", async () => {
+    const { AgentRulesReadSchema, AgentDefaultsSchema } = await import("../../../src/core/schema.js");
+    for (const permissions of ["ask-all", "project-edits", "auto", "bypass"]) {
+      expect(AgentRulesReadSchema.parse({ permissions }).permissions).toBe(permissions);
+      expect(AgentDefaultsSchema.parse({ permissions }).permissions).toBe(permissions);
+    }
+    expect(AgentRulesReadSchema.parse({}).permissions).toBe("project-edits");
+    expect(AgentRulesReadSchema.safeParse({ permissions: "yolo" }).success).toBe(false);
+  });
+
+  it("an old rules file still reads as it was written", async () => {
+    const { root } = await tmpProject();
+    const config = await mkdtemp(join(tmpdir(), "rushes-config-"));
+    const f = new AgentRulesFile(root, config);
+    await mkdir(dirname(f.path), { recursive: true });
+    await writeFile(f.path, JSON.stringify({ permissions: "ask-all", always: [{ kind: "execute", command: "npm run" }], setUp: true, agent: "claude" }));
+    expect(await f.read()).toEqual({ permissions: "ask-all", always: [{ kind: "execute", command: "npm run" }], setUp: true, agent: "claude" });
+  });
+
+  it("Auto is adopted from the default by a new project; Bypass never is (it starts in Accept edits)", async () => {
+    const config = await mkdtemp(join(tmpdir(), "rushes-config-"));
+    const a = new AgentRulesFile((await tmpProject()).root, config);
+    expect(await a.adopt({ agent: "claude", permissions: "auto" })).toEqual({ setUp: true, agent: "claude", permissions: "auto", always: [] });
+    const b = new AgentRulesFile((await tmpProject()).root, config);
+    expect(await b.adopt({ agent: "codex", permissions: "bypass" })).toEqual({ setUp: true, agent: "codex", permissions: "project-edits", always: [] });
+    expect(JSON.parse(await readFile(b.path, "utf8")).permissions).toBe("project-edits");
+  });
+
+  it("a brand-new Mac with no rules file starts in Accept edits", async () => {
+    const config = await mkdtemp(join(tmpdir(), "rushes-config-"));
+    expect((await new AgentRulesFile((await tmpProject()).root, config).read()).permissions).toBe("project-edits");
+  });
+});

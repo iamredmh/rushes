@@ -4,7 +4,7 @@
 import { AGENT_LINES } from "../../core/agentActivity.js";
 import { oneLine } from "../../core/labels.js";
 import { noteState } from "../../core/noteState.js";
-import type { Batch } from "../../core/schema.js";
+import type { AgentPermissions, Batch } from "../../core/schema.js";
 import type { Store } from "../../core/store.js";
 
 /** One turn's work: a batch, or the user's answer on a note that is with the agent. */
@@ -17,6 +17,11 @@ export interface TurnJob {
   /** How Activity and the Change Log name the turn. */
   label: string;
   prompt: string;
+  /**
+   * §33: a batch's permission row, read from the user's rules when it was sent. The agent runs the batch in that row's
+   * mode; a change in the menu applies from the next Send. A follow-up has none: it runs in the mode already running.
+   */
+  level?: AgentPermissions;
 }
 
 /** How much of a note's words an Activity line about an answer on it quotes (Task 10, 4). */

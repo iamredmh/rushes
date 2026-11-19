@@ -735,6 +735,24 @@ describe("Send to AI is set up once per Mac (§32)", () => {
   const defaults = () => agentDefaultsFile();
   const readDefault = () => JSON.parse(readFileSync(defaultsPath(), "utf8"));
 
+  it("§33: Auto picked in the menu is the default, and a second project starts in Auto", async () => {
+    const a = await rig({ settings: { on: true, agent: "claude" } });
+    await a.call("POST", "/api/agent/setup", { on: true, agent: "claude" });
+    await a.call("POST", "/api/agent/setup", { on: true, permissions: "auto" });
+    expect(readDefault()).toEqual({ agent: "claude", permissions: "auto" });
+    const b = await rig();
+    expect((await b.call("GET", "/api/agent")).json.status).toMatchObject({ on: true, agent: "claude", asked: true, permissions: "auto" });
+  });
+
+  it("§33: Bypass picked in the menu is kept for that project, but a second project starts in Accept edits", async () => {
+    const a = await rig({ settings: { on: true, agent: "claude" } });
+    await a.call("POST", "/api/agent/setup", { on: true, agent: "claude" });
+    await a.call("POST", "/api/agent/setup", { on: true, permissions: "bypass" });
+    expect((await a.call("GET", "/api/agent")).json.status).toMatchObject({ permissions: "bypass" });
+    const b = await rig();
+    expect((await b.call("GET", "/api/agent")).json.status).toMatchObject({ on: true, agent: "claude", asked: true, permissions: "project-edits" });
+  });
+
   it("with no default yet the sheet asks once, and its answer becomes the default (0600 in a 0700 folder)", async () => {
     expect(existsSync(defaultsPath())).toBe(false);
     const a = await rig();

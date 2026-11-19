@@ -1,6 +1,6 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { AgentId } from "../../core/schema.js";
+import type { AgentId, AgentPermissions } from "../../core/schema.js";
 import type { AdapterSpec, McpServerSpec } from "./acp.js";
 import { searchPath, type AgentInfo } from "./detect.js";
 import { RUSHES_SERVER } from "./ownTools.js";
@@ -23,8 +23,10 @@ export const ADAPTERS: Record<AgentId, { pkg: string; version: string }> = {
 /*
  * R14/R15: the session mode in which the agent asks Rushes (session/request_permission) before it acts, instead of
  * approving its own actions. The runner sends session/set_mode with it after every session/new and session/load,
- * when the session offers it. Never acceptEdits, auto, bypassPermissions or dontAsk (Claude), nor agent or
- * agent-full-access (Codex): in those the agent, or its own reviewer, decides.
+ * when the session offers it. Used for Manual and Accept edits, the two rows where Rushes is the gatekeeper. Never
+ * acceptEdits, plan or dontAsk (Claude). The modes where the agent, or its own reviewer, decides (Claude's auto and
+ * bypassPermissions, Codex's agent and agent-full-access) are used only for the Auto and Bypass rows (§33, AGENT_MODE
+ * below), which only the user picks, from the agent menu or the first-Send sheet, never from anything in the project.
  *
  * Claude (claude-agent-acp 0.107.3, read 17 Nov 2026):
  *   - dist/session-mode.js:47-48: with no permissions.defaultMode in the user's settings a session starts in `auto`
@@ -65,6 +67,35 @@ export const ASK_MODE: Record<AgentId, string> = {
   codex: "read-only",
 };
 
+/*
+ * §33: the session mode for each row of the permission menu. Manual and Accept edits use ASK_MODE, so every ask reaches
+ * Rushes, which decides by the row and the Always rules (core/agentRules.ts decide). Auto and Bypass hand the decision to
+ * the agent; there Rushes is no longer the gatekeeper for .rushes and .git.
+ *
+ * Checked 19 Nov 2026 against the installed adapters:
+ *   - Claude (claude-agent-acp 0.107.3, dist/session-mode.js buildAvailableModes): `auto` ("Claude handles permission
+ *     decisions", offered unless the user's settings disable auto mode) and `bypassPermissions` ("Accepts all
+ *     permissions", offered unless running as root outside a sandbox or disabled in settings). The CLI's own
+ *     --permission-mode takes the same two ids. When the session's model can't run auto, the adapter falls back to
+ *     AUTO_MODE_FALLBACK, `acceptEdits` (dist/session-mode.js:6, effectiveMode): edits go through and commands still ask
+ *     Rushes. The runner accepts that fallback for Auto and says so in Activity (AUTO_FALLBACK).
+ *   - Codex (codex-acp 2.7.0, README:76 INITIAL_AGENT_MODE): `agent` (Codex's "Auto review", approvalsReviewer
+ *     "auto_review") and `agent-full-access` (approvalPolicy "never").
+ * A mode the session doesn't offer fails the start closed, as ASK_MODE does (runner.ts agentMode).
+ */
+export const AGENT_MODE: Record<AgentPermissions, Record<AgentId, string>> = {
+  "ask-all": ASK_MODE,
+  "project-edits": ASK_MODE,
+  auto: { claude: "auto", codex: "agent" },
+  bypass: { claude: "bypassPermissions", codex: "agent-full-access" },
+};
+
+/** The mode Claude's adapter falls back to when Auto isn't available for the session's model. Still asks Rushes for commands. */
+export const AUTO_FALLBACK: Partial<Record<AgentId, string>> = { claude: "acceptEdits" };
+
+/** The agent's session mode for a menu row. */
+export const modeFor = (agent: AgentId, level: AgentPermissions): string => AGENT_MODE[level][agent];
+
 /**
  * clientCapabilities._meta for initialize. Codex (codex-acp 2.7.0, read 18 Nov 2026): a turn that fails on a model or
  * service error (an unsupported model, an outage) still answers session/prompt with stopReason "end_turn". It says it
@@ -87,12 +118,15 @@ export function clientMeta(agent: AgentId): Record<string, unknown> | undefined 
 export const CLAUDE_MODEL = "sonnet";
 export const CLAUDE_EFFORT = "medium";
 
-/** Extra params for session/new and session/load: Claude's initial mode, so the session is never in `auto` (R14), then its model. */
-export function sessionSetup(agent: AgentId): Record<string, unknown> {
+/**
+ * Extra params for session/new and session/load: Claude's initial mode for the row the Send was made under, so the
+ * session is never in `auto` unless the user picked Auto (R14, §33), then its model.
+ */
+export function sessionSetup(agent: AgentId, level: AgentPermissions = "project-edits"): Record<string, unknown> {
   if (agent === "claude") {
     return {
       configOptions: [
-        { configId: "mode", value: ASK_MODE.claude },
+        { configId: "mode", value: modeFor("claude", level) },
         { configId: "model", value: CLAUDE_MODEL },
         { configId: "effort", value: CLAUDE_EFFORT },
       ],
@@ -102,14 +136,14 @@ export function sessionSetup(agent: AgentId): Record<string, unknown> {
 }
 
 /** How to start the ACP adapter for an agent, in the project folder. */
-export function adapterSpec(agent: AgentInfo, root: string): AdapterSpec {
+export function adapterSpec(agent: AgentInfo, root: string, level: AgentPermissions = "project-edits"): AdapterSpec {
   const { pkg, version } = ADAPTERS[agent.id];
   // The same PATH detection used, so npx and node are found even when the server has a thin PATH.
   const env: Record<string, string> = { PATH: searchPath() };
   if (agent.id === "claude" && agent.path) env.CLAUDE_CODE_EXECUTABLE = agent.path;
   if (agent.id === "codex" && agent.path) env.CODEX_PATH = agent.path;
-  // R15: Codex starts in the mode whose approvals go to Rushes, not to Codex's own reviewer (see ASK_MODE.codex).
-  if (agent.id === "codex") env.INITIAL_AGENT_MODE = ASK_MODE.codex;
+  // R15: Codex starts in the mode whose approvals go to Rushes (ASK_MODE.codex), unless the user picked Auto or Bypass (§33).
+  if (agent.id === "codex") env.INITIAL_AGENT_MODE = modeFor("codex", level);
   return { command: "npx", args: ["-y", `${pkg}@${version}`], env, cwd: root };
 }
 

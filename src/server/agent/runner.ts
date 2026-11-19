@@ -19,11 +19,11 @@ import { oneLine } from "../../core/labels.js";
 import { lineEvent } from "../../core/logEvents.js";
 import { byFilm } from "../../core/notes.js";
 import { needsYou, noteState, recallNote, recallNotes } from "../../core/noteState.js";
-import type { AgentId, AgentRules, AgentSettings, AlwaysRule, Batch, Note } from "../../core/schema.js";
+import type { AgentId, AgentPermissions, AgentRules, AgentSettings, AlwaysRule, Batch, Note } from "../../core/schema.js";
 import type { ChangeEvent, Store } from "../../core/store.js";
 import { logBookFor } from "../logbook.js";
 import { AcpConnection, type AcpPermissionOutcome, type AcpPermissionParams, type AdapterSpec, type McpServerSpec } from "./acp.js";
-import { ASK_MODE, adapterSpec, clientMeta, rushesMcp, sessionSetup } from "./adapters.js";
+import { AUTO_FALLBACK, adapterSpec, clientMeta, modeFor, rushesMcp, sessionSetup } from "./adapters.js";
 import { noteToolCall, withSeen, type SeenCalls } from "./seenCalls.js";
 import { isOwnRushesTool, noteMcpCall, type McpCalls } from "./ownTools.js";
 import { PermissionBroker, addRule, allowOutcome, dropRule, toRequest, type AskChoice, type PendingAsk } from "./broker.js";
@@ -57,7 +57,7 @@ export interface AgentStatus {
 
 export interface RunnerOptions {
   detect?: () => Promise<AgentInfo[]>;
-  spec?: (a: AgentInfo, root: string) => AdapterSpec;
+  spec?: (a: AgentInfo, root: string, level: AgentPermissions) => AdapterSpec;
   mcp?: (root: string) => McpServerSpec;
   idleMs?: number;
   /** How long the adapter may take to start (spawn, initialize, new or loaded session). Defaults to AGENT_START_MS. */
@@ -157,12 +157,14 @@ async function within(p: Promise<unknown>, ms: number): Promise<void> {
 
 export class AgentRunner {
   private readonly detect: () => Promise<AgentInfo[]>;
-  private readonly specFor: (a: AgentInfo, root: string) => AdapterSpec;
+  private readonly specFor: (a: AgentInfo, root: string, level: AgentPermissions) => AdapterSpec;
   /**
    * Per adapter: which agent it runs, (Codex only) its MCP calls by tool call id (R16), and its session's mode as
    * last reported (round 2, item 3).
    */
-  private readonly adapters = new WeakMap<AcpConnection, { agent: AgentId; calls: McpCalls; seen: SeenCalls; mode: string | null; modeReported: boolean; activity: ActivityTracker }>();
+  private readonly adapters = new WeakMap<AcpConnection, { agent: AgentId; level: AgentPermissions; calls: McpCalls; seen: SeenCalls; mode: string | null; modeReported: boolean; activity: ActivityTracker }>();
+  /** §33: the row the last batch was sent under. A follow-up that has to start the agent again starts it in this one. */
+  private lastLevel: AgentPermissions | null = null;
   private readonly mcp: (root: string) => McpServerSpec;
   private readonly idleMs: number;
   private readonly startMs: number;
@@ -419,6 +421,8 @@ export class AgentRunner {
       return park("No conversation to carry on", agent ? NAMES[agent] : "your agent");
     }
     if (!agent) return { why: "No agent chosen" };
+    // §33: a Send runs in the row chosen when it was sent. One already running keeps its own.
+    if (job.kind === "batch") job.level = rules.permissions;
     const info = (await this.detect()).find((a) => a.id === agent);
     if (!info?.installed) return park(`${info?.name ?? NAMES[agent]} is not installed`, info?.name ?? NAMES[agent]);
     if (!info.signedIn) return park(`${info.name} is not signed in`, info.name);
@@ -433,7 +437,7 @@ export class AgentRunner {
     if (!queued && this.conn) {
       // An idle adapter for another agent or another conversation is replaced.
       const kept = settings.session?.id ?? null;
-      if (this.info?.id !== info.id || this.sessionId !== kept) this.dropConn();
+      if (this.info?.id !== info.id || this.sessionId !== kept || this.levelChanged(this.conn, job)) this.dropConn();
     }
     if (!queued) this.info = info;
     this.clearIdle();
@@ -476,8 +480,9 @@ export class AgentRunner {
     let timedOut = false;
     let timer: NodeJS.Timeout | undefined;
     try {
-      conn = AcpConnection.start(this.specFor(info, root));
-      this.attach(conn, info.id);
+      const level = this.startLevel();
+      conn = AcpConnection.start(this.specFor(info, root, level));
+      this.attach(conn, info.id, level);
       const c = conn;
       const deadline = new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
@@ -516,7 +521,8 @@ export class AgentRunner {
     const settings = await this.loadSettings();
     check();
     const mcp = [this.mcp(root)];
-    const setup = sessionSetup(info.id);
+    const level = this.adapters.get(c)?.level ?? "project-edits";
+    const setup = sessionSetup(info.id, level);
     const kept = settings.session;
     let sessionId: string | null = null;
     let modes: string[] = [];
@@ -546,23 +552,28 @@ export class AgentRunner {
       this.applySettings(data);
     }
     check();
-    await this.askMode(c, info, sessionId, modes, current);
+    await this.agentMode(c, info, sessionId, modes, current, level);
     check();
     if (c.hasExited) throw new Error("the adapter exited as it started");
     this.sessionId = sessionId;
   }
 
   /**
-   * R14/R15: every opened or loaded session goes into the mode in which the agent asks Rushes before it acts
-   * (ASK_MODE), before the first prompt. Fails closed (round 2, item 3): the start fails with a ModeError, and its
+   * R14/R15: every opened or loaded session goes into the mode for the row it was started under (§33: ASK_MODE for
+   * Manual and Accept edits, in which the agent asks Rushes before it acts; the agent's own for Auto and Bypass), before
+   * the first prompt. Fails closed (round 2, item 3): the start fails with a ModeError, and its
    * notes go back, when the mode isn't offered (or no modes are reported), when set_mode throws, or when the
    * session's mode isn't the ask mode afterwards. That mode is the setup response's currentModeId, then the
    * ask mode once set_mode succeeds, unless a current_mode_update during set_mode reports another one (as
    * claude-agent-acp's setSessionMode does when it falls back).
    */
-  private async askMode(c: AcpConnection, info: AgentInfo, sessionId: string, modes: string[], current: string | null): Promise<void> {
-    const want = ASK_MODE[info.id];
-    const refused = new ModeError(`${info.name} could not be put in a mode where Rushes approves actions`);
+  private async agentMode(c: AcpConnection, info: AgentInfo, sessionId: string, modes: string[], current: string | null, level: AgentPermissions): Promise<void> {
+    const want = modeFor(info.id, level);
+    const refused = new ModeError(
+      level === "auto" ? `${info.name} could not be put in Auto mode`
+        : level === "bypass" ? `${info.name} could not be put in Bypass mode`
+          : `${info.name} could not be put in a mode where Rushes approves actions`,
+    );
     const adapter = this.adapters.get(c);
     if (!adapter || !modes.includes(want)) throw refused;
     adapter.mode = current;
@@ -574,11 +585,46 @@ export class AgentRunner {
       throw refused;
     }
     if (!adapter.modeReported) adapter.mode = want;
+    // Claude's adapter falls back from auto to acceptEdits for a model that can't run auto: commands still ask Rushes.
+    const fallback = level === "auto" ? AUTO_FALLBACK[info.id] : undefined;
+    if (fallback !== undefined && adapter.mode === fallback) {
+      this.addLine(`${info.name} can't use Auto with this model: file edits go through, commands ask here`, null);
+      return;
+    }
     if (adapter.mode !== want) throw refused;
   }
 
+  /**
+   * §33: the row the agent starts in: the next batch's (its row when it was sent), else the last batch's, else the rules'
+   * row now. A follow-up never starts the agent in Auto or Bypass on its own: only a Send made under that row does.
+   */
+  private startLevel(): AgentPermissions {
+    const batch = [...(this.turn ? [this.turn.job] : []), ...this.queue].find((j) => j.kind === "batch" && j.level);
+    const level = batch?.level ?? this.lastLevel ?? this.rules.permissions;
+    if (batch?.level === undefined && this.lastLevel === null && (level === "auto" || level === "bypass")) return "project-edits";
+    return level;
+  }
+
+  /** §33: `job` is a Send made under another row than the one `conn` runs in. */
+  private levelChanged(conn: AcpConnection | null, job: TurnJob | undefined): boolean {
+    if (!conn || job?.kind !== "batch" || job.level === undefined) return false;
+    const running = this.adapters.get(conn)?.level;
+    return running !== undefined && running !== job.level;
+  }
+
+  /**
+   * §33: the row an ask is decided by. A batch keeps the row it started in: in Auto or Bypass the agent's own mode
+   * already decided, so that row holds. In Manual or Accept edits the row now holds (so a switch to Manual asks at once),
+   * except a switch to Auto or Bypass, which applies from the next Send.
+   */
+  private askLevel(running: AgentPermissions | undefined, now: AgentPermissions): AgentPermissions {
+    if (running === "auto" || running === "bypass") return running;
+    if (now === "auto" || now === "bypass") return running ?? "project-edits";
+    return now;
+  }
+
   /** Makes `conn` the runner's adapter and listens to it. */
-  private attach(conn: AcpConnection, agent: AgentId): void {
+  private attach(conn: AcpConnection, agent: AgentId, level: AgentPermissions): void {
     this.conn = conn;
     this.sessionId = null;
     this.live.add(conn);
@@ -587,7 +633,7 @@ export class AgentRunner {
     // Task 10 (3): each adapter's tool calls are followed from announced to run, so a command says it ran only then.
     // Task 10 round 2 (1): every tool call's kind, input and paths, so an ask that lacks them (Codex under AIR) gets them.
     const seen: SeenCalls = new Map();
-    const adapter = { agent, calls, seen, mode: null as string | null, modeReported: false, activity: new ActivityTracker(this.store.root) };
+    const adapter = { agent, level, calls, seen, mode: null as string | null, modeReported: false, activity: new ActivityTracker(this.store.root) };
     this.adapters.set(conn, adapter);
     conn.on("update", (u: unknown) => {
       if (agent === "codex") noteMcpCall(calls, u);
@@ -629,7 +675,8 @@ export class AgentRunner {
     await this.ruleWrite;
     const rules = await this.loadRules();
     if (!live()) return CANCELLED;
-    if (decide(toRequest(p, this.store.root), rules, this.store.root) === "allow") return allowOutcome(p.options);
+    const level = this.askLevel(adapter?.level, rules.permissions);
+    if (decide(toRequest(p, this.store.root), { permissions: level, always: rules.always }, this.store.root) === "allow") return allowOutcome(p.options);
     return this.broker.ask(p);
   }
 
@@ -682,7 +729,15 @@ export class AgentRunner {
       this.ensureStarted().then(() => this.pump(), () => undefined);
       return;
     }
+    if (this.levelChanged(conn, this.queue[0])) {
+      // §33: the next Send was made under another row. Its mode is set as a session opens, so the agent starts again
+      // (the conversation is loaded, as after any restart) before it begins.
+      this.dropConn();
+      this.ensureStarted().then(() => this.pump(), () => undefined);
+      return;
+    }
     const job = this.queue.shift()!;
+    if (job.kind === "batch" && job.level) this.lastLevel = job.level;
     const gen = this.gen;
     const name = this.info?.name ?? "The agent";
     this.clearIdle();

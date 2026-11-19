@@ -114,7 +114,7 @@ export function afterSend(r: SendHandOver | undefined): "dialog" | "handed" | "s
 
 /** Under Send while Send to AI is on: what the agent may do without asking. */
 export function whoLine(s: AgentStatus): string {
-  const may = s.permissions === "ask-all" ? "Asks before everything" : "Edits files in this project, asks before commands";
+  const may = WHO_MAY[s.permissions](agentName(s.agent));
   return s.session ? `${may} · next Send continues the conversation` : may;
 }
 
@@ -161,10 +161,30 @@ export const MENU_WORDS = {
   footer: "Switch off: Send copies a prompt, as now",
 } as const;
 
-export const PERMISSION_CHOICES: readonly { value: AgentRules["permissions"]; label: string }[] = [
-  { value: "project-edits", label: "Edit files in this project" },
-  { value: "ask-all", label: "Ask me for everything" },
+/**
+ * §33: the permission menu's four rows, the same for both agents, in the agent menu and the first-Send sheet's second
+ * step. Bypass is last. `hint` is the row's help line.
+ */
+export const PERMISSION_CHOICES: readonly { value: AgentRules["permissions"]; label: string; hint: string }[] = [
+  { value: "ask-all", label: "Manual", hint: "Always ask" },
+  { value: "project-edits", label: "Accept edits", hint: "Edit files in this project without asking" },
+  { value: "auto", label: "Auto", hint: "The agent decides: its own safety check approves or refuses each step. Rushes sees only what it asks, and no longer guards .rushes and .git" },
+  { value: "bypass", label: "Bypass", hint: "Accepts everything: nothing asks, nothing is checked, .rushes and .git included" },
 ];
+
+/** §33: the one-line warning shown when Bypass is picked, the way Claude Code warns of its bypass mode. */
+export const BYPASS_WARNING = "Bypass: the agent runs every command and edits any file with nothing asked or checked, .rushes and .git included.";
+
+/** §33: a change of row applies from the next Send; a batch already running keeps its own. */
+export const NEXT_SEND_LINE = "Applies from the next Send.";
+
+/** Under Send: what the agent may do without asking, by row. */
+const WHO_MAY: Record<AgentRules["permissions"], (name: string) => string> = {
+  "ask-all": () => "Asks before everything",
+  "project-edits": () => "Edits files in this project, asks before commands",
+  auto: (name) => `Auto: ${name} decides what to ask`,
+  bypass: () => "Bypass: nothing asks, nothing is checked",
+};
 
 export interface MenuAgent { id: AgentId; name: string; signedIn: boolean; current: boolean }
 

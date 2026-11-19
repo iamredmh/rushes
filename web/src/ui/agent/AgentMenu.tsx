@@ -2,7 +2,7 @@
 // Send sends to (and whether it is signed in), a fresh conversation when there is one to leave, what the agent may do
 // without asking, the Always rules, and what switching off does. The row (AgentRow) talks to the server; this draws.
 import { Fragment } from "preact";
-import { MENU_WORDS, PERMISSION_CHOICES, ruleRows, type MenuAgent } from "../../agent.js";
+import { BYPASS_WARNING, MENU_WORDS, NEXT_SEND_LINE, PERMISSION_CHOICES, ruleRows, type MenuAgent } from "../../agent.js";
 import type { AgentId, AgentRules, AgentStatus, AlwaysRule } from "../../types.js";
 import { Icon } from "../Icon.js";
 import type { Menu } from "../desk/useMenu.js";
@@ -64,11 +64,20 @@ export function AgentMenu({ menu, status, agents, refused, onPick, onSignIn, onF
       <hr />
       <div class="hd">{MENU_WORDS.may}</div>
       {PERMISSION_CHOICES.map((p) => (
-        <button key={p.value} ref={menu.row(i++)} type="button" role="menuitemradio" class="mi" tabIndex={-1} aria-checked={status.permissions === p.value} onClick={() => onPermissions(p.value)}>
+        <button key={p.value} ref={menu.row(i++)} type="button" role="menuitemradio" class="mi aperm" tabIndex={-1} aria-checked={status.permissions === p.value} aria-label={p.label} aria-describedby={`aperm-${p.value}`} onClick={() => onPermissions(p.value)}>
           <Tick on={status.permissions === p.value} />
-          <span class="nm">{p.label}</span>
+          <span class="pm">
+            <span class="nm">{p.label}</span>
+            <small id={`aperm-${p.value}`}>{p.hint}</small>
+          </span>
         </button>
       ))}
+      {status.permissions === "bypass" && (
+        <p class="awarn" role="note">
+          {BYPASS_WARNING}
+        </p>
+      )}
+      {status.batches.length > 0 && <p class="anote">{NEXT_SEND_LINE}</p>}
       <hr />
       <div class="hd">{MENU_WORDS.always}</div>
       {rules.length === 0 && <p class="anote">{MENU_WORDS.noRules}</p>}

@@ -181,8 +181,14 @@ export function canAlways(req: PermissionRequest, root: string): boolean {
   return kind !== "execute" || plainCommand(req.command ?? "");
 }
 
+/**
+ * Whether an ask the agent sent goes through unasked. Manual asks for everything. Accept edits allows edits in the
+ * project and the Always rules. In Auto the agent's own reviewer has already passed what it didn't send, and what it does
+ * send is treated as under Accept edits. Bypass allows everything (§33): nothing is checked, not even .rushes and .git.
+ */
 export function decide(req: PermissionRequest, s: Pick<AgentRules, "permissions" | "always">, root: string): "allow" | "ask" {
   if (s.permissions === "ask-all") return "ask";
+  if (s.permissions === "bypass") return "allow";
   if (s.always.some((r) => matches(r, req, root))) return "allow";
   if (req.kind && PROJECT_KINDS.has(req.kind) && inProject(req, root)) return "allow";
   return "ask";

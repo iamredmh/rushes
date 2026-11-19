@@ -3,7 +3,7 @@
 // (ruling P2-R3): who gets the notes (an agent, or copying a prompt as now, which skips step 2), then what that agent may
 // do without asking. Confirming posts setup, then the desk's own Send runs when notes are waiting.
 import { useLayoutEffect, useRef, useState } from "preact/hooks";
-import { MENU_WORDS, PERMISSION_CHOICES, SHEET_WORDS, mayQuestion, notSignedInWhy, sheetDefault, sheetPrimary, sheetRows, whoNext, type SendFollow, type Sheet, type SheetPick } from "../../agent.js";
+import { BYPASS_WARNING, MENU_WORDS, PERMISSION_CHOICES, SHEET_WORDS, mayQuestion, notSignedInWhy, sheetDefault, sheetPrimary, sheetRows, whoNext, type SendFollow, type Sheet, type SheetPick } from "../../agent.js";
 import { api, ApiError } from "../../api.js";
 import type { AgentId, AgentInfo, AgentRules, AgentStatus, SendHandOver } from "../../types.js";
 import { actOnSend, askNotificationsOnce } from "./sendFollow.js";
@@ -103,7 +103,8 @@ export function FirstSend({ status, waiting, batch, onStatus, toast, onClose, on
     close(true, a);
     if (waiting) onSend(a.status);
   };
-  const may = (agent: AgentId): Sheet => ({ step: "may", agent, permissions: status.permissions });
+  // §33: Accept edits is pre-selected, unless the user already chose another row; Bypass is never pre-selected.
+  const may = (agent: AgentId): Sheet => ({ step: "may", agent, permissions: status.asked && status.permissions !== "bypass" ? status.permissions : "project-edits" });
 
   const confirm = async () => {
     if (!sheet || busy.current) return;
@@ -177,14 +178,20 @@ export function FirstSend({ status, waiting, batch, onStatus, toast, onClose, on
             {PERMISSION_CHOICES.map((p) => (
               <div class="fsrow" key={p.value}>
                 <label class={`fsopt${sheet.permissions === p.value ? " on" : ""}`}>
-                  <input type="radio" name="fs-may" value={p.value} checked={sheet.permissions === p.value} onChange={() => setSheet({ ...sheet, permissions: p.value })} />
+                  <input type="radio" name="fs-may" value={p.value} aria-label={p.label} aria-describedby={`fs-may-${p.value}`} checked={sheet.permissions === p.value} onChange={() => setSheet({ ...sheet, permissions: p.value })} />
                   <span class="fstext">
                     <b>{p.label}</b>
+                    <small id={`fs-may-${p.value}`}>{p.hint}</small>
                   </span>
                 </label>
               </div>
             ))}
           </div>
+          {sheet.permissions === "bypass" && (
+            <p class="fswarn" role="note">
+              {BYPASS_WARNING}
+            </p>
+          )}
           <p class="fsline">{SHEET_WORDS.noKey}</p>
         </>
       )}
