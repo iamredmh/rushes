@@ -28,7 +28,13 @@ export interface PanelShared {
   activity: Omit<ActivityListProps, "log" | "onEscape">;
   /** What Send sends that is still waiting, and Send itself. `always`: shown even with nothing waiting (on its own Brief or
    *  Storyboard page, Send always carries that page's line). */
-  send: { count: number; always?: boolean; onSend(): void };
+  send: {
+    count: number;
+    always?: boolean;
+    onSend(): void;
+    /** I3: notes Send filed that never reached the agent (refused while Send to AI was on), why, and Send again. */
+    again?: { count: number; why: string; onSendAgain(): void } | null;
+  };
   /** §28: the Send to AI row, from the agent's status; null before the first answer and from a server without Send to AI. */
   agent: AgentPanel | null;
   /** On screen: not hidden (wide), or the drawer open (narrow). */
@@ -166,6 +172,8 @@ export function NotesPanel(props: NotesPanelProps) {
   // Send shows while something waits. The Send to AI row and its who-line stay whenever the desk knows the agent's
   // status, so the switch never vanishes under the pointer and Set up is there before the first note.
   const sendShown = send.count > 0 || !!send.always;
+  // I3: notes that read "With your agent" but never reached it get their own way out, so they are never stranded.
+  const again = send.again && send.again.count > 0 ? send.again : null;
   const tab = log.open ? "activity" : "notes";
   const todo = props.notes.filter((n) => n.status === "todo").length;
   const choose = (to: "notes" | "activity", focusList = true) => {
@@ -282,9 +290,19 @@ export function NotesPanel(props: NotesPanelProps) {
           <ActivityList {...activity} log={log} live={<LiveStrip status={agent?.status ?? null} notes={props.notes} onNote={showNote} />} onEscape={() => activityTab.current?.focus()} />
         </div>
       )}
-      {(sendShown || agent) && (
+      {(sendShown || agent || again) && (
         <div class={`nfoot${agent ? " agentfoot" : ""}`}>
           {agent && <AgentRow {...agent} />}
+          {again && (
+            <div class="sendagain" role="status">
+              <p class="sendagain-why">
+                {again.count === 1 ? "1 note didn't" : `${again.count} notes didn't`} reach the agent{again.why ? `: ${again.why}` : ""}
+              </p>
+              <button type="button" class={`btn${sendShown ? "" : " primary"} sendbtn`} aria-label={`Send again ${again.count}`} data-tip="Hand these notes to the agent again" onClick={again.onSendAgain}>
+                Send again<span class="count">{again.count}</span>
+              </button>
+            </div>
+          )}
           {sendShown && (
             <button ref={sendRef} type="button" class="btn primary sendbtn" aria-label={send.count > 0 ? `Send ${send.count}` : "Send"} data-tip="Notes and edits not sent yet, from every tab and film" onClick={send.onSend}>
               Send{send.count > 0 && <span class="count">{send.count}</span>}

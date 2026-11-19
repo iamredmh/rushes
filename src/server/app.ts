@@ -1604,6 +1604,24 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     return c.json({ batch, agent: await handOverOf(handing!) }, 201);
   });
 
+  // I3, Send again: a batch whose hand-over was refused while Send to AI was on (its `undelivered` mark) goes to the
+  // agent now, while notes of it still wait. The mark is in batches.json, so this works after a restart too. Refused
+  // again (still not signed in), it says why and keeps the mark, as Send does.
+  app.post("/api/batches/:id/resend", async (c) => {
+    const id = c.req.param("id");
+    const [batches, notes] = await Promise.all([store.read("batches"), store.read("notes")]);
+    const batch = batches.batches.find((b) => b.id === id);
+    if (!batch) throw new NotFoundError("batch", id);
+    if (!notes.notes.some((n) => n.batch === id && noteState(n) === "sent")) {
+      throw new RushesError(`Nothing in ${id} is waiting for the agent any more.`, 409, "batch_not_waiting");
+    }
+    if (!batch.undelivered) throw new RushesError(`${id} already reached the agent.`, 409, "batch_delivered");
+    const handed = await handOverOf(agent.resend(batch));
+    // Null: another Send again took it a moment ago.
+    if (!handed) throw new RushesError(`${id} already reached the agent.`, 409, "batch_delivered");
+    return c.json({ batch: { ...batch, undelivered: null }, agent: handed });
+  });
+
   app.get("/api/batches/:id", async (c) => {
     const [batches, notes, script, visuals] = await Promise.all([store.read("batches"), store.read("notes"), store.read("script"), store.read("visuals")]);
     const id = c.req.param("id");

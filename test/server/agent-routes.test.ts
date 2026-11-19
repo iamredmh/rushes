@@ -393,6 +393,64 @@ describe("setup hands over the batch the copy dialog was opened for (I3)", () =>
   });
 });
 
+describe("Send again: a refused batch is kept in batches.json, so a restart can't strand its notes (I3)", () => {
+  it("a batch refused for want of sign-in is marked, and after a restart Send again hands it over once", async () => {
+    const r = await rig({ settings: { on: true, agent: "claude" }, agents: [claude({ signedIn: false }), codex()], scenario: { turns: [[{ stop: "end_turn" }]] } });
+    await r.note("Tighten the opening");
+    const sent = await r.call("POST", "/api/batches", {});
+    expect(sent.json.agent).toEqual({ handedTo: null, why: "Claude Code is not signed in" });
+    const batch = sent.json.batch.id as string;
+    expect((await r.store.read("batches")).batches.find((b) => b.id === batch)?.undelivered).toMatchObject({ why: "Claude Code is not signed in" });
+    // The desk's state carries the mark, so it can offer Send again.
+    expect((await r.call("GET", "/api/state")).json.batches.batches.find((b: { id: string }) => b.id === batch).undelivered).toMatchObject({ why: "Claude Code is not signed in" });
+
+    // Rushes restarts (a new runner and app on the same project, nothing in memory), and the user has signed in meanwhile.
+    await r.runner.close();
+    const agents = [claude(), codex()];
+    const fake = fakeAgent(r.store, () => agents);
+    const runner = new AgentRunner(r.store, fake.opts);
+    runners.push(runner);
+    await waitFor("the new runner to read agent.json", () => runner.status().on);
+    const app = createApp(r.store, { agent: runner, detect: async () => agents });
+    const post = async (path: string) => {
+      const res = await app.request(path, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+      const text = await res.text();
+      return { status: res.status, json: (text ? JSON.parse(text) : null) as any };
+    };
+
+    const again = await post(`/api/batches/${batch}/resend`);
+    expect(again.status).toBe(200);
+    expect(again.json.agent).toEqual({ handedTo: "claude" });
+    expect(again.json.batch.undelivered).toBeNull();
+    await waitFor("the agent to be handed the batch", () => fake.log().some((m) => m.method === "session/prompt" && JSON.stringify(m).includes(batch)));
+    expect((await r.store.read("batches")).batches.find((b) => b.id === batch)?.undelivered).toBeNull();
+    await waitFor("the run to finish", () => !runner.busy());
+    // Gone once: a second Send again hands nothing over.
+    expect((await post(`/api/batches/${batch}/resend`)).status).toBe(409);
+    expect(fake.log().filter((m) => m.method === "session/prompt")).toHaveLength(1);
+  });
+
+  it("refused again, Send again says why and keeps the mark; a batch never refused, or unknown, is refused before anything is handed over", async () => {
+    const r = await rig({ settings: { on: true, agent: "claude" }, agents: [claude({ signedIn: false }), codex()] });
+    await r.note("Tighten the opening");
+    const batch = (await r.call("POST", "/api/batches", {})).json.batch.id as string;
+    const still = await r.call("POST", `/api/batches/${batch}/resend`);
+    expect(still.status).toBe(200);
+    expect(still.json.agent).toEqual({ handedTo: null, why: "Claude Code is not signed in" });
+    expect((await r.store.read("batches")).batches.find((b) => b.id === batch)?.undelivered).toMatchObject({ why: "Claude Code is not signed in" });
+    expect((await r.call("POST", "/api/batches/b_99/resend")).status).toBe(404);
+    // Copied while Send to AI was off: the user chose to paste it themselves, so it carries no mark.
+    await r.call("POST", "/api/agent/setup", { on: false });
+    await r.note("Copied one");
+    const copied = (await r.call("POST", "/api/batches", {})).json.batch.id as string;
+    expect((await r.store.read("batches")).batches.find((b) => b.id === copied)?.undelivered ?? null).toBeNull();
+    const refused = await r.call("POST", `/api/batches/${copied}/resend`);
+    expect(refused.status).toBe(409);
+    expect(refused.json.error).toBe("batch_delivered");
+    expect(r.log().filter((m) => m.method === "session/prompt")).toEqual([]);
+  });
+});
+
 describe("agent routes", () => {
   it("GET /api/agent gives the status and /api/agent/detect the agents found", async () => {
     const r = await rig({ agents: [claude(), codex({ installed: false, signedIn: false, path: null })] });

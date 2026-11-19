@@ -43,6 +43,10 @@
 .aswitch[aria-checked="true"]::before { transform: translateX(12px); background: var(--on-accent); }
 .aswitch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .awho { margin: 0; color: var(--text-3); font: 12px/14px var(--sans); }
+/* I3, Send again: notes Send filed that never reached the agent. "Needs you", so the todo tokens. */
+.sendagain { display: flex; flex-direction: column; align-items: stretch; gap: 4px; }
+.sendagain-why { margin: 0; padding: 4px 8px; border: 1px solid var(--todo-line); border-radius: var(--r); background: var(--todo-soft); color: var(--text); font-size: var(--t-small); line-height: 1.35; overflow-wrap: anywhere; }
+.nfoot:not(.agentfoot) .sendagain { flex: 1; }
 @media (prefers-reduced-motion: reduce) { .aswitch, .aswitch::before { transition: none; } }
 
 /* ---- the agent menu, opening upward from the row ---- */

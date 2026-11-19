@@ -3,7 +3,7 @@
 import { madeForStale, takeState } from "../../src/core/takes.js";
 import { NOTE_STATE_LABEL, noteState, type NoteState } from "../../src/core/noteState.js";
 import type { PlanPage } from "./lib.js";
-import type { InUse, Lane, LaneStage, Note, Stage, Variant, Video } from "./types.js";
+import type { Batch, InUse, Lane, LaneStage, Note, Stage, Variant, Video } from "./types.js";
 
 export type Workspace = "plan" | "review" | "visuals" | "assets";
 export type ReviewTab = "timeline" | "voice" | "music" | "sfx";
@@ -263,6 +263,18 @@ export function unsentEdits(i: Unsent): number {
 export function unsentCount(i: Unsent): number {
   const waiting = waitingNote(i);
   return i.notes.filter((n) => waiting(n) && n.batch === null).length + unsentEdits(i);
+}
+
+/**
+ * I3, Send again: the batches Send filed whose hand-over was refused while Send to AI was on (not signed in, not
+ * installed), with notes still waiting in them. Those notes read "With your agent" but no agent has them, and Send's
+ * count leaves them out, so the panel offers Send again for them. Oldest first, with how many notes wait in each.
+ */
+export function undeliveredBatches(batches: readonly Batch[], notes: readonly Note[]): { batch: Batch; notes: number }[] {
+  return batches
+    .filter((b) => !!b.undelivered)
+    .map((batch) => ({ batch, notes: notes.filter((n) => n.batch === batch.id && noteState(n) === "sent").length }))
+    .filter((x) => x.notes > 0);
 }
 
 /**

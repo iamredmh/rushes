@@ -420,6 +420,10 @@ export const BatchSchema = fileObject({
   sectionIds: z.array(z.string()).default([]),
   sentAt: z.string(),
   prompt: z.string(),
+  // I3: the hand-over was refused while Send to AI was on and nothing started (not signed in, not installed), so the
+  // notes still wait in this batch for Send again. Kept in the file, not the server's memory, so a restart can't strand
+  // them. Cleared when the batch is handed over again.
+  undelivered: z.object({ at: z.string(), why: z.string() }).nullable().optional(),
 });
 export type Batch = z.infer<typeof BatchSchema>;
 

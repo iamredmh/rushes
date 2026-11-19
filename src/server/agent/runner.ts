@@ -171,8 +171,6 @@ export class AgentRunner {
   /** The user's rules for this project, kept outside it (R10). `rules` is the last read, for the status. */
   private readonly rulesFile: AgentRulesFile;
   private rules: AgentRules = { permissions: "project-edits", always: [], setUp: false, agent: null };
-  /** I3: batches whose hand-over was refused while Send to AI was on (not signed in, not set up…); resend takes each once. */
-  private readonly refused = new Set<string>();
   private ruleReads = 0;
   private rulesApplied = 0;
   /** agent.json reads started, and the newest one applied (a write counts as one). */
@@ -285,23 +283,41 @@ export class AgentRunner {
   }
 
   /**
-   * I3: hands over a batch whose hand-over was refused, once (the copy dialog's Set up, through the setup route). The id
-   * is taken from the refused set under the send lock, so two at once hand it over once. Null when it wasn't refused, or
-   * has gone already.
+   * I3: hands over a batch whose hand-over was refused, once (Send again, or the copy dialog's Set up through the setup
+   * route). The mark is taken off the batch in batches.json under the send lock, so two at once hand it over once, and a
+   * restart in between loses nothing. Null when it wasn't refused, or has gone already.
    */
   async resend(batch: Batch): Promise<SendResult | null> {
-    const r = await this.hand(async () => (this.refused.delete(batch.id) ? batchJob(batch) : null));
+    const r = await this.hand(async () => {
+      const { result: took } = await this.store.update("batches", (f) => {
+        const b = f.batches.find((x) => x.id === batch.id);
+        if (!b?.undelivered) return false;
+        b.undelivered = null;
+        return true;
+      });
+      return took ? batchJob(batch) : null;
+    });
     if (r === null) return null;
     return this.noteRefusal(batch.id, "park" in r ? { handedTo: null, why: r.why } : r);
   }
 
   /**
-   * Records a batch refused while Send to AI really was on (the user's agent, switched on) and nothing started, its notes
-   * still waiting with it (not signed in, not installed), for resend. Not one refused because it only looked on (not set
-   * up, no agent chosen) or was off: the desk offers no Set up for those, and the user may have copied the prompt.
+   * Marks a batch refused while Send to AI really was on (the user's agent, switched on) and nothing started, its notes
+   * still waiting with it (not signed in, not installed), for Send again. Not one refused because it only looked on (not
+   * set up, no agent chosen) or was off: the desk offers no Set up for those, and the user may have copied the prompt.
+   * The mark is written to batches.json, so it outlives this server. A failed write is logged, not thrown: the answer to
+   * the desk still says why the batch didn't go.
    */
-  private noteRefusal(id: string, r: SendResult): SendResult {
-    if (r.handedTo === null && !r.stopped && !r.recalled && r.why !== CLOSING && this.switchedOn(this.settings, this.rules)) this.refused.add(id);
+  private async noteRefusal(id: string, r: SendResult): Promise<SendResult> {
+    if (r.handedTo === null && !r.stopped && !r.recalled && r.why !== CLOSING && this.switchedOn(this.settings, this.rules)) {
+      const at = this.now().toISOString();
+      await this.store
+        .update("batches", (f) => {
+          const b = f.batches.find((x) => x.id === id);
+          if (b) b.undelivered = { at, why: r.why };
+        })
+        .catch((e: unknown) => console.error(`Rushes: couldn't mark batch ${id} for Send again: ${messageOf(e)}`));
+    }
     return r;
   }
 

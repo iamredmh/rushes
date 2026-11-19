@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { clampView, followView, fullView, isFull, panView, viewPct, viewTime, zoomView } from "../../web/src/desk.js";
-import { defaultTake, deskPlace, NOTE_STATE_LABEL, noteState, pctOf, noteTarget, rulerMarks, takeCount, takeGroups, takeKey, takeSections, timecode, unsentCount, unsentEdits, deskView, viewForKey, viewForTab } from "../../web/src/desk.js";
-import type { Lane, Note, Variant } from "../../web/src/types.js";
+import { defaultTake, deskPlace, NOTE_STATE_LABEL, noteState, pctOf, noteTarget, rulerMarks, takeCount, takeGroups, takeKey, takeSections, timecode, undeliveredBatches, unsentCount, unsentEdits, deskView, viewForKey, viewForTab } from "../../web/src/desk.js";
+import type { Batch, Lane, Note, Variant } from "../../web/src/types.js";
 
 describe("deskPlace", () => {
   it("puts the planning pages in Plan", () => {
@@ -299,6 +299,27 @@ describe("unsentCount", () => {
   });
   it("is nothing when nothing waits", () => {
     expect(unsentCount({ ...base, notes: [] })).toBe(0);
+  });
+});
+
+describe("undeliveredBatches (I3, Send again)", () => {
+  const n = (over: Partial<Note>): Note => ({
+    id: "n", stage: "picture", video: "hero", version: "v1", on: null, scope: "point", t: 1, tOut: null, frame: null, text: "x",
+    box: null, pin: null, grab: null, shot: null, marks: [], format: null, status: "todo", reply: "", replies: [], fixT: null, fixVersion: null, batch: null,
+    createdAt: "2026-11-14T10:00:00.000Z", by: "user", ...over,
+  });
+  const b = (id: string, undelivered: Batch["undelivered"] = null): Batch => ({ id, stage: "picture", noteIds: [], sectionIds: [], sentAt: "2026-11-19T14:43:57.217Z", prompt: `Work through ${id}`, undelivered });
+  const refused = { at: "2026-11-19T14:43:57.300Z", why: "Claude Code is not signed in" };
+  it("lists a refused batch with the notes still waiting in it, which Send's count leaves out", () => {
+    const notes = [n({ id: "a", batch: "b_11" }), n({ id: "b", batch: "b_11" }), n({ id: "c", batch: "b_11", status: "done" })];
+    const out = undeliveredBatches([b("b_10"), b("b_11", refused)], notes);
+    expect(out.map((x) => [x.batch.id, x.notes])).toEqual([["b_11", 2]]);
+    expect(unsentCount({ notes, inPlay: new Set(["hero"]), scriptTodo: 0, briefChanged: 0, storyboardChanged: 0 })).toBe(0);
+  });
+  it("leaves out a refused batch whose notes are all done or back in to do, and batches from before the mark existed", () => {
+    const notes = [n({ id: "a", batch: "b_11", status: "done" }), n({ id: "b", batch: null })];
+    const old = { id: "b_9", stage: null, noteIds: [], sectionIds: [], sentAt: "2026-11-19T11:35:33.200Z", prompt: "p" } as Batch;
+    expect(undeliveredBatches([old, b("b_11", refused)], notes)).toEqual([]);
   });
 });
 

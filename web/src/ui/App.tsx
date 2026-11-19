@@ -6,7 +6,7 @@ import {
   filmAfterShelving, inPlay, isPlanPage, labelOfId, latest, lockedFound, neighbourFormat, neighbourVideo, planProgress, planTarget, previousVersion, proxyKey, readyPrompt, storySendPrompt, storyboardPrompt, versionFormats, type PlanPage,
 } from "../lib.js";
 import { onLabel } from "../../../src/core/notes.js";
-import { deskPlace, deskView, noteTarget, takeCount, takeGroups, unsentCount, unsentEdits, viewForKey, type DeskView } from "../desk.js";
+import { deskPlace, deskView, noteTarget, takeCount, takeGroups, undeliveredBatches, unsentCount, unsentEdits, viewForKey, type DeskView } from "../desk.js";
 import type { AgentStatus, Batch, BriefView, FoundCounts, FoundKind, Note, SendHandOver, Stage, StoryboardView, Video } from "../types.js";
 import { useRushes } from "../useRushes.js";
 import { Assets, type FoundRequest } from "./Assets.js";
@@ -522,6 +522,30 @@ export function App() {
     setCopied(false);
     if (batch) void refresh();
   };
+  // I3, Send again: each batch whose hand-over was refused (Send to AI on, agent not signed in…) goes to the agent again,
+  // oldest first. Refused again, the copy dialog opens for that batch with why, as after Send.
+  const sendAgain = async (waiting: Batch[], status: AgentStatus | null = agent) => {
+    setKeysOpen(false);
+    for (const b of waiting) {
+      let handOver: SendHandOver | undefined;
+      try {
+        ({ agent: handOver } = await api.post<{ batch: Batch; agent: SendHandOver }>(`/api/batches/${encodeURIComponent(b.id)}/resend`, {}));
+      } catch (e) {
+        // Gone meanwhile (another tab sent it, or its notes were marked done): nothing to send for this one.
+        if (e instanceof ApiError && (e.code === "batch_delivered" || e.code === "batch_not_waiting")) continue;
+        void refresh();
+        return toast((e as Error).message);
+      }
+      const follow = actOnSend(handOver, status, toast);
+      if (follow.dialog) {
+        setSent({ id: b.id, prompt: b.prompt, why: follow.why });
+        setCopied(false);
+        void refresh();
+        return;
+      }
+    }
+    void refresh();
+  };
   const copy = async () => {
     if (!sent) return;
     try {
@@ -586,6 +610,13 @@ export function App() {
   const inPlayIds = new Set(state.project.videos.filter(inPlay).map((v) => v.id));
   const unsentFrom = { notes: state.notes.notes, inPlay: inPlayIds, scriptTodo: tab("script")?.todo ?? 0, briefChanged: state.brief.changed, storyboardChanged: state.storyboard.changed };
   const unsent = unsentCount(unsentFrom);
+  // I3: notes Send filed that never reached the agent (refused while Send to AI was on): Send again offers them.
+  const undelivered = undeliveredBatches(state.batches.batches, state.notes.notes);
+  const again = undelivered.length === 0 ? null : {
+    count: undelivered.reduce((sum, x) => sum + x.notes, 0),
+    why: undelivered[undelivered.length - 1].batch.undelivered?.why ?? "",
+    onSendAgain: () => void sendAgain(undelivered.map((x) => x.batch)),
+  };
   // Where Send is, for the status bar's Send on a page with no notes panel (Visuals, Assets): Plan when only the plan's
   // edits wait, else Review.
   const planOnly = state.notes.notes.every((n) => n.stage === "script" || n.status !== "todo" || n.batch !== null || (!!n.video && !inPlayIds.has(n.video)));
@@ -639,7 +670,7 @@ export function App() {
       },
     },
     // On its own page Send always carries the brief's or storyboard's line (send()), so it shows there whenever that file exists.
-    send: { count: unsent, always: (stage === "brief" && state.brief.exists) || (stage === "storyboard" && state.storyboard.exists), onSend: () => void send() },
+    send: { count: unsent, always: (stage === "brief" && state.brief.exists) || (stage === "storyboard" && state.storyboard.exists), onSend: () => void send(), again },
     // §28: Set up Send to AI opens the first-Send sheet.
     agent: agent && { status: agent, onSetUp: firstSend.open, menu: agentMenu, onStatus: noteAgent, toast },
     shown: panel.shown,
