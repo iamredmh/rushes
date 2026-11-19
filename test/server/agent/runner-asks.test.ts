@@ -780,7 +780,7 @@ describe("AgentRunner session mode (R14, R15)", () => {
       await r.phase("finished");
       await r.waitFor("the first adapter to exit", () => started.every((c) => c.hasExited));
       await r.runner.send(await r.batch("Two"));
-      await r.waitFor("the second prompt", () => prompts(r.log()).length === 2);
+      await r.waitFor("the second prompt", () => prompts(r.log()).length === 2 && r.log().filter((m) => "promptMode" in m).length === 2);
       expect(r.log().filter((m) => m.loaded), want).toHaveLength(1);
       // The fake logs the session's mode as each prompt arrives: the first after session/new, the second after load.
       expect(r.log().filter((m) => "promptMode" in m).map((m) => m.promptMode), want).toEqual([want, want]);
@@ -1034,7 +1034,7 @@ describe("AgentRunner: the four permission rows (§33)", () => {
     await r.phase("finished");
     await agentRulesFor(r.store).update((f) => void (f.permissions = "auto"));
     await r.runner.send(await r.batch("Two"));
-    await r.waitFor("the second prompt", () => prompts(r.log()).length === 2);
+    await r.waitFor("the second prompt", () => prompts(r.log()).length === 2 && r.log().filter((m) => "promptMode" in m).length === 2);
     expect(r.levels).toEqual(["project-edits", "auto"]);
     expect(r.log().filter((m) => "promptMode" in m).map((m) => m.promptMode)).toEqual(["default", "auto"]);
   });
