@@ -2,7 +2,7 @@
 // the live strip and what the desk does after Send. Every string is the plan's own.
 import { describe, expect, it } from "vitest";
 import {
-  ASK_ARM_MS, ASK_WORDS, BYPASS_WARNING, askArmKey, askChoices, askHeading, askLead, revealParts, revealText, MENU_WORDS, PERMISSION_CHOICES, SHEET_WORDS, afterSend, focusAfterRemove, followSend, planLead, mayQuestion, notSignedInWhy, sendToLabel, sheetDefault, sheetPrimary, sheetRows, whoNext, agentName, canStop, chipShows, chipText, chipTone, footLine, liveLines, stripMode, stripLine, runLabel, menuAgents, menuRowCount, noteAgentBadge, rowText, ruleRows, whoLine, answerPlaceholder, badgeText, fixGo, noteLite, noteThread, replyBoxShows, threadParts, newCutFor, stepCuts, cutAction, unseenCut,
+  ASK_ARM_MS, ASK_WORDS, BYPASS_WARNING, askArmKey, askChoices, askHeading, askLead, revealParts, revealText, MENU_WORDS, PERMISSION_CHOICES, setDeskPlatform, signInWord, SHEET_WORDS, afterSend, focusAfterRemove, followSend, planLead, mayQuestion, notSignedInWhy, sendToLabel, sheetDefault, sheetPrimary, sheetRows, whoNext, agentName, canStop, chipShows, chipText, chipTone, footLine, liveLines, stripMode, stripLine, runLabel, menuAgents, menuRowCount, noteAgentBadge, rowText, ruleRows, whoLine, answerPlaceholder, badgeText, fixGo, noteLite, noteThread, replyBoxShows, threadParts, newCutFor, stepCuts, cutAction, unseenCut,
   type NoteLite,
 } from "../../web/src/agent.js";
 import type { AgentInfo, AgentStatus, Note, PendingAsk } from "../../web/src/types.js";
@@ -363,17 +363,37 @@ describe("the first-Send sheet (task 4)", () => {
     expect(mayQuestion("claude")).toBe("What may Claude Code do without asking?");
     expect(mayQuestion("codex")).toBe("What may Codex do without asking?");
     expect(sendToLabel("claude")).toBe("Send to Claude Code");
+    setDeskPlatform("darwin");
     expect(notSignedInWhy("claude")).toBe("Claude Code is not signed in. Choose Sign in in Terminal, then try again.");
+    // §34: the button's words follow the OS the server says it runs on.
+    setDeskPlatform("win32");
+    expect(notSignedInWhy("claude")).toBe("Claude Code is not signed in. Choose Sign in in Command Prompt, then try again.");
+    expect(signInWord()).toBe("Sign in in Command Prompt");
+    setDeskPlatform("linux");
+    expect(signInWord()).toBe("Sign in in a terminal");
+    setDeskPlatform("darwin");
   });
 
   it("sheetRows: every agent detection knows, in its order, by state, then the copy row", () => {
     const rows = sheetRows([info("claude", true, false), info("codex", false, false)]);
     expect(rows).toEqual([
       { pick: "claude", name: "Claude Code", state: "signedOut", note: "Not signed in" },
-      { pick: "codex", name: "Codex", state: "missing", note: "Not installed" },
+      { pick: "codex", name: "Codex", state: "missing", note: "Not installed", help: { kind: "install", command: "npm install -g @openai/codex", url: "https://developers.openai.com/codex/cli" } },
       { pick: "copy", name: "Copy a prompt, as now", state: "copy", note: null },
     ]);
     expect(sheetRows([info("claude", true, true)])[0]).toEqual({ pick: "claude", name: "Claude Code", state: "ready", note: "Signed in" });
+  });
+
+  it("§34 sheetRows: an outdated agent can't be picked and shows its update command; a downloading connector says so", () => {
+    const old = { ...info("claude", true, true), version: "1.0.44", outdated: true };
+    const [row] = sheetRows([old]);
+    expect(row).toEqual({ pick: "claude", name: "Claude Code", state: "outdated", note: "1.0.44 is too old: update it", help: { kind: "update", command: "claude update" } });
+    expect(whoNext("claude", [row])).toBe("missing");
+    expect(sheetDefault([row], "claude")).toBe("copy");
+    const fetching = { ...info("codex", true, true), connector: { state: "fetching" as const } };
+    expect(sheetRows([fetching])[0]).toMatchObject({ state: "ready", note: "Getting Codex ready…" });
+    expect(sheetRows([{ ...fetching, connector: { state: "ready" as const } }])[0].note).toBe("Signed in");
+    expect(menuAgents([fetching], { agent: "codex" } as AgentStatus)[0]).toMatchObject({ note: "Getting Codex ready…" });
   });
 
   it("sheetRows: detection not back yet, or failed: the copy row alone", () => {

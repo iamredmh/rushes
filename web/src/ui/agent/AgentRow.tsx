@@ -3,7 +3,7 @@
 // Every change goes to the server, and the status it answers is folded in at once (the SSE event follows).
 import type { MutableRef } from "preact/hooks";
 import { useEffect, useRef, useState } from "preact/hooks";
-import { focusAfterRemove, menuAgents, menuRowCount, rowReady, rowText } from "../../agent.js";
+import { focusAfterRemove, menuAgents, menuRowCount, rowReady, rowText, setDeskPlatform } from "../../agent.js";
 import { api, ApiError } from "../../api.js";
 import type { AgentId, AgentInfo, AgentRules, AgentStatus, AlwaysRule } from "../../types.js";
 import { Icon } from "../Icon.js";
@@ -23,7 +23,7 @@ export interface AgentPanel {
 }
 
 /** A refusal the menu shows under the agent's row: the agent isn't signed in (or installed) now. */
-const isRefusal = (e: unknown): e is ApiError => e instanceof ApiError && e.status === 409 && (e.code === "agent_not_signed_in" || e.code === "agent_not_installed");
+const isRefusal = (e: unknown): e is ApiError => e instanceof ApiError && e.status === 409 && (e.code === "agent_not_signed_in" || e.code === "agent_not_installed" || e.code === "agent_outdated");
 
 export function AgentRow({ status, onSetUp, menu: opener, onStatus, toast }: AgentPanel) {
   const [detected, setDetected] = useState<AgentInfo[] | null>(null);
@@ -33,8 +33,11 @@ export function AgentRow({ status, onSetUp, menu: opener, onStatus, toast }: Age
 
   const detect = (fresh: boolean) =>
     void api
-      .get<{ agents: AgentInfo[] }>(`/api/agent/detect${fresh ? "?fresh=1" : ""}`)
-      .then((r) => setDetected(r.agents))
+      .get<{ agents: AgentInfo[]; platform?: string }>(`/api/agent/detect${fresh ? "?fresh=1" : ""}`)
+      .then((r) => {
+        setDeskPlatform(r.platform);
+        setDetected(r.agents);
+      })
       .catch(() => undefined);
   // Known before the menu first opens, so its rows are there to take focus; checked again (fresh) each time it opens,
   // so an agent just signed in to says so.
@@ -81,7 +84,17 @@ export function AgentRow({ status, onSetUp, menu: opener, onStatus, toast }: Age
     if (agent === status.agent && status.on) return menu.close(true);
     if (await setup({ on: true, agent }, agent)) menu.close(true);
   };
-  const signIn = (agent: AgentId) => void api.post("/api/agent/sign-in", { agent }).catch((e: Error) => toast(e.message));
+  // §34: where no terminal can be opened (Linux without one), the command is copied and the toast says to run it.
+  const signIn = (agent: AgentId) =>
+    void api.post("/api/agent/sign-in", { agent }).catch((e: Error) => {
+      const command = detected?.find((a) => a.id === agent)?.signIn;
+      if (e instanceof ApiError && e.code === "no_terminal" && command) {
+        void navigator.clipboard.writeText(command).then(
+          () => toast(`Copied \`${command}\`. Run it in a terminal, then try again.`),
+          () => toast(`Run \`${command}\` in a terminal, then try again.`),
+        );
+      } else toast(e.message);
+    });
   const fresh = async () => {
     menu.close(true);
     await call(() => api.post("/api/agent/fresh"));

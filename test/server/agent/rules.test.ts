@@ -44,8 +44,8 @@ describe("the agent's rules file (R10)", () => {
       r.always.push({ kind: "execute", command: "npm run" });
     });
     expect(JSON.parse(await readFile(f.path, "utf8"))).toEqual({ permissions: "ask-all", always: [{ kind: "execute", command: "npm run" }], setUp: false, agent: null });
-    expect((await stat(f.path)).mode & 0o777).toBe(0o600);
-    expect((await stat(join(config, "rushes", "agent-rules"))).mode & 0o777).toBe(0o700);
+    if (process.platform !== "win32") expect((await stat(f.path)).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect((await stat(join(config, "rushes", "agent-rules"))).mode & 0o777).toBe(0o700);
     expect(await f.read()).toEqual({ permissions: "ask-all", always: [{ kind: "execute", command: "npm run" }], setUp: false, agent: null });
   });
 

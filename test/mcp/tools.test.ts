@@ -4,7 +4,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { tmpProject } from "../helpers/tmp.js";
 import { startServer } from "../../src/server/start.js";
 import { createMcpServer } from "../../src/mcp/tools.js";
@@ -342,9 +342,9 @@ describe("project root for stdio", () => {
     expect(() => resolveProjectRoot("/")).toThrow(ASK);
     expect(() => resolveProjectRoot(homedir())).toThrow(ASK);
     expect(() => resolveProjectRoot(join(homedir(), "Videos"), "..")).toThrow(ASK);
-    expect(resolveProjectRoot("/", "/Users/you/Videos/launch-film")).toBe("/Users/you/Videos/launch-film");
-    expect(resolveProjectRoot("/work/film")).toBe("/work/film");
-    expect(resolveProjectRoot("/work", "film")).toBe("/work/film");
+    expect(resolveProjectRoot("/", "/Users/you/Videos/launch-film")).toBe(resolve("/Users/you/Videos/launch-film"));
+    expect(resolveProjectRoot("/work/film")).toBe(resolve("/work/film"));
+    expect(resolveProjectRoot("/work", "film")).toBe(resolve("/work/film"));
   });
 
   it("reads a leading ~ as the home folder, not as a folder called ~ in the working directory", () => {
@@ -357,8 +357,8 @@ describe("project root for stdio", () => {
     expect(resolveDoctorRoot("/work", "~/Videos/launch-film")).toBe(join(home, "Videos", "launch-film"));
     // Only a leading "~" or "~/" means home. A folder that merely starts with a tilde, and another
     // user's "~name", are ordinary relative names.
-    expect(resolveProjectRoot("/work", "~film")).toBe("/work/~film");
-    expect(resolveProjectRoot("/work", "film/~/x")).toBe("/work/film/~/x");
+    expect(resolveProjectRoot("/work", "~film")).toBe(resolve("/work/~film"));
+    expect(resolveProjectRoot("/work", "film/~/x")).toBe(resolve("/work/film/~/x"));
   });
 
   it("a tool started in / returns that error and never spawns a server", async () => {

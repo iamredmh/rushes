@@ -2,6 +2,7 @@
 // desk does after Send. Pure: the words come from the agent's status (GET /api/agent and the SSE `agent` event)
 // and the notes the desk already holds, so every tab says the same thing.
 import { alwaysLabel } from "../../src/core/alwaysLabel.js";
+import { AGENT_HELP, signInLabel } from "../../src/core/agentHelp.js";
 import { clock } from "../../src/core/logText.js";
 import { needsYou, noteState } from "../../src/core/noteState.js";
 import type { JumpTarget } from "./changelog.js";
@@ -147,6 +148,31 @@ export const rowText = (s: AgentStatus): string => (rowReady(s) ? `Send to AI ·
 /** Under Send: the who-line while Send to AI is on, what Send does while it is off. */
 export const footLine = (s: AgentStatus): string => (s.on ? whoLine(s) : "Copies a prompt for your own chat");
 
+/**
+ * §34: the OS the desk runs on, which names the sign-in button. A first guess from the browser (the desk is local, so it
+ * is the same computer), then what the server says in its detect answer (setDeskPlatform).
+ */
+let deskPlatform: string = guessPlatform();
+function guessPlatform(): string {
+  const p = typeof navigator === "undefined" ? "" : `${navigator.platform} ${navigator.userAgent}`;
+  return /Win/i.test(p) ? "win32" : /Mac/i.test(p) ? "darwin" : /Linux|X11|CrOS/i.test(p) ? "linux" : "darwin";
+}
+export function setDeskPlatform(p: unknown): void {
+  if (typeof p === "string" && p) deskPlatform = p;
+}
+/** "Sign in in Terminal" on a Mac, "Sign in in Command Prompt" on Windows, "Sign in in a terminal" on Linux (§34). */
+export const signInWord = (): string => signInLabel(deskPlatform);
+
+/** §34: what the desk shows for an agent that can't be used yet, with a command to copy and, to install, a link. */
+export interface AgentHelp { kind: "install" | "update" | "signIn"; command: string; url?: string }
+export const helpFor = (a: Pick<AgentInfo, "id" | "installed" | "outdated" | "signIn">): AgentHelp | null => {
+  const h = AGENT_HELP[a.id];
+  if (!a.installed) return { kind: "install", command: h.install, url: h.url };
+  if (a.outdated) return { kind: "update", command: h.update };
+  return null;
+};
+export const HELP_WORDS = { copy: "Copy", copied: "Copied", setup: "Setup guide", inTerminal: "Run this in a terminal, then try again:" } as const;
+
 /** The agent menu's words, as the plan gives them. */
 export const MENU_WORDS = {
   sendTo: "Send notes to",
@@ -186,11 +212,14 @@ const WHO_MAY: Record<AgentRules["permissions"], (name: string) => string> = {
   bypass: () => "Bypass: nothing asks, nothing is checked",
 };
 
-export interface MenuAgent { id: AgentId; name: string; signedIn: boolean; current: boolean }
+export interface MenuAgent { id: AgentId; name: string; signedIn: boolean; current: boolean; /** §34: "Getting <agent> ready…" while its connector downloads. */ note?: string }
 
 /** "Send notes to": each agent detection found installed, in its order, the one Send to AI uses ticked. */
 export function menuAgents(detected: readonly AgentInfo[] | null, s: AgentStatus): MenuAgent[] {
-  return (detected ?? []).filter((a) => a.installed).map((a) => ({ id: a.id, name: a.name, signedIn: a.signedIn, current: a.id === s.agent }));
+  return (detected ?? []).filter((a) => a.installed).map((a) => {
+    const note = connectorNote(a);
+    return { id: a.id, name: a.name, signedIn: a.signedIn, current: a.id === s.agent, ...(note ? { note } : {}) };
+  });
 }
 
 /** The Always rules, each by its label, with the rule itself for Remove (DELETE names a rule by kind and command). */
@@ -237,13 +266,29 @@ export const useLabel = (id: AgentId): string => `Use ${agentName(id)}`;
 
 /** A row of step 1: an agent, or copying a prompt as now. */
 export type SheetPick = AgentId | "copy";
-export interface SheetRow { pick: SheetPick; name: string; state: "ready" | "signedOut" | "missing" | "copy"; note: string | null }
+export interface SheetRow {
+  pick: SheetPick;
+  name: string;
+  state: "ready" | "signedOut" | "missing" | "outdated" | "copy";
+  note: string | null;
+  /** §34: install or update help, for a missing or outdated agent. */
+  help?: AgentHelp;
+}
+
+/** §34: an agent's connector still downloading (or failed), for the note under its row. Null when ready or not known. */
+export function connectorNote(a: AgentInfo): string | null {
+  const c = a.connector;
+  if (!c || c.state === "ready" || c.state === "missing") return null;
+  return c.state === "fetching" ? `Getting ${a.name} ready…` : `${a.name}'s connector didn't download: Send tries again`;
+}
 
 /** Step 1's rows: every agent detection knows, in its order, by state (one not installed can't be picked), then the copy row. */
 export function sheetRows(detected: readonly AgentInfo[] | null): SheetRow[] {
   const agents = (detected ?? []).map((a): SheetRow => {
-    if (!a.installed) return { pick: a.id, name: a.name, state: "missing", note: SHEET_WORDS.notInstalled };
-    return a.signedIn ? { pick: a.id, name: a.name, state: "ready", note: MENU_WORDS.signedIn } : { pick: a.id, name: a.name, state: "signedOut", note: MENU_WORDS.notSignedIn };
+    if (!a.installed) return { pick: a.id, name: a.name, state: "missing", note: SHEET_WORDS.notInstalled, help: helpFor(a)! };
+    if (a.outdated) return { pick: a.id, name: a.name, state: "outdated", note: `${a.version ?? "This version"} is too old: update it`, help: helpFor(a)! };
+    if (!a.signedIn) return { pick: a.id, name: a.name, state: "signedOut", note: MENU_WORDS.notSignedIn };
+    return { pick: a.id, name: a.name, state: "ready", note: connectorNote(a) ?? MENU_WORDS.signedIn };
   });
   return [...agents, { pick: "copy", name: SHEET_WORDS.copy, state: "copy", note: null }];
 }
@@ -258,11 +303,12 @@ export function sheetDefault(rows: readonly SheetRow[], current: AgentId | null)
 export function whoNext(pick: SheetPick, rows: readonly SheetRow[]): "copy" | "may" | "signedOut" | "missing" {
   if (pick === "copy") return "copy";
   const state = rows.find((r) => r.pick === pick)?.state;
+  // §34: an outdated agent can't be picked, as one not installed can't.
   return state === "ready" ? "may" : state === "signedOut" ? "signedOut" : "missing";
 }
 
 /** Under an agent's row when step 1 goes on with it not signed in: the server's own words for that refusal. */
-export const notSignedInWhy = (id: AgentId): string => `${agentName(id)} is not signed in. Choose ${MENU_WORDS.signIn}, then try again.`;
+export const notSignedInWhy = (id: AgentId): string => `${agentName(id)} is not signed in. Choose ${signInWord()}, then try again.`;
 
 /** Where the sheet is: step 1 with its row picked, or step 2 for an agent with its choice. */
 export type Sheet = { step: "who"; pick: SheetPick } | { step: "may"; agent: AgentId; permissions: AgentRules["permissions"] };

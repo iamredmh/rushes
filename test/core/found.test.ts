@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Dirent } from "node:fs";
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import {
   DEFAULT_LIMITS,
   commonWordsOf,
@@ -269,7 +269,7 @@ describe("scanFolder (§20.2)", () => {
     for (const f of files) {
       expect(f.path.startsWith("..")).toBe(false);
       expect(f.path.startsWith("/")).toBe(false);
-      expect(f.abs.startsWith(realRoot + "/")).toBe(true);
+      expect(f.abs.startsWith(realRoot + sep)).toBe(true);
       expect(f.path).not.toContain("secret");
     }
   });
@@ -428,7 +428,7 @@ describe("scanFolder containment, proved one guard at a time", () => {
   it("skips a file that turns into a symlink between the listing and the lstat", async () => {
     await inTree(["real.wav", "swap.wav", "elsewhere/target.wav"], async (root, tmp) => {
       await symlink(join(root, "real.wav"), join(tmp, "swapped-link"));
-      spy.lstatLies = [["/swap.wav", join(tmp, "swapped-link")]];
+      spy.lstatLies = [[`${sep}swap.wav`, join(tmp, "swapped-link")]];
       const r = await scanFolder(root);
       const paths = r.files.map((f) => f.path);
       expect(paths).not.toContain("swap.wav");
@@ -440,7 +440,7 @@ describe("scanFolder containment, proved one guard at a time", () => {
   it("skips a real folder whose real path leads outside the root", async () => {
     await inTree(["escape/inside.wav", "fine/ok.wav"], async (root, tmp) => {
       await touch(join(tmp, "outside"), "inside.wav");
-      spy.realpathLies = [["/escape", join(tmp, "outside")]];
+      spy.realpathLies = [[`${sep}escape`, join(tmp, "outside")]];
       const r = await scanFolder(root);
       expect(r.files.map((f) => f.path)).toEqual(["fine/ok.wav"]);
     });
@@ -448,7 +448,7 @@ describe("scanFolder containment, proved one guard at a time", () => {
 
   it("does not take a sibling folder that merely starts with the root's name as inside it", async () => {
     await inTree(["escape/inside.wav", "fine/ok.wav"], async (root) => {
-      spy.realpathLies = [["/escape", `${root}-sibling`]];
+      spy.realpathLies = [[`${sep}escape`, `${root}-sibling`]];
       const r = await scanFolder(root);
       expect(r.files.map((f) => f.path)).toEqual(["fine/ok.wav"]);
     });

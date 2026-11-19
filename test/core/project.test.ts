@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
 import { addFile, addFormat, addVariant, addVersion, ensureProjectId, ensureProjectIdOnce, latestVersion, lockPicture, resolveCut, resolveVideo, setShots, shotAt } from "../../src/core/project.js";
 import { fromManifestPath, toManifestPath } from "../../src/core/paths.js";
@@ -98,10 +98,11 @@ describe("manifest paths", () => {
   });
   it("keeps files outside the project absolute", () => {
     expect(toManifestPath(root, "/Volumes/Extreme SSD/out.mov")).toBe("/Volumes/Extreme SSD/out.mov");
-    expect(toManifestPath(root, "../elsewhere/a.mp4")).toBe("/Users/you/elsewhere/a.mp4");
+    // resolve: on Windows a POSIX-style absolute path is on the current drive (D:\Users\...).
+    expect(toManifestPath(root, "../elsewhere/a.mp4")).toBe(resolve("/Users/you/elsewhere/a.mp4"));
   });
   it("round-trips back to an absolute path", () => {
-    expect(fromManifestPath(root, "renders/hero v3.mp4")).toBe(join(root, "renders", "hero v3.mp4"));
+    expect(fromManifestPath(root, "renders/hero v3.mp4")).toBe(resolve(root, "renders", "hero v3.mp4"));
     expect(fromManifestPath(root, "/Volumes/x.mov")).toBe("/Volumes/x.mov");
   });
 });

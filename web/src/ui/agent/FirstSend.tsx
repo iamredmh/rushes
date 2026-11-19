@@ -2,8 +2,9 @@
 // "Set up Send to AI" in the panel's foot, and Set up in the copy dialog, open it too. Two small steps, each a question
 // (ruling P2-R3): who gets the notes (an agent, or copying a prompt as now, which skips step 2), then what that agent may
 // do without asking. Confirming posts setup, then the desk's own Send runs when notes are waiting.
-import { useLayoutEffect, useRef, useState } from "preact/hooks";
-import { BYPASS_WARNING, MENU_WORDS, PERMISSION_CHOICES, SHEET_WORDS, mayQuestion, notSignedInWhy, sheetDefault, sheetPrimary, sheetRows, whoNext, type SendFollow, type Sheet, type SheetPick } from "../../agent.js";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { HelpLine } from "./HelpLine.js";
+import { BYPASS_WARNING, HELP_WORDS, PERMISSION_CHOICES, setDeskPlatform, signInWord, SHEET_WORDS, mayQuestion, notSignedInWhy, sheetDefault, sheetPrimary, sheetRows, whoNext, type SendFollow, type Sheet, type SheetPick } from "../../agent.js";
 import { api, ApiError } from "../../api.js";
 import type { AgentId, AgentInfo, AgentRules, AgentStatus, SendHandOver } from "../../types.js";
 import { actOnSend, askNotificationsOnce } from "./sendFollow.js";
@@ -31,16 +32,24 @@ export interface FirstSendProps {
 }
 
 /** The server refusing an agent that isn't signed in or installed now (409). */
-const isRefusal = (e: unknown): e is ApiError => e instanceof ApiError && e.status === 409 && (e.code === "agent_not_signed_in" || e.code === "agent_not_installed");
+const isRefusal = (e: unknown): e is ApiError => e instanceof ApiError && e.status === 409 && (e.code === "agent_not_signed_in" || e.code === "agent_not_installed" || e.code === "agent_outdated");
 
 const detect = (fresh: boolean): Promise<AgentInfo[]> =>
-  api.get<{ agents: AgentInfo[] }>(`/api/agent/detect${fresh ? "?fresh=1" : ""}`).then((r) => r.agents, () => []);
+  api.get<{ agents: AgentInfo[]; platform?: string }>(`/api/agent/detect${fresh ? "?fresh=1" : ""}`).then(
+    (r) => {
+      setDeskPlatform(r.platform);
+      return r.agents;
+    },
+    () => [],
+  );
 
 export function FirstSend({ status, waiting, batch, onStatus, toast, onClose, onSend }: FirstSendProps) {
   const [detected, setDetected] = useState<AgentInfo[] | null>(null);
   // Step 1 once detection answers (the rows to pick from are known then).
   const [sheet, setSheet] = useState<Sheet | null>(null);
   const [refused, setRefused] = useState<{ agent: AgentId; message: string } | null>(null);
+  // §34: the sign-in that couldn't open a terminal here: its command shows under the row, to copy.
+  const [noTerminal, setNoTerminal] = useState<AgentId | null>(null);
   // One confirm at a time: while one is on its way the buttons are off and Escape waits (busy is read in handlers,
   // pending drawn). Once the sheet has closed, nothing a late answer brings sends (closed).
   const busy = useRef(false);
@@ -135,7 +144,18 @@ export function FirstSend({ status, waiting, batch, onStatus, toast, onClose, on
     setRefused(null);
     setSheet({ step: "who", pick: p });
   };
-  const signIn = (agent: AgentId) => void api.post("/api/agent/sign-in", { agent }).catch((e: Error) => toast(e.message));
+  const signIn = (agent: AgentId) =>
+    void api.post("/api/agent/sign-in", { agent }).catch((e: Error) => {
+      if (e instanceof ApiError && e.code === "no_terminal") setNoTerminal(agent);
+      else toast(e.message);
+    });
+  // §34: while a connector downloads, the sheet looks again every 2 s, so "Getting ready…" clears when it's done.
+  const fetching = (detected ?? []).some((a) => a.connector?.state === "fetching");
+  useEffect(() => {
+    if (!fetching) return;
+    const t = setInterval(() => void detect(false).then(setDetected), 2000);
+    return () => clearInterval(t);
+  }, [fetching]);
   // Enter on a row goes on, as the button does (a radio has no Enter of its own).
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.key === "Enter" && e.target instanceof HTMLInputElement && e.target.type === "radio") {
@@ -151,17 +171,21 @@ export function FirstSend({ status, waiting, batch, onStatus, toast, onClose, on
         <div class="fsopts" role="radiogroup" aria-labelledby="fs-title">
           {rows.map((r) => (
             <div class="fsrow" key={r.pick}>
-              <label class={`fsopt${sheet.pick === r.pick ? " on" : ""}${r.state === "missing" ? " off" : ""}${r.state === "signedOut" ? " signin" : ""}`}>
-                <input type="radio" name="fs-who" value={r.pick} checked={sheet.pick === r.pick} disabled={r.state === "missing"} onChange={() => pick(r.pick)} />
+              <label class={`fsopt${sheet.pick === r.pick ? " on" : ""}${r.state === "missing" || r.state === "outdated" ? " off" : ""}${r.state === "signedOut" ? " signin" : ""}`}>
+                <input type="radio" name="fs-who" value={r.pick} checked={sheet.pick === r.pick} disabled={r.state === "missing" || r.state === "outdated"} onChange={() => pick(r.pick)} />
                 <span class="fstext">
                   <b>{r.name}</b>
-                  {r.note && <small class={r.state === "signedOut" ? "todo" : undefined}>{r.note}</small>}
+                  {r.note && <small class={r.state === "signedOut" || r.state === "outdated" ? "todo" : undefined}>{r.note}</small>}
                 </span>
               </label>
               {r.state === "signedOut" && (
                 <button type="button" class="btn ghost fssign" onClick={() => signIn(r.pick as AgentId)}>
-                  {MENU_WORDS.signIn}
+                  {signInWord()}
                 </button>
+              )}
+              {r.help && <HelpLine help={r.help} />}
+              {r.state === "signedOut" && noTerminal === r.pick && (
+                <HelpLine help={{ kind: "signIn", command: (detected ?? []).find((a) => a.id === r.pick)?.signIn ?? "" }} lead={HELP_WORDS.inTerminal} />
               )}
               {refused?.agent === r.pick && (
                 <p class="fserr" role="alert">

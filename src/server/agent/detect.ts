@@ -59,6 +59,8 @@ export interface AgentInfo {
   version?: string | null;
   /** §34: installed, but older than the tested minimum: Send refuses it until it's updated. */
   outdated?: boolean;
+  /** §34: the detect route adds whether its connector is downloaded (connectors.ts). */
+  connector?: { state: "ready" | "fetching" | "missing" | "failed"; error?: string };
 }
 
 const TIMEOUT_MS = 5000;

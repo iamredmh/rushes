@@ -21,7 +21,7 @@ import { mixInputs } from "../../src/server/loudness.js";
 import type { Picks, Project } from "../../src/core/schema.js";
 import { tmpProject } from "../helpers/tmp.js";
 import { mkdir, writeFile } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { join, relative, sep } from "node:path";
 import {
   filmPicks, heardVoice, onOptionGroups, takeInUse, sectionLabel, voiceNoteRows, voiceOnLabel, voiceRounds,
 } from "../../web/src/lib.js";
@@ -976,7 +976,7 @@ describe("the VO pick rule: server mix and dashboard agree (parity)", () => {
     const project: Project = { schema: 1, rev: 0, name: "p", fps: 30, videos: [], files: [], lanes, autoProxy: false };
     for (const c of cases) {
       const picks: Picks = { schema: 1, rev: 0, sections: c.sections, lanes: c.lanes, levels: {}, videos: {} };
-      const server = mixInputs(project, picks, ["voice"], root).map((i) => [relative(root, i.file), i.offset]);
+      const server = mixInputs(project, picks, ["voice"], root).map((i) => [relative(root, i.file).split(sep).join("/"), i.offset]);
       // The dashboard's VO, as Mix plays it: the newest round's pick, walking back past rounds with
       // none -- never the assembled read from takes, which Rushes no longer mixes.
       const variant = heardVoice(voiceRounds(lanes, c.lanes));

@@ -191,9 +191,12 @@ describe("AcpConnection", () => {
     c.kill();
     const e = await exit;
     const took = Date.now() - t0;
-    expect(took).toBeGreaterThanOrEqual(1800);
+    // §34: Windows has no SIGTERM to ignore: taskkill /T /F ends the tree at once, with exit code 1.
+    if (process.platform !== "win32") {
+      expect(took).toBeGreaterThanOrEqual(1800);
+      expect(e.code).toBeNull(); // killed by a signal
+    }
     expect(took).toBeLessThan(6000);
-    expect(e.code).toBeNull(); // killed by a signal
     await new Promise((r) => setTimeout(r, 200));
     expect(exits).toBe(1);
   });

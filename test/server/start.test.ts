@@ -170,7 +170,8 @@ describe("startServer", () => {
     await expect(access(lockPath(root))).resolves.toBeUndefined();
   });
 
-  it("treats EPERM from process.kill as alive", async () => {
+  // pid 1 is init on macOS and Linux (EPERM); Windows has no pid 1, so there is nothing to test there.
+  it.skipIf(process.platform === "win32")("treats EPERM from process.kill as alive", async () => {
     const { root } = await tmpProject();
     await writeFile(lockPath(root), JSON.stringify({ port: 4999, pid: 1, startedAt: "x" }), "utf8");
     expect(await readLock(root)).not.toBeNull();

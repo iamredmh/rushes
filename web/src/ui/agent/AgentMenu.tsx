@@ -2,7 +2,7 @@
 // Send sends to (and whether it is signed in), a fresh conversation when there is one to leave, what the agent may do
 // without asking, the Always rules, and what switching off does. The row (AgentRow) talks to the server; this draws.
 import { Fragment } from "preact";
-import { BYPASS_WARNING, MENU_WORDS, NEXT_SEND_LINE, PERMISSION_CHOICES, ruleRows, type MenuAgent } from "../../agent.js";
+import { BYPASS_WARNING, MENU_WORDS, signInWord, NEXT_SEND_LINE, PERMISSION_CHOICES, ruleRows, type MenuAgent } from "../../agent.js";
 import type { AgentId, AgentRules, AgentStatus, AlwaysRule } from "../../types.js";
 import { Icon } from "../Icon.js";
 import type { Menu } from "../desk/useMenu.js";
@@ -37,11 +37,11 @@ export function AgentMenu({ menu, status, agents, refused, onPick, onSignIn, onF
             <button ref={menu.row(i++)} type="button" role="menuitemradio" class="mi" tabIndex={-1} aria-checked={a.current} onClick={() => onPick(a.id)}>
               <Tick on={a.current} />
               <span class="nm">{a.name}</span>
-              <span class={`c fn${a.signedIn ? "" : " todo"}`}>{a.signedIn ? MENU_WORDS.signedIn : `${MENU_WORDS.notSignedIn} ·`}</span>
+              <span class={`c fn${a.signedIn ? "" : " todo"}`}>{a.signedIn ? (a.note ?? MENU_WORDS.signedIn) : `${MENU_WORDS.notSignedIn} ·`}</span>
             </button>
             {!a.signedIn && (
               <button ref={menu.row(i++)} type="button" role="menuitem" class="mi alink" tabIndex={-1} onClick={() => onSignIn(a.id)}>
-                {MENU_WORDS.signIn}
+                {signInWord()}
               </button>
             )}
           </div>

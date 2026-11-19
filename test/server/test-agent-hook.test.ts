@@ -76,7 +76,8 @@ describe("RUSHES_TEST_AGENT", () => {
     expect(sent.json.agent.handedTo).toBe("claude");
 
     // It really was the fake that took it, started in the project folder, and its prompt ran in the ask mode.
-    await waitFor("the fake agent's prompt", () => p.readLog().find((m) => m.method === "session/prompt"));
+    // The fake logs the prompt's mode a moment after the prompt itself: wait for the line read below.
+    await waitFor("the fake agent's prompt", () => p.readLog().find((m) => "promptMode" in m));
     expect(p.readLog().find((m) => m.method === "session/new")?.params.cwd).toBe(s.store.root);
     expect(p.readLog().find((m) => "promptMode" in m)?.promptMode).toBe("default");
     await waitFor("the run to finish", async () => ["finished", "question"].includes((await call(s, "GET", "/api/agent")).json.status.phase));

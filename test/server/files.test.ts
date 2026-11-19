@@ -67,7 +67,7 @@ describe("contentDisposition", () => {
 
 describe("inside", () => {
   it("keeps paths inside the folder and refuses escapes", () => {
-    expect(inside("/web", "assets/a.js")).toBe("/web/assets/a.js");
+    expect(inside("/web", "assets/a.js")).toBe(join("/web", "assets", "a.js"));
     expect(inside("/web", "../etc/passwd")).toBeNull();
     expect(inside("/web", "assets/../../etc/passwd")).toBeNull();
   });

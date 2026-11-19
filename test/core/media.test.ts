@@ -285,3 +285,12 @@ describe("VIDEO_FORMATS: the containers a render or a cut may be read as (final 
     for (const f of ["concat", "hls", "gif", "image2", "png_pipe", "tee", "data", "lavfi"]) expect(list).not.toContain(f);
   });
 });
+
+describe("§34: ffprobe's refusal on every OS", () => {
+  it("reads the container with the pointer as macOS and Linux print it, and as Windows does (no 0x)", async () => {
+    const { refusedContainer } = await import("../../src/core/media.js");
+    expect(refusedContainer("[concat @ 0x7f8b1c004000] Format not on whitelist 'mov,mp4'")).toBe("concat");
+    expect(refusedContainer("[png_pipe @ 0000020D3A5B6C80] Format not on whitelist 'mov,mp4'\r\n")).toBe("png_pipe");
+    expect(refusedContainer("x.mp4: Invalid data found when processing input")).toBeNull();
+  });
+});

@@ -219,8 +219,10 @@ export async function sendFile(absPath: string, rangeHeader: string | undefined,
 
 /** Resolve `rel` inside `dir`, or null if it would escape it. */
 export function inside(dir: string, rel: string): string | null {
-  const full = normalize(join(dir, rel));
-  return full === dir || full.startsWith(dir.endsWith(sep) ? dir : dir + sep) ? full : null;
+  // §34: the folder normalised too, so a Windows folder written with forward slashes still compares like for like.
+  const base = normalize(dir);
+  const full = normalize(join(base, rel));
+  return full === base || full.startsWith(base.endsWith(sep) ? base : base + sep) ? full : null;
 }
 
 /**

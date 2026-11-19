@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
+import { signInLabel } from "../../src/core/agentHelp.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -173,7 +174,7 @@ describe("the user's consent lives in their own rules file, never in the project
     expect(set.json.status).toMatchObject({ on: true, agent: "claude", asked: true });
     const file = agentRulesFor(r.store).path;
     expect(JSON.parse(readFileSync(file, "utf8"))).toMatchObject({ setUp: true, agent: "claude" });
-    expect(statSync(file).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect(statSync(file).mode & 0o777).toBe(0o600);
     await r.note("Then the end card");
     const again = await r.call("POST", "/api/batches", {});
     expect(again.json.agent).toEqual({ handedTo: "claude" });
@@ -476,7 +477,7 @@ describe("agent routes", () => {
     const r = await rig({ agents: [claude({ signedIn: false }), codex({ installed: false, signedIn: false, path: null })] });
     const res = await r.call("POST", "/api/agent/setup", { on: true, agent: "claude" });
     expect(res.status).toBe(409);
-    expect(res.json).toMatchObject({ error: "agent_not_signed_in", message: "Claude Code is not signed in. Choose Sign in in Terminal, then try again." });
+    expect(res.json).toMatchObject({ error: "agent_not_signed_in", message: `Claude Code is not signed in. Choose ${signInLabel(process.platform)}, then try again.` });
     const notInstalled = await r.call("POST", "/api/agent/setup", { on: true, agent: "codex" });
     expect(notInstalled.status).toBe(409);
     expect(notInstalled.json).toMatchObject({ error: "agent_not_installed", message: "Codex is not installed." });
@@ -759,8 +760,8 @@ describe("Send to AI is set up once per Mac (§32)", () => {
     expect((await a.call("GET", "/api/agent")).json.status).toMatchObject({ on: false, asked: false });
     await a.call("POST", "/api/agent/setup", { on: true, agent: "claude", permissions: "ask-all" });
     expect(readDefault()).toEqual({ agent: "claude", permissions: "ask-all" });
-    expect(statSync(defaultsPath()).mode & 0o777).toBe(0o600);
-    expect(statSync(dirname(defaultsPath())).mode & 0o777).toBe(0o700);
+    if (process.platform !== "win32") expect(statSync(defaultsPath()).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect(statSync(dirname(defaultsPath())).mode & 0o777).toBe(0o700);
   });
 
   it("a new project starts from the default: set up, on for that agent, its permissions, no Always rules, and Send goes straight to the agent", async () => {

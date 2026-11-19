@@ -151,9 +151,12 @@ export const VIDEO_FORMATS = "mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,m
  */
 export const AUDIO_FORMATS = "mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,mxf,wav,w64,aiff,mp3,aac,flac,ogg,caf,asf,mpeg,flv,dv";
 
-/** ffprobe's "[concat @ 0x…] Format not on whitelist": the container it found, or null. */
-function refusedContainer(stderr: string): string | null {
-  return /\[([a-z0-9_]+) @ 0x[0-9a-f]+\] Format not on whitelist/i.exec(stderr)?.[1] ?? null;
+/**
+ * ffprobe's "[concat @ 0x…] Format not on whitelist": the container it found, or null. §34: on Windows ffprobe prints the
+ * pointer with no 0x (`[png_pipe @ 0000020D3A5B6C80]`), so the prefix is optional.
+ */
+export function refusedContainer(stderr: string): string | null {
+  return /\[([a-z0-9_]+) @ (?:0x)?[0-9a-f]+\] Format not on whitelist/i.exec(stderr)?.[1] ?? null;
 }
 /** Reads a render. `signal` aborts the read (the server closing, or a sibling file refused). */
 export type VideoProber = (abs: string, signal?: AbortSignal) => Promise<VideoProbe>;
@@ -229,7 +232,7 @@ async function readVideoProbe(file: string, timeout: number, signal: AbortSignal
     const stderr = String((e as { stderr?: unknown }).stderr ?? "");
     const container = refusedContainer(stderr);
     if (container) return { ok: false, code: "not_video", reason: `it's a ${container} file`, container };
-    const last = stderr.trim().split("\n").pop() ?? "";
+    const last = stderr.trim().split(/\r?\n/).pop() ?? "";
     const trimmed = last.startsWith(`${file}: `) ? last.slice(file.length + 2) : last;
     // Belt and braces: the path never appears anywhere in what goes back to the caller.
     const reason = trimmed.split(file).join("the file");

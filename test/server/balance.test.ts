@@ -101,7 +101,7 @@ describe("POST /api/mix/balance (§29)", () => {
     await pickAll(t);
     await t.call("POST", "/api/mix/balance", {});
     // The takes' own readings (the balanced mix's peak check is one more run, through -filter_complex).
-    const reads = calls.filter((a) => a.includes("-af")).map((a) => `${a[a.indexOf("-i") + 1].split("/").pop()} ${a[a.indexOf("-af") + 1]}`);
+    const reads = calls.filter((a) => a.includes("-af")).map((a) => `${a[a.indexOf("-i") + 1].split(/[\\/]/).pop()} ${a[a.indexOf("-af") + 1]}`);
     expect(reads.sort()).toEqual(["bed.wav ebur128", "bed.wav highpass=f=300,lowpass=f=4000,ebur128", "fx.wav ebur128", "vo.wav ebur128", "vo.wav highpass=f=300,lowpass=f=4000,ebur128"]);
   });
 

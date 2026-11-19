@@ -83,7 +83,8 @@ describe("decide", () => {
     expect(SAFE_COMMAND.test(`npx hyperframes render --out "out/v 8.mp4"`)).toBe(true);
     expect(decide(req("execute", `npx hyperframes render --out "out/v 8.mp4"`), { ...s, always: [{ kind: "execute", command: "npx hyperframes" }] }, root)).toBe("allow");
     expect(decide(req("execute", "npm run build -- --watch"), { ...s, always: [{ kind: "execute", command: "npm run" }] }, root)).toBe("allow");
-    expect(decide(req("execute", "npm run build:prod --x=1 user@host 50% a+b,c\td"), { ...s, always: [{ kind: "execute", command: "npm run" }] }, root)).toBe("allow");
+    // §34: on Windows `%` is refused, because cmd expands it (agentRules.win32.test.ts).
+    expect(decide(req("execute", "npm run build:prod --x=1 user@host 50% a+b,c\td"), { ...s, always: [{ kind: "execute", command: "npm run" }] }, root)).toBe(process.platform === "win32" ? "ask" : "allow");
   });
   it("a stored rule for a shell never matches, so old files allow nothing by it", () => {
     for (const command of ["bash -lc", "bash", "/bin/zsh -c", "sh -c", "fish -c", "dash -c", "ksh -c", "env bash", "/usr/bin/env FOO=1"]) {
@@ -403,7 +404,8 @@ describe("protected paths (R10)", () => {
     await mkdir(join(proj, ".rushes"));
     expect(existsSync(join(proj, ".rushes"))).toBe(true);
     const folds = existsSync(join(proj, ".RUSHES"));
-    if (folds) expect(existsSync(join(proj, ".ruſhes"))).toBe(true);
+    // APFS folds ſ to s; NTFS folds case but not ſ, where the spelling is a different (unprotected-looking) name.
+    if (folds && process.platform !== "win32") expect(existsSync(join(proj, ".ruſhes"))).toBe(true);
     expect(decide(req("edit", null, [join(proj, ".ruſhes", "agent.json")]), s, proj)).toBe("ask");
   });
   it("a normal edit inside the project is still allowed, and so are look-alike names", () => {

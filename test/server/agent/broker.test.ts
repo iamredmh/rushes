@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { PermissionBroker, allowOutcome, toRequest } from "../../../src/server/agent/broker.js";
 import type { AcpPermissionParams } from "../../../src/server/agent/acp.js";
@@ -63,7 +63,7 @@ describe("toRequest", () => {
 
   it("resolves relative locations against the project root, not the process cwd", () => {
     const req = toRequest(params({ kind: "edit", locations: [{ path: "compositions/a.html" }, { path: "/elsewhere/b.txt" }] }), ROOT);
-    expect(req.paths).toEqual([join(ROOT, "compositions/a.html"), "/elsewhere/b.txt"]);
+    expect(req.paths).toEqual([resolve(ROOT, "compositions/a.html"), "/elsewhere/b.txt"]);
   });
 
   it("has no kind when the tool call gives none", () => {

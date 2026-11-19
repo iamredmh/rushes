@@ -169,3 +169,11 @@
 .lstrip .lshow { display: block; width: 100%; padding: 8px 16px; text-align: left; }
 .lstrip .lhide { flex: none; padding: 0; color: var(--text-2); }
 .lstrip.ended { background: transparent; }
+
+/* §34: a command to run yourself (install, update, sign in), with Copy, under an agent's row. */
+.fshelp { margin: 6px 0 0; padding: 0 12px; font-size: var(--t-small); color: var(--text-3); }
+.fshelp-lead { margin: 0 0 4px; }
+.fshelp-cmd { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.fshelp-cmd code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; padding: 4px 8px; border-radius: 6px; background: var(--bg-2, rgba(127, 127, 127, 0.12)); font: 12px/1.4 var(--mono); color: var(--text-2, inherit); }
+.fshelp-cmd .btn { height: 26px; padding: 0 10px; flex: none; }
+.fshelp a { display: inline-block; margin-top: 4px; color: var(--accent); }

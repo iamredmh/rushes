@@ -125,7 +125,8 @@ describe("every project has an address", () => {
     expect(res.headers.get("location")).toBeNull();
   });
 
-  it("GET /p/<id>/ serves the placeholder page when the dashboard isn't built, with the root escaped", async () => {
+  // Windows refuses < > " \ in file names, which this test needs on disk.
+  it.skipIf(process.platform === "win32")("GET /p/<id>/ serves the placeholder page when the dashboard isn't built, with the root escaped", async () => {
     const { root } = await tmpProject();
     const odd = join(root, "<b>A&B</b>");
     const store = new Store(odd);
@@ -999,7 +1000,8 @@ describe("GET /media?download=1", () => {
     );
   });
 
-  it("replaces non-ASCII characters, quotes and backslashes in the ASCII fallback with _", async () => {
+  // Windows refuses < > " \ in file names, which this test needs on disk.
+  it.skipIf(process.platform === "win32")("replaces non-ASCII characters, quotes and backslashes in the ASCII fallback with _", async () => {
     // café "clip"\.mp4 -- é, both quotes and the backslash each become _ in the fallback only.
     const name = 'café "clip"\\.mp4';
     const { call } = await withFile(name);

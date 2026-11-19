@@ -87,6 +87,14 @@ jobs:
     name: windows · chromium smoke · Node 22
     runs-on: windows-latest
     steps:
+      # The runner's default %TEMP% is an 8.3 short name (C:\Users\RUNNER~1\...), which realpath expands, so tests that
+      # build paths from os.tmpdir() would compare a short name with a long one. RUNNER_TEMP has no short parts.
+      - name: Use a temp folder with no short names
+        shell: pwsh
+        run: |
+          "TEMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
+          "TMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
+
       - uses: actions/checkout@v5
 
       - uses: actions/setup-node@v5
