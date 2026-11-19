@@ -4,7 +4,7 @@ import type { AgentId, AgentPermissions } from "../../core/schema.js";
 import type { AdapterSpec, McpServerSpec } from "./acp.js";
 import type { AgentInfo } from "./detect.js";
 import { cacheDir } from "./connectors.js";
-import { searchPath } from "./spawn.js";
+import { searchPath, unshim } from "./spawn.js";
 import { RUSHES_SERVER } from "./ownTools.js";
 
 /** The adapters and their pinned versions live with the fetch that installs them (§34). */
@@ -132,7 +132,8 @@ export function sessionSetup(agent: AgentId, level: AgentPermissions = "project-
 export function adapterSpec(agent: AgentInfo, _root: string, level: AgentPermissions = "project-edits", entry = ""): AdapterSpec {
   // The same PATH detection used, so the agent finds node and its own tools even when the server has a thin PATH.
   const env: Record<string, string> = { PATH: searchPath() };
-  if (agent.id === "claude" && agent.path) env.CLAUDE_CODE_EXECUTABLE = agent.path;
+  // §34: on Windows an npm-installed claude is a .cmd, which the Agent SDK can't spawn: it gets the script behind it.
+  if (agent.id === "claude" && agent.path) env.CLAUDE_CODE_EXECUTABLE = unshim(agent.path);
   if (agent.id === "codex" && agent.path) env.CODEX_PATH = agent.path;
   // R15: Codex starts in the mode whose approvals go to Rushes (ASK_MODE.codex), unless the user picked Auto or Bypass (§33).
   if (agent.id === "codex") env.INITIAL_AGENT_MODE = modeFor("codex", level);

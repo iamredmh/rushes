@@ -11,6 +11,7 @@ An audit of 0.12.0 (19 Nov) found that Send to AI couldn't work on native Window
 ### Finding and starting agents (`src/server/agent/spawn.ts`)
 - `findOnPath(bin)` searches PATH, and PATHEXT on Windows, in Node. `which` is no longer used.
 - Detection, the status and version checks, and the adapter all run the resolved path through `cross-spawn`, which wraps `.cmd`/`.bat` in `cmd.exe /d /s /c` and quotes the arguments correctly. Nothing runs through a shell on macOS or Linux, the same as before.
+- On Windows an npm-installed `claude` is a `.cmd` shim. Claude's Agent SDK spawns `CLAUDE_CODE_EXECUTABLE` with no shell, which Node refuses for a `.cmd`, but it runs a `.js` with node itself. So Rushes reads the shim and passes the script behind it (`node_modules\@anthropic-ai\claude-code\cli.js`), or the `.exe` from the native installer as it is. codex-acp already starts `CODEX_PATH` through cross-spawn on Windows.
 - The search path adds, after the user's PATH, the folder of the Node that runs Rushes, `$NVM_BIN`, `~/.volta/bin`, `~/.npm-global/bin`, `~/.bun/bin` and `npm prefix -g`'s bin folder (`%APPDATA%\npm` on Windows), then Homebrew, `/usr/local/bin` and `~/.local/bin` as before.
 
 ### No download at Send time (`src/server/agent/connectors.ts`)

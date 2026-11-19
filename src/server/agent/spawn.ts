@@ -3,7 +3,7 @@
 // wraps it in `cmd.exe /d /s /c` and escapes every argument for cmd, so an argument can't run anything else.
 import { spawn as nodeSpawn, spawnSync, type ChildProcess, type SpawnOptions } from "node:child_process";
 import crossSpawn from "cross-spawn";
-import { accessSync, constants, statSync } from "node:fs";
+import { accessSync, constants, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter as hostDelimiter, posix, win32 } from "node:path";
 
@@ -160,4 +160,29 @@ export function npmCliScript(execPath: string = process.execPath, platform: Node
       ? [p.join(dir, "node_modules", "npm", "bin", "npm-cli.js")]
       : [p.join(dir, "..", "lib", "node_modules", "npm", "bin", "npm-cli.js"), p.join(dir, "node_modules", "npm", "bin", "npm-cli.js")];
   return candidates.find((c) => isFile(c)) ?? null;
+}
+
+/**
+ * §34: the program behind an npm `.cmd` shim, read from the shim, when there is one. npm writes, for a package's bin,
+ * `"%_prog%"  "%dp0%\node_modules\<pkg>\<bin>" %*` (or `"%dp0%\node_modules\<pkg>\<bin>.exe" %*` for a native one).
+ * Claude's Agent SDK spawns CLAUDE_CODE_EXECUTABLE with no shell, which Node refuses for a .cmd (EINVAL), but runs a
+ * `.js` with node itself; so the Claude adapter is given the script. Null when `text` isn't such a shim.
+ */
+export function shimTarget(shimPath: string, text: string): string | null {
+  const targets = [...text.matchAll(/"%~?dp0%?\\([^"%]+)"/gi)].map((m) => m[1]).filter((t) => !/^node(\.exe)?$/i.test(t));
+  const last = targets.at(-1);
+  return last ? win32.join(win32.dirname(shimPath), last) : null;
+}
+
+/** On Windows, the real program behind an npm .cmd/.bat shim when it is there; otherwise `path` as it is. */
+export function unshim(path: string, o: { platform?: NodeJS.Platform; read?: (p: string) => string; exists?: (p: string) => boolean } = {}): string {
+  const platform = o.platform ?? process.platform;
+  if (platform !== "win32" || !/\.(cmd|bat)$/i.test(path)) return path;
+  try {
+    const text = (o.read ?? ((p: string) => readFileSync(p, "utf8")))(path);
+    const target = shimTarget(path, text);
+    return target && (o.exists ?? isFile)(target) ? target : path;
+  } catch {
+    return path;
+  }
 }

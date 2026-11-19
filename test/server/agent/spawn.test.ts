@@ -1,7 +1,7 @@
 // §34: finding and starting programs on macOS, Linux and Windows.
 import { describe, expect, it } from "vitest";
 import { spawn } from "node:child_process";
-import { extraPathDirs, findOnPath, killTree, searchPath, spawnEnv } from "../../../src/server/agent/spawn.js";
+import { extraPathDirs, findOnPath, killTree, searchPath, shimTarget, spawnEnv, unshim } from "../../../src/server/agent/spawn.js";
 
 describe("findOnPath", () => {
   it("POSIX: the first folder on the path that has it", () => {
@@ -68,5 +68,27 @@ describe("killTree", () => {
     const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
     for (let i = 0; i < 50 && alive(grandchild); i++) await new Promise((r) => setTimeout(r, 100));
     expect(alive(grandchild)).toBe(false);
+  });
+});
+
+describe("§34: npm's Windows shims", () => {
+  const SHIM = [
+    "@ECHO off", "GOTO start", ":find_dp0", "SET dp0=%~dp0", "EXIT /b", ":start", "SETLOCAL", "CALL :find_dp0",
+    'IF EXIST "%dp0%\\node.exe" (', '  SET "_prog=%dp0%\\node.exe"', ") ELSE (", '  SET "_prog=node"', "  SET PATHEXT=%PATHEXT:;.JS;=;%", ")",
+    'endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\@anthropic-ai\\claude-code\\cli.js" %*',
+  ].join("\r\n");
+  const shim = "C:\\Users\\Red\\AppData\\Roaming\\npm\\claude.cmd";
+  const target = "C:\\Users\\Red\\AppData\\Roaming\\npm\\node_modules\\@anthropic-ai\\claude-code\\cli.js";
+
+  it("reads the script behind a shim, never node.exe", () => {
+    expect(shimTarget(shim, SHIM)).toBe(target);
+    expect(shimTarget(shim, "@echo off\r\necho hi")).toBeNull();
+  });
+
+  it("unshim gives the script on Windows when it is there, and the path as it is otherwise", () => {
+    expect(unshim(shim, { platform: "win32", read: () => SHIM, exists: () => true })).toBe(target);
+    expect(unshim(shim, { platform: "win32", read: () => SHIM, exists: () => false })).toBe(shim);
+    expect(unshim("C:\\Users\\Red\\.local\\bin\\claude.exe", { platform: "win32" })).toBe("C:\\Users\\Red\\.local\\bin\\claude.exe");
+    expect(unshim("/usr/local/bin/claude", { platform: "darwin" })).toBe("/usr/local/bin/claude");
   });
 });
