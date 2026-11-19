@@ -315,7 +315,7 @@ describe("FOLDERS", () => {
   it("lists the §16.1 folders in order, with Exports film-filter-free and Cuts/Delivery/Screenshots film-filtered", () => {
     expect(FOLDERS.map((f) => f.title)).toEqual([
       "Screenshots", "Cuts", "Proxies", "Voiceover", "Music", "Sound effects",
-      "Scripts & docs", "Images", "Captions", "Exports", "Delivery", "Edit files",
+      "Scripts & docs", "Images", "Captions", "Exports", "Delivery", "Edit files", "Visuals",
     ]);
     expect(FOLDERS.find((f) => f.id === "export")?.filmFilter).toBe(false);
     expect(FOLDERS.find((f) => f.id === "cut")?.filmFilter).toBe(true);
@@ -324,7 +324,8 @@ describe("FOLDERS", () => {
   });
   it("only offers the grid/list toggle for Screenshots, Images, Cuts and Delivery (I5)", () => {
     const withToggle = FOLDERS.filter((f) => f.gridToggle).map((f) => f.id).sort();
-    expect(withToggle).toEqual(["cut", "delivery", "image", "screenshot"].sort());
+    // §31.2.3: and the visuals' pictures.
+    expect(withToggle).toEqual(["cut", "delivery", "image", "screenshot", "visual"].sort());
     expect(FOLDERS.find((f) => f.id === "music")?.gridToggle).toBe(false);
   });
 });
@@ -1460,33 +1461,38 @@ describe("one film's audio lists", () => {
     { id: "sfx", stage: "sfx", name: "Sound effects", variants: [v("f2a-pass", "f2a"), v("f3a-pass-1", "f3a"), v("f3a-pass-2", "f3a")] },
     { id: "round-1", stage: "voice", name: "Round 1", variants: [v("f2a-read", "f2a")] },
   ];
+  const two = [{ id: "f2a" }, { id: "f3a" }];
   it("lists only the beds, passes and reads on the film, one bed on several films included", () => {
-    const f3a = filmLanes(lanes, "f3a", 2);
+    const f3a = filmLanes(lanes, "f3a", two);
     expect(variantRows(f3a, "music").map((r) => r.variant)).toEqual(["f3a-bed", "shared-bed"]);
     expect(variantRows(f3a, "music").map((r) => r.films)).toEqual([["f3a"], ["f2a", "f3a"]]);
     expect(variantRows(f3a, "sfx").map((r) => r.variant)).toEqual(["f3a-pass-1", "f3a-pass-2"]);
     // F2A's only round has nothing for F3A, so it isn't listed at all.
     expect(f3a.some((l) => l.id === "round-1")).toBe(false);
-    expect(variantRows(filmLanes(lanes, "f2a", 2), "voice").map((r) => r.variant)).toEqual(["f2a-read"]);
+    expect(variantRows(filmLanes(lanes, "f2a", two), "voice").map((r) => r.variant)).toEqual(["f2a-read"]);
+    // §31.2.4 (replacing "on no film is on none"): the loose bed is the first film's.
+    expect(variantRows(filmLanes(lanes, "f2a", two), "music").map((r) => r.variant)).toEqual(["f2a-bed", "loose-bed", "shared-bed"]);
   });
-  it("keeps those not on the film apart, on other films or none, unless the project has one film", () => {
-    expect(variantRows(otherLanes(lanes, "f3a", 2), "music").map((r) => r.variant)).toEqual(["f2a-bed", "loose-bed"]);
-    expect(otherLanes(lanes, "f3a", 2).find((l) => l.id === "round-1")!.variants.map((v) => v.id)).toEqual(["f2a-read"]);
-    expect(otherLanes(lanes, "f3a", 1)).toEqual([]);
-    expect(variantRows(filmLanes(lanes, "f3a", 1), "music").map((r) => r.variant)).toContain("loose-bed");
+  it("keeps those not on the film apart, on other films, unless the project has one film", () => {
+    expect(variantRows(otherLanes(lanes, "f3a", two), "music").map((r) => r.variant)).toEqual(["f2a-bed", "loose-bed"]);
+    expect(otherLanes(lanes, "f3a", two).find((l) => l.id === "round-1")!.variants.map((v) => v.id)).toEqual(["f2a-read"]);
+    expect(otherLanes(lanes, "f3a", [{ id: "f3a" }])).toEqual([]);
+    expect(variantRows(filmLanes(lanes, "f3a", [{ id: "f3a" }]), "music").map((r) => r.variant)).toContain("loose-bed");
   });
   it("lists everything when no film is named", () => {
-    expect(filmLanes(lanes, undefined, 2)).toBe(lanes);
+    expect(filmLanes(lanes, undefined, two)).toBe(lanes);
   });
-  it("shows a tab's notes for the film it is on, plus any naming no film", () => {
+  // §31.5 rewrote this: a note naming no film is the first film's, not on every film.
+  it("shows a tab's notes for the film it is on, and one naming no film on the first film", () => {
     const notes = [
       note({ id: "a", stage: "sfx", video: "f2a" }),
       note({ id: "b", stage: "sfx", video: "f3a" }),
       note({ id: "c", stage: "sfx", video: null }),
       note({ id: "d", stage: "music", video: "f3a" }),
     ];
-    expect(filmNotes(notes, "sfx", "f3a").map((n) => n.id)).toEqual(["b", "c"]);
-    expect(filmNotes(notes, "sfx", null).map((n) => n.id)).toEqual(["a", "b", "c"]);
+    expect(filmNotes(notes, "sfx", "f3a", two).map((n) => n.id)).toEqual(["b"]);
+    expect(filmNotes(notes, "sfx", "f2a", two).map((n) => n.id)).toEqual(["a", "c"]);
+    expect(filmNotes(notes, "sfx", null, two).map((n) => n.id)).toEqual(["a", "b", "c"]);
   });
 });
 

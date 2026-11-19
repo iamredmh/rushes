@@ -93,6 +93,8 @@ Rewrite a line, add a direction, flag it or approve it. Every line sits in a fie
 
 Plan is one workspace, so planning never crowds the review. A switch at its top opens **Brief**, **Script** and **Storyboard**, each with a tick once it is approved and a dot while it has edits you haven't sent; key `1` comes back to the page you used last. **Brief** shows `brief.md` in your project folder, one field per section. Edit a section and Rushes writes it into the file; press **Approve brief** and it sets the file's status line. If your agent rewrites `brief.md`, the page follows without a reload. **Storyboard** works the same way over `storyboard.md`: a row per shot with its still (click it to enlarge), its description, a direction line and a tick to approve it. A line at the foot of each page counts what is approved and what you have edited. When the brief, every script line (if the film has a script) and every shot are approved, the Plan tab in the top bar shows a green check and the row above the page says **Ready to build**, with a prompt to copy. Rushes never stops your agent building before then: it only says what is still waiting.
 
+In a project with several films, each film has its own brief, script and storyboard, and every tab shows only the film selected in the top bar (it is in the address, `?film=`, so a reload or a shared link keeps it). The first film keeps `brief.md` and `storyboard.md` at the project root; every other film's are in `films/<film-id>/`. Visuals are the one exception: they are campaign material, so they show on every film, marked **Shared**. Notes, takes and files from before a project had a second film are moved once to its first film.
+
 ### Voice: compare reads, round by round
 
 <img src="docs/assets/screens/voiceover.jpg" alt="The Voice tab. Under the monitor, Round 2's read, Voice A slower, is In use, and Earlier lists Round 1's two reads, Voice A and Voice B, each with its waveform and description. In the notes panel, the note on Round 1's Voice A has a green tick and the agent's reply: Round 2 is Voice A at a slower pace." width="880">
@@ -138,7 +140,7 @@ Rushes keeps a running log of what happened, in the **Activity** tab of the note
 ## Why Rushes
 
 - **Notes your agent can act on.** Each one carries its stage, a timecode or range, an optional box on the frame, a frame grab, and the shot it falls in.
-- **Everything in one batch.** **Send** sends every open note from every tab and every film, wherever you press it, so nothing waits behind.
+- **Everything in one batch.** **Send** sends every open note from every tab of the film you are on, wherever you press it, so nothing waits behind. In a project with several films, a batch is about one film.
 - **Versions keep their history.** Notes follow the work from cut to cut, and you can lock picture when it's done.
 - **Local, with no sign-up.** No account, no API key, nothing uploaded. It runs on your machine.
 - **Works with the agent you already use.** One MCP server for Claude Code, Codex, Cursor, Claude Desktop and Gemini CLI, a plugin and skill for Claude Code, and a command line for anything else.

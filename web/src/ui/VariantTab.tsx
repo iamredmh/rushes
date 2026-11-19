@@ -57,7 +57,7 @@ export function VariantTab({ stage, state, assets, video, toast, onChanged, onPe
   const words = NAMES[stage];
 
   const filmCount = state.project.videos.length;
-  const lanes = filmLanes(state.project.lanes, video?.id, filmCount);
+  const lanes = filmLanes(state.project.lanes, video?.id, state.project.videos);
   const filmState = filmPicks(state.picks, video?.id);
   const films = (r: { lane: string; variant: string; films: string[] }) => (filmCount > 1 ? filmsControl(r, state.project.videos, video, toast, onChanged) : undefined);
   const list = takeList({
@@ -67,7 +67,7 @@ export function VariantTab({ stage, state, assets, video, toast, onChanged, onPe
     blind: blind ? { seed: BLIND_SEED, word: "Bed" } : null,
     films: (t: TakeRow) => films(filmsOf(t)),
   });
-  const loose = video ? variantRows(otherLanes(state.project.lanes, video.id, filmCount), stage) : [];
+  const loose = video ? variantRows(otherLanes(state.project.lanes, video.id, state.project.videos), stage) : [];
 
   // What a note is on, and its words: a bed or pass, or a pass's cue ("Cue · Swipe", with the pass's name when two share it).
   const rows = variantRows(lanes, stage);
@@ -90,7 +90,7 @@ export function VariantTab({ stage, state, assets, video, toast, onChanged, onPe
       prompt={agentPrompt("picture", state.project.name, video?.name ?? null)}
       // Frames are counted at the cut's rate, as on the Timeline (m1).
       fps={cut?.fps ?? (state.project.fps || 30)}
-      notes={filmNotes(state.notes.notes, stage, video?.id)}
+      notes={filmNotes(state.notes.notes, stage, video?.id, state.project.videos)}
       noteRow={(n) => variantNoteRow(rows, n.on)}
       onLabel={(n) => variantOnLabel(rows, options, n.on)}
       targetName={(it, cue) => (cue === null ? it.name : options.find((o) => o.value === `c:${it.key}:${cue}`)?.label ?? it.name)}

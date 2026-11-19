@@ -308,7 +308,7 @@ export function NotesPanel(props: NotesPanelProps) {
             </div>
           )}
           {sendShown && (
-            <button ref={sendRef} type="button" class="btn primary sendbtn" aria-label={send.count > 0 ? `Send ${send.count}` : "Send"} data-tip="Notes and edits not sent yet, from every tab and film" onClick={send.onSend}>
+            <button ref={sendRef} type="button" class="btn primary sendbtn" aria-label={send.count > 0 ? `Send ${send.count}` : "Send"} data-tip="Notes and edits on this film not sent yet, from every tab" onClick={send.onSend}>
               Send{send.count > 0 && <span class="count">{send.count}</span>}
             </button>
           )}

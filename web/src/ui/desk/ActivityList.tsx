@@ -77,7 +77,9 @@ export function ActivityList({ log, projectId, head, project, stage, film, notes
     const saved = recall(session(), storageKey(projectId, "log-filter"));
     return isFilter(saved) ? saved : "all";
   });
-  const cacheKey = (f: Filter) => `${projectId}\n${f}`;
+  // §31.5: with several films, the list is the film's (the server leaves out other films' lines), and so is its cache.
+  const scoped = film !== null && project.videos.length > 1 ? film : null;
+  const cacheKey = (f: Filter) => `${projectId}\n${f}\n${scoped ?? ""}`;
   const [view, setView] = useState<LogView | null>(() => loaded.get(cacheKey(filter))?.view ?? null);
   const [waiting, setWaiting] = useState<LogView | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -106,6 +108,7 @@ export function ActivityList({ log, projectId, head, project, stage, film, notes
     const asked = filterRef.current;
     const at = headKey(headNow.current);
     if (asked !== "all") q.set("area", asked);
+    if (scoped) q.set("video", scoped);
     try {
       const next = await api.get<LogView>(`/api/log?${q}`);
       loaded.set(cacheKey(asked), { head: at, view: next });
@@ -134,7 +137,7 @@ export function ActivityList({ log, projectId, head, project, stage, film, notes
     if (list.current) list.current.scrollTop = 0;
     setWaiting(null);
     void load(true);
-  }, [filter]);
+  }, [filter, scoped]);
   // Every write moves the head's rev (the existing change event refreshes it): fetch again. Not on
   // the first render, which the filter's effect has just loaded.
   const firstRev = useRef(true);
@@ -157,7 +160,8 @@ export function ActivityList({ log, projectId, head, project, stage, film, notes
     const line = text.trim();
     if (!line) return;
     try {
-      await api.post("/api/log", { text: line, area: stage });
+      // §31.5: a line added on a film is that film's.
+      await api.post("/api/log", { text: line, area: stage, ...(scoped ? { video: scoped } : {}) });
       setText("");
       // A line the filter on show leaves out would just vanish: say where it went (fix round 1, M1).
       if (!filterShows(filter, stage)) {

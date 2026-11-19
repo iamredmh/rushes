@@ -59,6 +59,20 @@ export interface State {
   visuals: VisualsFile;
   /** §22.8: the Change Log's newest line and size, for the header button's dot (null if it couldn't be read). */
   log?: LogHead | null;
+  /** §31.5: each film's own plan, tabs and Activity head, keyed by video id (lib.ts scopeState picks the film on screen). */
+  films?: Record<string, FilmPlan>;
+}
+
+/** §31.5: what one film's desk shows of Plan and Review. */
+export interface FilmPlan {
+  script: Script;
+  brief: BriefView;
+  storyboard: StoryboardView;
+  build: BuildState;
+  tabs: TabState[];
+  log?: LogHead | null;
+  /** §31.3: where the agent finds this film's brief and storyboard. */
+  paths?: { brief: string; storyboard: string };
 }
 
 /** One file in GET /api/found (§20.6): a candidate, or a hidden one (the server's `abs` stays on the server). */

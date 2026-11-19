@@ -1,5 +1,5 @@
 // Pure helpers for the dashboard. No DOM, so they're unit-tested in Node.
-import type { Asset, AssetKind, BriefSectionView, BriefView, Cue, FoundCounts, FoundItem, FoundKind, FoundSummary, InUse, Lane, LaneStage, LogLine, LoudnessResult, Mark, Note, Picks, Project, ProxyEvent, ProxyJob, Section, Shot, Stage, StoryboardView, TabState, Variant, Video, Version } from "./types.js";
+import type { Asset, AssetKind, BriefSectionView, BriefView, Cue, FilmPlan, FoundCounts, FoundItem, FoundKind, FoundSummary, InUse, Lane, LaneStage, LogLine, LoudnessResult, Mark, Note, Picks, Project, ProxyEvent, ProxyJob, Section, Shot, Stage, State, StoryboardView, TabState, Variant, Video, Version } from "./types.js";
 export type { FoundItem } from "./types.js";
 
 /** 72.4 -> "1:12.40" (minutes, seconds, hundredths). */
@@ -217,27 +217,34 @@ export const LOCKED_STORYBOARD = {
   ask: "a storyboard",
 };
 
+/** §31.3: where a film's own plan files are. The first film's (and a project's with no film yet) are the root ones. */
+export interface PlanPaths {
+  brief: string;
+  storyboard: string;
+}
+export const ROOT_PLAN: PlanPaths = { brief: "brief.md", storyboard: "storyboard.md" };
+
 /** The locked Brief page's "Copy prompt for your agent". */
-export function briefPrompt(projectName: string, filmName: string | null): string {
-  return `In Rushes project "${projectName}", start a brief${filmClause("for", filmName)}: ask me up to three questions, each with a recommended answer, then write brief.md (see "Starting a film" in AGENTS.md).`;
+export function briefPrompt(projectName: string, filmName: string | null, paths: PlanPaths = ROOT_PLAN): string {
+  return `In Rushes project "${projectName}", start a brief${filmClause("for", filmName)}: ask me up to three questions, each with a recommended answer, then write ${paths.brief} (see "Starting a film" in AGENTS.md).`;
 }
 
 /** The locked Storyboard page's "Copy prompt for your agent". */
-export function storyboardPrompt(projectName: string, filmName: string | null): string {
-  return `In Rushes project "${projectName}", sketch the shots${filmClause("for", filmName)} from the approved script: write storyboard.md with one "## Shot 01 · Name" section per shot (Tag, Length, Still and Status: draft lines, then what happens), make a still for each, and save them under storyboard/ (see "Starting a film" in AGENTS.md).`;
+export function storyboardPrompt(projectName: string, filmName: string | null, paths: PlanPaths = ROOT_PLAN): string {
+  return `In Rushes project "${projectName}", sketch the shots${filmClause("for", filmName)} from the approved script: write ${paths.storyboard} with one "## Shot 01 · Name" section per shot (Tag, Length, Still and Status: draft lines, then what happens), make a still for each, and save them under storyboard/ (see "Starting a film" in AGENTS.md).`;
 }
 
 /** What the Plan workspace's "Ready to build" copies once the plan is approved. */
-export function readyPrompt(projectName: string, filmName: string | null): string {
-  return `The plan is approved in Rushes project "${projectName}"${filmClause("for", filmName)}. Build the film from brief.md and storyboard.md, name each scene after its planned shot, and register the cut with rushes_add_version.`;
+export function readyPrompt(projectName: string, filmName: string | null, paths: PlanPaths = ROOT_PLAN): string {
+  return `The plan is approved in Rushes project "${projectName}"${filmClause("for", filmName)}. Build the film from ${paths.brief} and ${paths.storyboard}, name each scene after its planned shot, and register the cut with rushes_add_version.`;
 }
 
 /** What Send says from the Brief page. Nothing is recorded: the file itself is the record. */
-export function briefSendPrompt(projectName: string, filmName: string | null, brief: { status: BriefView["status"]; sections: Pick<BriefSectionView, "heading" | "changed">[] }): string {
+export function briefSendPrompt(projectName: string, filmName: string | null, brief: { status: BriefView["status"]; sections: Pick<BriefSectionView, "heading" | "changed">[] }, paths: PlanPaths = ROOT_PLAN): string {
   const approved = brief.status === "approved";
   const edited = brief.sections.filter((s) => s.changed).map((s) => s.heading);
   const parts = [`In Rushes project "${projectName}"${filmClause("for", filmName)}, the brief is ${approved ? "approved" : "still a draft"}.`];
-  if (edited.length) parts.push(`I changed ${edited.length === 1 ? "this section" : "these sections"} in brief.md: ${edited.join(", ")}. Read the file again before you go on, and keep my wording.`);
+  if (edited.length) parts.push(`I changed ${edited.length === 1 ? "this section" : "these sections"} in ${paths.brief}: ${edited.join(", ")}. Read the file again before you go on, and keep my wording.`);
   parts.push(approved ? "Next: write the script with rushes_set_script." : "Don't build anything until I approve it.");
   return parts.join(" ");
 }
@@ -249,10 +256,10 @@ export function openToSend(tabs: Pick<TabState, "todo">[], brief: Pick<BriefView
 }
 
 /** What Send says from the Storyboard page: how many shots are approved, and which ones I changed. */
-export function storySendPrompt(projectName: string, filmName: string | null, board: Pick<StoryboardView, "approved" | "total"> & { shots: { n: number; name: string; changed: boolean }[] }): string {
+export function storySendPrompt(projectName: string, filmName: string | null, board: Pick<StoryboardView, "approved" | "total"> & { shots: { n: number; name: string; changed: boolean }[] }, paths: PlanPaths = ROOT_PLAN): string {
   const edited = board.shots.filter((s) => s.changed).map((s) => `Shot ${String(s.n).padStart(2, "0")} · ${s.name}`);
-  const parts = [`In Rushes project "${projectName}"${filmClause("for", filmName)}, ${board.approved} of ${board.total} shots in storyboard.md are approved.`];
-  if (edited.length) parts.push(`I changed ${edited.length === 1 ? "this shot" : "these shots"}: ${edited.join(", ")}. Read storyboard.md again before you go on, keep my wording, and update the still${edited.length === 1 ? "" : "s"} if what happens has changed.`);
+  const parts = [`In Rushes project "${projectName}"${filmClause("for", filmName)}, ${board.approved} of ${board.total} shots in ${paths.storyboard} are approved.`];
+  if (edited.length) parts.push(`I changed ${edited.length === 1 ? "this shot" : "these shots"}: ${edited.join(", ")}. Read ${paths.storyboard} again before you go on, keep my wording, and update the still${edited.length === 1 ? "" : "s"} if what happens has changed.`);
   parts.push(board.approved === board.total && board.total > 0 ? "Next: build the film." : "Don't build anything until I approve them all.");
   return parts.join(" ");
 }
@@ -361,7 +368,7 @@ export function extOf(name: string): string {
   return i === -1 ? "" : name.slice(i + 1).toLowerCase();
 }
 
-export type FolderId = "screenshot" | "cut" | "proxy" | "voiceover" | "music" | "sfx" | "doc" | "image" | "caption" | "export" | "delivery" | "edit";
+export type FolderId = "screenshot" | "cut" | "proxy" | "voiceover" | "music" | "sfx" | "doc" | "image" | "caption" | "export" | "delivery" | "edit" | "visual";
 
 export interface FolderDef {
   id: FolderId;
@@ -393,7 +400,15 @@ export const FOLDERS: FolderDef[] = [
   { id: "export", title: "Exports", kinds: ["export"], view: "list", filmFilter: false, gridToggle: false },
   { id: "delivery", title: "Delivery", kinds: ["delivery"], view: "grid", filmFilter: true, gridToggle: true },
   { id: "edit", title: "Edit files", kinds: ["edit"], view: "list", filmFilter: false, gridToggle: false },
+  // §31.2.3: the visuals' pictures, the project's own: listed on every film, marked Shared.
+  { id: "visual", title: "Visuals", kinds: ["visual"], view: "grid", filmFilter: false, gridToggle: true },
 ];
+
+/**
+ * §31.5: whether a folder offers the Film filter. With several films every folder does (and opens on the film in the
+ * top bar); with one, only the folders that always did, so a one-film project's Assets look as they did (§31.7).
+ */
+export const filmFilterOn = (folder: Pick<FolderDef, "filmFilter">, filmCount: number): boolean => folder.filmFilter || filmCount > 1;
 
 /** Folders whose list view offers a read-only preview on the right (§16.1). */
 export const PREVIEW_FOLDER_IDS: ReadonlySet<FolderId> = new Set(["doc", "caption", "export", "edit"]);
@@ -412,7 +427,7 @@ export interface FolderItemsOptions {
    *  name and (for a cut) its version note. */
   query?: string;
   sort?: "newest" | "oldest" | "name";
-  /** A video id to narrow to, or null/undefined for every film. Only meaningful on a folder
+  /** A video id to narrow to, or null/undefined for every film (§31.5: assetOnFilm). Only meaningful on a folder
    *  with filmFilter set, but harmless to pass anywhere. */
   film?: string | null;
   /** Needed to resolve a film's name and a cut's version note for both search and sorting. */
@@ -423,7 +438,7 @@ export interface FolderItemsOptions {
 export function folderItems(assets: Asset[], folder: Pick<FolderDef, "kinds">, opts: FolderItemsOptions = {}): Asset[] {
   const { query = "", sort = "newest", film, videos = [] } = opts;
   let items = assets.filter((a) => folder.kinds.includes(a.kind));
-  if (film) items = items.filter((a) => a.video === film);
+  if (film) items = items.filter((a) => assetOnFilm(a, film, videos));
   const q = query.trim().toLowerCase();
   if (q) {
     items = items.filter((a) => {
@@ -1587,38 +1602,92 @@ export function onFilm(line: Pick<LogLine, "video" | "ref">, film: string | null
   return films.length === 0 || films.includes(film);
 }
 
+/**
+ * §31.5: whether an asset shows on `film` in Assets: a visual's picture on every film (shared), a read, bed or pass on
+ * each film it is on, anything else on its own film, and anything that names no film on the first film (§31.2.4).
+ */
+export function assetOnFilm(a: Pick<Asset, "video" | "videos" | "shared">, film: string, videos: readonly Pick<Video, "id">[]): boolean {
+  if (a.shared) return true;
+  if (a.videos?.length) return a.videos.includes(film);
+  if (a.video) return a.video === film;
+  return videos.length === 0 || videos[0].id === film;
+}
+
+/**
+ * A web copy of src/core/films.ts's noteOnFilm (§31.5): a note on a visual shows on every film; any other on its own
+ * film, and one that names none on the first film. With no film, every note.
+ */
+export function noteOnFilm(note: Pick<Note, "stage" | "video">, film: string | null | undefined, videos: readonly Pick<Video, "id">[]): boolean {
+  if (!film || note.stage === "visuals") return true;
+  if (note.video) return note.video === film;
+  return videos.length === 0 || videos[0].id === film;
+}
+
+/**
+ * §31.5: the state as one film's desk sees it: that film's script, brief, storyboard and plan state, its tabs (counts,
+ * dots, unlocking) and its Activity head, and only its notes (and the shared visuals'). With no film (a project with
+ * no film yet), the state as it is. A server older than §31 has no `films`: the state as it is too.
+ */
+export function scopeState(state: State, film: string | null | undefined): State {
+  const plan: FilmPlan | undefined = film ? state.films?.[film] : undefined;
+  if (!film || !plan) return state;
+  const videos = state.project.videos;
+  return {
+    ...state,
+    script: plan.script,
+    brief: plan.brief,
+    storyboard: plan.storyboard,
+    build: plan.build,
+    tabs: plan.tabs,
+    log: plan.log,
+    notes: { ...state.notes, notes: state.notes.notes.filter((n) => noteOnFilm(n, film, videos)) },
+  };
+}
+
+/** §31.5: the film a URL's query names (`?film=<id>`), or null. */
+export function filmFromSearch(search: string): string | null {
+  const f = new URLSearchParams(search).get("film");
+  return f && f.length <= 64 ? f : null;
+}
+
+/** §31.5: a URL's query with `film` set to `id`, every other parameter kept as it was. */
+export function withFilm(search: string, id: string): string {
+  const q = new URLSearchParams(search);
+  q.set("film", id);
+  return `?${q.toString()}`;
+}
+
 /** A web copy of src/core/schema.ts's variantFilms: a variant's `videos`, or an older project's one `video`. */
 export function variantFilms(v: Pick<Variant, "videos" | "video">): string[] {
   return v.videos ?? (v.video === undefined ? [] : [v.video]);
 }
 
 /** The lanes one film lists, as the server's lanesForVideo: each keeps only the reads, beds and
- *  passes on that film (one on no film counts only in a project with one film), and a lane left
- *  with none is dropped. */
-export function filmLanes(lanes: Lane[], videoId: string | null | undefined, filmCount: number): Lane[] {
+ *  passes on that film (§31.2.4: one on no film is the first film's), and a lane left with none is dropped. */
+export function filmLanes(lanes: Lane[], videoId: string | null | undefined, videos: readonly Pick<Video, "id">[]): Lane[] {
   if (!videoId) return lanes;
   return lanes
     .map((l) => ({
       ...l,
       variants: l.variants.filter((v) => {
         const films = variantFilms(v);
-        return films.length === 0 ? filmCount <= 1 : films.includes(videoId);
+        return films.length === 0 ? videos.length === 0 || videos[0].id === videoId : films.includes(videoId);
       }),
     }))
     .filter((l) => l.variants.length > 0);
 }
 
-/** The reads, beds and passes not on this film (on other films, or on none), in a project with more
- *  than one film: the tab keeps them folded under "Not on this film", to put one on it. */
-export function otherLanes(lanes: Lane[], videoId: string, filmCount: number): Lane[] {
-  if (filmCount <= 1) return [];
-  const here = new Set(filmLanes(lanes, videoId, filmCount).flatMap((l) => l.variants.map((v) => `${l.id}/${v.id}`)));
+/** The reads, beds and passes not on this film (on other films), in a project with more than one
+ *  film: the tab keeps them folded under "Not on this film", to put one on it. */
+export function otherLanes(lanes: Lane[], videoId: string, videos: readonly Pick<Video, "id">[]): Lane[] {
+  if (videos.length <= 1) return [];
+  const here = new Set(filmLanes(lanes, videoId, videos).flatMap((l) => l.variants.map((v) => `${l.id}/${v.id}`)));
   return lanes
     .map((l) => ({ ...l, variants: l.variants.filter((v) => !here.has(`${l.id}/${v.id}`)) }))
     .filter((l) => l.variants.length > 0);
 }
 
-/** One film's notes on an audio tab: those made on it, plus any that name no film. */
-export function filmNotes(notes: Note[], stage: Stage, videoId: string | null | undefined): Note[] {
-  return notes.filter((n) => n.stage === stage && (!videoId || !n.video || n.video === videoId));
+/** One film's notes on an audio tab: those made on it (§31.5: one that names no film is the first film's). */
+export function filmNotes(notes: Note[], stage: Stage, videoId: string | null | undefined, videos: readonly Pick<Video, "id">[] = []): Note[] {
+  return notes.filter((n) => n.stage === stage && noteOnFilm(n, videoId, videos));
 }

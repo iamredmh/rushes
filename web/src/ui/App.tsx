@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, ApiError, projectId } from "../api.js";
 import {
   LOCKED_BRIEF, LOCKED_STORYBOARD, LOCKED_TAB, testFlags, STAGE_NAMES, agentPrompt, briefPrompt, briefSendPrompt, copyShortcut, currentFormat, defaultVersion, filmLanes, filmPicks, firstView, formatChips, formatPrompt, foundChip, foundSignature, foundTotal,
-  filmAfterShelving, inPlay, isPlanPage, labelOfId, latest, lockedFound, neighbourFormat, neighbourVideo, planProgress, planTarget, previousVersion, proxyKey, readyPrompt, storySendPrompt, storyboardPrompt, versionFormats, type PlanPage,
+  filmAfterShelving, inPlay, isPlanPage, noteOnFilm, scopeState, ROOT_PLAN, filmFromSearch, withFilm, type PlanPaths, labelOfId, latest, lockedFound, neighbourFormat, neighbourVideo, planProgress, planTarget, previousVersion, proxyKey, readyPrompt, storySendPrompt, storyboardPrompt, versionFormats, type PlanPage,
 } from "../lib.js";
 import { onLabel } from "../../../src/core/notes.js";
 import { deskPlace, deskView, noteTarget, takeCount, takeGroups, undeliveredBatches, unsentCount, unsentEdits, viewForKey, type DeskView } from "../desk.js";
@@ -61,12 +61,12 @@ type Sent = Pick<Batch, "id" | "prompt"> & { title?: string; why?: string | null
 const typing = (el: EventTarget | null) => el instanceof HTMLElement && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
 
 /** §19.1: a locked tab's own page -- what it's for, what unlocks it, and a prompt to copy for your agent. */
-function Locked({ tab, projectName, filmName, found, onReview, toast }: { tab: Stage | "assets" | "brief" | "storyboard"; projectName: string; filmName: string | null; found: FoundCounts | undefined; onReview: (kind: FoundKind) => void; toast: (m: string) => void }) {
+function Locked({ tab, projectName, filmName, found, onReview, toast, paths = ROOT_PLAN }: { tab: Stage | "assets" | "brief" | "storyboard"; projectName: string; filmName: string | null; found: FoundCounts | undefined; onReview: (kind: FoundKind) => void; toast: (m: string) => void; paths?: PlanPaths }) {
   const planning = tab === "brief" || tab === "storyboard";
   const { what, unlocks } = tab === "brief" ? LOCKED_BRIEF : tab === "storyboard" ? LOCKED_STORYBOARD : LOCKED_TAB[tab];
   const name = tab === "assets" ? "Assets" : tab === "brief" ? "Brief" : tab === "storyboard" ? "Storyboard" : STAGE_NAMES[tab];
   const icon = tab === "assets" ? "grid" : tab === "brief" ? "brief" : tab === "storyboard" ? "story" : STAGE_ICONS[tab];
-  const prompt = tab === "brief" ? briefPrompt(projectName, filmName) : tab === "storyboard" ? storyboardPrompt(projectName, filmName) : agentPrompt(tab, projectName, filmName);
+  const prompt = tab === "brief" ? briefPrompt(projectName, filmName, paths) : tab === "storyboard" ? storyboardPrompt(projectName, filmName, paths) : agentPrompt(tab, projectName, filmName);
   // §20.5: when the folder holds files of this tab's kind, say so, and offer to look at them.
   const files = planning ? null : lockedFound(tab, found);
   const boxRef = useRef<HTMLTextAreaElement>(null);
@@ -117,7 +117,8 @@ export function App() {
   // §28: the agent menu's opener, which the Send to AI row puts here.
   const agentMenu = useRef<(() => void) | null>(null);
   const [stage, setStage] = useState<View | null>(null);
-  const [videoId, setVideoId] = useState<string | null>(null);
+  // §31.5: the selected film is in the URL (?film=<id>), so a reload or a shared link keeps it.
+  const [videoId, setVideoId] = useState<string | null>(() => filmFromSearch(location.search));
   const [versionId, setVersionId] = useState<string | null>(null);
   const [toastText, setToastText] = useState<string | null>(null);
   // §26: a toast may carry one action (Undo after shelving a film).
@@ -198,7 +199,10 @@ export function App() {
   // whose dot says lines arrived since it was last on screen.
   const panel = usePanelPlace();
   const panelHere = !!stage && (deskPlace(stage).workspace === "review" || deskPlace(stage).workspace === "plan");
-  const changeLog = useChangeLog(projectId() ?? "", state?.log, (open) => open && panelHere && panel.shown);
+  // §31.5: the "new" dot is the film's: its newest line among those its Activity shows, seen per film.
+  const filmOnScreen = state?.project.videos.find((v) => v.id === videoId) ?? state?.project.videos.find(inPlay);
+  const filmHead = filmOnScreen && state?.films?.[filmOnScreen.id] ? state.films[filmOnScreen.id].log : state?.log;
+  const changeLog = useChangeLog(projectId() ?? "", filmHead, (open) => open && panelHere && panel.shown, (state?.project.videos.length ?? 0) > 1 ? filmOnScreen?.id ?? null : null);
   // Send is to be brought into view and focused once the notes panel it opened is on screen (the status bar's Send).
   const [reveal, setReveal] = useState(false);
   const panelToggle = useRef<HTMLButtonElement>(null);
@@ -236,6 +240,17 @@ export function App() {
     if (videoId === null && first) setVideoId(first.id);
   }, [state]);
 
+  // §31.5: the film on screen goes in the URL (?film=<id>), replacing the entry rather than adding one, so a reload or a
+  // shared link opens on it. With one film the URL stays as it was (§31.7), unless it already names one.
+  const urlFilm = state?.project.videos.find((v) => v.id === videoId) ?? state?.project.videos.find(inPlay);
+  useEffect(() => {
+    if (!state || !urlFilm) return;
+    const named = filmFromSearch(location.search);
+    if (state.project.videos.length < 2 && named === null) return;
+    const search = withFilm(location.search, urlFilm.id);
+    if (search !== location.search) history.replaceState(history.state, "", `${location.pathname}${search}${location.hash}`);
+  }, [urlFilm?.id, state?.project.videos.length]);
+
   // The tab's title follows the project's name as soon as it's known.
   useEffect(() => {
     if (state?.project.name) document.title = `${state.project.name} · Rushes`;
@@ -250,7 +265,7 @@ export function App() {
   const locked = !!video?.lockedVersion;
   const fps = version?.fps ?? state?.project.fps ?? 30;
   // §21: this cut's formats, the chips and the one on screen.
-  const filmNotes = state?.notes.notes.filter((n) => n.stage === "picture" && (!n.video || n.video === video?.id)) ?? [];
+  const filmNotes = state?.notes.notes.filter((n) => n.stage === "picture" && noteOnFilm(n, video?.id, state.project.videos)) ?? [];
   const views = version ? versionFormats(version, measured[version.file]) : [];
   const before = video && version ? previousVersion(video, version.id) : undefined;
   const format = currentFormat(views, video ? formatChoice[video.id] : undefined);
@@ -380,7 +395,9 @@ export function App() {
     if (to.row) focusRow(to.row);
   };
 
-  const tabs = state?.tabs ?? [];
+  // §31.5: the Review tabs' counts, to-do dots and unlocking, and the Plan switch's, are the film's.
+  const tabs = (video && state?.films?.[video.id]?.tabs) || state?.tabs || [];
+  const filmPlan = video ? state?.films?.[video.id] : undefined;
   const tab = (s: Stage) => tabs.find((t) => t.stage === s);
   const chip = foundChip(state?.found);
   // Found files are worth opening Assets for even before anything is registered: More's Bring in leads there.
@@ -398,7 +415,7 @@ export function App() {
   };
   /** Key 1: the planning page last used if it has something in it, else the first that does. */
   const planKey = () => {
-    const open = { brief: !!state?.brief.exists, script: !!tab("script")?.unlocked, storyboard: !!state?.storyboard.exists };
+    const open = { brief: !!(filmPlan ?? state)?.brief.exists, script: !!tab("script")?.unlocked, storyboard: !!(filmPlan ?? state)?.storyboard.exists };
     show(planTarget(planLast, open));
   };
   const showAssets = () => {
@@ -492,17 +509,20 @@ export function App() {
     if (status?.on) askNotificationsOnce();
     // The Brief or Storyboard page waits for what you just typed to be saved, and is read as the server then has it.
     const settled = stage === "brief" || stage === "storyboard" ? await planSettle.current?.() : undefined;
-    const brief = (stage === "brief" ? (settled as BriefView | undefined) : undefined) ?? state.brief;
-    const board = (stage === "storyboard" ? (settled as StoryboardView | undefined) : undefined) ?? state.storyboard;
+    // §31.2.2: Send sends the selected film's brief, storyboard, script and notes alone.
+    const plan = filmPlan ?? state;
+    const brief = (stage === "brief" ? (settled as BriefView | undefined) : undefined) ?? plan.brief;
+    const board = (stage === "storyboard" ? (settled as StoryboardView | undefined) : undefined) ?? plan.storyboard;
+    const where = filmPlan?.paths ?? ROOT_PLAN;
     // On its own page, the brief's or storyboard's line always goes; elsewhere, only when something in it changed.
     const planning = [
-      brief.exists && (stage === "brief" || brief.changed > 0) ? briefSendPrompt(state.project.name, video?.name ?? null, brief) : null,
-      board.exists && (stage === "storyboard" || board.changed > 0) ? storySendPrompt(state.project.name, video?.name ?? null, board) : null,
+      brief.exists && (stage === "brief" || brief.changed > 0) ? briefSendPrompt(state.project.name, video?.name ?? null, brief, where) : null,
+      board.exists && (stage === "storyboard" || board.changed > 0) ? storySendPrompt(state.project.name, video?.name ?? null, board, where) : null,
     ].filter((line): line is string => line !== null);
     let batch: Batch | null = null;
     let handOver: SendHandOver | undefined;
     try {
-      ({ batch, agent: handOver } = await api.post<{ batch: Batch; agent?: SendHandOver }>("/api/batches", {}));
+      ({ batch, agent: handOver } = await api.post<{ batch: Batch; agent?: SendHandOver }>("/api/batches", video ? { video: video.id } : {}));
     } catch (e) {
       if (!(e instanceof ApiError && e.code === "empty_batch")) return toast((e as Error).message);
     }
@@ -516,7 +536,7 @@ export function App() {
     if (!batch && planning.length === 0) {
       if (stage === "brief" && !brief.exists) return toast("There's no brief yet: copy the prompt on this page for your agent");
       if (stage === "storyboard" && !board.exists) return toast("There's no storyboard yet: copy the prompt on this page for your agent");
-      return toast("Nothing open to send on any tab");
+      return toast(video && state.project.videos.length > 1 ? `Nothing open to send on ${video.name}` : "Nothing open to send on any tab");
     }
     setSent(batch ? { id: batch.id, prompt: [batch.prompt, ...planning].join("\n\n"), why: follow?.why } : { id: "plan", title: "Message for your agent", prompt: planning.join("\n\n"), lead: planLead(follow, status) });
     setCopied(false);
@@ -564,33 +584,38 @@ export function App() {
     );
   }
 
+  // §31.5: everything below is the selected film's: its script, brief, storyboard and plan state, its tabs, its
+  // Activity head and its notes (and the shared visuals'). `state` stays the whole project's, for what spans films
+  // (the Film menu's counts, Activity's placing of older lines, the agent's run).
+  const fstate = scopeState(state, video?.id);
+  const paths = (video && state.films?.[video.id]?.paths) || ROOT_PLAN;
   // §27, 5.6: the Timeline tab lists the notes on the mix with the picture's.
-  const pictureNotes = state.notes.notes.filter((n) => (n.stage === "picture" || n.stage === "mix") && (!n.video || n.video === video?.id));
+  const pictureNotes = fstate.notes.notes.filter((n) => n.stage === "picture" || n.stage === "mix");
   /** A film's open notes on the tabs that look at it, for the Film menu and the status bar. */
-  const openNotes = (vid: string) => state.notes.notes.filter((n) => n.status === "todo" && SHELVED_VIEW_ONLY.has(n.stage) && (!n.video || n.video === vid)).length;
+  const openNotes = (vid: string) => state.notes.notes.filter((n) => n.status === "todo" && SHELVED_VIEW_ONLY.has(n.stage) && noteOnFilm(n, vid, state.project.videos)).length;
   // §27, 5.6: with no cut, the Timeline tab still opens when the film has a take in use or a note on the mix: the takes
   // play together there (what the Mix tab did), with the engine as the clock.
   const filmUse = filmPicks(state.picks, video?.id).use;
-  const mixNotes = state.notes.notes.filter((n) => n.stage === "mix" && (!n.video || n.video === video?.id));
+  const mixNotes = fstate.notes.notes.filter((n) => n.stage === "mix");
   const soundOnly = !version && (!!(filmUse?.voice || filmUse?.music || filmUse?.sfx) || mixNotes.length > 0) && (!!video || state.project.videos.length === 0);
   const timelineOpen = !!tab("picture")?.unlocked || soundOnly;
-  const unlocked = stage === "assets" ? assetsUnlocked : stage === "brief" ? state.brief.exists : stage === "storyboard" ? state.storyboard.exists : stage === "picture" ? timelineOpen : (tab(stage)?.unlocked ?? false);
+  const unlocked = stage === "assets" ? assetsUnlocked : stage === "brief" ? fstate.brief.exists : stage === "storyboard" ? fstate.storyboard.exists : stage === "picture" ? timelineOpen : (tab(stage)?.unlocked ?? false);
   // §27: the Plan switch's pages, each with its tick and its dot, and the Plan workspace's tick (all three approved) and dot.
   const hasCut = !!tab("picture")?.unlocked;
-  const progress = planProgress(state.brief, state.script.sections, state.storyboard);
+  const progress = planProgress(fstate.brief, fstate.script.sections, fstate.storyboard);
   const approved = progress.brief === "ok" && progress.script === "ok" && progress.storyboard === "ok";
   // Ready to build shows while planning has begun (a brief or a storyboard) and no cut exists yet.
-  const planning = state.build.started && !hasCut;
+  const planning = fstate.build.started && !hasCut;
   const scriptTodo = tab("script")?.todo ?? 0;
   const planRows: PlanTabRow[] = [
-    { page: "brief", name: "Brief", icon: "brief", unlocked: state.brief.exists, ask: LOCKED_BRIEF.ask, approved: progress.brief === "ok", open: state.brief.changed },
+    { page: "brief", name: "Brief", icon: "brief", unlocked: fstate.brief.exists, ask: LOCKED_BRIEF.ask, approved: progress.brief === "ok", open: fstate.brief.changed },
     { page: "script", name: "Script", icon: STAGE_ICONS.script, unlocked: !!tab("script")?.unlocked, ask: LOCKED_TAB.script.ask, approved: progress.script === "ok", open: scriptTodo },
-    { page: "storyboard", name: "Storyboard", icon: "story", unlocked: state.storyboard.exists, ask: LOCKED_STORYBOARD.ask, approved: progress.storyboard === "ok", open: state.storyboard.changed },
+    { page: "storyboard", name: "Storyboard", icon: "story", unlocked: fstate.storyboard.exists, ask: LOCKED_STORYBOARD.ask, approved: progress.storyboard === "ok", open: fstate.storyboard.changed },
   ];
-  const planOpen = state.brief.changed + state.storyboard.changed + scriptTodo;
+  const planOpen = fstate.brief.changed + fstate.storyboard.changed + scriptTodo;
   const copyReady = async () => {
     try {
-      await navigator.clipboard.writeText(readyPrompt(state.project.name, video?.name ?? null));
+      await navigator.clipboard.writeText(readyPrompt(state.project.name, video?.name ?? null, paths));
       toast("Prompt copied");
     } catch {
       toast("Couldn't reach the clipboard. Ask your agent to build the film from the approved plan.");
@@ -599,7 +624,7 @@ export function App() {
 
   // §27: where the view sits on the desk, and each sound's takes on this film.
   const place = deskPlace(stage);
-  const lanes = filmLanes(state.project.lanes, video?.id, state.project.videos.length);
+  const lanes = filmLanes(state.project.lanes, video?.id, state.project.videos);
   const use = filmUse;
   const sounds = {
     voice: takeGroups(lanes, "voice", use?.voice, video),
@@ -608,7 +633,7 @@ export function App() {
   };
   // What Send would send that has not been sent yet: Send's count.
   const inPlayIds = new Set(state.project.videos.filter(inPlay).map((v) => v.id));
-  const unsentFrom = { notes: state.notes.notes, inPlay: inPlayIds, scriptTodo: tab("script")?.todo ?? 0, briefChanged: state.brief.changed, storyboardChanged: state.storyboard.changed };
+  const unsentFrom = { notes: fstate.notes.notes, inPlay: inPlayIds, scriptTodo: tab("script")?.todo ?? 0, briefChanged: fstate.brief.changed, storyboardChanged: fstate.storyboard.changed };
   const unsent = unsentCount(unsentFrom);
   // I3: notes Send filed that never reached the agent (refused while Send to AI was on): Send again offers them.
   const undelivered = undeliveredBatches(state.batches.batches, state.notes.notes);
@@ -619,8 +644,8 @@ export function App() {
   };
   // Where Send is, for the status bar's Send on a page with no notes panel (Visuals, Assets): Plan when only the plan's
   // edits wait, else Review.
-  const planOnly = state.notes.notes.every((n) => n.stage === "script" || n.status !== "todo" || n.batch !== null || (!!n.video && !inPlayIds.has(n.video)));
-  const sendTo: View = planOnly && unsent > 0 && (state.brief.changed + state.storyboard.changed + (tab("script")?.todo ?? 0)) > 0
+  const planOnly = fstate.notes.notes.every((n) => n.stage === "script" || n.status !== "todo" || n.batch !== null || (!!n.video && !inPlayIds.has(n.video)));
+  const sendTo: View = planOnly && unsent > 0 && (fstate.brief.changed + fstate.storyboard.changed + (tab("script")?.todo ?? 0)) > 0
     ? (isPlanPage(stage) ? stage : planLast)
     : reviewLast;
   // Red, round 2: the status bar no longer says what is next. It keeps one thing: on a page with no notes panel, a way to
@@ -654,7 +679,7 @@ export function App() {
     log: changeLog,
     activity: {
       projectId: projectId() ?? "",
-      head: state.log,
+      head: fstate.log,
       project: state.project,
       // §30: Activity on a film shows its own lines and the project's.
       film: video?.id ?? null,
@@ -673,7 +698,7 @@ export function App() {
       },
     },
     // On its own page Send always carries the brief's or storyboard's line (send()), so it shows there whenever that file exists.
-    send: { count: unsent, always: (stage === "brief" && state.brief.exists) || (stage === "storyboard" && state.storyboard.exists), onSend: () => void send(), again },
+    send: { count: unsent, always: (stage === "brief" && fstate.brief.exists) || (stage === "storyboard" && fstate.storyboard.exists), onSend: () => void send(), again },
     // §28: Set up Send to AI opens the first-Send sheet.
     agent: agent && { status: agent, onSetUp: firstSend.open, menu: agentMenu, onStatus: noteAgent, toast },
     shown: panel.shown,
@@ -702,7 +727,7 @@ export function App() {
     </div>
   );
   // §27, 5.8: the Plan pages' notes are the script's: on a line picked in Script, or on the script as a whole.
-  const scriptNotes = state.notes.notes.filter((n) => n.stage === "script");
+  const scriptNotes = fstate.notes.notes.filter((n) => n.stage === "script");
   const planTargetNow = planLine && stage === "script" ? noteTarget({ kind: "line", ...planLine }, null) : { stage: "script" as const, on: null, scope: "whole" as const, t: null, tOut: null, label: "The script" };
   // m7 (ruling): the Brief and Storyboard pages take no notes of their own; a note on the plan is written on the Script page.
   const planBox = stage === "script";
@@ -714,10 +739,11 @@ export function App() {
       fixedTimes
       toast={toast}
       // The line a note is about, in the words export and the CLI use; nothing when the section has gone.
-      onLabel={(n: Note) => (n.on === null ? "The script" : onLabel(n, { project: state.project, script: state.script }))}
+      onLabel={(n: Note) => (n.on === null ? "The script" : onLabel(n, { project: state.project, script: fstate.script }))}
       target={{ label: planTargetNow.label, onClear: planLine && stage === "script" ? () => setPlanLine(null) : undefined }}
       onAdd={async (text) => {
-        await api.post("/api/notes", { stage: "script", video: null, version: null, on: planTargetNow.on, scope: "whole", t: null, tOut: null, text });
+        // §31.5: a note is always made on the selected film.
+        await api.post("/api/notes", { stage: "script", video: video?.id ?? null, version: null, on: planTargetNow.on, scope: "whole", t: null, tOut: null, text });
         void refresh();
       }}
       onChanged={() => void refresh()}
@@ -876,7 +902,7 @@ export function App() {
         {place.workspace === "plan" && (
           <div class="rtabrow planrow">
             <PlanSwitch rows={planRows} selected={isPlanPage(stage) ? stage : null} onPick={(p) => show(p)} />
-            {planning && state.build.ready && (
+            {planning && fstate.build.ready && (
               <div class="planready">
                 <span class="rd">
                   <Icon name="check" />
@@ -904,7 +930,8 @@ export function App() {
               <Assets
                 assets={assets}
                 videos={state.project.videos}
-                state={state}
+                state={fstate}
+                film={video?.id ?? null}
                 foundRequest={foundRequest}
                 onFoundRequestUsed={() => setFoundRequest((r) => (r.pending ? { n: r.n, pending: false } : r))}
                 onFoundSeen={setFoundSeen}
@@ -915,11 +942,11 @@ export function App() {
               <Locked tab="assets" projectName={state.project.name} filmName={video?.name ?? null} found={state.found?.counts} onReview={openFound} toast={toast} />
             )
           ) : !unlocked ? (
-            withPanel(<Locked tab={stage} projectName={state.project.name} filmName={video?.name ?? null} found={state.found?.counts} onReview={openFound} toast={toast} />)
+            withPanel(<Locked tab={stage} projectName={state.project.name} filmName={video?.name ?? null} found={state.found?.counts} onReview={openFound} toast={toast} paths={paths} />)
           ) : stage === "picture" && soundOnly ? (
             <NoCutTimeline
               key={video?.id ?? "project"}
-              state={state}
+              state={fstate}
               assets={assets}
               video={video ?? null}
               notes={mixNotes}
@@ -965,22 +992,22 @@ export function App() {
               formatSwitch={chips.length > 1 ? (
                 <FormatToggle chips={chips} versionId={version.id} prompt={formatPrompt(state.project.name, video.name, version.id)} onSelect={switchFormat} toast={toast} />
               ) : null}
-              state={state}
+              state={fstate}
               assets={assets}
             />
           ) : stage === "brief" ? (
-            withPanel(<Brief brief={state.brief} toast={toast} onChanged={() => void refresh()} settle={planSettle} />, planPanel)
+            withPanel(<Brief key={video?.id ?? ""} brief={fstate.brief} video={video?.id ?? null} toast={toast} onChanged={() => void refresh()} settle={planSettle} />, planPanel)
           ) : stage === "storyboard" ? (
-            withPanel(<Storyboard board={state.storyboard} brief={state.brief} toast={toast} onChanged={() => void refresh()} settle={planSettle} />, planPanel)
+            withPanel(<Storyboard key={video?.id ?? ""} board={fstate.storyboard} brief={fstate.brief} video={video?.id ?? null} toast={toast} onChanged={() => void refresh()} settle={planSettle} />, planPanel)
           ) : stage === "visuals" ? (
-            <Visuals state={state} toast={toast} onChanged={() => void refresh()} onPendingChange={setPending} />
+            <Visuals state={fstate} toast={toast} onChanged={() => void refresh()} onPendingChange={setPending} />
           ) : stage === "script" ? (
-            withPanel(<Script script={state.script} toast={toast} onChanged={() => void refresh()} onPickLine={setPlanLine} />, planPanel)
+            withPanel(<Script key={video?.id ?? ""} script={fstate.script} video={video?.id ?? null} toast={toast} onChanged={() => void refresh()} onPickLine={setPlanLine} />, planPanel)
           ) : stage === "voice" ? (
             // Its own engine, disposed (and stopped) when you leave, like the other audio tabs.
             <Voice
               key="voice"
-              state={state}
+              state={fstate}
               assets={assets}
               video={video ?? null}
               toast={toast}
@@ -995,7 +1022,7 @@ export function App() {
             <VariantTab
               key={stage}
               stage={stage}
-              state={state}
+              state={fstate}
               assets={assets}
               video={video ?? null}
               toast={toast}

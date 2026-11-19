@@ -19,12 +19,16 @@ export interface SaveOptions {
   onChanged(): void;
   /** Where Send finds how to wait for these saves: it resolves once every queued save has landed, with the record as the server then has it. */
   settle: { current: (() => Promise<unknown>) | null };
+  /** §31.3: the film whose file this is. Every save names it, and the record is read back as that film's. */
+  video?: string | null;
 }
 
 /** A save Rushes will not make because what it would change is not what the person saw. */
 class RefusedError extends Error {}
 
 export function useRecordSaves<K extends Key>(key: K, view: State[K], o: SaveOptions) {
+  /** The record as the server has it now: this film's. */
+  const fetchNow = async (): Promise<State[K]> => (await api.get<Record<K, State[K]>>(`/api/${key}${o.video ? `?video=${encodeURIComponent(o.video)}` : ""}`))[key];
   const hash = useRef(view.hash);
   const latest = useRef(view);
   latest.current = view;
@@ -39,7 +43,7 @@ export function useRecordSaves<K extends Key>(key: K, view: State[K], o: SaveOpt
   useEffect(() => {
     o.settle.current = async () => {
       await queue.current.catch(() => undefined);
-      return (await api.get<State>("/api/state"))[key];
+      return fetchNow();
     };
     return () => {
       o.settle.current = null;
@@ -53,13 +57,13 @@ export function useRecordSaves<K extends Key>(key: K, view: State[K], o: SaveOpt
       if (!req) throw new Error(`that part is no longer in ${key}.md`);
       if ("refuse" in req) throw new RefusedError(req.refuse);
       try {
-        const r = await api.put<Record<K, State[K]>>(req.path, { ...req.body, hash: hash.current });
+        const r = await api.put<Record<K, State[K]>>(req.path, { ...req.body, ...(o.video ? { video: o.video } : {}), hash: hash.current });
         hash.current = r[key].hash;
         return;
       } catch (e) {
         // The agent rewrote the file while you were typing: take it as it is now, find the part again, and try once more.
         if (e instanceof ApiError && e.code === `${key}_changed` && attempt === 0) {
-          from = (await api.get<State>("/api/state"))[key];
+          from = await fetchNow();
           hash.current = from.hash;
           continue;
         }

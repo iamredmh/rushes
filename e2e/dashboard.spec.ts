@@ -1083,7 +1083,11 @@ test("search and the film filter narrow the screenshots", async ({ page, rushes 
   await page.keyboard.press("g");
   await expect(page.getByRole("status")).toContainText("Saved to screenshots/");
 
+  // §31.5: Assets opens on the film in the top bar (Cutdown, after ]): its screenshot alone. All films shows both.
   await page.keyboard.press("8");
+  await expect(page.locator(".shot-tile")).toHaveCount(1);
+  const film = page.getByRole("combobox", { name: "Film" });
+  await film.selectOption({ label: "All films" });
   await expect(page.locator(".shot-tile")).toHaveCount(2);
 
   const search = page.getByRole("searchbox", { name: "Search" });
@@ -1092,7 +1096,6 @@ test("search and the film filter narrow the screenshots", async ({ page, rushes 
   await search.fill("");
   await expect(page.locator(".shot-tile")).toHaveCount(2);
 
-  const film = page.getByRole("combobox", { name: "Film" });
   await film.selectOption({ label: "Cutdown" });
   await expect(page.locator(".shot-tile")).toHaveCount(1);
   await film.selectOption({ label: "All films" });

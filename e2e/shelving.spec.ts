@@ -71,12 +71,17 @@ test("a shelved film's open notes stop counting in Send, and come back on restor
   await note(rushes, "cutdown", "Cutdown fix two.", 0.6);
   await page.goto(rushes.url);
   await videoReady(page);
-  await expect(sendButton(page)).toContainText("3");
+  // §31.2.2: Send counts the film on screen's notes. Hero's one; shelving Hero moves to Cutdown, whose two are counted,
+  // and Hero's note is in no count while it is shelved.
+  await expect(sendButton(page)).toHaveAccessibleName("Send 1");
   await shelveCurrent(page); // Hero
-  await expect(sendButton(page)).toContainText("2");
+  await expect(currentFilm(page)).toHaveText("Cutdown");
+  await expect(sendButton(page)).toHaveAccessibleName("Send 2");
   await openFilms(page);
   await page.getByRole("menuitem", { name: "Restore Hero" }).click();
-  await expect(sendButton(page)).toContainText("3");
+  await expect(sendButton(page)).toHaveAccessibleName("Send 2");
+  await pickFilm(page, "Hero");
+  await expect(sendButton(page)).toHaveAccessibleName("Send 1");
 });
 
 test("Shift+S shelves the film you are in, and on a shelved film restores it", async ({ page, rushes }) => {

@@ -102,7 +102,7 @@ export const takeOn = (take: TakeRow) => `${take.lane}/${take.variant.id}`;
 export function planSounds(state: State, assets: Asset[], video: Video | null): SoundRow[] {
   const asset = (path: string) => assets.find((a) => a.path === path);
   const use = filmPicks(state.picks, video?.id).use;
-  const lanes = filmLanes(state.project.lanes, video?.id, state.project.videos.length);
+  const lanes = filmLanes(state.project.lanes, video?.id, state.project.videos);
   return MIX_LANES.map((lane) => {
     const groups = takeGroups(lanes, MIX_STAGE[lane], use?.[MIX_STAGE[lane]], video ?? undefined);
     const take = groups.inUse;
@@ -123,7 +123,7 @@ export function useMix({ state, assets, video, version, player, duration, monito
   const filmState = useMemo(() => filmPicks(state.picks, filmId), [state.picks, filmId]);
   const use = filmState.use;
   // Only this film's reads, beds and passes (and any made for every film), as the server measures them.
-  const lanes = useMemo(() => filmLanes(state.project.lanes, filmId, state.project.videos.length), [state.project.lanes, filmId, state.project.videos.length]);
+  const lanes = useMemo(() => filmLanes(state.project.lanes, filmId, state.project.videos), [state.project.lanes, filmId, state.project.videos]);
 
   // ---- what each sound plays: one take, the one in use, as the server worked it out (§27.6) ----
   const planned = useMemo(() => planSounds(state, assets, video), [state.picks, state.project, assets, video]);

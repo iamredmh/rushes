@@ -35,32 +35,38 @@ export interface ChangeLogState {
   saw(mark: string): void;
 }
 
-/** `visible`: the Activity tab is on screen (chosen, in a workspace with the panel, and the panel shown). */
-export function useChangeLog(projectId: string, head: LogHead | null | undefined, visible: (open: boolean) => boolean): ChangeLogState {
+/**
+ * `visible`: the Activity tab is on screen (chosen, in a workspace with the panel, and the panel shown). §31.5: `film`,
+ * in a project with several films: `head` is that film's, and what was seen is kept per film, so a line about one film
+ * neither lights nor clears another's dot. Null: the project's, as with one film.
+ */
+export function useChangeLog(projectId: string, head: LogHead | null | undefined, visible: (open: boolean) => boolean, film: string | null = null): ChangeLogState {
+  const seenKey = film ? `${storageKey(projectId, "log-seen")}:${film}` : storageKey(projectId, "log-seen");
   const [open, setOpenState] = useState(() => recall(session(), storageKey(projectId, "log-open")) === "1");
   const [focusOnOpen, setFocusOnOpen] = useState(false);
-  const [seen, setSeen] = useState(() => recall(local(), storageKey(projectId, "log-seen")));
+  const [seenAll, setSeenAll] = useState<Record<string, string | null>>({});
+  const seen = seenKey in seenAll ? seenAll[seenKey] : recall(local(), seenKey);
+  const setSeen = (m: string | null) => setSeenAll((all) => ({ ...all, [seenKey]: m }));
   const mark = head?.mark ?? null;
   const seenRef = useRef(seen);
   seenRef.current = seen;
   const see = (m: string) => {
     setSeen(m);
-    remember(local(), storageKey(projectId, "log-seen"), m);
+    remember(local(), seenKey, m);
   };
   const shown = visible(open);
   // Whatever arrives while it's on screen has been seen.
   useEffect(() => {
     if (shown && mark && isNews(mark, seen)) see(mark);
-  }, [shown, mark]);
+  }, [shown, mark, seenKey]);
   // Seen in another tab of this project is seen here too (fix round 1, M3).
   useEffect(() => {
-    const key = storageKey(projectId, "log-seen");
     const onStorage = (e: StorageEvent) => {
-      if (e.key === key && e.newValue) setSeen(e.newValue);
+      if (e.key === seenKey && e.newValue) setSeen(e.newValue);
     };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
-  }, [projectId]);
+  }, [seenKey]);
   const setOpen = (o: boolean, focus = o) => {
     setOpenState(o);
     setFocusOnOpen(o && focus);

@@ -19,7 +19,7 @@ const SAVE_AFTER_MS = 500;
 /** §27, 5.8: a script line as the notes panel names it: "S2 · The scan finds it" (the same words export and the CLI use). */
 const lineLabel = sectionLineLabel;
 
-function Row({ section, wps, toast, onChanged, onPick }: { section: Section; wps: number; toast(message: string): void; onChanged(): void; onPick?(line: { id: string; label: string }): void }) {
+function Row({ section, wps, video, toast, onChanged, onPick }: { section: Section; wps: number; video: string | null; toast(message: string): void; onChanged(): void; onPick?(line: { id: string; label: string }): void }) {
   const [text, setText] = useState(section.proposed ?? section.current);
   const [direction, setDirection] = useState(section.direction);
   const editing = useRef(false);
@@ -34,7 +34,8 @@ function Row({ section, wps, toast, onChanged, onPick }: { section: Section; wps
 
   const patch = async (body: Record<string, unknown>) => {
     try {
-      await api.patch(`/api/script/${encodeURIComponent(section.id)}`, body);
+      // §31.6: the line is in this film's script.
+      await api.patch(`/api/script/${encodeURIComponent(section.id)}`, video ? { ...body, video } : body);
     } catch (e) {
       toast(`Couldn't save ${section.id.toUpperCase()}: ${(e as Error).message}`);
     }
@@ -130,7 +131,7 @@ function Row({ section, wps, toast, onChanged, onPick }: { section: Section; wps
 }
 
 /** The VO script: one row per line, your version over the current wording when you've changed it, and the count at the foot. */
-export function Script({ script, toast, onChanged, onPickLine }: { script: ScriptData; toast(message: string): void; onChanged(): void; onPickLine?(line: { id: string; label: string }): void }) {
+export function Script({ script, video = null, toast, onChanged, onPickLine }: { script: ScriptData; video?: string | null; toast(message: string): void; onChanged(): void; onPickLine?(line: { id: string; label: string }): void }) {
   const changed = script.sections.filter(isChanged).length;
   const approved = script.sections.filter((s) => s.status === "approved").length;
   return (
@@ -139,7 +140,7 @@ export function Script({ script, toast, onChanged, onPickLine }: { script: Scrip
         <h2>Script</h2>
       </div>
       <div class="prows">
-        {script.sections.map((s) => <Row key={s.id} section={s} wps={script.wordsPerSecond} toast={toast} onChanged={onChanged} onPick={onPickLine} />)}
+        {script.sections.map((s) => <Row key={s.id} section={s} wps={script.wordsPerSecond} video={video} toast={toast} onChanged={onChanged} onPick={onPickLine} />)}
       </div>
       <PlanStatus counts={script.sections.length > 0 ? { approved: approvedOf(approved, script.sections.length, "line"), edited: changed } : null} />
     </div>

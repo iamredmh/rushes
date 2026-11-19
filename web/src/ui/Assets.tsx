@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { api, mediaUrl } from "../api.js";
 import { claim, release } from "../audio/bus.js";
 import {
-  FOLDERS, type FolderDef, type FolderId, folderItems, foundChip, foundTotal, groupByFilm, isPreviewable, PREVIEW_FOLDER_IDS,
+  FOLDERS, filmFilterOn, type FolderDef, type FolderId, folderItems, foundChip, foundTotal, groupByFilm, isPreviewable, PREVIEW_FOLDER_IDS,
 } from "../lib.js";
 import { safeMarkdownHtml } from "../markdown.js";
 import type { Asset, FoundKind, State, Video } from "../types.js";
@@ -30,6 +30,8 @@ export interface AssetsProps {
   videos: Video[];
   /** §20.5: the project and what has been found in its folder, for the Found folder at the top of the sidebar. */
   state: State;
+  /** §31.5: the film in the top bar. With several films, every folder opens on it ("All films" stays a choice). */
+  film?: string | null;
   /** Opens on Found while `pending`, and again whenever `n` changes. */
   foundRequest: FoundRequest;
   /** Told once Assets has acted on a request, so it is not acted on again. */
@@ -117,7 +119,9 @@ async function fetchPreview(path: string): Promise<{ text: string; truncated: bo
 /** The Assets library (§16): a folder sidebar, search/sort/film/grid-list controls, and a
  *  folder-specific view -- thumbnail grids, poster-frame grids, inline-audio lists or
  *  list+preview splits -- over every registered or auto-discovered project file. */
-export function Assets({ assets, videos, state, foundRequest, onFoundRequestUsed, onFoundSeen, toast, onChanged }: AssetsProps) {
+export function Assets({ assets, videos, state, film: selectedFilm = null, foundRequest, onFoundRequestUsed, onFoundSeen, toast, onChanged }: AssetsProps) {
+  // §31.5: the film a folder opens on: the selected one, with several films; with one, every file (as it always was).
+  const defaultFilm = videos.length > 1 ? selectedFilm : null;
   const visibleFolders = useMemo(
     () => FOLDERS.filter((f) => f.id === "export" || assets.some((a) => f.kinds.includes(a.kind))),
     [assets],
@@ -174,7 +178,13 @@ export function Assets({ assets, videos, state, foundRequest, onFoundRequestUsed
 
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<Sort>("newest");
-  const [film, setFilm] = useState<string | null>(null);
+  const [film, setFilm] = useState<string | null>(defaultFilm);
+  // A switch of film in the top bar takes Assets with it.
+  const lastDefault = useRef(defaultFilm);
+  if (lastDefault.current !== defaultFilm) {
+    lastDefault.current = defaultFilm;
+    setFilm(defaultFilm);
+  }
   // Lazily seeded the same way selectedId is above, so the first paint already shows the right
   // view instead of a flash of the "grid" fallback while an effect catches up.
   const [view, setView] = useState<View>(() => viewFor(folder));
@@ -193,13 +203,13 @@ export function Assets({ assets, videos, state, foundRequest, onFoundRequestUsed
   if (folder && folder.id !== lastFolderId.current) {
     lastFolderId.current = folder.id;
     setQuery("");
-    setFilm(null);
+    setFilm(defaultFilm);
     setSort("newest");
     setView(viewFor(folder));
   }
 
   const items = useMemo(
-    () => (folder ? folderItems(assets, folder, { query, sort, film, videos }) : []),
+    () => (folder ? folderItems(assets, folder, { query, sort, film: folder && filmFilterOn(folder, videos.length) ? film : null, videos }) : []),
     [assets, folder, query, sort, film, videos],
   );
 
@@ -492,7 +502,7 @@ export function Assets({ assets, videos, state, foundRequest, onFoundRequestUsed
                   onInput={(e) => setQuery((e.target as HTMLInputElement).value)}
                 />
               </label>
-              {folder.filmFilter && (
+              {filmFilterOn(folder, videos.length) && (
                 <select class="sel" aria-label="Film" value={film ?? ""} onChange={(e) => setFilm((e.target as HTMLSelectElement).value || null)}>
                   <option value="">All films</option>
                   {videos.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}

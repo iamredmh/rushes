@@ -40,7 +40,7 @@ export function Voice({ state, assets, video, toast, onChanged, onPendingChange,
     setBlindState(on);
   };
   const filmCount = state.project.videos.length;
-  const lanes = filmLanes(state.project.lanes, video?.id, filmCount);
+  const lanes = filmLanes(state.project.lanes, video?.id, state.project.videos);
   const filmState = filmPicks(state.picks, video?.id);
   const films = (r: { lane: string; variant: string; films: string[] }) => (filmCount > 1 ? filmsControl(r, state.project.videos, video, toast, onChanged) : undefined);
   const list = takeList({
@@ -51,7 +51,7 @@ export function Voice({ state, assets, video, toast, onChanged, onPendingChange,
     films: (t: TakeRow) => films(filmsOf(t)),
   });
   const nameOf = (r: VariantRow) => list.nameOf(r.key) ?? r.name;
-  const loose = video ? variantRows(otherLanes(state.project.lanes, video.id, filmCount), "voice") : [];
+  const loose = video ? variantRows(otherLanes(state.project.lanes, video.id, state.project.videos), "voice") : [];
 
   // Notes resolve against the rounds (an older round's read is named by its round) and the script's takes (older notes).
   const model: VoiceNotes = { rounds: voiceRounds(lanes, filmState.lanes), sections: state.script.sections };
@@ -76,7 +76,7 @@ export function Voice({ state, assets, video, toast, onChanged, onPendingChange,
       prompt={agentPrompt("picture", state.project.name, video?.name ?? null)}
       // Frames are counted at the cut's rate, as on the Timeline (m1).
       fps={cut?.fps ?? (state.project.fps || 30)}
-      notes={filmNotes(state.notes.notes, "voice", video?.id)}
+      notes={filmNotes(state.notes.notes, "voice", video?.id, state.project.videos)}
       noteRow={(n) => voiceNoteRows(model, n)}
       onLabel={(n) => voiceOnLabel(model, n.on, nameOf)}
       targetName={(it) => `${it.take.round} · ${it.name}`}

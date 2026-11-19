@@ -1889,14 +1889,13 @@ test("Sound effects and Music list only the film you are on, with its own notes"
   await expect(names).toHaveText(["F2A bed", "Any film bed"]);
   await pickFilm(page, "F3A");
   await expect(names).toHaveText(["Any film bed"]);
-  // F2A's read is all there is: F3A's Voice says it has none yet, and keeps F2A's under Not on this film.
+  // §31.5: F2A's read is all there is, and it is F2A's: on F3A the Voice tab stays locked (each film's tabs unlock on
+  // its own material), and on F2A it lists the read.
+  await expect(reviewTab(page, "Voice")).toHaveAttribute("data-locked", "true");
+  await pickFilm(page, "F2A");
+  await expect(reviewTab(page, "Voice")).not.toHaveAttribute("data-locked", "true");
   await openReviewTab(page, "Voice");
-  await expect(takeRows(page)).toHaveCount(0);
-  await expect(takesList(page).locator(".knone")).toHaveText("No voice reads for this film yet.");
-  await expect(takeHeadings(page)).toHaveText(["Not on this film · 1 read"]);
-  await foldToggle(page, "Not on this film").click();
-  await expect(takesList(page).locator(".take.loose")).toHaveCount(1);
-  await expect(takesList(page).getByRole("button", { name: /^Films for Round 1 · F2A read/ })).toBeVisible();
+  await expect(names).toHaveText(["F2A read"]);
 });
 
 // ---- Red's round 1 (the sound tabs): the picture is a small preview above the notes panel, the takes area has the rest

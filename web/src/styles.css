@@ -484,6 +484,8 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .aselect { background: none; border: 0; padding: 0; margin: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
 .aselect:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 .asub { font-size: 15px; color: var(--text-2); overflow-wrap: anywhere; }
+/* §31.2.3: a visual's picture is on every film: a small tag says so. */
+.asub.ashared { display: inline-block; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-2); border: 1px solid var(--line, currentColor); border-radius: 4px; padding: 0 5px; margin-top: 2px; }
 /* A voiceover/music/sfx row's lane + meta line (§16, v3): same size as .asub, but dimmer --
    secondary to the track's own name, not a version note. */
 .atrackmeta { font: 15px/1.4 var(--sans); color: var(--text-3); overflow-wrap: anywhere; }

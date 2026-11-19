@@ -67,8 +67,8 @@ const occurrenceOf = (sections: BriefSectionView[], index: number): number => se
  * `settle` is how Send waits for what you just typed: it resolves once every queued save has landed,
  * with the brief as the server now has it.
  */
-export function Brief({ brief, toast, onChanged, settle }: { brief: BriefView; toast(message: string): void; onChanged(): void; settle: { current: (() => Promise<unknown>) | null } }) {
-  const { latest, enqueue } = useRecordSaves("brief", brief, { toast, onChanged, settle });
+export function Brief({ brief, video = null, toast, onChanged, settle }: { brief: BriefView; video?: string | null; toast(message: string): void; onChanged(): void; settle: { current: (() => Promise<unknown>) | null } }) {
+  const { latest, enqueue } = useRecordSaves("brief", brief, { toast, onChanged, settle, video });
   const save: Saver = {
     section: (s, text) => {
       const nth = occurrenceOf(latest.current.sections, s.index);

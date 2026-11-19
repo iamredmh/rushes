@@ -179,17 +179,19 @@ function Lightbox({ shot, onClose }: { shot: StoryboardShotView; onClose(): void
 export function Storyboard({
   board,
   brief,
+  video = null,
   toast,
   onChanged,
   settle,
 }: {
   board: StoryboardView;
   brief: BriefView;
+  video?: string | null;
   toast(message: string): void;
   onChanged(): void;
   settle: { current: (() => Promise<unknown>) | null };
 }) {
-  const { latest, enqueue } = useRecordSaves("storyboard", board, { toast, onChanged, settle });
+  const { latest, enqueue } = useRecordSaves("storyboard", board, { toast, onChanged, settle, video });
   const [zoom, setZoom] = useState<string | null>(null);
   // The button that opened the still, so closing it puts focus back there.
   const opener = useRef<HTMLElement | null>(null);

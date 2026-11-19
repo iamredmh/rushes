@@ -920,7 +920,8 @@ test("one playhead across the Review tabs: Music opens where the Timeline is, th
 test("a film switch restores that film's playhead on the Timeline and on a sound's tab, and clears the Timeline's mute", async ({ page, rushes }) => {
   await rushes.addCut();
   await rushes.addCut(undefined, "Cutdown");
-  const bed = await rushes.addVariant("music", "Warm keys", { seconds: 4, freq: 330, video: "hero" });
+  // On both films, so Music is open on each (§31.5: a film's tabs unlock on its own material); in use on Hero only.
+  const bed = await rushes.addVariant("music", "Warm keys", { seconds: 4, freq: 330, video: ["hero", "cutdown"] });
   await rushes.api("PUT", "/api/picks", { video: "hero", lanes: { [bed.lane.id]: bed.variant.id } });
   await page.goto(rushes.testUrl());
   await videoReady(page);
@@ -1156,7 +1157,7 @@ test.describe("the notes panel", () => {
     await expect(sendButton(page)).toHaveText("Send1");
     await expect(sendButton(page)).toHaveAccessibleName("Send 1");
     // Its tooltip says what the count counts: what has not been sent yet.
-    await expect(sendButton(page)).toHaveAttribute("data-tip", "Notes and edits not sent yet, from every tab and film");
+    await expect(sendButton(page)).toHaveAttribute("data-tip", "Notes and edits on this film not sent yet, from every tab");
     await sendButton(page).click();
     await expect(sentDialog(page)).toContainText("picture");
     await expect(sentDialog(page).getByRole("button", { name: "Copy prompt" })).toBeVisible();

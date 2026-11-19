@@ -533,6 +533,8 @@ export function Visuals({ state, toast, onChanged, onPendingChange }: { state: S
         <div class="vznhead">
           <h3>Notes</h3>
           <span>{openTotal} open across {openVisuals} visual{openVisuals === 1 ? "" : "s"}</span>
+          {/* §31.2.3: visuals are the project's, so they are the same on every film: said, not taken for a leak. */}
+          {state.project.videos.length > 1 && <span class="asub ashared" data-tip="Visuals belong to the project: they show on every film">Shared</span>}
         </div>
         <div class="vznlist">
           {groups.length === 0 && <div class="vzempty">No notes yet.</div>}

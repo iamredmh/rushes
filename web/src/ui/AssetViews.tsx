@@ -185,6 +185,7 @@ export function AssetRow({ asset, videos, toast }: { asset: Asset; videos: Video
           {asset.missing && <Missing />}
         </div>
         {cut?.subtitle && <div class="asub">{cut.subtitle}</div>}
+        {asset.shared && videos.length > 1 && <Shared />}
         <div class="afolder mono">{asset.path}</div>
         {/* A missing file has no size or date to show -- just the mark above, no dangling "0 B · ". */}
         {!asset.missing && <div class="ameta">{formatBytes(asset.size ?? 0)} · {shortDate(asset.modified)}</div>}
@@ -301,6 +302,11 @@ export function PreviewRow({
   );
 }
 
+/** §31.2.3: a visual's picture belongs to every film: said, so it doesn't read as another film's file. */
+function Shared() {
+  return <div class="asub ashared" data-tip="Visuals belong to the project: they show on every film">Shared</div>;
+}
+
 /** A Screenshots/Images grid tile. */
 export function ShotTile({ asset, videos, toast, onOpen }: { asset: Asset; videos: Video[]; toast(message: string): void; onOpen(from: HTMLElement): void }) {
   const video = videos.find((v) => v.id === asset.video);
@@ -315,6 +321,7 @@ export function ShotTile({ asset, videos, toast, onOpen }: { asset: Asset; video
       <div class="shot-meta">
         <div class="mono">{when}{asset.missing && <Missing />}</div>
         {film && <div class="asub">{film}</div>}
+        {asset.shared && videos.length > 1 && <Shared />}
       </div>
       <Actions asset={asset} toast={toast} />
     </div>
