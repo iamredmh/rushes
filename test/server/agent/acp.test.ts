@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AcpConnection, type AdapterSpec } from "../../../src/server/agent/acp.js";
+import { readJsonl } from "../../helpers/jsonl.js";
 
 const FAKE = resolve(__dirname, "../../helpers/fake-acp.mjs");
 const dirs: string[] = [];
@@ -24,7 +25,7 @@ async function fake(scenario: object): Promise<{ spec: AdapterSpec; log: () => P
   await writeFile(scenarioPath, JSON.stringify(scenario));
   return {
     spec: { command: process.execPath, args: [FAKE], env: { FAKE_ACP_SCENARIO: scenarioPath, FAKE_ACP_LOG: logPath }, cwd: dir },
-    log: async () => (await readFile(logPath, "utf8").catch(() => "")).split("\n").filter(Boolean).map((l) => JSON.parse(l)),
+    log: async () => readJsonl(await readFile(logPath, "utf8").catch(() => "")),
   };
 }
 async function start(scenario: object) {

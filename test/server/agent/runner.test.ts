@@ -19,6 +19,7 @@ import { RushesError } from "../../../src/core/errors.js";
 import { agentRulesFor } from "../../../src/server/agent/rules.js";
 import type { AgentSettings, Batch } from "../../../src/core/schema.js";
 import type { Store } from "../../../src/core/store.js";
+import { readJsonl } from "../../helpers/jsonl.js";
 
 const FAKE = resolve(__dirname, "../../helpers/fake-acp.mjs");
 
@@ -86,7 +87,7 @@ async function rig(scenario: object, opts: { agents?: AgentInfo[]; settings?: Pa
   const log = () => {
     let text = "";
     try { text = readFileSync(logPath, "utf8"); } catch { /* not written yet */ }
-    return text.split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    return readJsonl(text);
   };
   const batch = async (...texts: string[]) => {
     const [project, script, batches] = await Promise.all([store.read("project"), store.read("script"), store.read("batches")]);

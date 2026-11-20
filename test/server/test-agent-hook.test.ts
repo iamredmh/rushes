@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { tmpProject } from "../helpers/tmp.js";
 import { startServer, type Running } from "../../src/server/start.js";
+import { readJsonl } from "../helpers/jsonl.js";
 
 // Detection on this Mac must never decide a test: with the hook ignored, the server finds no agent at all.
 vi.mock("../../src/server/agent/detect.js", async (original) => ({
@@ -35,7 +36,7 @@ async function project(extra: object = {}) {
   const readLog = () => {
     let text = "";
     try { text = readFileSync(log, "utf8"); } catch { /* not written yet */ }
-    return text.split("\n").filter(Boolean).map((l) => JSON.parse(l) as Record<string, any>);
+    return readJsonl(text);
   };
   return { root, hook, readLog };
 }

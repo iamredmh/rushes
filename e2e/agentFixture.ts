@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { openRushes, test as base, type OpenRushes, type Rushes } from "./fixture.js";
+import { readJsonl } from "../test/helpers/jsonl.js";
 
 export * from "./fixture.js";
 
@@ -42,7 +43,7 @@ function freePort(): Promise<number> {
 /** What the fake has received so far, oldest first (an empty list before it has written anything). */
 export async function readAgentLog(path: string): Promise<any[]> {
   const text = await readFile(path, "utf8").catch(() => "");
-  return text.split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  return readJsonl(text);
 }
 
 export const test = base.extend<{ startWithAgent: (scenario: object, opts?: { agents?: TestAgents }) => Promise<AgentRushes> }>({

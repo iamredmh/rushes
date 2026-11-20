@@ -13,6 +13,7 @@ import type { AgentInfo } from "../../src/server/agent/detect.js";
 import type { AgentRules, AgentSettings } from "../../src/core/schema.js";
 import { agentDefaultsFile, agentRulesFor, defaultsPath } from "../../src/server/agent/rules.js";
 import type { Store } from "../../src/core/store.js";
+import { readJsonl } from "../helpers/jsonl.js";
 
 const FAKE = resolve(__dirname, "../helpers/fake-acp.mjs");
 
@@ -46,7 +47,7 @@ function fakeAgent(store: Store, agents: () => AgentInfo[]): { opts: RunnerOptio
     log: () => {
       let text = "";
       try { text = readFileSync(logPath, "utf8"); } catch { /* not written yet */ }
-      return text.split("\n").filter(Boolean).map((l) => JSON.parse(l));
+      return readJsonl(text);
     },
   };
 }
