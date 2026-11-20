@@ -202,7 +202,7 @@ async function startOnPort(port: number, noFfmpeg = false, env: Record<string, s
     const attempt = await start(port, noFfmpeg, env);
     if (attempt.port === port) return attempt;
     await stop(attempt.child);
-    await rm(attempt.tmpDir, { recursive: true, force: true });
+    await rm(attempt.tmpDir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
     if (Date.now() > deadline) {
       throw new Error(`rushes serve kept landing on ${attempt.port} instead of ${port} after 5 s`);
     }
@@ -460,7 +460,7 @@ export async function openRushes({ noFfmpeg, browserName, port = 0, env = {} }: 
     rushes,
     async close() {
       await stop(child);
-      for (const dir of tmpDirs) await rm(dir, { recursive: true, force: true });
+      for (const dir of tmpDirs) await rm(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 }); // Windows: EBUSY while a just-stopped process still holds the folder
     },
   };
 }

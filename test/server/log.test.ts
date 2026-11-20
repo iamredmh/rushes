@@ -149,7 +149,7 @@ describe("the server writes the log as things happen (§22.5)", () => {
       await writeFile(join(root, f), "bytes");
     }
     const lengths: Record<string, number> = { "hero v3 theme.wav": 60, "hero v3 read.wav": 60.4 };
-    const s = await startServer(root, { port: 0, found: { probe: async (abs) => lengths[abs.split("/").pop()!] ?? null } });
+    const s = await startServer(root, { port: 0, found: { probe: async (abs) => lengths[abs.split(/[\\/]/).pop()!] ?? null } });
     let view: { entries: { text: string; by: string }[]; undated: unknown[] } = { entries: [], undated: [] };
     await expect
       .poll(async () => {
@@ -170,7 +170,7 @@ describe("the server writes the log as things happen (§22.5)", () => {
       await writeFile(join(root, f), "bytes");
     }
     const lengths: Record<string, number> = { "hero v3 theme.wav": 60, "hero v3 read.wav": 60.4 };
-    const scanner = new FoundScanner({ store, probe: async (abs) => lengths[abs.split("/").pop()!] ?? null, announce: () => undefined });
+    const scanner = new FoundScanner({ store, probe: async (abs) => lengths[abs.split(/[\\/]/).pop()!] ?? null, announce: () => undefined });
     const app = createApp(store, { found: scanner });
     await scanner.scan();
     // Nothing has read the log yet: the adoption's line is its first write, so the backfill sees the

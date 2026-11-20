@@ -576,6 +576,9 @@ describe("AgentRunner answers on notes", () => {
     await r.waitFor("the switch to go off", () => r.runner.status().phase === "off");
     const before = r.runner.status().lines.length;
     await r.answerOn(b1.noteIds[1], "Yes");
+    // The runner handles the answer in its own time: let it finish (while still off) before turning it back on.
+    const pending = (r.runner as unknown as { pending: Set<Promise<unknown>> }).pending;
+    while (pending.size) await Promise.allSettled([...pending]);
     // Turning it back on and sending shows any follow-up the answer had made: there is none, and no line.
     await r.store.update("agent", (f) => void (f.on = true));
     const b2 = await r.batch("Three");

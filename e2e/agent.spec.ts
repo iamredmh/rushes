@@ -6,6 +6,10 @@ import { dirname, join } from "node:path";
 import type { Locator, Page } from "@playwright/test";
 import { rulesPath } from "../src/server/agent/rules.js";
 import { cutButton, expect, openPlanPage, openReviewTab, pickFilm, pickVersion, readAgentLog, sendButton, sentDialog, test, videoReady, type AgentRushes } from "./agentFixture.js";
+import { signInLabel } from "../src/core/agentHelp.js";
+
+/** §34: the sign-in button is named for the OS the desk runs on (the server is local, so this one). */
+const SIGN_IN = signInLabel(process.platform);
 
 /** The top bar's chip: what the agent is doing. Clicking it opens Activity. */
 const chip = (page: Page): Locator => page.locator("header.top .achip");
@@ -363,10 +367,10 @@ test("an agent that isn't signed in says so, and picking it shows why under its 
   const menu = agentMenu(page);
   const codex = menu.getByRole("menuitemradio", { name: /Codex/ });
   await expect(codex).toContainText("Not signed in");
-  await expect(menu.getByRole("menuitem", { name: "Sign in in Terminal" })).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: SIGN_IN })).toBeVisible();
   await codex.click();
   const why = menu.getByRole("alert");
-  await expect(why).toHaveText("Codex is not signed in. Choose Sign in in Terminal, then try again.");
+  await expect(why).toHaveText(`Codex is not signed in. Choose ${SIGN_IN}, then try again.`);
   await expect(why).toBeVisible();
   // Under Codex's row, and the agent is unchanged.
   expect((await why.boundingBox())!.y).toBeGreaterThanOrEqual((await codex.boundingBox())!.y + (await codex.boundingBox())!.height - 0.5);
@@ -819,14 +823,14 @@ test("not signed in falls back to the dialog with Set up", async ({ page, startW
   await expect(sentPop(page)).toHaveCount(0);
   const claudeRow = whoRow(page, "Claude Code");
   await expect(claudeRow).toContainText("Not signed in");
-  await expect(claudeRow.getByRole("button", { name: "Sign in in Terminal" })).toBeVisible();
+  await expect(claudeRow.getByRole("button", { name: SIGN_IN })).toBeVisible();
   await expect(whoRadio(page, "Codex")).toBeChecked();
   await sheetFits(page);
   await shootSheet(page, "sheet-not-signed-in-1440");
   await whoRadio(page, "Claude Code").check();
   await primary(page, "Next").click();
   const alert = claudeRow.getByRole("alert");
-  await expect(alert).toHaveText("Claude Code is not signed in. Choose Sign in in Terminal, then try again.");
+  await expect(alert).toHaveText(`Claude Code is not signed in. Choose ${SIGN_IN}, then try again.`);
   await expect(alert).toBeVisible();
   await expect(page.getByRole("dialog", { name: "Who should get these notes?" })).toBeVisible();
   await sheetFits(page);

@@ -26,7 +26,7 @@ import type { ScanLimits } from "../../src/core/found.js";
 type ProbeFn = (abs: string, signal?: AbortSignal) => Promise<number | null>;
 
 /** A probe that answers from a table of file names (anything else is unknown). */
-const byName = (table: Record<string, number> = {}): ProbeFn => async (abs) => table[abs.split("/").pop()!] ?? null;
+const byName = (table: Record<string, number> = {}): ProbeFn => async (abs) => table[abs.split(/[\\/]/).pop()!] ?? null;
 
 /** A probe that never answers: nothing may wait on it. */
 const never: ProbeFn = () => new Promise<number | null>(() => undefined);
@@ -1121,7 +1121,7 @@ describe("adoption when lengths are slow (fix round 1)", () => {
   it("probes the anchor first, then registered voice and music, then voice and music candidates, then the rest", async () => {
     const order: string[] = [];
     const probe: ProbeFn = async (abs) => {
-      order.push(abs.slice(abs.indexOf("My Project/") + "My Project/".length));
+      order.push(abs.replace(/\\/g, "/").slice(abs.replace(/\\/g, "/").indexOf("My Project/") + "My Project/".length));
       return null;
     };
     const files = ["renders/hero v3.mov", "renders/alt cut.mov", "sfx/whoosh.wav", "misc/a.wav", "bed/theme.wav", "vo/read.wav", "bed/kept.wav"];
@@ -1141,7 +1141,7 @@ describe("adoption when lengths are slow (fix round 1)", () => {
     const started: string[] = [];
     const gates: (() => void)[] = [];
     const probe: ProbeFn = (abs) => {
-      started.push(abs.slice(abs.indexOf("My Project/") + "My Project/".length));
+      started.push(abs.replace(/\\/g, "/").slice(abs.replace(/\\/g, "/").indexOf("My Project/") + "My Project/".length));
       return new Promise((r) => gates.push(() => r(null)));
     };
     const music = ["bed/m1.wav", "bed/m2.wav", "bed/m3.wav", "bed/m4.wav", "bed/m5.wav"];

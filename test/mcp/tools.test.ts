@@ -438,7 +438,7 @@ describe("MCP tools: finding the project's other files", () => {
   // The cut is "hero v3" (60 s). The theme and the read match its length, time and name.
   const FILES = ["renders/hero v3.mov", "bed/hero v3 theme.wav", "vo_jules/hero v3 read.wav", "stems/other pad.wav", "sfx/whoosh.wav", "notes/brief.md"];
   const LENGTHS: Record<string, number> = { "hero v3.mov": 60, "hero v3 theme.wav": 60, "hero v3 read.wav": 60.4, "other pad.wav": 31 };
-  const probe: Probe = async (abs) => LENGTHS[abs.split("/").pop()!] ?? null;
+  const probe: Probe = async (abs) => LENGTHS[abs.split(/[\\/]/).pop()!] ?? null;
 
   async function withCut(opts: { files?: string[] } = {}) {
     const t = await connect({ files: opts.files ?? FILES, probe });
