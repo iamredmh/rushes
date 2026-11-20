@@ -2,7 +2,8 @@
 // Rushes says so with a notification (macOS, and since §34 Linux and Windows). Fixed text only: never a command or anything the agent wrote.
 import { execFile } from "node:child_process";
 import { basename } from "node:path";
-import { findOnPath } from "./spawn.js";
+import { findOnPath, windowsSystemTool } from "./spawn.js";
+import { win32 } from "node:path";
 import type { Store } from "../../core/store.js";
 import { AGENT_NAMES, type AgentStatus } from "./runner.js";
 
@@ -56,7 +57,7 @@ export function osNotifier(
       if (platform === "darwin") {
         await exec("osascript", ["-e", notificationScript(title, body)]);
       } else if (platform === "win32") {
-        await exec("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", WINDOWS_TOAST_SCRIPT], {
+        await exec(windowsSystemTool(win32.join("WindowsPowerShell", "v1.0", "powershell.exe"), env), ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", WINDOWS_TOAST_SCRIPT], {
           ...process.env, RUSHES_NOTIFY_TITLE: line(title), RUSHES_NOTIFY_BODY: line(body),
         });
       } else {

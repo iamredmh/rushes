@@ -133,10 +133,21 @@ export function killTree(child: ChildProcess, signal: NodeJS.Signals = "SIGTERM"
   const pid = child.pid;
   if (pid === undefined) return;
   if (process.platform === "win32") {
+    // By its full path: a server started with a thin PATH may not find System32. spawnSync reports a failure in its
+    // result rather than throwing, so anything but a clean exit falls back to ending the child itself.
+    let ok = false;
     try {
-      spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore", windowsHide: true, timeout: 10_000 });
+      const r = spawnSync(windowsSystemTool("taskkill.exe"), ["/pid", String(pid), "/T", "/F"], { stdio: "ignore", windowsHide: true, timeout: 10_000 });
+      ok = !r.error && r.status === 0;
     } catch {
-      child.kill();
+      ok = false;
+    }
+    if (!ok) {
+      try {
+        child.kill();
+      } catch {
+        /* already gone */
+      }
     }
     return;
   }
@@ -149,6 +160,11 @@ export function killTree(child: ChildProcess, signal: NodeJS.Signals = "SIGTERM"
       /* already gone */
     }
   }
+}
+
+/** A program in Windows's System32 by its full path (%SystemRoot%, else C:\\Windows). */
+export function windowsSystemTool(name: string, env: NodeJS.ProcessEnv = process.env): string {
+  return win32.join(env.SystemRoot || env.windir || "C:\\Windows", "System32", name);
 }
 
 /** npm's own CLI script for the Node running Rushes, run as `node npm-cli.js`; null when it isn't where installers put it. */

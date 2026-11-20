@@ -42,7 +42,7 @@ describe("§34: notifications on Linux and Windows", () => {
     await osNotifier({ platform: "win32", env: {}, run })("Rushes", body);
     expect(ran).toHaveLength(1);
     const [file, args, env] = ran[0];
-    expect(file).toBe("powershell.exe");
+    expect(file).toBe("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe");
     expect(args.slice(0, 5)).toEqual(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command"]);
     expect(args[5]).toBe(WINDOWS_TOAST_SCRIPT);
     expect(args.join(" ")).not.toContain("Remove-Item");

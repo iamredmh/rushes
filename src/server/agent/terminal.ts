@@ -6,7 +6,7 @@ import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RushesError } from "../../core/errors.js";
-import { findOnPath, spawnEnv } from "./spawn.js";
+import { findOnPath, spawnEnv, windowsSystemTool } from "./spawn.js";
 
 /** How long the sign-in file is kept after the terminal is asked to open it. */
 export const SIGN_IN_FILE_MS = 60_000;
@@ -79,7 +79,7 @@ export function terminalOpener(o: { platform?: NodeJS.Platform; find?: (bin: str
         });
       } else if (platform === "win32") {
         // `start "" "<file>"` opens it in a new console window. The path is Rushes's own temp file.
-        await launch(process.env.ComSpec || "cmd.exe", ["/d", "/c", `start "" "${file}"`], { windowsVerbatimArguments: true });
+        await launch(process.env.ComSpec || windowsSystemTool("cmd.exe"), ["/d", "/c", `start "" "${file}"`], { windowsVerbatimArguments: true });
       } else {
         await launch(find(linuxTerminal!.bin)!, linuxTerminal!.args(file));
       }
