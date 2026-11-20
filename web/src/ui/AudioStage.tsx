@@ -28,7 +28,8 @@ import type { FilmsControl } from "./FilmsMenu.js";
 import { PreviewDivider, type ReviewClock, usePreviewSize, useReviewClock, useVolume } from "./desk/frame.js";
 import { Icon } from "./Icon.js";
 import { NoCutSlate } from "./desk/NoCut.js";
-import { escapeIsFree, NotesPanel, useNoteBox } from "./desk/NotesPanel.js";
+import { escapeIsFree, NotesPanel, useAllTabs, useNoteBox } from "./desk/NotesPanel.js";
+import { allTabNotes } from "../tabNotes.js";
 import { PictureTrack } from "./desk/PictureTrack.js";
 import { useTimeView } from "./desk/tracks.js";
 import { timelineWheel, ZoomRow } from "./desk/ZoomBar.js";
@@ -181,6 +182,11 @@ export interface AudioStageProps {
   noteRow(note: Note): string | null;
   /** What a listed note is on, for the notes panel. */
   onLabel(note: Note): string | null;
+  /**
+   * §35.3: the film's notes from every tab, and the tab label on one from another tab, for the "All tabs" switch beside
+   * the notes' filter (off by default, remembered per browser).
+   */
+  others?: { notes: Note[]; label(note: Note): string | null };
   /** A note's target line names the take (or one of its cues) like this: "Round 2 · Gerald", "Cue · Swipe". */
   targetName(item: TakeItem, cue: string | null): string;
   /** Every sound's tab takes a range (I and O, the Range tool); Music and Effects also tick marks on it (Rise, Fall,
@@ -246,7 +252,8 @@ function ClockedBy({ engine, by, children }: { engine: AudioEngine; by: (t: numb
 type Picked = { key: string; cue: string | null; clicked: boolean };
 
 export function AudioStage(props: AudioStageProps) {
-  const { stage, title, list, preview, fps, notes, noteRow, onLabel, targetName, rangeMarks, toast, onChanged, onPendingChange, onPlayingChange, readOnly = false } = props;
+  const { stage, title, list, preview, fps, notes, noteRow, onLabel, others, targetName, rangeMarks, toast, onChanged, onPendingChange, onPlayingChange, readOnly = false } = props;
+  const [allTabs, setAllTabs] = useAllTabs();
   if (hook) hook.renders++;
 
   // ---- the takes on show, and what the engine plays ----
@@ -753,7 +760,9 @@ export function AudioStage(props: AudioStageProps) {
             if (hook) hook.panelRenders++;
             return (
               <NotesPanel
-                notes={notes}
+                notes={allTabs && others ? allTabNotes(notes, others.notes) : notes}
+                todoCount={notes.filter((n) => n.status === "todo").length}
+                allTabs={others ? { on: allTabs, onChange: setAllTabs } : undefined}
                 version={preview?.version.id ?? null}
                 placeholder={placeholderAt(t)}
                 inputRef={input}
@@ -771,7 +780,7 @@ export function AudioStage(props: AudioStageProps) {
                   onClear: selectedItem || whole !== null ? clearAim : undefined,
                 }}
                 marks={!rangeMarks || target.scope !== "range" ? undefined : { value: marks, onChange: setMarks }}
-                onLabel={onLabel}
+                onLabel={(n) => (n.stage === stage || !others ? onLabel(n) : others.label(n))}
                 readOnly={readOnly}
               />
             );

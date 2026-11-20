@@ -124,16 +124,12 @@
 .nbadge svg.ic { flex: none; width: 13px; height: 13px; }
 .nbadge.working { color: var(--accent); }
 .nbadge svg.ic.nspin { stroke-width: 2.5; animation: fspin 0.9s linear infinite; }
-.nbadge.needsYou { color: var(--todo); }
-.nbadge .ndot { flex: none; width: 7px; height: 7px; margin: 0 3px; border-radius: 50%; background: var(--todo); }
 .nbadge.fixed { color: var(--done); }
 .nbadge.fixed svg.ic { stroke-width: 2.5; }
 .nbadge .nfix { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; text-decoration: underline; text-decoration-color: var(--done-line); text-underline-offset: 2px; }
 .nbadge .nfix:hover { text-decoration-color: currentColor; }
 .nbadge .nfix:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
 /* Needs you: the circle's ring and the card's left edge in the to-do colour (an inset edge, so nothing moves). */
-.note.needs, .note.needs[aria-current="true"] { box-shadow: inset 2px 0 0 var(--todo); }
-.note.needs .chk { border-color: var(--todo); }
 
 .nthread { grid-column: 2; display: flex; flex-direction: column; gap: 2px; min-width: 0; margin-top: 4px; }
 .nline { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 6px; align-items: start; color: var(--text-2); font: 400 var(--t-small)/1.4 var(--sans); }
@@ -141,14 +137,10 @@
 .nline .ntime { padding-top: 1px; color: var(--text-4); font: 400 12px/1.4 var(--sans); font-variant-numeric: tabular-nums; }
 .nwho { display: grid; place-items: center; width: 16px; height: 16px; margin-top: 1px; }
 .nline.agent .nwho svg.ic { width: 14px; height: 14px; color: var(--text-3); }
-.nline.user .nwho { width: 15px; height: 15px; border: 1px solid var(--line-2); border-radius: 50%; background: var(--raised); color: var(--text-2); font: 600 9px/1 var(--sans); }
 .nmore { align-self: flex-start; margin: 0 0 2px 22px; padding: 0; border: 0; background: none; color: var(--text-3); font: 500 12px/1.4 var(--sans); cursor: pointer; }
 .nmore:hover { color: var(--text); }
 .nmore:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
 
-.nreply { grid-column: 2; min-width: 0; margin-top: 6px; }
-.nreply .input { display: block; min-height: 0; padding: 5px 9px; border-color: var(--line-2); font: 400 var(--t-small)/1.4 var(--sans); overflow-y: hidden; }
-.nreply .input:focus { border-color: var(--accent); }
 @media (prefers-reduced-motion: reduce) { .nbadge svg.ic.nspin { animation: none; } }
 /* A hidden character in the agent's words, spelled out (as on an ask card). */
 .nline .nhid { padding: 0 2px; border-radius: 3px; background: var(--todo-soft); color: var(--todo); unicode-bidi: isolate; }

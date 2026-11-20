@@ -1,12 +1,14 @@
 // §28.2, §28.3: one run of the user's own agent per project. The runner owns the adapter process, the
-// conversation, the turn queue, progress, permission asks (§28.4), answers on notes (§28.5) and Stop.
+// conversation, the turn queue, progress, permission asks (§28.4) and Stop. §35: notes go one way; there is no
+// follow-up turn and no question phase.
 //
 // How it moves:
-//   idle/finished/question/failed --send--> starting (adapter up, initialize, load or new session)
-//   starting --ready--> working (one session/prompt per turn: batches and follow-ups, in order of arrival)
+//   idle/finished/failed --send--> starting (adapter up, initialize, load or new session)
+//   starting --ready--> working (one session/prompt per turn: one batch each, in order of arrival)
 //   starting --fails--> failed (notes of every waiting batch recalled; send says why)
 //   working --an ask the rules don't allow--> waiting (until the user answers; never by time) --> working
-//   working --turn ends, more queued--> working;  --turn ends, none--> question | finished (idle timer armed)
+//   working --turn ends, more queued--> working;  --turn ends, none--> finished (idle timer armed; notes left with
+//   the agent go back to to do, §35)
 //   working --adapter exits--> failed (notes recalled);  any busy phase --stop--> idle (notes recalled)
 //   Stop, close and an adapter exit answer every pending ask cancelled.
 //
@@ -18,7 +20,7 @@ import { NotFoundError, RushesError } from "../../core/errors.js";
 import { oneLine } from "../../core/labels.js";
 import { lineEvent } from "../../core/logEvents.js";
 import { byFilm } from "../../core/notes.js";
-import { needsYou, noteState, recallNote, recallNotes } from "../../core/noteState.js";
+import { noteState, recallNote, recallNotes } from "../../core/noteState.js";
 import type { AgentId, AgentPermissions, AgentRules, AgentSettings, AlwaysRule, Batch, Note } from "../../core/schema.js";
 import type { ChangeEvent, Store } from "../../core/store.js";
 import { logBookFor } from "../logbook.js";
@@ -30,9 +32,9 @@ import { PermissionBroker, addRule, allowOutcome, dropRule, toRequest, type AskC
 import { detectAgents, type AgentInfo } from "./detect.js";
 import { connectorEntry, ensureConnector } from "./connectors.js";
 import { agentRulesFor, type AgentRulesFile } from "./rules.js";
-import { batchJob, batchLabel, followUpFor, type TurnJob } from "./followUp.js";
+import { batchJob, batchLabel, type TurnJob } from "./turns.js";
 
-export type AgentPhase = "off" | "idle" | "starting" | "working" | "waiting" | "question" | "finished" | "failed";
+export type AgentPhase = "off" | "idle" | "starting" | "working" | "waiting" | "finished" | "failed";
 
 export interface ActivityLine { at: string; text: string; note: string | null }
 
@@ -42,8 +44,6 @@ export interface AgentStatus {
   phase: AgentPhase;
   /** The batch being worked on, then the ones queued behind it, by id. */
   batches: string[];
-  /** Task 10 (2): the notes whose answer the agent is working on or has queued (follow-up turns), by id. */
-  followUps: string[];
   current: { note: string | null; doing: string | null };
   asks: PendingAsk[];
   lines: ActivityLine[];
@@ -80,10 +80,7 @@ export interface RunnerOptions {
  */
 export type SendResult = { handedTo: AgentId } | { handedTo: null; why: string; stopped?: true; recalled?: true };
 
-/** A follow-up parked by R11: its note goes back to to do, and Activity names the agent to Send to. */
-type Park = { name: string; batch: string };
-type HandResult = SendResult | { handedTo: null; why: string; park: Park };
-type Accepted = { info: AgentInfo } | { why: string; stopped?: true } | { why: string; park: Park };
+type Accepted = { info: AgentInfo } | { why: string; stopped?: true };
 
 /** How long the adapter stays up after its last turn (§5.2). */
 export const AGENT_IDLE_MS = 600_000;
@@ -100,9 +97,6 @@ const CANCELLED: AcpPermissionOutcome = { outcome: "cancelled" };
 const CLOSING = "Rushes is closing";
 /** A turn's failure in the adapter's words is kept to this many characters (the chip's tooltip). */
 const ERROR_MAX = 200;
-/** An answer's name in Activity (Task 10, 4): its follow-up's label, or "your answer on a note" when it was never read. */
-const answerOf = (job: TurnJob | null): string => job?.label ?? "your answer on a note";
-const capitalised = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
 /** I1: Send to AI is on in the project, but the user's own rules file has no answer to the first-Send sheet. */
 export const NOT_SET_UP = "Send to AI is not set up";
 const OFF = "Send to AI is off";
@@ -173,7 +167,7 @@ export class AgentRunner {
    * last reported (round 2, item 3).
    */
   private readonly adapters = new WeakMap<AcpConnection, { agent: AgentId; level: AgentPermissions; calls: McpCalls; seen: SeenCalls; mode: string | null; modeReported: boolean; activity: ActivityTracker }>();
-  /** §33: the row the last batch was sent under. A follow-up that has to start the agent again starts it in this one. */
+  /** §33: the row the last batch was sent under. */
   private lastLevel: AgentPermissions | null = null;
   private readonly mcp: (root: string) => McpServerSpec;
   private readonly idleMs: number;
@@ -194,7 +188,7 @@ export class AgentRunner {
   private lines: ActivityLine[] = [];
   private current: { note: string | null; doing: string | null } = { note: null, doing: null };
 
-  /** Batches and follow-ups waiting for their turn, in the order they came in. */
+  /** Batches waiting for their turn, in the order they came in. */
   private queue: TurnJob[] = [];
   /** The job whose session/prompt is in flight; `done` settles when that prompt does. */
   private turn: { job: TurnJob; done: Promise<void> } | null = null;
@@ -202,9 +196,7 @@ export class AgentRunner {
   private readonly broker: PermissionBroker;
   /** The latest Always rule write; a permission ask waits for it before reading the rules. */
   private ruleWrite: Promise<void> = Promise.resolve();
-  /** R13: per note, the follow-ups being handed (from the user's answer until hand() returns). */
-  private readonly answering = new Map<string, number>();
-  /** A turn has ended and the runner is reading the notes to choose question or finished. */
+  /** A turn has ended and the runner is giving back the notes it left. */
   private ending = false;
 
   private conn: AcpConnection | null = null;
@@ -228,10 +220,6 @@ export class AgentRunner {
   private readonly onChange = (e: ChangeEvent) => {
     if (e.file === "agent" && !this.closed) this.track(this.loadSettings());
   };
-  /** The user answered on a note: a follow-up turn when R11 allows one (followUp.ts). */
-  private readonly onUserReply = (e: { note: string; text: string }) => {
-    if (!this.closed) this.track(this.followUp(e));
-  };
 
   constructor(private readonly store: Store, opts: RunnerOptions = {}) {
     this.detect = opts.detect ?? (() => detectAgents());
@@ -248,7 +236,6 @@ export class AgentRunner {
     this.broker = new PermissionBroker(store.root, { now: this.now, onChange: () => this.asksChanged() });
     this.rulesFile = agentRulesFor(store);
     store.on("change", this.onChange);
-    store.on("user-reply", this.onUserReply);
     this.track(this.loadSettings());
     this.track(this.loadRules());
   }
@@ -265,8 +252,7 @@ export class AgentRunner {
       on,
       agent: this.settings?.agent ?? null,
       phase: !on && !this.busy() ? "off" : this.broker.size > 0 ? "waiting" : this.phase,
-      batches: jobs.filter((j) => j.kind === "batch").map((j) => j.batchId),
-      followUps: jobs.flatMap((j) => (j.kind === "followUp" && j.note ? [j.note] : [])),
+      batches: jobs.map((j) => j.batchId),
       current: { ...this.current },
       asks: this.broker.pending(),
       lines: this.lines.slice(),
@@ -296,8 +282,7 @@ export class AgentRunner {
    */
   async send(batch: Batch): Promise<SendResult> {
     const r = (await this.hand(async () => batchJob(batch)))!;
-    // A batch is never parked (only a follow-up is).
-    return this.noteRefusal(batch.id, "park" in r ? { handedTo: null, why: r.why } : r);
+    return this.noteRefusal(batch.id, r);
   }
 
   /**
@@ -316,7 +301,7 @@ export class AgentRunner {
       return took ? batchJob(batch) : null;
     });
     if (r === null) return null;
-    return this.noteRefusal(batch.id, "park" in r ? { handedTo: null, why: r.why } : r);
+    return this.noteRefusal(batch.id, r);
   }
 
   /**
@@ -339,60 +324,11 @@ export class AgentRunner {
     return r;
   }
 
-  /**
-   * Hands the answer on as a follow-up (R11). With Send to AI on but no kept session, or the agent not signed in,
-   * the note goes back to to do and Activity says so. One that can't be sent for another reason says why, unless
-   * Send to AI is off.
-   */
-  private async followUp(e: { note: string; text: string }): Promise<void> {
-    // R13: held from before hand() until it returns (the job is queued or running by then, or refused), so a turn
-    // ending meanwhile leaves this note to the follow-up.
-    this.answering.set(e.note, (this.answering.get(e.note) ?? 0) + 1);
-    try {
-      await this.followUpHanded(e);
-    } finally {
-      const left = (this.answering.get(e.note) ?? 1) - 1;
-      if (left > 0) this.answering.set(e.note, left);
-      else this.answering.delete(e.note);
-    }
-  }
-
-  private async followUpHanded(e: { note: string; text: string }): Promise<void> {
-    let job: TurnJob | null = null;
-    const r = await this.hand(async () => {
-      job = await followUpFor(this.store, e).catch((err: unknown) => {
-        console.error(`Rushes: couldn't read note ${e.note} to pass on its answer: ${messageOf(err)}`);
-        throw err;
-      });
-      return job;
-    });
-    if (!r) return;
-    if ("park" in r) {
-      await this.recall({ batches: [], notes: [{ id: e.note, batch: r.park.batch }] });
-      if (this.closed) return;
-      this.addLine(`${capitalised(answerOf(job as TurnJob | null))} is saved. Press Send to hand it to ${r.park.name}.`, e.note);
-      this.announce();
-      return;
-    }
-    if (this.closed) {
-      // Refused because Rushes is closing, before it was queued: its note goes back too (I3), as a queued job's does.
-      const j = job as TurnJob | null;
-      if (j?.note && r.handedTo === null && r.why === CLOSING) await this.recall({ batches: [], notes: [{ id: j.note, batch: j.batchId }] });
-      return;
-    }
-    // Quiet when Send to AI is off, and when the user's own Stop cut it short.
-    if (r.handedTo !== null || r.stopped || r.why === "Send to AI is off") return;
-    this.addLine(`${capitalised(answerOf(job as TurnJob | null))} was not sent: ${r.why}`, e.note);
-    this.announce();
-  }
-
   /** Queues the job `make` gives (none: nothing to do, null back), then starts the adapter or pumps the queue. */
-  private async hand(make: () => Promise<TurnJob | null>): Promise<HandResult | null> {
+  private async hand(make: () => Promise<TurnJob | null>): Promise<SendResult | null> {
     const accepting = this.sendLock.then(async () => {
-      // A follow-up is dropped if a Stop lands after its note was read: the Stop may have taken the note back.
-      const gen = this.gen;
       const job = await make();
-      return job ? this.accept(job, job.kind === "followUp" ? gen : null) : null;
+      return job ? this.accept(job) : null;
     });
     this.sendLock = accepting.catch(() => undefined);
     let accepted: Accepted | null;
@@ -402,7 +338,6 @@ export class AgentRunner {
       return { handedTo: null, why: messageOf(e) };
     }
     if (accepted === null) return null;
-    if ("park" in accepted) return { handedTo: null, why: accepted.why, park: accepted.park };
     if ("why" in accepted) return accepted.stopped ? { handedTo: null, why: accepted.why, stopped: true } : { handedTo: null, why: accepted.why };
     try {
       await this.ensureStarted();
@@ -417,38 +352,28 @@ export class AgentRunner {
   }
 
   /**
-   * Checks the switch, the agent and its sign-in, then queues the job. Runs one at a time. A follow-up that can't
-   * go now for want of a kept session or a signed-in agent is parked: its note goes back to to do (R11).
+   * Checks the switch, the agent and its sign-in, then queues the job. Runs one at a time.
    */
-  private async accept(job: TurnJob, sinceGen: number | null): Promise<Accepted | null> {
+  private async accept(job: TurnJob): Promise<Accepted | null> {
     while (this.stopping) await this.stopping;
     if (this.closed) return { why: CLOSING };
     const [settings, rules] = await Promise.all([this.loadSettings(), this.loadRules()]);
     if (!settings.on) return { why: OFF };
     const agent = settings.agent;
-    const park = (why: string, name: string): Accepted =>
-      job.kind === "followUp" ? { why, park: { name, batch: job.batchId } } : { why };
     // I1 and the consent fix: the switch and the agent in the project's agent.json are not the user's consent; the agent
     // they chose, in their own rules file, is. Unless the two name the same agent nothing is handed over and nothing
     // starts: the desk shows Send to AI off and copies the prompt, or opens the first-Send sheet.
-    if (agent && !this.switchedOn(settings, rules)) return park(NOT_SET_UP, NAMES[agent]);
-    if (job.kind === "followUp" && (!agent || settings.session?.agent !== agent)) {
-      return park("No conversation to carry on", agent ? NAMES[agent] : "your agent");
-    }
+    if (agent && !this.switchedOn(settings, rules)) return { why: NOT_SET_UP };
     if (!agent) return { why: "No agent chosen" };
     // §33: a Send runs in the row chosen when it was sent. One already running keeps its own.
-    if (job.kind === "batch") job.level = rules.permissions;
+    job.level = rules.permissions;
     const info = (await this.detect()).find((a) => a.id === agent);
-    if (!info?.installed) return park(`${info?.name ?? NAMES[agent]} is not installed`, info?.name ?? NAMES[agent]);
-    if (info.outdated) return park(`${info.name} ${info.version} is too old for Send to AI: update it`, info.name);
-    if (!info.signedIn) return park(`${info.name} is not signed in`, info.name);
-    // A follow-up's note may have left the agent while this was checking (recalled, done): then there is nothing to
-    // follow up, and it is dropped quietly, with no line and no turn.
-    if (job.kind === "followUp" && !(await this.stillSent(job))) return null;
+    if (!info?.installed) return { why: `${info?.name ?? NAMES[agent]} is not installed` };
+    if (info.outdated) return { why: `${info.name} ${info.version} is too old for Send to AI: update it` };
+    if (!info.signedIn) return { why: `${info.name} is not signed in` };
     // A Stop or close may have begun while this send was checking.
     while (this.stopping) await this.stopping;
     if (this.closed) return { why: CLOSING };
-    if (sinceGen !== null && sinceGen !== this.gen) return { why: "Stopped", stopped: true };
     const queued = this.busy();
     if (!queued && this.conn) {
       // An idle adapter for another agent or another conversation is replaced.
@@ -461,12 +386,6 @@ export class AgentRunner {
     // Queued behind a run: say so now. Otherwise the start or the turn about to begin says it.
     if (queued) this.announce();
     return { info };
-  }
-
-  /** The follow-up's note is still with the agent, in the batch the follow-up was made for. */
-  private async stillSent(job: TurnJob): Promise<boolean> {
-    const n = (await this.store.read("notes")).notes.find((x) => x.id === job.note);
-    return n !== undefined && noteState(n) === "sent" && n.batch === job.batchId;
   }
 
   /** One start at a time: a second caller waits on the first one's promise. */
@@ -763,7 +682,7 @@ export class AgentRunner {
       return;
     }
     const job = this.queue.shift()!;
-    if (job.kind === "batch" && job.level) this.lastLevel = job.level;
+    if (job.level) this.lastLevel = job.level;
     const gen = this.gen;
     const name = this.info?.name ?? "The agent";
     this.clearIdle();
@@ -772,7 +691,7 @@ export class AgentRunner {
     this.phase = "working";
     this.error = null;
     this.current = { note: null, doing: null };
-    this.milestone(job.kind === "batch" ? `${name} started on ${job.label}` : `${name} picked up ${job.label}`, job, (label) => `${name} started on ${label}`);
+    this.milestone(`${name} started on ${job.label}`, job, (label) => `${name} started on ${label}`);
     this.announce();
     this.track(
       conn.prompt(sessionId, job.prompt).then(
@@ -797,14 +716,11 @@ export class AgentRunner {
     const ended = (label: string) => (stopReason === "end_turn" ? `${name} finished ${label}` : `${name} ended ${label} (${stopReason})`);
     this.milestone(ended(job.label), job, ended);
     this.announce();
-    // Still busy while the notes are read, so a send now queues and is picked up below. The phase follows
-    // the batch this turn worked on: a question on one of its notes makes it "question".
-    let question = false;
+    // Still busy while the notes are read, so a send now queues and is picked up below.
     let back = 0;
     try {
       const notes = await this.store.read("notes");
-      question = notes.notes.some((n) => n.batch === job.batchId && needsYou(n));
-      // M3: what the turn left untouched (still sent, no question waiting) goes back to to do.
+      // M3, §35: what the turn left with the agent goes back to to do, replied on or not. Its replies stay.
       if (notes.notes.some((n) => this.leftOver(job, n))) {
         const { result } = await this.store.update("notes", (f) => {
           const left = f.notes.filter((n) => this.leftOver(job, n));
@@ -820,35 +736,22 @@ export class AgentRunner {
     if (back > 0) this.addLine(back === 1 ? "1 note was not picked up and is back in to do" : `${back} notes were not picked up and are back in to do`, null);
     this.ending = false;
     if (this.queue.length) return this.pump();
-    this.phase = question ? "question" : "finished";
+    this.phase = "finished";
     this.current = { note: null, doing: null };
     this.announce();
     this.armIdle();
   }
 
-  /**
-   * M3: a note the ended turn left with the agent: still sent in the turn's batch, no question waiting on it, and no
-   * other follow-up for it in flight. A follow-up turn answers for its own note only.
-   *
-   * R13: a follow-up in flight is one being handed (`answering`: read, accepted, started) or queued. The turn ending
-   * now has already left `this.turn`, so a follow-up turn that leaves its own note untouched gives it back unless
-   * another answer on it is still on its way.
-   */
+  /** M3, §35: a note the ended turn left with the agent: still sent in the turn's batch. */
   private leftOver(job: TurnJob, n: Note): boolean {
-    if (n.batch !== job.batchId || noteState(n) !== "sent" || needsYou(n)) return false;
-    if (job.kind === "followUp" && n.id !== job.note) return false;
-    return !this.followUpInFlight(n.id);
-  }
-
-  private followUpInFlight(note: string): boolean {
-    return (this.answering.get(note) ?? 0) > 0 || this.queue.some((q) => q.kind === "followUp" && q.note === note);
+    return n.batch === job.batchId && noteState(n) === "sent";
   }
 
   /**
    * Task 10 (1): the adapter answered the prompt but said the turn failed (Codex: a model it can't use, a service error).
    * The run fails with the adapter's words, one line: "<A> couldn't finish: <words>" in Activity and the Change Log, and
-   * the words as the status's error. As when a turn ends (M3), the notes it left untouched go back to to do, and asked
-   * and done ones stay; the jobs queued behind it give their notes back, as a failure's do. The adapter stays up.
+   * the words as the status's error. As when a turn ends (M3), the notes it left with the agent go back to to do, and
+   * done ones stay; the jobs queued behind it give their notes back, as a failure's do. The adapter stays up.
    */
   private async turnFailedInPlace(gen: number, job: TurnJob, message: string): Promise<void> {
     if (gen !== this.gen || this.turn?.job !== job) return;
@@ -875,10 +778,7 @@ export class AgentRunner {
     } catch (e) {
       console.error(`Rushes: couldn't read the notes after a turn: ${messageOf(e)}`);
     }
-    await this.recall({
-      batches: queued.filter((j) => j.kind === "batch").map((j) => j.batchId),
-      notes: queued.flatMap((j) => (j.kind === "followUp" && j.note ? [{ id: j.note, batch: j.batchId }] : [])),
-    });
+    await this.recall({ batches: queued.map((j) => j.batchId), notes: [] });
     if (gen !== this.gen) return;
     if (back > 0) this.addLine(back === 1 ? "1 note was not picked up and is back in to do" : `${back} notes were not picked up and are back in to do`, null);
     this.ending = false;
@@ -966,7 +866,7 @@ export class AgentRunner {
     }
     const name = this.info?.name ?? "the agent";
     const turn = this.turn;
-    // Batches and follow-ups in flight or queued are dropped, and give their notes back.
+    // Batches in flight or queued are dropped, and give their notes back.
     const back = this.unfinished();
     this.queue = [];
     const conn = this.conn;
@@ -1022,7 +922,6 @@ export class AgentRunner {
     this.closed = true;
     this.gen += 1;
     this.store.off("change", this.onChange);
-    this.store.off("user-reply", this.onUserReply);
     this.clearIdle();
     this.broker.cancelAll();
     const back = this.unfinished();
@@ -1099,8 +998,8 @@ export class AgentRunner {
   private unfinished(): { batches: string[]; notes: { id: string; batch: string }[] } {
     const jobs = [...(this.turn ? [this.turn.job] : []), ...this.queue];
     return {
-      batches: jobs.filter((j) => j.kind === "batch").map((j) => j.batchId),
-      notes: jobs.flatMap((j) => (j.kind === "followUp" && j.note ? [{ id: j.note, batch: j.batchId }] : [])),
+      batches: jobs.map((j) => j.batchId),
+      notes: [],
     };
   }
 
@@ -1134,14 +1033,13 @@ export class AgentRunner {
     const book = logBookFor(this.store);
     const parts = job ? await this.filmParts(job).catch(() => []) : [];
     if (parts.length === 0) return book.add(lineEvent(text, "notes"), "rushes", at);
-    for (const p of parts) await book.add(lineEvent(say && job?.kind === "batch" ? say(p.label) : text, "notes", { video: p.film }), "rushes", at);
+    for (const p of parts) await book.add(lineEvent(say && job ? say(p.label) : text, "notes", { video: p.film }), "rushes", at);
     return undefined;
   }
 
   /** §30: the films a turn's notes are on, each with the label of its own share of them ("2 notes"). */
   private async filmParts(job: TurnJob): Promise<{ film: string | null; label: string }[]> {
     const notes = await this.store.read("notes");
-    if (job.kind === "followUp") return [{ film: notes.notes.find((n) => n.id === job.note)?.video ?? null, label: job.label }];
     const b = (await this.store.read("batches")).batches.find((x) => x.id === job.batchId);
     if (!b) return [];
     const filmOf = new Map(notes.notes.map((n) => [n.id, n.video ?? null]));

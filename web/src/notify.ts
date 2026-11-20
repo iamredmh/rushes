@@ -1,6 +1,6 @@
 // §28, Send to AI: the browser notification when the agent needs you and the page is out of sight (plan 2, task 5).
-// A new ask notifies "<A> is waiting for you"; the run turning to a question notifies "<A> has a question". Each ask id,
-// and each turn to a question, notifies at most once, and only while the page is out of sight (outOfSight). Leave to notify is never
+// A new ask notifies "<A> is waiting for you". §35: there is no question to notify (notes go one way). Each ask id
+// notifies at most once, and only while the page is out of sight (outOfSight). Leave to notify is never
 // asked for here: only in the press that sends notes to an agent (sendFollow.askNotificationsOnce). Without it granted,
 // nothing shows, and the chip and the ask cards still say what needs you.
 import { useEffect, useRef } from "preact/hooks";
@@ -11,12 +11,11 @@ import type { AgentPhase, AgentStatus } from "./types.js";
 export interface Heard { asks: ReadonlySet<string>; phase: AgentPhase | null }
 export const NOTHING_HEARD: Heard = { asks: new Set(), phase: null };
 
-/** A notification to show: its words, and a tag naming what it is about (an ask id, or "question"). */
+/** A notification to show: its words, and a tag naming what it is about (an ask id). */
 export interface Notice { body: string; tag: string }
 
 /**
- * The notices a status calls for, given what was heard before it, and what is heard now. An ask or a question that
- * arrives while the page is shown is heard there, so it never notifies later. Asks arriving together notify once. An
+ * The notices a status calls for, given what was heard before it, and what is heard now. An ask that arrives while the page is shown is heard there, so it never notifies later. Asks arriving together notify once. An
  * answered ask leaves the heard set, so a server restarted with its ids counting from one again still notifies.
  * No status (no Send to AI) changes nothing.
  */
@@ -27,7 +26,6 @@ export function notices(before: Heard, s: AgentStatus | null, hidden: boolean): 
   const notes: Notice[] = [];
   const fresh = s.asks.find((a) => !before.asks.has(a.id));
   if (fresh) notes.push({ body: `${agentName(s.agent)} is waiting for you`, tag: fresh.id });
-  if (s.phase === "question" && before.phase !== "question") notes.push({ body: `${agentName(s.agent)} has a question`, tag: "question" });
   return { heard, notes };
 }
 

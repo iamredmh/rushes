@@ -5,6 +5,7 @@ import { useState } from "preact/hooks";
 import { takeGroups, type TakeRow } from "../desk.js";
 import { agentPrompt, defaultVersion, filmLanes, filmNotes, filmPicks, otherLanes, variantNoteRow, variantOnLabel, variantOnOptions, variantRows } from "../lib.js";
 import type { Asset, State, Version, Video } from "../types.js";
+import { otherTabLabel } from "../tabNotes.js";
 import { AudioStage, filmsOf, type Preview, takeList } from "./AudioStage.js";
 import { filmsControl } from "./FilmsMenu.js";
 import type { ReviewClock } from "./desk/frame.js";
@@ -91,6 +92,8 @@ export function VariantTab({ stage, state, assets, video, toast, onChanged, onPe
       // Frames are counted at the cut's rate, as on the Timeline (m1).
       fps={cut?.fps ?? (state.project.fps || 30)}
       notes={filmNotes(state.notes.notes, stage, video?.id, state.project.videos)}
+      // §35.3: the "All tabs" switch: the film's notes from every tab (state is the film's, §31).
+      others={{ notes: state.notes.notes, label: (n) => otherTabLabel(n, state.project.lanes, filmState.use) }}
       noteRow={(n) => variantNoteRow(rows, n.on)}
       onLabel={(n) => variantOnLabel(rows, options, n.on)}
       targetName={(it, cue) => (cue === null ? it.name : options.find((o) => o.value === `c:${it.key}:${cue}`)?.label ?? it.name)}

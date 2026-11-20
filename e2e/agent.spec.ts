@@ -856,7 +856,7 @@ test("signed out, Send's dialog and its Set up end with the filed notes at the a
   await sendBtn(page).click();
   const why = sentPop(page).locator(".swhy");
   await expect(why).toContainText("Claude Code is not signed in");
-  // The note is filed but no agent has it: it doesn't claim one, and has no Answer box.
+  // The note is filed but no agent has it: it doesn't claim one. §35: no card has an answer box.
   const c = card(page, note.id);
   await expect(badgeOf(c)).toHaveText("With your agent");
   await expect(replyBox(c)).toHaveCount(0);
@@ -877,7 +877,7 @@ test("signed out, Send's dialog and its Set up end with the filed notes at the a
   await expect.poll(async () => (await prompts(rushes)).length, { timeout: 10_000 }).toBe(1);
   expect((await prompts(rushes))[0]).toContain("b_1");
   await expect(badgeOf(c)).toHaveText(/^(With Claude Code|Working on it)$/);
-  await expect(replyBox(c)).toHaveAttribute("placeholder", "Answer Claude Code");
+  await expect(replyBox(c)).toHaveCount(0);
 });
 
 test("an agent that isn't installed can't be picked; keys move, Escape closes and asks nothing", async ({ page, startWithAgent }) => {
@@ -1335,15 +1335,11 @@ test("an ask notifies while the page is hidden, once, and so does a question; ne
   await rushes.api("POST", "/api/agent/permission/ask_1", { choice: "once" });
   await expect.poll(shown).toEqual([{ title: "Rushes", body: "Claude Code is waiting for you" }]);
   await rushes.api("POST", "/api/agent/permission/ask_2", { choice: "once" });
-  // The agent asks on the note and the turn ends: a question.
+  // §35: the agent replies on the note and the turn ends: it finishes, and nothing more notifies.
   await rushes.api("POST", "/api/replies", { replies: [{ id, reply: "Up or down?" }] });
-  await expect.poll(async () => (await rushes.api("GET", "/api/agent")).status.phase, { timeout: 10_000 }).toBe("question");
-  await expect.poll(shown).toEqual([
-    { title: "Rushes", body: "Claude Code is waiting for you" },
-    { title: "Rushes", body: "Claude Code has a question" },
-  ]);
+  await expect.poll(async () => (await rushes.api("GET", "/api/agent")).status.phase, { timeout: 10_000 }).toBe("finished");
   await page.waitForTimeout(500);
-  expect(await shown()).toHaveLength(2);
+  expect(await shown()).toEqual([{ title: "Rushes", body: "Claude Code is waiting for you" }]);
   expect(await page.evaluate(() => (window as unknown as { __asked: number }).__asked)).toBe(0);
 });
 
@@ -1444,16 +1440,6 @@ const badgeOf = (c: Locator): Locator => c.locator(".nbadge");
 const threadOf = (c: Locator): Locator => c.locator(".nthread");
 const replyBox = (c: Locator): Locator => c.getByRole("textbox", { name: /^Answer / });
 
-/** Every answer the desk posts on a note: the note's id and the body, in order. */
-function watchReplies(page: Page): { id: string; body: unknown }[] {
-  const posted: { id: string; body: unknown }[] = [];
-  page.on("request", (r) => {
-    const m = /\/api\/notes\/([^/?]+)\/replies$/.exec(new URL(r.url()).pathname);
-    if (m && r.method() === "POST") posted.push({ id: decodeURIComponent(m[1]), body: r.postDataJSON() });
-  });
-  return posted;
-}
-
 /** The prompts the fake was sent, in order. */
 async function prompts(rushes: AgentRushes): Promise<string[]> {
   return (await readAgentLog(rushes.agentLog))
@@ -1462,7 +1448,7 @@ async function prompts(rushes: AgentRushes): Promise<string[]> {
 }
 
 /**
- * The card's agent parts (badge, thread, reply box) are on screen in full: inside the card, the card inside the notes
+ * The card's agent parts (badge, thread) are on screen in full: inside the card, the card inside the notes
  * list and the panel, nothing cut off or scrolled sideways, and long words wrapped rather than spilling.
  */
 async function noteFits(page: Page, c: Locator): Promise<void> {
@@ -1475,7 +1461,7 @@ async function noteFits(page: Page, c: Locator): Promise<void> {
       card: box(el)!,
       panel: box(panelEl)!,
       chk: box(el.querySelector(".chk"))!,
-      parts: [".nbadge", ".nthread", ".nreply"].map((s) => box(el.querySelector(s))).filter((b) => b !== null),
+      parts: [".nbadge", ".nthread"].map((s) => box(el.querySelector(s))).filter((b) => b !== null),
       spill: [el, ...el.querySelectorAll("*")].filter((e) => e.scrollWidth > e.clientWidth + 1 && getComputedStyle(e).overflow !== "visible").map((e) => e.className),
       wide: el.scrollWidth > el.clientWidth,
     };
@@ -1488,8 +1474,8 @@ async function noteFits(page: Page, c: Locator): Promise<void> {
     // In the text column, right of the circle: never under it.
     expect(b!.x).toBeGreaterThanOrEqual(r.chk.x + r.chk.width);
   }
-  // Nothing cut off or scrolled sideways (the reply box past four lines scrolls down inside itself, by design).
-  expect(r.spill.filter((cls) => cls !== "input")).toEqual([]);
+  // Nothing cut off or scrolled sideways.
+  expect(r.spill).toEqual([]);
   expect(r.wide).toBe(false);
 }
 
@@ -1500,89 +1486,38 @@ async function shootNote(page: Page, c: Locator, name: string): Promise<void> {
   await page.screenshot({ path: test.info().outputPath(`${name}.png`), clip: { x: Math.max(0, b.x - 8), y: Math.max(0, b.y - 8), width: b.width + 16, height: b.height + 16 } });
 }
 
-test("a question shows Needs you and the answer goes to the agent", async ({ page, startWithAgent }) => {
+test("§35: a reply that ends in a question is a read-only line: no Needs you, no answer box, the note back in to do", async ({ page, startWithAgent }) => {
   const rushes = await startWithAgent({ turns: [] });
   const id = await readyToSend(rushes);
-  // Turn 1 asks on the note (rushes_reply with no status) and ends; turn 2 is the follow-up with the answer.
-  await rushes.setScenario({ turns: [[{ http: { method: "POST", path: "/api/replies", body: { replies: [{ id, reply: "Full stop after the title?" }] } } }, { stop: "end_turn" }], [{ stop: "end_turn" }]] });
-  const posted = watchReplies(page);
+  await rushes.setScenario({ turns: [[{ http: { method: "POST", path: "/api/replies", body: { replies: [{ id, reply: "Full stop after the title?" }] } } }, { stop: "end_turn" }]] });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(rushes.url);
   await videoReady(page);
   await rushes.api("POST", "/api/batches", {});
 
   const c = card(page, id);
-  await expect(badgeOf(c)).toHaveText("Needs you", { timeout: 10_000 });
-  await expect(c).toHaveClass(/\bneeds\b/);
-  // The circle's ring and the card's left edge are the to-do colour; the badge's words too.
-  const todo = await tokenColour(page, "--todo");
-  expect(await c.locator(".chk").evaluate((el) => getComputedStyle(el).borderTopColor)).toBe(todo);
-  expect(await c.evaluate((el) => getComputedStyle(el).boxShadow)).toContain(todo);
-  expect(await badgeOf(c).evaluate((el) => getComputedStyle(el).color)).toBe(todo);
-  // The agent's line, with its reply icon and its time on the right.
   const lines = threadOf(c).locator(".nline");
-  await expect(lines).toHaveCount(1);
+  await expect(lines).toHaveCount(1, { timeout: 10_000 });
+  // The turn ends finished, and the note it left is back in to do, its reply kept.
+  await expect.poll(async () => (await rushes.api("GET", "/api/agent")).status.phase, { timeout: 10_000 }).toBe("finished");
+  await expect.poll(async () => (await rushes.api("GET", "/api/notes")).notes.map((n: { state: string }) => n.state)).toEqual(["todo"]);
+  await expect(badgeOf(c)).toHaveCount(0);
+  await expect(c).not.toHaveClass(/\bneeds\b/);
+  await expect(page.getByText("Needs you")).toHaveCount(0);
+  await expect(replyBox(c)).toHaveCount(0);
+  await expect(c.locator("textarea")).toHaveCount(0);
+  // No "has a question" anywhere, the chip included.
+  await expect(page.getByText(/has a question/)).toHaveCount(0);
+  // The agent's line, with its reply icon and its time on the right.
   await expect(lines.first().locator(".ntext")).toHaveText("Full stop after the title?");
   await expect(lines.first().locator(".nwho svg.ic")).toBeVisible();
   await expect(lines.first().locator(".ntime")).toHaveText(/^\d\d:\d\d$/);
   const [text, time] = [(await lines.first().locator(".ntext").boundingBox())!, (await lines.first().locator(".ntime").boundingBox())!];
   expect(time.x).toBeGreaterThanOrEqual(text.x + text.width - 0.5);
-  // The reply box, one line, for the agent by name.
-  const boxEl = replyBox(c);
-  await expect(boxEl).toBeVisible();
-  await expect(boxEl).toHaveAttribute("placeholder", "Answer Claude Code");
-  const oneLine = (await boxEl.boundingBox())!.height;
-  expect(oneLine).toBeLessThan(40);
+  // Send counts the note again: a new Send (or a new note) is how the user follows up.
+  await expect(sendBtn(page)).toHaveAccessibleName("Send 1");
   await noteFits(page, c);
-  await shootNote(page, c, "note-needs-you-1440");
-  await page.setViewportSize({ width: 900, height: 900 });
-  await page.getByRole("button", { name: "Show the notes panel · \\" }).click();
-  await noteFits(page, c);
-  await shootNote(page, c, "note-needs-you-900");
-  await page.setViewportSize({ width: 1440, height: 900 });
-
-  // Shift+Enter adds a line (the box grows, to four lines at most); Enter sends.
-  await boxEl.click();
-  await page.keyboard.type("No full stop.");
-  await page.keyboard.press("Shift+Enter");
-  await expect(boxEl).toHaveValue("No full stop.\n");
-  await expect.poll(async () => (await boxEl.boundingBox())!.height).toBeGreaterThan(oneLine + 8);
-  for (let i = 0; i < 6; i++) await page.keyboard.press("Shift+Enter");
-  const tall = (await boxEl.boundingBox())!.height;
-  expect(tall).toBeLessThan(oneLine * 4 + 8);
-  await page.keyboard.press("ControlOrMeta+a");
-  await page.keyboard.type("No full stop.");
-  await page.keyboard.press("Enter");
-
-  // The server got the answer as typed, the thread shows it as the user's, and the agent was handed it.
-  await expect(lines).toHaveCount(2);
-  await expect(lines.nth(1)).toHaveClass(/\buser\b/);
-  await expect(lines.nth(1).locator(".ntext")).toHaveText("No full stop.");
-  await expect(lines.nth(1).locator(".nwho")).toHaveText("Y");
-  expect(posted).toEqual([{ id, body: { text: "No full stop." } }]);
-  await expect.poll(async () => (await prompts(rushes)).some((p) => p.includes("No full stop.")), { timeout: 5_000 }).toBe(true);
-  await shootNote(page, c, "note-answered-1440");
-});
-
-test("while the agent works on an answer, the note says it is with the agent by name (Task 10, 2)", async ({ page, startWithAgent }) => {
-  const rushes = await startWithAgent({ turns: [] });
-  const id = await readyToSend(rushes);
-  await rushes.setScenario({ turns: [[{ http: { method: "POST", path: "/api/replies", body: { replies: [{ id, reply: "Which end card?" }] } } }, { stop: "end_turn" }], [{ sleep: 4000 }, { stop: "end_turn" }]] });
-  await page.goto(rushes.url);
-  await videoReady(page);
-  await rushes.api("POST", "/api/batches", {});
-  const c = card(page, id);
-  await expect(badgeOf(c)).toHaveText("Needs you", { timeout: 10_000 });
-  await replyBox(c).fill("The white one.");
-  await replyBox(c).press("Enter");
-  // The follow-up turn runs: the note is with Claude Code, by name, and the box still answers it.
-  await expect.poll(async () => (await prompts(rushes)).length, { timeout: 5_000 }).toBe(2);
-  await expect(badgeOf(c)).toHaveText("With Claude Code");
-  await expect(badgeOf(c)).toBeVisible();
-  await expect(replyBox(c)).toHaveAttribute("placeholder", "Answer Claude Code");
-  expect((await rushes.api("GET", "/api/agent")).status.followUps).toEqual([id]);
-  await noteFits(page, c);
-  await shootNote(page, c, "note-follow-up-1440");
+  await shootNote(page, c, "note-one-way-1440");
 });
 
 test("working note shows what the agent is doing", async ({ page, startWithAgent }) => {
@@ -1600,61 +1535,14 @@ test("working note shows what the agent is doing", async ({ page, startWithAgent
   await expect(spin).toBeVisible();
   expect((await spin.boundingBox())!.width).toBeGreaterThanOrEqual(10);
   expect(await badgeOf(c).evaluate((el) => getComputedStyle(el).color)).toBe(await tokenColour(page, "--accent"));
-  // The note is with the agent while Send to AI is on: the box is there to add to what it's doing.
-  await expect(replyBox(c)).toBeVisible();
-  await expect(c).not.toHaveClass(/\bneeds\b/);
+  // §35: no answer box, even while the agent has the note.
+  await expect(replyBox(c)).toHaveCount(0);
   await noteFits(page, c);
   await shootNote(page, c, "note-working-1440");
   await page.setViewportSize({ width: 900, height: 900 });
   await page.getByRole("button", { name: "Show the notes panel · \\" }).click();
   await noteFits(page, c);
   await shootNote(page, c, "note-working-900");
-});
-
-test("an answer with no conversation to carry on goes back to to do, with Press Send", async ({ page, startWithAgent }) => {
-  const rushes = await startWithAgent({ turns: [] });
-  const id = await readyToSend(rushes);
-  await rushes.setScenario({ turns: [[{ http: { method: "POST", path: "/api/replies", body: { replies: [{ id, reply: "Which end card?" }] } } }, { stop: "end_turn" }]] });
-  await page.goto(rushes.url);
-  await videoReady(page);
-  await rushes.api("POST", "/api/batches", {});
-  const c = card(page, id);
-  await expect(badgeOf(c)).toHaveText("Needs you", { timeout: 10_000 });
-  // The conversation is dropped (Start a fresh conversation): an answer has nowhere to go now.
-  await rushes.api("POST", "/api/agent/fresh", {});
-  await replyBox(c).fill("The white one.");
-  await replyBox(c).press("Enter");
-  // R11: the server keeps the answer, the note goes back to to do, and Activity says to press Send.
-  await expect.poll(async () => (await rushes.api("GET", "/api/notes")).notes.map((n: { status: string; batch: string | null }) => [n.status, n.batch]), { timeout: 5_000 }).toEqual([["todo", null]]);
-  const { status } = await rushes.api("GET", "/api/agent");
-  expect(status.lines.map((l: { text: string }) => l.text)).toContain("Your answer on 'Hold the end card.' is saved. Press Send to hand it to Claude Code.");
-  expect(await prompts(rushes)).toHaveLength(1);
-  // On the card: no badge or box now, the thread keeps both lines, and Send counts the note again.
-  await expect(badgeOf(c)).toHaveCount(0);
-  await expect(c.locator(".nreply")).toHaveCount(0);
-  await expect(threadOf(c).locator(".ntext")).toHaveText(["Which end card?", "The white one."]);
-  await expect(sendBtn(page)).toHaveAccessibleName("Send 1");
-});
-
-test("an answer the server refuses says why and keeps what was typed", async ({ page, startWithAgent }) => {
-  const rushes = await startWithAgent({ turns: [] });
-  const id = await readyToSend(rushes);
-  await rushes.setScenario({ turns: [[{ http: { method: "POST", path: "/api/replies", body: { replies: [{ id, reply: "Longer?" }] } } }, { stop: "end_turn" }]] });
-  await page.goto(rushes.url);
-  await videoReady(page);
-  await rushes.api("POST", "/api/batches", {});
-  const c = card(page, id);
-  await expect(replyBox(c)).toBeVisible({ timeout: 10_000 });
-  const long = "x".repeat(4001);
-  await replyBox(c).fill(long);
-  await replyBox(c).press("Enter");
-  await expect(toastEl(page)).toHaveText("An answer is at most 4000 characters");
-  await expect(replyBox(c)).toHaveValue(long);
-  // Four lines at most, then it scrolls inside itself; the card still fits.
-  expect((await replyBox(c).boundingBox())!.height).toBeLessThan(120);
-  await noteFits(page, c);
-  await shootNote(page, c, "note-refused-1440");
-  await expect(threadOf(c).locator(".nline")).toHaveCount(1);
 });
 
 test("a note with no agent activity is as it was: no badge, thread or box", async ({ page, startWithAgent }) => {
@@ -1676,17 +1564,17 @@ test("a long thread shows its last three, wraps, and Fixed in v2 goes to the fix
   const { note } = await rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 1.5, text: "Title card too short." });
   await rushes.addCut("held title");
   const long = "Held the title card 0.6 s longer and eased the fade so it lands on the downbeat; https://example.com/a-very-long-reference-without-any-spaces-at-all-to-wrap";
-  await rushes.api("POST", "/api/replies", { replies: [{ id: note.id, reply: "Longer, or slower?" }] });
-  await rushes.api("POST", `/api/notes/${note.id}/replies`, { text: "Longer." });
-  await rushes.api("POST", "/api/replies", { replies: [{ id: note.id, reply: "How much?" }] });
-  await rushes.api("POST", `/api/notes/${note.id}/replies`, { text: "Half a second." });
+  await rushes.api("POST", "/api/replies", { replies: [{ id: note.id, reply: "Couldn't hold it on v1." }] });
+  await rushes.api("POST", "/api/replies", { replies: [{ id: note.id, reply: "Tried 0.4 s." }] });
+  await rushes.api("POST", "/api/replies", { replies: [{ id: note.id, reply: "Tried 0.5 s." }] });
+  await rushes.api("POST", "/api/replies", { replies: [{ id: note.id, reply: "Tried 0.6 s." }] });
   await rushes.api("POST", "/api/replies", { replies: [{ id: note.id, reply: long, status: "done", fixT: 2.1, fixVersion: "v2" }] });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(rushes.url);
   await videoReady(page);
   const c = card(page, note.id);
   // The last three, oldest first, and Show all for the rest.
-  await expect(threadOf(c).locator(".ntext")).toHaveText(["How much?", "Half a second.", long]);
+  await expect(threadOf(c).locator(".ntext")).toHaveText(["Tried 0.5 s.", "Tried 0.6 s.", long]);
   const more = threadOf(c).getByRole("button", { name: "Show all (5)" });
   await expect(more).toBeVisible();
   // The long reply wraps inside the card: several lines, never wider than its column.
@@ -1737,38 +1625,6 @@ test("the agent's own words on a card show hidden characters as what they are", 
   expect((await text.boundingBox())!.height).toBeGreaterThan(30);
   await noteFits(page, c);
   await shootNote(page, c, "note-hidden-chars-1440");
-});
-
-test("a reply box that hides and comes back shows what was kept in full", async ({ page, startWithAgent }) => {
-  const rushes = await startWithAgent({ turns: [[{ sleep: 15_000 }, { stop: "end_turn" }]] });
-  const id = await readyToSend(rushes);
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto(rushes.url);
-  await videoReady(page);
-  await rushes.api("POST", "/api/batches", {});
-  const c = card(page, id);
-  // Sent, not waiting on you: the box shows only while Send to AI is on.
-  await expect(replyBox(c)).toBeVisible({ timeout: 10_000 });
-  await replyBox(c).click();
-  await page.keyboard.type("One.");
-  await page.keyboard.press("Shift+Enter");
-  await page.keyboard.type("Two.");
-  await page.keyboard.press("Shift+Enter");
-  await page.keyboard.type("Three.");
-  await toggle(page).click();
-  await expect(toggle(page)).toHaveAttribute("aria-checked", "false");
-  await expect(c.locator(".nreply")).toHaveCount(0);
-  await toggle(page).click();
-  await expect(toggle(page)).toHaveAttribute("aria-checked", "true");
-  const box = replyBox(c);
-  await expect(box).toBeVisible();
-  await expect(box).toHaveValue("One.\nTwo.\nThree.");
-  // All three lines on show: nothing scrolled out of the box.
-  const [scroll, client, line] = await box.evaluate((el) => [el.scrollHeight, el.clientHeight, parseFloat(getComputedStyle(el).lineHeight)]);
-  expect(scroll).toBeLessThanOrEqual(client);
-  expect(client).toBeGreaterThanOrEqual(line * 3);
-  await noteFits(page, c);
-  await shootNote(page, c, "note-box-back-1440");
 });
 
 // ---- task 7: the live strip in Activity, and readable lines ----

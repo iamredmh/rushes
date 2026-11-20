@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canMove, markSent, moveNote, NOTE_STATE_LABEL, NOTE_TRANSITIONS, needsYou, noteState, recallNote, recallNotes, withState } from "../../src/core/noteState.js";
+import { canMove, markSent, moveNote, NOTE_STATE_LABEL, NOTE_TRANSITIONS, leftAsking, noteState, recallNote, recallNotes, withState } from "../../src/core/noteState.js";
 import type { Note } from "../../src/core/schema.js";
 
 const note = (over: Partial<Note> = {}): Note => ({
@@ -58,11 +58,11 @@ describe("a note's state", () => {
 });
 
 describe("replies and recall", () => {
-  it("needsYou: a sent note whose last reply is the agent's", () => {
-    expect(needsYou({ status: "todo", batch: "b_1", replies: [{ by: "agent", text: "?", at: "t" }] })).toBe(true);
-    expect(needsYou({ status: "todo", batch: "b_1", replies: [{ by: "agent", text: "?", at: "t" }, { by: "user", text: "no", at: "t" }] })).toBe(false);
-    expect(needsYou({ status: "done", batch: "b_1", replies: [{ by: "agent", text: "fixed", at: "t" }] })).toBe(false);
-    expect(needsYou({ status: "todo", batch: null, replies: [{ by: "agent", text: "?", at: "t" }] })).toBe(false);
+  it("leftAsking (§35's migration): a sent note whose last reply is the agent's", () => {
+    expect(leftAsking({ status: "todo", batch: "b_1", replies: [{ by: "agent", text: "?", at: "t" }] })).toBe(true);
+    expect(leftAsking({ status: "todo", batch: "b_1", replies: [{ by: "agent", text: "?", at: "t" }, { by: "user", text: "no", at: "t" }] })).toBe(false);
+    expect(leftAsking({ status: "done", batch: "b_1", replies: [{ by: "agent", text: "fixed", at: "t" }] })).toBe(false);
+    expect(leftAsking({ status: "todo", batch: null, replies: [{ by: "agent", text: "?", at: "t" }] })).toBe(false);
   });
 
   it("recall moves the batches' sent notes back to to do and leaves done ones", () => {
@@ -92,8 +92,7 @@ describe("replies and recall", () => {
     expect(notes[0].batch).toBeNull();
   });
 
-  it("withState adds needsYou", () => {
-    expect(withState(note({ batch: "b_1", replies: [{ by: "agent", text: "?", at: "t" }] })).needsYou).toBe(true);
-    expect(withState(note()).needsYou).toBe(false);
+  it("withState carries no needsYou (§35: notes go one way)", () => {
+    expect("needsYou" in withState(note({ batch: "b_1", replies: [{ by: "agent", text: "?", at: "t" }] }))).toBe(false);
   });
 });

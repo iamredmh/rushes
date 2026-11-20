@@ -183,6 +183,19 @@ export async function writeLock(root: string, port: number, opts: { link?: typeo
   }
 }
 
+/**
+ * §35.5: the key that proves a desk was opened on this computer: the running server's lock token, which is only ever in
+ * `.rushes/server.json`, never sent over HTTP. Rushes adds it to the address when it opens the browser itself
+ * (`#here=<key>`). Null when no live server holds the lock.
+ */
+export async function hereKey(root: string): Promise<string | null> {
+  const lock = await readLockFile(root);
+  return lock?.token && alive(lock.pid) ? lock.token : null;
+}
+
+/** The desk's address with the here key (§35.5), or as it was without one. */
+export const withHere = (url: string, key: string | null): string => (key ? `${url.split("#")[0]}#here=${encodeURIComponent(key)}` : url);
+
 /** Remove the lock only if it is ours (same token, or same pid for locks without one), so a newer server's lock survives. */
 export async function removeLock(root: string, token?: string): Promise<void> {
   const lock = await readLockFile(root);

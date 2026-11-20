@@ -88,10 +88,13 @@ export function recallNote(notes: Pick<Note, "id" | "status" | "batch">[], id: s
   return true;
 }
 
-/** It is the user's turn: the note is with the agent and the last word in its thread is the agent's. */
-export function needsYou(n: Pick<Note, "status" | "batch" | "replies">): boolean {
+/**
+ * §35's migration: a note left in the old Needs you state (§28.5): still sent, and the last word in its thread is the
+ * agent's. With no question phase it would read "With your agent" for good; on start it goes back to to do.
+ */
+export function leftAsking(n: Pick<Note, "status" | "batch" | "replies">): boolean {
   return noteState(n) === "sent" && n.replies.at(-1)?.by === "agent";
 }
 
 /** The note with its state, as the server hands it out. A copy: the stored note never carries one. */
-export const withState = <T extends Pick<Note, "status" | "batch" | "replies">>(n: T): T & { state: NoteState; needsYou: boolean } => ({ ...n, state: noteState(n), needsYou: needsYou(n) });
+export const withState = <T extends Pick<Note, "status" | "batch">>(n: T): T & { state: NoteState } => ({ ...n, state: noteState(n) });

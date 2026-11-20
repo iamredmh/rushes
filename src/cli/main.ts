@@ -6,7 +6,7 @@ import { ffmpegRunner, makeDemo, sayAvailable, sayRunner } from "./demo.js";
 import { makeProject } from "./new.js";
 import { startServer, DEFAULT_PORT, type Running } from "../server/start.js";
 import { ensureServer, findServer, type EnsureOptions } from "../mcp/ensure.js";
-import { AlreadyRunningError, canonicalRoot } from "../server/lock.js";
+import { AlreadyRunningError, canonicalRoot, hereKey, withHere } from "../server/lock.js";
 import { ApiError, RushesClient, dashboardUrlFor } from "../mcp/client.js";
 import { openBrowser, runStdio } from "../mcp/stdio.js";
 import { VERSION } from "../server/app.js";
@@ -260,8 +260,11 @@ export async function main(argv: string[], io: Io): Promise<number> {
       case "serve": {
         // The folder is the argument, or --dir, or the current folder: `status` and `doctor` already read it so.
         const root = await canonicalRoot(rest[0] ? resolve(io.cwd, rest[0]) : dir);
-        const show = (url: string) => {
-          if (cmd === "open" && !o["no-browser"]) (io.openBrowser ?? openBrowser)(url);
+        // §35.5: the browser Rushes opens itself is on this computer, so its address carries the here key.
+        const show = async (url: string) => {
+          if (cmd !== "open" || o["no-browser"]) return;
+          const key = await hereKey(root).catch(() => null);
+          (io.openBrowser ?? openBrowser)(withHere(url, key));
         };
         // §20.1: opening looks through the folder and brings in the current set, then says what it did.
         // The desk is open either way, so a scan that fails says nothing.
@@ -280,7 +283,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         const already = async (url: string) => {
           const dashboardUrl = await dashboardUrlFor(url);
           io.out(`Rushes is already running for ${root}\n${dashboardUrl}`);
-          show(dashboardUrl);
+          await show(dashboardUrl);
           await lookThrough(url);
           return 0;
         };
@@ -299,7 +302,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
           throw e;
         }
         io.out(`Rushes is running for ${root}\n${s.dashboardUrl}`);
-        show(s.dashboardUrl);
+        await show(s.dashboardUrl);
         if (io.onServer) {
           io.onServer(s);
         } else {

@@ -14,11 +14,13 @@ export function projectId(): string | null {
 /** `keepalive`: the request outlives the page (a save sent as the tab is hidden or closed). */
 export interface CallOptions {
   keepalive?: boolean;
+  /** Extra request headers (§35.5's x-rushes-here). */
+  headers?: Record<string, string>;
 }
 
 async function call<T>(method: string, path: string, body?: unknown, opts: CallOptions = {}): Promise<T> {
   const id = projectId();
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { ...opts.headers };
   if (body !== undefined) headers["content-type"] = "application/json";
   if (id) headers["x-rushes-project"] = id;
   const res = await fetch(path, {
@@ -35,7 +37,7 @@ async function call<T>(method: string, path: string, body?: unknown, opts: CallO
 
 export const api = {
   get: <T>(path: string) => call<T>("GET", path),
-  post: <T>(path: string, body: unknown = {}) => call<T>("POST", path, body),
+  post: <T>(path: string, body: unknown = {}, opts?: CallOptions) => call<T>("POST", path, body, opts),
   patch: <T>(path: string, body: unknown) => call<T>("PATCH", path, body),
   put: <T>(path: string, body: unknown, opts?: CallOptions) => call<T>("PUT", path, body, opts),
   del: <T>(path: string, body: unknown = {}) => call<T>("DELETE", path, body),

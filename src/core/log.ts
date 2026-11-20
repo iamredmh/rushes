@@ -19,8 +19,8 @@ export interface LogEvent {
   ref?: string | null;
   /** The tab a Notes line opens (R3, R18). */
   tab?: Stage | null;
-  /** R4: "count" sums `count` and rewrites the line with `many`; "replace" keeps the newest line for the same `subject`; "once" only drops an identical repeat. */
-  merge: "count" | "replace" | "once";
+  /** R4: "count" sums `count` and rewrites the line with `many`; "replace" keeps the newest line for the same `subject`; "once" only drops an identical repeat; "never" always writes its own line (§35.5). */
+  merge: "count" | "replace" | "once" | "never";
   count?: number;
   subject?: string;
   /** `before` is the line's own text so far, for a line that also totals something `n` doesn't (the replies' done count). */
@@ -33,6 +33,7 @@ export interface LogEvent {
 
 /** The newest entry this event may merge into: same kind, area and writer, within the window (R4). */
 function mergeTarget(entries: LogEntry[], event: LogEvent, by: LogBy, t: number): number {
+  if (event.merge === "never") return -1;
   const window = event.windowMs ?? MERGE_MS;
   for (let i = entries.length - 1; i >= 0; i--) {
     const e = entries[i];

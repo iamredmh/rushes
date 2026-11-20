@@ -45,11 +45,11 @@ async function connect(opts: { files?: string[]; probe?: Probe; formatProbe?: Vi
 }
 
 describe("MCP tools", () => {
-  it("lists the twenty-five tools", async () => {
+  it("lists the twenty-six tools", async () => {
     const t = await connect();
     const { tools } = await t.client.listTools();
     expect(tools.map((x) => x.name).sort()).toEqual([
-      "rushes_add_file", "rushes_add_format", "rushes_add_take", "rushes_add_variant", "rushes_add_version", "rushes_add_visual", "rushes_bring_in", "rushes_doctor", "rushes_export_notes",
+      "rushes_add_file", "rushes_add_format", "rushes_add_take", "rushes_add_variant", "rushes_add_version", "rushes_add_visual", "rushes_attention", "rushes_bring_in", "rushes_doctor", "rushes_export_notes",
       "rushes_get_batch", "rushes_get_log", "rushes_get_picks", "rushes_get_script", "rushes_list_assets", "rushes_list_notes",
       "rushes_lock_picture", "rushes_log", "rushes_open", "rushes_reply", "rushes_scan", "rushes_set_films", "rushes_set_script", "rushes_set_shots", "rushes_status",
       "rushes_working_on",
@@ -114,6 +114,38 @@ describe("MCP tools", () => {
     expect((await t.call("rushes_list_notes", { stage: "picture", status: "todo" })).json.notes).toEqual([]);
     const status = await t.call("rushes_status");
     expect(status.json.tabs.find((x: any) => x.stage === "picture")).toMatchObject({ unlocked: true, todo: 0 });
+    await t.close();
+  });
+
+  it("§35: rushes_reply has no question path: its inputs are id, reply, status, fixT and fixVersion, and it says notes go one way", async () => {
+    const t = await connect();
+    const { tools } = await t.client.listTools();
+    const reply = tools.find((x) => x.name === "rushes_reply")!;
+    const item = (reply.inputSchema.properties as any).replies.items;
+    expect(Object.keys(item.properties).sort()).toEqual(["fixT", "fixVersion", "id", "reply", "status"]);
+    expect(item.properties.status.enum).toEqual(["todo", "done"]);
+    expect(reply.description).toMatch(/never ask the user a question/);
+    expect(reply.description).toMatch(/rushes_attention/);
+    await t.close();
+  });
+
+  it("§35: rushes_attention writes an attention line on the note's film, and on the film named without a note", async () => {
+    const t = await connect({ files: ["renders/a.mp4", "renders/b.mp4"] });
+    await t.call("rushes_add_version", { video: "Meet", file: "renders/a.mp4" });
+    await t.call("rushes_add_version", { video: "Five views", file: "renders/b.mp4" });
+    const api = new RushesClient(t.running.url);
+    const project = (await api.get<any>("/api/state")).project;
+    const five = project.videos.find((v: any) => v.name === "Five views").id;
+    const meet = project.videos.find((v: any) => v.name === "Meet").id;
+    const note = (await api.post<any>("/api/notes", { stage: "voice", scope: "whole", video: five, text: "Warmer" })).note;
+    const r = await t.call("rushes_attention", { title: "ElevenLabs sign-in needed on this Mac", note: note.id });
+    expect(r.isError).toBe(false);
+    expect(r.json.attention).toMatchObject({ kind: "attention", video: five, note: note.id, text: "ElevenLabs sign-in needed on this Mac" });
+    expect((await t.call("rushes_attention", { title: "Missing key", film: "Meet" })).json.attention.video).toBe(meet);
+    // Several films and neither a note nor a film: refused, naming the films.
+    const refused = await t.call("rushes_attention", { title: "Missing key" });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toMatch(/Meet/);
     await t.close();
   });
 

@@ -70,18 +70,6 @@ export function applyReply(file: NotesFile, r: Reply, now = new Date()): Note {
   return n;
 }
 
-export const USER_REPLY_MAX = 4000;
-
-/** The user's answer to the agent's reply, added to the note's thread. */
-export function addUserReply(file: NotesFile, id: string, text: string, now = new Date()): Note {
-  const n = find(file, id);
-  if (text.trim().length > USER_REPLY_MAX) throw new InvalidError(`An answer is at most ${USER_REPLY_MAX} characters`);
-  const parsed = ReplySchema.safeParse({ by: "user", text, at: now.toISOString() });
-  if (!parsed.success) throw new InvalidError("Reply is invalid", parsed.error.issues);
-  n.replies.push(parsed.data);
-  return n;
-}
-
 /** Fields the user owns. Status is shared. */
 export interface UserEdit {
   id: string;

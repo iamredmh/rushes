@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { addUserReply, applyReply } from "../../src/core/notes.js";
+import { applyReply } from "../../src/core/notes.js";
 import { NoteSchema, NotesFileSchema, type NotesFile } from "../../src/core/schema.js";
-import { InvalidError } from "../../src/core/errors.js";
 
 const base = { id: "n1", stage: "picture", scope: "point", t: 1, text: "Move the title", createdAt: "2026-11-01T10:00:00.000Z" };
 const sentNote = NoteSchema.parse({ ...base, batch: "b_1" });
@@ -17,10 +16,9 @@ describe("reply threads", () => {
   });
   it("rushes_reply appends to the thread and reply mirrors the latest agent reply", () => {
     const f = file([sentNote]);
-    applyReply(f, { id: "n1", reply: "Should the full stop show?" });
-    addUserReply(f, "n1", "No full stop.");
+    applyReply(f, { id: "n1", reply: "Couldn't find the font." });
     applyReply(f, { id: "n1", reply: "Done, no full stop.", status: "done", fixVersion: "v8" });
-    expect(f.notes[0].replies.map((r) => [r.by, r.text])).toEqual([["agent", "Should the full stop show?"], ["user", "No full stop."], ["agent", "Done, no full stop."]]);
+    expect(f.notes[0].replies.map((r) => [r.by, r.text])).toEqual([["agent", "Couldn't find the font."], ["agent", "Done, no full stop."]]);
     expect(f.notes[0].reply).toBe("Done, no full stop.");
   });
   it("a reply with only a status adds nothing to the thread", () => {
@@ -45,11 +43,8 @@ describe("reply threads", () => {
     expect(f.notes[0].replies[0]).toEqual({ by: "agent", text: long, at: "2026-11-02T09:00:00.000Z" });
     expect(NotesFileSchema.safeParse(f).success).toBe(true);
   });
-  it("addUserReply refuses 4001 characters and takes 4000", () => {
-    expect(() => addUserReply(file([sentNote]), "n1", "c".repeat(4001))).toThrow(InvalidError);
-    expect(addUserReply(file([sentNote]), "n1", "c".repeat(4000)).replies).toHaveLength(1);
-  });
-  it("addUserReply refuses an empty answer", () => {
-    expect(() => addUserReply(file([sentNote]), "n1", "  ")).toThrow(InvalidError);
+  it("an answer a user wrote before §35 still loads (by: user), so old files read", () => {
+    const n = NoteSchema.parse({ ...base, batch: "b_1", replies: [{ by: "agent", text: "Which?", at: base.createdAt }, { by: "user", text: "The left", at: base.createdAt }] });
+    expect(n.replies.map((r) => r.by)).toEqual(["agent", "user"]);
   });
 });

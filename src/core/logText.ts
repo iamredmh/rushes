@@ -5,7 +5,7 @@ import { oneLine, oneLineOf } from "./labels.js";
 
 export const LOG_AREAS = ["script", "picture", "voice", "music", "sfx", "mix", "visuals", "notes", "assets", "project"] as const;
 export type LogArea = (typeof LOG_AREAS)[number];
-export const LOG_KINDS = ["cut", "variant", "take", "script", "picks", "notes-sent", "replies", "lock", "files", "entry", "format", "visual", "film"] as const;
+export const LOG_KINDS = ["cut", "variant", "take", "script", "picks", "notes-sent", "replies", "lock", "files", "entry", "format", "visual", "film", "attention"] as const;
 export type LogKind = (typeof LOG_KINDS)[number];
 export const LOG_BY = ["user", "agent", "rushes"] as const;
 export type LogBy = (typeof LOG_BY)[number];
@@ -48,6 +48,9 @@ export interface LogLine {
   by: LogBy;
   /** The tab a Notes line opens (R3). */
   tab?: string | null;
+  /** §35.5: an Attention line's note, and when it cleared. */
+  note?: string;
+  resolved?: string;
 }
 
 /** A "Before the log" line (§22.6): audio from before the log, computed when it's read. */

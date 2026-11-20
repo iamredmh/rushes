@@ -12,6 +12,7 @@ import { FormatScope } from "./FormatScope.js";
 import { Icon } from "./Icon.js";
 import { escapeIsFree, NotesPanel, useNoteBox } from "./desk/NotesPanel.js";
 import { takeNotesOf } from "./desk/useTakeSelection.js";
+import { tabLabel, timelineNotes } from "../tabNotes.js";
 import { OtherFormats } from "./OtherFormats.js";
 import { ProxyBar } from "./ProxyBar.js";
 import { PictureTrack } from "./desk/PictureTrack.js";
@@ -462,6 +463,13 @@ export function Picture({
   const mix = useMix({ state, assets, video, version, player: ref, duration, monitor: sound, toast, onChanged, keep: mixView });
   // The notes on the takes in use are this tab's too: listed, and marked on their rows.
   const takeNotes = takeNotesOf(mix, state.notes.notes, video);
+  // §35.3: the list also holds the film's other Voice, Music and Effects notes and the shared Visuals notes, labelled
+  // with their tab. Only the tab's own count toward its Notes count, and only notes on a take in use are marked on a row.
+  const own = [...visible, ...takeNotes];
+  const listed = timelineNotes(own, state.notes.notes);
+  const ownTodo = own.filter((n) => n.status === "todo").length;
+  const ownIds = new Set(own.map((n) => n.id));
+  const labelOf = (n: Note) => tabLabel(n, state.project.lanes, (x) => mix.noteRow(x) !== null, mix.noteLabel);
 
   // §27, 5.5: the level and mute live on the element, and are remembered per browser. With a take in use the takes are
   // heard instead (through the engine, at the same level), and the cut's own sound only when its row says so.
@@ -929,7 +937,8 @@ export function Picture({
 
       <NotesPanel
         readOnly={readOnly}
-        notes={[...visible, ...takeNotes]}
+        notes={listed}
+        todoCount={ownTodo}
         version={version.id}
         selectedId={selectedId}
         placeholder={placeholder}
@@ -938,7 +947,7 @@ export function Picture({
         onAdd={add}
         onChanged={onChanged}
         onTextChange={setNoteHasText}
-        onLabel={mix.noteLabel}
+        onLabel={labelOf}
         target={{
           label: target.label,
           when: target.when,
@@ -946,8 +955,9 @@ export function Picture({
           menu: { value: aim, options: AIM_OPTIONS, onChange: (v) => setAim(v === "mix" ? "mix" : "frame") },
           onClear: aim === "mix" ? clearSelection : undefined,
         }}
-        formatTag={(n) => noteFormatTag(n, many)}
-        cardExtra={many && view ? (n) => (
+        // The other tabs' notes listed here (§35.3) are on no format of this cut: no tag, no scope.
+        formatTag={(n) => (ownIds.has(n.id) ? noteFormatTag(n, many) : null)}
+        cardExtra={many && view ? (n) => !ownIds.has(n.id) ? null : (
           <FormatScope
             name="Note applies to"
             label={view.label}

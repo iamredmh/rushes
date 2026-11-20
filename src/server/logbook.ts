@@ -5,6 +5,7 @@ import { rename, stat } from "node:fs/promises";
 import { basename } from "node:path";
 import { CorruptFileError } from "../core/errors.js";
 import { appendEvent, backfillLog, lineOnFilm, logView, type FilmContext, type LogEvent, type LogQuery, type LogView, type UndatedContext } from "../core/log.js";
+import { isOpenAttention } from "../core/attention.js";
 import { allSections } from "../core/script.js";
 import { LOG_MAX, logMarkdown, type LogBy } from "../core/logText.js";
 import type { LogEntry, LogFile, Project } from "../core/schema.js";
@@ -15,6 +16,8 @@ export interface LogHead {
   rev: number;
   mark: string | null;
   total: number;
+  /** §35.5: Attention lines still open (on this film, for a film's head). The Activity dot is the warning colour while any is. */
+  attention: number;
 }
 
 /** R8: the dashboard sends its project id with every request (web/src/api.ts); MCP, the CLI and curl don't. */
@@ -184,6 +187,29 @@ export class LogBook {
     }
   }
 
+  /**
+   * §35.5: a change to lines already written (an Attention line raised or cleared), made as `add` makes its write: after
+   * the backfill, never into a newer Rushes' log. Unlike `add` it throws, so the route can say what went wrong.
+   */
+  async change<T>(fn: (f: LogFile) => T): Promise<T> {
+    await this.ready();
+    const write = () =>
+      this.store.update("log", (f) => {
+        refuseNewer(f);
+        if (!f.backfilled && this.known) throw STALE;
+        if (!f.backfilled) f.began ??= new Date(this.since).toISOString();
+        return fn(f);
+      });
+    try {
+      return (await write()).result;
+    } catch (e) {
+      if (e !== STALE && !(e instanceof CorruptFileError)) throw e;
+      this.known = false;
+      await this.ready();
+      return (await write()).result;
+    }
+  }
+
   /** §22.7: a page of the log, newest first. The first read backfills (R6). */
   async view(q: LogQuery, ctx: UndatedContext & { films?: FilmContext }): Promise<LogView> {
     await this.ready();
@@ -202,7 +228,7 @@ export class LogBook {
     try {
       const f = await this.read(false);
       const last = f.entries[f.entries.length - 1];
-      return { rev: f.rev, mark: last ? `${last.id}@${last.at}` : null, total: f.entries.length };
+      return { rev: f.rev, mark: last ? `${last.id}@${last.at}` : null, total: f.entries.length, attention: f.entries.filter(isOpenAttention).length };
     } catch {
       return null;
     }
@@ -218,13 +244,14 @@ export class LogBook {
       const out: Record<string, LogHead> = {};
       for (const v of films.videos) {
         let mark: string | null = null;
+        let attention = 0;
         for (let i = f.entries.length - 1; i >= 0; i--) {
           const e = f.entries[i];
           if (!lineOnFilm(e, v.id, films)) continue;
-          mark = `${e.id}@${e.at}`;
-          break;
+          mark ??= `${e.id}@${e.at}`;
+          if (isOpenAttention(e)) attention += 1;
         }
-        out[v.id] = { rev: f.rev, mark, total: f.entries.length };
+        out[v.id] = { rev: f.rev, mark, total: f.entries.length, attention };
       }
       return out;
     } catch {

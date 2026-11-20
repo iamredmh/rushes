@@ -4,11 +4,12 @@ import { streamSSE } from "hono/streaming";
 import { z } from "zod";
 import type { Store, ChangeEvent } from "../core/store.js";
 import { RushesError, InvalidError, NotFoundError } from "../core/errors.js";
+import { hostname } from "node:os";
 import { addFile, addFormat, addVariant, addVersion, ensureProjectIdOnce, inPlay, lockPicture, noteInPlay, resolveCut, resolveVideo, setShots, setVariantFilms, shelveFilm, shotAt } from "../core/project.js";
 import { addTake, allSections, editSection, filmScript, filmScriptDraft, setSections } from "../core/script.js";
 import { chooseFilm, filmPlace, firstFilm, noteOnFilm } from "../core/films.js";
 import { moveToFirstFilmOnce } from "./films.js";
-import { addNote, addUserReply, applyReply, applyUserEdit, byFilm, checkNoteFormat, filterNotes } from "../core/notes.js";
+import { addNote, applyReply, applyUserEdit, byFilm, checkNoteFormat, filterNotes } from "../core/notes.js";
 import { FORMAT_ID_RE, MAX_FORMATS, isPictureSize, labelOfId, versionFormats } from "../core/formats.js";
 import { createBatch, latestBatch } from "../core/batches.js";
 import { markSent, noteState, NOTE_STATES, withState, type NoteState } from "../core/noteState.js";
@@ -54,6 +55,8 @@ import { AGENT_HELP, signInLabel } from "../core/agentHelp.js";
 import type { ConnectorStatus } from "./agent/connectors.js";
 import type { AgentId } from "../core/schema.js";
 import { openInTerminal, type TerminalOpener } from "./agent/terminal.js";
+import { ATTENTION_TITLE_MAX, raiseAttention, replySettles, resolveAttention } from "../core/attention.js";
+import { resumeFor } from "./agent/resume.js";
 import { agentRulesFor } from "./agent/rules.js";
 import { adoptAgentDefaultsOnce, rememberDefault } from "./agent/setupOnce.js";
 import { notifyWhenWaiting, osNotifier, type Notifier } from "./agent/notify.js";
@@ -401,6 +404,15 @@ export interface AppOptions {
   connectors?: (agent: AgentId) => ConnectorStatus;
   /** §28: opens a terminal with an agent's login command for "Sign in". Defaults to openInTerminal; tests inject a fake. */
   terminal?: TerminalOpener;
+  /**
+   * §35.5: the key that proves a desk was opened on this computer (the server's lock token; see lock.ts hereKey). Without
+   * one (tests, a server with no lock yet) no desk counts as local, and an Attention item's click shows the command.
+   */
+  here?: () => string | undefined;
+  /** §35.5: whether the request came from this computer. Defaults to its socket's address being a loopback one. */
+  fromHere?: (c: Context) => boolean;
+  /** §35.5: this computer's short name, for "Run this on <host>". Defaults to os.hostname() up to its first dot. */
+  hostname?: () => string;
   /** §28: how long Send waits for the agent to take the batch before answering `starting: true`. Defaults to SEND_WAIT_MS. */
   sendWaitMs?: number;
   /**
@@ -424,7 +436,7 @@ export const SEND_WAIT_MS = 5_000;
 
 // `asked`: with no runner there is nothing to set up, so Send never opens the first-Send sheet.
 const OFF_STATUS: AgentStatus = {
-  on: false, agent: null, phase: "off", batches: [], followUps: [], current: { note: null, doing: null }, asks: [], lines: [], error: null, session: null,
+  on: false, agent: null, phase: "off", batches: [], current: { note: null, doing: null }, asks: [], lines: [], error: null, session: null,
   asked: true, permissions: "project-edits", always: [],
 };
 
@@ -457,6 +469,15 @@ function hostnameOf(value: string, isUrl: boolean): string | null {
 const escapeHtml = (text: string) =>
   text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 
+/** §35.5: the request's socket is this computer's own (127.0.0.0/8 or ::1). A tunnel's requests are too: see `here`. */
+export function peerIsLoopback(c: Context): boolean {
+  const addr = (c.env as { incoming?: { socket?: { remoteAddress?: string } } } | undefined)?.incoming?.socket?.remoteAddress ?? "";
+  return addr === "::1" || /^(::ffff:)?127\./.test(addr);
+}
+
+/** "Reds-Mac-mini.local" -> "Reds-Mac-mini". */
+export const shortHostname = (): string => hostname().split(".")[0] || hostname();
+
 export function createApp(store: Store, opts: AppOptions = {}): Hono {
   const webDir = opts.webDir ?? DEFAULT_WEB_DIR;
   const reveal = opts.reveal ?? osRevealer;
@@ -471,6 +492,9 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   const sendWaitMs = opts.sendWaitMs ?? SEND_WAIT_MS;
   const detect = opts.detect ?? (() => detectAgents());
   const terminal = opts.terminal ?? openInTerminal;
+  const here = opts.here ?? (() => undefined);
+  const fromHere = opts.fromHere ?? peerIsLoopback;
+  const hostname = opts.hostname ?? shortHostname;
   const connectors = opts.connectors ?? ((): ConnectorStatus => ({ state: "ready" }));
   /** §24.12, §31.5: whether a film's plan (its brief, script and storyboard) is approved, from the files as they are now. */
   const planBuild = async (video?: string | null) => {
@@ -489,6 +513,9 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   // §22: the Change Log, shared with the found scanner (logBookFor keeps one per store).
   const log = logBookFor(store);
   const by = (c: Context) => byOf(c.req.header("x-rushes-project"));
+  /** §35.5: clears the open Attention items on these notes. A log that can't be written is reported, not thrown: the note's change stands. */
+  const settleAttention = (notes: Set<string>) =>
+    log.change((f) => resolveAttention(f, (e) => !!e.note && notes.has(e.note), new Date())).catch((e: unknown) => console.error(`Rushes: couldn't clear an attention item: ${(e as Error).message}`));
   /** R17: writes exports/change-log-YYYY-MM-DD.md (a same-day export replaces it) and returns its path. Written as Export notes writes. */
   async function exportChangeLog(now: Date): Promise<string> {
     const [project, script] = await Promise.all([store.read("project"), store.read("script")]);
@@ -1107,15 +1134,60 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     const visuals = project ? await store.read("visuals") : null;
     const check = project && visuals ? (next: Note, prev: Note) => (next.stage === "visuals" ? checkVisualNote(next, visuals) : checkNoteFormat({ next, prev, boxRedrawn: b.box !== undefined }, project)) : undefined;
     const { result } = await store.update("notes", (f) => applyUserEdit(f, { id: c.req.param("id"), ...b }, check));
+    // §35.5: ticked done by the user: its Attention items clear.
+    if (result.status === "done") await settleAttention(new Set([result.id]));
     return c.json({ note: withState(result) });
   });
 
-  app.post("/api/notes/:id/replies", async (c) => {
-    const b = await body(c, z.object({ text: z.string() }));
+  // §35: notes go one way. There is no route for the user's answer on a note (§28.5's POST /api/notes/:id/replies).
+
+  // ---- §35.5: Attention items ----
+  app.post("/api/attention", async (c) => {
+    const b = await body(c, z.object({ title: z.string().trim().min(1).max(ATTENTION_TITLE_MAX), note: z.string().min(1).optional(), film: z.string().optional() }));
+    let video: string | null;
+    if (b.note) {
+      const n = (await store.read("notes")).notes.find((x) => x.id === b.note);
+      if (!n) throw new NotFoundError("note", b.note);
+      // A note on the shared Visuals is on no one film: it is the film named, or the only one.
+      video = n.video ?? (await filmOf(b.film, "attention item"));
+    } else video = await filmOf(b.film, "attention item");
+    const { entry, created } = await log.change((f) => raiseAttention(f, { title: b.title, note: b.note ?? null, video }, new Date()));
+    return c.json({ attention: entry, created }, created ? 201 : 200);
+  });
+  app.post("/api/attention/:id/dismiss", async (c) => {
     const id = c.req.param("id");
-    const { result } = await store.update("notes", (f) => addUserReply(f, id, b.text));
-    store.emit("user-reply", { note: id, text: b.text.trim() });
-    return c.json({ note: withState(result) }, 201);
+    const cleared = await log.change((f) => {
+      const e = f.entries.find((x) => x.id === id && x.kind === "attention");
+      if (!e) throw new NotFoundError("attention item", id);
+      return resolveAttention(f, (x) => x.id === id, new Date());
+    });
+    return c.json({ cleared: cleared.length });
+  });
+  /**
+   * §35.5: back to the agent's conversation. On this computer (the desk's here key matches, and the request comes from
+   * here) a terminal opens in the project folder resuming it; otherwise, or if no terminal opens, the answer carries
+   * the command for the desk to show.
+   */
+  app.post("/api/attention/:id/open", async (c) => {
+    const id = c.req.param("id");
+    const line = (await store.read("log")).entries.find((x) => x.id === id && x.kind === "attention");
+    if (!line) throw new NotFoundError("attention item", id);
+    const settings = await store.read("agent");
+    const resume = resumeFor(settings.session, store.root, process.platform);
+    const where = { host: hostname(), folder: store.root };
+    const key = here();
+    const local = !!key && c.req.header("x-rushes-here") === key && fromHere(c);
+    if (!resume) return c.json({ opened: false, local, ...where, agent: settings.agent ?? null, session: null, command: null });
+    if (local) {
+      const info = (await detect().catch(() => [])).find((a) => a.id === resume.agent);
+      try {
+        await terminal(resume.command, info?.path ? [info.path, ...resume.args] : undefined, { cwd: store.root, name: "resume" });
+        return c.json({ opened: true, local, ...where, agent: resume.agent, session: resume.session, command: resume.command });
+      } catch {
+        // No terminal here: the desk shows the command instead.
+      }
+    }
+    return c.json({ opened: false, local, ...where, agent: resume.agent, session: resume.session, command: resume.command });
   });
 
   app.post("/api/replies", async (c) => {
@@ -1123,6 +1195,9 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     const { result } = await store.update("notes", (f) => b.replies.map((r) => applyReply(f, r)));
     // §30: one line per film, so each film's Activity counts only its own notes.
     for (const [film, notes] of byFilm(result, (n) => n.video)) await log.add(() => repliesEvent(notes, film), by(c));
+    // §35.5: a note marked done, or fixed in a version, clears its Attention items.
+    const settled = new Set(b.replies.filter(replySettles).map((r) => r.id));
+    if (settled.size > 0) await settleAttention(settled);
     return c.json({ notes: result.map(withState) });
   });
 

@@ -2,13 +2,13 @@
 // the live strip and what the desk does after Send. Every string is the plan's own.
 import { describe, expect, it } from "vitest";
 import {
-  ASK_ARM_MS, ASK_WORDS, BYPASS_WARNING, askArmKey, askChoices, askHeading, askLead, revealParts, revealText, MENU_WORDS, PERMISSION_CHOICES, setDeskPlatform, signInWord, SHEET_WORDS, afterSend, focusAfterRemove, followSend, planLead, mayQuestion, notSignedInWhy, sendToLabel, sheetDefault, sheetPrimary, sheetRows, whoNext, agentName, canStop, chipShows, chipText, chipTone, footLine, liveLines, stripMode, stripLine, runLabel, menuAgents, menuRowCount, noteAgentBadge, rowText, ruleRows, whoLine, answerPlaceholder, badgeText, fixGo, noteLite, noteThread, replyBoxShows, threadParts, newCutFor, stepCuts, cutAction, unseenCut,
+  ASK_ARM_MS, ASK_WORDS, BYPASS_WARNING, askArmKey, askChoices, askHeading, askLead, revealParts, revealText, MENU_WORDS, PERMISSION_CHOICES, setDeskPlatform, signInWord, SHEET_WORDS, afterSend, focusAfterRemove, followSend, planLead, mayQuestion, notSignedInWhy, sendToLabel, sheetDefault, sheetPrimary, sheetRows, whoNext, agentName, canStop, chipShows, chipText, chipTone, footLine, liveLines, stripMode, stripLine, runLabel, menuAgents, menuRowCount, noteAgentBadge, rowText, ruleRows, whoLine, badgeText, fixGo, noteLite, noteThread, threadParts, newCutFor, stepCuts, cutAction, unseenCut,
   type NoteLite,
 } from "../../web/src/agent.js";
 import type { AgentInfo, AgentStatus, Note, PendingAsk } from "../../web/src/types.js";
 
 const status = (over: Partial<AgentStatus> = {}): AgentStatus => ({
-  on: true, agent: "claude", phase: "idle", batches: [], followUps: [], current: { note: null, doing: null }, asks: [], lines: [], error: null, session: null, asked: true,
+  on: true, agent: "claude", phase: "idle", batches: [], current: { note: null, doing: null }, asks: [], lines: [], error: null, session: null, asked: true,
   permissions: "project-edits", always: [], ...over,
 });
 
@@ -49,9 +49,6 @@ describe("chipText", () => {
     expect(chipText(status({ phase: "waiting" }), notes)).toBe("Claude Code is waiting for you");
   });
 
-  it("question", () => {
-    expect(chipText(status({ phase: "question" }), notes)).toBe("Claude Code has a question");
-  });
 
   it("finished", () => {
     expect(chipText(status({ phase: "finished" }), notes)).toBe("Claude Code finished");
@@ -82,8 +79,8 @@ describe("chipText", () => {
 describe("noteAgentBadge", () => {
   const working = status({ phase: "working", batches: ["b1"], current: { note: "n1", doing: "Trimming the intro" } });
 
-  it("a note that needs you says so, ahead of everything", () => {
-    expect(noteAgentBadge(note("n1", { batch: "b1", needsYou: true }), working)).toEqual({ kind: "needsYou", text: "Needs you" });
+  it("a note the agent replied on and left is never Needs you (§35): it is with the agent until its turn ends", () => {
+    expect(noteAgentBadge(note("n1", { batch: "b1" }), working)?.kind).not.toBe("needsYou");
   });
 
   it("the note being worked on says what the agent is doing", () => {
@@ -188,7 +185,7 @@ describe("liveLines", () => {
 describe("the live strip (task 7)", () => {
   it("stripMode: live while the run goes, collapsed once it ended with lines, nothing off or idle", () => {
     const l = [{ at: "2026-11-17T10:00:00Z", text: "x", note: null }];
-    for (const phase of ["starting", "working", "waiting", "question"] as const) expect(stripMode(status({ phase, lines: l }))).toBe("live");
+    for (const phase of ["starting", "working", "waiting"] as const) expect(stripMode(status({ phase, lines: l }))).toBe("live");
     expect(stripMode(status({ phase: "working" }))).toBe("live");
     for (const phase of ["finished", "failed"] as const) expect(stripMode(status({ phase, lines: l }))).toBe("ended");
     expect(stripMode(status({ phase: "finished" }))).toBeNull();
@@ -217,7 +214,7 @@ describe("the chip (task 2)", () => {
   });
 
   it("chipShows: always while the run is going", () => {
-    for (const phase of ["starting", "working", "waiting", "question"] as const) {
+    for (const phase of ["starting", "working", "waiting"] as const) {
       expect(chipShows(status({ phase, lines: [at("2026-11-17T09:00:00Z")] }), now)).toBe(true);
     }
   });
@@ -239,13 +236,12 @@ describe("the chip (task 2)", () => {
     expect(chipTone("starting")).toBe("busy");
     expect(chipTone("working")).toBe("busy");
     expect(chipTone("waiting")).toBe("todo");
-    expect(chipTone("question")).toBe("todo");
     expect(chipTone("finished")).toBe("done");
     expect(chipTone("failed")).toBe("over");
   });
 
   it("canStop: while starting, working or waiting only", () => {
-    expect((["off", "idle", "starting", "working", "waiting", "question", "finished", "failed"] as const).filter(canStop)).toEqual(["starting", "working", "waiting"]);
+    expect((["off", "idle", "starting", "working", "waiting", "finished", "failed"] as const).filter(canStop)).toEqual(["starting", "working", "waiting"]);
   });
 });
 
@@ -585,9 +581,8 @@ describe("when a card's buttons may be pressed (task 5, fix 1)", () => {
 // ---- a note's badge, thread and reply box (task 6) ----
 
 describe("noteAgentBadge priority (task 6)", () => {
-  it("needs you beats working, even on the note being worked on", () => {
+  it("working is said on the note being worked on", () => {
     const s = status({ phase: "working", batches: ["b1"], current: { note: "n1", doing: "Measuring the cut" } });
-    expect(noteAgentBadge(note("n1", { batch: "b1", needsYou: true }), s)?.kind).toBe("needsYou");
     expect(noteAgentBadge(note("n1", { batch: "b1" }), s)).toEqual({ kind: "working", text: "Measuring the cut" });
   });
 
@@ -600,47 +595,19 @@ describe("noteAgentBadge priority (task 6)", () => {
     // Refused (not signed in), or sent by copying a prompt before the switch went on: no run holds its batch.
     const on = status({ phase: "idle", batches: [] });
     expect(noteAgentBadge(note("n1", { batch: "b1" }), on)).toEqual({ kind: "with", text: "With your agent" });
-    expect(replyBoxShows(note("n1", { batch: "b1" }), on)).toBe(false);
-    expect(answerPlaceholder(note("n1", { batch: "b1" }), on)).toBe("Answer your agent");
     // Another batch held is not this one.
     const other = status({ phase: "working", batches: ["b2"], current: { note: "n9", doing: null } });
     expect(noteAgentBadge(note("n1", { batch: "b1" }), other)).toEqual({ kind: "with", text: "With your agent" });
-    expect(replyBoxShows(note("n1", { batch: "b1" }), other)).toBe(false);
   });
 
   it("the agent is named while its run holds the note's batch, or is on the note", () => {
     const queued = status({ phase: "starting", batches: ["b1"] });
     expect(noteAgentBadge(note("n1", { batch: "b1" }), queued)).toEqual({ kind: "with", text: "With Claude Code" });
-    expect(replyBoxShows(note("n1", { batch: "b1" }), queued)).toBe(true);
-    expect(answerPlaceholder(note("n1", { batch: "b1" }), queued)).toBe("Answer Claude Code");
-    // A follow-up's turn on the note (its batch's own turn over).
-    const followUp = status({ phase: "working", batches: [], current: { note: "n1", doing: null } });
-    expect(replyBoxShows(note("n1", { batch: "b1" }), followUp)).toBe(true);
-    expect(answerPlaceholder(note("n1", { batch: "b1" }), followUp)).toBe("Answer Claude Code");
   });
 
-  it("a follow-up queued or running for the note: the agent has it, before it says what it is doing (Task 10, 2)", () => {
-    const running = status({ phase: "working", batches: [], followUps: ["n1"], current: { note: null, doing: null } });
-    expect(noteAgentBadge(note("n1", { batch: "b1" }), running)).toEqual({ kind: "with", text: "With Claude Code" });
-    expect(replyBoxShows(note("n1", { batch: "b1" }), running)).toBe(true);
-    expect(answerPlaceholder(note("n1", { batch: "b1" }), running)).toBe("Answer Claude Code");
-    // Another note of the same batch, with no follow-up of its own, is not held by it.
-    expect(noteAgentBadge(note("n2", { batch: "b1" }), running)).toEqual({ kind: "with", text: "With your agent" });
-  });
-
-  it("an answer to the agent's question names it while Send to AI is on with the conversation kept: the answer goes there", () => {
-    const asked = note("n1", { batch: "b1", needsYou: true });
-    expect(answerPlaceholder(asked, status({ phase: "question", session: "s-1" }))).toBe("Answer Claude Code");
-    expect(answerPlaceholder(asked, status({ phase: "question", session: null }))).toBe("Answer your agent");
-    expect(answerPlaceholder(asked, status({ on: false, session: "s-1" }))).toBe("Answer your agent");
-    expect(answerPlaceholder(asked, null)).toBe("Answer your agent");
-  });
-
-  it("switched off mid-run: the badge still names the agent that holds the batch, but no box, since an answer wouldn't go", () => {
+  it("switched off mid-run: the badge still names the agent that holds the batch", () => {
     const off = status({ on: false, phase: "working", batches: ["b1"] });
     expect(noteAgentBadge(note("n1", { batch: "b1" }), off)).toEqual({ kind: "with", text: "With Claude Code" });
-    expect(replyBoxShows(note("n1", { batch: "b1" }), off)).toBe(false);
-    expect(answerPlaceholder(note("n1", { batch: "b1", needsYou: true }), off)).toBe("Answer your agent");
   });
 
   it("with Send to AI off, a sent note is with your agent (a copied prompt went to a chat Rushes can't name)", () => {
@@ -654,17 +621,17 @@ describe("noteThread", () => {
   const at = (m: number) => new Date(2026, 10, 17, 14, m).toISOString();
   const r = (by: "agent" | "user", text: string, m: number) => ({ by, text, at: at(m) });
 
-  it("each reply on a line, oldest first, with its local time", () => {
-    const t = noteThread({ reply: "", replies: [r("agent", "Full stop?", 5), r("user", "No full stop.", 7)] });
+  it("each agent reply on a line, oldest first, with its local time; an answer written before §35 is not shown", () => {
+    const t = noteThread({ reply: "", replies: [r("agent", "Full stop?", 5), r("user", "No full stop.", 7), r("agent", "Took it out.", 9)] });
     expect(t.lines).toEqual([
       { by: "agent", text: "Full stop?", time: "14:05" },
-      { by: "user", text: "No full stop.", time: "14:07" },
+      { by: "agent", text: "Took it out.", time: "14:09" },
     ]);
     expect(t.more).toBeNull();
   });
 
   it("the last three, with Show all (n) when there are more; all of them once asked", () => {
-    const replies = [r("agent", "a", 1), r("user", "b", 2), r("agent", "c", 3), r("user", "d", 4), r("agent", "e", 5)];
+    const replies = [r("agent", "a", 1), r("agent", "b", 2), r("agent", "c", 3), r("user", "x", 4), r("agent", "d", 5), r("agent", "e", 6)];
     const t = noteThread({ reply: "", replies });
     expect(t.lines.map((l) => l.text)).toEqual(["c", "d", "e"]);
     expect(t.more).toBe("Show all (5)");
@@ -686,40 +653,10 @@ describe("noteThread", () => {
   });
 });
 
-describe("noteLite: needs you, worked out in the desk", () => {
-  const full = (over: Partial<Note>) => ({ id: "n1", batch: "b1", status: "todo", fixVersion: null, replies: [], ...over }) as unknown as Note;
-  it("a note with the agent whose last word is the agent's needs you; GET /api/state sends notes as stored, without it", () => {
-    expect(noteLite(full({ replies: [{ by: "agent", text: "Which?", at: "" }] })).needsYou).toBe(true);
-    expect(noteLite(full({ replies: [{ by: "agent", text: "Which?", at: "" }, { by: "user", text: "This.", at: "" }] })).needsYou).toBe(false);
-    expect(noteLite(full({ batch: null, replies: [{ by: "agent", text: "Which?", at: "" }] })).needsYou).toBe(false);
-    expect(noteLite(full({ status: "done", replies: [{ by: "agent", text: "Done.", at: "" }] })).needsYou).toBe(false);
-  });
-});
-
-describe("replyBoxShows and its placeholder", () => {
-  it("shows on a note that needs you, whatever the switch", () => {
-    expect(replyBoxShows(note("n1", { batch: "b1", needsYou: true }), status())).toBe(true);
-    expect(replyBoxShows(note("n1", { batch: "b1", needsYou: true }), status({ on: false }))).toBe(true);
-    expect(replyBoxShows(note("n1", { batch: "b1", needsYou: true }), null)).toBe(true);
-  });
-
-  it("shows on a sent note while the agent holds its batch, and not otherwise", () => {
-    expect(replyBoxShows(note("n1", { batch: "b1" }), status({ phase: "working", batches: ["b1"] }))).toBe(true);
-    expect(replyBoxShows(note("n1", { batch: "b1" }), status())).toBe(false);
-    expect(replyBoxShows(note("n1", { batch: "b1" }), status({ on: false }))).toBe(false);
-    expect(replyBoxShows(note("n1", { batch: "b1" }), null)).toBe(false);
-  });
-
-  it("never on a to-do or a done note", () => {
-    expect(replyBoxShows(note("n1"), status())).toBe(false);
-    expect(replyBoxShows(note("n1", { batch: "b1", status: "done" }), status())).toBe(false);
-  });
-
-  it("Answer <A> for a note the agent holds", () => {
-    const held = note("n1", { batch: "b1" });
-    expect(answerPlaceholder(held, status({ phase: "working", batches: ["b1"] }))).toBe("Answer Claude Code");
-    expect(answerPlaceholder(held, status({ agent: "codex", phase: "working", batches: ["b1"] }))).toBe("Answer Codex");
-    expect(answerPlaceholder(held, null)).toBe("Answer your agent");
+describe("noteLite (§35)", () => {
+  it("carries no needsYou: notes go one way", () => {
+    const n = { id: "n1", batch: "b1", status: "todo", fixVersion: null, replies: [{ by: "agent", text: "Which?", at: "" }] } as unknown as Note;
+    expect(noteLite(n)).toEqual({ id: "n1", batch: "b1", status: "todo", fixVersion: null });
   });
 });
 
@@ -752,7 +689,6 @@ describe("agent-written words on a card show hidden characters (task 6, fix 1)",
   it("what the agent is doing, too; Rushes' own words are unchanged", () => {
     const s = status({ phase: "working", batches: ["b1"], current: { note: "n1", doing: "Trim​ming" } });
     expect(badgeText(noteAgentBadge(note("n1", { batch: "b1" }), s)!)).toBe("Trim<U+200B>ming");
-    expect(badgeText(noteAgentBadge(note("n1", { batch: "b1", needsYou: true }), s)!)).toBe("Needs you");
     expect(badgeText(noteAgentBadge(note("n2", { batch: "b1" }), s)!)).toBe("With Claude Code");
   });
 

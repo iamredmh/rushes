@@ -267,7 +267,10 @@ export function markLabel(m: Mark): string {
   return m.db === undefined ? label : `${label} ${m.db} dB`;
 }
 
-/** One message in a note's thread: the agent's reply or the user's answer. No length cap here, so stored data always loads; a user's answer is capped where it comes in (addUserReply). */
+/**
+ * One message in a note's thread: the agent's reply. `by: "user"` is an answer written on a note before §35 (0.14.0):
+ * still read, so old files load, but never shown and never written now. No length cap here, so stored data always loads.
+ */
 export const ReplySchema = z.object({ by: z.enum(["agent", "user"]), text: z.string().trim().min(1), at: z.string() });
 export type NoteReply = z.infer<typeof ReplySchema>;
 
@@ -506,6 +509,9 @@ export const LogEntrySchema = fileObject({
   tab: StageSchema.nullable().default(null),
   n: z.number().int().positive().default(1),
   subject: z.string().max(200).default(""),
+  // §35.5: an Attention line's note (its id), and when it cleared. Only Attention lines carry them; absent elsewhere.
+  note: z.string().max(200).optional(),
+  resolved: z.string().optional(),
 });
 export type LogEntry = z.infer<typeof LogEntrySchema>;
 

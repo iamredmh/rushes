@@ -13,6 +13,7 @@ import { removeLock, writeLock } from "./lock.js";
 import { watchStore } from "./watch.js";
 import { briefRecords, storyboardRecords } from "./plans.js";
 import { moveToFirstFilmOnce } from "./films.js";
+import { settleOldQuestions } from "./oneWay.js";
 import { adoptAgentDefaultsOnce } from "./agent/setupOnce.js";
 import type { Revealer } from "./reveal.js";
 import { ProxyJobs, removePartials, type ProxyJobsOptions } from "./proxy.js";
@@ -181,7 +182,10 @@ export async function startServer(rootDir: string, opts: StartOptions = {}): Pro
   // Browser tests drive the fake agent through RUSHES_TEST_AGENT (ignored outside tests).
   const agentOpts = opts.agent ?? testAgentOptions();
   const runner = new AgentRunner(store, agentOpts);
+  // The lock's token, once this server holds the lock: §35.5's here key (lock.ts hereKey).
+  let token: string | undefined;
   const appOpts: AppOptions = {
+    here: () => token,
     briefs, storyboards, webDir: opts.webDir, onShutdown: () => void close(), reveal: opts.reveal, proxyJobs, peakJobs, found, formatProbe: opts.formats?.probe,
     agent: runner, detect: agentOpts?.detect, notify: opts.notify,
     // §34: a real server reports its connectors' fetch; the fake agent needs none.
@@ -212,7 +216,6 @@ export async function startServer(rootDir: string, opts: StartOptions = {}): Pro
   }
   if (port < 0) throw new Error(`No free port from ${first} to ${first + 10}: ${(lastError as Error)?.message}`);
 
-  let token: string | undefined;
   try {
     token = (await writeLock(root, port)).token;
   } catch (e) {
@@ -242,6 +245,8 @@ export async function startServer(rootDir: string, opts: StartOptions = {}): Pro
   const stopWatching = await watchStore(store);
   // §31.4: what was on no film in a project with several becomes the first film's, once, before anything is shown.
   await moveToFirstFilmOnce(store).catch((e: unknown) => console.error(`Rushes: couldn't move what was on no film: ${(e as Error).message}`));
+  // §35: notes left asking the user (the old Needs you) go back to to do, keeping their replies.
+  await settleOldQuestions(store).catch((e: unknown) => console.error(`Rushes: couldn't give back the notes left asking: ${(e as Error).message}`));
   // §32: a project with no Send to AI rules of its own yet starts from the Mac-wide default.
   await adoptAgentDefaultsOnce(store);
   const stopBrief = briefs.start();

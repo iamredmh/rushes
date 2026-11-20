@@ -7,6 +7,7 @@ import {
   agentPrompt, defaultVersion, filmLanes, filmNotes, filmPicks, otherLanes, type VariantRow, type VoiceNotes, voiceNoteRows, voiceOnLabel, voiceRounds, variantRows,
 } from "../lib.js";
 import type { Asset, State, Version, Video } from "../types.js";
+import { otherTabLabel } from "../tabNotes.js";
 import { AudioStage, filmsOf, type Preview, takeList } from "./AudioStage.js";
 import { filmsControl } from "./FilmsMenu.js";
 import { BlindButton } from "./VariantTab.js";
@@ -77,6 +78,8 @@ export function Voice({ state, assets, video, toast, onChanged, onPendingChange,
       // Frames are counted at the cut's rate, as on the Timeline (m1).
       fps={cut?.fps ?? (state.project.fps || 30)}
       notes={filmNotes(state.notes.notes, "voice", video?.id, state.project.videos)}
+      // §35.3: the "All tabs" switch: the film's notes from every tab (state is the film's, §31).
+      others={{ notes: state.notes.notes, label: (n) => otherTabLabel(n, state.project.lanes, filmState.use) }}
       noteRow={(n) => voiceNoteRows(model, n)}
       onLabel={(n) => voiceOnLabel(model, n.on, nameOf)}
       targetName={(it) => `${it.take.round} · ${it.name}`}

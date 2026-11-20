@@ -4,8 +4,7 @@ import { api, mediaUrl } from "../api.js";
 import { MARK_DB, type MarkKind, marksLabel, noteTime, placeNote, setMarkDb, shotLabel, toggleMark } from "../lib.js";
 import type { Mark, Note } from "../types.js";
 import { markTitle, noteState } from "../desk.js";
-import { noteLite } from "../agent.js";
-import { NoteBadge, NoteThread, type NotesAgent, ReplyBox } from "./agent/NoteThread.js";
+import { NoteBadge, NoteThread, type NotesAgent } from "./agent/NoteThread.js";
 import { FormatScope } from "./FormatScope.js";
 import { Icon } from "./Icon.js";
 
@@ -15,6 +14,13 @@ export type Filter = "all" | "todo" | "done";
 export interface NotesProps {
   /** This tab's notes (already narrowed to the video being watched, where that applies). */
   notes: Note[];
+  /**
+   * §35.3: the to-do count the panel's Notes tab shows, when the list holds more than the tab's own notes (the Timeline
+   * lists every tab's; the count stays what it was). Defaults to the list's to-do notes.
+   */
+  todoCount?: number;
+  /** §35.3: the sound tabs' "All tabs" switch, beside the filter: the list shows the film's notes from every tab. */
+  allTabs?: { on: boolean; onChange(on: boolean): void };
   /** The version being watched, so notes from older cuts can be placed. */
   version: string | null;
   placeholder: string;
@@ -184,7 +190,7 @@ export function Notes({
         {placed.length === 0 && <div class="none">{filter !== "all" ? "Nothing here." : footer ? "None on this format." : "No notes yet."}</div>}
         {placed.map(({ n, at }) => (
           // Keyed (review M3): a card that shows on the next format keeps its node, and its focus.
-          <div key={n.id} class={`note${noteState(n) === "todo" ? "" : ` ${noteState(n)}`}${agent && noteLite(n).needsYou ? " needs" : ""}`} data-note={n.id} aria-current={selectedId === n.id ? "true" : undefined}>
+          <div key={n.id} class={`note${noteState(n) === "todo" ? "" : ` ${noteState(n)}`}`} data-note={n.id} aria-current={selectedId === n.id ? "true" : undefined}>
             <button class="chk" aria-label={dotName(n)} data-tip={dotName(n)} onClick={() => void toggle(n)}>
               <Icon name="check" />
             </button>
@@ -207,7 +213,6 @@ export function Notes({
             )}
             {agent && <NoteBadge n={n} agent={agent} version={version} onSeek={onSeek} />}
             <NoteThread n={n} />
-            {agent && !readOnly && <ReplyBox n={n} status={agent.status} toast={toast} onChanged={onChanged} />}
             {selectedId === n.id && cardExtra && <div class="nfmt">{cardExtra(n)}</div>}
           </div>
         ))}

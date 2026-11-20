@@ -6,6 +6,7 @@ import { createMcpServer, type ToolContext } from "./tools.js";
 import { ensureServer, type EnsureOptions } from "./ensure.js";
 import { runDoctor, realDoctorEnv } from "../cli/doctor.js";
 import { isProjectRoot, projectPath } from "../core/projectFolder.js";
+import { hereKey } from "../server/lock.js";
 
 export function openBrowser(url: string): void {
   const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open";
@@ -59,6 +60,7 @@ export function stdioContext(defaultRoot: string, ensure?: EnsureOptions, opts: 
   return {
     client: async (project) => ensureServer(forTool(project), ensure),
     openBrowser,
+    here: (project) => hereKey(forTool(project)),
     doctor: async (project) => runDoctor(realDoctorEnv(forDoctor(project))),
   };
 }

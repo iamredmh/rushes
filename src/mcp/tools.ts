@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ApiError, dashboardUrlFor, type RushesClient } from "./client.js";
 import { VERSION } from "../server/app.js";
+import { withHere } from "../server/lock.js";
 import { BRING_IN_MAX } from "../server/found.js";
 import { LABEL_MAX, oneLineOf } from "../core/labels.js";
 import { LOG_AREAS } from "../core/logText.js";
@@ -13,6 +14,8 @@ export interface ToolContext {
   client(project?: string): Promise<RushesClient>;
   /** Open a URL in the user's browser. */
   openBrowser(url: string): void;
+  /** §35.5: the here key for the project's server (lock.ts hereKey), added to an address this computer's browser opens. */
+  here?(project?: string): Promise<string | null>;
   /** §19.3: the doctor checks for a project folder (defaults to the working directory). Read-only, no server required. */
   doctor(project?: string): Promise<Check[]>;
 }
@@ -133,7 +136,7 @@ export function createMcpServer(ctx: ToolContext): McpServer {
       const c = await ctx.client(project);
       const url = await dashboardUrlFor(c.baseUrl);
       // Open first: the dashboard shows the folder being looked through, and fills in as files arrive.
-      if (browser !== false) ctx.openBrowser(url);
+      if (browser !== false) ctx.openBrowser(withHere(url, (await ctx.here?.(project).catch(() => null)) ?? null));
       let r;
       try {
         r = await c.post("/api/found/scan", { wait: true, ...(film ? { film } : {}), ...(include ? { include } : {}) });
@@ -513,7 +516,7 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     "rushes_reply",
     {
       title: "Reply to notes",
-      description: "Reply to one or more notes. Set status \"done\" when fixed, fixT to the time the fix is visible in the new cut, and fixVersion to that cut. A reply without a status leaves its state as it was (a sent note stays with you); status \"todo\" on a done note reopens it for the user's next Send. Each note comes back with its new `state`.",
+      description: "Reply to one or more notes, saying only what you did, in a sentence or two. Notes go one way: never ask the user a question in a reply, about the work or the setup (the user follows up with a new note; for something they must do outside Rushes, use rushes_attention). Set status \"done\" when fixed, fixT to the time the fix is visible in the new cut, and fixVersion to that cut. A note you couldn't do: say so in one line and leave its status alone; when Rushes ran you on a batch it goes back to the user's to do as your turn ends. Status \"todo\" on a done note reopens it for the user's next Send. Each note comes back with its new `state`.",
       inputSchema: {
         project,
         replies: z
@@ -530,6 +533,22 @@ export function createMcpServer(ctx: ToolContext): McpServer {
       },
     },
     safe(async ({ project, replies }) => (await ctx.client(project)).post("/api/replies", { replies })),
+  );
+
+  server.registerTool(
+    "rushes_attention",
+    {
+      title: "Raise an attention item",
+      description:
+        "Use only when you can't go on without the user doing something outside Rushes: a sign-in, a missing key, a missing file. It puts one line, marked as needing them, in the film's Activity, and clicking it takes them back to this conversation (your session) to sort it out. `title` is one plain line saying what is needed, e.g. \"ElevenLabs sign-in needed on this Mac\", never a question about the work. Pass `note` when it blocks a note: reply on that note in one line that you couldn't do it, and leave it to do. Raising the same title again while one is open adds nothing. It clears when the note is done, gets a reply with fixVersion, or the user dismisses it. Pass `film` when there is no note and the project has several films.",
+      inputSchema: {
+        project,
+        title: z.string().trim().min(1).max(160),
+        note: z.string().min(1).optional(),
+        film: film.optional(),
+      },
+    },
+    safe(async ({ project, title, note, film }) => (await ctx.client(project)).post("/api/attention", { title, ...(note ? { note } : {}), ...(film ? { film } : {}) })),
   );
 
   server.registerTool(

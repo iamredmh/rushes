@@ -10,9 +10,14 @@ import "./changes.css";
 import "./cues.css";
 import "./desk.css";
 import "./agent.css";
+import { keepHereKey } from "./here.js";
 import { watchFocusOrigin } from "./lib.js";
 import { applyTheme, readTheme, safeStorage } from "./theme.js";
 import { App } from "./ui/App.js";
+
+// §35.5: a desk Rushes opened itself carries the here key; it is kept for the tab and taken out of the address.
+keepHereKey();
+window.addEventListener("hashchange", () => keepHereKey());
 
 // Space on a button reached by keyboard presses it; after a click it plays (§19.8).
 watchFocusOrigin(document);

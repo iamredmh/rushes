@@ -7,7 +7,8 @@ describe("AGENT_LINES", () => {
   it("is the exact text the runner adds after the batch prompt", () => {
     expect(AGENT_LINES).toBe(
       "Before you start on each note, call rushes_working_on with the note's id and what you are doing, in a few plain words.\n" +
-        "If you are not sure what a note means, ask on the note with rushes_reply (no status) and go on to the next one. The user answers on the note.\n" +
+        "Reply on each note with rushes_reply saying only what you did, in a sentence or two. Never ask the user a question in Rushes, about the work or the setup: the user writes a new note to follow up. If a note is unclear, do your best reading and say what you did.\n" +
+        "If you could not do a note, say so in one line and leave it to do. If you can't go on without the user doing something outside Rushes (a sign-in, a missing key, a missing file), call rushes_attention once with a one-line title and the note's id, then carry on with the other notes.\n" +
         "Only add a new version when the picture or sound changed.\n" +
         "Wait for each command to finish before you reply on a note; do not run work as a background task.\n" +
         "Read and search files with your own file tools, not shell commands (no cat, head, grep, or python -c to read a file). " +

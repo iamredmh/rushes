@@ -27,6 +27,8 @@ export interface ChangeLogState {
   focusOnOpen: boolean;
   /** Lines arrived since it was last on screen (R19). */
   dot: boolean;
+  /** §35.5: an Attention item is open on this film: the dot shows, in the alert colour, until it clears. */
+  alert: boolean;
   /** Chooses the tab (true: Activity). `focus`: the "add a line" box takes focus as the list opens (the default when opening). */
   setOpen(open: boolean, focus?: boolean): void;
   /** The list has given the box its focus: a later mount (another view's panel) leaves focus where it is. */
@@ -76,7 +78,7 @@ export function useChangeLog(projectId: string, head: LogHead | null | undefined
   const saw = (m: string) => {
     if (isNews(m, seenRef.current)) see(m);
   };
-  return { open, focusOnOpen, dot: !shown && isNews(mark, seen), setOpen, saw, focused: () => setFocusOnOpen(false) };
+  return { open, focusOnOpen, dot: !shown && isNews(mark, seen), alert: (head?.attention ?? 0) > 0, setOpen, saw, focused: () => setFocusOnOpen(false) };
 }
 
 /** R18: after a jump, a variant's lane row takes focus once its tab has drawn it (for up to about a second). */

@@ -1,11 +1,11 @@
-// Send to AI (plan 2, task 5): when the desk notifies. Only while the page is hidden, once for each new ask and once
-// when the run turns to a question; never for an ask or a question already heard.
+// Send to AI (plan 2, task 5): when the desk notifies. Only while the page is hidden, once for each new ask; never for
+// an ask already heard. §35: never for a run that ends with a reply on a note (there is no question).
 import { describe, expect, it } from "vitest";
 import { NOTHING_HEARD, notices, outOfSight, type Heard } from "../../web/src/notify.js";
 import type { AgentStatus, PendingAsk } from "../../web/src/types.js";
 
 const status = (over: Partial<AgentStatus> = {}): AgentStatus => ({
-  on: true, agent: "claude", phase: "working", batches: ["b_1"], followUps: [], current: { note: null, doing: null }, asks: [], lines: [], error: null, session: null, asked: true,
+  on: true, agent: "claude", phase: "working", batches: ["b_1"], current: { note: null, doing: null }, asks: [], lines: [], error: null, session: null, asked: true,
   permissions: "project-edits", always: [], ...over,
 });
 const ask = (id: string): PendingAsk => ({ id, title: "Run ffprobe", kind: "execute", command: "ffprobe renders/a.mp4", always: "", at: "2026-11-17T10:00:00.000Z" });
@@ -47,17 +47,8 @@ describe("notices", () => {
     expect(run([[waiting("ask_1"), true], [status(), true], [waiting("ask_2"), true]]).map((n) => n.tag)).toEqual(["ask_1", "ask_2"]);
   });
 
-  it("the phase turning to question: <A> has a question, once", () => {
-    const q = status({ phase: "question", agent: "codex" });
-    expect(run([[status({ agent: "codex" }), true], [q, true], [q, true], [{ ...q, lines: [{ at: "x", text: "y", note: null }] }, true]])).toEqual([
-      { body: "Codex has a question", tag: "question" },
-    ]);
-  });
-
-  it("a question shown on the page doesn't notify later; a new one after another phase does", () => {
-    const q = status({ phase: "question" });
-    expect(run([[q, false], [q, true]])).toEqual([]);
-    expect(run([[q, true], [status({ phase: "working" }), true], [q, true]]).map((n) => n.body)).toEqual(["Claude Code has a question", "Claude Code has a question"]);
+  it("a run that finishes notifies nothing (§35: notes go one way, there is no question)", () => {
+    expect(run([[status(), true], [status({ phase: "finished" }), true]])).toEqual([]);
   });
 
   it("no status (no Send to AI) notifies nothing and forgets nothing", () => {

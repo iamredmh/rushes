@@ -73,18 +73,15 @@ export function osNotifier(
 }
 
 /**
- * Listens to the runner's status on `store` and calls `notify` when a new ask arrives or the run reaches question,
- * only while `watchers()` is 0 (no desk has the events stream open). Returns the function that stops listening.
+ * Listens to the runner's status on `store` and calls `notify` when a new permission ask arrives, only while `watchers()` is 0 (no desk has the events stream open). Returns the function that stops listening.
  */
 export function notifyWhenWaiting(store: Store, notify: Notifier, watchers: () => number): () => void {
   const seen = new Set<string>();
-  let phase: AgentStatus["phase"] | null = null;
+  // §35: a permission ask only. There is no question phase: the agent never asks the user anything on a note.
   const onStatus = (s: AgentStatus) => {
     const fresh = s.asks.some((a) => !seen.has(a.id));
     for (const a of s.asks) seen.add(a.id);
-    const question = s.phase === "question" && phase !== "question";
-    phase = s.phase;
-    if (!(fresh || question) || watchers() > 0) return;
+    if (!fresh || watchers() > 0) return;
     const name = s.agent ? AGENT_NAMES[s.agent] : "Your agent";
     void notify("Rushes", `${name} is waiting for you in ${basename(store.root)}`).catch(() => undefined);
   };

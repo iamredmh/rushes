@@ -508,7 +508,7 @@ describe("a log that is missing, corrupt or huge (§22.9)", () => {
 
   it("GET /api/state carries a read-only head for the dot: it never backfills or writes (R6, R19)", async () => {
     const { store, call } = await setup();
-    expect((await call("GET", "/api/state")).json.log).toEqual({ rev: 0, mark: null, total: 0 });
+    expect((await call("GET", "/api/state")).json.log).toEqual({ rev: 0, mark: null, total: 0, attention: 0 });
     await expect(access(store.path("log"))).rejects.toThrow();
     const { entry } = (await call("POST", "/api/log", { text: "Kept the wide" })).json;
     const head = (await call("GET", "/api/state")).json.log;

@@ -9,6 +9,7 @@ import type { Asset, Note, State, Video } from "../../types.js";
 import { Icon } from "../Icon.js";
 import { NotesPanel, useNoteBox } from "./NotesPanel.js";
 import { takeNotesOf } from "./useTakeSelection.js";
+import { tabLabel, timelineNotes } from "../../tabNotes.js";
 import { Ruler } from "./Ruler.js";
 import { LoudnessReadout, SoundTracks } from "./SoundTracks.js";
 import { type MixView, useMix } from "./useMix.js";
@@ -58,6 +59,9 @@ export function NoCutTimeline({ state, assets, video, notes, prompt, readOnly = 
   const [hasText, setHasText] = useState(false);
   // §27, 5.7: a note here is on the mix at the playhead (there is no frame); a take is noted on its own tab.
   const takeNotes = takeNotesOf(mix, state.notes.notes, video);
+  // §35.3: the list holds the film's notes from every tab, as the Timeline's does; the count stays the tab's own.
+  const own = [...notes, ...takeNotes];
+  const listed = timelineNotes(own, state.notes.notes);
   const openNoteBox = useNoteBox(input);
   const targetAt = (at: number) => noteTarget({ kind: "mix", t: at }, null, fps);
   const target = targetAt(snap(t, fps));
@@ -127,7 +131,8 @@ export function NoCutTimeline({ state, assets, video, notes, prompt, readOnly = 
       </div>
       <NotesPanel
         readOnly={readOnly}
-        notes={[...notes, ...takeNotes]}
+        notes={listed}
+        todoCount={own.filter((n) => n.status === "todo").length}
         version={null}
         placeholder={`Note on ${target.label}`}
         inputRef={input}
@@ -135,7 +140,7 @@ export function NoCutTimeline({ state, assets, video, notes, prompt, readOnly = 
         onAdd={add}
         onChanged={onChanged}
         onTextChange={setHasText}
-        onLabel={mix.noteLabel}
+        onLabel={(n) => tabLabel(n, state.project.lanes, (x) => mix.noteRow(x) !== null, mix.noteLabel)}
         fixedTimes
         onSeek={(to) => engine.seek(to)}
         target={{ label: target.label, when: target.when, name: target.name }}

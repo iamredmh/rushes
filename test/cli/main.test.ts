@@ -8,7 +8,7 @@ import { main, longRunningCommand, type Io } from "../../src/cli/main.js";
 import { findServer } from "../../src/mcp/ensure.js";
 import { startServer, DEFAULT_PORT, type Running } from "../../src/server/start.js";
 import { addVersion } from "../../src/core/project.js";
-import { lockPath } from "../../src/server/lock.js";
+import { lockPath, hereKey } from "../../src/server/lock.js";
 import { sizedProbe } from "../helpers/probe.js";
 
 function io(cwd: string) {
@@ -162,7 +162,8 @@ describe("cli", () => {
     a.x.onServer = (s) => { server = s; };
     expect(await main(["new", "Open Film", "--port", "0"], a.x)).toBe(0);
     try {
-      expect(a.opened).toEqual([server!.dashboardUrl]);
+      // §35.5: the browser Rushes opens itself carries the here key (the server's lock token).
+      expect(a.opened).toEqual([`${server!.dashboardUrl}#here=${await hereKey(join(root, "Open Film"))}`]);
       expect((await (await fetch(`${server!.url}/api/health`)).json()).root).toBe(join(root, "Open Film"));
       // --port 0 means "any free port", not the default 4580 range.
       expect(Number(new URL(server!.url).port)).toBeGreaterThan(DEFAULT_PORT + 20);
@@ -479,8 +480,8 @@ describe("cli", () => {
     let server: Running | undefined;
     a.x.onServer = (s) => { server = s; };
     expect(await main(["open", ".", "--port", "0"], a.x)).toBe(0);
-    expect(a.opened).toEqual([server!.dashboardUrl]);
-    expect(a.opened[0]).toMatch(/\/p\/[a-z2-9]{8}\/$/);
+    expect(a.opened).toEqual([`${server!.dashboardUrl}#here=${await hereKey(root)}`]);
+    expect(a.opened[0]).toMatch(/\/p\/[a-z2-9]{8}\/#here=[0-9a-f-]{36}$/);
     const health = await (await fetch(`${server!.url}/api/health`)).json();
     expect(health.root).toBe(root);
     await server!.close();
@@ -505,7 +506,7 @@ describe("cli", () => {
     a.x.onServer = (x) => { started = x; };
     expect(await main(["open", "."], a.x)).toBe(0);
     expect(a.out).toEqual([`Rushes is already running for ${root}\n${s.dashboardUrl}`]);
-    expect(a.opened).toEqual([s.dashboardUrl]);
+    expect(a.opened).toEqual([`${s.dashboardUrl}#here=${await hereKey(root)}`]);
     const b = io(root);
     b.x.onServer = (x) => { started = x; };
     expect(await main(["serve", root], b.x)).toBe(0);

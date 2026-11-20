@@ -82,6 +82,7 @@ export function escapeIsFree(e: KeyboardEvent): boolean {
 }
 
 const WIDTH_KEY = "rushes:notes-width";
+const ALL_TABS_KEY = "rushes:notes-all-tabs";
 const HIDDEN_KEY = "rushes:notes-hidden";
 
 function recall(key: string): string | null {
@@ -135,6 +136,15 @@ export function usePanelPlace() {
   return { width, setWidth, narrow, shown, setShown, toggle: () => setShown(!shown) };
 }
 
+/** §35.3: the sound tabs' "All tabs" switch, off by default and remembered per browser. */
+export function useAllTabs(): [boolean, (on: boolean) => void] {
+  const [on, setOn] = useState(() => recall(ALL_TABS_KEY) === "1");
+  return [on, (to: boolean) => {
+    setOn(to);
+    keep(ALL_TABS_KEY, to ? "1" : null);
+  }];
+}
+
 /** The top bar's button that hides and shows the panel (opens and closes the drawer under 1100 px). */
 const HIDE = "Hide the notes panel · \\";
 
@@ -175,7 +185,7 @@ export function NotesPanel(props: NotesPanelProps) {
   // I3: notes that read "With your agent" but never reached it get their own way out, so they are never stranded.
   const again = send.again && send.again.count > 0 ? send.again : null;
   const tab = log.open ? "activity" : "notes";
-  const todo = props.notes.filter((n) => n.status === "todo").length;
+  const todo = props.todoCount ?? props.notes.filter((n) => n.status === "todo").length;
   const choose = (to: "notes" | "activity", focusList = true) => {
     if ((to === "activity") !== log.open) log.setOpen(to === "activity", focusList);
   };
@@ -264,15 +274,27 @@ export function NotesPanel(props: NotesPanelProps) {
             class="ntab"
             aria-selected={tab === "activity"}
             aria-controls="npanel-activity"
-            aria-label={log.dot ? "Activity (new entries)" : "Activity"}
+            aria-label={log.alert ? "Activity (needs your attention)" : log.dot ? "Activity (new entries)" : "Activity"}
             tabIndex={tab === "activity" ? 0 : -1}
             onClick={() => choose("activity")}
             onKeyDown={onTabKey}
           >
-            Activity{log.dot && <span class="cdot" aria-hidden="true" />}
+            Activity{(log.dot || log.alert) && <span class={`cdot${log.alert ? " alert" : ""}`} aria-hidden="true" />}
           </button>
         </div>
         <span class="sp" />
+        {tab === "notes" && props.allTabs && (
+          <button
+            type="button"
+            class={`ntabs-all${props.allTabs.on ? " on" : ""}`}
+            role="switch"
+            aria-checked={props.allTabs.on}
+            data-tip="Show this film's notes from every tab"
+            onClick={() => props.allTabs!.onChange(!props.allTabs!.on)}
+          >
+            All tabs
+          </button>
+        )}
         {tab === "notes" && <NoteFilterMenu filter={noteFilter} onChange={setNoteFilter} />}
         {narrow && (
           <button type="button" class="ibtn" aria-label={HIDE} data-tip={HIDE} onClick={() => desk.setShown(false)}>

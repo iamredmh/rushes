@@ -11,6 +11,7 @@ import { Icon } from "../Icon.js";
 import type { LogHead, LogLine, LogView, Note, Project, Stage } from "../../types.js";
 import { onFilm } from "../../lib.js";
 import type { ChangeLogState } from "../ChangeLog.js";
+import { AttentionRow } from "./AttentionRow.js";
 
 /** How many lines the list loads (R16): the footer says when there are more. */
 const LIMIT = 1000;
@@ -196,6 +197,9 @@ export function ActivityList({ log, projectId, head, project, stage, film, notes
   const goRef = useRef(onJump);
   goRef.current = onJump;
   const goLatest = useRef((to: JumpTarget) => goRef.current(to)).current;
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
+  const toastLatest = useRef((message: string) => toastRef.current(message)).current;
   const exportMd = async () => {
     try {
       const r = await api.post<{ path: string }>("/api/exports/change-log", {});
@@ -218,7 +222,7 @@ export function ActivityList({ log, projectId, head, project, stage, film, notes
         <ul>
           {g.entries.map((e) => (
             <li key={e.id}>
-              <Row entry={e} to={jumpOf(e, project)} onGo={goLatest} />
+              {e.kind === "attention" && !e.resolved ? <AttentionRow entry={e} toast={toastLatest} /> : <Row entry={e} to={jumpOf(e, project)} onGo={goLatest} />}
             </li>
           ))}
         </ul>

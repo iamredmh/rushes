@@ -294,6 +294,22 @@
 .ntab[aria-selected="true"] { background: var(--app); color: var(--text); font-weight: 600; }
 .ntab .n { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--todo-soft); color: var(--todo); font: 600 var(--t-small)/20px var(--mono); text-align: center; }
 .ntab .cdot { position: absolute; top: 4px; right: 2px; width: 7px; height: 7px; border-radius: 50%; background: var(--todo); }
+/* §35.5: an Attention item open on this film: the dot in the alert colour, with a ring so it reads as more than news. */
+.ntab .cdot.alert { width: 8px; height: 8px; background: var(--over); box-shadow: 0 0 0 2px var(--over-soft); }
+/* §35.5: an Attention item in Activity: the alert icon and colour, never the normal line's look. */
+.lattn { margin: 2px 0; padding: 6px 8px; border: 1px solid var(--over); border-radius: var(--r); background: var(--over-soft); }
+.lattn-row { display: grid; grid-template-columns: auto 16px minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.lattn-ic { display: grid; place-items: center; color: var(--over); }
+.lattn-ic svg.ic { width: 15px; height: 15px; }
+.lattn-go { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 0; border: 0; background: transparent; color: var(--text); text-align: start; font: 500 var(--t-small)/1.35 var(--sans); cursor: pointer; }
+.lattn-go:hover .lattn-text { text-decoration: underline; }
+.lattn-text { overflow-wrap: anywhere; }
+.lattn-sub { color: var(--over); font-weight: 500; font-size: 12px; }
+.lattn-x { height: 26px; padding: 0 9px; font-size: var(--t-small); }
+.lattn-panel { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.lattn-cmd { display: flex; gap: 6px; align-items: center; }
+.lattn-cmd code { flex: 1; min-width: 0; padding: 5px 8px; border-radius: 6px; background: var(--black); color: var(--on-black); font: 400 12px/1.4 var(--mono, monospace); overflow-x: auto; white-space: nowrap; user-select: all; }
+.lattn-where { margin: 0; color: var(--text-2); font-size: var(--t-small); overflow-wrap: anywhere; }
 .ntabs .ibtn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--text-2); cursor: pointer; }
 .ntabs .ibtn:hover { background: var(--hover); color: var(--text); }
 .ntabs .ibtn .ic { width: 15px; height: 15px; }
@@ -306,6 +322,10 @@
 .npanel .seg button { font-size: var(--t-ui); }
 .ntabs .nfilter .sel { height: 28px; padding: 0 28px 0 10px; border-radius: 6px; color: var(--text-2); font-size: var(--t-ui); }
 .ntabs .nfilter .sel:hover { color: var(--text); }
+/* §35.3: the sound tabs' "All tabs" switch, a small pill beside the filter. */
+.ntabs-all { height: 24px; padding: 0 9px; border: 1px solid var(--line-2); border-radius: 999px; background: transparent; color: var(--text-3); font: 500 var(--t-small)/1 var(--sans); white-space: nowrap; cursor: pointer; }
+.ntabs-all:hover { color: var(--text); }
+.ntabs-all.on { border-color: var(--accent); background: var(--accent-soft, transparent); color: var(--text); }
 .npanel .note { font-size: var(--t-ui); }
 .npanel .list .none { font-size: var(--t-ui); }
 .npanel .nt .on, .npanel .nmarks, .npanel .shotref { font-size: var(--t-small); }

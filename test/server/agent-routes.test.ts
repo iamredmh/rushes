@@ -692,7 +692,7 @@ describe("the macOS notification when no desk is open (spec §5.4)", () => {
     const post = (path: string, json: unknown) =>
       fetch(`${s.url}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(json) }).then((r) => r.json() as Promise<any>);
     const status = async () => (await (await fetch(`${s.url}/api/agent`)).json() as any).status as AgentStatus;
-    /** A note the agent asks on before its turn ends, so the run ends in question. */
+    /** A note the agent replied on before its turn ends (§35: the run still ends finished). */
     const sendAsked = async () => {
       const note = (await post("/api/notes", { stage: "picture", scope: "whole", text: "Tighten the opening" })).note.id as string;
       await store.update("notes", (f) => {
@@ -704,16 +704,16 @@ describe("the macOS notification when no desk is open (spec §5.4)", () => {
     return { s, told, post, status, sendAsked };
   }
 
-  it("tells the Mac when an ask arrives and when a run ends in a question, with no desk open", async () => {
+  it("tells the Mac when an ask arrives, with no desk open; a run that ends with a reply on a note tells it nothing more (§35)", async () => {
     const r = await server();
     await r.sendAsked();
     const ask = await waitFor("an ask", async () => (await r.status()).asks[0]);
     await waitFor("the first notification", () => r.told.length === 1);
     expect(r.told[0]).toEqual(["Rushes", "Claude Code is waiting for you in My Project"]);
     await r.post(`/api/agent/permission/${ask.id}`, { choice: "once" });
-    await waitFor("the question", async () => (await r.status()).phase === "question");
-    await waitFor("the second notification", () => r.told.length === 2);
-    expect(r.told[1]).toEqual(["Rushes", "Claude Code is waiting for you in My Project"]);
+    await waitFor("the run to finish", async () => (await r.status()).phase === "finished");
+    await new Promise((ok) => setTimeout(ok, 100));
+    expect(r.told).toHaveLength(1);
     // Never the command.
     expect(r.told.flat().some((t) => t.includes("npm test"))).toBe(false);
   });
@@ -725,7 +725,7 @@ describe("the macOS notification when no desk is open (spec §5.4)", () => {
     await r.sendAsked();
     const ask = await waitFor("an ask", async () => (await r.status()).asks[0]);
     await r.post(`/api/agent/permission/${ask.id}`, { choice: "once" });
-    await waitFor("the question", async () => (await r.status()).phase === "question");
+    await waitFor("the run to finish", async () => (await r.status()).phase === "finished");
     await new Promise((ok) => setTimeout(ok, 100));
     expect(r.told).toEqual([]);
     events.stop();

@@ -4,13 +4,12 @@
 import { alwaysLabel } from "../../src/core/alwaysLabel.js";
 import { AGENT_HELP, signInLabel } from "../../src/core/agentHelp.js";
 import { clock } from "../../src/core/logText.js";
-import { needsYou, noteState } from "../../src/core/noteState.js";
+import { noteState } from "../../src/core/noteState.js";
 import type { JumpTarget } from "./changelog.js";
 import type { ActivityLine, AgentId, AgentInfo, AgentPhase, AgentRules, AgentStatus, AlwaysRule, AskChoice, Note, PendingAsk, SendHandOver } from "./types.js";
 
-/** A note as these helpers read it. `needsYou` comes from the server's `withState`, or from noteLite for the notes
- *  GET /api/state sends as stored. */
-export type NoteLite = Pick<Note, "id" | "batch" | "status" | "fixVersion"> & { needsYou?: boolean };
+/** A note as these helpers read it. */
+export type NoteLite = Pick<Note, "id" | "batch" | "status" | "fixVersion">;
 
 const NAMES: Readonly<Record<AgentId, string>> = { claude: "Claude Code", codex: "Codex" };
 
@@ -40,7 +39,6 @@ export function chipText(s: AgentStatus, notes: readonly NoteLite[]): string | n
       break;
     }
     case "waiting": text = `${a} is waiting for you`; break;
-    case "question": text = `${a} has a question`; break;
     case "finished": text = `${a} finished`; break;
     case "failed": text = `${a} didn't finish`; break;
     default: return null;
@@ -65,7 +63,7 @@ export function chipShows(s: AgentStatus, now: number): boolean {
 
 /** The chip's look: a spinner while busy, the to-do colour while it waits on you, done, and over for a failure. */
 export function chipTone(phase: AgentPhase): "busy" | "todo" | "done" | "over" {
-  if (phase === "waiting" || phase === "question") return "todo";
+  if (phase === "waiting") return "todo";
   if (phase === "finished") return "done";
   if (phase === "failed") return "over";
   return "busy";
@@ -74,21 +72,20 @@ export function chipTone(phase: AgentPhase): "busy" | "todo" | "done" | "over" {
 /** Stop shows while the agent is starting, on a turn, or waiting on an ask: the phases a Stop can end. */
 export const canStop = (phase: AgentPhase): boolean => RUNNING.has(phase);
 
-export type NoteBadge = { kind: "working" | "needsYou" | "with" | "fixed"; text: string };
+export type NoteBadge = { kind: "working" | "with" | "fixed"; text: string };
 
 /**
  * I3: the agent Send to AI uses really has this sent note: a run holds its batch (queued, starting or on it), a turn is
- * on the note itself, or the user's answer on it is queued or being worked on (a follow-up, Task 10). A note sent by
+ * on the note itself. A note sent by
  * copying a prompt, or in a batch whose hand-over was refused, is with "your agent", whatever the switch says.
  */
 export function agentHolds(n: NoteLite, s: AgentStatus | null): boolean {
   if (!s || noteState(n) !== "sent") return false;
-  return (n.batch !== null && s.batches.includes(n.batch)) || (RUNNING.has(s.phase) && s.current.note === n.id) || (s.followUps ?? []).includes(n.id);
+  return (n.batch !== null && s.batches.includes(n.batch)) || (RUNNING.has(s.phase) && s.current.note === n.id);
 }
 
-/** The badge on a note's card, by priority: needs you, being worked on, with the agent, fixed. Null for none. */
+/** The badge on a note's card, by priority: being worked on, with the agent, fixed. Null for none (§35: no Needs you). */
 export function noteAgentBadge(n: NoteLite, s: AgentStatus | null): NoteBadge | null {
-  if (n.needsYou) return { kind: "needsYou", text: "Needs you" };
   if (s && s.current.note === n.id && RUNNING.has(s.phase)) return { kind: "working", text: s.current.doing ?? "Working on it" };
   const state = noteState(n);
   // Named only while the agent has the note (agentHolds); otherwise it is with "your agent".
@@ -415,43 +412,30 @@ export function revealParts(s: string): ({ text: string } | { hidden: string })[
 /** The same as one string, for a label read aloud or a title. */
 export const revealText = (s: string): string => s.replace(HIDDEN_ALL, codeOf);
 
-// ---- a note's thread, its reply box and its Fixed in <v> (task 6) ----
+// ---- a note's thread and its Fixed in <v> (task 6); §35: no reply box, notes go one way ----
 
-/** A note as the badge and the reply box read it, with `needsYou` worked out here: GET /api/state sends notes as stored. */
-export const noteLite = (n: Note): NoteLite => ({ id: n.id, batch: n.batch, status: n.status, fixVersion: n.fixVersion, needsYou: needsYou(n) });
+/** A note as the badge reads it. */
+export const noteLite = (n: Note): NoteLite => ({ id: n.id, batch: n.batch, status: n.status, fixVersion: n.fixVersion });
 
 /** How many of a thread's last replies a card shows before Show all. */
 export const THREAD_SHOWN = 3;
 
-/** A line of a note's thread: who said it, its plain text, and its local time ("" for a legacy reply with none). */
-export interface ThreadLine { by: "agent" | "user"; text: string; time: string }
+/** A line of a note's thread: the agent's reply, its plain text, and its local time ("" for a legacy reply with none). */
+export interface ThreadLine { by: "agent"; text: string; time: string }
 
 /**
  * A note's thread as its card shows it: the last THREAD_SHOWN replies, oldest first, with "Show all (n)" when there are
  * more (all of them once `all`). A note from before threads, with its old `reply` and nothing in `replies`, shows that
- * text as the agent's (the server migrates it into replies[0] when it reads a file, so this is a fallback).
+ * text as the agent's (the server migrates it into replies[0] when it reads a file, so this is a fallback). §35: the
+ * thread is the agent's replies, read-only; an answer the user wrote on a note before 0.14.0 is kept but not shown.
  */
 export function noteThread(n: Pick<Note, "reply" | "replies">, all = false): { lines: ThreadLine[]; more: string | null } {
-  const lines: ThreadLine[] = n.replies.length > 0
-    ? n.replies.map((r) => ({ by: r.by, text: r.text, time: clock(new Date(r.at)) }))
-    : n.reply.trim() !== "" ? [{ by: "agent", text: n.reply.trim(), time: "" }] : [];
+  const agents = n.replies.filter((r) => r.by === "agent");
+  const lines: ThreadLine[] = agents.length > 0
+    ? agents.map((r) => ({ by: "agent" as const, text: r.text, time: clock(new Date(r.at)) }))
+    : n.replies.length === 0 && n.reply.trim() !== "" ? [{ by: "agent", text: n.reply.trim(), time: "" }] : [];
   if (all || lines.length <= THREAD_SHOWN) return { lines, more: null };
   return { lines: lines.slice(-THREAD_SHOWN), more: `Show all (${lines.length})` };
-}
-
-/**
- * Whether a card has the reply box: on a note that needs you (the agent asked; the answer is kept, and handed on as R11
- * says), and, while Send to AI is on, on a note the agent has now (agentHolds, I3). Never on a to-do or a done note.
- */
-export const replyBoxShows = (n: NoteLite, s: AgentStatus | null): boolean => !!n.needsYou || (!!s?.on && agentHolds(n, s));
-
-/**
- * The reply box's placeholder: the agent by name where the answer goes to it (R11: only while Send to AI is on), on a
- * note it has now, or on its question with the conversation kept. Otherwise "your agent".
- */
-export function answerPlaceholder(n: NoteLite, s: AgentStatus | null): string {
-  const goes = !!s?.on && (agentHolds(n, s) || (!!n.needsYou && s.session !== null));
-  return `Answer ${agentName(goes ? s!.agent : null)}`;
 }
 
 /**

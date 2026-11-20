@@ -15,7 +15,13 @@ export const SIGN_IN_FILE_MS = 60_000;
  * Opens a terminal running the sign-in. `command` is always an AgentInfo.signIn (what the desk shows), never text from a
  * request; `argv`, when given, is the detected program's path and its login arguments, which run in its place.
  */
-export type TerminalOpener = (command: string, argv?: string[]) => Promise<void>;
+export type TerminalOpener = (command: string, argv?: string[], opts?: TerminalOptions) => Promise<void>;
+
+/** §35.5: where the command runs (the project folder, for a resume), and the file's name, for the window's title. */
+export interface TerminalOptions {
+  cwd?: string;
+  name?: string;
+}
 
 /** A word for /bin/sh: single-quoted, with any single quote closed, escaped and reopened. */
 export const shQuote = (s: string): string => (/^[A-Za-z0-9_./:=@+-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`);
@@ -26,14 +32,19 @@ export const shQuote = (s: string): string => (/^[A-Za-z0-9_./:=@+-]+$/.test(s) 
  */
 export const cmdQuote = (s: string): string => `"${s.replace(/%/g, "%%").replace(/"/g, "")}"`;
 
-/** The sign-in file's body for this OS: only the login command, then a pause on Windows so the window stays to read. */
-export function signInScript(platform: NodeJS.Platform, command: string, argv?: string[]): string {
+/**
+ * The sign-in file's body for this OS: only the login command, then a pause on Windows so the window stays to read. With
+ * `cwd` (§35.5's resume), it first goes to that folder, and stops there if it can't.
+ */
+export function signInScript(platform: NodeJS.Platform, command: string, argv?: string[], cwd?: string): string {
   if (platform === "win32") {
     const line = argv?.length ? argv.map(cmdQuote).join(" ") : command;
-    return `@echo off\r\n${line}\r\necho.\r\necho You can close this window.\r\npause >nul\r\n`;
+    const go = cwd ? `cd /d ${cmdQuote(cwd)} || exit /b 1\r\n` : "";
+    return `@echo off\r\n${go}${line}\r\necho.\r\necho You can close this window.\r\npause >nul\r\n`;
   }
   const line = argv?.length ? argv.map(shQuote).join(" ") : command;
-  return `#!/bin/sh\n${line}\n`;
+  const go = cwd ? `cd ${shQuote(cwd)} || exit 1\n` : "";
+  return `#!/bin/sh\n${go}${line}\n`;
 }
 
 /** Linux terminals tried in order, each with the words that make it run a program. */
@@ -63,12 +74,13 @@ function launch(file: string, args: string[], opts: { windowsVerbatimArguments?:
 export function terminalOpener(o: { platform?: NodeJS.Platform; find?: (bin: string) => string | null } = {}): TerminalOpener {
   const platform = o.platform ?? process.platform;
   const find = o.find ?? ((bin: string) => findOnPath(bin));
-  return async (command, argv) => {
+  return async (command, argv, opts = {}) => {
     const linuxTerminal = platform !== "darwin" && platform !== "win32" ? LINUX_TERMINALS.find((t) => find(t.bin)) : undefined;
     if (platform !== "darwin" && platform !== "win32" && !linuxTerminal) throw noTerminal(command);
     const dir = await mkdtemp(join(tmpdir(), "rushes-sign-in-"));
-    const file = join(dir, platform === "win32" ? "sign-in.cmd" : platform === "darwin" ? "sign-in.command" : "sign-in.sh");
-    await writeFile(file, signInScript(platform, command, argv), { mode: 0o700 });
+    const name = opts.name ?? "sign-in";
+    const file = join(dir, platform === "win32" ? `${name}.cmd` : platform === "darwin" ? `${name}.command` : `${name}.sh`);
+    await writeFile(file, signInScript(platform, command, argv, opts.cwd), { mode: 0o700 });
     if (platform !== "win32") await chmod(file, 0o700);
     // The terminal has read the file long before this: the folder goes, quietly, whatever happens.
     setTimeout(() => void rm(dir, { recursive: true, force: true }).catch(() => undefined), SIGN_IN_FILE_MS).unref();
@@ -90,4 +102,4 @@ export function terminalOpener(o: { platform?: NodeJS.Platform; find?: (bin: str
 }
 
 /** The default for this computer. */
-export const openInTerminal: TerminalOpener = (command, argv) => terminalOpener()(command, argv);
+export const openInTerminal: TerminalOpener = (command, argv, opts) => terminalOpener()(command, argv, opts);
