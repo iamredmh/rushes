@@ -23,8 +23,8 @@ describe("package.json, §19.7", () => {
     expect(pkg.scripts.prepublishOnly).toBe("npm run build && npm run typecheck && npx vitest run");
   });
 
-  it("is at 0.13.0", () => {
-    expect(pkg.version).toBe("0.13.0");
+  it("is at 0.14.0", () => {
+    expect(pkg.version).toBe("0.14.0");
   });
 
   it("the runtime VERSION constant (the CLI's --version and help banner) matches package.json, so they can't drift apart", () => {
