@@ -35,8 +35,9 @@ describe("adapterSpec", () => {
   it("gives both adapters the extended PATH, deduplicated", () => {
     for (const agent of [claude, codex]) {
       const parts = adapterSpec(agent, root).env.PATH.split(delimiter);
-      for (const dir of ["/opt/homebrew/bin", "/usr/local/bin", join(homedir(), ".local", "bin")]) expect(parts).toContain(dir);
-      expect(new Set(parts).size).toBe(parts.length);
+      const want = process.platform === "win32" ? [dirname(process.execPath), join(homedir(), ".local", "bin")] : ["/opt/homebrew/bin", "/usr/local/bin", join(homedir(), ".local", "bin")];
+      for (const dir of want) expect(parts).toContain(dir);
+      expect(new Set(parts.map((p) => (process.platform === "win32" ? p.toLowerCase() : p))).size).toBe(parts.length);
     }
   });
 });

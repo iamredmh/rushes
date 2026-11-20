@@ -5,15 +5,20 @@ import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { tmpProject } from "../../helpers/tmp.js";
-import { AgentRulesFile, agentRulesFor, rulesKey, rulesPath, userConfigDir } from "../../../src/server/agent/rules.js";
+import { AgentRulesFile, agentRulesFor, legacyConfigDir, rulesKey, rulesPath, userConfigDir } from "../../../src/server/agent/rules.js";
 
 describe("the agent's rules file (R10)", () => {
   it("lives in the user config folder, named from the project's real path", async () => {
     const { root, store } = await tmpProject();
     const config = await realpath(await mkdtemp(join(tmpdir(), "rushes-config-")));
     expect(userConfigDir({ XDG_CONFIG_HOME: config })).toBe(config);
-    expect(userConfigDir({ XDG_CONFIG_HOME: "relative/dir" })).toMatch(/\.config$/);
-    expect(userConfigDir({})).toMatch(/\.config$/);
+    expect(userConfigDir({ XDG_CONFIG_HOME: "relative/dir" }, "darwin")).toMatch(/\.config$/);
+    expect(userConfigDir({}, "linux")).toMatch(/\.config$/);
+    // §34: Windows keeps them in %APPDATA%, and still reads the old %USERPROFILE%\.config place.
+    expect(userConfigDir({ APPDATA: "C:\\Users\\R\\AppData\\Roaming" }, "win32")).toBe("C:\\Users\\R\\AppData\\Roaming");
+    expect(legacyConfigDir({}, "win32", "C:\\Users\\R")).toBe(join("C:\\Users\\R", ".config"));
+    expect(legacyConfigDir({}, "darwin")).toBeNull();
+    expect(legacyConfigDir({ XDG_CONFIG_HOME: config }, "win32")).toBeNull();
     const key = createHash("sha256").update(root).digest("hex").slice(0, 16);
     expect(rulesKey(root)).toBe(key);
     expect(rulesPath(root, config)).toBe(join(config, "rushes", "agent-rules", `${key}.json`));
@@ -110,5 +115,21 @@ describe("§33: the four rows in the rules and the Mac-wide default", () => {
   it("a brand-new Mac with no rules file starts in Accept edits", async () => {
     const config = await mkdtemp(join(tmpdir(), "rushes-config-"));
     expect((await new AgentRulesFile((await tmpProject()).root, config).read()).permissions).toBe("project-edits");
+  });
+});
+
+describe("§34: the old Windows place is still read", () => {
+  it("reads the legacy file when the new one isn't there, and writes the new one", async () => {
+    const { root } = await tmpProject();
+    const base = await realpath(await mkdtemp(join(tmpdir(), "rushes-legacy-")));
+    const legacy = join(base, "old"), now = join(base, "new");
+    const old = new AgentRulesFile(root, legacy);
+    await old.update((f) => void (f.permissions = "ask-all"));
+    const f = new AgentRulesFile(root, now) as AgentRulesFile & { legacyPath: string | null };
+    (f as { legacyPath: string | null }).legacyPath = old.path;
+    expect((await f.read()).permissions).toBe("ask-all");
+    await f.update((d) => void (d.permissions = "auto"));
+    expect((await new AgentRulesFile(root, now).read()).permissions).toBe("auto");
+    expect((await old.read()).permissions).toBe("ask-all");
   });
 });

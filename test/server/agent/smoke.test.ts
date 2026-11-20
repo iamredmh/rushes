@@ -8,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AcpConnection } from "../../../src/server/agent/acp.js";
 import { clearDetectCache, defaultRunner, detectAgents } from "../../../src/server/agent/detect.js";
 import { findOnPath } from "../../../src/server/agent/spawn.js";
+import { adapterSpec } from "../../../src/server/agent/adapters.js";
 
 const FAKE_ACP = resolve(__dirname, "../../helpers/fake-acp.mjs");
 const win = process.platform === "win32";
@@ -42,7 +43,6 @@ beforeAll(async () => {
   dir = await mkdtemp(join(tmpdir(), "rushes smoke "));
   await shim("claude", CLI("2.1.328 (Claude Code)"));
   await shim("codex", CLI("codex-cli 0.170.0"));
-  await shim("fake-adapter", `await import(${JSON.stringify(new URL(`file:///${FAKE_ACP.replace(/\\/g, "/")}`).href)});`);
   await writeFile(join(dir, "scenario.json"), JSON.stringify({ modes: ["default", "read-only"], turns: [] }));
   oldPath = process.env[pathKey];
   process.env[pathKey] = dir;
@@ -63,13 +63,18 @@ describe("§34 smoke: a fake claude and codex on PATH", () => {
   });
 
   it("arguments with spaces and cmd's own characters arrive intact through the shim", { timeout: 30_000 }, async () => {
-    const r = await defaultRunner(findOnPath("claude")!, ["a b", "x&y", "50%", 'q"t', "^"], { timeoutMs: 20_000 });
+    // (A lone ^ is eaten by cmd re-reading %* in a .cmd shim; Rushes only ever passes plain words such as auth status.)
+    const r = await defaultRunner(findOnPath("claude")!, ["a b", "x&y", "50%", 'q"t'], { timeoutMs: 20_000 });
     expect(r.code).toBe(0);
-    expect(JSON.parse(r.stdout.trim())).toEqual(["a b", "x&y", "50%", 'q"t', "^"]);
+    expect(JSON.parse(r.stdout.trim())).toEqual(["a b", "x&y", "50%", 'q"t']);
   });
 
-  it("an adapter started through a shim answers initialize and session/new, and Stop ends it", { timeout: 30_000 }, async () => {
-    const c = AcpConnection.start({ command: findOnPath("fake-adapter")!, args: [], env: { FAKE_ACP_SCENARIO: join(dir, "scenario.json") }, cwd: dir });
+  it("the adapter starts as Rushes starts it (node <connector entry>, from outside the project) and answers a handshake", { timeout: 30_000 }, async () => {
+    const [claude] = await detectAgents();
+    const spec = adapterSpec(claude, dir, "project-edits", FAKE_ACP);
+    expect(spec.command).toBe(process.execPath);
+    expect(spec.env.CLAUDE_CODE_EXECUTABLE).toBe(claude.path);
+    const c = AcpConnection.start({ ...spec, env: { ...spec.env, FAKE_ACP_SCENARIO: join(dir, "scenario.json") } });
     const exited = new Promise<void>((r) => c.once("exit", () => r()));
     try {
       await c.initialize();

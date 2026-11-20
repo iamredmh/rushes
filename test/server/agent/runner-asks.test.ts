@@ -192,7 +192,8 @@ describe("AgentRunner permission asks", () => {
     });
   }
 
-  it("an execute Always rule still matches a started command parsed as a read, here of a file outside the project", async () => {
+  // §34: on Windows a second word starting with / is a flag, so a rule like "cat /etc/hosts" never matches there (asks).
+  it.skipIf(process.platform === "win32")("an execute Always rule still matches a started command parsed as a read, here of a file outside the project", async () => {
     // Outside the project a read would ask, so only the execute rule can let it through.
     const r = await rig({ turns: [] }, { rules: { permissions: "project-edits", always: [{ kind: "execute", command: "cat /etc/hosts" }] } });
     await r.scenario({ turns: [[{
