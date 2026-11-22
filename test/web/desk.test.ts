@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { clampView, followView, fullView, isFull, panView, viewPct, viewTime, zoomView } from "../../web/src/desk.js";
-import { defaultTake, deskPlace, NOTE_STATE_LABEL, noteState, pctOf, noteTarget, rulerMarks, takeCount, takeGroups, takeKey, takeSections, timecode, undeliveredBatches, unsentCount, unsentEdits, deskView, viewForKey, viewForTab } from "../../web/src/desk.js";
+import { defaultTake, deskPlace, NOTE_STATE_LABEL, noteState, pctOf, noteTarget, rulerMarks, takeCount, takeGroups, takeKey, takeSections, timecode, sendAgainOffer, undeliveredBatches, unfinishedBatches, unfinishedLines, unsentCount, unsentEdits, deskView, viewForKey, viewForTab } from "../../web/src/desk.js";
 import type { Batch, Lane, Note, Variant } from "../../web/src/types.js";
 
 describe("deskPlace", () => {
@@ -320,6 +320,43 @@ describe("undeliveredBatches (I3, Send again)", () => {
     const notes = [n({ id: "a", batch: "b_11", status: "done" }), n({ id: "b", batch: null })];
     const old = { id: "b_9", stage: null, noteIds: [], sectionIds: [], sentAt: "2026-11-19T11:35:33.200Z", prompt: "p" } as Batch;
     expect(undeliveredBatches([old, b("b_11", refused)], notes)).toEqual([]);
+  });
+});
+
+describe("unfinished batches and Send again's row (§35.7)", () => {
+  const n = (over: Partial<Note>): Note => ({
+    id: "n", stage: "picture", video: "eu-only", version: "v1", on: null, scope: "point", t: 1, tOut: null, frame: null, text: "x",
+    box: null, pin: null, grab: null, shot: null, marks: [], format: null, status: "todo", reply: "", replies: [], fixT: null, fixVersion: null, batch: null,
+    createdAt: "2026-11-22T18:48:00.000Z", by: "user", ...over,
+  });
+  const b = (id: string, sentAt: string, over: Partial<Batch> = {}): Batch => ({ id, stage: "picture", noteIds: [], sectionIds: [], sentAt, prompt: `Work through ${id}`, ...over });
+  const ended = (said: string | null) => ({ unfinished: { at: "2026-11-22T19:27:15.254Z", said } });
+
+  it("lists a batch whose turn ended with notes unanswered, by its sent notes, and they stay out of Send's count", () => {
+    const notes = [n({ id: "n_3e87dd", batch: "b_6" }), n({ id: "n_f719c1", batch: "b_6" }), n({ id: "n_b88d5d", batch: "b_5", status: "done" })];
+    const batches = [b("b_5", "2026-11-22T18:48:41.105Z", ended(null)), b("b_6", "2026-11-22T18:49:25.761Z", ended("Not done yet, and neither note is replied to."))];
+    // b_5's only note left is done: nothing of it waits.
+    expect(unfinishedBatches(batches, notes).map((x) => [x.batch.id, x.notes])).toEqual([["b_6", 2]]);
+    expect(unsentCount({ notes, inPlay: new Set(["eu-only"]), scriptTodo: 0, briefChanged: 0, storyboardChanged: 0 })).toBe(0);
+  });
+
+  it("gives each unfinished batch's notes their status line: the agent's last words, or that the run ended first", () => {
+    const batches = [b("b_5", "2026-11-22T18:48:41.105Z", ended(null)), b("b_6", "2026-11-22T18:49:25.761Z", ended("Not done yet.")), b("b_7", "2026-11-22T19:19:25.658Z")];
+    expect(unfinishedLines(batches)).toEqual({ b_5: "The run ended before this note was answered", b_6: "Not finished: Not done yet." });
+  });
+
+  it("Send again's row: not answered in the sent colour, didn't reach the agent in the to-do colour, both counted together", () => {
+    const notes = [n({ id: "a", batch: "b_6" }), n({ id: "b", batch: "b_6" }), n({ id: "c", batch: "b_8" })];
+    const unfinished = b("b_6", "2026-11-22T18:49:25.761Z", ended("Not done yet, and neither note is replied to."));
+    const refused = b("b_8", "2026-11-22T19:30:00.000Z", { undelivered: { at: "2026-11-22T19:30:00.100Z", why: "Claude Code is not signed in" } });
+    expect(sendAgainOffer([unfinished], notes)).toMatchObject({ count: 2, tone: "sent", text: "2 notes weren't answered: Not done yet, and neither note is replied to." });
+    expect(sendAgainOffer([b("b_6", unfinished.sentAt, ended(null))], notes.slice(0, 1))).toMatchObject({ count: 1, text: "1 note wasn't answered before the run ended" });
+    expect(sendAgainOffer([refused], notes)).toMatchObject({ count: 1, tone: "todo", text: "1 note didn't reach the agent: Claude Code is not signed in" });
+    const both = sendAgainOffer([refused, unfinished], notes)!;
+    expect(both).toMatchObject({ count: 3, tone: "todo", text: "3 notes are waiting to go to the agent again" });
+    // Oldest first, as Send again hands them over.
+    expect(both.batches.map((x) => x.id)).toEqual(["b_6", "b_8"]);
+    expect(sendAgainOffer([b("b_9", "2026-11-22T19:00:00.000Z")], notes)).toBeNull();
   });
 });
 

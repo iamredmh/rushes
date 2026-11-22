@@ -395,6 +395,34 @@ describe("setup hands over the batch the copy dialog was opened for (I3)", () =>
   });
 });
 
+describe("Send again: a batch whose turn ended with notes unanswered (§35.7)", () => {
+  it("goes to the agent again, and while a run is on the same film the answer says so and nothing starts", async () => {
+    const r = await rig({ settings: { on: true, agent: "claude" }, scenario: { turns: [[], [{ sleep: 60000 }], []] } });
+    await r.note("Why are certain countries not filled in?");
+    const first = await r.call("POST", "/api/batches", {});
+    expect(first.json.agent).toEqual({ handedTo: "claude" });
+    const batch = first.json.batch.id as string;
+    await waitFor("the run to finish", () => !r.runner.busy() && r.log().some((m) => m.method === "session/prompt"));
+    // The note stays sent, and the desk's state carries the batch's mark.
+    expect((await r.call("GET", "/api/state")).json.batches.batches.find((b: { id: string }) => b.id === batch).unfinished).toMatchObject({ said: null });
+
+    await r.note("The flag is not as present");
+    expect((await r.call("POST", "/api/batches", {})).json.agent).toEqual({ handedTo: "claude" });
+    await waitFor("the second run to start", () => r.runner.status().phase === "working");
+    const busy = await r.call("POST", `/api/batches/${batch}/resend`, {});
+    expect(busy.status).toBe(200);
+    expect(busy.json.agent).toEqual({ handedTo: null, why: "Claude Code is still working on this film", busy: true });
+    expect(busy.json.batch.unfinished).toBeTruthy();
+    expect(r.log().filter((m) => m.method === "session/prompt")).toHaveLength(2);
+
+    await r.call("POST", "/api/agent/stop", {});
+    const again = await r.call("POST", `/api/batches/${batch}/resend`, {});
+    expect(again.json.agent).toEqual({ handedTo: "claude" });
+    expect(again.json.batch.unfinished).toBeNull();
+    await waitFor("the agent to be handed it again", () => r.log().filter((m) => m.method === "session/prompt" && JSON.stringify(m).includes(batch)).length === 2);
+  });
+});
+
 describe("Send again: a refused batch is kept in batches.json, so a restart can't strand its notes (I3)", () => {
   it("a batch refused for want of sign-in is marked, and after a restart Send again hands it over once", async () => {
     const r = await rig({ settings: { on: true, agent: "claude" }, agents: [claude({ signedIn: false }), codex()], scenario: { turns: [[{ stop: "end_turn" }]] } });
@@ -426,10 +454,12 @@ describe("Send again: a refused batch is kept in batches.json, so a restart can'
     expect(again.json.batch.undelivered).toBeNull();
     await waitFor("the agent to be handed the batch", () => fake.log().some((m) => m.method === "session/prompt" && JSON.stringify(m).includes(batch)));
     expect((await r.store.read("batches")).batches.find((b) => b.id === batch)?.undelivered).toBeNull();
-    await waitFor("the run to finish", () => !runner.busy());
-    // Gone once: a second Send again hands nothing over.
+    // Gone once: a second Send again while it is with the agent hands nothing over.
     expect((await post(`/api/batches/${batch}/resend`)).status).toBe(409);
+    await waitFor("the run to finish", () => !runner.busy());
     expect(fake.log().filter((m) => m.method === "session/prompt")).toHaveLength(1);
+    // §35.7: the fake answered nothing, so its note stays sent and the batch is marked unfinished: Send again offers it.
+    expect((await r.store.read("batches")).batches.find((b) => b.id === batch)?.unfinished).toMatchObject({ said: null });
   });
 
   it("refused again, Send again says why and keeps the mark; a batch never refused, or unknown, is refused before anything is handed over", async () => {

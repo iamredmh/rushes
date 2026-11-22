@@ -12,6 +12,8 @@ import { Icon } from "../Icon.js";
 export interface NotesAgent {
   status: AgentStatus | null;
   onJump(to: JumpTarget): void;
+  /** §35.7: by batch id, the status line of a batch the agent's turn ended without answering. */
+  unfinished?: Readonly<Record<string, string>>;
 }
 
 /** How long after Fixed in <v> is pressed its version may come on screen and still be sought. */
@@ -20,9 +22,9 @@ const JUMP_WAIT_MS = 2000;
 /** The Timeline's player, whose file a jump to another version swaps; never an audio tab's preview (`.spreview`, I2). */
 const player = (): HTMLVideoElement | null => document.querySelector<HTMLVideoElement>(".monitor:not(.spreview) .frame video");
 
-/** The badge line: what the agent is doing (spinning), With <A>, or Fixed in <v> (a button to the fix). */
+/** The badge line: what the agent is doing (spinning), With <A>, Not finished (§35.7), or Fixed in <v> (a button to the fix). */
 export function NoteBadge({ n, agent, version, onSeek }: { n: Note; agent: NotesAgent; version: string | null; onSeek?(t: number, note: Note): void }) {
-  const badge = noteAgentBadge(noteLite(n), agent.status);
+  const badge = noteAgentBadge(noteLite(n), agent.status, (n.batch !== null && agent.unfinished?.[n.batch]) || null);
   // After a jump to the fix's version, its time is sought once that version is on screen and its file has loaded: a
   // seek made while the player is still swapping files is lost (the browser starts the new file from the top). A jump
   // the desk refused (a note half written) leaves nothing behind to seek on a later, unrelated switch.
@@ -62,6 +64,7 @@ export function NoteBadge({ n, agent, version, onSeek }: { n: Note; agent: Notes
   return (
     <div class={`nbadge ${badge.kind}`}>
       {badge.kind === "working" && <Icon name="spin" class="nspin" />}
+      {badge.kind === "unfinished" && <Icon name="pause" />}
       <span dir="auto">{text}</span>
     </div>
   );

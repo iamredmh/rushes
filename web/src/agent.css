@@ -47,6 +47,8 @@
 .sendagain { display: flex; flex-direction: column; align-items: stretch; gap: 4px; }
 .sendagain-why { margin: 0; padding: 4px 8px; border: 1px solid var(--todo-line); border-radius: var(--r); background: var(--todo-soft); color: var(--text); font-size: var(--t-small); line-height: 1.35; overflow-wrap: anywhere; }
 .nfoot:not(.agentfoot) .sendagain { flex: 1; }
+/* §35.7: notes the agent's turn ended without answering are still sent: the accent's soft tokens, not to do's. */
+.sendagain.sent .sendagain-why { border-color: var(--accent-soft-2); background: var(--accent-soft); }
 @media (prefers-reduced-motion: reduce) { .aswitch, .aswitch::before { transition: none; } }
 
 /* ---- the agent menu, opening upward from the row ---- */
@@ -125,6 +127,9 @@
 .nbadge.working { color: var(--accent); }
 .nbadge svg.ic.nspin { stroke-width: 2.5; animation: fspin 0.9s linear infinite; }
 .nbadge.fixed { color: var(--done); }
+/* §35.7: sent, and the agent's turn ended without answering it: still the agent's (sent), so the accent, never to do. */
+.nbadge.unfinished { color: var(--accent); }
+.nbadge.unfinished svg.ic { stroke-width: 2.25; }
 .nbadge.fixed svg.ic { stroke-width: 2.5; }
 .nbadge .nfix { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; text-decoration: underline; text-decoration-color: var(--done-line); text-underline-offset: 2px; }
 .nbadge .nfix:hover { text-decoration-color: currentColor; }

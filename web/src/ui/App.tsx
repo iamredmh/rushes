@@ -6,7 +6,7 @@ import {
   filmAfterShelving, inPlay, isPlanPage, noteOnFilm, scopeState, ROOT_PLAN, filmFromSearch, withFilm, type PlanPaths, labelOfId, latest, lockedFound, neighbourFormat, neighbourVideo, planProgress, planTarget, previousVersion, proxyKey, readyPrompt, storySendPrompt, storyboardPrompt, versionFormats, type PlanPage,
 } from "../lib.js";
 import { onLabel } from "../../../src/core/notes.js";
-import { deskPlace, deskView, noteTarget, takeCount, takeGroups, undeliveredBatches, unsentCount, unsentEdits, viewForKey, type DeskView } from "../desk.js";
+import { deskPlace, deskView, noteTarget, sendAgainOffer, takeCount, takeGroups, unfinishedLines, unsentCount, unsentEdits, viewForKey, type DeskView } from "../desk.js";
 import type { AgentStatus, Batch, BriefView, FoundCounts, FoundKind, Note, SendHandOver, Stage, StoryboardView, Video } from "../types.js";
 import { useRushes } from "../useRushes.js";
 import { Assets, type FoundRequest } from "./Assets.js";
@@ -635,13 +635,10 @@ export function App() {
   const inPlayIds = new Set(state.project.videos.filter(inPlay).map((v) => v.id));
   const unsentFrom = { notes: fstate.notes.notes, inPlay: inPlayIds, scriptTodo: tab("script")?.todo ?? 0, briefChanged: fstate.brief.changed, storyboardChanged: fstate.storyboard.changed };
   const unsent = unsentCount(unsentFrom);
-  // I3: notes Send filed that never reached the agent (refused while Send to AI was on): Send again offers them.
-  const undelivered = undeliveredBatches(state.batches.batches, state.notes.notes);
-  const again = undelivered.length === 0 ? null : {
-    count: undelivered.reduce((sum, x) => sum + x.notes, 0),
-    why: undelivered[undelivered.length - 1].batch.undelivered?.why ?? "",
-    onSendAgain: () => void sendAgain(undelivered.map((x) => x.batch)),
-  };
+  // I3: notes Send filed that never reached the agent (refused while Send to AI was on), and §35.7 notes the agent's turn
+  // ended without answering (still sent): Send again offers them.
+  const offer = sendAgainOffer(state.batches.batches, state.notes.notes);
+  const again = offer === null ? null : { count: offer.count, text: offer.text, tone: offer.tone, onSendAgain: () => void sendAgain(offer.batches) };
   // Where Send is, for the status bar's Send on a page with no notes panel (Visuals, Assets): Plan when only the plan's
   // edits wait, else Review.
   const planOnly = fstate.notes.notes.every((n) => n.stage === "script" || n.status !== "todo" || n.batch !== null || (!!n.video && !inPlayIds.has(n.video)));
@@ -699,6 +696,8 @@ export function App() {
     },
     // On its own page Send always carries the brief's or storyboard's line (send()), so it shows there whenever that file exists.
     send: { count: unsent, always: (stage === "brief" && fstate.brief.exists) || (stage === "storyboard" && fstate.storyboard.exists), onSend: () => void send(), again },
+    // §35.7: the status line of each batch the agent's turn ended without answering, for its notes' cards.
+    unfinished: unfinishedLines(state.batches.batches),
     // §28: Set up Send to AI opens the first-Send sheet.
     agent: agent && { status: agent, onSetUp: firstSend.open, menu: agentMenu, onStatus: noteAgent, toast },
     shown: panel.shown,

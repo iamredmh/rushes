@@ -39,7 +39,7 @@ On the desk:
 On the server:
 
 - The follow-up turn (`src/server/agent/followUp.ts`), the `user-reply` event and `POST /api/notes/:id/replies` are removed (404). A turn is always a batch.
-- **When a turn ends**, every note in its batch still with the agent goes back to to do, whether or not the agent replied on it. Its replies stay.
+- **When a turn ends**, a note in its batch still with the agent that the agent replied on goes back to to do, its replies kept. A note it never answered stays sent (§35.7).
 - **Migration** (on start, once, idempotent): a note that was in the old Needs you state (still sent, the last word in its thread the agent's) goes back to to do, keeping its replies. Old `by: "user"` replies are ignored on read.
 
 For the agent (`rushes_reply`, the batch prompt `AGENT_LINES`, AGENTS.md, the skill, README):
@@ -77,3 +77,21 @@ For the agent (`rushes_reply`, the batch prompt `AGENT_LINES`, AGENTS.md, the sk
 ## 35.6 With one film
 
 Everything above applies; the Timeline's list simply covers the one film.
+
+## 35.7 A run that ends without answering a note
+
+Red, 22 Nov 2026, on Cloud Engines shorts, film "EU only": he sent batches b_5, b_6 and b_7. Claude Code's closing render hit its 10-minute command limit and its turn ended with a message in its own session ("Not done yet, and neither note is replied to…"). Rushes logged "Claude Code finished 2 notes", put the three notes back to to do, and Send read "Send (2)" again. He couldn't tell why, and re-sent, which queued another run on the same work.
+
+**When a turn ends** (any stop reason; not a failure, a Stop or Rushes closing, which still give the notes back):
+
+- A note of its batch that is **done**, or that the agent **replied on** since the batch was sent, is answered. Done stays done; replied on and not done goes back to to do, its reply saying why (§35.4).
+- A note **not answered** (no reply, not done) **stays sent** in its batch. The batch is marked `unfinished: { at, said }` in `batches.json`, where `said` is the first line of the agent's last message in that turn (the text after its last tool call, markdown marks dropped, secrets masked, one line of at most 160 characters), or null when it said nothing.
+- **The Change Log and Activity line counts answered notes only**: "Claude Code finished 3 notes", "Claude Code finished 2 of 3 notes", "Claude Code ended without answering 3 notes" (with the stop reason in brackets when it isn't `end_turn`), per film as §30 has it. Activity adds "2 notes were not answered and stay sent".
+
+**On the desk:**
+
+- The note stays blue (sent). Its badge line, in the accent colour with a pause icon, reads **"Not finished: <said>"**, or **"The run ended before this note was answered"**. Once a run holds its batch again it reads "With <A>"; done, the line goes.
+- Send's count leaves it out (it is sent). **Send again** (the I3 row above Send) offers it: "2 notes weren't answered: <said>" in the accent's soft colours; with undelivered notes too, "3 notes are waiting to go to the agent again".
+- Send again (`POST /api/batches/:id/resend`) takes the `unfinished` mark off and hands the batch over. **While a turn in flight or queued is on a film its notes are on**, it starts nothing: the answer is `{ handedTo: null, why: "Claude Code is still working on EU only", busy: true }`, the desk shows that as a toast, and the mark stays. The setup sheet's hand-over (I3) never takes an unfinished batch.
+
+Nothing here asks the user anything: the line says what happened, and the agent's own session (§35.5) has the rest.

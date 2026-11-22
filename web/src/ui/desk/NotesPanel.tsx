@@ -7,7 +7,7 @@
 // pending permission asks (AskCards).
 import { createContext, type RefObject } from "preact";
 import { useContext, useEffect, useRef, useState } from "preact/hooks";
-import { footLine } from "../../agent.js";
+import { footLine, revealText } from "../../agent.js";
 import { AgentRow, type AgentPanel } from "../agent/AgentRow.js";
 import { AskCards } from "../agent/AskCard.js";
 import { LiveStrip } from "../agent/LiveStrip.js";
@@ -32,9 +32,12 @@ export interface PanelShared {
     count: number;
     always?: boolean;
     onSend(): void;
-    /** I3: notes Send filed that never reached the agent (refused while Send to AI was on), why, and Send again. */
-    again?: { count: number; why: string; onSendAgain(): void } | null;
+    /** I3: notes Send filed that never reached the agent (refused while Send to AI was on), and §35.7 notes the agent's
+     *  turn ended without answering: the row's line, its colour (to do, or sent), and Send again. */
+    again?: { count: number; text: string; tone: "todo" | "sent"; onSendAgain(): void } | null;
   };
+  /** §35.7: by batch id, the status line of a batch the agent's turn ended without answering ("Not finished: …"). */
+  unfinished?: Readonly<Record<string, string>>;
   /** §28: the Send to AI row, from the agent's status; null before the first answer and from a server without Send to AI. */
   agent: AgentPanel | null;
   /** On screen: not hidden (wide), or the drawer open (narrow). */
@@ -305,7 +308,7 @@ export function NotesPanel(props: NotesPanelProps) {
       {agent && <AskCards {...agent} />}
       {/* Hidden, never unmounted, while Activity shows: a half-typed note stays where it was. */}
       <div class="ntabpanel" role="tabpanel" id="npanel-notes" aria-labelledby="ntab-notes" hidden={tab !== "notes"}>
-        <Notes {...props} filter={noteFilter} agent={{ status: agent?.status ?? null, onJump: activity.onJump }} />
+        <Notes {...props} filter={noteFilter} agent={{ status: agent?.status ?? null, onJump: activity.onJump, unfinished: desk.unfinished }} />
       </div>
       {tab === "activity" && (
         <div class="ntabpanel" role="tabpanel" id="npanel-activity" aria-label="Activity">
@@ -320,10 +323,8 @@ export function NotesPanel(props: NotesPanelProps) {
         <div class={`nfoot${agent ? " agentfoot" : ""}`}>
           {agent && <AgentRow {...agent} />}
           {again && (
-            <div class="sendagain" role="status">
-              <p class="sendagain-why">
-                {again.count === 1 ? "1 note didn't" : `${again.count} notes didn't`} reach the agent{again.why ? `: ${again.why}` : ""}
-              </p>
+            <div class={`sendagain ${again.tone}`} role="status">
+              <p class="sendagain-why" dir="auto">{revealText(again.text)}</p>
               <button type="button" class={`btn${sendShown ? "" : " primary"} sendbtn`} aria-label={`Send again ${again.count}`} data-tip="Hand these notes to the agent again" onClick={again.onSendAgain}>
                 Send again<span class="count">{again.count}</span>
               </button>

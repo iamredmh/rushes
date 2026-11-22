@@ -102,6 +102,16 @@ describe("noteAgentBadge", () => {
     expect(noteAgentBadge(note("n2", { batch: "b1" }), null)).toEqual({ kind: "with", text: "With your agent" });
   });
 
+  it("a sent note whose turn ended unanswered says so, in place of With <A> (§35.7)", () => {
+    const ended = status({ phase: "finished", batches: [] });
+    expect(noteAgentBadge(note("n2", { batch: "b6" }), ended, "Not finished: Not done yet.")).toEqual({ kind: "unfinished", text: "Not finished: Not done yet." });
+    expect(noteAgentBadge(note("n2", { batch: "b6" }), null, "The run ended before this note was answered")?.kind).toBe("unfinished");
+    // Sent again: a run holds its batch, so it is with the agent once more.
+    expect(noteAgentBadge(note("n2", { batch: "b1" }), working, "Not finished: Not done yet.")).toEqual({ kind: "with", text: "With Claude Code" });
+    // Done meanwhile: the line goes.
+    expect(noteAgentBadge(note("n2", { batch: "b6", status: "done" }), ended, "Not finished: Not done yet.")).toBeNull();
+  });
+
   it("a done note with a fix version says where it was fixed", () => {
     expect(noteAgentBadge(note("n2", { batch: "b1", status: "done", fixVersion: "v8" }), working)).toEqual({ kind: "fixed", text: "Fixed in v8" });
   });
@@ -117,6 +127,12 @@ describe("afterSend", () => {
   it("no hand-over at all, or a plain refusal: the Copy prompt dialog", () => {
     expect(afterSend(undefined)).toBe("dialog");
     expect(afterSend({ handedTo: null, why: "Send to AI is off" })).toBe("dialog");
+  });
+
+  it("Send again refused while the agent is still on that film: a toast saying so, no dialog (§35.7)", () => {
+    const r = { handedTo: null, why: "Claude Code is still working on EU only", busy: true } as const;
+    expect(afterSend(r)).toBe("busy");
+    expect(followSend(r, status())).toEqual({ toast: { text: "Claude Code is still working on EU only", ms: 4000 }, dialog: false, why: null, handed: false });
   });
 
   it("a Stop's refusal", () => {

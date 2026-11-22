@@ -7,14 +7,15 @@
 //   starting --ready--> working (one session/prompt per turn: one batch each, in order of arrival)
 //   starting --fails--> failed (notes of every waiting batch recalled; send says why)
 //   working --an ask the rules don't allow--> waiting (until the user answers; never by time) --> working
-//   working --turn ends, more queued--> working;  --turn ends, none--> finished (idle timer armed; notes left with
-//   the agent go back to to do, §35)
+//   working --turn ends, more queued--> working;  --turn ends, none--> finished (idle timer armed; of the notes left
+//   with the agent, ones it replied on go back to to do, §35, and ones it never answered stay sent, their batch
+//   marked unfinished with the agent's last words, §35.7)
 //   working --adapter exits--> failed (notes recalled);  any busy phase --stop--> idle (notes recalled)
 //   Stop, close and an adapter exit answer every pending ask cancelled.
 //
 // `gen` counts stops and closes. Anything that awaited (a start, a turn's end) checks it afterwards, so
 // work begun before a Stop never changes the state after it.
-import { ACTIVITY_LINE_MAX, ActivityTracker } from "../../core/agentActivity.js";
+import { ACTIVITY_LINE_MAX, ActivityTracker, maskSecrets } from "../../core/agentActivity.js";
 import { alwaysLabel, decide } from "../../core/agentRules.js";
 import { NotFoundError, RushesError } from "../../core/errors.js";
 import { oneLine } from "../../core/labels.js";
@@ -78,7 +79,7 @@ export interface RunnerOptions {
  * prompt only for a refusal with neither flag (Send to AI off, no agent, not installed, not signed in), where
  * nothing was started and the notes stay sent.
  */
-export type SendResult = { handedTo: AgentId } | { handedTo: null; why: string; stopped?: true; recalled?: true };
+export type SendResult = { handedTo: AgentId } | { handedTo: null; why: string; stopped?: true; recalled?: true; busy?: true };
 
 type Accepted = { info: AgentInfo } | { why: string; stopped?: true };
 
@@ -88,6 +89,9 @@ export const AGENT_IDLE_MS = 600_000;
 export const AGENT_START_MS = 120_000;
 /** How long Stop waits for a cancelled turn to end before it kills the adapter. */
 export const STOP_WAIT_MS = 5000;
+/** §35.7: what the agent last said in a turn is kept to this many characters, and its first line to SAID_MAX. */
+const SAID_KEPT = 2000;
+const SAID_MAX = 160;
 /** Activity keeps this many lines, in memory only. */
 export const AGENT_LINES_KEPT = 200;
 /** Long enough for AcpConnection.kill's SIGKILL (2 s) to land. */
@@ -158,6 +162,23 @@ async function within(p: Promise<unknown>, ms: number): Promise<void> {
   }
 }
 
+/** §30: a turn's share of notes on one film, and how its Change Log line names them ("2 notes"). */
+interface FilmPart { film: string | null; label: string; ids: readonly string[] }
+
+/** §35.7: the agent replied on the note since `ms` (when its batch was sent). */
+const repliedSince = (n: Note, ms: number): boolean => n.replies.some((r) => r.by === "agent" && Date.parse(r.at) >= ms);
+
+/**
+ * §35.7: how a turn's end reads, by how many of its `total` notes were answered (replied on or done): "finished 3
+ * notes", "finished 1 of 3 notes", "ended without answering 3 notes". A turn on script lines alone (no notes) finished.
+ */
+export function endedText(name: string, label: string, total: number, answered: number, stopReason: string): string {
+  const why = stopReason === "end_turn" ? "" : ` (${stopReason})`;
+  if (answered >= total) return stopReason === "end_turn" ? `${name} finished ${label}` : `${name} ended ${label}${why}`;
+  if (answered === 0) return `${name} ended without answering ${label}${why}`;
+  return `${name} finished ${answered} of ${label}${why}`;
+}
+
 export class AgentRunner {
   private readonly detect: () => Promise<AgentInfo[]>;
   private readonly specFor: (a: AgentInfo, root: string, level: AgentPermissions, entry: string) => AdapterSpec;
@@ -198,6 +219,8 @@ export class AgentRunner {
   private ruleWrite: Promise<void> = Promise.resolve();
   /** A turn has ended and the runner is giving back the notes it left. */
   private ending = false;
+  /** §35.7: the agent's last message in the turn in flight (the text after its last tool call), from its message chunks. */
+  private said = "";
 
   private conn: AcpConnection | null = null;
   private sessionId: string | null = null;
@@ -288,20 +311,56 @@ export class AgentRunner {
   /**
    * I3: hands over a batch whose hand-over was refused, once (Send again, or the copy dialog's Set up through the setup
    * route). The mark is taken off the batch in batches.json under the send lock, so two at once hand it over once, and a
-   * restart in between loses nothing. Null when it wasn't refused, or has gone already.
+   * restart in between loses nothing. Null when it wasn't refused, or has gone already. §35.7: with `unfinished` (Send
+   * again), a batch whose turn ended with notes unanswered goes too, once no run is on its film.
    */
-  async resend(batch: Batch): Promise<SendResult | null> {
+  async resend(batch: Batch, opts: { unfinished?: boolean } = {}): Promise<SendResult | null> {
+    let busy: string | null = null;
     const r = await this.hand(async () => {
+      // §35.7: an unfinished batch goes again only from Send again (`unfinished`), never from the setup sheet's hand-over.
+      if (!batch.undelivered && !opts.unfinished) return null;
+      // §35.7: a batch whose turn ended unfinished goes again only once nothing is running on its film, so a Send again
+      // pressed while the agent is still on that film's work never starts a second run on it.
+      busy = await this.busyOnFilm(batch);
+      if (busy !== null) return null;
       const { result: took } = await this.store.update("batches", (f) => {
         const b = f.batches.find((x) => x.id === batch.id);
-        if (!b?.undelivered) return false;
+        if (!b?.undelivered && !(opts.unfinished && b?.unfinished)) return false;
         b.undelivered = null;
+        b.unfinished = null;
         return true;
       });
       return took ? batchJob(batch) : null;
     });
+    if (busy !== null) return { handedTo: null, why: busy, busy: true };
     if (r === null) return null;
     return this.noteRefusal(batch.id, r);
+  }
+
+  /**
+   * §35.7: why `batch` can't go again now, when a turn in flight or queued is on a film its notes are on ("Claude Code is
+   * still working on EU only"); null when none is. A project with one film (or notes on none) counts as one film.
+   */
+  private async busyOnFilm(batch: Batch): Promise<string | null> {
+    const jobs = [...(this.turn ? [this.turn.job] : []), ...this.queue].filter((j) => j.batchId !== batch.id);
+    if (jobs.length === 0 && !this.starting) return null;
+    const [notes, batches, project] = await Promise.all([this.store.read("notes"), this.store.read("batches"), this.store.read("project")]);
+    const filmOf = new Map(notes.notes.map((n) => [n.id, n.video ?? null]));
+    const films = (b: Pick<Batch, "noteIds" | "video">): Set<string | null> => {
+      const s = new Set<string | null>(b.noteIds.map((id) => filmOf.get(id) ?? null));
+      if (s.size === 0) s.add(b.video ?? null);
+      return s;
+    };
+    const mine = films(batch);
+    for (const j of jobs) {
+      const b = batches.batches.find((x) => x.id === j.batchId);
+      const shared = b ? [...films(b)].find((f) => mine.has(f)) : undefined;
+      if (shared === undefined) continue;
+      const name = this.info?.name ?? (this.settings?.agent ? NAMES[this.settings.agent] : "The agent");
+      const film = shared === null ? null : project.videos.find((v) => v.id === shared)?.name ?? null;
+      return film ? `${name} is still working on ${film}` : `${name} is still working on this film`;
+    }
+    return null;
   }
 
   /**
@@ -312,7 +371,7 @@ export class AgentRunner {
    * the desk still says why the batch didn't go.
    */
   private async noteRefusal(id: string, r: SendResult): Promise<SendResult> {
-    if (r.handedTo === null && !r.stopped && !r.recalled && r.why !== CLOSING && this.switchedOn(this.settings, this.rules)) {
+    if (r.handedTo === null && !r.stopped && !r.recalled && !r.busy && r.why !== CLOSING && this.switchedOn(this.settings, this.rules)) {
       const at = this.now().toISOString();
       await this.store
         .update("batches", (f) => {
@@ -685,13 +744,14 @@ export class AgentRunner {
     if (job.level) this.lastLevel = job.level;
     const gen = this.gen;
     const name = this.info?.name ?? "The agent";
+    this.said = "";
     this.clearIdle();
     let done!: () => void;
     this.turn = { job, done: new Promise<void>((r) => (done = r)) };
     this.phase = "working";
     this.error = null;
     this.current = { note: null, doing: null };
-    this.milestone(`${name} started on ${job.label}`, job, (label) => `${name} started on ${label}`);
+    this.milestone(`${name} started on ${job.label}`, job, (p) => `${name} started on ${p.label}`);
     this.announce();
     this.track(
       conn.prompt(sessionId, job.prompt).then(
@@ -707,39 +767,80 @@ export class AgentRunner {
     );
   }
 
+  /**
+   * The turn ended. §35: of the notes it left with the agent (still sent in its batch), the ones the agent replied on in
+   * this turn go back to to do, their replies kept. §35.7: the ones it never answered (no reply, not done) stay sent, and
+   * the batch is marked unfinished with the first line of the agent's last message, so the desk can say why and offer
+   * Send again; they don't turn up in Send's count as if never sent. The "finished" line counts answered notes only.
+   */
   private async turnEnded(gen: number, job: TurnJob, stopReason: string): Promise<void> {
     // Stopped, closed or failed meanwhile: whoever did that has already settled this job.
     if (gen !== this.gen || this.turn?.job !== job) return;
     const name = this.info?.name ?? "The agent";
+    const said = this.saidLine();
     this.turn = null;
     this.ending = true;
-    const ended = (label: string) => (stopReason === "end_turn" ? `${name} finished ${label}` : `${name} ended ${label} (${stopReason})`);
-    this.milestone(ended(job.label), job, ended);
     this.announce();
     // Still busy while the notes are read, so a send now queues and is picked up below.
     let back = 0;
+    let kept = 0;
+    let answered = new Set<string>();
+    let whole: string[] = [];
     try {
+      // §35.7: a note is answered by a reply made since its batch was sent (replies and batches carry the server's clock).
+      const batch = (await this.store.read("batches")).batches.find((x) => x.id === job.batchId);
+      whole = batch?.noteIds ?? [];
+      const sinceMs = batch ? Date.parse(batch.sentAt) : 0;
+      const replied = (n: Note) => repliedSince(n, sinceMs);
       const notes = await this.store.read("notes");
-      // M3, §35: what the turn left with the agent goes back to to do, replied on or not. Its replies stay.
       if (notes.notes.some((n) => this.leftOver(job, n))) {
         const { result } = await this.store.update("notes", (f) => {
-          const left = f.notes.filter((n) => this.leftOver(job, n));
-          for (const n of left) recallNote(f.notes, n.id, job.batchId);
-          return left.length;
+          let moved = 0;
+          let stay = 0;
+          for (const n of f.notes.filter((x) => this.leftOver(job, x))) {
+            if (replied(n)) moved += recallNote(f.notes, n.id, job.batchId) ? 1 : 0;
+            else stay += 1;
+          }
+          return { moved, stay };
         });
-        back = result;
+        back = result.moved;
+        kept = result.stay;
       }
+      if (kept > 0) {
+        const at = this.now().toISOString();
+        await this.store.update("batches", (f) => {
+          const b = f.batches.find((x) => x.id === job.batchId);
+          if (b) b.unfinished = { at, said };
+        });
+      }
+      answered = new Set((await this.store.read("notes")).notes.filter((n) => noteState(n) === "done" || replied(n)).map((n) => n.id));
     } catch (e) {
       console.error(`Rushes: couldn't read the notes after a turn: ${messageOf(e)}`);
     }
     if (gen !== this.gen) return;
-    if (back > 0) this.addLine(back === 1 ? "1 note was not picked up and is back in to do" : `${back} notes were not picked up and are back in to do`, null);
+    const ended = (p: { label: string; ids: readonly string[] }) => endedText(name, p.label, p.ids.length, p.ids.filter((id) => answered.has(id)).length, stopReason);
+    this.milestone(ended({ label: job.label, ids: whole }), job, ended);
+    if (back > 0) this.addLine(back === 1 ? "1 note the agent replied on is back in to do" : `${back} notes the agent replied on are back in to do`, null);
+    if (kept > 0) this.addLine(kept === 1 ? "1 note was not answered and stays sent" : `${kept} notes were not answered and stay sent`, null);
+    if (gen !== this.gen) return;
     this.ending = false;
     if (this.queue.length) return this.pump();
     this.phase = "finished";
     this.current = { note: null, doing: null };
     this.announce();
     this.armIdle();
+  }
+
+  /**
+   * §35.7: the first line of the agent's last message in the turn, as one short line with secrets masked and markdown's
+   * leading marks dropped. Null when it said nothing.
+   */
+  private saidLine(): string | null {
+    for (const raw of this.said.split(/\r?\n/)) {
+      const text = oneLine(maskSecrets(raw.replace(/^[\s#>*\-•]+/, "").replace(/\*\*|__|`/g, "")), SAID_MAX);
+      if (text !== "" && text !== "…") return text;
+    }
+    return null;
   }
 
   /** M3, §35: a note the ended turn left with the agent: still sent in the turn's batch. */
@@ -801,10 +902,20 @@ export class AgentRunner {
 
   private onUpdate(conn: AcpConnection, update: unknown): void {
     if (conn !== this.conn || this.closed) return;
+    if (this.turn) this.hear(update);
     const text = this.adapters.get(conn)?.activity.line(update) ?? null;
     if (!text) return;
     this.addLine(text, this.current.note);
     this.announce();
+  }
+
+  /** §35.7: keeps the agent's words since its last tool call, so the turn's end can quote the first line of its last message. */
+  private hear(update: unknown): void {
+    const u = update as { sessionUpdate?: unknown; content?: { type?: unknown; text?: unknown } } | null;
+    if (u?.sessionUpdate === "tool_call") this.said = "";
+    else if (u?.sessionUpdate === "agent_message_chunk" && u.content?.type === "text" && typeof u.content.text === "string" && this.said.length < SAID_KEPT) {
+      this.said += u.content.text;
+    }
   }
 
   private onExit(conn: AcpConnection, e: { code: number | null; stderr: string }): void {
@@ -1022,30 +1133,30 @@ export class AgentRunner {
    * `job`, the Change Log line is written once per film its notes are on, each with that film, so a film's Activity
    * never tells another film's work; `say` words a batch's line from that film's own count ("2 notes").
    */
-  private milestone(text: string, job?: TurnJob, say?: (label: string) => string): void {
+  private milestone(text: string, job?: TurnJob, say?: (part: FilmPart) => string): void {
     this.addLine(text, null);
     this.track(this.writeMilestone(text, job, say));
   }
 
-  private async writeMilestone(text: string, job?: TurnJob, say?: (label: string) => string): Promise<unknown> {
+  private async writeMilestone(text: string, job?: TurnJob, say?: (part: FilmPart) => string): Promise<unknown> {
     const at = this.now();
     // LogBook.add never throws: a line it can't write is reported and counted.
     const book = logBookFor(this.store);
     const parts = job ? await this.filmParts(job).catch(() => []) : [];
     if (parts.length === 0) return book.add(lineEvent(text, "notes"), "rushes", at);
-    for (const p of parts) await book.add(lineEvent(say && job ? say(p.label) : text, "notes", { video: p.film }), "rushes", at);
+    for (const p of parts) await book.add(lineEvent(say && job ? say(p) : text, "notes", { video: p.film }), "rushes", at);
     return undefined;
   }
 
   /** §30: the films a turn's notes are on, each with the label of its own share of them ("2 notes"). */
-  private async filmParts(job: TurnJob): Promise<{ film: string | null; label: string }[]> {
+  private async filmParts(job: TurnJob): Promise<FilmPart[]> {
     const notes = await this.store.read("notes");
     const b = (await this.store.read("batches")).batches.find((x) => x.id === job.batchId);
     if (!b) return [];
     const filmOf = new Map(notes.notes.map((n) => [n.id, n.video ?? null]));
     const groups = byFilm(b.noteIds, (id) => filmOf.get(id));
     if (groups.length === 0 || (b.sectionIds.length > 0 && !groups.some(([f]) => f === null))) groups.push([null, []]);
-    return groups.map(([film, ids]) => ({ film, label: batchLabel({ noteIds: ids, sectionIds: film === null ? b.sectionIds : [] }) }));
+    return groups.map(([film, ids]) => ({ film, ids, label: batchLabel({ noteIds: ids, sectionIds: film === null ? b.sectionIds : [] }) }));
   }
 
   private addLine(text: string, note: string | null): void {

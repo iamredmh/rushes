@@ -340,8 +340,13 @@ describe("AgentRunner", () => {
     await expect(r.runner.workingOn(unsent.id, "Something")).rejects.toMatchObject({ status: 409, code: "note_not_sent" });
   });
 
-  it("when a turn ends, the notes it left with the agent go back to to do, replied on or not; done ones stay (M3, §35)", async () => {
-    const r = await rig({ turns: [[{ sleep: 300 }], [{ stop: "refusal" }]] });
+  it("when a turn ends, a note the agent replied on goes back to to do and one it never answered stays sent, its batch marked unfinished (M3, §35, §35.7)", async () => {
+    const r = await rig({ turns: [[
+      { sleep: 300 },
+      { update: { sessionUpdate: "tool_call", toolCallId: "t1", title: "Render" } },
+      { update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "**Not done yet**, and neither note is " } } },
+      { update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "replied to.\n\nThe render hit the 10-minute limit." } } },
+    ], [{ stop: "refusal" }]] });
     const b1 = await r.batch("Done one", "Replied one", "Untouched one");
     await r.runner.send(b1);
     await r.phase("working");
@@ -351,18 +356,87 @@ describe("AgentRunner", () => {
     });
     await r.phase("finished");
     const after = await notesOf(r.store, b1.noteIds);
-    expect(after.map((n) => [noteState(n), n.batch])).toEqual([["done", "b_1"], ["todo", null], ["todo", null]]);
+    expect(after.map((n) => [noteState(n), n.batch])).toEqual([["done", "b_1"], ["todo", null], ["sent", "b_1"]]);
     // The reply stays on the note it was given back with.
     expect(after[1].replies.map((x) => x.text)).toEqual(["Couldn't find the logo file."]);
-    expect(r.runner.status().lines.map((l) => l.text)).toContain("2 notes were not picked up and are back in to do");
+    // The batch says why its last note wasn't answered: the first line of what the agent last said.
+    const marked = (await r.store.read("batches")).batches.find((b) => b.id === "b_1")!;
+    expect(marked.unfinished).toMatchObject({ said: "Not done yet, and neither note is replied to." });
+    const texts = r.runner.status().lines.map((l) => l.text);
+    expect(texts).toContain("Claude Code finished 2 of 3 notes");
+    expect(texts).toContain("1 note the agent replied on is back in to do");
+    expect(texts).toContain("1 note was not answered and stays sent");
+    expect(await r.waitFor("the Change Log line", async () => (await changeLog(r.store)).find((t) => t.includes("of 3 notes")))).toBe("Claude Code finished 2 of 3 notes");
 
-    // Any stop reason: a refusal leaves every note of b_2 untouched.
+    // Any stop reason: a refusal that answers nothing leaves b_2's notes sent, and says it ended without answering them.
     const b2 = await r.batch("Two", "Three");
-    expect(b2.noteIds).toHaveLength(4); // b_1's two notes go again
+    // b_1's replied note goes again; its untouched one is still sent in b_1, so Send doesn't take it twice.
+    expect(b2.noteIds).toHaveLength(3);
+    expect(b2.noteIds).not.toContain(b1.noteIds[2]);
     await r.runner.send(b2);
     await r.phase("finished");
-    expect((await notesOf(r.store, b2.noteIds)).map(noteState)).toEqual(["todo", "todo", "todo", "todo"]);
-    expect(r.runner.status().lines.map((l) => l.text)).toContain("4 notes were not picked up and are back in to do");
+    expect((await notesOf(r.store, b2.noteIds)).map(noteState)).toEqual(["sent", "sent", "sent"]);
+    // It said nothing this turn: the status line will say the run ended first.
+    expect((await r.store.read("batches")).batches.find((b) => b.id === "b_2")!.unfinished).toMatchObject({ said: null });
+    expect(r.runner.status().lines.map((l) => l.text)).toContain("Claude Code ended without answering 3 notes (refusal)");
+  });
+
+  it("a turn that answers nothing never says it finished, and its notes stay sent (§35.7)", async () => {
+    const r = await rig({ turns: [[]] });
+    const b = await r.batch("One", "Two");
+    await r.runner.send(b);
+    await r.phase("finished");
+    const texts = r.runner.status().lines.map((l) => l.text);
+    expect(texts).toContain("Claude Code ended without answering 2 notes");
+    expect(texts.some((t) => t.includes("finished"))).toBe(false);
+    expect(texts).toContain("2 notes were not answered and stay sent");
+    expect((await notesOf(r.store, b.noteIds)).map((n) => [noteState(n), n.batch])).toEqual([["sent", "b_1"], ["sent", "b_1"]]);
+    expect(await r.waitFor("the Change Log line", async () => (await changeLog(r.store)).find((t) => t.includes("without answering")))).toBe("Claude Code ended without answering 2 notes");
+  });
+
+  it("Send again hands an unfinished batch over once nothing runs on its film, and says so while one does (§35.7)", async () => {
+    const r = await rig({ turns: [[], [{ sleep: 60000 }], []] });
+    const b1 = await r.batch("Unanswered");
+    await r.runner.send(b1);
+    await r.phase("finished");
+    const unfinished = (await r.store.read("batches")).batches.find((b) => b.id === "b_1")!;
+    expect(unfinished.unfinished).toBeTruthy();
+
+    // A new note on the same film is on its way: Send again on b_1 says so and starts nothing.
+    const b2 = await r.batch("New one");
+    expect(b2.noteIds).toHaveLength(1);
+    await r.runner.send(b2);
+    await r.phase("working");
+    // The setup sheet's hand-over (I3) never takes an unfinished batch: only Send again does.
+    expect(await r.runner.resend(unfinished)).toBeNull();
+    expect(await r.runner.resend(unfinished, { unfinished: true })).toEqual({ handedTo: null, why: "Claude Code is still working on this film", busy: true });
+    expect(r.runner.status().batches).toEqual(["b_2"]);
+    // The mark stays, so Send again is still offered, and the refusal isn't taken as a hand-over refused (I3).
+    const kept = (await r.store.read("batches")).batches.find((b) => b.id === "b_1")!;
+    expect(kept.unfinished).toBeTruthy();
+    expect(kept.undelivered ?? null).toBeNull();
+
+    // Once that run is over, Send again hands it over and takes the mark off.
+    await r.runner.stop();
+    expect(await r.runner.resend(unfinished, { unfinished: true })).toEqual({ handedTo: "claude" });
+    expect((await r.store.read("batches")).batches.find((b) => b.id === "b_1")!.unfinished ?? null).toBeNull();
+    await r.phase("finished");
+    expect(prompts(r.log()).map((m) => m.params.prompt[0].text).filter((t: string) => t.includes("b_1"))).toHaveLength(2);
+  });
+
+  it("a run on another film doesn't hold up Send again (§35.7)", async () => {
+    const r = await rig({ turns: [[], [{ sleep: 60000 }]] });
+    const b1 = await r.batch("On hero");
+    await r.store.update("notes", (f) => { for (const n of f.notes) n.video = "hero"; });
+    await r.runner.send(b1);
+    await r.phase("finished");
+    const b2 = await r.batch("On teaser");
+    await r.store.update("notes", (f) => { for (const n of f.notes) if (n.text === "On teaser") n.video = "teaser"; });
+    await r.runner.send(b2);
+    await r.phase("working");
+    const unfinished = (await r.store.read("batches")).batches.find((b) => b.id === "b_1")!;
+    expect(await r.runner.resend(unfinished, { unfinished: true })).toEqual({ handedTo: "claude" });
+    expect(r.runner.status().batches).toEqual(["b_2", "b_1"]);
   });
 
   it("a turn that ends with every note done says nothing about notes coming back (M3)", async () => {
@@ -661,29 +735,35 @@ describe("AgentRunner", () => {
     const r = await rig({ turns: [[{ update: { sessionUpdate: "tool_call", toolCallId: "t1", title: "Ran the render" } }]] });
     await r.runner.send(await r.batch("One"));
     await r.phase("finished");
-    const texts = await r.waitFor("the finished line", async () => {
+    const texts = await r.waitFor("the ended line", async () => {
       const t = await changeLog(r.store);
-      return t.some((x) => x.includes("finished")) ? t : null;
+      return t.some((x) => x.includes("without answering")) ? t : null;
     });
     expect(texts).toContain("Claude Code started on 1 note");
     expect(texts.some((t) => t.includes("Ran the render"))).toBe(false);
   });
 
   it("§30: a batch with notes on two films writes its Change Log lines once per film, each with its own count", async () => {
-    const r = await rig({ turns: [[]] });
+    const r = await rig({ turns: [[{ sleep: 200 }]] });
     // Two notes on Hero and one on Teaser, then the batch that holds all three.
     const b = await r.batch("One", "Two", "Three");
     await r.store.update("notes", (f) => {
       for (const n of f.notes) n.video = n.text === "Three" ? "teaser" : "hero";
     });
     await r.runner.send(b);
+    await r.phase("working");
+    // The agent answers One and Three; Two it never gets to (§35.7: only answered notes count as finished).
+    await r.store.update("notes", (f) => {
+      applyReply(f, { id: b.noteIds[0], reply: "Done.", status: "done" });
+      applyReply(f, { id: b.noteIds[2], reply: "Done.", status: "done" });
+    });
     await r.phase("finished");
     const lines = await r.waitFor("both films' finished lines", async () => {
       const e = (await r.store.read("log")).entries.filter((x) => x.by === "rushes" && /finished/.test(x.text));
       return e.length === 2 ? e : null;
     });
     expect(lines.map((e) => [e.video, e.text]).sort()).toEqual([
-      ["hero", "Claude Code finished 2 notes"],
+      ["hero", "Claude Code finished 1 of 2 notes"],
       ["teaser", "Claude Code finished 1 note"],
     ]);
     const started = (await r.store.read("log")).entries.filter((x) => /started on/.test(x.text)).map((e) => [e.video, e.text]).sort();
@@ -692,22 +772,22 @@ describe("AgentRunner", () => {
       ["teaser", "Claude Code started on 1 note"],
     ]);
     // The live strip still tells the run as one: 3 notes.
-    expect(r.runner.status().lines.map((l) => l.text)).toContain("Claude Code finished 3 notes");
+    expect(r.runner.status().lines.map((l) => l.text)).toContain("Claude Code finished 2 of 3 notes");
   });
 
   it("Activity names a batch's turn by how many notes it holds, never by the batch's id (M7)", async () => {
     const r = await rig({ turns: [[], []] });
     const texts = () => r.runner.status().lines.map((l) => l.text);
     await r.runner.send(await r.batch("One"));
-    await r.waitFor("the first turn to end", () => texts().includes("Claude Code finished 1 note"));
+    await r.waitFor("the first turn to end", () => texts().includes("Claude Code ended without answering 1 note"));
     expect(texts()).toContain("Claude Code started on 1 note");
     await r.phase("finished");
-    // The first note, left untouched, is back in to do: the next batch takes it with the two new ones.
+    // §35.7: the first note, left unanswered, stays sent: the next batch holds only the two new ones.
     const b2 = await r.batch("Two", "Three");
-    expect(b2.noteIds).toHaveLength(3);
+    expect(b2.noteIds).toHaveLength(2);
     await r.runner.send(b2);
-    await r.waitFor("the second turn to end", () => texts().includes("Claude Code finished 3 notes"));
-    expect(texts()).toContain("Claude Code started on 3 notes");
+    await r.waitFor("the second turn to end", () => texts().includes("Claude Code ended without answering 2 notes"));
+    expect(texts()).toContain("Claude Code started on 2 notes");
     expect(texts().some((t) => /\bb_\d/.test(t))).toBe(false);
   });
 

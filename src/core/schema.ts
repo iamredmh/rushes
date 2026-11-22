@@ -460,6 +460,10 @@ export const BatchSchema = fileObject({
   // notes still wait in this batch for Send again. Kept in the file, not the server's memory, so a restart can't strand
   // them. Cleared when the batch is handed over again.
   undelivered: z.object({ at: z.string(), why: z.string() }).nullable().optional(),
+  // §35.7: the agent's turn on this batch ended with notes of it not answered (no reply, not done). Those notes stay sent
+  // in the batch, and `said` is the first line of the agent's last message in that turn (null when it said nothing), for
+  // the note's status line. Cleared when the batch goes to the agent again (Send again).
+  unfinished: z.object({ at: z.string(), said: z.string().nullable() }).nullable().optional(),
 });
 export type Batch = z.infer<typeof BatchSchema>;
 

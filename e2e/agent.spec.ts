@@ -189,7 +189,8 @@ const foot = (page: Page): Locator => panel(page).locator(".nfoot");
 const row = (page: Page): Locator => foot(page).locator(".agentrow");
 const toggle = (page: Page): Locator => foot(page).getByRole("switch", { name: "Send to AI" });
 const who = (page: Page): Locator => foot(page).locator(".awho");
-const sendBtn = (page: Page): Locator => foot(page).locator(".sendbtn");
+// Send itself, not Send again (I3, §35.7), which shares its look.
+const sendBtn = (page: Page): Locator => foot(page).locator(".sendbtn:not([aria-label^=\"Send again\"])");
 const agentMenu = (page: Page): Locator => page.getByRole("menu", { name: "Send to AI" });
 
 /** A cut and one note to send; Send to AI on for Claude Code unless `on` is false. */
@@ -1002,13 +1003,14 @@ test("Send asks to notify in its own click while Send to AI is on, once", async 
   await sendBtn(page).click();
   await expect(toastEl(page)).toHaveText(/^(Sent to|Starting) Claude Code$/);
   expect(await notifyAsked()).toEqual(["click"]);
-  // The first turn ends having touched nothing, so its note goes back to to do (M3). Wait for the server to say so
-  // before adding the next note, or the count races the recall.
+  // The first turn ends having answered nothing, so its note stays sent in b_1 (§35.7). Wait for the run to end before
+  // adding the next note.
+  await expect.poll(async () => (await rushes.api("GET", "/api/agent")).status.phase, { timeout: 10_000 }).toBe("finished");
   const notesNow = async () => (await rushes.api("GET", "/api/notes")).notes as { status: string; batch: string | null }[];
-  await expect.poll(async () => (await notesNow()).map((n) => [n.status, n.batch]), { timeout: 10_000 }).toEqual([["todo", null]]);
+  expect((await notesNow()).map((n) => [n.status, n.batch])).toEqual([["todo", "b_1"]]);
   // The browser has been asked: a later Send doesn't ask again.
   await rushes.api("POST", "/api/notes", { stage: "picture", video: "hero", version: "v1", scope: "point", t: 1, text: "Softer cut." });
-  await expect(sendBtn(page)).toHaveAccessibleName("Send 2", { timeout: 10_000 });
+  await expect(sendBtn(page)).toHaveAccessibleName("Send 1", { timeout: 10_000 });
   await sendBtn(page).click();
   await expect.poll(async () => (await readAgentLog(rushes.agentLog)).filter((m) => m.method === "session/prompt").length, { timeout: 10_000 }).toBe(2);
   expect(await notifyAsked()).toEqual(["click"]);
@@ -1518,6 +1520,43 @@ test("§35: a reply that ends in a question is a read-only line: no Needs you, n
   await expect(sendBtn(page)).toHaveAccessibleName("Send 1");
   await noteFits(page, c);
   await shootNote(page, c, "note-one-way-1440");
+});
+
+test("§35.7: a note the run ended without answering stays sent, says why, and Send again offers it, not Send", async ({ page, startWithAgent }) => {
+  const rushes = await startWithAgent({ turns: [] });
+  const id = await readyToSend(rushes);
+  await rushes.setScenario({ turns: [[
+    { update: { sessionUpdate: "tool_call", toolCallId: "t1", title: "Render the closing shot" } },
+    { update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Not done yet, and the note is not replied to: the render hit the 10-minute limit.\n\nI'll pick it up next turn." } } },
+    { stop: "end_turn" },
+  ], [{ sleep: 60000 }]] });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(rushes.url);
+  await videoReady(page);
+  await rushes.api("POST", "/api/batches", {});
+  await expect.poll(async () => (await rushes.api("GET", "/api/agent")).status.phase, { timeout: 10_000 }).toBe("finished");
+
+  const c = card(page, id);
+  // Still sent: blue, never to do, and its line says why in the agent's own first words.
+  expect((await rushes.api("GET", "/api/notes")).notes.map((n: { state: string }) => n.state)).toEqual(["sent"]);
+  await expect(c).toHaveClass(/\bsent\b/);
+  await expect(badgeOf(c)).toHaveClass(/\bunfinished\b/);
+  await expect(badgeOf(c)).toHaveText("Not finished: Not done yet, and the note is not replied to: the render hit the 10-minute limit.");
+  expect(await badgeOf(c).evaluate((el) => getComputedStyle(el).color)).toBe(await tokenColour(page, "--accent"));
+  // Send has nothing new to send; Send again offers the note, saying why.
+  await expect(foot(page).locator(".sendagain-why")).toHaveText("1 note wasn't answered: Not done yet, and the note is not replied to: the render hit the 10-minute limit.");
+  await expect(sendBtn(page)).toHaveCount(0);
+  // Activity and the Change Log never say it finished.
+  const log = (await rushes.api("GET", "/api/log")).entries.map((e: { text: string }) => e.text);
+  expect(log).toContain("Claude Code ended without answering 1 note");
+  expect(log.some((t: string) => /finished/.test(t))).toBe(false);
+  await noteFits(page, c);
+  await shootNote(page, c, "note-unfinished-1440");
+
+  // Send again hands it over: the line gives way to With Claude Code while the run has it.
+  await foot(page).getByRole("button", { name: "Send again 1" }).click();
+  await expect(badgeOf(c)).toHaveText("With Claude Code", { timeout: 10_000 });
+  await expect(foot(page).locator(".sendagain")).toHaveCount(0);
 });
 
 test("working note shows what the agent is doing", async ({ page, startWithAgent }) => {

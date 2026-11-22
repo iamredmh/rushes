@@ -72,7 +72,7 @@ export function chipTone(phase: AgentPhase): "busy" | "todo" | "done" | "over" {
 /** Stop shows while the agent is starting, on a turn, or waiting on an ask: the phases a Stop can end. */
 export const canStop = (phase: AgentPhase): boolean => RUNNING.has(phase);
 
-export type NoteBadge = { kind: "working" | "with" | "fixed"; text: string };
+export type NoteBadge = { kind: "working" | "with" | "unfinished" | "fixed"; text: string };
 
 /**
  * I3: the agent Send to AI uses really has this sent note: a run holds its batch (queued, starting or on it), a turn is
@@ -84,12 +84,18 @@ export function agentHolds(n: NoteLite, s: AgentStatus | null): boolean {
   return (n.batch !== null && s.batches.includes(n.batch)) || (RUNNING.has(s.phase) && s.current.note === n.id);
 }
 
-/** The badge on a note's card, by priority: being worked on, with the agent, fixed. Null for none (§35: no Needs you). */
-export function noteAgentBadge(n: NoteLite, s: AgentStatus | null): NoteBadge | null {
+/**
+ * The badge on a note's card, by priority: being worked on, with the agent, not finished, fixed. Null for none (§35: no
+ * Needs you). `unfinished` (§35.7) is the status line of the note's batch when the agent's turn on it ended with the note
+ * unanswered ("Not finished: …"): shown while the note is still sent and no run holds it again.
+ */
+export function noteAgentBadge(n: NoteLite, s: AgentStatus | null, unfinished: string | null = null): NoteBadge | null {
   if (s && s.current.note === n.id && RUNNING.has(s.phase)) return { kind: "working", text: s.current.doing ?? "Working on it" };
   const state = noteState(n);
+  const holds = agentHolds(n, s);
+  if (state === "sent" && unfinished && !holds) return { kind: "unfinished", text: unfinished };
   // Named only while the agent has the note (agentHolds); otherwise it is with "your agent".
-  const named = agentHolds(n, s) ? s!.agent : null;
+  const named = holds ? s!.agent : null;
   if (state === "sent") return { kind: "with", text: `With ${agentName(named)}` };
   if (state === "done" && n.fixVersion) return { kind: "fixed", text: `Fixed in ${n.fixVersion}` };
   return null;
@@ -100,9 +106,11 @@ export function noteAgentBadge(n: NoteLite, s: AgentStatus | null): NoteBadge | 
  * Copy prompt: no hand-over, or a refusal where nothing was started (runner.ts SendResult). A Stop's refusal and a
  * recalled start say so instead, with or without a reason.
  */
-export function afterSend(r: SendHandOver | undefined): "dialog" | "handed" | "starting" | "recalled" | "stopped" {
+export function afterSend(r: SendHandOver | undefined): "dialog" | "handed" | "starting" | "recalled" | "stopped" | "busy" {
   if (r === undefined) return "dialog";
-  const flags = r as { stopped?: true; recalled?: true; starting?: true };
+  const flags = r as { stopped?: true; recalled?: true; starting?: true; busy?: true };
+  // §35.7: Send again refused while the agent is still on that film's work: nothing to copy, it says why.
+  if (r.handedTo === null && flags.busy) return "busy";
   if (r.handedTo === null && !flags.stopped && !flags.recalled) return "dialog";
   if (flags.stopped) return "stopped";
   if (flags.recalled) return "recalled";
@@ -335,6 +343,7 @@ export function followSend(r: SendHandOver | undefined, s: AgentStatus | null): 
       return { ...none, toast: { text: `${name} couldn't start: ${why.startsWith(lead) ? why.slice(lead.length) : why}. The notes are back in to do.`, ms: 6000 } };
     }
     case "stopped": return none;
+    case "busy": return { ...none, toast: { text: said ?? "Your agent is still working on this film", ms: 4000 } };
     default: return { ...none, dialog: true, why: s?.on && said ? said : null };
   }
 }

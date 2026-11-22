@@ -1851,7 +1851,8 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     return c.json({ batch, agent: await handOverOf(handing!) }, 201);
   });
 
-  // I3, Send again: a batch whose hand-over was refused while Send to AI was on (its `undelivered` mark) goes to the
+  // I3, Send again: a batch whose hand-over was refused while Send to AI was on (its `undelivered` mark), or whose turn
+  // ended with notes unanswered (§35.7, `unfinished`), goes to the
   // agent now, while notes of it still wait. The mark is in batches.json, so this works after a restart too. Refused
   // again (still not signed in), it says why and keeps the mark, as Send does.
   app.post("/api/batches/:id/resend", async (c) => {
@@ -1862,11 +1863,14 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     if (!notes.notes.some((n) => n.batch === id && noteState(n) === "sent")) {
       throw new RushesError(`Nothing in ${id} is waiting for the agent any more.`, 409, "batch_not_waiting");
     }
-    if (!batch.undelivered) throw new RushesError(`${id} already reached the agent.`, 409, "batch_delivered");
-    const handed = await handOverOf(agent.resend(batch));
+    // §35.7: a batch whose turn ended with notes of it unanswered (its `unfinished` mark) can go again too.
+    if (!batch.undelivered && !batch.unfinished) throw new RushesError(`${id} already reached the agent.`, 409, "batch_delivered");
+    const handed = await handOverOf(agent.resend(batch, { unfinished: true }));
     // Null: another Send again took it a moment ago.
     if (!handed) throw new RushesError(`${id} already reached the agent.`, 409, "batch_delivered");
-    return c.json({ batch: { ...batch, undelivered: null }, agent: handed });
+    // Refused because the agent is still on this film (§35.7): the marks stay, and the answer says why.
+    if (handed.handedTo === null && "busy" in handed && handed.busy) return c.json({ batch, agent: handed });
+    return c.json({ batch: { ...batch, undelivered: null, unfinished: null }, agent: handed });
   });
 
   app.get("/api/batches/:id", async (c) => {

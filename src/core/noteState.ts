@@ -8,6 +8,7 @@
 //   todo  --resolve--> done   Fixed, or ticked off, before it was ever sent.
 //   sent  --resolve--> done   The agent (or the user) marked it done. It keeps its batch, as history.
 //   sent  --recall-->  todo   The send was stopped: the note leaves its batch, so the next Send takes it again.
+//                             (§35.7: a turn that ends leaves its unanswered notes sent, its batch marked unfinished.)
 //   done  --reopen-->  todo   Not fixed after all. It leaves its batch, so the next Send takes it again.
 //
 // Prior art: a Review Board issue (open, resolved, dropped) and a Kitsu task (waiting for approval, retake,
@@ -95,6 +96,13 @@ export function recallNote(notes: Pick<Note, "id" | "status" | "batch">[], id: s
 export function leftAsking(n: Pick<Note, "status" | "batch" | "replies">): boolean {
   return noteState(n) === "sent" && n.replies.at(-1)?.by === "agent";
 }
+
+/**
+ * §35.7: the status line on a note the agent's turn ended without answering (still sent, its batch marked `unfinished`):
+ * the first line of what the agent last said, or that the run ended first.
+ */
+export const unfinishedLine = (said: string | null | undefined): string =>
+  said ? `Not finished: ${said}` : "The run ended before this note was answered";
 
 /** The note with its state, as the server hands it out. A copy: the stored note never carries one. */
 export const withState = <T extends Pick<Note, "status" | "batch">>(n: T): T & { state: NoteState } => ({ ...n, state: noteState(n) });

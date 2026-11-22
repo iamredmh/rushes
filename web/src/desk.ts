@@ -1,7 +1,7 @@
 // §27: the desk's own logic, pure. Where a view sits in the workspaces, what the number keys open,
 // and how a sound's takes are grouped.
 import { madeForStale, takeState } from "../../src/core/takes.js";
-import { NOTE_STATE_LABEL, noteState, type NoteState } from "../../src/core/noteState.js";
+import { NOTE_STATE_LABEL, noteState, unfinishedLine, type NoteState } from "../../src/core/noteState.js";
 import type { PlanPage } from "./lib.js";
 import type { Batch, InUse, Lane, LaneStage, Note, Stage, Variant, Video } from "./types.js";
 
@@ -275,6 +275,49 @@ export function undeliveredBatches(batches: readonly Batch[], notes: readonly No
     .filter((b) => !!b.undelivered)
     .map((batch) => ({ batch, notes: notes.filter((n) => n.batch === batch.id && noteState(n) === "sent").length }))
     .filter((x) => x.notes > 0);
+}
+
+/**
+ * §35.7: the batches whose agent turn ended with notes of them unanswered, those notes still sent in them, with how many
+ * wait in each. Oldest first. Send again offers them, as it does undelivered ones.
+ */
+export function unfinishedBatches(batches: readonly Batch[], notes: readonly Note[]): { batch: Batch; notes: number }[] {
+  return batches
+    .filter((b) => !!b.unfinished)
+    .map((batch) => ({ batch, notes: notes.filter((n) => n.batch === batch.id && noteState(n) === "sent").length }))
+    .filter((x) => x.notes > 0);
+}
+
+/** §35.7: each unfinished batch's status line, by batch id, for the cards of its notes ("Not finished: …"). */
+export function unfinishedLines(batches: readonly Batch[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const b of batches) if (b.unfinished) out[b.id] = unfinishedLine(b.unfinished.said);
+  return out;
+}
+
+/**
+ * Send again's row (I3, §35.7): the notes it would hand over again, and its one line. Notes that never reached the agent
+ * say why in the to-do colour; notes the agent's turn ended without answering say so in the sent colour. Null for none.
+ */
+export function sendAgainOffer(
+  batches: readonly Batch[],
+  notes: readonly Note[],
+): { count: number; text: string; tone: "todo" | "sent"; batches: Batch[] } | null {
+  const undelivered = undeliveredBatches(batches, notes);
+  const unfinished = unfinishedBatches(batches, notes);
+  const all = [...undelivered, ...unfinished].sort((a, b) => a.batch.sentAt.localeCompare(b.batch.sentAt));
+  if (all.length === 0) return null;
+  const count = all.reduce((sum, x) => sum + x.notes, 0);
+  const n = (k: number, verb: [string, string]) => (k === 1 ? `1 note ${verb[0]}` : `${k} notes ${verb[1]}`);
+  if (unfinished.length === 0) {
+    const why = undelivered[undelivered.length - 1].batch.undelivered?.why ?? "";
+    return { count, text: `${n(count, ["didn't", "didn't"])} reach the agent${why ? `: ${why}` : ""}`, tone: "todo", batches: all.map((x) => x.batch) };
+  }
+  if (undelivered.length === 0) {
+    const said = unfinished[unfinished.length - 1].batch.unfinished?.said ?? null;
+    return { count, text: `${n(count, ["wasn't", "weren't"])} answered${said ? `: ${said}` : " before the run ended"}`, tone: "sent", batches: all.map((x) => x.batch) };
+  }
+  return { count, text: `${n(count, ["is", "are"])} waiting to go to the agent again`, tone: "todo", batches: all.map((x) => x.batch) };
 }
 
 /**
