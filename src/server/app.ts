@@ -19,7 +19,8 @@ import { addVisualVersion, checkVisualNote, registerVisual, visualNoteView, visu
 import { readPicture } from "./visuals.js";
 import { fromManifestPath, toManifestPath } from "../core/paths.js";
 import { AUDIO_FORMATS, PROBE_TIMEOUT_MS, VIDEO_EXT, giveUpAfter, probe, probeVideo, videoGaveUp, type VideoProbe, type VideoProber } from "../core/media.js";
-import { PROXY_PATH, ProxyJobs, type ProxyEvent } from "./proxy.js";
+import { PROXY_PATH, ProxyJobs, type ProxyEvent, type ProxyJob } from "./proxy.js";
+import { proxyIsAt } from "../core/proxyPresets.js";
 import { PeakJobs } from "./peaks.js";
 import { lstat, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
@@ -33,7 +34,7 @@ import { osRevealer, osOpener, OPEN_SAFE_EXT, type Revealer, type Opener } from 
 import type { CorruptEvent } from "./watch.js";
 import { inUse, setInUse } from "../core/picks.js";
 import { filmTakes, putAway } from "../core/takes.js";
-import { AGENTS, AgentPermissionsSchema, AlwaysRuleSchema, LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, PinSchema, FileKindSchema, MarkSchema, ProjectIdSchema, ShotSchema, LEVEL_MIN, LEVEL_MAX, LEVEL_STEP, lanesForVideo, picksForVideo, variantFilms, type InUse, type Levels, type Batch, type Note, type Picks, type Project, type VisualsFile } from "../core/schema.js";
+import { AGENTS, AgentPermissionsSchema, ProxyPresetSchema, type ProxyPreset, AlwaysRuleSchema, LaneStageSchema, SectionStatusSchema, StageSchema, BoxSchema, PinSchema, FileKindSchema, MarkSchema, ProjectIdSchema, ShotSchema, LEVEL_MIN, LEVEL_MAX, LEVEL_STEP, lanesForVideo, picksForVideo, variantFilms, type InUse, type Levels, type Batch, type Note, type Picks, type Project, type VisualsFile } from "../core/schema.js";
 import { LABEL_MAX, oneLineOf } from "../core/labels.js";
 import { byOf, logBookFor } from "./logbook.js";
 import { briefRecords, storyboardRecords, type BriefRecords, type StoryboardRecords } from "./plans.js";
@@ -257,7 +258,12 @@ const ShelveBody = z.object({ shelved: z.boolean() });
 const MixLoudnessBody = z.object({ lanes: z.array(LaneStageSchema).min(1), video: z.string().min(1).max(200).optional() });
 const BalanceBody = z.object({ video: z.string().min(1).max(200).optional() });
 
-const SettingsBody = z.object({ autoProxy: z.boolean() }).strict();
+// §36.5: the project's proxy settings. `autoProxy` is §19.5's name for `alwaysProxy`, still taken from an older client.
+const SettingsBody = z
+  .object({ alwaysProxy: z.boolean().optional(), proxyPreset: ProxyPresetSchema.optional(), autoProxy: z.boolean().optional() })
+  .strict()
+  .refine((b) => b.alwaysProxy !== undefined || b.proxyPreset !== undefined || b.autoProxy !== undefined, { message: "Nothing to change" });
+const ProxyBody = z.object({ preset: ProxyPresetSchema.optional() }).strict();
 // A time in seconds, 0 to 24 h: an empty value, NaN, Infinity or anything huge is a 400.
 const FrameQuery = z.object({
   t: z.string().min(1).pipe(z.coerce.number<string>().finite().min(0).max(86400)),
@@ -938,7 +944,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
         versions: await Promise.all(v.versions.map(async (ver) => ({ ...ver, proxyNeed: await jobs.needNow(fromManifestPath(store.root, ver.file)) }))),
       })),
     );
-    return c.json({ version: VERSION, project: { ...project, videos }, script, notes, picks: withUse(project, picks), batches, tabs, visuals, proxies: { ffmpeg, jobs: jobs.list() }, found: foundSummary, log: logHead, brief: briefView, storyboard: storyboardView, build: first.build, films });
+    return c.json({ version: VERSION, project: { ...project, videos }, script, notes, picks: withUse(project, picks), batches, tabs, visuals, proxies: { ffmpeg, jobs: jobs.list(), encoder: ffmpeg ? await jobs.encoder() : null }, found: foundSummary, log: logHead, brief: briefView, storyboard: storyboardView, build: first.build, films });
   });
 
   // ---- found: the project's other files (§20) ----
@@ -1259,7 +1265,8 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
       ? []
       : await storyboards.at(filmPlace({ videos: known ? before.videos : [...before.videos, { id: plannedFor }] }, plannedFor)).cutShots();
     let lockedVersion: string | null = null;
-    let autoProxy = false;
+    let alwaysProxy = false;
+    let preset: ProxyPreset = "1080l";
     let films = 1;
     let restored = false;
     const { result } = await store.update("project", (p) => {
@@ -1289,7 +1296,8 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
       }
       lockedVersion = out.video.lockedVersion;
       restored = out.restored;
-      autoProxy = p.autoProxy;
+      alwaysProxy = p.alwaysProxy;
+      preset = p.proxyPreset;
       films = p.videos.length;
       if (info.fps && p.videos.length === 1 && p.videos[0].versions.length === 1) p.fps = info.fps;
       return out;
@@ -1299,8 +1307,8 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     // §26: a cut on a shelved film brings it back; the Change Log says so, then says what was added.
     if (restored) await log.add(() => filmEvent(result.video, false), by(c));
     await log.add(() => cutEvent(films, result.video, result.version, result.version.formats.map((f) => f.label)), by(c));
-    // §19.5: say when the cut is likely to play badly, and start its proxy straight away when the
-    // project asks for that. Without ffmpeg, nothing is offered (needFor is null).
+    // §19.5: say when the cut is likely to play badly. §36.5: with the project's switch on, every new cut gets a proxy
+    // at the project's preset straight away, whatever the criteria say. Without ffmpeg, nothing is offered or made.
     // §19.9: its waveform is made in the background; nothing here waits for it.
     void peaks.queueCut(result.video.id, result.version.id, file).catch(() => undefined);
     const reason = await jobs.needFrom(abs, info);
@@ -1308,7 +1316,9 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     if (reason) {
       proxy.proxySuggested = true;
       proxy.proxyReason = reason;
-      if (autoProxy && !jobs.isClosing) proxy.proxyJob = jobs.start(result.video.id, result.version.id);
+    }
+    if (alwaysProxy && !jobs.isClosing && (await jobs.available())) {
+      proxy.proxyJob = jobs.start(result.video.id, result.version.id, { preset, addedAt: result.version.addedAt });
     }
     // §24.12: a soft nudge, never a refusal: the plan (brief, script, storyboard) is not all approved yet.
     const planNote = planWarning(await planBuild(result.video.id));
@@ -1369,13 +1379,72 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     return { project, video, version };
   }
 
+  /**
+   * §36.5: queues the latest version of each film in play that has no proxy at `preset` and none being made at it.
+   * Older versions are only made when asked.
+   */
+  function queueLatest(project: Project, preset: ProxyPreset): ProxyJob[] {
+    const started: ProxyJob[] = [];
+    for (const video of project.videos) {
+      if (!inPlay(video)) continue;
+      const v = video.versions[video.versions.length - 1];
+      if (!v || proxyIsAt(v.proxy, preset)) continue;
+      if (jobs.find(video.id, v.id)?.preset === preset) continue;
+      started.push(jobs.start(video.id, v.id, { preset, addedAt: v.addedAt }));
+    }
+    return started;
+  }
+
   app.post("/api/videos/:video/versions/:version/proxy", async (c) => {
     await jobs.requireFfmpeg();
-    const { video, version } = await cutOf(c.req.param("video"), c.req.param("version"));
-    // One job per cut (Review Focus 2): a second press, from this tab or another, joins the first.
-    const joined = jobs.find(video.id, version.id) !== undefined;
-    const job = jobs.start(video.id, version.id);
+    // §19.5's clients POST with no body (or {}): that is the project's preset.
+    const raw = await c.req.text();
+    let b: z.infer<typeof ProxyBody> = {};
+    if (raw.trim() !== "") {
+      let json: unknown;
+      try {
+        json = JSON.parse(raw);
+      } catch {
+        throw new InvalidError("Request body must be JSON");
+      }
+      const parsed = ProxyBody.safeParse(json);
+      if (!parsed.success) throw new InvalidError("Request body is invalid", parsed.error.issues);
+      b = parsed.data;
+    }
+    const { project, video, version } = await cutOf(c.req.param("video"), c.req.param("version"));
+    const preset = b.preset ?? project.proxyPreset;
+    // One job per cut (Review Focus 2): a second press at the same preset, from this tab or another, joins the first.
+    const joined = jobs.find(video.id, version.id)?.preset === preset;
+    const job = jobs.start(video.id, version.id, { preset, addedAt: version.addedAt });
     return c.json({ job }, joined ? 200 : 202);
+  });
+
+  // §36.6: Make proxies now -- the latest version of each film, at the project's preset.
+  app.post("/api/proxies", async (c) => {
+    await jobs.requireFfmpeg();
+    const project = await store.read("project");
+    return c.json({ jobs: queueLatest(project, project.proxyPreset) }, 202);
+  });
+
+  // §36.6: Delete all proxies. Every job is cancelled first, then every proxy file and record goes. Originals stay.
+  app.delete("/api/proxies", async (c) => {
+    await Promise.all(jobs.list().map((j) => jobs.cancel(j.id).catch(() => undefined)));
+    const removed: string[] = [];
+    const before = await store.read("project");
+    if (before.videos.some((video) => video.versions.some((v) => v.proxy))) {
+      await store.update("project", (p) => {
+        for (const video of p.videos) {
+          for (const v of video.versions) {
+            if (!v.proxy) continue;
+            removed.push(v.proxy.file);
+            v.proxy = null;
+          }
+        }
+      });
+    }
+    // Only ever files this server wrote into proxies/: never an original, even from a hand-edited record.
+    await Promise.all(removed.filter((f) => PROXY_PATH.test(f)).map((f) => rm(fromManifestPath(store.root, f), { force: true }).catch(() => undefined)));
+    return c.json({ deleted: removed.length });
   });
 
   app.delete("/api/proxy-jobs/:job", async (c) => {
@@ -1411,10 +1480,20 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
 
   app.put("/api/project/settings", async (c) => {
     const b = await body(c, SettingsBody);
+    const always = b.alwaysProxy ?? b.autoProxy;
+    let wasOn = false;
+    let wasPreset: ProxyPreset | null = null;
     const { data } = await store.update("project", (p) => {
-      p.autoProxy = b.autoProxy;
+      wasOn = p.alwaysProxy;
+      wasPreset = p.proxyPreset;
+      if (always !== undefined) p.alwaysProxy = always;
+      if (b.proxyPreset !== undefined) p.proxyPreset = b.proxyPreset;
     });
-    return c.json({ autoProxy: data.autoProxy });
+    // §36.5: turning the switch on, or changing the preset while it's on, queues the latest version of each film.
+    // Changing the preset deletes nothing: proxies at the old one show "older quality".
+    const changed = (data.alwaysProxy && !wasOn) || data.proxyPreset !== wasPreset;
+    const queued = data.alwaysProxy && changed && !jobs.isClosing && (await jobs.available()) ? queueLatest(data, data.proxyPreset) : [];
+    return c.json({ alwaysProxy: data.alwaysProxy, proxyPreset: data.proxyPreset, jobs: queued });
   });
 
   // Grab Frame's still, always from the original at full quality: the exact frame round(t*fps),

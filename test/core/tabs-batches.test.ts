@@ -8,7 +8,7 @@ import { VisualsFileSchema, type BatchesFile, type NotesFile, type Project, type
 import { registerVisual } from "../../src/core/visuals.js";
 
 function ctx() {
-  const project: Project = { schema: 1, rev: 0, name: "spring-launch", fps: 30, videos: [], lanes: [], files: [], autoProxy: false };
+  const project: Project = { schema: 1, rev: 0, name: "spring-launch", fps: 30, videos: [], lanes: [], files: [], alwaysProxy: false, proxyPreset: "1080l" as const };
   const script: Script = { schema: 1, rev: 0, wordsPerSecond: 2.6, sections: [] };
   const notes: NotesFile = { schema: 1, rev: 0, notes: [] };
   const batches: BatchesFile = { schema: 1, rev: 0, batches: [] };

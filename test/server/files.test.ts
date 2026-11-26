@@ -244,7 +244,7 @@ describe("media", () => {
 
 describe("registeredMedia and formats", () => {
   it("registeredMedia includes every format file of every cut (§21.6)", () => {
-    const p = { schema: 1 as const, rev: 0, name: "demo", fps: 30, videos: [], lanes: [], files: [], autoProxy: false };
+    const p = { schema: 1 as const, rev: 0, name: "demo", fps: 30, videos: [], lanes: [], files: [], alwaysProxy: false, proxyPreset: "1080l" as const };
     addVersion(p, { video: "Hero", file: "renders/hero_v1.mp4", width: 1920, height: 1080 });
     addFormat(p, { file: "/elsewhere/hf/hero_v1_9x16.mp4", width: 1080, height: 1920, duration: 8, fps: 30 });
     expect(registeredMedia(p, { schema: 1, rev: 0, wordsPerSecond: 2.6, sections: [] }).has("/elsewhere/hf/hero_v1_9x16.mp4")).toBe(true);

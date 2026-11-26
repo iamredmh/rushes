@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { BrowserContext, Page } from "@playwright/test";
 import { expect, hasFfmpeg, needsH264, pickVersion, type Rushes, test, cutButton, videoReady, reviewTab, openWorkspace, openMore, workspaceTab, openReviewTab, currentFilm, pickFilm, filmButton,
-  autoProxySetting, rangeChip, ruler, shotBlocks, toolButton, transport, pictureTrack, CUT_SOUND_LANE, CUT_SOUND_WAVE, sendButton, sentDialog, statusSend, baselineText } from "./fixture.js";
+  proxiesButton, turnProxiesOn, openProxiesTab, rangeChip, ruler, shotBlocks, toolButton, transport, pictureTrack, CUT_SOUND_LANE, CUT_SOUND_WAVE, sendButton, sentDialog, statusSend, baselineText } from "./fixture.js";
 
 const CLIP = fileURLToPath(new URL("./fixtures/clip.mp4", import.meta.url));
 // A 1x1 transparent PNG, reused for every screenshot the library tests need on disk: its
@@ -1391,13 +1391,13 @@ async function proxyRecorded(rushes: { api<T = any>(m: string, p: string, b?: un
       const s = await rushes.api("GET", "/api/state");
       return s.project.videos[0].versions.find((v: { id: string }) => v.id === version)?.proxy?.file ?? null;
     }, { timeout: 20_000 })
-    .toBe(`proxies/hero_${version}_proxy.mp4`);
+    .toBe(`proxies/hero_${version}_proxy-1080l.mp4`);
 }
 
 test.describe("proxies (§19.5)", () => {
   test.skip(!hasFfmpeg, "needs ffmpeg and ffprobe");
 
-  test("a ProRes cut offers a proxy with its reason; making one shows progress, then the Proxy/Original switch, keeping your place", async ({ page, rushes }) => {
+  test("a ProRes cut offers a proxy with its reason; making one shows progress, turns Proxies on and plays it, keeping your place", async ({ page, rushes }) => {
     await rushes.addProResCut();
     await page.goto(rushes.url);
     const offer = page.locator(".proxybar");
@@ -1405,41 +1405,39 @@ test.describe("proxies (§19.5)", () => {
     const create = offer.getByRole("button", { name: "Create proxy" });
     await expect(create).toHaveAttribute(
       "data-tip",
-      "Makes a lightweight 1080p copy on your drive so this cut previews smoothly. About 10 MB. Your original isn't changed.",
+      "Makes a lightweight 1080p Low copy on your drive so this cut previews smoothly. About 10 MB. Your original isn't changed.",
     );
-    // §27: making proxies of new cuts automatically is a setting in the More menu, off to begin with.
-    await openMore(page);
-    await expect(autoProxySetting(page)).toHaveAttribute("aria-checked", "false");
-    await page.keyboard.press("Escape");
-    await expect(autoProxySetting(page)).toHaveCount(0);
+    // §36.7: Proxies is off to begin with in a new browser.
+    const toggle = proxiesButton(page);
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+    await expect(toggle).toHaveAttribute("data-tip", "Proxies off · playing originals · P");
 
     await watchForProgress(page);
     await create.click();
     await expect(offer).toContainText("✓ Proxy ready");
-    await expect(offer.locator(".mono", { hasText: "proxies/hero_v1_proxy.mp4" })).toBeVisible();
+    await expect(offer.locator(".mono", { hasText: "proxies/hero_v1_proxy-1080l.mp4" })).toBeVisible();
     expect(await page.evaluate(() => (window as unknown as { __sawProgress: boolean }).__sawProgress)).toBe(true);
     await expect(create).toHaveCount(0);
 
-    const proxyBtn = page.getByRole("button", { name: "Proxy", exact: true });
-    const originalBtn = page.getByRole("button", { name: "Original", exact: true });
-    await expect(proxyBtn).toHaveAttribute("aria-pressed", "true");
-    await expect(proxyBtn).toHaveAttribute("data-tip", "Playing the lightweight copy. Notes and timings are the same.");
-    await expect(originalBtn).toHaveAttribute("data-tip", "Play the full-quality file. It may stutter.");
+    // A proxy asked for from the player turns Proxies on, so it plays once ready.
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
+    await expect(toggle).toHaveAttribute("data-tip", "Proxies on · playing 1080p Low · P");
     const video = page.locator("video");
-    await expect(video).toHaveAttribute("src", /proxies%2Fhero_v1_proxy\.mp4/);
+    await expect(video).toHaveAttribute("src", /proxies%2Fhero_v1_proxy-1080l\.mp4/);
 
     await videoReady(page);
     for (let i = 0; i < 60; i++) await page.keyboard.press("ArrowRight");
     await expect(page.getByLabel("Timecode")).toContainText("0:02.00");
 
-    await originalBtn.click();
-    await expect(originalBtn).toHaveAttribute("aria-pressed", "true");
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
     await expect(video).toHaveAttribute("src", /renders%2Fhero_v1\.mov/);
     // The playhead stays where it was, even on a file this browser may not be able to play.
     await expect(page.getByLabel("Timecode")).toContainText("0:02.00");
 
-    await proxyBtn.click();
-    await expect(video).toHaveAttribute("src", /proxies%2Fhero_v1_proxy\.mp4/);
+    await page.keyboard.press("p");
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
+    await expect(video).toHaveAttribute("src", /proxies%2Fhero_v1_proxy-1080l\.mp4/);
     await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.readyState >= 1 && Math.abs(v.currentTime - 2) < 0.02)).toBe(true);
     expect(await video.evaluate((v: HTMLVideoElement) => v.paused)).toBe(true);
     await expect(page.getByLabel("Timecode")).toContainText("0:02.00");
@@ -1486,20 +1484,24 @@ test.describe("proxies (§19.5)", () => {
     }
   });
 
-  test("ticking the setting saves autoProxy, and a new qualifying cut starts its proxy by itself", async ({ page, rushes }) => {
+  test("§36: the Always make proxies switch saves alwaysProxy, and a new cut starts its proxy by itself", async ({ page, rushes }) => {
     await rushes.addCut();
     await page.goto(rushes.url);
     await videoReady(page);
-    // §27: the setting is in the More menu (the checkbox under the picture is gone).
+    // The More menu's Proxies row opens the Proxies tab, where the switch is.
     await openMore(page);
-    const auto = autoProxySetting(page);
+    await page.getByRole("menuitem", { name: "Proxies" }).click();
+    const panel = page.getByRole("tabpanel", { name: "Proxies" });
+    const auto = panel.getByRole("switch", { name: "Always make proxies for this project" });
+    await expect(auto).toHaveAttribute("aria-checked", "false");
     await auto.click();
-    await expect.poll(async () => (await rushes.api("GET", "/api/state")).project.autoProxy).toBe(true);
+    await expect.poll(async () => (await rushes.api("GET", "/api/state")).project.alwaysProxy).toBe(true);
     await expect(auto).toHaveAttribute("aria-checked", "true");
-    await page.keyboard.press("Escape");
+    // Turning it on made the latest cut's proxy.
+    await proxyRecorded(rushes, "v1");
 
     const added = await rushes.addProResCut({ long: true }, "prores cut");
-    expect(added.proxyJob?.state).toBe("running");
+    expect(["queued", "running"]).toContain(added.proxyJob?.state);
     await expect(cutButton(page)).toHaveAttribute("data-version", "v2");
     const offer = page.locator(".proxybar");
     await expect(offer).toContainText("Creating proxy");
@@ -1521,14 +1523,14 @@ test.describe("proxies (§19.5)", () => {
     await rushes.api("POST", "/api/videos/hero/versions/v1/proxy", {});
     await proxyRecorded(rushes, "v1");
     await sidebar.getByRole("button", { name: /Proxies/ }).click();
-    const row = page.locator(".arow", { hasText: "hero_v1_proxy.mp4" });
+    const row = page.locator(".arow", { hasText: "hero_v1_proxy-1080l.mp4" });
     await expect(row).toBeVisible();
     await expect(row.locator(".ameta")).toHaveText(/^[\d.]+ (B|KB|MB) · 640×360 · from v1$/);
 
     await row.getByRole("button", { name: "Delete proxy" }).click();
     await row.getByRole("button", { name: "Delete", exact: true }).click();
     await expect(sidebar.getByRole("button", { name: /Proxies/ })).toHaveCount(0);
-    await expect.poll(() => access(join(rushes.root, "proxies", "hero_v1_proxy.mp4")).then(() => true, () => false)).toBe(false);
+    await expect.poll(() => access(join(rushes.root, "proxies", "hero_v1_proxy-1080l.mp4")).then(() => true, () => false)).toBe(false);
     await access(join(rushes.root, "renders", "hero_v1.mov"));
     const state = await rushes.api("GET", "/api/state");
     expect(state.project.videos[0].versions[0].proxy).toBeNull();
@@ -1631,35 +1633,38 @@ test.describe("proxies (§19.5)", () => {
     await rushes.api("POST", "/api/videos/hero/versions/v1/proxy", {});
     await proxyRecorded(rushes, "v1");
     await page.goto(rushes.url);
+    await turnProxiesOn(page);
     const video = page.locator("video");
     await expect(video).toHaveAttribute("src", /proxies%2F/);
     await videoReady(page);
     await page.keyboard.press(" ");
     await expect.poll(() => video.evaluate((v: HTMLVideoElement) => !v.paused && v.currentTime > 0.3)).toBe(true);
     const before = await video.evaluate((v: HTMLVideoElement) => v.currentTime);
-    await page.getByRole("button", { name: "Original", exact: true }).click();
+    await proxiesButton(page).click();
     await expect(video).toHaveAttribute("src", /renders%2Fhero_v1\.mp4/);
     await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.readyState >= 2 && !v.paused && v.currentTime >= 0.3)).toBe(true);
     expect(await video.evaluate((v: HTMLVideoElement) => v.currentTime)).toBeGreaterThanOrEqual(before - 0.05);
-    await page.getByRole("button", { name: "Proxy", exact: true }).click();
+    await proxiesButton(page).click();
     await expect(video).toHaveAttribute("src", /proxies%2F/);
     await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.readyState >= 2 && !v.paused && v.currentTime >= 0.3)).toBe(true);
     await page.keyboard.press(" ");
   });
 
-  test("a proxy deleted while you watch takes the switch with it, back to the original", async ({ page, rushes }) => {
+  test("a proxy deleted while you watch goes back to the original, and the bar says there's no proxy", async ({ page, rushes }) => {
     await rushes.addProResCut();
     await rushes.api("POST", "/api/videos/hero/versions/v1/proxy", {});
     await proxyRecorded(rushes, "v1");
     await page.goto(rushes.url);
+    await turnProxiesOn(page);
     const video = page.locator("video");
-    await expect(page.getByRole("button", { name: "Proxy", exact: true })).toBeVisible();
     await expect(video).toHaveAttribute("src", /proxies%2F/);
     await rushes.api("DELETE", "/api/videos/hero/versions/v1/proxy", {});
-    await expect(page.getByRole("button", { name: "Proxy", exact: true })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Original", exact: true })).toHaveCount(0);
     await expect(video).toHaveAttribute("src", /renders%2Fhero_v1\.mov/);
-    await expect(page.locator(".proxybar").getByRole("button", { name: "Create proxy" })).toBeVisible();
+    // §36.7: no per-film switch any more; Proxies stays on, and the bar offers to make one.
+    await expect(page.getByRole("button", { name: "Original", exact: true })).toHaveCount(0);
+    await expect(proxiesButton(page)).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator(".proxybar")).toContainText("No proxy for this cut.");
+    await expect(page.locator(".proxybar").getByRole("button", { name: "Make proxy" })).toBeVisible();
   });
 
   test("Grab Frame on the proxy saves the original's full-size frame", async ({ page, rushes }) => {
@@ -1667,7 +1672,7 @@ test.describe("proxies (§19.5)", () => {
     await rushes.api("POST", "/api/videos/hero/versions/v1/proxy", {});
     await proxyRecorded(rushes, "v1");
     await page.goto(rushes.url);
-    await expect(page.getByRole("button", { name: "Proxy", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await turnProxiesOn(page);
     await expect(page.locator("video")).toHaveAttribute("src", /proxies%2F/);
     await videoReady(page);
     expect(await page.locator("video").evaluate((v: HTMLVideoElement) => v.videoWidth)).toBe(1920);

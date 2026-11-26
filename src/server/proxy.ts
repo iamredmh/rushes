@@ -6,12 +6,14 @@ import { join } from "node:path";
 import { RushesError, NotFoundError } from "../core/errors.js";
 import { VIDEO_FORMATS, hasFfprobe, probe as ffprobe, proxyNeed, type Probe } from "../core/media.js";
 import { fromManifestPath } from "../core/paths.js";
+import { DEFAULT_PROXY_PRESET, PRESETS, PROXY_AUDIO_KBPS, type ProxyPreset } from "../core/proxyPresets.js";
 import type { Project, Version } from "../core/schema.js";
 import type { ChangeEvent, Store } from "../core/store.js";
 
-// §19.5: opt-in proxies. One ffmpeg job per cut, with progress over SSE and a Cancel that kills
-// the process and deletes the half-written file. A version's `proxy` record is set only once a
-// render has completed and been renamed into place, so a `*.partial.mp4` never poses as a proxy.
+// §19.5 and §36: proxies. One job per cut, queued and run one at a time, newest cut first, with progress over SSE and a
+// Cancel that kills the process and deletes the half-written file. A version's `proxy` record is set only once a render
+// has completed and been renamed into place, so a `*.partial.mp4` never poses as a proxy. §36: each is made at one of
+// four presets, and making one at another preset replaces the old.
 
 /**
  * Spawns ffmpeg with an argument array, never through a shell (global constraints). Same contract
@@ -84,17 +86,20 @@ export const defaultFfmpeg: FfmpegRunner = makeFfmpegRunner();
 
 /** The visible folder proxies live in, at the project root. */
 export const PROXY_DIR = "proxies";
-/** A proxy file this server writes: proxies/<film-slug>_<version>_proxy.mp4. */
-export const PROXY_PATH = /^proxies\/[a-z0-9][a-z0-9-]*_v\d+_proxy\.mp4$/;
+/**
+ * A proxy file this server writes: proxies/<film-slug>_<version>_proxy-<preset>.mp4 (§36.4), or §19.5's
+ * proxies/<film-slug>_<version>_proxy.mp4, which still plays and can still be deleted.
+ */
+export const PROXY_PATH = /^proxies\/[a-z0-9][a-z0-9-]*_v\d+_proxy(?:-(?:1080h|1080l|720h|720l))?\.mp4$/;
 
-/** "proxies/hero-60s_v3_proxy.mp4" */
-export function proxyPath(video: string, version: string): string {
-  return `${PROXY_DIR}/${video}_${version}_proxy.mp4`;
+/** "proxies/hero-60s_v3_proxy-1080l.mp4"; without a preset, §19.5's "proxies/hero-60s_v3_proxy.mp4". */
+export function proxyPath(video: string, version: string, preset?: ProxyPreset): string {
+  return `${PROXY_DIR}/${video}_${version}_proxy${preset ? `-${preset}` : ""}.mp4`;
 }
 
 /** The half-written file for `proxyPath`: never recorded, deleted on cancel, failure and start-up. */
-export function partialPath(video: string, version: string): string {
-  return `${PROXY_DIR}/${video}_${version}_proxy.partial.mp4`;
+export function partialPath(video: string, version: string, preset?: ProxyPreset): string {
+  return `${PROXY_DIR}/${video}_${version}_proxy${preset ? `-${preset}` : ""}.partial.mp4`;
 }
 
 export interface FfmpegVersion {
@@ -113,42 +118,89 @@ export function hasFpsMode(v: FfmpegVersion | null): boolean {
   return v === null || v.major > 5 || (v.major === 5 && v.minor >= 1);
 }
 
+/** The H.264 encoders a proxy can be made with (§36.3). */
+export type ProxyEncoder = "libx264" | "h264_videotoolbox";
+
 /**
- * §19.5's encode, exactly: H.264 at most 1920 px on the long edge, same frame rate and length,
- * yuv420p, AAC, faststart. On ffmpeg before 5.1, `-vsync passthrough` stands in for
- * `-fps_mode passthrough`, which it doesn't know.
+ * §36.3, measured on the Mac mini (ffmpeg 9.0.2): h264_videotoolbox ignores `-maxrate` (a 5 Mbps cap peaked at
+ * 14 Mbps over 1 s windows; its constant-bitrate mode at 16). Every preset is capped, so VideoToolbox is never chosen
+ * while this is false. Set it true only after measuring an ffmpeg that holds the cap.
  */
-export function encodeArgs(orig: string, out: string, version: FfmpegVersion | null = null): string[] {
+export const VIDEOTOOLBOX_HONOURS_PEAK = false;
+
+/**
+ * Which encoder makes a capped proxy: VideoToolbox when ffmpeg has it and it holds the peak (macOS only), otherwise
+ * libx264. `encoders` is the names `ffmpeg -encoders` lists.
+ */
+export function chooseEncoder(encoders: readonly string[], honoursPeak = VIDEOTOOLBOX_HONOURS_PEAK): ProxyEncoder {
+  return honoursPeak && encoders.includes("h264_videotoolbox") ? "h264_videotoolbox" : "libx264";
+}
+
+/** "V....D h264_videotoolbox  VideoToolbox H.264 Encoder" lines -> ["h264_videotoolbox", …]. */
+export function parseEncoders(text: string): string[] {
+  return text
+    .split("\n")
+    .map((l) => /^\s*[VAS][.A-Z]{5}\s+(\S+)/.exec(l)?.[1])
+    .filter((n): n is string => !!n);
+}
+
+/** The scale filter for a preset (§36.3): the short edge at most `shortEdge`, never upscaled, both sides even. */
+export function scaleFilter(shortEdge: number): string {
+  // Landscape: the height is the short edge; portrait and square: the width. -2 keeps the shape, rounded to even.
+  return `scale=w='if(gt(iw,ih),-2,trunc(min(${shortEdge},iw)/2)*2)':h='if(gt(iw,ih),trunc(min(${shortEdge},ih)/2)*2,-2)'`;
+}
+
+/**
+ * §36.3's encode for a preset: H.264, the short edge at most the preset's (never upscaled), a capped bitrate (`-b:v`
+ * the average, `-maxrate` the peak, `-bufsize` half a second of the peak), a keyframe every 2 s, same frame rate and
+ * length, yuv420p, AAC 256 kbps, faststart. On ffmpeg before 5.1, `-vsync passthrough` stands in for `-fps_mode
+ * passthrough`, which it doesn't know.
+ */
+export function encodeArgs(
+  orig: string,
+  out: string,
+  version: FfmpegVersion | null = null,
+  preset: ProxyPreset = DEFAULT_PROXY_PRESET,
+  encoder: ProxyEncoder = "libx264",
+): string[] {
   const passthrough = hasFpsMode(version) ? ["-fps_mode", "passthrough"] : ["-vsync", "passthrough"];
+  const spec = PRESETS[preset];
+  const codec = encoder === "libx264" ? ["-c:v", "libx264", "-preset", "veryfast"] : ["-c:v", "h264_videotoolbox"];
   return [
     // Local files only, and only video containers (follow-up to final review I1): a cut that is
     // really a playlist (ffconcat named .mp4) is refused, never encoded from the files it names.
     "-hide_banner", "-y", "-protocol_whitelist", "file", "-format_whitelist", VIDEO_FORMATS, "-i", orig,
-    "-vf", "scale='if(gt(iw,ih),min(1920,iw),-2)':'if(gt(iw,ih),-2,min(1920,ih))'",
-    "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p", ...passthrough,
-    "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart",
+    "-vf", scaleFilter(spec.shortEdge),
+    ...codec,
+    "-b:v", `${spec.avgKbps}k`, "-maxrate", `${spec.peakKbps}k`, "-bufsize", `${Math.round(spec.peakKbps / 2)}k`,
+    "-force_key_frames", "expr:gte(t,n_forced*2)",
+    "-pix_fmt", "yuv420p", ...passthrough,
+    "-c:a", "aac", "-b:a", `${PROXY_AUDIO_KBPS}k`, "-movflags", "+faststart",
     "-progress", "pipe:1", out,
   ];
 }
 
-/** The proxy's size from the original's, by the same rule as the scale filter (even, at most 1920 on the long edge). */
-export function scaledSize(width: number, height: number): { width: number; height: number } {
-  const even = (n: number) => Math.max(2, Math.round(n / 2) * 2);
+/** The proxy's size from the original's, by the same rule as the scale filter (§36.3). */
+export function scaledSize(width: number, height: number, shortEdge = 1080): { width: number; height: number } {
+  const even = (n: number) => Math.max(2, Math.trunc(n / 2) * 2);
+  const evenRound = (n: number) => Math.max(2, Math.round(n / 2) * 2);
   if (width > height) {
-    const w = Math.min(1920, width);
-    return { width: w, height: w === width ? even(height) : even((height * w) / width) };
+    const h = even(Math.min(shortEdge, height));
+    return { width: evenRound((width * h) / height), height: h };
   }
-  const h = Math.min(1920, height);
-  return { width: h === height ? even(width) : even((width * h) / height), height: h };
+  const w = even(Math.min(shortEdge, width));
+  return { width: w, height: evenRound((height * w) / width) };
 }
 
-export type ProxyJobState = "running" | "done" | "failed" | "cancelled";
+export type ProxyJobState = "queued" | "running" | "done" | "failed" | "cancelled";
 
 /** A proxy job, as the routes return it. */
 export interface ProxyJob {
   id: string;
   video: string;
   version: string;
+  /** §36: the quality it is made at. */
+  preset: ProxyPreset;
   /** 0–100. Never goes down. */
   pct: number;
   state: ProxyJobState;
@@ -161,6 +213,7 @@ export interface ProxyEvent {
   job: string;
   video: string;
   version: string;
+  preset: ProxyPreset;
   pct: number;
   state: ProxyJobState;
   reason?: string;
@@ -175,7 +228,16 @@ export interface ProxyJobsOptions {
   available?: () => Promise<boolean>;
   /** How many file revisions' needs are remembered. Defaults to 500. */
   needCacheLimit?: number;
+  /** How many proxies are made at once. Defaults to PROXY_CONCURRENCY (§36.6). */
+  concurrency?: number;
+  /** The encoders ffmpeg lists. Read only when VideoToolbox could be chosen; tests inject a list. */
+  encoders?: () => Promise<string[]>;
+  /** Whether VideoToolbox holds the peak. Defaults to VIDEOTOOLBOX_HONOURS_PEAK; tests turn it on to cover that path. */
+  videotoolboxHonoursPeak?: boolean;
 }
+
+/** §36.6: one proxy at a time. An encode already uses every core libx264 is given; a second halves both. */
+export const PROXY_CONCURRENCY = 1;
 
 interface Running {
   job: ProxyJob;
@@ -184,6 +246,12 @@ interface Running {
   committing: boolean;
   cancelled: boolean;
   settled: Promise<ProxyJob>;
+  /** Ends `settled`, for a job that never left the queue. */
+  settle(job: ProxyJob): void;
+  /** The cut's addedAt, for the queue's newest-first order. */
+  addedAt: string;
+  /** Enqueue order: among cuts added at the same moment, the later ask goes first. */
+  seq: number;
 }
 
 export const NEED_CACHE_LIMIT = 500;
@@ -202,6 +270,14 @@ export class ProxyJobs {
   private versionOnce: Promise<{ ok: boolean; version: FfmpegVersion | null }> | null = null;
   private readonly byVersion = new Map<string, Running>();
   private readonly byId = new Map<string, Running>();
+  /** Jobs waiting for a slot, in no order: pump() picks the newest cut. */
+  private readonly pending: Running[] = [];
+  private active = 0;
+  private seq = 0;
+  private readonly concurrency: number;
+  private readonly honoursPeak: boolean;
+  private readonly listEncoders: (() => Promise<string[]>) | undefined;
+  private encoderOnce: Promise<ProxyEncoder> | null = null;
   private closing = false;
   // Why each file (by path, size and mtime) needs a proxy, so a file revision is probed once.
   private readonly needs = new Map<string, string | null>();
@@ -223,6 +299,9 @@ export class ProxyJobs {
     // Everything this probes is a cut (or a proxy of one), so it is read only as a video container.
     this.probeFile = opts.probe ?? ((abs, signal) => ffprobe(abs, { signal, formats: VIDEO_FORMATS }));
     this.needCacheLimit = opts.needCacheLimit ?? NEED_CACHE_LIMIT;
+    this.concurrency = Math.max(1, opts.concurrency ?? PROXY_CONCURRENCY);
+    this.honoursPeak = opts.videotoolboxHonoursPeak ?? VIDEOTOOLBOX_HONOURS_PEAK;
+    this.listEncoders = opts.encoders;
     const injected = opts.available;
     this.isAvailable = () =>
       injected
@@ -245,6 +324,30 @@ export class ProxyJobs {
       }
     })();
     return this.versionOnce;
+  }
+
+  /**
+   * The encoder proxies are made with (§36.3), worked out once. `ffmpeg -encoders` is only asked when VideoToolbox
+   * could be chosen (it holds the peak, on macOS); otherwise it is libx264 without asking.
+   */
+  encoder(): Promise<ProxyEncoder> {
+    this.encoderOnce ??= (async () => {
+      if (!this.honoursPeak) return "libx264";
+      if (!this.listEncoders && process.platform !== "darwin") return "libx264";
+      try {
+        const names = this.listEncoders
+          ? await this.listEncoders()
+          : await (async () => {
+              let text = "";
+              const r = await this.run(["-hide_banner", "-encoders"], { onStdout: (c) => (text += c.toString()) });
+              return r.code === 0 ? parseEncoders(text) : [];
+            })();
+        return chooseEncoder(names, this.honoursPeak);
+      } catch {
+        return "libx264";
+      }
+    })();
+    return this.encoderOnce;
   }
 
   /** Whether ffmpeg and ffprobe are both there. Checked once per server. */
@@ -273,30 +376,69 @@ export class ProxyJobs {
     return r ? { ...r.job } : undefined;
   }
 
-  /** Every running job, for GET /api/state. */
+  /** Every queued and running job, for GET /api/state. */
   list(): ProxyJob[] {
-    return [...this.byId.values()].map((r) => ({ ...r.job }));
+    return [...this.byId.values()].filter((r) => this.byVersion.get(key(r.job.video, r.job.version)) === r).map((r) => ({ ...r.job }));
   }
 
   /**
-   * Starts making a proxy for a cut, or returns the job already making one (Review Focus 2: two
-   * tabs or a double click get one job between them). The caller checks the cut exists first.
-   * Refused (503 `closing`) once the server has started closing.
+   * Queues a proxy for a cut at `preset` (§36.6), or returns the job already there (Review Focus 2: two tabs or a
+   * double click get one job between them). One job per cut: a queued one at another preset takes the new preset; a
+   * running one at another preset is cancelled and the new one queued. With a slot free it starts at once. The caller
+   * checks the cut exists first. Refused (503 `closing`) once the server has started closing.
    */
-  start(video: string, version: string): ProxyJob {
-    const existing = this.byVersion.get(key(video, version));
-    if (existing) return { ...existing.job };
+  start(video: string, version: string, opts: { preset?: ProxyPreset; addedAt?: string } = {}): ProxyJob {
+    const preset = opts.preset ?? DEFAULT_PROXY_PRESET;
+    const k = key(video, version);
+    const existing = this.byVersion.get(k);
+    if (existing && existing.job.preset === preset && !existing.cancelled) return { ...existing.job };
+    if (existing && existing.job.state === "queued") {
+      existing.job.preset = preset;
+      this.emit(existing.job);
+      return { ...existing.job };
+    }
     if (this.closing) throw new RushesError("Rushes is closing, so it isn't starting a proxy", 503, "closing");
-    const job: ProxyJob = { id: randomUUID(), video, version, pct: 0, state: "running" };
-    const r: Running = { job, controller: new AbortController(), committing: false, cancelled: false, settled: undefined! };
-    this.byVersion.set(key(video, version), r);
+    if (existing && !existing.committing) {
+      existing.cancelled = true;
+      existing.controller.abort();
+    }
+    const job: ProxyJob = { id: randomUUID(), video, version, preset, pct: 0, state: "queued" };
+    let settle!: (j: ProxyJob) => void;
+    const settled = new Promise<ProxyJob>((res) => (settle = res));
+    const r: Running = { job, controller: new AbortController(), committing: false, cancelled: false, settled, settle, addedAt: opts.addedAt ?? "", seq: ++this.seq };
+    this.byVersion.set(k, r);
     this.byId.set(job.id, r);
-    this.emit(job);
-    r.settled = this.execute(r).finally(() => {
-      this.byVersion.delete(key(video, version));
+    void settled.then(() => {
+      if (this.byVersion.get(k) === r) this.byVersion.delete(k);
       this.byId.delete(job.id);
     });
+    this.pending.push(r);
+    // A free slot starts it now (state "running" from its first event); otherwise it says it's queued.
+    if (!this.pump(r)) this.emit(job);
     return { ...job };
+  }
+
+  /**
+   * Starts the newest queued cuts while there are slots. Returns whether `first` was started (so start() doesn't
+   * announce it as queued as well).
+   */
+  private pump(first?: Running): boolean {
+    let startedFirst = false;
+    while (this.active < this.concurrency && this.pending.length > 0 && !this.closing) {
+      // Newest cut first; among equals, the later ask.
+      this.pending.sort((a, b) => (a.addedAt === b.addedAt ? b.seq - a.seq : a.addedAt < b.addedAt ? 1 : -1));
+      const r = this.pending.shift()!;
+      if (r === first) startedFirst = true;
+      this.active++;
+      r.job.state = "running";
+      this.emit(r.job);
+      void this.execute(r).then((end) => {
+        this.active--;
+        r.settle(end);
+        this.pump();
+      });
+    }
+    return startedFirst;
   }
 
   /** Resolves with the job's end state. Throws 404 when no such job is running. */
@@ -314,6 +456,16 @@ export class ProxyJobs {
   async cancel(jobId: string): Promise<ProxyJob> {
     const r = this.byId.get(jobId);
     if (!r) throw new NotFoundError("proxy job", jobId);
+    const waiting = this.pending.indexOf(r);
+    if (waiting >= 0) {
+      // Still queued: it simply leaves the queue. Nothing was spawned or written.
+      this.pending.splice(waiting, 1);
+      r.cancelled = true;
+      r.job.state = "cancelled";
+      this.emit(r.job);
+      r.settle({ ...r.job });
+      return r.settled;
+    }
     if (!r.committing) {
       r.cancelled = true;
       r.controller.abort();
@@ -446,7 +598,7 @@ export class ProxyJobs {
   }
 
   private emit(job: ProxyJob): void {
-    const e: ProxyEvent = { job: job.id, video: job.video, version: job.version, pct: job.pct, state: job.state };
+    const e: ProxyEvent = { job: job.id, video: job.video, version: job.version, preset: job.preset, pct: job.pct, state: job.state };
     if (job.reason !== undefined) e.reason = job.reason;
     this.store.emit("proxy", e);
   }
@@ -454,8 +606,10 @@ export class ProxyJobs {
   private async execute(r: Running): Promise<ProxyJob> {
     const { job } = r;
     const root = this.store.root;
-    const partial = fromManifestPath(root, partialPath(job.video, job.version));
-    const final = fromManifestPath(root, proxyPath(job.video, job.version));
+    const preset = job.preset;
+    const named = proxyPath(job.video, job.version, preset);
+    const partial = fromManifestPath(root, partialPath(job.video, job.version, preset));
+    const final = fromManifestPath(root, named);
     const end = (state: ProxyJobState, reason?: string): ProxyJob => {
       job.state = state;
       if (state === "done") job.pct = 100;
@@ -477,11 +631,11 @@ export class ProxyJobs {
       const version = findVersion(project, job.video, job.version);
       if (!version) return await fail("That cut isn't in the project any more");
       // A hand-edited id ("../x") must never put a file outside proxies/.
-      if (!PROXY_PATH.test(proxyPath(job.video, job.version))) return await fail("Rushes can't name a proxy for this cut");
+      if (!PROXY_PATH.test(named)) return await fail("Rushes can't name a proxy for this cut");
       const orig = fromManifestPath(root, version.file);
       if (!(await readableFile(orig))) return await fail("The original file is missing");
 
-      const [origProbe, ffmpeg] = await Promise.all([this.probe(orig).catch(() => null), this.ffmpegInfo()]);
+      const [origProbe, ffmpeg, encoder] = await Promise.all([this.probe(orig).catch(() => null), this.ffmpegInfo(), this.encoder()]);
       const duration = version.duration ?? origProbe?.duration ?? null;
       await mkdir(join(root, PROXY_DIR), { recursive: true });
       if (r.cancelled) return await cancelled();
@@ -502,7 +656,11 @@ export class ProxyJobs {
           }
         }
       };
-      const res = await this.run(encodeArgs(orig, partial, ffmpeg.version), { signal: r.controller.signal, onStdout });
+      let res = await this.run(encodeArgs(orig, partial, ffmpeg.version, preset, encoder), { signal: r.controller.signal, onStdout });
+      // §36.3: a VideoToolbox encode that fails (no session free, an odd source) is made again with libx264, once.
+      if (res.code !== 0 && encoder !== "libx264" && !r.cancelled) {
+        res = await this.run(encodeArgs(orig, partial, ffmpeg.version, preset, "libx264"), { signal: r.controller.signal, onStdout });
+      }
       if (r.cancelled) return await cancelled();
       if (res.code !== 0) return await fail(ffmpegReason(res.stderr));
 
@@ -521,18 +679,21 @@ export class ProxyJobs {
         out?.width && out?.height
           ? { width: out.width, height: out.height }
           : origProbe?.width && origProbe?.height
-            ? scaledSize(origProbe.width, origProbe.height)
+            ? scaledSize(origProbe.width, origProbe.height, PRESETS[preset].shortEdge)
             : null;
       if (!size) {
         await this.dropUnrecorded(final, job);
         return await fail("Couldn't read the proxy's size");
       }
       let recorded = false;
+      // §36.4: one proxy per cut. The one it replaces (another preset, or §19.5's) is deleted once the new one is recorded.
+      let replaced: string | null = null;
       try {
         await this.store.update("project", (p) => {
           const v = findVersion(p, job.video, job.version);
           if (!v) return;
-          v.proxy = { file: proxyPath(job.video, job.version), width: size.width, height: size.height, bytes: made.size, createdAt: new Date().toISOString() };
+          replaced = v.proxy && v.proxy.file !== named ? v.proxy.file : null;
+          v.proxy = { file: named, width: size.width, height: size.height, bytes: made.size, createdAt: new Date().toISOString(), preset };
           recorded = true;
         });
       } catch (e) {
@@ -543,6 +704,9 @@ export class ProxyJobs {
         await this.dropUnrecorded(final, job);
         return await fail("That cut isn't in the project any more");
       }
+      // Only ever a file this server wrote into proxies/: never the original, even from a hand-edited record.
+      const old: string | null = replaced;
+      if (old && PROXY_PATH.test(old)) await rm(fromManifestPath(root, old), { force: true }).catch(() => undefined);
       return end("done");
     } catch (e) {
       if (r.cancelled && !r.committing) return await cancelled();
@@ -559,7 +723,7 @@ export class ProxyJobs {
     let keep = false;
     try {
       const v = findVersion(await this.store.read("project"), job.video, job.version);
-      keep = v?.proxy?.file === proxyPath(job.video, job.version);
+      keep = v?.proxy?.file === proxyPath(job.video, job.version, job.preset);
     } catch {
       keep = false;
     }

@@ -13,8 +13,16 @@ import { vi } from "vitest";
 import type { ChildProcess } from "node:child_process";
 import {
   KILL_GRACE_MS,
+  PROXY_CONCURRENCY,
+  PROXY_PATH,
   ProxyJobs,
+  VIDEOTOOLBOX_HONOURS_PEAK,
+  chooseEncoder,
   encodeArgs,
+  parseEncoders,
+  partialPath,
+  proxyPath,
+  scaleFilter,
   extractFrame,
   frameArgs,
   hasFpsMode,
@@ -53,7 +61,7 @@ async function project(opts: { missing?: boolean; duration?: number | null } = {
 
 const ORIGINAL: Probe = { duration: 2, fps: 25, codec: "prores", width: 3840, height: 2160, pixFmt: "yuv422p10le" };
 const PROXY: Probe = { duration: 2, fps: 25, codec: "h264", width: 1920, height: 1080, pixFmt: "yuv420p" };
-const fakeProbe = async (abs: string): Promise<Probe> => (abs.endsWith("_proxy.mp4") ? PROXY : ORIGINAL);
+const fakeProbe = async (abs: string): Promise<Probe> => (/_proxy(-\w+)?\.mp4$/.test(abs) ? PROXY : ORIGINAL);
 
 interface Fake extends FfmpegRunner {
   calls: string[][];
@@ -107,13 +115,16 @@ function listen(store: Store): ProxyEvent[] {
 }
 
 describe("encodeArgs", () => {
-  it("is §19.5's encode, as an args array", () => {
+  it("is §36.3's encode for the default preset (1080p Low), as an args array", () => {
     expect(encodeArgs("/in/a.mov", "/out/b.partial.mp4")).toEqual([
       // Follow-up to final review I1: local files only, and only video containers, ahead of the input.
       "-hide_banner", "-y", "-protocol_whitelist", "file", "-format_whitelist", VIDEO_FORMATS, "-i", "/in/a.mov",
-      "-vf", "scale='if(gt(iw,ih),min(1920,iw),-2)':'if(gt(iw,ih),-2,min(1920,ih))'",
-      "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p", "-fps_mode", "passthrough",
-      "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart",
+      "-vf", "scale=w='if(gt(iw,ih),-2,trunc(min(1080,iw)/2)*2)':h='if(gt(iw,ih),trunc(min(1080,ih)/2)*2,-2)'",
+      "-c:v", "libx264", "-preset", "veryfast",
+      "-b:v", "4000k", "-maxrate", "5000k", "-bufsize", "2500k",
+      "-force_key_frames", "expr:gte(t,n_forced*2)",
+      "-pix_fmt", "yuv420p", "-fps_mode", "passthrough",
+      "-c:a", "aac", "-b:a", "256k", "-movflags", "+faststart",
       "-progress", "pipe:1", "/out/b.partial.mp4",
     ]);
   });
@@ -140,10 +151,15 @@ describe("encodeArgs", () => {
     expect(hasFpsMode({ major: 6, minor: 0 })).toBe(true);
   });
 
-  it("scales to at most 1920 on the long edge, keeping sizes even", () => {
+  it("§36.3: sizes by the short edge, never upscaling, keeping sizes even", () => {
     expect(scaledSize(3840, 2160)).toEqual({ width: 1920, height: 1080 });
     expect(scaledSize(2160, 3840)).toEqual({ width: 1080, height: 1920 });
+    expect(scaledSize(3840, 2160, 720)).toEqual({ width: 1280, height: 720 });
+    expect(scaledSize(1080, 1920, 720)).toEqual({ width: 720, height: 1280 });
+    expect(scaledSize(2000, 2000, 1080)).toEqual({ width: 1080, height: 1080 });
+    // Smaller than the preset: kept (an odd side made even), only the bitrate changes.
     expect(scaledSize(640, 360)).toEqual({ width: 640, height: 360 });
+    expect(scaledSize(641, 361, 720)).toEqual({ width: 640, height: 360 });
   });
 });
 
@@ -173,15 +189,15 @@ describe("ProxyJobs", () => {
     const pcts = events.map((e) => e.pct);
     for (let i = 1; i < pcts.length; i++) expect(pcts[i]).toBeGreaterThan(pcts[i - 1]);
     expect(pcts).toEqual([0, 10, 25, 50, 95, 99, 100]);
-    expect(events.at(-1)).toEqual({ job: job.id, video: "hero", version: "v1", pct: 100, state: "done" });
+    expect(events.at(-1)).toEqual({ job: job.id, video: "hero", version: "v1", preset: "1080l", pct: 100, state: "done" });
     expect(events.slice(0, -1).every((e) => e.state === "running")).toBe(true);
 
     const v = (await store.read("project")).videos[0].versions[0];
-    expect(v.proxy).toMatchObject({ file: "proxies/hero_v1_proxy.mp4", width: 1920, height: 1080, bytes: "partial bytes".length });
-    expect(await exists(join(root, "proxies", "hero_v1_proxy.mp4"))).toBe(true);
-    expect(await exists(join(root, "proxies", "hero_v1_proxy.partial.mp4"))).toBe(false);
+    expect(v.proxy).toMatchObject({ file: "proxies/hero_v1_proxy-1080l.mp4", width: 1920, height: 1080, bytes: "partial bytes".length });
+    expect(await exists(join(root, "proxies", "hero_v1_proxy-1080l.mp4"))).toBe(true);
+    expect(await exists(join(root, "proxies", "hero_v1_proxy-1080l.partial.mp4"))).toBe(false);
     // ffmpeg wrote to the partial name, never to the final one.
-    expect(run.calls.at(-1)!.at(-1)).toBe(join(root, "proxies", "hero_v1_proxy.partial.mp4"));
+    expect(run.calls.at(-1)!.at(-1)).toBe(join(root, "proxies", "hero_v1_proxy-1080l.partial.mp4"));
     expect(jobs.list()).toEqual([]);
   });
 
@@ -193,7 +209,7 @@ describe("ProxyJobs", () => {
     const job = jobs.start("hero", "v1");
     // Wait until ffmpeg has started and written its partial file; if the job ends first, this says why.
     await encodeStarted(run.started, jobs.wait(job.id));
-    expect(await exists(join(root, "proxies", "hero_v1_proxy.partial.mp4"))).toBe(true);
+    expect(await exists(join(root, "proxies", "hero_v1_proxy-1080l.partial.mp4"))).toBe(true);
     const end = await jobs.cancel(job.id);
     expect(end.state).toBe("cancelled");
     expect(run.killed).toBe(true);
@@ -341,20 +357,20 @@ describe("start-up clean-up (Review Focus 1)", () => {
     const { root } = await tmpProject();
     await mkdir(join(root, "proxies"));
     await writeFile(join(root, "proxies", "x.partial.mp4"), "half");
-    await writeFile(join(root, "proxies", "hero_v1_proxy.mp4"), "whole");
+    await writeFile(join(root, "proxies", "hero_v1_proxy-1080l.mp4"), "whole");
     expect(await removePartials(root)).toEqual(["x.partial.mp4"]);
-    expect(await readdir(join(root, "proxies"))).toEqual(["hero_v1_proxy.mp4"]);
+    expect(await readdir(join(root, "proxies"))).toEqual(["hero_v1_proxy-1080l.mp4"]);
   });
 
   it("a stray proxies/x.partial.mp4 is deleted when the server starts", async () => {
     const { root } = await tmpProject();
     await mkdir(join(root, "proxies"));
     await writeFile(join(root, "proxies", "x.partial.mp4"), "half");
-    await writeFile(join(root, "proxies", "hero_v1_proxy.mp4"), "whole");
+    await writeFile(join(root, "proxies", "hero_v1_proxy-1080l.mp4"), "whole");
     const s = await startServer(root, { port: 0 });
     try {
       expect(await exists(join(root, "proxies", "x.partial.mp4"))).toBe(false);
-      expect(await exists(join(root, "proxies", "hero_v1_proxy.mp4"))).toBe(true);
+      expect(await exists(join(root, "proxies", "hero_v1_proxy-1080l.mp4"))).toBe(true);
     } finally {
       await s.close();
     }
@@ -367,7 +383,7 @@ describe("start-up clean-up (Review Focus 1)", () => {
     const res = await fetch(`${s.url}/api/videos/hero/versions/v1/proxy`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
     expect(res.status).toBe(202);
     await encodeStarted(run.started);
-    expect(await exists(join(root, "proxies", "hero_v1_proxy.partial.mp4"))).toBe(true);
+    expect(await exists(join(root, "proxies", "hero_v1_proxy-1080l.partial.mp4"))).toBe(true);
     await s.close();
     expect(run.killed).toBe(true);
     expect(await readdir(join(root, "proxies"))).toEqual([]);
@@ -396,10 +412,10 @@ describe.skipIf(!FFMPEG)("ProxyJobs with real ffmpeg", () => {
     const end = await jobs.wait(jobs.start("hero", "v1").id);
     expect(end).toMatchObject({ state: "done", pct: 100 });
 
-    const proxy = join(root, "proxies", "hero_v1_proxy.mp4");
+    const proxy = join(root, "proxies", "hero_v1_proxy-1080l.mp4");
     const info = await stat(proxy);
     const record = (await store.read("project")).videos[0].versions[0].proxy;
-    expect(record).toMatchObject({ file: "proxies/hero_v1_proxy.mp4", width: 640, height: 360, bytes: info.size });
+    expect(record).toMatchObject({ file: "proxies/hero_v1_proxy-1080l.mp4", width: 640, height: 360, bytes: info.size });
 
     const count = (file: string) =>
       execFileSync("ffprobe", ["-v", "error", "-select_streams", "v:0", "-count_frames", "-show_entries", "stream=codec_name,nb_read_frames", "-of", "csv=p=0", file]).toString().trim();
@@ -409,7 +425,7 @@ describe.skipIf(!FFMPEG)("ProxyJobs with real ffmpeg", () => {
     const pcts = events.map((e) => e.pct);
     for (let i = 1; i < pcts.length; i++) expect(pcts[i]).toBeGreaterThan(pcts[i - 1]);
     expect(events.at(-1)?.state).toBe("done");
-    expect(await readdir(join(root, "proxies"))).toEqual(["hero_v1_proxy.mp4"]);
+    expect(await readdir(join(root, "proxies"))).toEqual(["hero_v1_proxy-1080l.mp4"]);
   });
 
   // Follow-up to final review I1: a cut registered before the fix that is really a playlist is
@@ -439,12 +455,12 @@ describe.skipIf(!FFMPEG)("ProxyJobs with real ffmpeg", () => {
     expect(await jobs.probe(join(root, "renders", "cat.mp4"))).toMatchObject({ duration: null, codec: null, width: null });
     const refused = await jobs.wait(jobs.start("cat", "v1").id);
     expect(refused.state).toBe("failed");
-    expect(existsSync(join(root, "proxies", "cat_v1_proxy.mp4"))).toBe(false);
+    expect(existsSync(join(root, "proxies", "cat_v1_proxy-1080l.mp4"))).toBe(false);
     for (const [name] of cuts) {
       const video = `film-${name.replace(".", "-")}`;
       expect((await jobs.probe(join(root, "renders", name))).codec, name).not.toBeNull();
       expect((await jobs.wait(jobs.start(video, "v1").id)).state, name).toBe("done");
-      expect(existsSync(join(root, "proxies", `${video}_v1_proxy.mp4`)), name).toBe(true);
+      expect(existsSync(join(root, "proxies", `${video}_v1_proxy-1080l.mp4`)), name).toBe(true);
     }
   }, 60_000);
 });
@@ -477,7 +493,7 @@ describe("ProxyJobs, risky paths (fix round 1)", () => {
     it(`with a ${duration === null ? "null" : "0"} duration, progress stays at 0 until done`, async () => {
       const { store } = await project({ duration });
       const events = listen(store);
-      const nothingKnown = async (abs: string): Promise<Probe> => (abs.endsWith("_proxy.mp4") ? PROXY : { ...ORIGINAL, duration });
+      const nothingKnown = async (abs: string): Promise<Probe> => (/_proxy(-\w+)?\.mp4$/.test(abs) ? PROXY : { ...ORIGINAL, duration });
       const run = fakeRunner({ steps: [500_000, 1_000_000, 1_500_000] });
       const jobs = new ProxyJobs(store, { run, probe: nothingKnown, available: async () => true });
       await jobs.wait(jobs.start("hero", "v1").id);
@@ -505,8 +521,8 @@ describe("ProxyJobs, risky paths (fix round 1)", () => {
     store.on("change", () => {
       // Checked synchronously at the moment project.json is written.
       seen.push({
-        final: existsSync(join(root, "proxies", "hero_v1_proxy.mp4")),
-        partial: existsSync(join(root, "proxies", "hero_v1_proxy.partial.mp4")),
+        final: existsSync(join(root, "proxies", "hero_v1_proxy-1080l.mp4")),
+        partial: existsSync(join(root, "proxies", "hero_v1_proxy-1080l.partial.mp4")),
       });
     });
     const jobs = new ProxyJobs(store, { run: fakeRunner(), probe: fakeProbe, available: async () => true });
@@ -527,7 +543,7 @@ describe("ProxyJobs, risky paths (fix round 1)", () => {
     let cancelling: Promise<unknown> | undefined;
     const probe = async (abs: string) => {
       // The probe of the finished file runs inside the commit: cancel right there.
-      if (abs.endsWith("_proxy.mp4") && !cancelling) cancelling = jobs.cancel(jobId);
+      if (/_proxy(-\w+)?\.mp4$/.test(abs) && !cancelling) cancelling = jobs.cancel(jobId);
       return fakeProbe(abs);
     };
     jobs = new ProxyJobs(store, { run, probe, available: async () => true });
@@ -537,8 +553,8 @@ describe("ProxyJobs, risky paths (fix round 1)", () => {
     expect(await cancelling).toMatchObject({ state: "done" });
     expect(end.state).toBe("done");
     expect(signal?.aborted).toBe(false);
-    expect((await store.read("project")).videos[0].versions[0].proxy?.file).toBe("proxies/hero_v1_proxy.mp4");
-    expect(await exists(join(root, "proxies", "hero_v1_proxy.mp4"))).toBe(true);
+    expect((await store.read("project")).videos[0].versions[0].proxy?.file).toBe("proxies/hero_v1_proxy-1080l.mp4");
+    expect(await exists(join(root, "proxies", "hero_v1_proxy-1080l.mp4"))).toBe(true);
   });
 
   it("when recording fails after the rename, a first proxy's file is removed", async () => {
@@ -559,7 +575,7 @@ describe("ProxyJobs, risky paths (fix round 1)", () => {
     const jobs = new ProxyJobs(store, { run: fakeRunner(), probe: fakeProbe, available: async () => true });
     await jobs.wait(jobs.start("hero", "v1").id);
     const before = (await store.read("project")).videos[0].versions[0].proxy;
-    expect(before?.file).toBe("proxies/hero_v1_proxy.mp4");
+    expect(before?.file).toBe("proxies/hero_v1_proxy-1080l.mp4");
 
     const real = store.update.bind(store);
     store.update = (async (k: any, fn: any, rev?: number) => {
@@ -568,7 +584,7 @@ describe("ProxyJobs, risky paths (fix round 1)", () => {
     }) as typeof store.update;
     const end = await jobs.wait(jobs.start("hero", "v1").id);
     expect(end).toMatchObject({ state: "failed", reason: "Couldn't record the proxy: disk full" });
-    expect(await readdir(join(root, "proxies"))).toEqual(["hero_v1_proxy.mp4"]);
+    expect(await readdir(join(root, "proxies"))).toEqual(["hero_v1_proxy-1080l.mp4"]);
     expect((await store.read("project")).videos[0].versions[0].proxy).toEqual(before);
   });
 
@@ -789,5 +805,153 @@ describe("frame extraction reads local files only (review M3)", () => {
     expect(await extractFrame(makeFfmpegRunner(), join(root, "gif.mp4"), 0.5)).toBeNull();
     execFileSync("ffmpeg", ["-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=64x36:rate=30:duration=1", "-c:v", "mpeg4", join(root, "a.avi")]);
     expect((await extractFrame(makeFfmpegRunner(), join(root, "a.avi"), 0.5))?.subarray(1, 4).toString()).toBe("PNG");
+  });
+});
+
+describe("§36 presets, encoder and queue", () => {
+  /** A project with `n` cuts of Hero, v1..vn, added a minute apart (v1 oldest). */
+  async function many(n: number) {
+    const { root, store } = await tmpProject();
+    await mkdir(join(root, "renders"), { recursive: true });
+    await writeFile(join(root, "renders", "hero.mov"), "original bytes");
+    await store.update("project", (p) => {
+      for (let i = 0; i < n; i++) addVersion(p, { video: "hero", file: "renders/hero.mov", duration: 2, fps: 25 }, new Date(Date.UTC(2026, 10, 26, 12, i)));
+    });
+    const versions = (await store.read("project")).videos[0].versions;
+    return { root, store, versions };
+  }
+
+  it("each preset scales by the short edge, never up, with its own capped bitrate and 256 kbps audio", () => {
+    const at = (args: string[], flag: string) => args[args.indexOf(flag) + 1];
+    for (const [preset, edge, avg, peak] of [["1080h", 1080, "10000k", "14000k"], ["1080l", 1080, "4000k", "5000k"], ["720h", 720, "3500k", "4500k"], ["720l", 720, "1500k", "2000k"]] as const) {
+      const a = encodeArgs("/in/a.mov", "/out/b.mp4", null, preset);
+      expect(at(a, "-vf")).toBe(scaleFilter(edge));
+      expect(at(a, "-b:v")).toBe(avg);
+      expect(at(a, "-maxrate")).toBe(peak);
+      // Half a second of the peak (§36.3).
+      expect(at(a, "-bufsize")).toBe(`${Number.parseInt(peak) / 2}k`);
+      expect(at(a, "-b:a")).toBe("256k");
+      expect(a).not.toContain("-crf");
+    }
+    // The filter: landscape caps the height, portrait and square cap the width, -2 keeps the shape; min() never upscales.
+    expect(scaleFilter(720)).toBe("scale=w='if(gt(iw,ih),-2,trunc(min(720,iw)/2)*2)':h='if(gt(iw,ih),trunc(min(720,ih)/2)*2,-2)'");
+  });
+
+  it("chooses libx264 unless VideoToolbox is listed and known to hold the peak, which none is today", () => {
+    expect(VIDEOTOOLBOX_HONOURS_PEAK).toBe(false);
+    expect(chooseEncoder(["libx264", "h264_videotoolbox"])).toBe("libx264");
+    expect(chooseEncoder(["libx264", "h264_videotoolbox"], true)).toBe("h264_videotoolbox");
+    expect(chooseEncoder(["libx264"], true)).toBe("libx264");
+    const vt = encodeArgs("/in/a.mov", "/out/b.mp4", null, "1080l", "h264_videotoolbox");
+    expect(vt.slice(vt.indexOf("-c:v"), vt.indexOf("-c:v") + 2)).toEqual(["-c:v", "h264_videotoolbox"]);
+    expect(vt).not.toContain("veryfast");
+    expect(parseEncoders(" V....D libx264              libx264 H.264\n V....D h264_videotoolbox    VideoToolbox H.264 Encoder (codec h264)\n A....D aac   AAC\n ------\n")).toEqual(["libx264", "h264_videotoolbox", "aac"]);
+  });
+
+  it("never asks ffmpeg for its encoders while VideoToolbox can't be chosen", async () => {
+    const { store } = await project();
+    const run = fakeRunner();
+    const jobs = new ProxyJobs(store, { run, probe: fakeProbe, available: async () => true });
+    expect(await jobs.encoder()).toBe("libx264");
+    expect(run.calls.some((a) => a.includes("-encoders"))).toBe(false);
+  });
+
+  it("a VideoToolbox encode that fails is made again with libx264, once", async () => {
+    const { store } = await project();
+    const calls: string[][] = [];
+    const run: FfmpegRunner = async (args) => {
+      calls.push(args);
+      if (args[0] === "-version") return { code: 0, stderr: "" };
+      await writeFile(args[args.length - 1], "bytes");
+      return args.includes("h264_videotoolbox") ? { code: 1, stderr: "Error: cannot create compression session" } : { code: 0, stderr: "" };
+    };
+    const jobs = new ProxyJobs(store, { run, probe: fakeProbe, available: async () => true, videotoolboxHonoursPeak: true, encoders: async () => ["libx264", "h264_videotoolbox"] });
+    expect(await jobs.encoder()).toBe("h264_videotoolbox");
+    const end = await jobs.wait(jobs.start("hero", "v1").id);
+    expect(end.state).toBe("done");
+    const encodes = calls.filter((a) => a[0] !== "-version").map((a) => a[a.indexOf("-c:v") + 1]);
+    expect(encodes).toEqual(["h264_videotoolbox", "libx264"]);
+  });
+
+  it("runs one job at a time, newest cut first; the rest wait queued and say so", async () => {
+    const { store, versions } = await many(3);
+    const events = listen(store);
+    const g = gate();
+    const run = fakeRunner({ gate: g.promise });
+    const jobs = new ProxyJobs(store, { run, probe: fakeProbe, available: async () => true });
+    const order: string[] = [];
+    store.on("proxy", (e: ProxyEvent) => e.state === "running" && e.pct === 0 && order.push(e.version));
+    // v1 first takes the free slot; then v2 and v3 queue, and v3 (newest) goes before v2.
+    const [a, b, c] = versions.map((v) => jobs.start("hero", v.id, { addedAt: v.addedAt }));
+    expect([a.state, b.state, c.state]).toEqual(["running", "queued", "queued"]);
+    expect(jobs.list().map((j) => [j.version, j.state])).toEqual([["v1", "running"], ["v2", "queued"], ["v3", "queued"]]);
+    expect(events.filter((e) => e.state === "queued").map((e) => e.version)).toEqual(["v2", "v3"]);
+    const ends = [a, b, c].map((j) => jobs.wait(j.id));
+    g.open();
+    for (const end of await Promise.all(ends)) expect(end.state).toBe("done");
+    expect(order).toEqual(["v1", "v3", "v2"]);
+  });
+
+  it("concurrency is an option: two at a time when asked", async () => {
+    const { store, versions } = await many(3);
+    const g = gate();
+    const jobs = new ProxyJobs(store, { run: fakeRunner({ gate: g.promise }), probe: fakeProbe, available: async () => true, concurrency: 2 });
+    const started = versions.map((v) => jobs.start("hero", v.id, { addedAt: v.addedAt }));
+    expect(jobs.list().filter((j) => j.state === "running")).toHaveLength(2);
+    const ends = started.map((j) => jobs.wait(j.id));
+    g.open();
+    await Promise.all(ends);
+    expect(PROXY_CONCURRENCY).toBe(1);
+  });
+
+  it("a queued job is cancelled without spawning anything; a queued one asked at another preset takes it", async () => {
+    const { store, versions } = await many(2);
+    const g = gate();
+    const run = fakeRunner({ gate: g.promise });
+    const jobs = new ProxyJobs(store, { run, probe: fakeProbe, available: async () => true });
+    const first = jobs.start("hero", "v1", { addedAt: versions[0].addedAt });
+    const queued = jobs.start("hero", "v2", { addedAt: versions[1].addedAt });
+    const moved = jobs.start("hero", "v2", { preset: "720l", addedAt: versions[1].addedAt });
+    expect(moved).toMatchObject({ id: queued.id, preset: "720l", state: "queued" });
+    expect((await jobs.cancel(queued.id)).state).toBe("cancelled");
+    g.open();
+    await jobs.wait(first.id);
+    expect(run.calls.filter((a) => a[0] !== "-version")).toHaveLength(1);
+    expect((await store.read("project")).videos[0].versions[1].proxy).toBeNull();
+  });
+
+  it("asking at another preset while one is running cancels it and makes the new one", async () => {
+    const { root, store } = await project();
+    let calls = 0;
+    const g = gate();
+    const run: FfmpegRunner = async (args, o = {}) => {
+      if (args[0] === "-version") return { code: 0, stderr: "" };
+      calls++;
+      await writeFile(args[args.length - 1], "bytes");
+      if (calls === 1) {
+        await new Promise<void>((res) => o.signal?.addEventListener("abort", () => res()));
+        return { code: 255, stderr: "" };
+      }
+      await g.promise;
+      return { code: 0, stderr: "" };
+    };
+    const jobs = new ProxyJobs(store, { run, probe: fakeProbe, available: async () => true });
+    const a = jobs.start("hero", "v1", { preset: "1080l" });
+    await new Promise((r) => setTimeout(r, 20));
+    const b = jobs.start("hero", "v1", { preset: "720h" });
+    expect(b.id).not.toBe(a.id);
+    expect((await jobs.wait(a.id)).state).toBe("cancelled");
+    g.open();
+    expect((await jobs.wait(b.id)).state).toBe("done");
+    expect((await store.read("project")).videos[0].versions[0].proxy).toMatchObject({ file: "proxies/hero_v1_proxy-720h.mp4", preset: "720h" });
+    expect(await readdir(join(root, "proxies"))).toEqual(["hero_v1_proxy-720h.mp4"]);
+  });
+
+  it("names a proxy by its preset, and still knows §19.5's name", () => {
+    expect(proxyPath("hero", "v3", "720l")).toBe("proxies/hero_v3_proxy-720l.mp4");
+    expect(partialPath("hero", "v3", "1080h")).toBe("proxies/hero_v3_proxy-1080h.partial.mp4");
+    expect(proxyPath("hero", "v3")).toBe("proxies/hero_v3_proxy.mp4");
+    for (const ok of ["proxies/hero_v3_proxy.mp4", "proxies/hero_v3_proxy-1080l.mp4", "proxies/hero-60s_v12_proxy-720h.mp4"]) expect(PROXY_PATH.test(ok)).toBe(true);
+    for (const bad of ["proxies/hero_v3_proxy-4k.mp4", "renders/hero_v3_proxy-1080l.mp4", "proxies/../hero_v3_proxy-1080l.mp4"]) expect(PROXY_PATH.test(bad)).toBe(false);
   });
 });

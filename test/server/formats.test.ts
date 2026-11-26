@@ -183,7 +183,7 @@ describe("POST /api/versions with formats (§21.4)", () => {
       return { proxyJobs: jobs };
     });
     await store.update("project", (p) => {
-      p.autoProxy = true;
+      p.alwaysProxy = true;
     });
     const r = await call("POST", "/api/versions", { video: "Hero", file: WIDE, formats: [{ file: TALL }, { file: "renders/alt_720x1280.mp4" }] });
     expect(r.status).toBe(409);

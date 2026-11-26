@@ -351,7 +351,7 @@ describe("appendEvent (§22.5, R4, Review Focus 3)", () => {
 
 describe("backfill and reading back (§22.6)", () => {
   const project = (): Project => {
-    const p: Project = { schema: 1, rev: 0, name: "Lumen launch film", fps: 30, videos: [], lanes: [], files: [], autoProxy: false };
+    const p: Project = { schema: 1, rev: 0, name: "Lumen launch film", fps: 30, videos: [], lanes: [], files: [], alwaysProxy: false, proxyPreset: "1080l" as const };
     addVersion(p, { video: "Hero", file: "renders/hero_v1.mp4", note: "v1: first pass; rough" }, at(-3000));
     addVersion(p, { video: "Hero", file: "renders/hero_v2.mp4", note: "v2 (batch b_1): tighter cut" }, at(-1000));
     addVersion(p, { video: "Hero", file: "renders/hero_v3.mp4", note: "v3: after the log began" }, at(10));
@@ -416,7 +416,7 @@ describe("backfill and reading back (§22.6)", () => {
     // Speed is measured outside the suite (task-3-report.md: 30,000 items in about 170 ms warm); a
     // wall-clock bound here failed under a load average of 200, so this checks the result only.
     const iso = (i: number) => at(-(20_000 - i) * 3).toISOString();
-    const p: Project = { schema: 1, rev: 0, name: "Lumen launch film", fps: 30, videos: [], lanes: [], files: [], autoProxy: false };
+    const p: Project = { schema: 1, rev: 0, name: "Lumen launch film", fps: 30, videos: [], lanes: [], files: [], alwaysProxy: false, proxyPreset: "1080l" as const };
     for (let f = 0; f < 3; f++) p.videos.push({ id: `film-${f}`, name: `Film ${f}`, lockedVersion: null, versions: Array.from({ length: 1000 }, (_, i) => ({ id: `v${i + 1}`, file: "r/a.mp4", duration: null, fps: null, addedAt: iso(f * 1000 + i), note: `v${i + 1}: a tighter cut`, label: "", shots: [], proxy: null, width: null, height: null, formats: [] })) });
     p.files = Array.from({ length: 3000 }, (_, i) => ({ id: `f${i}`, kind: "doc" as const, file: "d.md", name: `Doc ${i}`, note: "", video: null, addedAt: iso(i + 3) }));
     const b: BatchesFile = { schema: 1, rev: 0, batches: Array.from({ length: 3000 }, (_, i) => ({ id: `b${i}`, stage: "picture" as const, noteIds: ["n_1"], sectionIds: [], sentAt: iso(i + 7), prompt: "" })) };

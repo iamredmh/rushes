@@ -46,7 +46,7 @@ export interface State {
   batches: BatchesFile;
   tabs: TabState[];
   /** §19.5: whether the server has ffmpeg and ffprobe, and the proxy jobs running right now. */
-  proxies: { ffmpeg: boolean; jobs: ProxyJob[] };
+  proxies: { ffmpeg: boolean; jobs: ProxyJob[]; /** §36.3: the encoder proxies are made with; null without ffmpeg. */ encoder?: string | null };
   /** §20.6: what the last scan of the folder left, and what has been brought in this session. */
   found: FoundSummary;
   /** §24 step 2: brief.md as the dashboard shows it (`exists: false` when there is none). */

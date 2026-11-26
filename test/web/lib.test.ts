@@ -5,7 +5,7 @@ import {
 } from "../../web/src/lib.js";
 import type { Asset, Note, Section, Shot, TabState, Video } from "../../web/src/types.js";
 import {
-  mergeProxyJob, PLAYBACK_ERROR_REASON, proxyEstimateMb, proxyMeta, proxyPhase, proxyProgress, proxyReason, proxyTip, settleProxyJobs,
+  mergeProxyJob, PLAYBACK_ERROR_REASON, proxyEstimateMb, proxyMeta, proxyPhase, proxyProgress, proxyReason, proxyTip, proxiesKey, proxiesTip, speedText, stallsSayHint, settleProxyJobs,
   type ProxyJobs, type ProxyProgress,
 } from "../../web/src/lib.js";
 // Only this test imports the server's own list, so the web copy (ruling 1) is never pulled
@@ -973,7 +973,7 @@ describe("the VO pick rule: server mix and dashboard agree (parity)", () => {
     const { root } = await tmpProject("parity");
     await mkdir(join(root, "audio"), { recursive: true });
     await Promise.all(files.map((f) => writeFile(join(root, "audio", f), "x")));
-    const project: Project = { schema: 1, rev: 0, name: "p", fps: 30, videos: [], files: [], lanes, autoProxy: false };
+    const project: Project = { schema: 1, rev: 0, name: "p", fps: 30, videos: [], files: [], lanes, alwaysProxy: false, proxyPreset: "1080l" as const };
     for (const c of cases) {
       const picks: Picks = { schema: 1, rev: 0, sections: c.sections, lanes: c.lanes, levels: {}, videos: {} };
       const server = mixInputs(project, picks, ["voice"], root).map((i) => [relative(root, i.file).split(sep).join("/"), i.offset]);
@@ -1012,15 +1012,18 @@ describe("onOptionGroups keeps same-named rounds apart", () => {
 });
 
 describe("proxies (§19.5)", () => {
-  const job = (over: Partial<ProxyProgress> = {}): ProxyProgress => ({ job: "j1", video: "hero", version: "v1", pct: 0, state: "running", at: 1, ...over });
+  const job = (over: Partial<ProxyProgress> = {}): ProxyProgress => ({ job: "j1", video: "hero", version: "v1", preset: "1080l", pct: 0, state: "running", at: 1, ...over });
 
-  it("estimates the proxy at 1 MB a second (8 Mbit/s), rounded to 10 MB and never under 10", () => {
+  it("estimates the proxy from the preset's average bitrate plus 256 kbps audio, rounded to 10 MB and never under 10", () => {
     expect(proxyEstimateMb(6)).toBe(10);
     expect(proxyEstimateMb(0)).toBe(10);
     expect(proxyEstimateMb(NaN)).toBe(10);
-    expect(proxyEstimateMb(142)).toBe(140);
-    expect(proxyEstimateMb(145)).toBe(150);
-    expect(proxyTip(142)).toBe("Makes a lightweight 1080p copy on your drive so this cut previews smoothly. About 140 MB. Your original isn't changed.");
+    // 1080p Low: 4256 kbps = 0.532 MB a second.
+    expect(proxyEstimateMb(142)).toBe(80);
+    expect(proxyEstimateMb(142, "1080h")).toBe(180);
+    expect(proxyEstimateMb(142, "720l")).toBe(30);
+    expect(proxyTip(142)).toBe("Makes a lightweight 1080p Low copy on your drive so this cut previews smoothly. About 80 MB. Your original isn't changed.");
+    expect(proxyTip(142, "720h")).toBe("Makes a lightweight 720p High copy on your drive so this cut previews smoothly. About 70 MB. Your original isn't changed.");
   });
 
   it("never moves a job backwards: a finished job stays finished, and its % never drops", () => {
@@ -1041,15 +1044,15 @@ describe("proxies (§19.5)", () => {
   });
 
   it("turns a route's ProxyJob into the event's shape", () => {
-    expect(proxyProgress({ id: "j1", video: "hero", version: "v2", pct: 3, state: "failed", reason: "The original file is missing" }, 9)).toEqual({
-      job: "j1", video: "hero", version: "v2", pct: 3, state: "failed", reason: "The original file is missing", at: 9,
+    expect(proxyProgress({ id: "j1", video: "hero", version: "v2", preset: "720l", pct: 3, state: "failed", reason: "The original file is missing" }, 9)).toEqual({
+      job: "j1", video: "hero", version: "v2", preset: "720l", pct: 3, state: "failed", reason: "The original file is missing", at: 9,
     });
   });
 
   it("settling against a state seeds its running jobs and drops what it shows is over, but only older news", () => {
     const noProxy = () => false;
     // A tab opened mid-job: the state's running job is seeded.
-    const seeded = settleProxyJobs({}, [{ id: "j1", video: "hero", version: "v1", pct: 12, state: "running" }], 10, noProxy);
+    const seeded = settleProxyJobs({}, [{ id: "j1", video: "hero", version: "v1", preset: "1080l", pct: 12, state: "running" }], 10, noProxy);
     expect(seeded["hero/v1"]).toMatchObject({ job: "j1", pct: 12, state: "running", at: 10 });
     // A running job the state no longer lists ended unseen: dropped.
     expect(settleProxyJobs(seeded, [], 20, noProxy)).toEqual({});
@@ -1079,6 +1082,47 @@ describe("proxies (§19.5)", () => {
     expect(proxyPhase({ ...base, need: "x", hasProxy: true, job: job({ state: "done" }), watched: true })).toBe("done");
     expect(proxyPhase({ ...base, need: "x", hasProxy: true, job: job({ state: "done" }) })).toBe("none");
     expect(proxyPhase({ ...base, need: "x", hasProxy: true })).toBe("none");
+  });
+
+  it("§36.7: queued is working; with proxies on and no proxy, missing; with proxies off and stalling, the hint", () => {
+    const base = { ffmpeg: true, need: null, broken: false, hasProxy: false, job: undefined, starting: false, watched: false };
+    expect(proxyPhase({ ...base, job: job({ state: "queued" }) })).toBe("working");
+    expect(proxyPhase({ ...base, proxiesOn: true })).toBe("missing");
+    expect(proxyPhase({ ...base, proxiesOn: true, need: "x" })).toBe("missing");
+    expect(proxyPhase({ ...base, proxiesOn: true, hasProxy: true })).toBe("none");
+    expect(proxyPhase({ ...base, proxiesOn: true, job: job() })).toBe("working");
+    expect(proxyPhase({ ...base, stalling: true })).toBe("stall");
+    expect(proxyPhase({ ...base, stalling: true, hasProxy: true })).toBe("stall");
+    // The hint never shows with proxies on, and nothing shows without ffmpeg.
+    expect(proxyPhase({ ...base, stalling: true, proxiesOn: true, hasProxy: true })).toBe("none");
+    expect(proxyPhase({ ...base, ffmpeg: false, stalling: true, proxiesOn: true })).toBe("none");
+  });
+
+  it("§36.7: a queued job moves to running, may change preset while queued, and a running one never goes back to queued", () => {
+    let jobs: ProxyJobs = mergeProxyJob({}, job({ state: "queued", at: 1 }));
+    expect(mergeProxyJob(jobs, job({ state: "queued", at: 2 }))).toBe(jobs);
+    jobs = mergeProxyJob(jobs, job({ state: "queued", preset: "720l", at: 2 }));
+    expect(jobs["hero/v1"].preset).toBe("720l");
+    jobs = mergeProxyJob(jobs, job({ state: "running", preset: "720l", pct: 0, at: 3 }));
+    expect(jobs["hero/v1"].state).toBe("running");
+    expect(mergeProxyJob(jobs, job({ state: "queued", preset: "720l", at: 4 }))).toBe(jobs);
+    // A queued job the state no longer lists ended unseen: dropped, like a running one.
+    expect(settleProxyJobs(mergeProxyJob({}, job({ state: "queued", at: 1 })), [], 20, () => false)).toEqual({});
+  });
+
+  it("§36.7: the stall rule is two waits of 1 s or more within 30 s", () => {
+    expect(stallsSayHint([{ at: 0, ms: 1000 }], 1000)).toBe(false);
+    expect(stallsSayHint([{ at: 0, ms: 1000 }, { at: 5000, ms: 1200 }], 6000)).toBe(true);
+    expect(stallsSayHint([{ at: 0, ms: 1000 }, { at: 5000, ms: 999 }], 6000)).toBe(false);
+    expect(stallsSayHint([{ at: 0, ms: 1000 }, { at: 31_000, ms: 1000 }], 31_500)).toBe(false);
+  });
+
+  it("§36.7: the toolbar tooltip, the key per project, and the measured speed", () => {
+    expect(proxiesTip(true, "1080l")).toBe("Proxies on · playing 1080p Low");
+    expect(proxiesTip(false, "720h")).toBe("Proxies off · playing originals");
+    expect(proxiesKey("6xrjxdgf")).toBe("rushes:proxies:6xrjxdgf");
+    expect(speedText(5.84)).toBe("About 5.8 Mbps from here");
+    expect(speedText(42.4)).toBe("About 42 Mbps from here");
   });
 
   it("gives the server's reason, else the browser's refusal", () => {

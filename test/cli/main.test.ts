@@ -754,7 +754,7 @@ describe("cli: rushes add version and proxies (§19.5)", () => {
     return { code: 0, stderr: "" };
   };
 
-  it("prints the suggestion for a cut that may play badly, and says when autoProxy is making one", async () => {
+  it("prints the suggestion for a cut that may play badly, and says when Always make proxies is making one", async () => {
     const { root } = await tmpProject();
     await mkdir(join(root, "renders"), { recursive: true });
     await writeFile(join(root, "renders", "hero.mov"), "original");
@@ -772,10 +772,10 @@ describe("cli: rushes add version and proxies (§19.5)", () => {
       expect(await main(["add", "version", "renders/small.mp4", "--video", "Hero"], b.x)).toBe(0);
       expect(b.out).toEqual(["Added Hero v2"]);
 
-      await fetch(`${s.url}/api/project/settings`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ autoProxy: true }) });
+      await fetch(`${s.url}/api/project/settings`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ alwaysProxy: true }) });
       const c = io(root);
       expect(await main(["add", "version", "renders/hero.mov", "--video", "Hero"], c.x)).toBe(0);
-      expect(c.out).toEqual(["Added Hero v3", "Proxy suggested: It's a 4K ProRes file, which browsers struggle with. Making one now (autoProxy is on)."]);
+      expect(c.out).toEqual(["Added Hero v3", "Making a proxy (1080p Low): \"Always make proxies\" is on."]);
     } finally {
       await s.close();
     }
@@ -1053,7 +1053,7 @@ describe("formats on the CLI (§21.4)", () => {
       if (req.url === "/api/health") return void res.end(JSON.stringify({ app: "rushes", root, id: "abcdefgh" }));
       if (req.url === "/api/notes") return void res.end(JSON.stringify({ notes }));
       if (req.url === "/api/state") {
-        const project = { name: "Demo", fps: 30, lanes: [], files: [], autoProxy: false, videos: [{ id: "hero", name: "Hero", lockedVersion: null, versions: [{ id: "v1", file: "renders/hero.mp4", duration: 8, fps: 30, shots: [] }] }] };
+        const project = { name: "Demo", fps: 30, lanes: [], files: [], alwaysProxy: false, proxyPreset: "1080l" as const, videos: [{ id: "hero", name: "Hero", lockedVersion: null, versions: [{ id: "v1", file: "renders/hero.mp4", duration: 8, fps: 30, shots: [] }] }] };
         return void res.end(JSON.stringify({ project, script: { sections: [] }, picks: { lanes: {} } }));
       }
       res.statusCode = 404;

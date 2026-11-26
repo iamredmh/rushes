@@ -1,4 +1,5 @@
 // Pure helpers for the dashboard. No DOM, so they're unit-tested in Node.
+import { DEFAULT_PROXY_PRESET, PRESETS, PROXY_AUDIO_KBPS, type ProxyPreset } from "../../src/core/proxyPresets.js";
 import type { Asset, AssetKind, BriefSectionView, BriefView, Cue, FilmPlan, FoundCounts, FoundItem, FoundKind, FoundSummary, InUse, Lane, LaneStage, LogLine, LoudnessResult, Mark, Note, Picks, Project, ProxyEvent, ProxyJob, Section, Shot, Stage, State, StoryboardView, TabState, Variant, Video, Version } from "./types.js";
 export type { FoundItem } from "./types.js";
 
@@ -1108,17 +1109,46 @@ export function loudnessReadout(s: LoudnessState): ReadoutCell[] {
   return cells(level(r.integrated), level(r.truePeak), under);
 }
 
-// ---- Proxies (§19.5) ----
+// ---- Proxies (§19.5, §36) ----
 
-/** The Create proxy tooltip's size: duration × 8 Mbit/s (about 1 MB a second), rounded to 10 MB, and never under 10. */
-export function proxyEstimateMb(seconds: number): number {
-  return Math.max(10, Math.round((Number.isFinite(seconds) ? seconds : 0) / 10) * 10);
+/**
+ * The Create proxy tooltip's size: duration × the preset's average video bitrate plus 256 kbps audio, rounded to 10 MB,
+ * and never under 10.
+ */
+export function proxyEstimateMb(seconds: number, preset: ProxyPreset = DEFAULT_PROXY_PRESET): number {
+  const kbps = PRESETS[preset].avgKbps + PROXY_AUDIO_KBPS;
+  const mb = ((Number.isFinite(seconds) ? seconds : 0) * kbps) / 8 / 1000;
+  return Math.max(10, Math.round(mb / 10) * 10);
 }
 
-/** The Create proxy button's tooltip (§19.5). */
-export function proxyTip(seconds: number): string {
-  return `Makes a lightweight 1080p copy on your drive so this cut previews smoothly. About ${proxyEstimateMb(seconds)} MB. Your original isn't changed.`;
+/** The Create proxy button's tooltip (§19.5, §36). */
+export function proxyTip(seconds: number, preset: ProxyPreset = DEFAULT_PROXY_PRESET): string {
+  return `Makes a lightweight ${PRESETS[preset].label} copy on your drive so this cut previews smoothly. About ${proxyEstimateMb(seconds, preset)} MB. Your original isn't changed.`;
 }
+
+/** §36.7: where the toolbar's Proxies on/off is kept for this browser, per project. */
+export const proxiesKey = (project: string): string => `rushes:proxies:${project}`;
+
+/** §36.7: the toolbar button's tooltip. */
+export function proxiesTip(on: boolean, preset: ProxyPreset): string {
+  return on ? `Proxies on · playing ${PRESETS[preset].label}` : "Proxies off · playing originals";
+}
+
+/** "About 5.8 Mbps from here": a measured speed, to one decimal under 10 and whole above. */
+export function speedText(mbps: number): string {
+  return `About ${mbps < 10 ? mbps.toFixed(1) : Math.round(mbps)} Mbps from here`;
+}
+
+/** §36.7: the stall hint's rule: 2 or more waits of 1 s or longer within the last 30 s. */
+export const STALL_MIN_MS = 1000;
+export const STALL_WINDOW_MS = 30_000;
+export const STALLS_TO_HINT = 2;
+export function stallsSayHint(stalls: readonly { at: number; ms: number }[], now: number): boolean {
+  return stalls.filter((s) => s.ms >= STALL_MIN_MS && now - s.at <= STALL_WINDOW_MS).length >= STALLS_TO_HINT;
+}
+
+/** A job still to finish: waiting its turn, or being made. */
+export const proxyActive = (state: ProxyJob["state"] | undefined): boolean => state === "queued" || state === "running";
 
 /** The offer's reason when the browser itself refused the file, whatever the server thought of it. */
 export const PLAYBACK_ERROR_REASON = "The browser couldn't play this file";
@@ -1134,7 +1164,7 @@ export const proxyKey = (video: string, version: string): string => `${video}/${
 
 /** A route's ProxyJob in the SSE event's shape. */
 export function proxyProgress(job: ProxyJob, at: number): ProxyProgress {
-  const p: ProxyProgress = { job: job.id, video: job.video, version: job.version, pct: job.pct, state: job.state, at };
+  const p: ProxyProgress = { job: job.id, video: job.video, version: job.version, preset: job.preset, pct: job.pct, state: job.state, at };
   if (job.reason !== undefined) p.reason = job.reason;
   return p;
 }
@@ -1149,8 +1179,11 @@ export function mergeProxyJob(jobs: ProxyJobs, e: ProxyProgress): ProxyJobs {
   const key = proxyKey(e.video, e.version);
   const old = jobs[key];
   if (old && old.job === e.job) {
-    if (old.state !== "running") return jobs;
-    if (e.state === "running" && e.pct <= old.pct) return jobs;
+    if (!proxyActive(old.state)) return jobs;
+    // Queued news while queued (its preset may have changed) and anything past the queue land; a running job's % never drops.
+    if (old.state === "running" && e.state === "queued") return jobs;
+    if (old.state === "running" && e.state === "running" && e.pct <= old.pct) return jobs;
+    if (old.state === "queued" && e.state === "queued" && e.preset === old.preset) return jobs;
   } else if (old && old.at > e.at) {
     return jobs;
   }
@@ -1174,7 +1207,7 @@ export function settleProxyJobs(
   let next: Record<string, ProxyProgress> | null = null;
   for (const [key, p] of Object.entries(jobs)) {
     if (p.at >= since) continue;
-    const over = (p.state === "running" && !listed.has(p.job)) || (p.state === "done" && !hasProxy(p.video, p.version));
+    const over = (proxyActive(p.state) && !listed.has(p.job)) || (p.state === "done" && !hasProxy(p.video, p.version));
     if (!over) continue;
     next ??= { ...jobs };
     delete next[key];
@@ -1184,7 +1217,7 @@ export function settleProxyJobs(
   return out;
 }
 
-export type ProxyPhase = "none" | "offer" | "working" | "done";
+export type ProxyPhase = "none" | "offer" | "working" | "done" | "missing" | "stall";
 
 /**
  * Which row the bar under the player shows (§19.5). Nothing without ffmpeg. "working" while a job
@@ -1200,10 +1233,18 @@ export function proxyPhase(p: {
   job: ProxyProgress | undefined;
   starting: boolean;
   watched: boolean;
+  /** §36.7: the toolbar's Proxies is on in this browser. */
+  proxiesOn?: boolean;
+  /** §36.7: proxies are off and the player keeps stalling (not yet dismissed for this cut). */
+  stalling?: boolean;
 }): ProxyPhase {
   if (!p.ffmpeg) return "none";
-  if (p.starting || p.job?.state === "running" || (p.job?.state === "done" && !p.hasProxy)) return "working";
-  if (p.hasProxy) return p.watched && p.job?.state === "done" ? "done" : "none";
+  if (p.starting || proxyActive(p.job?.state) || (p.job?.state === "done" && !p.hasProxy)) return "working";
+  if (p.hasProxy && p.watched && p.job?.state === "done") return "done";
+  // §36.7: proxies on, and this cut has none to play.
+  if (!p.hasProxy && p.proxiesOn) return "missing";
+  if (p.stalling && !p.proxiesOn) return "stall";
+  if (p.hasProxy) return "none";
   return p.need || p.broken ? "offer" : "none";
 }
 

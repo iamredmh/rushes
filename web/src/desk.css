@@ -612,3 +612,43 @@ span.knm, span.knm:hover { cursor: default; background: none; }
 .takespanel .kfoot { flex: none; position: sticky; bottom: 0; z-index: 6; background: var(--app); border-top: 1px solid var(--line); }
 .takespanel .kfoot .ptrack { min-height: 28px; }
 .takespanel.zoomed .ruler, .takespanel.zoomed .tlane { overflow-x: clip; }
+
+/* §36.7: the toolbar's Proxies on/off, below the tools. Inactive: outlined. Active: filled with the accent. */
+.tools .toolgap { flex: none; height: 10px; }
+.tool.proxytoggle { border: 1.5px solid var(--line-2); color: var(--text-2); background: transparent; }
+.tool.proxytoggle:hover { border-color: var(--text-3); color: var(--text); background: var(--hover); }
+.tool.proxytoggle[aria-pressed="true"], .tool.proxytoggle.on { border-color: var(--accent); background: var(--accent); color: var(--on-accent); }
+.tool.proxytoggle[aria-pressed="true"]:hover { background: var(--accent-2, var(--accent)); }
+.tool.proxytoggle[aria-pressed="true"] .ic { fill: currentColor; }
+
+/* §36.7: the notes panel's Proxies tab. */
+.proxtab { display: flex; flex-direction: column; gap: 16px; padding: 12px 14px 16px; overflow: auto; }
+.proxsec { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.proxh { margin: 0; font: 600 var(--t-small)/1.2 var(--sans); color: var(--text-3); text-transform: uppercase; letter-spacing: .04em; }
+.proxnote { margin: 0; color: var(--text-3); font-size: var(--t-small); line-height: 1.4; }
+.proxpresets { display: flex; flex-direction: column; gap: 4px; align-self: stretch; }
+.proxpreset { display: grid; grid-template-columns: auto 1fr; column-gap: 8px; row-gap: 2px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+.proxpreset:hover { background: var(--hover); }
+.proxpreset.on { border-color: var(--accent); background: var(--accent-soft); }
+.proxpreset input { grid-row: span 2; margin: 2px 0 0; accent-color: var(--accent); }
+.proxpreset .pname { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--text); }
+.proxpreset .phint { color: var(--text-3); font-size: var(--t-small); line-height: 1.35; }
+.proxpreset .pfit { display: inline-grid; place-items: center; color: var(--done, var(--accent-2)); }
+.proxpreset .pfit .ic { width: 14px; height: 14px; }
+.proxswitch { display: inline-flex; align-items: center; gap: 10px; padding: 0; border: 0; background: transparent; color: var(--text); font: 500 var(--t-ui)/1.3 var(--sans); text-align: left; cursor: pointer; }
+.proxswitch .track { position: relative; flex: none; width: 32px; height: 18px; border-radius: 999px; background: var(--line-2); transition: background .15s; }
+.proxswitch .track i { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--text); transition: transform .15s; }
+.proxswitch[aria-checked="true"] .track { background: var(--accent); }
+.proxswitch[aria-checked="true"] .track i { transform: translateX(14px); background: var(--on-accent); }
+.proxtest { flex-direction: row; align-items: center; flex-wrap: wrap; }
+.proxspeed { color: var(--text-2); font-size: var(--t-small); }
+.proxlist { list-style: none; margin: 0; padding: 0; align-self: stretch; display: flex; flex-direction: column; gap: 2px; }
+.proxrow { display: flex; align-items: center; gap: 8px; padding: 7px 4px; border-bottom: 1px solid var(--line); }
+.proxrow .pcut { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.proxrow .pnm { font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.proxrow .pstate { color: var(--text-3); font-size: var(--t-small); }
+.proxrow.older .pstate { color: var(--todo); }
+.proxrow .pacts { flex: none; display: flex; gap: 4px; }
+.proxfoot { align-self: stretch; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.proxtotal { color: var(--text-3); font-size: var(--t-small); }
+@media (prefers-reduced-motion: reduce) { .proxswitch .track, .proxswitch .track i { transition: none; } }

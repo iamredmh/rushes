@@ -206,7 +206,7 @@ describe("Store", () => {
       // Written as 0.2.2 wrote them: no `label` on the cut, no found.json, no log.json.
       const files: Record<string, unknown> = {
         "project.json": {
-          schema: 1, rev: 4, name: "Lumen launch film", fps: 30, autoProxy: false, lanes: [], files: [],
+          schema: 1, rev: 4, name: "Lumen launch film", fps: 30, alwaysProxy: false, proxyPreset: "1080l" as const, lanes: [], files: [],
           videos: [{ id: "hero", name: "Hero", lockedVersion: null, versions: [{ id: "v1", file: "renders/hero_v1.mp4", note: "v1: first pass", addedAt: "2026-10-01T09:00:00.000Z", duration: null, proxy: null, shots: [] }] }],
         },
         "script.json": { schema: 1, rev: 0, wordsPerSecond: 2.6, sections: [] },

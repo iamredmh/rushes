@@ -198,7 +198,7 @@ describe("Version.label (§22.3, R2)", () => {
   });
 
   it("addVersion stores the label trimmed, and empty when there's none", () => {
-    const p: Project = { schema: 1, rev: 0, name: "demo", fps: 30, videos: [], lanes: [], files: [], autoProxy: false };
+    const p: Project = { schema: 1, rev: 0, name: "demo", fps: 30, videos: [], lanes: [], files: [], alwaysProxy: false, proxyPreset: "1080l" as const };
     expect(addVersion(p, { video: "Hero", file: "a.mp4", label: "  Launch slower " }).version.label).toBe("Launch slower");
     expect(addVersion(p, { video: "Hero", file: "b.mp4" }).version.label).toBe("");
     expect(addVersion(p, { video: "Hero", file: "c.mp4", label: "\u200b\u202e" }).version.label).toBe("");

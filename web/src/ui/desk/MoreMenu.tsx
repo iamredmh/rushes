@@ -1,5 +1,5 @@
 // §27, 5.2: the More menu, the top bar's last control. What is not about one place on the desk: bringing in the files found,
-// Export notes, shelving the film you are in, lighter copies of new cuts, the keyboard shortcuts and Appearance. It takes in
+// Export notes, shelving the film you are in, the Proxies tab (§36), the keyboard shortcuts and Appearance. It takes in
 // what the old film-actions menu held (§26.6).
 import { useState } from "preact/hooks";
 import { api } from "../../api.js";
@@ -14,13 +14,14 @@ export interface MoreMenuProps {
   onBringIn(): void;
   video: Video | undefined;
   onToggleShelved(): void;
-  autoProxy: boolean;
+  /** §36.7: opens the notes panel on its Proxies tab, where proxies are set up (replaces §19.5's autoProxy row). */
+  onProxies(): void;
   onKeys(): void;
   toast(message: string): void;
   onChanged(): void;
 }
 
-export function MoreMenu({ found, onBringIn, video, onToggleShelved, autoProxy, onKeys, toast, onChanged }: MoreMenuProps) {
+export function MoreMenu({ found, onBringIn, video, onToggleShelved, onProxies, onKeys, toast, onChanged }: MoreMenuProps) {
   const menu = useMenu(6);
   const shelved = !!video?.shelved;
   // The browser's own setting, not the film's.
@@ -35,14 +36,6 @@ export function MoreMenu({ found, onBringIn, video, onToggleShelved, autoProxy, 
     try {
       const { path } = await api.post<{ path: string }>("/api/exports/notes");
       toast(`Saved to ${path}`);
-      onChanged();
-    } catch (e) {
-      toast((e as Error).message);
-    }
-  };
-  const setAuto = async (on: boolean) => {
-    try {
-      await api.put("/api/project/settings", { autoProxy: on });
       onChanged();
     } catch (e) {
       toast((e as Error).message);
@@ -86,10 +79,9 @@ export function MoreMenu({ found, onBringIn, video, onToggleShelved, autoProxy, 
             {video && <span class="c fn" dir="auto">{video.name}</span>}
             <kbd>Shift+S</kbd>
           </button>
-          {/* Stays open: a setting, ticked or not where it is. */}
-          <button ref={menu.row(3)} type="button" role="menuitemcheckbox" class="mi" tabIndex={-1} aria-checked={autoProxy} onClick={() => void setAuto(!autoProxy)}>
-            <span class="mtick" aria-hidden="true">{autoProxy && <Icon name="check" />}</span>
-            <span class="nm">Make lighter copies of new cuts automatically</span>
+          <button ref={menu.row(3)} type="button" role="menuitem" class="mi" tabIndex={-1} onClick={act(onProxies)}>
+            <Icon name="zap" />
+            <span class="nm">Proxies</span>
           </button>
           <hr />
           <button ref={menu.row(4)} type="button" role="menuitem" class="mi" tabIndex={-1} onClick={act(onKeys)}>

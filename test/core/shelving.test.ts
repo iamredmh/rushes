@@ -12,7 +12,7 @@ import { VideoSchema, type BatchesFile, type NotesFile, type Project, type Scrip
 const AT = new Date("2026-10-13T10:00:00.000Z");
 
 function ctx() {
-  const project: Project = { schema: 1, rev: 0, name: "Lumen", fps: 30, videos: [], lanes: [], files: [], autoProxy: false };
+  const project: Project = { schema: 1, rev: 0, name: "Lumen", fps: 30, videos: [], lanes: [], files: [], alwaysProxy: false, proxyPreset: "1080l" as const };
   const script: Script = { schema: 1, rev: 0, wordsPerSecond: 2.6, sections: [] };
   const notes: NotesFile = { schema: 1, rev: 0, notes: [] };
   const batches: BatchesFile = { schema: 1, rev: 0, batches: [] };

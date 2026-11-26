@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, ApiError, projectId } from "../api.js";
 import {
   LOCKED_BRIEF, LOCKED_STORYBOARD, LOCKED_TAB, testFlags, STAGE_NAMES, agentPrompt, briefPrompt, briefSendPrompt, copyShortcut, currentFormat, defaultVersion, filmLanes, filmPicks, firstView, formatChips, formatPrompt, foundChip, foundSignature, foundTotal,
-  filmAfterShelving, inPlay, isPlanPage, noteOnFilm, scopeState, ROOT_PLAN, filmFromSearch, withFilm, type PlanPaths, labelOfId, latest, lockedFound, neighbourFormat, neighbourVideo, planProgress, planTarget, previousVersion, proxyKey, readyPrompt, storySendPrompt, storyboardPrompt, versionFormats, type PlanPage,
+  filmAfterShelving, inPlay, isPlanPage, noteOnFilm, scopeState, ROOT_PLAN, filmFromSearch, withFilm, type PlanPaths, labelOfId, latest, lockedFound, neighbourFormat, neighbourVideo, planProgress, planTarget, previousVersion, proxiesKey, proxyKey, readyPrompt, storySendPrompt, storyboardPrompt, versionFormats, type PlanPage,
 } from "../lib.js";
 import { onLabel } from "../../../src/core/notes.js";
 import { deskPlace, deskView, noteTarget, sendAgainOffer, takeCount, takeGroups, unfinishedLines, unsentCount, unsentEdits, viewForKey, type DeskView } from "../desk.js";
@@ -13,7 +13,7 @@ import { Assets, type FoundRequest } from "./Assets.js";
 import { Brief } from "./Brief.js";
 import { FormatToggle } from "./FormatToggle.js";
 import { Icon, STAGE_ICONS } from "./Icon.js";
-import { Picture, type Source } from "./Picture.js";
+import { Picture } from "./Picture.js";
 import { Storyboard } from "./Storyboard.js";
 import { PLAN_PANEL_ID, PlanSwitch, planTabId, type PlanTabRow } from "./Planning.js";
 import { Script } from "./Script.js";
@@ -112,6 +112,24 @@ function PlanNotesPanel({ onPendingChange, ...props }: NotesPanelProps & { onPen
   return <NotesPanel {...props} onTextChange={onPendingChange} />;
 }
 
+
+/** §36.7: a remembered on/off for this browser, read safely (a private window refuses storage; then it is off). */
+function readFlag(key: string): boolean {
+  try {
+    return window.localStorage.getItem(key) === "1";
+  } catch {
+    return false;
+  }
+}
+function writeFlag(key: string, on: boolean): void {
+  try {
+    if (on) window.localStorage.setItem(key, "1");
+    else window.localStorage.removeItem(key);
+  } catch {
+    // Storage refused: the choice holds for this visit only.
+  }
+}
+
 export function App() {
   const { state, assets, problem, wrongProject, refresh, proxyJobs, noteProxyJob, agent, noteAgent } = useRushes();
   // §28: the agent menu's opener, which the Send to AI row puts here.
@@ -165,9 +183,14 @@ export function App() {
   const playerRef = useRef<HTMLVideoElement | null>(null);
   // Tells Picture whenever its pending grab changes, so App can remember it per film.
   const setGrabFor = (forVideo: string, grab: string | null) => setGrabs((g) => ({ ...g, [forVideo]: grab }));
-  // §19.5: each film's Proxy/Original choice, in memory only. Proxy unless you've picked Original.
-  const [sources, setSources] = useState<Record<string, Source>>({});
-  const setSourceFor = (forVideo: string, source: Source) => setSources((s) => ({ ...s, [forVideo]: source }));
+  // §36.7: the toolbar's Proxies, on or off for this browser and project (each viewer's connection differs). Off by default.
+  const [proxiesOn, setProxiesOnState] = useState(() => readFlag(proxiesKey(projectId() ?? "")));
+  const setProxiesOn = (on: boolean) => {
+    setProxiesOnState(on);
+    writeFlag(proxiesKey(projectId() ?? ""), on);
+  };
+  // §36.7: the notes panel's Proxies tab is the one on show.
+  const [proxiesTab, setProxiesTab] = useState(false);
   // §21.5: each film's chosen format, in memory only; a fresh load shows the primary.
   const [formatChoice, setFormatChoice] = useState<Record<string, string>>({});
   // R2: the primary's shape as the player measured it, for a cut stored with no size.
@@ -652,6 +675,7 @@ export function App() {
     if (pending) return toast("Add or clear your note first");
     show(sendTo as Stage);
     panel.setShown(true);
+    setProxiesTab(false);
     changeLog.setOpen(false);
     setReveal(true);
   };
@@ -700,6 +724,19 @@ export function App() {
     unfinished: unfinishedLines(state.batches.batches),
     // §28: Set up Send to AI opens the first-Send sheet.
     agent: agent && { status: agent, onSetUp: firstSend.open, menu: agentMenu, onStatus: noteAgent, toast },
+    proxies: {
+      open: proxiesTab,
+      setOpen: setProxiesTab,
+      view: {
+        project: state.project,
+        ffmpeg: state.proxies?.ffmpeg ?? false,
+        jobs: proxyJobs,
+        noteProxyJob,
+        current: video && version ? { video: video.id, version: version.id } : null,
+        toast,
+        onChanged: () => void refresh(),
+      },
+    },
     shown: panel.shown,
     narrow: panel.narrow,
     setShown: panel.setShown,
@@ -710,8 +747,9 @@ export function App() {
     revealNotes: (then) => {
       afterReveal.current = then;
       panel.setShown(true);
+      if (proxiesTab) setProxiesTab(false);
       if (changeLog.open) changeLog.setOpen(false, false);
-      else if (panel.shown) {
+      else if (panel.shown && !proxiesTab) {
         afterReveal.current = null;
         then();
       }
@@ -803,6 +841,7 @@ export function App() {
               // §28: the run's lines are in Activity, in the notes panel (Review's when this page has none).
               if (!panelHere) show(reviewLast as Stage);
               panel.setShown(true);
+              setProxiesTab(false);
               changeLog.setOpen(true, false);
             }}
             onStop={() => void api.post("/api/agent/stop", {}).catch((e) => toast((e as Error).message))}
@@ -815,7 +854,11 @@ export function App() {
             onBringIn={() => openFound()}
             video={video}
             onToggleShelved={toggleShelved}
-            autoProxy={state.project.autoProxy}
+            onProxies={() => {
+              if (!panelHere) show(reviewLast as Stage);
+              panel.setShown(true);
+              setProxiesTab(true);
+            }}
             onKeys={() => {
               setSent(null);
               setKeysOpen(true);
@@ -858,6 +901,7 @@ export function App() {
             <span><kbd>N</kbd></span><span>New note</span>
             <span><kbd>V</kbd></span><span>Select</span>
             <span><kbd>F</kbd></span><span>Full screen</span>
+            <span><kbd>P</kbd></span><span>Proxies on or off</span>
             <span><kbd>1</kbd></span><span>Plan</span>
             <span><kbd>2</kbd>–<kbd>6</kbd></span><span>Review: Timeline, Voice, Music, Effects, Timeline</span>
             <span><kbd>7</kbd> <kbd>8</kbd></span><span>Visuals, Assets</span>
@@ -978,8 +1022,9 @@ export function App() {
               ffmpeg={state.proxies?.ffmpeg ?? false}
               proxyJob={proxyJobs[proxyKey(video.id, version.id)]}
               noteProxyJob={noteProxyJob}
-              source={sources[video.id] ?? "proxy"}
-              onSourceChange={setSourceFor}
+              proxiesOn={proxiesOn}
+              onProxiesChange={setProxiesOn}
+              proxyPreset={state.project.proxyPreset}
               formats={views}
               format={format}
               formatMissing={!!format && missingFiles.has(views.find((f) => f.id === format)?.file ?? "")}

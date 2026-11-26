@@ -4,7 +4,7 @@ import { api, mediaUrl, originalFrame } from "../api.js";
 import { noteTarget, rulerMarks, type Selection, type Tool, viewPct, viewTime, zoomView } from "../desk.js";
 import {
   BOX_REASON, boxFrom, boxShowsOn, contentRect, fmt, frameAt, noteFormatTag, noteTime, otherFormatNotes, placeNote, RESHAPE_MS, reshapeKeyframes, scopeHint, shotAt,
-  shotLabel, shotSeek, snap, spacePressesButton, stepFrame, testFlags, versionFormats, visibleNotes,
+  shotLabel, shotSeek, snap, spacePressesButton, stepFrame, testFlags, versionFormats, visibleNotes, proxiesTip, stallsSayHint, STALL_MIN_MS,
   type FormatView, type ProxyProgress,
 } from "../lib.js";
 import type { Asset, Note, ProxyJob, State, Video, Version } from "../types.js";
@@ -15,6 +15,7 @@ import { takeNotesOf } from "./desk/useTakeSelection.js";
 import { tabLabel, timelineNotes } from "../tabNotes.js";
 import { OtherFormats } from "./OtherFormats.js";
 import { ProxyBar } from "./ProxyBar.js";
+import { DEFAULT_PROXY_PRESET, type ProxyPreset } from "../../../src/core/proxyPresets.js";
 import { PictureTrack } from "./desk/PictureTrack.js";
 import { Ruler, type RulerMarker } from "./desk/Ruler.js";
 import { LoudnessReadout, SoundTracks } from "./desk/SoundTracks.js";
@@ -33,8 +34,8 @@ declare global {
   }
 }
 
-/** Which file the player shows when the cut has a proxy (§19.5). */
-export type Source = "proxy" | "original";
+/** §36.7: the cuts whose stall hint has been shown this session (by "video/version"): it shows once per cut. */
+const stallHinted = new Set<string>();
 
 type Box = { x: number; y: number; w: number; h: number };
 
@@ -68,9 +69,11 @@ export interface PictureProps {
   /** This cut's proxy job, as this tab last heard of it. */
   proxyJob?: ProxyProgress;
   noteProxyJob?(job: ProxyJob): void;
-  /** This film's Proxy/Original choice, remembered by the caller. Proxy unless you've picked Original. */
-  source?: Source;
-  onSourceChange?(video: string, source: Source): void;
+  /** §36.7: the toolbar's Proxies, on or off in this browser for this project. A cut with a ready proxy plays it when on. */
+  proxiesOn?: boolean;
+  onProxiesChange?(on: boolean): void;
+  /** §36.3: the project's preset, for the tooltip and a proxy made from the player. */
+  proxyPreset?: ProxyPreset;
   /** §21.5: this cut's shapes, the primary first (empty when its size isn't known yet). */
   formats?: FormatView[];
   /** §21.5: the format on screen; null on a one-format cut, which plays the version's own file. */
@@ -103,7 +106,7 @@ const typing = (el: EventTarget | null) => el instanceof HTMLElement && (el.isCo
  */
 export function Picture({
   video, version, fps, notes, toast, onChanged, onPendingChange, onMarksPendingChange, clock, mixView, grab, onGrabChange, playerRef,
-  ffmpeg = false, proxyJob, noteProxyJob, source = "proxy", onSourceChange,
+  ffmpeg = false, proxyJob, noteProxyJob, proxiesOn = false, onProxiesChange, proxyPreset = DEFAULT_PROXY_PRESET,
   formats = [], format = null, formatMissing = false, onPrimarySize, onBoxPendingChange, onFormatChange, readOnly = false, formatSwitch,
   state, assets,
 }: PictureProps) {
@@ -293,9 +296,9 @@ export function Picture({
     }
   }, [format, notes]);
 
-  // §19.5: the proxy plays unless you've picked Original. The switch never changes the cut, so
-  // notes, timecodes and frame numbers are the same on both.
-  const playsProxy = onPrimary && !!version.proxy && source !== "original";
+  // §36.7: with the toolbar's Proxies on, a cut with a ready proxy plays it (one at an older preset too, until it's
+  // remade). It never changes the cut, so notes, timecodes and frame numbers are the same on both.
+  const playsProxy = onPrimary && !!version.proxy && proxiesOn;
   const src = mediaUrl(playsProxy ? version.proxy!.file : onPrimary ? version.file : view!.file);
   const broken = brokenSrc === src;
 
@@ -607,6 +610,8 @@ export function Picture({
     else if (e.key === "ArrowLeft") { e.preventDefault(); step(e.shiftKey ? -10 : -1); }
     else if (e.key === "ArrowRight") { e.preventDefault(); step(e.shiftKey ? 10 : 1); }
     else if (k === "v") selectTool();
+    // §36.7: P turns proxies on and off, on a shelved film too (it changes nothing in the project).
+    else if (k === "p" && ffmpeg && onProxiesChange && !e.repeat) onProxiesChange(!proxiesOn);
     else if (escapeIsFree(e)) clearSelection();
     else if (k === "f") { e.preventDefault(); if (!e.repeat) fullScreen(); }
     // Premiere's keys for the timeline's zoom: = in, - out, \ the whole cut (\ alone is the notes panel's, on the desk).
@@ -747,8 +752,32 @@ export function Picture({
 
   const withClass = <T extends { class: string }>(p: T, more: string): T => ({ ...p, class: `${p.class} ${more}` });
 
-  const choose = (to: Source) => {
-    if (to !== source) onSourceChange?.(video.id, to);
+  // §36.7: the stall hint. With proxies off, a wait of STALL_MIN_MS or more counts as a stall; two within
+  // STALL_WINDOW_MS show the hint, once per cut per session. Seeking's own waits don't count.
+  const cutKey = `${video.id}/${version.id}`;
+  const [stalling, setStalling] = useState(false);
+  const stalls = useRef<{ at: number; ms: number }[]>([]);
+  const waitTimer = useRef<number | null>(null);
+  const clearWait = () => {
+    if (waitTimer.current !== null) clearTimeout(waitTimer.current);
+    waitTimer.current = null;
+  };
+  useEffect(() => {
+    stalls.current = [];
+    setStalling(false);
+    return clearWait;
+  }, [cutKey, playsProxy]);
+  const onWaiting = (v: HTMLVideoElement) => {
+    if (playsProxy || !onPrimary || v.seeking || waitTimer.current !== null || stallHinted.has(cutKey)) return;
+    waitTimer.current = window.setTimeout(() => {
+      waitTimer.current = null;
+      const now = performance.now();
+      stalls.current = [...stalls.current, { at: now, ms: STALL_MIN_MS }];
+      if (stallsSayHint(stalls.current, now) && !stallHinted.has(cutKey)) {
+        stallHinted.add(cutKey);
+        setStalling(true);
+      }
+    }, STALL_MIN_MS);
   };
 
   return (
@@ -764,6 +793,7 @@ export function Picture({
             onRange={rangeTool}
             onBox={() => setBoxMode((m) => !m)}
             onGrab={() => void grabFrame()}
+            proxies={ffmpeg && onProxiesChange ? { on: proxiesOn, tip: proxiesTip(proxiesOn, proxyPreset), onToggle: () => onProxiesChange(!proxiesOn) } : undefined}
           />
           {/* The picture, centred on black, as large as the monitor allows in the cut's own shape. Its width is worked out
               from the box's size (container units): Safari doesn't narrow a width from a height through aspect-ratio. */}
@@ -799,7 +829,10 @@ export function Picture({
                   }}
                   onSeeked={(e) => !resume.current && setT((e.target as HTMLVideoElement).currentTime)}
                   onPlay={() => setPlaying(true)}
-                  onPause={() => setPlaying(false)}
+                  onWaiting={(e) => onWaiting(e.target as HTMLVideoElement)}
+                  onPlaying={clearWait}
+                  onSeeking={clearWait}
+                  onPause={() => { clearWait(); setPlaying(false); }}
                   onEnded={() => setPlaying(false)}
                 />
                 <div
@@ -820,30 +853,6 @@ export function Picture({
                   </div>
                 </div>
                 <div class="tcover">f{frameAt(t, fps)}{current && ` · shot ${shotLabel(current.n)}`}</div>
-                {version.proxy && onPrimary && (
-                  <div class="srcswitch" role="group" aria-label="Which file plays">
-                    <button
-                      type="button"
-                      class="tip-below tip-start tip-wrap"
-                      aria-pressed={playsProxy}
-                      aria-label="Proxy"
-                      data-tip="Playing the lightweight copy. Notes and timings are the same."
-                      onClick={(e) => { (e.currentTarget as HTMLElement).blur(); choose("proxy"); }}
-                    >
-                      Proxy
-                    </button>
-                    <button
-                      type="button"
-                      class="tip-below tip-start tip-wrap"
-                      aria-pressed={!playsProxy}
-                      aria-label="Original"
-                      data-tip="Play the full-quality file. It may stutter."
-                      onClick={(e) => { (e.currentTarget as HTMLElement).blur(); choose("original"); }}
-                    >
-                      Original
-                    </button>
-                  </div>
-                )}
               </div>
             </div>
             {formatSwitch && <div class="monfmt">{formatSwitch}</div>}
@@ -862,6 +871,11 @@ export function Picture({
                 toast={toast}
                 onChanged={onChanged}
                 noteProxyJob={noteProxyJob}
+                preset={proxyPreset}
+                proxiesOn={proxiesOn}
+                onProxiesOn={onProxiesChange ? () => onProxiesChange(true) : undefined}
+                stalling={stalling && !proxiesOn}
+                onStallDismissed={() => setStalling(false)}
               />
             )}
           </div>

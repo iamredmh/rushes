@@ -1,0 +1,145 @@
+# §36 Proxies you can choose and switch on
+
+## 36.1 The problem
+
+Red, 26 Nov 2026, reviewing Cloud Engines Shorts from the DFINITY MacBook through the `mini rushes` tunnel. Tailscale goes through its London relay there, and a 30 MB ranged fetch ran at 0.64–0.75 MB/s (5–6 Mbps). The cuts are 1080p H.264 at 36–44 Mbps, 33–156 MB. They pass every §19.5 check (not 4K, under 1.5 GB, a codec browsers play), so Rushes never offers a proxy, and they stall constantly.
+
+§19.5's machinery works. What's missing is the choice: when a proxy is made, at what quality, and one way to switch.
+
+## 36.2 Decision (Red, 26 Nov 2026)
+
+1. **Four quality presets**, simple names: 1080p High, 1080p Low, 720p High, 720p Low.
+2. **A Proxies tab next to Activity**, where the quality is chosen and proxies are fine-tuned.
+3. **An "always make proxies" switch per project**, so every new cut gets one at the chosen quality.
+4. **One button in the left toolbar** that turns proxies on and off, with two clear states: active and inactive.
+
+**Replaces from §19.5:** the per-film **Proxy / Original** switch on the player (the toolbar button is the one control now), and the `autoProxy` checkbox and its criteria (the project switch makes a proxy for every new cut, whatever the criteria say). **Kept from §19.5:** the offer bar for a cut that meets the criteria (4K, over 1.5 GB, a codec browsers struggle with, a playback error) while the project switch is off; progress and Cancel over SSE; the `proxies/` folder; Grab Frame from the original; originals never touched.
+
+## 36.3 The presets
+
+| Preset | Id | Short edge | Video, average / peak | Audio |
+|---|---|---|---|---|
+| 1080p High | `1080h` | 1080 | 10 / 14 Mbps | AAC 256 kbps |
+| **1080p Low** (default) | `1080l` | 1080 | 4 / 5 Mbps | AAC 256 kbps |
+| 720p High | `720h` | 720 | 3.5 / 4.5 Mbps | AAC 256 kbps |
+| 720p Low | `720l` | 720 | 1.5 / 2 Mbps | AAC 256 kbps |
+
+- **Size goes by the short edge**, so a 9:16 short gets a 1080- or 720-wide proxy, never a squashed one. Never upscaled: a source smaller than the preset keeps its size (made even) and only the bitrate changes.
+- **Frame rate and duration** match the original (`-fps_mode passthrough`, `-vsync` before ffmpeg 5.1). yuv420p, faststart. A keyframe every 2 s, so a seek on a slow link fetches little.
+- **Capped bitrate, not CRF.** `-b:v` is the average, `-maxrate` the peak, and `-bufsize` **half a second** of the peak. The card asked for about 1 s; measured, a 1 s buffer let 1080p Low peak at 5.74 Mbps on the high-motion clip (15% over, at the limit), and 0.5 s holds every preset well inside it (36.8). Half a second still fits a 2 s keyframe comfortably.
+- **Audio stays 256 kbps** in every preset: Red reviews mixes on proxies, and it costs almost nothing next to the picture.
+- **1080p Low is the default**: it fits the 5–6 Mbps link measured above. 1080p Low and 720p High use about the same bandwidth on purpose: one keeps on-screen text sharp, the other keeps motion clean.
+
+### Encoder: libx264, because VideoToolbox ignores the cap
+
+The card asked for `h264_videotoolbox` on macOS where ffmpeg has it, if it honours the peak. Measured on the Mac mini (ffmpeg 9.0.2, a 16 s clip with a 3 s burst of full-frame noise after a still section, 1080p, 1 s windows):
+
+| Encoder | Asked | Peak measured |
+|---|---|---|
+| h264_videotoolbox, `-b:v 4M -maxrate 5M -bufsize 5M` | 5 Mbps peak | **14.05 Mbps** |
+| h264_videotoolbox, `-constant_bit_rate 1 -b:v 4M` | 4 Mbps constant | **16.03 Mbps** |
+| h264_videotoolbox, `-b:v 10M -maxrate 14M` | 14 Mbps peak | **34.82 Mbps** |
+| libx264 veryfast, `-b:v 4M -maxrate 5M -bufsize 2.5M` | 5 Mbps peak | 5.71 Mbps |
+
+VideoToolbox doesn't honour `-maxrate` (nor its constant-bitrate mode) in this ffmpeg, and every preset is capped, so **every preset encodes with libx264 `-preset veryfast`**. It costs nothing in time: on the mini, libx264 veryfast made the 1080p clips in 0.9–1.6 s against VideoToolbox's 1.9 s.
+
+The choice stays in code (`chooseEncoder`): VideoToolbox would be picked for a preset only when ffmpeg lists it **and** it is known to honour the peak, which no ffmpeg does today (`VIDEOTOOLBOX_HONOURS_PEAK = false`); a VideoToolbox encode that fails is retried once with libx264. Windows and Linux always use libx264.
+
+## 36.4 One proxy per cut
+
+- **Name**: `proxies/<film-slug>_<version>_proxy-<preset>.mp4`, e.g. `proxies/hero_v3_proxy-1080l.mp4`.
+- **Record**: the version's `proxy` gains `preset`. Making a proxy at another preset **replaces** the old one: the new file is recorded, then the old file is deleted.
+- **Older proxies**: a §19.5 proxy (`<slug>_<version>_proxy.mp4`, no `preset`) still plays, and shows as **"1080p (older)"**. It counts as not at the chosen preset, so "Remake" applies.
+
+## 36.5 Project settings
+
+In `project.json`:
+
+- `proxyPreset`: `"1080h" | "1080l" | "720h" | "720l"`, default `"1080l"`.
+- `alwaysProxy`: boolean, default off. **Replaces `autoProxy`**: on reading, `autoProxy: true` becomes `alwaysProxy: true`, and `autoProxy` is dropped on the next write.
+
+`PUT /api/project/settings` takes either or both (and `autoProxy` as an old name for `alwaysProxy`, for older clients).
+
+- **Turning the switch on** queues a proxy for the **latest version of each film in play** (not shelved, §26) that has none at the chosen preset. Older versions are made only when asked.
+- **Changing the preset** deletes nothing. Ready proxies at another preset show "older quality". With the switch on, the latest version of each film is queued for a remake; older versions are not.
+- **A new cut** (`POST /api/versions`, `rushes_add_version`), with the switch on, gets a proxy at the chosen preset straight away, whatever §19.5's criteria say. With it off, §19.5's `proxySuggested` and reason are returned as before, and nothing starts.
+
+## 36.6 The queue
+
+- **One job at a time.** An encode already uses every core libx264 is given, so a second one in parallel doesn't finish the pair sooner; it halves the speed of each and doubles the memory, and the desk's own ffmpeg work (Grab Frame, waveforms, probes) competes with both. One at a time also makes "newest first" mean what it says: the cut you just added is the next one done.
+- **Order: newest cut first** (the version's `addedAt`), so the cut you're about to watch is ready first.
+- **States**: `queued`, `running` (with %), then `done`, `failed` or `cancelled`. Every change goes to every open tab over SSE, as in §19.5. Cancel works on a queued job too (it simply leaves the queue).
+- **One job per cut.** Asking again at the same preset joins the job already there. Asking at another preset replaces it: a queued job changes preset, a running one is cancelled and the new one queued.
+
+Routes:
+
+- `POST /api/videos/:video/versions/:version/proxy` takes an optional `{ preset }`, defaulting to the project's.
+- `POST /api/proxies` (**Make proxies now**): queues the latest version of each film in play that has no proxy at the chosen preset. Returns the jobs.
+- `DELETE /api/proxies` (**Delete all proxies**): cancels every job, then removes every proxy file and record. Originals are never touched.
+- `DELETE /api/videos/:video/versions/:version/proxy` as before.
+
+## 36.7 On the desk
+
+### The Proxies tab
+
+In the notes panel's tab list, after Activity (`web/src/ui/desk/ProxiesTab.tsx`), in the wide panel and the narrow drawer alike. Arrow keys move across all three tabs. Top to bottom:
+
+- **Quality**: the four presets as a radio group, each with a one-line hint:
+  - 1080p High: "Closest to the original, for a fast connection (≈14 Mbps)"
+  - 1080p Low: "Sharp picture, plays on a slow connection (≈5 Mbps)"
+  - 720p High: "Smooth motion on a slow connection (≈4.5 Mbps)"
+  - 720p Low: "Plays almost anywhere, softer picture (≈2 Mbps)"
+
+  The figures are the peaks, the rate a connection must sustain.
+- **Always make proxies for this project**: an on/off switch (36.5).
+- **Make proxies now (N)**: shown while the switch is off and N latest cuts lack a proxy at the chosen quality.
+- **Test connection**: times a ranged fetch of the first 16 MB of the cut on screen (or the latest cut), from this browser, uncached, and says "About 5.8 Mbps from here", with a tick beside each preset whose peak fits in that speed. It never changes anything by itself.
+- **The list**: each film's latest cut, plus every cut that has a proxy, newest first. Each row: film and version, then the state (none / queued / making with % and Cancel / ready / "older quality, remake?"), the preset and size, and **Make** (or **Remake**) and **Delete**.
+- Under the list: the total disk the proxies use, and **Delete all proxies** (asks once more).
+
+### The toolbar button
+
+In the monitor's tool strip (`ToolStrip`), below the five tools with a small gap, on the Picture tabs only. A toggle with `aria-pressed`:
+
+- **Active**: filled, accent colour. Tooltip "Proxies on · playing 1080p Low". Key **P**.
+- **Inactive**: outlined. Tooltip "Proxies off · playing originals".
+
+Remembered **per browser, per project** (`localStorage` `rushes:proxies:<project id>`), default off: each viewer's connection differs (the mini's own screen wants originals; a laptop on the relay wants proxies).
+
+- **On**: every cut with a ready proxy plays it; a proxy at an older preset still plays until it's remade. A cut with no proxy plays the original, and the bar under the player says **"No proxy for this cut"** with **Make proxy** (at the project's preset).
+- **The §19.5 offer** (project switch off, a cut that meets the criteria): **Create proxy** makes it at the project's preset, and turns Proxies on **once it is ready**, so it plays. Cancelled or failed, nothing changes and the offer returns, as in §19.5. (Turning Proxies on at the press would replace the offer with "No proxy for this cut" after a Cancel.)
+- **Off**: originals everywhere.
+- **Swapping** keeps the playhead and whether it was playing.
+- Notes, timecodes and frame numbers are the same either way. **Grab Frame always reads the original**.
+
+The per-film Proxy / Original switch on the player is gone. The More menu's old "Make lighter copies of new cuts automatically" row is now **Proxies**, which opens the tab. **P** is listed in Keyboard shortcuts.
+
+### The stall hint
+
+With proxies off, when the player stalls twice within 30 s for 1 s or more each (a `waiting` not followed by `playing` within 1 s; a wait while seeking doesn't count), one line shows under the player: **"Playback is stalling. Turn on proxies?"** with **Turn on proxies**, which turns the toggle on and makes a proxy for the cut if it has none. Once per cut per session (dismissable). Rushes never switches on its own.
+
+## 36.8 Measured
+
+**Encode check** (`test/server/proxyEncode.test.ts`, real ffmpeg; skipped without it): a 5 s 1920×1080 high-motion clip (`testsrc2` under full-frame noise that changes every frame), encoded at each preset; the peak is the most bits in any 1 s window of video packets (ffprobe). It must be within 15% of the cap, and the average within 15% of the preset's. The same test checks portrait, square and smaller-than-preset sizes. On the mini (libx264, ffmpeg 9.0.2), with two harsher clips for reference (12 s of constant heavier noise, and 16 s of still picture with a 3 s noise burst):
+
+| Preset | Cap | Test clip avg / peak | Heavy noise avg / peak | Burst clip avg / peak |
+|---|---|---|---|---|
+| 1080p High | 14 | 8.92 / 12.01 | 9.70 / 13.70 | 7.70 / 15.93 |
+| 1080p Low | 5 | 3.43 / 4.57 | 3.81 / 4.98 | 3.08 / 5.71 |
+| 720p High | 4.5 | 3.12 / 4.21 | 3.11 / 4.70 | 2.77 / 5.34 |
+| 720p Low | 2 | 1.27 / 1.71 | 1.33 / 1.89 | 1.25 / 2.18 |
+
+All in Mbps. The burst clip's 1 s peaks run up to 19% over the cap in the second after a still section: that is the half-second VBV buffer draining, by design. The stream stays VBV-compliant, so a player with half a second buffered at the cap's rate never stalls.
+
+**Hands-on** (26 Nov, the Mac mini, a copy of Cloud Engines Shorts served from the branch on port 4598): turning the switch on at 1080p Low made the latest cut of all six films in 25 s, one at a time; changing to 720p Low showed all six as older and remade them in 17 s. Toggling Proxies while playing swapped the file and kept playing from the same place every time. The originals are 1080p H.264 at 9–55 Mbps.
+
+| Film | Original | 1080p Low: size, time, avg / peak | 720p Low: size, time, avg / peak |
+|---|---|---|---|
+| Engine sizes v14 | 22.2 s, 124 MB, 44.6 Mbps | 9.4 MB, 3.1 s, 3.11 / 5.00 | 4.0 MB, 1.8 s, 1.18 / 1.95 |
+| Cloud on cloud v9 | 28.0 s, 33 MB, 9.3 Mbps | 13.0 MB, 3.5 s, 3.43 / **6.03** | 5.3 MB, 2.2 s, 1.24 / 2.13 |
+| North America v4 | 30.2 s, 202 MB, 53.5 Mbps | 12.1 MB, 5.1 s, 3.20 / 5.27 | 4.4 MB, 3.6 s, 1.16 / 2.02 |
+| EU only v9 | 33.0 s, 226 MB, 54.7 Mbps | 14.2 MB, 5.9 s, 3.19 / 5.05 | 5.9 MB, 4.1 s, 1.17 / 1.90 |
+| Engine power v9 | 23.9 s, 117 MB, 39.2 Mbps | 9.6 MB, 3.6 s, 2.94 / 4.82 | 3.9 MB, 2.6 s, 1.03 / 1.86 |
+| Always running v17 | 24.8 s, 138 MB, 44.6 Mbps | 10.9 MB, 5.0 s, 3.25 / 4.66 | 4.6 MB, 3.0 s, 1.23 / 1.84 |
+
+Eleven of the twelve sit within 15% of the cap. Cloud on cloud at 1080p Low peaks 21% over, in the second from 24.3 s, a busy shot after a lighter stretch: the half-second buffer draining, as on the burst clip. It is within the VBV model, so a link that carries 5 Mbps with half a second buffered plays it without a stall; a 1 s window can't promise less without a buffer too small for a 1080p keyframe.

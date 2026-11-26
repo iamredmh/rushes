@@ -34,13 +34,22 @@ export const ShotSchema = fileObject({
 });
 export type Shot = z.infer<typeof ShotSchema>;
 
+/** §36.3: the four proxy qualities, by id: 1080p High, 1080p Low, 720p High, 720p Low. */
+export const PROXY_PRESETS = ["1080h", "1080l", "720h", "720l"] as const;
+export const ProxyPresetSchema = z.enum(PROXY_PRESETS);
+export type ProxyPreset = z.infer<typeof ProxyPresetSchema>;
+/** §36.3: the quality a project starts with: it fits a 5–6 Mbps link. */
+export const DEFAULT_PROXY_PRESET: ProxyPreset = "1080l";
+
 export const ProxySchema = fileObject({
-  /** Manifest path, always "proxies/<film-slug>_<version>_proxy.mp4". */
+  /** Manifest path: "proxies/<film-slug>_<version>_proxy-<preset>.mp4" (§36.4), or §19.5's "…_proxy.mp4". */
   file: z.string().min(1),
   width: z.number().int().positive(),
   height: z.number().int().positive(),
   bytes: z.number().int().nonnegative(),
   createdAt: z.string(),
+  // §36.4: the quality it was made at. Absent on a §19.5 proxy, shown as "1080p (older)".
+  preset: ProxyPresetSchema.optional(),
 });
 export type Proxy = z.infer<typeof ProxySchema>;
 
@@ -156,7 +165,17 @@ export const FileEntrySchema = fileObject({
 });
 export type FileEntry = z.infer<typeof FileEntrySchema>;
 
-export const ProjectSchema = fileObject({
+/**
+ * §36.5: `autoProxy` (§19.5) became `alwaysProxy`. On reading, `autoProxy: true` turns the switch on, and the old key is
+ * dropped, so the next write leaves it out. Runs on every parse, so it is idempotent.
+ */
+function migrateProject(raw: unknown): unknown {
+  if (!isRecord(raw) || !("autoProxy" in raw)) return raw;
+  const { autoProxy, ...rest } = raw;
+  return rest.alwaysProxy === undefined && autoProxy === true ? { ...rest, alwaysProxy: true } : rest;
+}
+
+export const ProjectSchema = z.preprocess(migrateProject, fileObject({
   schema: z.literal(1),
   rev: z.number().int().nonnegative(),
   id: ProjectIdSchema.optional(),
@@ -165,9 +184,11 @@ export const ProjectSchema = fileObject({
   videos: z.array(VideoSchema).default([]),
   lanes: z.array(LaneSchema).default([]),
   files: z.array(FileEntrySchema).default([]),
-  // §19.5: start a proxy straight away for a new cut that meets the criteria. Off by default.
-  autoProxy: z.boolean().default(false),
-});
+  // §36.5: every new cut gets a proxy at `proxyPreset` straight away. Off by default. Replaces §19.5's autoProxy.
+  alwaysProxy: z.boolean().default(false),
+  // §36.3: the quality proxies are made at.
+  proxyPreset: ProxyPresetSchema.default(DEFAULT_PROXY_PRESET),
+}));
 export type Project = z.infer<typeof ProjectSchema>;
 
 export const TakeSchema = fileObject({

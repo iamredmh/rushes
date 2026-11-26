@@ -15,6 +15,8 @@ export interface ToolStripProps {
   onGrab(): void;
   /** The tools this view offers (a sound's tab has no Box or Grab). Defaults to all five. */
   tools?: Tool[];
+  /** §36.7: the Proxies on/off, below the tools. Left out where proxies don't apply (no ffmpeg, a sound's tab). */
+  proxies?: { on: boolean; tip: string; onToggle(): void };
 }
 
 const TOOLS: { tool: Tool; icon: string; tip: string; marks: boolean }[] = [
@@ -26,7 +28,7 @@ const TOOLS: { tool: Tool; icon: string; tip: string; marks: boolean }[] = [
 ];
 
 /** §27, 5.4: the monitor's tools, down its left edge. Each runs the player's own handler for its key. */
-export function ToolStrip({ active, readOnly, grabbing, onSelect, onNote, onRange, onBox, onGrab, tools }: ToolStripProps) {
+export function ToolStrip({ active, readOnly, grabbing, onSelect, onNote, onRange, onBox, onGrab, tools, proxies }: ToolStripProps) {
   const run: Record<Tool, () => void> = { select: onSelect, note: onNote, range: onRange, box: onBox, grab: onGrab };
   return (
     <div class="tools" role="toolbar" aria-label="Tools" aria-orientation="vertical">
@@ -49,6 +51,25 @@ export function ToolStrip({ active, readOnly, grabbing, onSelect, onNote, onRang
           <Icon name={icon} />
         </button>
       ))}
+      {proxies && (
+        <>
+          <span class="toolgap" aria-hidden="true" />
+          {/* §36.7: two looks: active (filled, accent) and inactive (outlined). Not a tool: it changes which file plays. */}
+          <button
+            type="button"
+            class={`tool proxytoggle${proxies.on ? " on" : ""}`}
+            data-tip={`${proxies.tip} · P`}
+            aria-label="Proxies"
+            aria-pressed={proxies.on}
+            onClick={(e) => {
+              if (e.detail > 0) (e.currentTarget as HTMLElement).blur();
+              proxies.onToggle();
+            }}
+          >
+            <Icon name="zap" />
+          </button>
+        </>
+      )}
     </div>
   );
 }

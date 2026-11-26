@@ -87,7 +87,8 @@ test("the More menu's arrows step over a disabled row instead of sticking on it"
   await page.keyboard.press("ArrowDown");
   await expect(menu.getByRole("menuitem", { name: /Export notes/ })).toBeFocused();
   await page.keyboard.press("ArrowDown");
-  await expect(menu.getByRole("menuitemcheckbox", { name: /lighter copies/ })).toBeFocused();
+  // §36: the old "lighter copies" setting is now Proxies, which opens the Proxies tab.
+  await expect(menu.getByRole("menuitem", { name: "Proxies" })).toBeFocused();
   await page.keyboard.press("ArrowUp");
   await expect(menu.getByRole("menuitem", { name: /Export notes/ })).toBeFocused();
 });
@@ -332,7 +333,9 @@ test("the tool strip has five tools, Select first and active, and B makes Box th
   await page.goto(rushes.url);
   await videoReady(page);
   const tools = toolStrip(page).getByRole("button");
-  await expect(tools).toHaveCount(5);
+  // The five tools, then (§36.7) the Proxies on/off after a gap, where there's ffmpeg to make proxies.
+  await expect(tools).toHaveCount(hasFfmpeg ? 6 : 5);
+  if (hasFfmpeg) await expect(tools.nth(5)).toHaveAccessibleName("Proxies");
   for (const [i, tip] of Object.values(TOOL_TIPS).entries()) {
     await expect(tools.nth(i)).toHaveAttribute("data-tip", tip);
     await expect(tools.nth(i)).toHaveAttribute("aria-label", tip);

@@ -607,7 +607,8 @@ for (const width of [1440, 1280, 1100]) {
     // At 1100 px and wider the panel is the right-hand column, not a drawer.
     await expect(notesPanel(page)).toBeVisible();
     const row = await barRow(page);
-    expect(row).toHaveLength(2);
+    // Notes, Activity and (§36) Proxies, on one line.
+    expect(row).toHaveLength(3);
     const mids = row.map((c) => c.mid);
     expect(Math.max(...mids) - Math.min(...mids), JSON.stringify(row)).toBeLessThanOrEqual(2);
     const [s, p] = [(await send.boundingBox())!, (await notesPanel(page).boundingBox())!];

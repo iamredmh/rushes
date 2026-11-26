@@ -15,6 +15,7 @@ import { LABEL_MAX, oneLineOf } from "../core/labels.js";
 import { LOG_AREAS, LOG_MAX, areaWord, byWord, localStamp, logMarkdown, type LogArea, type LogLine, type UndatedLine } from "../core/logText.js";
 import { markLabel, type Mark, type Note, type Project } from "../core/schema.js";
 import { formatTag } from "../core/formats.js";
+import { PRESETS, isPreset } from "../core/proxyPresets.js";
 import { onLabel, type OnContext } from "../core/notes.js";
 import { setup, type SetupEnv } from "../setup/setup.js";
 import { realSetupEnv } from "../setup/env.js";
@@ -418,8 +419,12 @@ export async function main(argv: string[], io: Io): Promise<number> {
           io.out(`Added ${r.video.name} ${r.version.id}${r.restored ? " (it was shelved: restored)" : ""}`);
           // A Rushes started by an older version ignores `label` and its reply has none.
           if (o.label?.trim() && r.version.label === undefined) io.err("An older Rushes is running and dropped the label: the cut was added without it. Run `rushes stop`, then open again.");
-          // §19.5: the server says when this cut is likely to play badly in a browser.
-          if (r.proxySuggested) io.out(`Proxy suggested: ${r.proxyReason}.${r.proxyJob ? " Making one now (autoProxy is on)." : " Create one from Picture."}`);
+          // §36.5: with the project's switch on, every new cut gets a proxy; §19.5: otherwise, say when this cut is likely to play badly.
+          if (r.proxyJob) {
+            const preset: unknown = r.proxyJob.preset;
+            io.out(`Making a proxy${isPreset(preset) ? ` (${PRESETS[preset].label})` : ""}: "Always make proxies" is on.`);
+          }
+          else if (r.proxySuggested) io.out(`Proxy suggested: ${r.proxyReason}. Create one from Picture.`);
           return 0;
         }
         if (what === "format") {

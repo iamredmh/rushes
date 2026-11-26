@@ -601,9 +601,25 @@ export function shapeButton(page: Page): Locator {
   return page.locator("footer.status").getByRole("button", { name: / · other shapes$/ });
 }
 
-/** The More menu's setting that makes proxies of new cuts automatically (§19.5): a checkbox item. Open the menu first. */
-export function autoProxySetting(page: Page): Locator {
-  return page.getByRole("menuitemcheckbox", { name: "Make lighter copies of new cuts automatically" });
+/** §36.7: the toolbar's Proxies on/off, below the tools. */
+export function proxiesButton(page: Page): Locator {
+  return page.getByRole("toolbar", { name: "Tools" }).getByRole("button", { name: "Proxies", exact: true });
+}
+
+/** §36.7: turns the toolbar's Proxies on (a no-op when it is already on). */
+export async function turnProxiesOn(page: Page): Promise<void> {
+  const b = proxiesButton(page);
+  await expect(b).toBeVisible();
+  if ((await b.getAttribute("aria-pressed")) !== "true") await b.click();
+  await expect(b).toHaveAttribute("aria-pressed", "true");
+}
+
+/** §36.7: opens the notes panel's Proxies tab and returns its panel. */
+export async function openProxiesTab(page: Page): Promise<Locator> {
+  await page.getByRole("tab", { name: "Proxies", exact: true }).click();
+  const panel = page.getByRole("tabpanel", { name: "Proxies" });
+  await expect(panel).toBeVisible();
+  return panel;
 }
 
 /** Picks a version from the version list, the way a person would, and waits until it's on screen. */

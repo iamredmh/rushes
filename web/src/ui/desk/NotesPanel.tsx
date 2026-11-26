@@ -15,6 +15,7 @@ import type { ChangeLogState } from "../ChangeLog.js";
 import { Icon } from "../Icon.js";
 import { type Filter, NoteFilterMenu, Notes, type NotesProps } from "../Notes.js";
 import { ActivityList, type ActivityListProps } from "./ActivityList.js";
+import { ProxiesTab, type ProxiesTabProps } from "./ProxiesTab.js";
 
 /** The panel's width: 360 px until dragged (Red, 16 Nov: room for the notes), kept between these. */
 export const PANEL_WIDTH = 360;
@@ -40,6 +41,8 @@ export interface PanelShared {
   unfinished?: Readonly<Record<string, string>>;
   /** §28: the Send to AI row, from the agent's status; null before the first answer and from a server without Send to AI. */
   agent: AgentPanel | null;
+  /** §36.7: the Proxies tab, after Activity: whether it is the tab on show (over Notes and Activity), and what it shows. */
+  proxies?: { open: boolean; setOpen(open: boolean): void; view: ProxiesTabProps };
   /** On screen: not hidden (wide), or the drawer open (narrow). */
   shown: boolean;
   /** Under 1100 px: the panel is a drawer. */
@@ -65,7 +68,7 @@ export const PanelContext = createContext<PanelShared | null>(null);
 export function useNoteBox(box: RefObject<HTMLTextAreaElement>): () => void {
   const desk = useContext(PanelContext);
   return () => {
-    if (desk && (!desk.shown || desk.log.open)) desk.revealNotes(() => box.current?.focus());
+    if (desk && (!desk.shown || desk.log.open || desk.proxies?.open)) desk.revealNotes(() => box.current?.focus());
     else box.current?.focus();
   };
 }
@@ -166,6 +169,7 @@ export function NotesPanel(props: NotesPanelProps) {
   const desk = useContext(PanelContext);
   const notesTab = useRef<HTMLButtonElement>(null);
   const activityTab = useRef<HTMLButtonElement>(null);
+  const proxiesTab = useRef<HTMLButtonElement>(null);
   const sendRef = useRef<HTMLButtonElement>(null);
   const root = useRef<HTMLElement>(null);
   const drag = useRef<{ right: number } | null>(null);
@@ -187,19 +191,26 @@ export function NotesPanel(props: NotesPanelProps) {
   const sendShown = send.count > 0 || !!send.always;
   // I3: notes that read "With your agent" but never reached it get their own way out, so they are never stranded.
   const again = send.again && send.again.count > 0 ? send.again : null;
-  const tab = log.open ? "activity" : "notes";
+  const proxies = desk.proxies;
+  type Tab = "notes" | "activity" | "proxies";
+  const tab: Tab = proxies?.open ? "proxies" : log.open ? "activity" : "notes";
   const todo = props.todoCount ?? props.notes.filter((n) => n.status === "todo").length;
-  const choose = (to: "notes" | "activity", focusList = true) => {
+  const choose = (to: Tab, focusList = true) => {
+    if (to === "proxies") return proxies?.setOpen(true);
+    if (proxies?.open) proxies.setOpen(false);
     if ((to === "activity") !== log.open) log.setOpen(to === "activity", focusList);
   };
-  // A radio-like tablist: the arrows move between the two tabs.
+  // A radio-like tablist: the arrows move between the tabs.
+  const order: Tab[] = proxies ? ["notes", "activity", "proxies"] : ["notes", "activity"];
+  const refs: Record<Tab, typeof notesTab> = { notes: notesTab, activity: activityTab, proxies: proxiesTab };
   const onTabKey = (e: KeyboardEvent) => {
     if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
     e.preventDefault();
     e.stopPropagation();
-    const to = tab === "notes" ? "activity" : "notes";
+    const i = order.indexOf(tab);
+    const to = order[(i + (e.key === "ArrowRight" ? 1 : order.length - 1)) % order.length];
     choose(to, false);
-    (to === "notes" ? notesTab : activityTab).current?.focus();
+    refs[to].current?.focus();
   };
   // A strip line that names a note: back to the Notes tab, the card in view.
   const showNote = (id: string) => {
@@ -284,6 +295,22 @@ export function NotesPanel(props: NotesPanelProps) {
           >
             Activity{(log.dot || log.alert) && <span class={`cdot${log.alert ? " alert" : ""}`} aria-hidden="true" />}
           </button>
+          {proxies && (
+            <button
+              ref={proxiesTab}
+              type="button"
+              role="tab"
+              id="ntab-proxies"
+              class="ntab"
+              aria-selected={tab === "proxies"}
+              aria-controls="npanel-proxies"
+              tabIndex={tab === "proxies" ? 0 : -1}
+              onClick={() => choose("proxies")}
+              onKeyDown={onTabKey}
+            >
+              Proxies
+            </button>
+          )}
         </div>
         <span class="sp" />
         {tab === "notes" && props.allTabs && (
@@ -310,6 +337,11 @@ export function NotesPanel(props: NotesPanelProps) {
       <div class="ntabpanel" role="tabpanel" id="npanel-notes" aria-labelledby="ntab-notes" hidden={tab !== "notes"}>
         <Notes {...props} filter={noteFilter} agent={{ status: agent?.status ?? null, onJump: activity.onJump, unfinished: desk.unfinished }} />
       </div>
+      {tab === "proxies" && proxies && (
+        <div class="ntabpanel" role="tabpanel" id="npanel-proxies" aria-labelledby="ntab-proxies">
+          <ProxiesTab {...proxies.view} />
+        </div>
+      )}
       {tab === "activity" && (
         <div class="ntabpanel" role="tabpanel" id="npanel-activity" aria-label="Activity">
           <ActivityList {...activity} log={log} live={<LiveStrip status={agent?.status ?? null} notes={props.notes} onNote={showNote} elsewhere={(id) => {

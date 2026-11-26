@@ -166,7 +166,7 @@ Rushes keeps your review in a `.rushes/` folder in the project. The agent reads 
 
 **Does it need ffmpeg?** No, but it helps. With ffmpeg installed Rushes reads frame rates and durations, makes browser-playable proxies of heavy cuts, and measures loudness on the Timeline tab. Run `rushes doctor` to check.
 
-**Can it handle big files?** Cuts that play badly in a browser (4K and above, huge files, ProRes and similar) get an offer of a light 1080p proxy. Your original is never changed. See [Proxies](#proxies).
+**Can it handle big files, or a slow connection?** Rushes makes lighter proxies of your cuts, at a quality you choose, and a toolbar button switches between them and the originals. Your originals are never changed. See [Proxies](#proxies).
 
 **Where do I report a bug or ask for something?** [Open an issue](https://github.com/iamredmh/rushes/issues). Please say which agent and operating system you're using, and attach the output of `rushes doctor`.
 
@@ -264,6 +264,7 @@ On the Timeline tab:
 - **N** new note
 - **V** the select tool
 - **F** full screen
+- **P** proxies on or off
 
 On the Voice, Music and Effects tabs:
 
@@ -440,11 +441,33 @@ The format keys never fire while you're typing a note. In a text field, Alt+←/
 
 ## Proxies
 
-Some cuts play badly in a browser: 4K or larger, over 1.5 GB, a codec browsers can't play reliably (ProRes, DNx, HEVC 10-bit — anything that isn't H.264, VP9 or AV1), or one that threw a playback error. Rushes checks with ffprobe as the cut is added, and if it's likely to struggle, a bar appears under the player saying why in a few words, with a **Create proxy** button. It makes a lightweight 1080p H.264 copy on your drive — your original file is never changed — with visible progress and **Cancel**. Notes, timecodes and frame numbers are identical on the proxy and the original.
+A proxy is a lighter H.264 copy of a cut, made on your drive in `proxies/`. Your original is never changed, and notes, timecodes and frame numbers are identical on both. Use them when a cut plays badly: a heavy file, or a slow connection to the computer running Rushes (a tunnel, a relay).
 
-Once it's ready, a **Proxy / Original** switch appears on the player (defaults to Proxy, remembered per film). **Grab this frame** (**G**) always takes the still from the original at full quality, whichever one you're watching. Turn on **Make lighter copies of new cuts automatically** in the More menu (off by default, saved per project) to skip the offer next time. The **Assets** tab has a **Proxies** folder listing each one with its size and a **Delete proxy** button; deleting removes only the proxy file, never the original.
+**The Proxies tab**, in the notes panel after Activity, is where they're set up:
 
-Without ffmpeg, no proxy is ever offered.
+- **Quality**: four presets. Sizes go by the short edge, so a vertical cut gets a 1080- or 720-wide proxy, and nothing is ever upscaled. Each has a capped bitrate, so it plays smoothly on a connection that can carry its peak. Audio is AAC 256 kbps in all four.
+
+  | Preset | Short edge | Average / peak |
+  |---|---|---|
+  | 1080p High | 1080 | 10 / 14 Mbps |
+  | **1080p Low** (default) | 1080 | 4 / 5 Mbps |
+  | 720p High | 720 | 3.5 / 4.5 Mbps |
+  | 720p Low | 720 | 1.5 / 2 Mbps |
+
+- **Always make proxies for this project**: every new cut gets a proxy at the chosen quality straight away. Turning it on also makes one for the latest cut of each film.
+- **Make proxies now** does the same once, for projects that keep the switch off.
+- **Test connection** times a short download of the cut from your browser, says how fast it was, and ticks the presets that should play smoothly.
+- **The list** shows each film's latest cut and every cut with a proxy: its quality and size, progress while it's made (with **Cancel**), and **Make**, **Remake** and **Delete**. Changing the quality deletes nothing: older proxies say so and offer a remake. **Delete all proxies** is under the list.
+
+Proxies are made one at a time, newest cut first. Each cut has one proxy: making it at another quality replaces the old one.
+
+**The Proxies button**, at the foot of the monitor's tool strip (key **P**), switches between proxies and originals. It's remembered per browser and per project, and starts off: the computer running Rushes wants originals, a laptop on a slow link wants proxies. With it on, every cut that has a proxy plays it, and a cut that doesn't says **No proxy for this cut**, with **Make proxy**. Switching keeps your place and whether it was playing. If playback keeps stalling with proxies off, a line under the player offers to turn them on; it never switches by itself.
+
+A cut that's likely to play badly in any browser (4K or larger, over 1.5 GB, or a codec such as ProRes, DNx or HEVC 10-bit) still gets an offer under the player when the project switch is off, saying why, with **Create proxy**. Once that proxy is ready, Proxies turns on.
+
+**Grab this frame** (**G**) always takes the still from the original at full quality, whichever file is playing. The **Assets** tab has a **Proxies** folder too.
+
+Proxies need ffmpeg. Without it, none is offered or made.
 
 ## Audio review
 

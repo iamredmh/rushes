@@ -1,7 +1,7 @@
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Page } from "@playwright/test";
-import { expect, hasFfmpeg, pickVersion, test, cutButton, videoReady, openWorkspace, workspaceTab, pickFilm, filmButton, cutLength, rangeChip, ruler, rulerMarkers, shotBlocks, shapeButton, CUT_SOUND_LANE, CUT_SOUND_WAVE } from "./fixture.js";
+import { expect, hasFfmpeg, pickVersion, test, cutButton, videoReady, openWorkspace, workspaceTab, pickFilm, filmButton, cutLength, rangeChip, ruler, rulerMarkers, shotBlocks, shapeButton, turnProxiesOn, CUT_SOUND_LANE, CUT_SOUND_WAVE } from "./fixture.js";
 
 test.skip(!hasFfmpeg, "formats are generated with ffmpeg and measured with ffprobe");
 
@@ -262,17 +262,20 @@ test("a format whose file has gone warns on its chip and says File not found; a 
   await expect(cutLength(page)).toHaveText("0:04.00");
 });
 
-test("the Proxy/Original switch belongs to the primary: it hides while another format shows", async ({ page, rushes }) => {
+test("§36.7: the proxy belongs to the primary: another format plays its own file, with no proxy bar", async ({ page, rushes }) => {
   await rushes.addProResCut({ seconds: 2 });
   await rushes.api("POST", "/api/videos/hero/versions/v1/proxy", {});
   await expect.poll(async () => (await rushes.api("GET", "/api/state")).project.videos[0].versions[0].proxy !== null, { timeout: 20_000 }).toBe(true);
   await rushes.addFormatFile({ width: 360, height: 640, seconds: 2 });
   await page.goto(rushes.url);
-  await expect(page.getByRole("button", { name: "Proxy", exact: true })).toBeVisible();
+  await turnProxiesOn(page);
+  const video = page.locator("video");
+  await expect(video).toHaveAttribute("src", /proxies%2F/);
   await radio(page, "9:16").click();
-  await expect(page.getByRole("button", { name: "Proxy", exact: true })).toHaveCount(0);
+  await expect(video).not.toHaveAttribute("src", /proxies%2F/);
+  await expect(page.locator(".proxybar")).toBeHidden();
   await radio(page, "16:9").click();
-  await expect(page.getByRole("button", { name: "Proxy", exact: true })).toBeVisible();
+  await expect(video).toHaveAttribute("src", /proxies%2F/);
 });
 
 // §27, 5.4: the proxy bar is a message over the monitor now, so a hidden one can take no room. §27, 5.6: the picture's
@@ -468,7 +471,8 @@ test("a cut stored with no size, playing its proxy, still gets its single shape 
   await writeFile(file, JSON.stringify(project, null, 2));
   await expect.poll(async () => (await rushes.api("GET", "/api/state")).project.videos[0].versions[0].width, { timeout: 10_000 }).toBeNull();
   await page.goto(rushes.url);
-  await expect(page.getByRole("button", { name: "Proxy", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await turnProxiesOn(page);
+  await expect(page.locator("video")).toHaveAttribute("src", /proxies%2F/);
   await expect(shapeButton(page)).toHaveText("16:9");
   await expect(page.getByRole("radiogroup", { name: "Format" })).toHaveCount(0);
   await shapeButton(page).click();

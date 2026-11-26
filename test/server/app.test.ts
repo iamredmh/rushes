@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chmod, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, readdir, symlink, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { Store } from "../../src/core/store.js";
 import { tmpProject } from "../helpers/tmp.js";
@@ -1235,7 +1235,7 @@ async function proxySetup(opts: { hold?: Promise<void>; started?: () => void; av
   const { root, store } = await tmpProject("spring-launch");
   const jobs = new ProxyJobs(store, {
     run: holdingRunner(opts.hold, opts.started),
-    probe: opts.probe ?? (async (abs) => (abs.endsWith("_proxy.mp4") ? H264_1080 : PRORES_4K)),
+    probe: opts.probe ?? (async (abs) => (/_proxy(-\w+)?\.mp4$/.test(abs) ? H264_1080 : PRORES_4K)),
     available: async () => opts.available ?? true,
   });
   const ctx = await setupWith(store, { proxyJobs: jobs });
@@ -1285,8 +1285,8 @@ describe("proxies (§19.5)", () => {
     const { json } = await call("POST", "/api/videos/hero/versions/v1/proxy", {});
     await jobs.wait(json.job.id);
     const v = (await store.read("project")).videos[0].versions[0];
-    expect(v.proxy).toMatchObject({ file: "proxies/hero_v1_proxy.mp4", width: 1920, height: 1080, bytes: "proxy bytes".length, createdAt: expect.any(String) });
-    const media = await call("GET", "/media?path=proxies%2Fhero_v1_proxy.mp4");
+    expect(v.proxy).toMatchObject({ file: "proxies/hero_v1_proxy-1080l.mp4", width: 1920, height: 1080, bytes: "proxy bytes".length, createdAt: expect.any(String) });
+    const media = await call("GET", "/media?path=proxies%2Fhero_v1_proxy-1080l.mp4");
     expect(media.status).toBe(200);
     expect(media.headers.get("content-type")).toBe("video/mp4");
   });
@@ -1306,11 +1306,11 @@ describe("proxies (§19.5)", () => {
     const { json } = await call("POST", "/api/videos/hero/versions/v1/proxy", {});
     // Until the fake ffmpeg has written its partial file; if the job ends first, this says why.
     await encodeStarted(started.promise, jobs.wait(json.job.id));
-    expect(existsSync(join(root, "proxies", "hero_v1_proxy.partial.mp4"))).toBe(true);
+    expect(existsSync(join(root, "proxies", "hero_v1_proxy-1080l.partial.mp4"))).toBe(true);
     const r = await call("DELETE", `/api/proxy-jobs/${json.job.id}`, {});
     expect(r.status).toBe(200);
     expect(r.json.job).toMatchObject({ id: json.job.id, state: "cancelled" });
-    expect(existsSync(join(root, "proxies", "hero_v1_proxy.partial.mp4"))).toBe(false);
+    expect(existsSync(join(root, "proxies", "hero_v1_proxy-1080l.partial.mp4"))).toBe(false);
     expect((await call("DELETE", `/api/proxy-jobs/${json.job.id}`, {})).status).toBe(404);
   });
 
@@ -1323,22 +1323,27 @@ describe("proxies (§19.5)", () => {
     expect(r.status).toBe(200);
     expect(r.json.version).toMatchObject({ id: "v1", proxy: null });
     expect((await store.read("project")).videos[0].versions[0].proxy).toBeNull();
-    expect(existsSync(join(root, "proxies", "hero_v1_proxy.mp4"))).toBe(false);
+    expect(existsSync(join(root, "proxies", "hero_v1_proxy-1080l.mp4"))).toBe(false);
     expect(existsSync(join(root, "renders", "hero.mov"))).toBe(true);
     expect((await call("DELETE", "/api/videos/hero/versions/v1/proxy", {})).status).toBe(404);
   });
 
-  it("PUT /api/project/settings saves autoProxy; anything else is 400", async () => {
+  it("PUT /api/project/settings saves alwaysProxy and proxyPreset (autoProxy is the old name); anything else is 400", async () => {
     const { call, store } = await proxySetup();
-    expect((await store.read("project")).autoProxy).toBe(false);
-    const r = await call("PUT", "/api/project/settings", { autoProxy: true });
-    expect(r).toMatchObject({ status: 200, json: { autoProxy: true } });
-    expect((await store.read("project")).autoProxy).toBe(true);
+    expect((await store.read("project")).alwaysProxy).toBe(false);
+    expect((await store.read("project")).proxyPreset).toBe("1080l");
+    const r = await call("PUT", "/api/project/settings", { alwaysProxy: true });
+    expect(r).toMatchObject({ status: 200, json: { alwaysProxy: true, proxyPreset: "1080l" } });
+    expect((await store.read("project")).alwaysProxy).toBe(true);
+    expect((await call("PUT", "/api/project/settings", { autoProxy: false })).json).toMatchObject({ alwaysProxy: false });
+    expect((await call("PUT", "/api/project/settings", { proxyPreset: "720h" })).json).toMatchObject({ proxyPreset: "720h" });
     expect((await call("PUT", "/api/project/settings", { autoProxy: "yes" })).status).toBe(400);
-    expect((await call("PUT", "/api/project/settings", { autoProxy: true, fps: 12 })).status).toBe(400);
+    expect((await call("PUT", "/api/project/settings", { proxyPreset: "4k" })).status).toBe(400);
+    expect((await call("PUT", "/api/project/settings", {})).status).toBe(400);
+    expect((await call("PUT", "/api/project/settings", { alwaysProxy: true, fps: 12 })).status).toBe(400);
   });
 
-  it("adding a cut that needs one says so; with autoProxy on, its job starts at once", async () => {
+  it("adding a cut that needs one says so; with alwaysProxy on, its job starts at once", async () => {
     const hold = gateOpen();
     const { call, jobs } = await proxySetup({ hold: hold.promise });
     const off = await call("POST", "/api/versions", { video: "Hero", file: "renders/hero.mov" });
@@ -1347,21 +1352,28 @@ describe("proxies (§19.5)", () => {
     expect(off.json.proxyJob).toBeUndefined();
     expect(jobs.list()).toEqual([]);
 
-    await call("PUT", "/api/project/settings", { autoProxy: true });
+    await call("PUT", "/api/project/settings", { alwaysProxy: true });
+    // Turning it on queued the latest cut (v1); the new v2 replaces it as the latest but v1's job goes on.
     const on = await call("POST", "/api/versions", { video: "Hero", file: "renders/hero.mov" });
-    expect(on.json).toMatchObject({ proxySuggested: true, proxyJob: { video: "hero", version: "v2", state: "running" } });
-    expect(jobs.list()).toEqual([expect.objectContaining({ video: "hero", version: "v2" })]);
+    expect(on.json).toMatchObject({ proxySuggested: true, proxyJob: { video: "hero", version: "v2", preset: "1080l" } });
+    expect(jobs.list()).toEqual(expect.arrayContaining([expect.objectContaining({ video: "hero", version: "v2" })]));
     hold.open();
     await jobs.wait(on.json.proxyJob.id);
   });
 
-  it("a cut that plays fine gets no suggestion, and autoProxy leaves it alone", async () => {
-    const { call, jobs } = await proxySetup({ probe: async () => H264_1080 });
-    await call("PUT", "/api/project/settings", { autoProxy: true });
+  it("§36.5: a cut that plays fine gets no suggestion, but with alwaysProxy on it still gets a proxy", async () => {
+    const hold = gateOpen();
+    const { call, jobs } = await proxySetup({ probe: async () => H264_1080, hold: hold.promise });
+    const off = await call("POST", "/api/versions", { video: "Hero", file: "renders/hero.mov" });
+    expect(off.json.proxySuggested).toBeUndefined();
+    expect(off.json.proxyJob).toBeUndefined();
+    await call("PUT", "/api/project/settings", { alwaysProxy: true });
     const r = await call("POST", "/api/versions", { video: "Hero", file: "renders/hero.mov" });
     expect(r.json.proxySuggested).toBeUndefined();
     expect(r.json.proxyReason).toBeUndefined();
-    expect(jobs.list()).toEqual([]);
+    expect(r.json.proxyJob).toMatchObject({ video: "hero", version: "v2", preset: "1080l" });
+    hold.open();
+    await jobs.wait(r.json.proxyJob.id);
   });
 
   it("GET /api/state carries proxyNeed per version, probed once per file revision", async () => {
@@ -1382,7 +1394,7 @@ describe("proxies (§19.5)", () => {
     expect(probes).toBe(before);
     for (const s of [s1, s2]) {
       expect(s.json.project.videos[0].versions.map((v: any) => v.proxyNeed)).toEqual(["It's a 4K ProRes file, which browsers struggle with", null, null]);
-      expect(s.json.proxies).toEqual({ ffmpeg: true, jobs: [] });
+      expect(s.json.proxies).toEqual({ ffmpeg: true, jobs: [], encoder: "libx264" });
     }
     // A new render at the same path is a new revision: probed again, once.
     await writeFile(join(root, "renders", "small.mp4"), "a bigger re-render of the small cut");
@@ -1398,7 +1410,7 @@ describe("proxies (§19.5)", () => {
     expect(add.json.proxySuggested).toBeUndefined();
     const state = await call("GET", "/api/state");
     expect(state.json.project.videos[0].versions[0].proxyNeed).toBeNull();
-    expect(state.json.proxies).toEqual({ ffmpeg: false, jobs: [] });
+    expect(state.json.proxies).toEqual({ ffmpeg: false, jobs: [], encoder: null });
     const post = await call("POST", "/api/videos/hero/versions/v1/proxy", {});
     expect(post.status).toBe(501);
     expect(post.json).toMatchObject({ error: "no_ffmpeg", message: expect.stringContaining("ffmpeg") });
@@ -1427,7 +1439,7 @@ describe("proxies (§19.5)", () => {
     const { root } = await tmpProject();
     await mkdir(join(root, "renders"), { recursive: true });
     await writeFile(join(root, "renders", "hero.mov"), "original");
-    const proxy = { run: holdingRunner(), probe: async (abs: string) => (abs.endsWith("_proxy.mp4") ? H264_1080 : PRORES_4K), available: async () => true };
+    const proxy = { run: holdingRunner(), probe: async (abs: string) => (/_proxy(-\w+)?\.mp4$/.test(abs) ? H264_1080 : PRORES_4K), available: async () => true };
     const s = await startServer(root, { port: 0, proxy });
     try {
       const a = await sse(s.url);
@@ -1439,8 +1451,8 @@ describe("proxies (§19.5)", () => {
       for (const tab of [a, b]) {
         const text = await tab.until('"state":"done"');
         expect(text).toContain("event: proxy");
-        expect(text).toContain(JSON.stringify({ job: r.job.id, video: "hero", version: "v1", pct: 50, state: "running" }));
-        expect(text).toContain(JSON.stringify({ job: r.job.id, video: "hero", version: "v1", pct: 100, state: "done" }));
+        expect(text).toContain(JSON.stringify({ job: r.job.id, video: "hero", version: "v1", preset: "1080l", pct: 50, state: "running" }));
+        expect(text).toContain(JSON.stringify({ job: r.job.id, video: "hero", version: "v1", preset: "1080l", pct: 100, state: "done" }));
         tab.stop();
       }
     } finally {
@@ -1553,11 +1565,11 @@ describe("proxies, fix round 1", () => {
     await call("POST", "/api/versions", { video: "Hero", file: "renders/hero.mov" });
     await mkdir(join(root, "proxies"), { recursive: true });
     await writeFile(join(root, "elsewhere.mp4"), "someone else's file");
-    await symlink(join(root, "elsewhere.mp4"), join(root, "proxies", "hero_v1_proxy.mp4"));
+    await symlink(join(root, "elsewhere.mp4"), join(root, "proxies", "hero_v1_proxy-1080l.mp4"));
     await store.update("project", (p) => {
-      p.videos[0].versions[0].proxy = { file: "proxies/hero_v1_proxy.mp4", width: 2, height: 2, bytes: 1, createdAt: "2026-10-04T00:00:00Z" };
+      p.videos[0].versions[0].proxy = { file: "proxies/hero_v1_proxy-1080l.mp4", width: 2, height: 2, bytes: 1, createdAt: "2026-10-04T00:00:00Z" };
     });
-    expect((await call("GET", "/media?path=proxies%2Fhero_v1_proxy.mp4")).status).toBe(404);
+    expect((await call("GET", "/media?path=proxies%2Fhero_v1_proxy-1080l.mp4")).status).toBe(404);
   });
 
   it("DELETE …/proxy never deletes a file outside proxies/, even when the record was hand-edited to point there", async () => {
@@ -1603,5 +1615,159 @@ function gateOpen() {
 describe("after the server tests", () => {
   it("there's no pipe:1 file in the working directory", () => {
     expect(existsSync(join(process.cwd(), "pipe:1"))).toBe(false);
+  });
+});
+
+/** Waits for every job in `list` that is still queued or running (one already over has left the list). */
+async function waitAll(jobs: ProxyJobs, list: { id: string }[]) {
+  await Promise.all(list.map((j) => {
+    try {
+      return jobs.wait(j.id);
+    } catch {
+      return undefined;
+    }
+  }));
+}
+
+describe("§36 proxies you can choose and switch on", () => {
+  /** Adds `n` cuts of Hero (v1..vn) and, when `films`, a second film "Promo" with one cut. */
+  async function cuts(call: (m: string, p: string, j?: unknown) => Promise<any>, n: number, films = false) {
+    for (let i = 0; i < n; i++) await call("POST", "/api/versions", { video: "Hero", file: "renders/hero.mov" });
+    if (films) await call("POST", "/api/versions", { video: "Promo", file: "renders/hero.mov" });
+  }
+
+  it("a proxy at a preset is named and recorded with it; another preset replaces the old one and deletes its file", async () => {
+    const { call, jobs, store, root } = await proxySetup();
+    await cuts(call, 1);
+    const a = await call("POST", "/api/videos/hero/versions/v1/proxy", { preset: "720h" });
+    expect(a.json.job).toMatchObject({ preset: "720h" });
+    await jobs.wait(a.json.job.id);
+    expect((await store.read("project")).videos[0].versions[0].proxy).toMatchObject({ file: "proxies/hero_v1_proxy-720h.mp4", preset: "720h" });
+    expect(existsSync(join(root, "proxies", "hero_v1_proxy-720h.mp4"))).toBe(true);
+    // Without a preset, the project's (1080p Low).
+    const b = await call("POST", "/api/videos/hero/versions/v1/proxy", {});
+    expect(b.json.job.preset).toBe("1080l");
+    await jobs.wait(b.json.job.id);
+    expect((await store.read("project")).videos[0].versions[0].proxy).toMatchObject({ file: "proxies/hero_v1_proxy-1080l.mp4", preset: "1080l" });
+    expect(existsSync(join(root, "proxies", "hero_v1_proxy-720h.mp4"))).toBe(false);
+    expect(existsSync(join(root, "proxies", "hero_v1_proxy-1080l.mp4"))).toBe(true);
+    expect(existsSync(join(root, "renders", "hero.mov"))).toBe(true);
+    expect((await call("POST", "/api/videos/hero/versions/v1/proxy", { preset: "4k" })).status).toBe(400);
+  });
+
+  it("an older §19.5 proxy (no preset) still plays from /media, and a remake replaces it", async () => {
+    const { call, jobs, store, root } = await proxySetup();
+    await cuts(call, 1);
+    await mkdir(join(root, "proxies"), { recursive: true });
+    await writeFile(join(root, "proxies", "hero_v1_proxy.mp4"), "old proxy");
+    await store.update("project", (p) => {
+      p.videos[0].versions[0].proxy = { file: "proxies/hero_v1_proxy.mp4", width: 1920, height: 1080, bytes: 9, createdAt: "2026-11-01T00:00:00.000Z" };
+    });
+    expect((await call("GET", "/media?path=proxies%2Fhero_v1_proxy.mp4")).status).toBe(200);
+    const r = await call("POST", "/api/videos/hero/versions/v1/proxy", {});
+    await jobs.wait(r.json.job.id);
+    expect((await store.read("project")).videos[0].versions[0].proxy?.file).toBe("proxies/hero_v1_proxy-1080l.mp4");
+    expect(existsSync(join(root, "proxies", "hero_v1_proxy.mp4"))).toBe(false);
+  });
+
+  it("an old project's autoProxy: true becomes alwaysProxy on, and the old key goes on the next write", async () => {
+    const { root, store } = await tmpProject("old");
+    const file = join(root, ".rushes", "project.json");
+    // A project.json from before §36: autoProxy, and neither alwaysProxy nor proxyPreset.
+    const { alwaysProxy: _a, proxyPreset: _p, ...raw } = JSON.parse(await readFile(file, "utf8"));
+    await writeFile(file, JSON.stringify({ ...raw, autoProxy: true }));
+    const p = await store.read("project");
+    expect(p.alwaysProxy).toBe(true);
+    expect(p.proxyPreset).toBe("1080l");
+    expect("autoProxy" in p).toBe(false);
+    await store.update("project", (x) => {
+      x.name = "old2";
+    });
+    const written = JSON.parse(await readFile(file, "utf8"));
+    expect(written.autoProxy).toBeUndefined();
+    expect(written.alwaysProxy).toBe(true);
+    // autoProxy: false (or none) leaves the switch off.
+    await writeFile(file, JSON.stringify({ ...written, alwaysProxy: undefined, autoProxy: false }));
+    expect((await store.read("project")).alwaysProxy).toBe(false);
+  });
+
+  it("turning the switch on queues the latest version of each film in play, not older ones or shelved films", async () => {
+    const hold = gateOpen();
+    const { call, jobs } = await proxySetup({ hold: hold.promise });
+    await cuts(call, 3, true);
+    await call("POST", "/api/versions", { video: "Shelved one", file: "renders/hero.mov" });
+    expect((await call("PUT", "/api/videos/shelved-one/shelve", { shelved: true })).status).toBe(200);
+    const r = await call("PUT", "/api/project/settings", { alwaysProxy: true });
+    const cutsQueued = r.json.jobs.map((j: { video: string; version: string }) => `${j.video}/${j.version}`).sort();
+    expect(cutsQueued).toEqual(["hero/v3", "promo/v1"]);
+    // Asking again changes nothing: they are already queued at this preset.
+    expect((await call("PUT", "/api/project/settings", { alwaysProxy: true })).json.jobs).toEqual([]);
+    hold.open();
+    await waitAll(jobs, r.json.jobs);
+  });
+
+  it("changing the preset deletes nothing; with the switch on, latest versions are queued for a remake", async () => {
+    const { call, jobs, store, root } = await proxySetup();
+    await cuts(call, 2);
+    for (const v of ["v1", "v2"]) await jobs.wait((await call("POST", `/api/videos/hero/versions/${v}/proxy`, {})).json.job.id);
+    // Off: a new preset queues nothing, and the 1080p Low proxies stay.
+    expect((await call("PUT", "/api/project/settings", { proxyPreset: "720l" })).json.jobs).toEqual([]);
+    expect(existsSync(join(root, "proxies", "hero_v1_proxy-1080l.mp4"))).toBe(true);
+    expect(existsSync(join(root, "proxies", "hero_v2_proxy-1080l.mp4"))).toBe(true);
+    // On: only v2 (the latest) is remade at 720p Low; v1 keeps its older one.
+    const on = await call("PUT", "/api/project/settings", { alwaysProxy: true });
+    expect(on.json.jobs.map((j: { version: string; preset: string }) => [j.version, j.preset])).toEqual([["v2", "720l"]]);
+    await waitAll(jobs, on.json.jobs);
+    const changed = await call("PUT", "/api/project/settings", { proxyPreset: "1080h" });
+    expect(changed.json.jobs.map((j: { version: string; preset: string }) => [j.version, j.preset])).toEqual([["v2", "1080h"]]);
+    await waitAll(jobs, changed.json.jobs);
+    const [v1, v2] = (await store.read("project")).videos[0].versions;
+    expect(v1.proxy?.preset).toBe("1080l");
+    expect(v2.proxy?.preset).toBe("1080h");
+  });
+
+  it("Make proxies now queues each film's latest cut without a proxy at the preset", async () => {
+    const hold = gateOpen();
+    const { call, jobs } = await proxySetup({ hold: hold.promise });
+    await cuts(call, 2, true);
+    const r = await call("POST", "/api/proxies", {});
+    expect(r.status).toBe(202);
+    expect(r.json.jobs.map((j: { video: string; version: string }) => `${j.video}/${j.version}`).sort()).toEqual(["hero/v2", "promo/v1"]);
+    hold.open();
+    await waitAll(jobs, r.json.jobs);
+    expect((await call("POST", "/api/proxies", {})).json.jobs).toEqual([]);
+  });
+
+  it("Delete all proxies cancels every job and removes every proxy file and record, never an original", async () => {
+    const hold = gateOpen();
+    const { call, jobs, store, root } = await proxySetup({ hold: hold.promise });
+    await cuts(call, 2);
+    const first = await call("POST", "/api/videos/hero/versions/v1/proxy", {});
+    hold.open();
+    await jobs.wait(first.json.job.id);
+    await mkdir(join(root, "proxies"), { recursive: true });
+    await writeFile(join(root, "proxies", "hero_v2_proxy.mp4"), "old");
+    await store.update("project", (p) => {
+      p.videos[0].versions[1].proxy = { file: "proxies/hero_v2_proxy.mp4", width: 2, height: 2, bytes: 3, createdAt: "x" };
+    });
+    const r = await call("DELETE", "/api/proxies", {});
+    expect(r.json).toEqual({ deleted: 2 });
+    expect((await store.read("project")).videos[0].versions.map((v) => v.proxy)).toEqual([null, null]);
+    expect(await readdir(join(root, "proxies"))).toEqual([]);
+    expect(existsSync(join(root, "renders", "hero.mov"))).toBe(true);
+    expect(jobs.list()).toEqual([]);
+    // Nothing left: still fine, and project.json isn't rewritten.
+    const rev = (await store.read("project")).rev;
+    expect((await call("DELETE", "/api/proxies", {})).json).toEqual({ deleted: 0 });
+    expect((await store.read("project")).rev).toBe(rev);
+  });
+
+  it("without ffmpeg, Make proxies now says no_ffmpeg and the switch queues nothing", async () => {
+    const { call } = await proxySetup({ available: false });
+    await cuts(call, 1);
+    expect((await call("POST", "/api/proxies", {})).status).toBe(501);
+    const r = await call("PUT", "/api/project/settings", { alwaysProxy: true });
+    expect(r.json).toMatchObject({ alwaysProxy: true, jobs: [] });
+    expect((await call("POST", "/api/versions", { video: "Hero", file: "renders/hero.mov" })).json.proxyJob).toBeUndefined();
   });
 });

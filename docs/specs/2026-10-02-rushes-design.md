@@ -673,6 +673,8 @@ This section is binding and replaces §17.5.
   - **a box drawn on a vertical cut is measured against the picture in Safari**. Today it is measured against the 16:9 frame, which is a real bug.
 
 ### 19.5 Proxies: the user's choice, never silent
+
+> **§36 (26 Nov 2026, `2026-11-26-rushes-proxies.md`) extends this.** It replaces the per-film Proxy / Original switch (now one Proxies button in the tool strip) and the `autoProxy` checkbox and its criteria (now the project's "Always make proxies" switch, `alwaysProxy`). Proxies are made at one of four presets, named `<film-slug>_<version>_proxy-<preset>.mp4`. The offer bar below is kept for when the project switch is off.
 - **When Rushes offers one.** For a cut that's likely to play badly:
   - 4K or larger on either edge;
   - over 1.5 GB;
