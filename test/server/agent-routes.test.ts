@@ -409,6 +409,8 @@ describe("Send again: a batch whose turn ended with notes unanswered (§35.7)", 
     await r.note("The flag is not as present");
     expect((await r.call("POST", "/api/batches", {})).json.agent).toEqual({ handedTo: "claude" });
     await waitFor("the second run to start", () => r.runner.status().phase === "working");
+    // The runner says "working" before the agent has logged the prompt: wait for that too, or a slow machine counts one.
+    await waitFor("the agent to be handed the second batch", () => r.log().filter((m) => m.method === "session/prompt").length === 2);
     const busy = await r.call("POST", `/api/batches/${batch}/resend`, {});
     expect(busy.status).toBe(200);
     expect(busy.json.agent).toEqual({ handedTo: null, why: "Claude Code is still working on this film", busy: true });
@@ -425,7 +427,7 @@ describe("Send again: a batch whose turn ended with notes unanswered (§35.7)", 
 
 describe("Send again: a refused batch is kept in batches.json, so a restart can't strand its notes (I3)", () => {
   it("a batch refused for want of sign-in is marked, and after a restart Send again hands it over once", async () => {
-    const r = await rig({ settings: { on: true, agent: "claude" }, agents: [claude({ signedIn: false }), codex()], scenario: { turns: [[{ stop: "end_turn" }]] } });
+    const r = await rig({ settings: { on: true, agent: "claude" }, agents: [claude({ signedIn: false }), codex()], scenario: { turns: [[{ sleep: 2000 }, { stop: "end_turn" }]] } });
     await r.note("Tighten the opening");
     const sent = await r.call("POST", "/api/batches", {});
     expect(sent.json.agent).toEqual({ handedTo: null, why: "Claude Code is not signed in" });
@@ -454,7 +456,8 @@ describe("Send again: a refused batch is kept in batches.json, so a restart can'
     expect(again.json.batch.undelivered).toBeNull();
     await waitFor("the agent to be handed the batch", () => fake.log().some((m) => m.method === "session/prompt" && JSON.stringify(m).includes(batch)));
     expect((await r.store.read("batches")).batches.find((b) => b.id === batch)?.undelivered).toBeNull();
-    // Gone once: a second Send again while it is with the agent hands nothing over.
+    // Gone once: a second Send again while it is with the agent hands nothing over. (The fake holds its turn 2 s, so
+    // this lands while it is still with the agent, however slow the machine.)
     expect((await post(`/api/batches/${batch}/resend`)).status).toBe(409);
     await waitFor("the run to finish", () => !runner.busy());
     expect(fake.log().filter((m) => m.method === "session/prompt")).toHaveLength(1);
