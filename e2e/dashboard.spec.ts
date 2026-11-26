@@ -2,8 +2,7 @@ import { access, copyFile, mkdir, readFile, readdir, rm, writeFile } from "node:
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { BrowserContext, Page } from "@playwright/test";
-import { expect, hasFfmpeg, needsH264, pickVersion, type Rushes, test, cutButton, videoReady, reviewTab, openWorkspace, openMore, workspaceTab, openReviewTab, currentFilm, pickFilm, filmButton,
-  proxiesButton, turnProxiesOn, openProxiesTab, rangeChip, ruler, shotBlocks, toolButton, transport, pictureTrack, CUT_SOUND_LANE, CUT_SOUND_WAVE, sendButton, sentDialog, statusSend, baselineText } from "./fixture.js";
+import { expect, hasFfmpeg, needsH264, pickVersion, type Rushes, test, cutButton, videoReady, reviewTab, openWorkspace, openMore, workspaceTab, openReviewTab, currentFilm, pickFilm, filmButton, proxiesButton, turnProxiesOn, openProxiesTab, rangeChip, ruler, shotBlocks, toolButton, transport, pictureTrack, CUT_SOUND_LANE, CUT_SOUND_WAVE, sendButton, sentDialog, statusSend, baselineText, shownTip } from "./fixture.js";
 
 const CLIP = fileURLToPath(new URL("./fixtures/clip.mp4", import.meta.url));
 // A 1x1 transparent PNG, reused for every screenshot the library tests need on disk: its
@@ -461,17 +460,13 @@ test("tooltips in the top bar open below their button, inside the window", async
   for (const name of [/^More$/, /the notes panel/]) {
     const button = page.locator("header.top").getByRole("button", { name });
     await button.hover();
-    const tip = await button.evaluate((el) => {
-      const after = getComputedStyle(el, "::after");
-      const box = el.getBoundingClientRect();
-      // The tooltip's top edge, from the pseudo-element's computed top (in px, relative to the button).
-      return { top: box.top + parseFloat(after.top), buttonBottom: box.bottom, content: after.content };
-    });
-    expect(tip.content).not.toBe("none");
-    expect(tip.top).toBeGreaterThanOrEqual(tip.buttonBottom);
-    // And it stays inside the window: the last button's opens leftwards.
-    const right = await button.evaluate((el) => el.getBoundingClientRect().left + parseFloat(getComputedStyle(el, "::after").left) + parseFloat(getComputedStyle(el, "::after").width));
-    expect(right).toBeLessThanOrEqual(1440);
+    const tip = await shownTip(page, (await button.getAttribute("data-tip"))!);
+    const buttonBottom = (await button.boundingBox())!.y + (await button.boundingBox())!.height;
+    expect(tip.side).toBe("below");
+    expect(tip.top).toBeGreaterThanOrEqual(buttonBottom);
+    // And it stays inside the window, 8 px clear of its edge.
+    expect(tip.right).toBeLessThanOrEqual(tip.vw - 8);
+    await page.mouse.move(0, 400);
   }
 });
 
@@ -836,7 +831,7 @@ test("Send works from Assets too, by the status bar's line, and shows its toolti
   await expect(button).toBeEnabled();
   // The tooltip fades in over 0.12s (styles.css), so poll for it rather than reading the mid-transition value.
   await button.hover();
-  await expect.poll(() => button.evaluate((el) => Number(getComputedStyle(el, "::after").opacity))).toBe(1);
+  await shownTip(page);
   await button.click();
   await expect(sentDialog(page)).toContainText("picture batch b_1");
 });
@@ -1389,7 +1384,7 @@ async function proxyRecorded(rushes: { api<T = any>(m: string, p: string, b?: un
   await expect
     .poll(async () => {
       const s = await rushes.api("GET", "/api/state");
-      return s.project.videos[0].versions.find((v: { id: string }) => v.id === version)?.proxy?.file ?? null;
+      return s.project.videos[0].versions.find((v: { id: string }) => v.id === version)?.proxies?.["1080l"]?.file ?? null;
     }, { timeout: 20_000 })
     .toBe(`proxies/hero_${version}_proxy-1080l.mp4`);
 }
@@ -1460,7 +1455,7 @@ test.describe("proxies (§19.5)", () => {
     await expect(offer).not.toContainText("Creating proxy");
     await expect.poll(async () => (await readdir(join(rushes.root, "proxies")).catch(() => [])).length).toBe(0);
     const state = await rushes.api("GET", "/api/state");
-    expect(state.project.videos[0].versions[0].proxy).toBeNull();
+    expect(state.project.videos[0].versions[0].proxies).toEqual({});
     expect(state.proxies.jobs).toEqual([]);
   });
 
@@ -1501,7 +1496,7 @@ test.describe("proxies (§19.5)", () => {
     await proxyRecorded(rushes, "v1");
 
     const added = await rushes.addProResCut({ long: true }, "prores cut");
-    expect(["queued", "running"]).toContain(added.proxyJob?.state);
+    expect(["queued", "running"]).toContain(added.proxyJobs?.[0]?.state);
     await expect(cutButton(page)).toHaveAttribute("data-version", "v2");
     const offer = page.locator(".proxybar");
     await expect(offer).toContainText("Creating proxy");
@@ -1533,7 +1528,7 @@ test.describe("proxies (§19.5)", () => {
     await expect.poll(() => access(join(rushes.root, "proxies", "hero_v1_proxy-1080l.mp4")).then(() => true, () => false)).toBe(false);
     await access(join(rushes.root, "renders", "hero_v1.mov"));
     const state = await rushes.api("GET", "/api/state");
-    expect(state.project.videos[0].versions[0].proxy).toBeNull();
+    expect(state.project.videos[0].versions[0].proxies).toEqual({});
   });
 
   test("a cut the browser can't play is offered a proxy; when the original's gone, the failure says why and the offer returns", async ({ page, rushes }) => {

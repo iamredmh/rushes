@@ -445,7 +445,7 @@ A proxy is a lighter H.264 copy of a cut, made on your drive in `proxies/`. Your
 
 **The Proxies tab**, in the notes panel after Activity, is where they're set up:
 
-- **Quality**: four presets. Sizes go by the short edge, so a vertical cut gets a 1080- or 720-wide proxy, and nothing is ever upscaled. Each has a capped bitrate, so it plays smoothly on a connection that can carry its peak. Audio is AAC 256 kbps in all four.
+- **Quality**: four presets, as checkboxes: tick one or more. Sizes go by the short edge, so a vertical cut gets a 1080- or 720-wide proxy, and nothing is ever upscaled. Each has a capped bitrate, so it plays smoothly on a connection that can carry its peak. Audio is AAC 256 kbps in all four.
 
   | Preset | Short edge | Average / peak |
   |---|---|---|
@@ -454,14 +454,16 @@ A proxy is a lighter H.264 copy of a cut, made on your drive in `proxies/`. Your
   | 720p High | 720 | 3.5 / 4.5 Mbps |
   | 720p Low | 720 | 1.5 / 2 Mbps |
 
-- **Always make proxies for this project**: every new cut gets a proxy at the chosen quality straight away. Turning it on also makes one for the latest cut of each film.
-- **Make proxies now** does the same once, for projects that keep the switch off.
+- **Make proxies for this cut** makes every ticked quality the cut on screen is missing, and **Make proxies for all films** every ticked quality each film's latest cut is missing. Each shows how many proxies it will make; with nothing to make it is greyed out and its tooltip says why.
+- **Always make proxies for this project**: every new cut gets a proxy at each ticked quality straight away. Turning it on, or ticking another quality while it's on, also makes them for the latest cut of each film.
 - **Test connection** times a short download of the cut from your browser, says how fast it was, and ticks the presets that should play smoothly.
-- **The list** shows each film's latest cut and every cut with a proxy: its quality and size, progress while it's made (with **Cancel**), and **Make**, **Remake** and **Delete**. Changing the quality deletes nothing: older proxies say so and offer a remake. **Delete all proxies** is under the list.
+- **The list** shows each film's latest cut and every cut with a proxy, with a line per proxy (its quality, size and **Delete**), progress while one is made (with **Cancel**), and a **Make** button for each ticked quality it lacks. Unticking a quality deletes nothing: its proxies say **Not in use** and aren't played. **Delete all proxies** is under the list.
 
-Proxies are made one at a time, newest cut first. Each cut has one proxy: making it at another quality replaces the old one.
+Proxies are made one at a time, newest cut first, and the better quality first within a cut. A cut holds one proxy per quality.
 
-**The Proxies button**, at the foot of the monitor's tool strip (key **P**), switches between proxies and originals. It's remembered per browser and per project, and starts off: the computer running Rushes wants originals, a laptop on a slow link wants proxies. With it on, every cut that has a proxy plays it, and a cut that doesn't says **No proxy for this cut**, with **Make proxy**. Switching keeps your place and whether it was playing. If playback keeps stalling with proxies off, a line under the player offers to turn them on; it never switches by itself.
+**The Proxies button**, at the foot of the monitor's tool strip (key **P**), switches between proxies and originals. It's remembered per browser and per project, and starts off: the computer running Rushes wants originals, a laptop on a slow link wants proxies. With it on, each cut plays the best ticked quality it has, and a cut with none says **No proxy for this cut**, with **Make proxy**. Switching keeps your place and whether it was playing.
+
+**Stepping down.** With two or more qualities ticked (say 1080p Low and 720p Low), if playback keeps stalling (two waits of a second or more within 30 s) the player steps down to the next quality the cut has, keeping your place. One step at a time, at most every 10 s, and never back up by itself. A label at the top left of the picture says what's playing ("720p Low · stepped down"); click it to pick a quality, the original, or **Back to best**. A pick holds until you change cut. If playback keeps stalling with proxies off, a line under the player offers to turn them on; it never switches by itself.
 
 A cut that's likely to play badly in any browser (4K or larger, over 1.5 GB, or a codec such as ProRes, DNx or HEVC 10-bit) still gets an offer under the player when the project switch is off, saying why, with **Create proxy**. Once that proxy is ready, Proxies turns on.
 

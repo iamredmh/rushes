@@ -265,7 +265,7 @@ test("a format whose file has gone warns on its chip and says File not found; a 
 test("§36.7: the proxy belongs to the primary: another format plays its own file, with no proxy bar", async ({ page, rushes }) => {
   await rushes.addProResCut({ seconds: 2 });
   await rushes.api("POST", "/api/videos/hero/versions/v1/proxy", {});
-  await expect.poll(async () => (await rushes.api("GET", "/api/state")).project.videos[0].versions[0].proxy !== null, { timeout: 20_000 }).toBe(true);
+  await expect.poll(async () => (await rushes.api("GET", "/api/state")).project.videos[0].versions[0].proxies["1080l"] !== undefined, { timeout: 20_000 }).toBe(true);
   await rushes.addFormatFile({ width: 360, height: 640, seconds: 2 });
   await page.goto(rushes.url);
   await turnProxiesOn(page);
@@ -461,7 +461,7 @@ test("a cut stored with no size, playing its proxy, still gets its single shape 
   if (browserName === "chromium") await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await rushes.addProResCut({ seconds: 2 });
   await rushes.api("POST", "/api/videos/hero/versions/v1/proxy", {});
-  await expect.poll(async () => (await rushes.api("GET", "/api/state")).project.videos[0].versions[0].proxy !== null, { timeout: 20_000 }).toBe(true);
+  await expect.poll(async () => (await rushes.api("GET", "/api/state")).project.videos[0].versions[0].proxies["1080l"] !== undefined, { timeout: 20_000 }).toBe(true);
   // As a 0.2.x file has it: no stored size.
   const file = join(rushes.root, ".rushes", "project.json");
   const project = JSON.parse(await readFile(file, "utf8"));

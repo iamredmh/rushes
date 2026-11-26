@@ -675,6 +675,8 @@ This section is binding and replaces §17.5.
 ### 19.5 Proxies: the user's choice, never silent
 
 > **§36 (26 Nov 2026, `2026-11-26-rushes-proxies.md`) extends this.** It replaces the per-film Proxy / Original switch (now one Proxies button in the tool strip) and the `autoProxy` checkbox and its criteria (now the project's "Always make proxies" switch, `alwaysProxy`). Proxies are made at one of four presets, named `<film-slug>_<version>_proxy-<preset>.mp4`. The offer bar below is kept for when the project switch is off.
+>
+> **§37 (26 Nov 2026, `2026-11-26-rushes-proxy-ladder.md`) extends §36.** One or more qualities are ticked (`proxyPresets`), a cut holds one proxy per quality (`proxies`, keyed by preset), and with Proxies on the player plays the best ticked quality ready and steps down one rung on repeated stalls.
 - **When Rushes offers one.** For a cut that's likely to play badly:
   - 4K or larger on either edge;
   - over 1.5 GB;

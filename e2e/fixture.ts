@@ -103,7 +103,7 @@ export interface Rushes {
   /** Register the 9:16 test clip (360x640, 2 s) as a new cut of "Hero". */
   addVerticalCut(note?: string): Promise<{ version: { id: string } }>;
   /** Generate a ProRes test pattern (640x360, 6 s by default) into the project and register it as a new cut of "Hero". Needs ffmpeg. */
-  addProResCut(opts?: ProResOptions, note?: string): Promise<{ version: { id: string }; proxySuggested?: true; proxyReason?: string; proxyJob?: { id: string; state: string } }>;
+  addProResCut(opts?: ProResOptions, note?: string): Promise<{ version: { id: string }; proxySuggested?: true; proxyReason?: string; proxyJobs?: { id: string; state: string }[] }>;
   /**
    * Register a new cut of `video` (default "Hero") in several shapes (§21): the first size is the
    * primary, the rest its formats. `audio` gives the primary a tone. Needs ffmpeg. Generated H.264
@@ -996,3 +996,40 @@ export const ELEVEN_FILMS = [
 export const ELEVEN_FILMS_PROJECT = "2026-10-12-tidewater-rough-review";
 
 export { expect };
+
+// ---- §37.5: the one tooltip layer ----
+
+/** The page's tooltip layer (tips.ts): every data-tip is drawn by it. */
+export function tipLayer(page: Page): Locator {
+  return page.locator(".tiplayer");
+}
+
+export interface ShownTip {
+  text: string;
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+  whiteSpace: string;
+  side: string;
+  vw: number;
+  vh: number;
+}
+
+/** Waits for the tooltip layer to be fully shown (its 0.12 s fade settled), with `text` when given, and measures it. */
+export async function shownTip(page: Page, text?: string): Promise<ShownTip> {
+  await expect
+    .poll(() => tipLayer(page).evaluate((el) => (el.classList.contains("show") ? Number(getComputedStyle(el).opacity) : 0)))
+    .toBe(1);
+  if (text !== undefined) await expect(tipLayer(page)).toHaveText(text);
+  return tipLayer(page).evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return {
+      text: el.textContent ?? "",
+      left: r.left, right: r.right, top: r.top, bottom: r.bottom,
+      whiteSpace: getComputedStyle(el).whiteSpace,
+      side: (el as HTMLElement).dataset.side ?? "",
+      vw: document.documentElement.clientWidth, vh: document.documentElement.clientHeight,
+    };
+  });
+}

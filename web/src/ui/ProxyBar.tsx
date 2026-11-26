@@ -173,7 +173,7 @@ export function ProxyBar({
         )}
         {shown === "working" && (
           <>
-            <span>{job?.state === "queued" ? `Waiting to make ${PRESETS[job.preset].label}` : `Creating ${job ? PRESETS[job.preset].label : "proxy"}`}</span>
+            <span>{job?.state === "queued" ? "Waiting to make a proxy" : "Creating proxy"}{job ? ` (${PRESETS[job.preset].label})` : ""}</span>
             <div class="pbar" role="progressbar" aria-label="Proxy progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
               <i style={{ width: `${pct}%` }} />
             </div>

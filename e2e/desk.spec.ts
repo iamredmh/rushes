@@ -1,13 +1,7 @@
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Page } from "@playwright/test";
-import {
-  expect, test, videoReady, cutButton, pickVersion, currentFilm, filmButton, openWorkspace, pickFilm, reviewTab, workspaceTab, type FormatSize, type Rushes,
-  ELEVEN_FILMS, ELEVEN_FILMS_PROJECT, monitor, pictureTrack, ruler, rulerMarkers, shotBlocks, TOOL_TIPS, toolButton, toolStrip, transport,
-  hasFfmpeg, loudness, playButton, soundBlock, soundButton, soundLabel, soundLevel, soundTrack, expectReadableInRow, timelinePanel,
-  activity, openActivity, notesPanel, noteTargetLine, noteTargetLabel, noteTargetMenu, noteTargetName, noteTargetWhen, panelTab, panelToggle, rangeChip, sendButton, sentDialog, statusSend,
-  openReviewTab, takesList, takeHeadings, takeRow, takeRows, takeCircle, takeName, takeTag, takeBlock, putAwayButton, pressRowButton, foldToggle,
-} from "./fixture.js";
+import { expect, test, videoReady, cutButton, pickVersion, currentFilm, filmButton, openWorkspace, pickFilm, reviewTab, workspaceTab, type FormatSize, type Rushes, ELEVEN_FILMS, ELEVEN_FILMS_PROJECT, monitor, pictureTrack, ruler, rulerMarkers, shotBlocks, TOOL_TIPS, toolButton, toolStrip, transport, hasFfmpeg, loudness, playButton, soundBlock, soundButton, soundLabel, soundLevel, soundTrack, expectReadableInRow, timelinePanel, activity, openActivity, notesPanel, noteTargetLine, noteTargetLabel, noteTargetMenu, noteTargetName, noteTargetWhen, panelTab, panelToggle, rangeChip, sendButton, sentDialog, statusSend, openReviewTab, takesList, takeHeadings, takeRow, takeRows, takeCircle, takeName, takeTag, takeBlock, putAwayButton, pressRowButton, foldToggle, shownTip } from "./fixture.js";
 
 // §27, 5.1 to 5.3 and 5.9: the desk's frame. A top bar and a status bar that never move, the Film and Cut menus,
 // the workspaces with Review's tabs, and the one line that says what to do next.
@@ -415,14 +409,10 @@ test("a note shows as a marker on the ruler, and clicking it selects the note an
   }
   // Shown under the ruler, inside the timeline panel, clear of the marker it names.
   await rulerMarkers(page).nth(0).hover();
-  await expect.poll(() => rulerMarkers(page).nth(0).evaluate((el) => getComputedStyle(el, "::after").opacity)).toBe("1");
-  const tip = await rulerMarkers(page).nth(0).evaluate((el) => {
-    const s = getComputedStyle(el, "::after");
-    const m = el.getBoundingClientRect();
-    return { top: m.top + parseFloat(s.top), bottom: m.top + parseFloat(s.top) + parseFloat(s.height), marker: m.bottom, panel: el.closest(".tlpanel")!.getBoundingClientRect().bottom };
-  });
-  expect(tip.top).toBeGreaterThan(tip.marker); // below the marker, never over it
-  expect(tip.bottom).toBeLessThanOrEqual(tip.panel); // not cut off by the panel
+  const shown = await shownTip(page, "Hold the logo.");
+  const marker = (await rulerMarkers(page).nth(0).boundingBox())!;
+  expect(shown.top).toBeGreaterThan(marker.y + marker.height); // below the marker, never over it
+  expect(shown.bottom).toBeLessThanOrEqual(shown.vh - 8); // inside the window: nothing clips it
   await rulerMarkers(page).nth(1).click();
   await expect(page.getByLabel("Timecode")).toContainText("0:02.00");
   await expect(page.locator(".list > .note", { hasText: "Tighter here." })).toHaveAttribute("aria-current", "true");
@@ -449,7 +439,7 @@ test("an all-format note's ring on the ruler answers on its band; its middle let
   expect(await at(r.x + 1, r.y + r.height / 2)).toBe("ring");
   // Its tooltip is whole on hover: the cut-out never clips it.
   await page.mouse.move(r.x + 1, r.y + r.height / 2);
-  await expect.poll(() => ring.evaluate((el) => Number(getComputedStyle(el, "::after").opacity))).toBe(1);
+  await shownTip(page, "All · Drop the first sound.");
   expect(await ring.evaluate((el) => getComputedStyle(el).clipPath)).toBe("none");
 });
 

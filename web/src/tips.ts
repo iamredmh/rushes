@@ -106,9 +106,10 @@ export function installTips(doc: Document = document): () => void {
     layer.classList.remove("fit");
     if (look.wrap !== "clip" && layer.offsetWidth > view.width - TIP_MARGIN * 2) layer.classList.add("fit");
     const r = el.getBoundingClientRect();
-    const at = placeTip({ left: r.left, top: r.top, width: r.width, height: r.height }, { width: layer.offsetWidth, height: layer.offsetHeight }, view, look.side);
-    layer.style.left = `${Math.round(at.left)}px`;
-    layer.style.top = `${Math.round(at.top)}px`;
+    const at = placeTip({ left: r.left, top: r.top, width: r.width, height: r.height }, { width: Math.ceil(layer.getBoundingClientRect().width), height: Math.ceil(layer.getBoundingClientRect().height) }, view, look.side);
+    // Whole pixels, rounded down, so a fractional width never pushes a clamped tip past the 8 px margin.
+    layer.style.left = `${Math.floor(at.left)}px`;
+    layer.style.top = `${Math.floor(at.top)}px`;
     layer.dataset.side = at.side;
   };
 
@@ -150,6 +151,9 @@ export function installTips(doc: Document = document): () => void {
   const over = (e: MouseEvent) => {
     const el = tipOf(e.target);
     if (!el) return;
+    // The pointer arriving from outside the element starts afresh, even after Escape.
+    const from = e.relatedTarget instanceof win.Node ? e.relatedTarget : null;
+    if (silenced === el && !(from && el.contains(from))) silenced = null;
     if (el !== current || by !== "hover") show(el, "hover");
   };
   const out = (e: MouseEvent) => {

@@ -225,7 +225,7 @@ export const ProjectSchema = z.preprocess(migrateProject, fileObject({
   videos: z.array(VideoSchema).default([]),
   lanes: z.array(LaneSchema).default([]),
   files: z.array(FileEntrySchema).default([]),
-  // §36.5: every new cut gets a proxy at `proxyPreset` straight away. Off by default. Replaces §19.5's autoProxy.
+  // §36.5: every new cut gets a proxy at each of `proxyPresets` straight away (§37.4). Off by default. Replaces §19.5's autoProxy.
   alwaysProxy: z.boolean().default(false),
   // §37.3: the ticked qualities proxies are made at, in ladder order (best first). Never empty.
   proxyPresets: z.array(ProxyPresetSchema).min(1).default([DEFAULT_PROXY_PRESET]).transform(ladderOrder),

@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Page } from "@playwright/test";
-import { expect, test, cutButton, videoReady, reviewTab, openWorkspace, workspaceTab, currentFilm, pickFilm, activity, notesPanel, openActivity, panelTab, panelToggle, sendButton, takesList, openPlanPage } from "./fixture.js";
+import { expect, test, cutButton, videoReady, reviewTab, openWorkspace, workspaceTab, currentFilm, pickFilm, activity, notesPanel, openActivity, panelTab, panelToggle, sendButton, takesList, openPlanPage, shownTip } from "./fixture.js";
 
 // §27, 5.7: the Change Log is the notes panel's Activity tab. Choosing the tab opens it; choosing Notes puts it away.
 const logButton = (page: Page) => panelTab(page, "Activity");
@@ -654,7 +654,8 @@ test("the top bar's notes panel button is an icon, named for screen readers and 
   const button = panelToggle(page);
   await expect(button).toHaveAccessibleName("Show the notes panel · \\"); // a drawer, closed, under 1100 px
   expect((await button.boundingBox())!.width).toBeLessThan(48);
-  expect(await button.evaluate((el) => getComputedStyle(el, "::after").content)).toBe('"Show the notes panel · \\\\"');
+  await button.hover();
+  expect((await shownTip(page)).text).toBe("Show the notes panel · \\");
   await page.setViewportSize({ width: 1280, height: 800 });
   await expect(button).toHaveAccessibleName("Hide the notes panel · \\");
   expect((await button.boundingBox())!.width).toBeLessThan(48);
@@ -693,24 +694,23 @@ test("the top bar's tooltips stay above the open drawer, so More's can still be 
   await videoReady(page);
   await panelToggle(page).click();
   await logButton(page).click();
-  // A tooltip is a pseudo-element with pointer-events none, so a test can't hit it; with the events
-  // on, the element under a point inside it is the button's own, unless the drawer covers it.
-  await page.addStyleTag({ content: ".top [data-tip]::after { pointer-events: auto !important; }" });
+  // §37.5: the tooltip layer takes no pointer, so a test can't hit it; with the events on, the element under a point
+  // inside it is the layer itself, unless the drawer covers it.
+  await page.addStyleTag({ content: ".tiplayer { pointer-events: auto !important; }" });
   const more = page.getByRole("button", { name: "More", exact: true });
   await more.hover();
-  await expect(more).toHaveCSS("position", "relative");
-  const box = (await more.boundingBox())!;
+  const tip = await shownTip(page, "More");
   const head = (await page.locator("header.top").boundingBox())!;
   const d = (await notesPanel(page).boundingBox())!;
   // A point of the tooltip that lies below the top bar, over the drawer.
-  const x = box.x + box.width / 2 - 4;
-  const y = head.y + head.height + 6;
-  expect(y).toBeGreaterThan(box.y + box.height + 6);
+  const x = (tip.left + tip.right) / 2;
+  const y = Math.max(tip.top + 2, head.y + head.height + 2);
+  expect(y).toBeLessThan(tip.bottom);
   expect(x).toBeGreaterThan(d.x);
   expect(y).toBeGreaterThan(d.y);
   const hit = await page.evaluate(([px, py]) => {
     const el = document.elementFromPoint(px, py);
-    return { inDrawer: !!el?.closest(".npanel"), inBar: !!el?.closest(".rtabrow"), tip: el?.closest("[data-tip]")?.getAttribute("aria-label") ?? null };
+    return { inDrawer: !!el?.closest(".npanel"), inBar: !!el?.closest(".rtabrow"), tip: !!el?.closest(".tiplayer") };
   }, [x, y]);
-  expect(hit).toEqual({ inDrawer: false, inBar: false, tip: "More" });
+  expect(hit).toEqual({ inDrawer: false, inBar: false, tip: true });
 });

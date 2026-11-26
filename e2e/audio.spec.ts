@@ -4,11 +4,7 @@ import type { Locator, Page } from "@playwright/test";
 import { readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { makeWav } from "./fixtures/wav.js";
-import {
-  expect, type Rushes, test, openReviewTab, reviewTab, workspaceTab, currentFilm, pickFilm, videoReady, loudness, rangeChip, notesPanel, panelToggle, noteTargetLine, noteTargetLabel, noteTargetName, noteTargetMenu, clearTarget, rulerMarkers, soundBlock, soundButton, soundTrack,
-  monitor, playButton, toolButton, takesList, takeHeadings, takeRow, takeRows, takeCircle, takeName, takeBlock, pressRowButton, foldToggle, clickTakeAt, expectReadableInRow,
-  takeDetailsButton, takeDetailsLine, textOverWaveform, transport,
-} from "./fixture.js";
+import { expect, type Rushes, test, openReviewTab, reviewTab, workspaceTab, currentFilm, pickFilm, videoReady, loudness, rangeChip, notesPanel, panelToggle, noteTargetLine, noteTargetLabel, noteTargetName, noteTargetMenu, clearTarget, rulerMarkers, soundBlock, soundButton, soundTrack, monitor, playButton, toolButton, takesList, takeHeadings, takeRow, takeRows, takeCircle, takeName, takeBlock, pressRowButton, foldToggle, clickTakeAt, expectReadableInRow, takeDetailsButton, takeDetailsLine, textOverWaveform, transport, shownTip, tipLayer } from "./fixture.js";
 
 test("the generated WAV fixture decodes in Chromium to the tone it describes", async ({ page }) => {
   const wav = makeWav({ seconds: 1.5, freq: 440 }).toString("base64");
@@ -59,8 +55,8 @@ async function loaded(page: Page, n: number) {
 
 /**
  * The computed `overflow` of an element and every ancestor up to (and including) its take's row: a
- * `[data-tip]` mark's tooltip (an `::after`) is clipped if any box between it and the row hides
- * overflow, so every link in the chain must stay `visible`.
+ * `[data-tip]` mark's tooltip was once an `::after`, clipped if any box between it and the row hid overflow; §37.5's
+ * layer can't be clipped, but the chain is still kept `visible` so nothing else is cut off.
  */
 function overflowChain(mark: ReturnType<Page["locator"]>) {
   return mark.evaluate((el) => {
@@ -935,9 +931,9 @@ test("a read's details tooltip isn't clipped, and wraps its lines", async ({ pag
   expect(chain.every((o) => o === "visible")).toBe(true);
   // Hovering actually shows the tooltip (opacity: 1 once the 0.12s transition settles), with the full text.
   await name.hover();
-  await expect.poll(() => name.evaluate((el) => Number(getComputedStyle(el, "::after").opacity))).toBe(1);
-  expect(await name.evaluate((el) => getComputedStyle(el, "::after").content)).toBe(JSON.stringify(LONG));
-  expect(await name.evaluate((el) => getComputedStyle(el, "::after").whiteSpace)).toBe("pre-line");
+  const tip = await shownTip(page);
+  expect(await tipLayer(page).evaluate((el) => (el as HTMLElement).innerText.replace(/\s+/g, " ").trim())).toBe(LONG.replace(/\s+/g, " ").trim());
+  expect(tip.whiteSpace).toBe("pre-line");
 });
 
 test("a range note on a read draws on Voiceover as a span from its In to its Out (round 1); a point note stays a point", async ({ page, rushes }) => {
@@ -977,8 +973,10 @@ test("a cut-off round heading and the note's target show in full as tooltips, in
     expect(await head.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
     await expect(head).toHaveAttribute("data-tip", `New · ${name}`);
     await head.hover();
-    await expect.poll(() => head.evaluate((e) => Number(getComputedStyle(e, "::after").opacity))).toBe(1);
-    expect(await head.evaluate((e) => getComputedStyle(e, "::after").whiteSpace)).toBe("normal");
+    const tip = await shownTip(page, `New · ${name}`);
+    expect(tip.whiteSpace).toBe("normal");
+    expect(tip.left).toBeGreaterThanOrEqual(8);
+    expect(tip.right).toBeLessThanOrEqual(tip.vw - 8);
   }
   await takeName(page, "more sombre").click();
   await panelToggle(page).click();
@@ -987,12 +985,10 @@ test("a cut-off round heading and the note's target show in full as tooltips, in
   await expect(on).toHaveAttribute("data-tip", `Voice · ${NEW} · more sombre`);
   await on.hover();
   // The target's tooltip wraps and stays inside the window rather than running off its right edge.
-  const box = await on.evaluate((e) => {
-    const after = getComputedStyle(e, "::after");
-    return { left: e.getBoundingClientRect().left, width: parseFloat(after.width), ws: after.whiteSpace, vw: window.innerWidth };
-  });
-  expect(box.ws).toBe("normal");
-  expect(box.left + box.width).toBeLessThanOrEqual(box.vw);
+  const box = await shownTip(page, `Voice · ${NEW} · more sombre`);
+  expect(box.whiteSpace).toBe("normal");
+  expect(box.left).toBeGreaterThanOrEqual(8);
+  expect(box.right).toBeLessThanOrEqual(box.vw - 8);
 });
 
 test("a long file's mark sits beside the read's name, not over its waveform", async ({ page, rushes }) => {
@@ -2139,7 +2135,7 @@ test("no words over any take's waveform on Voice, Music and Effects; the details
   await expect(takeName(page, "Warm pad")).toHaveAttribute("aria-description", "Soft keys, no drums · 96 BPM · D major");
   // Hovered, the name shows its details.
   await takeName(page, "Warm pad").hover();
-  await expect.poll(() => takeName(page, "Warm pad").evaluate((el) => Number(getComputedStyle(el, "::after").opacity))).toBe(1);
+  await shownTip(page, "Soft keys, no drums · 96 BPM · D major");
 });
 
 test("a take's details button opens its details as a line under its row, pushing the rows below down; several can be open", async ({ page, rushes, browserName }) => {

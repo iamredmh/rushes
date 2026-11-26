@@ -1,3 +1,4 @@
+import { shownTip } from "./fixture.js";
 // §28, Send to AI (plan 2): the run's chip in the top bar, and Stop; the Send to AI row above Send and the agent menu;
 // the first-Send sheet and what Send does with the answer; the ask cards in the notes panel and the notification for an ask.
 // The agent is the fake (e2e/agentFixture.ts).
@@ -155,7 +156,7 @@ test("a failed run's chip says why in its tooltip, and has no Stop", async ({ pa
   await chipFits(page);
   await chip(page).hover();
   // The tooltip fades in.
-  await expect.poll(() => chip(page).evaluate((el) => getComputedStyle(el, "::after").opacity)).toBe("1");
+  await shownTip(page, status.error);
   await page.screenshot({ path: test.info().outputPath("chip-failed-hover-1440.png"), clip: { x: 640, y: 0, width: 800, height: 140 } });
 });
 
@@ -178,7 +179,7 @@ test("a Codex turn that ends in an error shows failed, with Codex's words in the
   await expect(sendBtn(page)).toHaveAccessibleName("Send 1");
   await chipFits(page);
   await chip(page).hover();
-  await expect.poll(() => chip(page).evaluate((el) => getComputedStyle(el, "::after").opacity)).toBe("1");
+  await shownTip(page, message);
   await page.screenshot({ path: test.info().outputPath("chip-codex-failed-1440.png"), clip: { x: 640, y: 0, width: 800, height: 140 } });
 });
 
