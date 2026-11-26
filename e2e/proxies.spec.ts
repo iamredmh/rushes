@@ -9,8 +9,8 @@ import { expect, hasFfmpeg, openProxiesTab, proxiesButton, shownTip, test, turnP
 /** The cut's proxies as the server has them. */
 const proxiesOf = async (rushes: Rushes, n = 0) => (await rushes.api("GET", "/api/state")).project.videos[0].versions[n].proxies as Record<string, { file: string; preset?: string }>;
 /** Waits until the first cut has a proxy at each of `presets`. */
-async function proxiesReady(rushes: Rushes, presets: string[]) {
-  await expect.poll(async () => Object.keys(await proxiesOf(rushes)).sort().join(","), { timeout: 30_000 }).toBe([...presets].sort().join(","));
+async function proxiesReady(rushes: Rushes, presets: string[], timeout = 30_000) {
+  await expect.poll(async () => Object.keys(await proxiesOf(rushes)).sort().join(","), { timeout }).toBe([...presets].sort().join(","));
 }
 /** Two waits of over a second each, as a slow link gives them. */
 async function stallTwice(page: Page) {
@@ -66,6 +66,8 @@ test.describe("proxies you can choose and switch on (§36)", () => {
   });
 
   test("ticking 1080p Low and 720p Low, then Make proxies for this cut, makes both; the row's progress is a 4 px line", async ({ page, rushes }) => {
+    // Two encodes of the long clip, one after the other: slow on a loaded runner.
+    test.setTimeout(90_000);
     await rushes.addProResCut({ long: true });
     await page.goto(rushes.url);
     await videoReady(page);
@@ -93,7 +95,7 @@ test.describe("proxies you can choose and switch on (§36)", () => {
       expect(pb.width).toBeGreaterThanOrEqual(120);
     }
     await expect(row).toContainText(/Making (1080p|720p) Low · \d+%|Queued · (1080p|720p) Low/);
-    await proxiesReady(rushes, ["1080l", "720l"]);
+    await proxiesReady(rushes, ["1080l", "720l"], 60_000);
     const proxies = await proxiesOf(rushes);
     expect(proxies["1080l"]).toMatchObject({ file: "proxies/hero_v1_proxy-1080l.mp4", preset: "1080l" });
     expect(proxies["720l"]).toMatchObject({ file: "proxies/hero_v1_proxy-720l.mp4", preset: "720l" });
