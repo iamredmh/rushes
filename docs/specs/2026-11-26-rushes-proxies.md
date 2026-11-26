@@ -26,7 +26,7 @@ Red, 26 Nov 2026, reviewing Cloud Engines Shorts from the DFINITY MacBook throug
 
 - **Size goes by the short edge**, so a 9:16 short gets a 1080- or 720-wide proxy, never a squashed one. Never upscaled: a source smaller than the preset keeps its size (made even) and only the bitrate changes.
 - **Frame rate and duration** match the original (`-fps_mode passthrough`, `-vsync` before ffmpeg 5.1). yuv420p, faststart. A keyframe every 2 s, so a seek on a slow link fetches little.
-- **Capped bitrate, not CRF.** `-b:v` is the average, `-maxrate` the peak, and `-bufsize` **half a second** of the peak. The card asked for about 1 s; measured, a 1 s buffer let 1080p Low peak at 5.74 Mbps on the high-motion clip (15% over, at the limit), and 0.5 s holds every preset well inside it (36.8). Half a second still fits a 2 s keyframe comfortably.
+- **Capped bitrate, not CRF.** `-b:v` is the average; `-maxrate` is **90% of the stated peak**, and `-bufsize` **half a second** of that. The card asked for the cap at the peak and a buffer of about 1 s. Measured: a 1 s buffer let 1080p Low peak at 5.74 Mbps on the high-motion clip (15% over, at the limit); with the cap at the peak and 0.5 s, a busy shot after a quiet stretch still ran a 1 s window up to 21% over on a real cut (Cloud on cloud), and a Windows nightly ffmpeg ran the test clip's 720p High 16% over. The 10% headroom brings every measured peak to within 4% of the stated one (36.8), so the stated peak is the rate a link must carry. Half a second still fits a 2 s keyframe comfortably.
 - **Audio stays 256 kbps** in every preset: Red reviews mixes on proxies, and it costs almost nothing next to the picture.
 - **1080p Low is the default**: it fits the 5–6 Mbps link measured above. 1080p Low and 720p High use about the same bandwidth on purpose: one keeps on-screen text sharp, the other keeps motion clean.
 
@@ -120,26 +120,26 @@ With proxies off, when the player stalls twice within 30 s for 1 s or more each 
 
 ## 36.8 Measured
 
-**Encode check** (`test/server/proxyEncode.test.ts`, real ffmpeg; skipped without it): a 5 s 1920×1080 high-motion clip (`testsrc2` under full-frame noise that changes every frame), encoded at each preset; the peak is the most bits in any 1 s window of video packets (ffprobe). It must be within 15% of the cap, and the average within 15% of the preset's. The same test checks portrait, square and smaller-than-preset sizes. On the mini (libx264, ffmpeg 9.0.2), with two harsher clips for reference (12 s of constant heavier noise, and 16 s of still picture with a 3 s noise burst):
+**Encode check** (`test/server/proxyEncode.test.ts`, real ffmpeg; skipped without it): a 5 s 1920×1080 high-motion clip (`testsrc2` under full-frame noise that changes every frame), encoded at each preset; the peak is the most bits in any 1 s window of video packets (ffprobe). It must be within 15% of the stated peak, and the average within 15% of the preset's. The same test checks portrait, square and smaller-than-preset sizes. On the Mac mini (libx264, ffmpeg 9.0.2), final settings:
 
-| Preset | Cap | Test clip avg / peak | Heavy noise avg / peak | Burst clip avg / peak |
-|---|---|---|---|---|
-| 1080p High | 14 | 8.92 / 12.01 | 9.70 / 13.70 | 7.70 / 15.93 |
-| 1080p Low | 5 | 3.43 / 4.57 | 3.81 / 4.98 | 3.08 / 5.71 |
-| 720p High | 4.5 | 3.12 / 4.21 | 3.11 / 4.70 | 2.77 / 5.34 |
-| 720p Low | 2 | 1.27 / 1.71 | 1.33 / 1.89 | 1.25 / 2.18 |
+| Preset | Stated peak | Test clip avg / peak (Mbps) |
+|---|---|---|
+| 1080p High | 14 | 8.83 / 11.89 |
+| 1080p Low | 5 | 3.33 / 4.41 |
+| 720p High | 4.5 | 3.11 / 4.04 |
+| 720p Low | 2 | 1.17 / 1.52 |
 
-All in Mbps. The burst clip's 1 s peaks run up to 19% over the cap in the second after a still section: that is the half-second VBV buffer draining, by design. The stream stays VBV-compliant, so a player with half a second buffered at the cap's rate never stalls.
+With `-maxrate` at the full peak (the first build), the same clip measured 12.01 / 4.57 / 4.21 / 1.71 on the mini and 14.32 / 5.68 / **5.22** / 2.13 on CI's Windows nightly ffmpeg, which is what moved `-maxrate` to 90%.
 
-**Hands-on** (26 Nov, the Mac mini, a copy of Cloud Engines Shorts served from the branch on port 4598): turning the switch on at 1080p Low made the latest cut of all six films in 25 s, one at a time; changing to 720p Low showed all six as older and remade them in 17 s. Toggling Proxies while playing swapped the file and kept playing from the same place every time. The originals are 1080p H.264 at 9–55 Mbps.
+**Hands-on** (26 Nov, the Mac mini, a copy of Cloud Engines Shorts served from the branch on port 4598): turning the switch on at 1080p Low made the latest cut of all six films in 25 s, one at a time; changing to 720p Low showed all six as older, queued them and remade them in 17 s. Toggling Proxies while playing swapped the file and kept playing from the same place, four times out of four. The stall hint showed after two simulated stalls, and its button turned Proxies on and played the 720p Low proxy. The originals are 1080p H.264 at 9–55 Mbps. Final settings, per film (time is ffmpeg alone):
 
 | Film | Original | 1080p Low: size, time, avg / peak | 720p Low: size, time, avg / peak |
 |---|---|---|---|
-| Engine sizes v14 | 22.2 s, 124 MB, 44.6 Mbps | 9.4 MB, 3.1 s, 3.11 / 5.00 | 4.0 MB, 1.8 s, 1.18 / 1.95 |
-| Cloud on cloud v9 | 28.0 s, 33 MB, 9.3 Mbps | 13.0 MB, 3.5 s, 3.43 / **6.03** | 5.3 MB, 2.2 s, 1.24 / 2.13 |
-| North America v4 | 30.2 s, 202 MB, 53.5 Mbps | 12.1 MB, 5.1 s, 3.20 / 5.27 | 4.4 MB, 3.6 s, 1.16 / 2.02 |
-| EU only v9 | 33.0 s, 226 MB, 54.7 Mbps | 14.2 MB, 5.9 s, 3.19 / 5.05 | 5.9 MB, 4.1 s, 1.17 / 1.90 |
-| Engine power v9 | 23.9 s, 117 MB, 39.2 Mbps | 9.6 MB, 3.6 s, 2.94 / 4.82 | 3.9 MB, 2.6 s, 1.03 / 1.86 |
-| Always running v17 | 24.8 s, 138 MB, 44.6 Mbps | 10.9 MB, 5.0 s, 3.25 / 4.66 | 4.6 MB, 3.0 s, 1.23 / 1.84 |
+| Engine sizes v14 | 22.2 s, 124 MB, 44.6 Mbps | 8.9 MB, 2.0 s, 2.93 / 4.50 | 3.7 MB, 1.4 s, 1.08 / 1.73 |
+| Cloud on cloud v9 | 28.0 s, 33 MB, 9.3 Mbps | 12.5 MB, 1.7 s, 3.31 / 5.20 | 5.2 MB, 1.2 s, 1.22 / 2.00 |
+| North America v4 | 30.2 s, 202 MB, 53.5 Mbps | 10.5 MB, 2.4 s, 2.78 / 4.80 | 3.7 MB, 1.8 s, 0.97 / 1.84 |
+| EU only v9 | 33.0 s, 226 MB, 54.7 Mbps | 12.4 MB, 2.8 s, 2.75 / 4.42 | 5.2 MB, 2.0 s, 1.00 / 1.73 |
+| Engine power v9 | 23.9 s, 117 MB, 39.2 Mbps | 8.4 MB, 1.9 s, 2.53 / 4.22 | 3.3 MB, 1.3 s, 0.83 / 1.69 |
+| Always running v17 | 24.8 s, 138 MB, 44.6 Mbps | 9.4 MB, 1.8 s, 2.76 / 4.15 | 4.2 MB, 1.5 s, 1.07 / 1.49 |
 
-Eleven of the twelve sit within 15% of the cap. Cloud on cloud at 1080p Low peaks 21% over, in the second from 24.3 s, a busy shot after a lighter stretch: the half-second buffer draining, as on the burst clip. It is within the VBV model, so a link that carries 5 Mbps with half a second buffered plays it without a stall; a 1 s window can't promise less without a buffer too small for a 1080p keyframe.
+Every peak is within 4% of the stated one. (With the first settings, Cloud on cloud at 1080p Low peaked at 6.03, 21% over, in the second from 24.3 s.)

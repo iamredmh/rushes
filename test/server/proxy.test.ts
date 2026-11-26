@@ -121,7 +121,7 @@ describe("encodeArgs", () => {
       "-hide_banner", "-y", "-protocol_whitelist", "file", "-format_whitelist", VIDEO_FORMATS, "-i", "/in/a.mov",
       "-vf", "scale=w='if(gt(iw,ih),-2,trunc(min(1080,iw)/2)*2)':h='if(gt(iw,ih),trunc(min(1080,ih)/2)*2,-2)'",
       "-c:v", "libx264", "-preset", "veryfast",
-      "-b:v", "4000k", "-maxrate", "5000k", "-bufsize", "2500k",
+      "-b:v", "4000k", "-maxrate", "4500k", "-bufsize", "2250k",
       "-force_key_frames", "expr:gte(t,n_forced*2)",
       "-pix_fmt", "yuv420p", "-fps_mode", "passthrough",
       "-c:a", "aac", "-b:a", "256k", "-movflags", "+faststart",
@@ -823,7 +823,8 @@ describe("§36 presets, encoder and queue", () => {
 
   it("each preset scales by the short edge, never up, with its own capped bitrate and 256 kbps audio", () => {
     const at = (args: string[], flag: string) => args[args.indexOf(flag) + 1];
-    for (const [preset, edge, avg, peak] of [["1080h", 1080, "10000k", "14000k"], ["1080l", 1080, "4000k", "5000k"], ["720h", 720, "3500k", "4500k"], ["720l", 720, "1500k", "2000k"]] as const) {
+    // -maxrate is 90% of the stated peak (§36.3), so builds that overshoot it still land near the peak.
+    for (const [preset, edge, avg, peak] of [["1080h", 1080, "10000k", "12600k"], ["1080l", 1080, "4000k", "4500k"], ["720h", 720, "3500k", "4050k"], ["720l", 720, "1500k", "1800k"]] as const) {
       const a = encodeArgs("/in/a.mov", "/out/b.mp4", null, preset);
       expect(at(a, "-vf")).toBe(scaleFilter(edge));
       expect(at(a, "-b:v")).toBe(avg);

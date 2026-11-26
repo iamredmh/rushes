@@ -144,6 +144,16 @@ export function parseEncoders(text: string): string[] {
     .filter((n): n is string => !!n);
 }
 
+/**
+ * §36.3: the encoder's `-maxrate`, 90% of the preset's peak. With a half-second buffer, a 1 s window can run above
+ * `-maxrate` when a busy shot follows a quiet one, and how far varies between x264 builds (a Windows nightly ran 720p
+ * High 16% over with the cap at the peak). The 10% headroom keeps the measured peak at or near the stated one.
+ */
+export const MAXRATE_SHARE = 0.9;
+export function maxrateKbps(preset: ProxyPreset): number {
+  return Math.round(PRESETS[preset].peakKbps * MAXRATE_SHARE);
+}
+
 /** The scale filter for a preset (§36.3): the short edge at most `shortEdge`, never upscaled, both sides even. */
 export function scaleFilter(shortEdge: number): string {
   // Landscape: the height is the short edge; portrait and square: the width. -2 keeps the shape, rounded to even.
@@ -172,7 +182,7 @@ export function encodeArgs(
     "-hide_banner", "-y", "-protocol_whitelist", "file", "-format_whitelist", VIDEO_FORMATS, "-i", orig,
     "-vf", scaleFilter(spec.shortEdge),
     ...codec,
-    "-b:v", `${spec.avgKbps}k`, "-maxrate", `${spec.peakKbps}k`, "-bufsize", `${Math.round(spec.peakKbps / 2)}k`,
+    "-b:v", `${spec.avgKbps}k`, "-maxrate", `${maxrateKbps(preset)}k`, "-bufsize", `${Math.round(maxrateKbps(preset) / 2)}k`,
     "-force_key_frames", "expr:gte(t,n_forced*2)",
     "-pix_fmt", "yuv420p", ...passthrough,
     "-c:a", "aac", "-b:a", `${PROXY_AUDIO_KBPS}k`, "-movflags", "+faststart",
