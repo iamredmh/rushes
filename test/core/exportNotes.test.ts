@@ -7,7 +7,7 @@ import { addFormat, addVersion } from "../../src/core/project.js";
 import { VisualsFileSchema, type NotesFile, type Project } from "../../src/core/schema.js";
 import { registerVisual } from "../../src/core/visuals.js";
 
-const project = (): Project => ({ schema: 1, rev: 0, name: "Spring Launch", fps: 30, videos: [], lanes: [], files: [], alwaysProxy: false, proxyPreset: "1080l" as const });
+const project = (): Project => ({ schema: 1, rev: 0, name: "Spring Launch", fps: 30, videos: [], lanes: [], files: [], alwaysProxy: false, proxyPresets: ["1080l"] as const });
 
 describe("exportFileName", () => {
   it("slugs the project name and dates it YYYY-MM-DD", () => {

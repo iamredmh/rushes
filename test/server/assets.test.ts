@@ -103,7 +103,7 @@ describe("listAssets", () => {
     await mkdir(join(root, "proxies"), { recursive: true });
     await writeFile(join(root, "proxies", "hero_v1_proxy.mp4"), Buffer.alloc(1234));
     await store.update("project", (p) => {
-      p.videos[0].versions[0].proxy = { file: "proxies/hero_v1_proxy.mp4", width: 1920, height: 1080, bytes: 1234, createdAt: new Date().toISOString() };
+      p.videos[0].versions[0].proxies.legacy = { file: "proxies/hero_v1_proxy.mp4", width: 1920, height: 1080, bytes: 1234, createdAt: new Date().toISOString() };
     });
     const [project, script] = await Promise.all([store.read("project"), store.read("script")]);
     const assets = await listAssets(store, project, script);
@@ -117,7 +117,7 @@ describe("listAssets", () => {
   it("never lists a proxy record that points outside proxies/ (a hand edit)", async () => {
     const { store } = await seeded();
     await store.update("project", (p) => {
-      p.videos[0].versions[0].proxy = { file: "renders/hero_v1.mp4", width: 1920, height: 1080, bytes: 1, createdAt: new Date().toISOString() };
+      p.videos[0].versions[0].proxies["1080l"] = { file: "renders/hero_v1.mp4", width: 1920, height: 1080, bytes: 1, createdAt: new Date().toISOString() };
     });
     const [project, script] = await Promise.all([store.read("project"), store.read("script")]);
     const assets = await listAssets(store, project, script);

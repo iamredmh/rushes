@@ -193,7 +193,7 @@ describe("ProxyJobs", () => {
     expect(events.slice(0, -1).every((e) => e.state === "running")).toBe(true);
 
     const v = (await store.read("project")).videos[0].versions[0];
-    expect(v.proxy).toMatchObject({ file: "proxies/hero_v1_proxy-1080l.mp4", width: 1920, height: 1080, bytes: "partial bytes".length });
+    expect(v.proxies["1080l"]).toMatchObject({ file: "proxies/hero_v1_proxy-1080l.mp4", width: 1920, height: 1080, bytes: "partial bytes".length });
     expect(await exists(join(root, "proxies", "hero_v1_proxy-1080l.mp4"))).toBe(true);
     expect(await exists(join(root, "proxies", "hero_v1_proxy-1080l.partial.mp4"))).toBe(false);
     // ffmpeg wrote to the partial name, never to the final one.
@@ -214,7 +214,7 @@ describe("ProxyJobs", () => {
     expect(end.state).toBe("cancelled");
     expect(run.killed).toBe(true);
     expect(await readdir(join(root, "proxies"))).toEqual([]);
-    expect((await store.read("project")).videos[0].versions[0].proxy).toBeNull();
+    expect((await store.read("project")).videos[0].versions[0].proxies).toEqual({});
     expect(events.at(-1)).toMatchObject({ job: job.id, state: "cancelled" });
     expect(jobs.list()).toEqual([]);
     await expect(jobs.cancel(job.id)).rejects.toMatchObject({ status: 404 });
@@ -238,7 +238,7 @@ describe("ProxyJobs", () => {
     expect(end.state).toBe("failed");
     expect(end.reason).toBe("ffmpeg stopped: hero.mov: Invalid data found when processing input");
     expect(events.at(-1)).toMatchObject({ state: "failed", reason: end.reason });
-    expect((await store.read("project")).videos[0].versions[0].proxy).toBeNull();
+    expect((await store.read("project")).videos[0].versions[0].proxies).toEqual({});
     expect(await readdir(join(root, "proxies"))).toEqual([]);
   });
 
@@ -252,7 +252,7 @@ describe("ProxyJobs", () => {
     expect(events.at(-1)).toMatchObject({ state: "failed", reason: "The original file is missing" });
     expect(run.calls.filter((a) => a[0] !== "-version")).toEqual([]);
     expect(await exists(join(root, "proxies"))).toBe(false);
-    expect((await store.read("project")).videos[0].versions[0].proxy).toBeNull();
+    expect((await store.read("project")).videos[0].versions[0].proxies).toEqual({});
     // The offer comes back: a fresh start is a new job.
     expect(jobs.list()).toEqual([]);
   });
@@ -414,7 +414,7 @@ describe.skipIf(!FFMPEG)("ProxyJobs with real ffmpeg", () => {
 
     const proxy = join(root, "proxies", "hero_v1_proxy-1080l.mp4");
     const info = await stat(proxy);
-    const record = (await store.read("project")).videos[0].versions[0].proxy;
+    const record = (await store.read("project")).videos[0].versions[0].proxies["1080l"];
     expect(record).toMatchObject({ file: "proxies/hero_v1_proxy-1080l.mp4", width: 640, height: 360, bytes: info.size });
 
     const count = (file: string) =>
@@ -553,7 +553,7 @@ describe("ProxyJobs, risky paths (fix round 1)", () => {
     expect(await cancelling).toMatchObject({ state: "done" });
     expect(end.state).toBe("done");
     expect(signal?.aborted).toBe(false);
-    expect((await store.read("project")).videos[0].versions[0].proxy?.file).toBe("proxies/hero_v1_proxy-1080l.mp4");
+    expect((await store.read("project")).videos[0].versions[0].proxies["1080l"]?.file).toBe("proxies/hero_v1_proxy-1080l.mp4");
     expect(await exists(join(root, "proxies", "hero_v1_proxy-1080l.mp4"))).toBe(true);
   });
 
@@ -574,7 +574,7 @@ describe("ProxyJobs, risky paths (fix round 1)", () => {
     const { root, store } = await project();
     const jobs = new ProxyJobs(store, { run: fakeRunner(), probe: fakeProbe, available: async () => true });
     await jobs.wait(jobs.start("hero", "v1").id);
-    const before = (await store.read("project")).videos[0].versions[0].proxy;
+    const before = (await store.read("project")).videos[0].versions[0].proxies["1080l"];
     expect(before?.file).toBe("proxies/hero_v1_proxy-1080l.mp4");
 
     const real = store.update.bind(store);
@@ -585,7 +585,7 @@ describe("ProxyJobs, risky paths (fix round 1)", () => {
     const end = await jobs.wait(jobs.start("hero", "v1").id);
     expect(end).toMatchObject({ state: "failed", reason: "Couldn't record the proxy: disk full" });
     expect(await readdir(join(root, "proxies"))).toEqual(["hero_v1_proxy-1080l.mp4"]);
-    expect((await store.read("project")).videos[0].versions[0].proxy).toEqual(before);
+    expect((await store.read("project")).videos[0].versions[0].proxies["1080l"]).toEqual(before);
   });
 
   it("once closing, start refuses a new job (503 closing) and the running one is cancelled", async () => {
@@ -905,47 +905,57 @@ describe("§36 presets, encoder and queue", () => {
     expect(PROXY_CONCURRENCY).toBe(1);
   });
 
-  it("a queued job is cancelled without spawning anything; a queued one asked at another preset takes it", async () => {
+  it("a queued job is cancelled without spawning anything; asking the same cut at another quality is a job of its own (§37.4)", async () => {
     const { store, versions } = await many(2);
     const g = gate();
     const run = fakeRunner({ gate: g.promise });
     const jobs = new ProxyJobs(store, { run, probe: fakeProbe, available: async () => true });
     const first = jobs.start("hero", "v1", { addedAt: versions[0].addedAt });
     const queued = jobs.start("hero", "v2", { addedAt: versions[1].addedAt });
-    const moved = jobs.start("hero", "v2", { preset: "720l", addedAt: versions[1].addedAt });
-    expect(moved).toMatchObject({ id: queued.id, preset: "720l", state: "queued" });
+    const other = jobs.start("hero", "v2", { preset: "720l", addedAt: versions[1].addedAt });
+    expect(other.id).not.toBe(queued.id);
+    expect(jobs.start("hero", "v2", { preset: "720l", addedAt: versions[1].addedAt }).id).toBe(other.id);
+    expect(jobs.forCut("hero", "v2").map((j) => j.preset).sort()).toEqual(["1080l", "720l"]);
     expect((await jobs.cancel(queued.id)).state).toBe("cancelled");
+    expect((await jobs.cancel(other.id)).state).toBe("cancelled");
     g.open();
     await jobs.wait(first.id);
     expect(run.calls.filter((a) => a[0] !== "-version")).toHaveLength(1);
-    expect((await store.read("project")).videos[0].versions[1].proxy).toBeNull();
+    expect((await store.read("project")).videos[0].versions[1].proxies).toEqual({});
   });
 
-  it("asking at another preset while one is running cancels it and makes the new one", async () => {
+  it("a second quality of a cut is made beside the first, and neither replaces the other (§37.3)", async () => {
     const { root, store } = await project();
-    let calls = 0;
-    const g = gate();
-    const run: FfmpegRunner = async (args, o = {}) => {
+    const run: FfmpegRunner = async (args) => {
       if (args[0] === "-version") return { code: 0, stderr: "" };
-      calls++;
       await writeFile(args[args.length - 1], "bytes");
-      if (calls === 1) {
-        await new Promise<void>((res) => o.signal?.addEventListener("abort", () => res()));
-        return { code: 255, stderr: "" };
-      }
-      await g.promise;
       return { code: 0, stderr: "" };
     };
     const jobs = new ProxyJobs(store, { run, probe: fakeProbe, available: async () => true });
     const a = jobs.start("hero", "v1", { preset: "1080l" });
-    await new Promise((r) => setTimeout(r, 20));
-    const b = jobs.start("hero", "v1", { preset: "720h" });
+    const b = jobs.start("hero", "v1", { preset: "720l" });
     expect(b.id).not.toBe(a.id);
-    expect((await jobs.wait(a.id)).state).toBe("cancelled");
-    g.open();
+    expect((await jobs.wait(a.id)).state).toBe("done");
     expect((await jobs.wait(b.id)).state).toBe("done");
-    expect((await store.read("project")).videos[0].versions[0].proxy).toMatchObject({ file: "proxies/hero_v1_proxy-720h.mp4", preset: "720h" });
-    expect(await readdir(join(root, "proxies"))).toEqual(["hero_v1_proxy-720h.mp4"]);
+    const proxies = (await store.read("project")).videos[0].versions[0].proxies;
+    expect(proxies["1080l"]).toMatchObject({ file: "proxies/hero_v1_proxy-1080l.mp4", preset: "1080l" });
+    expect(proxies["720l"]).toMatchObject({ file: "proxies/hero_v1_proxy-720l.mp4", preset: "720l" });
+    expect((await readdir(join(root, "proxies"))).sort()).toEqual(["hero_v1_proxy-1080l.mp4", "hero_v1_proxy-720l.mp4"]);
+  });
+
+  it("within one cut the better quality is made first, whatever order they were asked in (§37.4)", async () => {
+    const { store, versions } = await many(2);
+    const g = gate();
+    const run = fakeRunner({ gate: g.promise });
+    const jobs = new ProxyJobs(store, { run, probe: fakeProbe, available: async () => true });
+    const blocker = jobs.start("hero", "v1", { addedAt: versions[0].addedAt });
+    const low = jobs.start("hero", "v2", { preset: "720l", addedAt: versions[1].addedAt });
+    const high = jobs.start("hero", "v2", { preset: "1080h", addedAt: versions[1].addedAt });
+    const order: string[] = [];
+    for (const j of [low, high]) void jobs.wait(j.id).then((e) => order.push(e.preset));
+    g.open();
+    await Promise.all([blocker, low, high].map((j) => jobs.wait(j.id)));
+    expect(order).toEqual(["1080h", "720l"]);
   });
 
   it("names a proxy by its preset, and still knows §19.5's name", () => {

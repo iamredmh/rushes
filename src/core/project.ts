@@ -102,7 +102,7 @@ export function addVersion(p: Project, input: AddVersionInput, now = new Date())
     note: input.note ?? "",
     label: oneLineOf(input.label ?? ""),
     shots: shots.map((s) => ({ ...s })),
-    proxy: null,
+    proxies: {},
     width: input.width ?? null,
     height: input.height ?? null,
     formats: [],

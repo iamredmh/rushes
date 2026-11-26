@@ -40,6 +40,7 @@ export const ProxyPresetSchema = z.enum(PROXY_PRESETS);
 export type ProxyPreset = z.infer<typeof ProxyPresetSchema>;
 /** §36.3: the quality a project starts with: it fits a 5–6 Mbps link. */
 export const DEFAULT_PROXY_PRESET: ProxyPreset = "1080l";
+export const DEFAULT_PROXY_PRESETS: readonly ProxyPreset[] = [DEFAULT_PROXY_PRESET];
 
 export const ProxySchema = fileObject({
   /** Manifest path: "proxies/<film-slug>_<version>_proxy-<preset>.mp4" (§36.4), or §19.5's "…_proxy.mp4". */
@@ -52,6 +53,32 @@ export const ProxySchema = fileObject({
   preset: ProxyPresetSchema.optional(),
 });
 export type Proxy = z.infer<typeof ProxySchema>;
+
+/** §37.3: where a §19.5 proxy (made before presets) is kept in a version's `proxies`. Never played. */
+export const LEGACY_PROXY = "legacy" as const;
+export type ProxySlot = ProxyPreset | typeof LEGACY_PROXY;
+/** §37.3: a version's proxies, at most one per quality, keyed by preset id (and `legacy`). */
+export const ProxiesSchema = fileObject({
+  "1080h": ProxySchema.optional(),
+  "1080l": ProxySchema.optional(),
+  "720h": ProxySchema.optional(),
+  "720l": ProxySchema.optional(),
+  legacy: ProxySchema.optional(),
+});
+export type Proxies = z.infer<typeof ProxiesSchema>;
+
+/**
+ * §37.3: §36's one `proxy` per version moves into `proxies`, under its preset (or `legacy` for a §19.5 proxy with
+ * none). `proxy` is dropped on the next write. Runs on every parse, so it is idempotent.
+ */
+function migrateVersion(raw: unknown): unknown {
+  if (!isRecord(raw) || !("proxy" in raw)) return raw;
+  const { proxy, ...rest } = raw;
+  if (!isRecord(proxy)) return rest;
+  const slot = typeof proxy.preset === "string" && (PROXY_PRESETS as readonly string[]).includes(proxy.preset) ? proxy.preset : LEGACY_PROXY;
+  const proxies = isRecord(rest.proxies) ? rest.proxies : {};
+  return proxies[slot] === undefined ? { ...rest, proxies: { ...proxies, [slot]: proxy } } : { ...rest, proxies };
+}
 
 // §21.3: another render of the same cut at another aspect ratio. Its id is its label with ":" as "x".
 export const FormatSchema = fileObject({
@@ -66,7 +93,7 @@ export const FormatSchema = fileObject({
 });
 export type Format = z.infer<typeof FormatSchema>;
 
-export const VersionSchema = z
+export const VersionSchema = z.preprocess(migrateVersion, z
   .object({
     id,
     file: z.string().min(1),
@@ -80,8 +107,8 @@ export const VersionSchema = z
     // (its aspect ratio, "9:16").
     label: z.string().default(""),
     shots: z.array(ShotSchema).max(200).default([]),
-    // §19.5: a lightweight H.264 copy for smooth preview. Set only once a render has completed.
-    proxy: ProxySchema.nullable().default(null),
+    // §19.5, §37.3: lightweight H.264 copies for smooth preview, one per quality. Set only once a render has completed.
+    proxies: ProxiesSchema.default({}),
     // §21.3 (R2): the primary render's picture size as shown, read when the cut is added. Null for a
     // cut from before formats until its first format is registered.
     width: z.number().int().positive().nullable().default(null),
@@ -99,7 +126,7 @@ export const VersionSchema = z
       if (seen.has(f.id)) ctx.addIssue({ code: "custom", path: ["formats", i, "id"], message: `${v.id} already has ${f.label}` });
       seen.add(f.id);
     });
-  });
+  }));
 export type Version = z.infer<typeof VersionSchema>;
 
 export const VideoSchema = fileObject({
@@ -170,9 +197,23 @@ export type FileEntry = z.infer<typeof FileEntrySchema>;
  * dropped, so the next write leaves it out. Runs on every parse, so it is idempotent.
  */
 function migrateProject(raw: unknown): unknown {
-  if (!isRecord(raw) || !("autoProxy" in raw)) return raw;
-  const { autoProxy, ...rest } = raw;
-  return rest.alwaysProxy === undefined && autoProxy === true ? { ...rest, alwaysProxy: true } : rest;
+  if (!isRecord(raw)) return raw;
+  let out = raw;
+  if ("autoProxy" in out) {
+    const { autoProxy, ...rest } = out;
+    out = rest.alwaysProxy === undefined && autoProxy === true ? { ...rest, alwaysProxy: true } : rest;
+  }
+  // §37.3: §36's one `proxyPreset` becomes a one-item `proxyPresets`, and the old key is dropped.
+  if ("proxyPreset" in out) {
+    const { proxyPreset, ...rest } = out;
+    out = rest.proxyPresets === undefined && typeof proxyPreset === "string" && (PROXY_PRESETS as readonly string[]).includes(proxyPreset) ? { ...rest, proxyPresets: [proxyPreset] } : rest;
+  }
+  return out;
+}
+
+/** §37.3: ticked qualities in ladder order (best first), each once. */
+export function ladderOrder(presets: readonly ProxyPreset[]): ProxyPreset[] {
+  return PROXY_PRESETS.filter((p) => presets.includes(p));
 }
 
 export const ProjectSchema = z.preprocess(migrateProject, fileObject({
@@ -186,8 +227,8 @@ export const ProjectSchema = z.preprocess(migrateProject, fileObject({
   files: z.array(FileEntrySchema).default([]),
   // §36.5: every new cut gets a proxy at `proxyPreset` straight away. Off by default. Replaces §19.5's autoProxy.
   alwaysProxy: z.boolean().default(false),
-  // §36.3: the quality proxies are made at.
-  proxyPreset: ProxyPresetSchema.default(DEFAULT_PROXY_PRESET),
+  // §37.3: the ticked qualities proxies are made at, in ladder order (best first). Never empty.
+  proxyPresets: z.array(ProxyPresetSchema).min(1).default([DEFAULT_PROXY_PRESET]).transform(ladderOrder),
 }));
 export type Project = z.infer<typeof ProjectSchema>;
 

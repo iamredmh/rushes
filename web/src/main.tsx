@@ -14,6 +14,7 @@ import { keepHereKey } from "./here.js";
 import { watchFocusOrigin } from "./lib.js";
 import { applyTheme, readTheme, safeStorage } from "./theme.js";
 import { App } from "./ui/App.js";
+import { installTips } from "./tips.js";
 
 // §35.5: a desk Rushes opened itself carries the here key; it is kept for the tab and taken out of the address.
 keepHereKey();
@@ -24,5 +25,8 @@ watchFocusOrigin(document);
 
 // Before the first paint, so a light desk never flashes dark.
 applyTheme(readTheme(safeStorage()));
+
+// §37.5: one tooltip layer for every data-tip on the page.
+installTips(document);
 
 render(<App />, document.getElementById("app")!);

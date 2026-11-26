@@ -5,6 +5,7 @@ import {
 } from "../../web/src/lib.js";
 import type { Asset, Note, Section, Shot, TabState, Video } from "../../web/src/types.js";
 import {
+  choosePlaying, cutJobs, LADDER_TOP, makingPresets, playingLabel, stepDown, STEP_SPACING_MS, toMake,
   mergeProxyJob, PLAYBACK_ERROR_REASON, proxyEstimateMb, proxyMeta, proxyPhase, proxyProgress, proxyReason, proxyTip, proxiesKey, proxiesTip, speedText, stallsSayHint, settleProxyJobs,
   type ProxyJobs, type ProxyProgress,
 } from "../../web/src/lib.js";
@@ -177,7 +178,7 @@ describe("isChanged and latest", () => {
     expect(isChanged(sec("Line.", "New line."))).toBe(true);
   });
   it("picks a video's newest version", () => {
-    const v = (id: string) => ({ id, file: `${id}.mp4`, duration: null, fps: null, addedAt: "", note: "", label: "", shots: [], proxy: null, width: null, height: null, formats: [] });
+    const v = (id: string) => ({ id, file: `${id}.mp4`, duration: null, fps: null, addedAt: "", note: "", label: "", shots: [], proxies: {}, width: null, height: null, formats: [] });
     expect(latest({ id: "hero", name: "Hero", versions: [v("v1"), v("v2")], lockedVersion: null })?.id).toBe("v2");
     expect(latest({ id: "hero", name: "Hero", versions: [], lockedVersion: null })).toBeUndefined();
     expect(latest(undefined)).toBeUndefined();
@@ -185,7 +186,7 @@ describe("isChanged and latest", () => {
 });
 
 describe("defaultVersion", () => {
-  const v = (id: string) => ({ id, file: `${id}.mp4`, duration: null, fps: null, addedAt: "", note: "", label: "", shots: [], proxy: null, width: null, height: null, formats: [] });
+  const v = (id: string) => ({ id, file: `${id}.mp4`, duration: null, fps: null, addedAt: "", note: "", label: "", shots: [], proxies: {}, width: null, height: null, formats: [] });
   it("follows the newest version when nothing is locked", () => {
     const video: Video = { id: "hero", name: "Hero", versions: [v("v1"), v("v2")], lockedVersion: null };
     expect(defaultVersion(video)?.id).toBe("v2");
@@ -342,7 +343,7 @@ describe("folderItems", () => {
     ...over,
   });
   const videos: Video[] = [
-    { id: "hero", name: "Hero", versions: [{ id: "v1", file: "renders/hero_v1.mp4", duration: null, fps: null, addedAt: "2026-10-01T00:00:00Z", note: "First pass", label: "", shots: [], proxy: null, width: null, height: null, formats: [] }], lockedVersion: null },
+    { id: "hero", name: "Hero", versions: [{ id: "v1", file: "renders/hero_v1.mp4", duration: null, fps: null, addedAt: "2026-10-01T00:00:00Z", note: "First pass", label: "", shots: [], proxies: {}, width: null, height: null, formats: [] }], lockedVersion: null },
     { id: "cutdown", name: "Cutdown", versions: [], lockedVersion: null },
   ];
 
@@ -973,7 +974,7 @@ describe("the VO pick rule: server mix and dashboard agree (parity)", () => {
     const { root } = await tmpProject("parity");
     await mkdir(join(root, "audio"), { recursive: true });
     await Promise.all(files.map((f) => writeFile(join(root, "audio", f), "x")));
-    const project: Project = { schema: 1, rev: 0, name: "p", fps: 30, videos: [], files: [], lanes, alwaysProxy: false, proxyPreset: "1080l" as const };
+    const project: Project = { schema: 1, rev: 0, name: "p", fps: 30, videos: [], files: [], lanes, alwaysProxy: false, proxyPresets: ["1080l"] as const };
     for (const c of cases) {
       const picks: Picks = { schema: 1, rev: 0, sections: c.sections, lanes: c.lanes, levels: {}, videos: {} };
       const server = mixInputs(project, picks, ["voice"], root).map((i) => [relative(root, i.file).split(sep).join("/"), i.offset]);
@@ -1029,18 +1030,18 @@ describe("proxies (§19.5)", () => {
   it("never moves a job backwards: a finished job stays finished, and its % never drops", () => {
     let jobs: ProxyJobs = {};
     jobs = mergeProxyJob(jobs, job({ pct: 40, at: 2 }));
-    expect(jobs["hero/v1"].pct).toBe(40);
+    expect(jobs["hero/v1/1080l"].pct).toBe(40);
     expect(mergeProxyJob(jobs, job({ pct: 10, at: 3 }))).toBe(jobs);
     jobs = mergeProxyJob(jobs, job({ pct: 100, state: "done", at: 4 }));
     expect(mergeProxyJob(jobs, job({ pct: 99, at: 5 }))).toBe(jobs);
-    expect(jobs["hero/v1"].state).toBe("done");
+    expect(jobs["hero/v1/1080l"].state).toBe("done");
   });
 
   it("a newer job for the same cut replaces the old one, older news never does", () => {
     let jobs: ProxyJobs = mergeProxyJob({}, job({ state: "failed", reason: "x", at: 5 }));
     expect(mergeProxyJob(jobs, job({ job: "j0", at: 3 }))).toBe(jobs);
     jobs = mergeProxyJob(jobs, job({ job: "j2", at: 6 }));
-    expect(jobs["hero/v1"]).toMatchObject({ job: "j2", state: "running" });
+    expect(jobs["hero/v1/1080l"]).toMatchObject({ job: "j2", state: "running" });
   });
 
   it("turns a route's ProxyJob into the event's shape", () => {
@@ -1053,7 +1054,7 @@ describe("proxies (§19.5)", () => {
     const noProxy = () => false;
     // A tab opened mid-job: the state's running job is seeded.
     const seeded = settleProxyJobs({}, [{ id: "j1", video: "hero", version: "v1", preset: "1080l", pct: 12, state: "running" }], 10, noProxy);
-    expect(seeded["hero/v1"]).toMatchObject({ job: "j1", pct: 12, state: "running", at: 10 });
+    expect(seeded["hero/v1/1080l"]).toMatchObject({ job: "j1", pct: 12, state: "running", at: 10 });
     // A running job the state no longer lists ended unseen: dropped.
     expect(settleProxyJobs(seeded, [], 20, noProxy)).toEqual({});
     // ...unless the news is newer than the fetch.
@@ -1098,14 +1099,16 @@ describe("proxies (§19.5)", () => {
     expect(proxyPhase({ ...base, ffmpeg: false, stalling: true, proxiesOn: true })).toBe("none");
   });
 
-  it("§36.7: a queued job moves to running, may change preset while queued, and a running one never goes back to queued", () => {
+  it("§37.4: one job per cut and quality: a queued job moves to running, never back, and another quality is its own job", () => {
     let jobs: ProxyJobs = mergeProxyJob({}, job({ state: "queued", at: 1 }));
     expect(mergeProxyJob(jobs, job({ state: "queued", at: 2 }))).toBe(jobs);
-    jobs = mergeProxyJob(jobs, job({ state: "queued", preset: "720l", at: 2 }));
-    expect(jobs["hero/v1"].preset).toBe("720l");
-    jobs = mergeProxyJob(jobs, job({ state: "running", preset: "720l", pct: 0, at: 3 }));
-    expect(jobs["hero/v1"].state).toBe("running");
-    expect(mergeProxyJob(jobs, job({ state: "queued", preset: "720l", at: 4 }))).toBe(jobs);
+    jobs = mergeProxyJob(jobs, job({ job: "j2", state: "queued", preset: "720l", at: 2 }));
+    expect(Object.keys(jobs).sort()).toEqual(["hero/v1/1080l", "hero/v1/720l"]);
+    jobs = mergeProxyJob(jobs, job({ state: "running", pct: 0, at: 3 }));
+    expect(jobs["hero/v1/1080l"].state).toBe("running");
+    expect(mergeProxyJob(jobs, job({ state: "queued", at: 4 }))).toBe(jobs);
+    expect(cutJobs(jobs, "hero", "v1").map((j) => j.preset)).toEqual(["1080l", "720l"]);
+    expect([...makingPresets(jobs, "hero", "v1")].sort()).toEqual(["1080l", "720l"]);
     // A queued job the state no longer lists ended unseen: dropped, like a running one.
     expect(settleProxyJobs(mergeProxyJob({}, job({ state: "queued", at: 1 })), [], 20, () => false)).toEqual({});
   });
@@ -1565,5 +1568,143 @@ describe("lineFilms / onFilm (§30)", () => {
     expect(onFilm(line(null, null), "teaser", project, notes)).toBe(true);
     expect(onFilm(line("hero"), null, project, notes)).toBe(true);
     expect(onFilm(line("hero"), "teaser", { lanes, videos: [{ id: "teaser" }] } as never, notes)).toBe(true);
+  });
+});
+
+
+// §37: several qualities, the ladder, stepping down.
+import { ladderOrder, missingPresets, readyRungs, slotInUse, slotLabel, PROXY_PRESETS, type ProxyPreset } from "../../src/core/proxyPresets.js";
+import { ProjectSchema, VersionSchema, type Proxies } from "../../src/core/schema.js";
+import { cutMissing, latestMissing, toggledPresets } from "../../web/src/lib.js";
+
+describe("§37 proxy ladder", () => {
+  const rec = (preset?: ProxyPreset) => ({ file: `proxies/hero_v1_proxy${preset ? `-${preset}` : ""}.mp4`, width: 2, height: 2, bytes: 1, createdAt: "x", ...(preset ? { preset } : {}) });
+  const have = (...ps: ProxyPreset[]): Proxies => Object.fromEntries(ps.map((p) => [p, rec(p)]));
+
+  it("migrates §36's proxyPreset to a one-item proxyPresets, and keeps the list in ladder order", () => {
+    const base = { schema: 1, rev: 0, name: "x" };
+    expect(ProjectSchema.parse({ ...base, proxyPreset: "720l" }).proxyPresets).toEqual(["720l"]);
+    expect("proxyPreset" in ProjectSchema.parse({ ...base, proxyPreset: "720l" })).toBe(false);
+    expect(ProjectSchema.parse(base).proxyPresets).toEqual(["1080l"]);
+    expect(ProjectSchema.parse({ ...base, proxyPresets: ["720l", "1080h"] }).proxyPresets).toEqual(["1080h", "720l"]);
+    expect(ProjectSchema.parse({ ...base, proxyPresets: ["720h"], proxyPreset: "1080l" }).proxyPresets).toEqual(["720h"]);
+    expect(() => ProjectSchema.parse({ ...base, proxyPresets: [] })).toThrow();
+  });
+
+  it("migrates §36's proxy to proxies under its preset, and a §19.5 one (no preset) under legacy", () => {
+    const v = { id: "v1", file: "renders/hero.mp4", addedAt: "x" };
+    expect(VersionSchema.parse({ ...v, proxy: rec("1080l") }).proxies).toEqual({ "1080l": rec("1080l") });
+    expect(VersionSchema.parse({ ...v, proxy: rec() }).proxies).toEqual({ legacy: rec() });
+    expect(VersionSchema.parse({ ...v, proxy: null }).proxies).toEqual({});
+    expect("proxy" in VersionSchema.parse({ ...v, proxy: rec("720l") })).toBe(false);
+    // Running it again (every parse does) changes nothing.
+    const once = VersionSchema.parse({ ...v, proxy: rec("720l") });
+    expect(VersionSchema.parse(once)).toEqual(once);
+  });
+
+  it("the ladder is the ticked qualities in quality order: 1080p High, 1080p Low, 720p High, 720p Low", () => {
+    expect(PROXY_PRESETS).toEqual(["1080h", "1080l", "720h", "720l"]);
+    expect(ladderOrder(["720l", "1080l"])).toEqual(["1080l", "720l"]);
+    expect(ladderOrder(["720h", "720l", "1080h", "1080l"])).toEqual(["1080h", "1080l", "720h", "720l"]);
+    expect(readyRungs(have("720l", "1080h"), ["1080l", "720l"])).toEqual(["720l"]);
+    expect(missingPresets(have("720l"), ["720l", "1080l"])).toEqual(["1080l"]);
+  });
+
+  it("plays the highest ticked quality that's ready; none ready, or off, plays the original", () => {
+    expect(choosePlaying(true, ["1080l", "720l"], LADDER_TOP)).toEqual({ preset: "1080l", stepped: false, picked: false });
+    expect(choosePlaying(true, ["720l"], LADDER_TOP).preset).toBe("720l");
+    expect(choosePlaying(true, [], LADDER_TOP)).toEqual({ preset: null, stepped: false, picked: false });
+    expect(choosePlaying(false, ["1080l"], LADDER_TOP).preset).toBeNull();
+    // A pick from the menu holds while it's ready; "original" plays the original.
+    expect(choosePlaying(true, ["1080l", "720l"], { ...LADDER_TOP, pick: "720l" })).toEqual({ preset: "720l", stepped: false, picked: true });
+    expect(choosePlaying(true, ["1080l", "720l"], { ...LADDER_TOP, pick: "original" })).toEqual({ preset: null, stepped: false, picked: true });
+    expect(choosePlaying(true, ["1080l"], { ...LADDER_TOP, pick: "720l" }).preset).toBe("1080l");
+  });
+
+  it("steps down one rung after repeated stalls, at most once every 10 s, and never up", () => {
+    const ready: ProxyPreset[] = ["1080h", "1080l", "720l"];
+    const stalls = (at: number) => [{ at: at - 5000, ms: 1000 }, { at, ms: 1000 }];
+    let ladder = LADDER_TOP;
+    let playing = choosePlaying(true, ready, ladder);
+    expect(playing.preset).toBe("1080h");
+    // One stall is not enough.
+    expect(stepDown(ladder, playing, ready, [{ at: 1000, ms: 1000 }], 1000)).toBeNull();
+    // Two within 30 s: one rung, to 1080p Low.
+    ladder = stepDown(ladder, playing, ready, stalls(10_000), 10_000)!;
+    playing = choosePlaying(true, ready, ladder);
+    expect(playing).toEqual({ preset: "1080l", stepped: true, picked: false });
+    expect(playingLabel(playing)).toBe("1080p Low · stepped down");
+    // Again within 10 s: held.
+    expect(stepDown(ladder, playing, ready, stalls(10_000 + STEP_SPACING_MS - 1), 10_000 + STEP_SPACING_MS - 1)).toBeNull();
+    // After 10 s: the next rung down, 720p Low (skipping nothing that isn't ready).
+    ladder = stepDown(ladder, playing, ready, stalls(20_000), 20_000)!;
+    playing = choosePlaying(true, ready, ladder);
+    expect(playing.preset).toBe("720l");
+    // The bottom: nothing below.
+    expect(stepDown(ladder, playing, ready, stalls(40_000), 40_000)).toBeNull();
+    // Never up by itself: with the cap at 720p Low, a better proxy being ready changes nothing.
+    expect(choosePlaying(true, ["1080h", "1080l", "720h", "720l"], ladder).preset).toBe("720l");
+    // A hand pick or the original never steps.
+    expect(stepDown(LADDER_TOP, { preset: "1080h", stepped: false, picked: true }, ready, stalls(50_000), 50_000)).toBeNull();
+    expect(stepDown(LADDER_TOP, { preset: null, stepped: false, picked: false }, ready, stalls(50_000), 50_000)).toBeNull();
+    // One quality ticked: nothing to step down to, as in §36.
+    expect(stepDown(LADDER_TOP, choosePlaying(true, ["1080l"], LADDER_TOP), ["1080l"], stalls(60_000), 60_000)).toBeNull();
+  });
+
+  it("the ladder resets to the top when the cut changes (a new cut starts from LADDER_TOP)", () => {
+    // Picture keeps the ladder with the cut it belongs to; any other cut reads LADDER_TOP.
+    const held = { cut: "hero/v1", state: { cap: "720l" as const, pick: null, steppedAt: 1 } };
+    const forCut = (cut: string) => (held.cut === cut ? held.state : LADDER_TOP);
+    expect(choosePlaying(true, ["1080l", "720l"], forCut("hero/v1")).preset).toBe("720l");
+    expect(choosePlaying(true, ["1080l", "720l"], forCut("hero/v2")).preset).toBe("1080l");
+  });
+
+  it("the last ticked quality can't be unticked", () => {
+    expect(toggledPresets(["1080l"], "1080l")).toBeNull();
+    expect(toggledPresets(["1080l", "720l"], "1080l")).toEqual(["720l"]);
+    expect(toggledPresets(["720l"], "1080h")).toEqual(["1080h", "720l"]);
+  });
+
+  it("counts both Make buttons in proxies, leaving out what's being made and shelved films", () => {
+    const version = (id: string, proxies: Proxies = {}) => ({ id, file: "f", duration: 1, fps: 30, addedAt: id, note: "", label: "", shots: [], proxies, width: null, height: null, formats: [] });
+    const project = {
+      schema: 1 as const, rev: 0, name: "p", fps: 30, lanes: [], files: [], alwaysProxy: false, proxyPresets: ["1080l", "720l"] as ProxyPreset[],
+      videos: [
+        { id: "a", name: "A", lockedVersion: null, versions: [version("v1"), version("v2", have("1080l"))] },
+        { id: "b", name: "B", lockedVersion: null, versions: [version("v1")] },
+        { id: "c", name: "C", lockedVersion: null, shelved: "x", versions: [version("v1")] },
+      ],
+    };
+    const ticked: ProxyPreset[] = ["1080l", "720l"];
+    // a/v2 lacks 720l; b/v1 lacks both; c is shelved.
+    expect(latestMissing(project, ticked, {})).toBe(3);
+    expect(cutMissing(project, { video: "a", version: "v1" }, ticked, {})).toEqual(["1080l", "720l"]);
+    expect(cutMissing(project, { video: "a", version: "v2" }, ticked, {})).toEqual(["720l"]);
+    expect(cutMissing(project, null, ticked, {})).toEqual([]);
+    const making = mergeProxyJob({}, { job: "j", video: "b", version: "v1", preset: "720l", pct: 0, state: "running", at: 1 });
+    expect(latestMissing(project, ticked, making)).toBe(2);
+    expect(cutMissing(project, { video: "b", version: "v1" }, ticked, making)).toEqual(["1080l"]);
+    expect(toMake(have("1080l"), ticked, new Set())).toEqual(["720l"]);
+  });
+
+  it("a proxy at a quality that isn't ticked, and every legacy one, is Not in use", () => {
+    expect(slotInUse("1080l", ["1080l", "720l"])).toBe(true);
+    expect(slotInUse("1080h", ["1080l", "720l"])).toBe(false);
+    expect(slotInUse("legacy", ["1080l"])).toBe(false);
+    expect(slotLabel("legacy")).toBe("1080p (older)");
+    // Not in use is never played.
+    expect(readyRungs(have("1080h"), ["1080l"])).toEqual([]);
+  });
+
+  it("the toolbar tip names what's playing", () => {
+    expect(proxiesTip(false)).toBe("Proxies off · playing originals");
+    expect(proxiesTip(true, { preset: "720l", stepped: true, picked: false })).toBe("Proxies on · playing 720p Low (stepped down)");
+    expect(proxiesTip(true, { preset: "1080l", stepped: false, picked: false })).toBe("Proxies on · playing 1080p Low");
+    expect(proxiesTip(true, { preset: null, stepped: false, picked: false })).toBe("Proxies on · no proxy for this cut, playing the original");
+    expect(playingLabel({ preset: null, stepped: false, picked: true })).toBe("Original");
+  });
+
+  it("the Make tooltip names every quality and adds up their sizes", () => {
+    expect(proxyTip(142, ["1080l", "720l"])).toBe("Makes lightweight 1080p Low and 720p Low copies on your drive so this cut previews smoothly. About 110 MB. Your original isn't changed.");
   });
 });

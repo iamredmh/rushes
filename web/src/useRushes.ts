@@ -3,6 +3,7 @@ import { api, ApiError, eventsUrl, projectId } from "./api.js";
 import { mergeProxyJob, proxyProgress, settleProxyJobs, testFlags, type ProxyJobs } from "./lib.js";
 import { connectLive, type LiveRole } from "./live.js";
 import type { AgentStatus, Asset, ProxyEvent, ProxyJob, State } from "./types.js";
+import type { ProxyPreset } from "../../src/core/proxyPresets.js";
 
 export interface Live {
   state: State | null;
@@ -15,7 +16,7 @@ export interface Live {
   wrongProject: boolean;
   /** Fetch the latest state now (after a write the page made itself). */
   refresh(): Promise<void>;
-  /** §19.5: every proxy job this tab knows of, one per cut, from the SSE `proxy` events (so
+  /** §19.5, §37.4: every proxy job this tab knows of, one per cut and quality, from the SSE `proxy` events (so
    *  every open tab shows the same progress), seeded from the state's running jobs. */
   proxyJobs: ProxyJobs;
   /** Folds a job a route just returned (Create proxy, Cancel) in, ahead of its SSE event. */
@@ -82,8 +83,8 @@ export function useRushes(): Live {
     if (stateResult.ok) {
       const data = stateResult.data;
       setState(data);
-      const hasProxy = (video: string, version: string) =>
-        !!data.project.videos.find((v) => v.id === video)?.versions.find((v) => v.id === version)?.proxy;
+      const hasProxy = (video: string, version: string, preset: ProxyPreset) =>
+        !!data.project.videos.find((v) => v.id === video)?.versions.find((v) => v.id === version)?.proxies[preset];
       setProxyJobs((jobs) => settleProxyJobs(jobs, data.proxies?.jobs ?? [], since, hasProxy));
       setProblem(null);
       setWrongProject(false);

@@ -1053,7 +1053,7 @@ describe("formats on the CLI (§21.4)", () => {
       if (req.url === "/api/health") return void res.end(JSON.stringify({ app: "rushes", root, id: "abcdefgh" }));
       if (req.url === "/api/notes") return void res.end(JSON.stringify({ notes }));
       if (req.url === "/api/state") {
-        const project = { name: "Demo", fps: 30, lanes: [], files: [], alwaysProxy: false, proxyPreset: "1080l" as const, videos: [{ id: "hero", name: "Hero", lockedVersion: null, versions: [{ id: "v1", file: "renders/hero.mp4", duration: 8, fps: 30, shots: [] }] }] };
+        const project = { name: "Demo", fps: 30, lanes: [], files: [], alwaysProxy: false, proxyPresets: ["1080l"] as const, videos: [{ id: "hero", name: "Hero", lockedVersion: null, versions: [{ id: "v1", file: "renders/hero.mp4", duration: 8, fps: 30, shots: [] }] }] };
         return void res.end(JSON.stringify({ project, script: { sections: [] }, picks: { lanes: {} } }));
       }
       res.statusCode = 404;

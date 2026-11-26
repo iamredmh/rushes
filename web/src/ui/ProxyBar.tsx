@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { api, ApiError } from "../api.js";
 import { formatBytes, proxyPhase, proxyReason, proxyTip, type ProxyProgress } from "../lib.js";
-import { DEFAULT_PROXY_PRESET, PRESETS, proxyIsAt, type ProxyPreset } from "../../../src/core/proxyPresets.js";
+import { DEFAULT_PROXY_PRESETS, PRESETS, missingPresets, presetNames, readyRungs, type ProxyPreset } from "../../../src/core/proxyPresets.js";
 import type { ProxyJob, Version, Video } from "../types.js";
 import { Icon } from "./Icon.js";
 
@@ -13,8 +13,8 @@ export interface ProxyBarProps {
   version: Version;
   /** The server has ffmpeg and ffprobe. Without them nothing is offered and this renders nothing. */
   ffmpeg: boolean;
-  /** This cut's proxy job, as this tab last heard of it. */
-  job: ProxyProgress | undefined;
+  /** §37.4: this cut's proxy jobs (one per quality), as this tab last heard of them. */
+  jobs: readonly ProxyProgress[];
   /** The browser refused the file that's playing. */
   broken: boolean;
   /** The cut's length in seconds, for the size in Create proxy's tooltip. */
@@ -24,8 +24,8 @@ export interface ProxyBarProps {
   noteProxyJob(job: ProxyJob): void;
   /** §21.5 (review M4): hidden, not unmounted, while another format than the primary is on screen. */
   hidden?: boolean;
-  /** §36.3: the project's preset, which a proxy made from here is made at. */
-  preset?: ProxyPreset;
+  /** §37.3: the ticked qualities: a proxy made from here is made at each one the cut is missing. */
+  presets?: readonly ProxyPreset[];
   /** §36.7: the toolbar's Proxies is on in this browser. */
   proxiesOn?: boolean;
   /** §36.7: turns the toolbar's Proxies on (the stall hint's button, and the offer's Create proxy). */
@@ -46,9 +46,17 @@ const ensureStop = (s: string) => (/[.!?]$/.test(s) ? s : `${s}.`);
  * by version, so nothing carries across cuts.
  */
 export function ProxyBar({
-  video, version, ffmpeg, job, broken, duration, toast, onChanged, noteProxyJob, hidden = false,
-  preset = DEFAULT_PROXY_PRESET, proxiesOn = false, onProxiesOn, stalling = false, onStallDismissed,
+  video, version, ffmpeg, jobs, broken, duration, toast, onChanged, noteProxyJob, hidden = false,
+  presets = DEFAULT_PROXY_PRESETS, proxiesOn = false, onProxiesOn, stalling = false, onStallDismissed,
 }: ProxyBarProps) {
+  // §37.4: the job the bar speaks for: the one running, else one waiting, else the latest to finish.
+  const job =
+    jobs.find((j) => j.state === "running") ??
+    jobs.find((j) => j.state === "queued") ??
+    [...jobs].sort((a, b) => b.at - a.at)[0];
+  const ready = readyRungs(version.proxies, presets);
+  const missing = missingPresets(version.proxies, presets);
+  const top = presets[0] ?? DEFAULT_PROXY_PRESETS[0];
   const [starting, setStarting] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   // The jobs this view has seen running (or started itself): only those end in "✓ Proxy ready".
@@ -59,10 +67,10 @@ export function ProxyBar({
   const [dismissed, setDismissed] = useState<string | null>(null);
   // §36.7: the job made from the offer: once it is ready (and recorded), Proxies goes on so it plays. Cancelled or
   // failed, nothing changes, and the offer comes back as in §19.5.
-  const turnOnWhenReady = useRef<string | null>(null);
+  const turnOnWhenReady = useRef<Set<string>>(new Set());
 
-  // A finished job whose record hasn't arrived yet (the cut still shows its old proxy, or none) is still "working".
-  const hasProxy = !!version.proxy && (job?.state !== "done" || proxyIsAt(version.proxy, job.preset));
+  // A finished job whose record hasn't arrived yet is still "working". Otherwise: a ticked quality is ready to play.
+  const hasProxy = job?.state === "done" ? !!version.proxies[job.preset] : ready.length > 0;
   const phase = proxyPhase({
     ffmpeg,
     need: version.proxyNeed,
@@ -78,8 +86,8 @@ export function ProxyBar({
   });
   const doneJob = phase === "done" && job ? job.job : null;
   useEffect(() => {
-    if (doneJob && turnOnWhenReady.current === doneJob) {
-      turnOnWhenReady.current = null;
+    if (doneJob && turnOnWhenReady.current.has(doneJob)) {
+      turnOnWhenReady.current.clear();
       onProxiesOn?.();
     }
   }, [doneJob]);
@@ -96,20 +104,23 @@ export function ProxyBar({
   const pct = job?.state === "running" ? job.pct : job?.state === "done" ? 100 : 0;
   const active = job?.state === "running" || job?.state === "queued" ? job : null;
   // Nothing to say: the bar keeps its place in the tree (its state survives) but draws nothing.
-  const empty = shown === "none" || (shown === "offer" && !reason) || (shown === "done" && !version.proxy);
+  const made = job ? version.proxies[job.preset] : undefined;
+  const empty = shown === "none" || (shown === "offer" && !reason) || (shown === "done" && !made);
 
   const create = async (turnOn: boolean) => {
     if (starting) return;
     setStarting(true);
     try {
-      const { job: started } = await api.post<{ job: ProxyJob }>(
+      // §37.4: no body: every ticked quality the cut is missing.
+      const { jobs: started } = await api.post<{ jobs: ProxyJob[] }>(
         `/api/videos/${encodeURIComponent(video.id)}/versions/${encodeURIComponent(version.id)}/proxy`,
-        { preset },
       );
-      watched.current.add(started.id);
-      noteProxyJob(started);
-      // §36.7: a proxy asked for from the offer is one you mean to watch: Proxies goes on once it is ready.
-      if (turnOn) turnOnWhenReady.current = started.id;
+      for (const j of started) {
+        watched.current.add(j.id);
+        noteProxyJob(j);
+        // §36.7: a proxy asked for from the offer is one you mean to watch: Proxies goes on once one is ready.
+        if (turnOn) turnOnWhenReady.current.add(j.id);
+      }
     } catch (e) {
       toast((e as Error).message);
     } finally {
@@ -135,7 +146,7 @@ export function ProxyBar({
   const turnOn = () => {
     onProxiesOn?.();
     onStallDismissed?.();
-    if (!version.proxy) void create(false);
+    if (ready.length === 0 && missing.length > 0) void create(false);
   };
 
   return (
@@ -144,25 +155,25 @@ export function ProxyBar({
         {shown === "offer" && reason && (
           <>
             <span class="why"><b>This cut may play slowly.</b> {ensureStop(reason)}</span>
-            <button class="btn primary tip-wrap tip-end" aria-label="Create proxy" data-tip={proxyTip(version.duration ?? duration, preset)} onClick={() => void create(true)}>Create proxy</button>
+            <button class="btn primary tip-wrap tip-end" aria-label="Create proxy" data-tip={proxyTip(version.duration ?? duration, missing.length ? missing : [top])} onClick={() => void create(true)}>Create proxy</button>
           </>
         )}
         {shown === "missing" && (
           <>
             <span class="why"><b>No proxy for this cut.</b> Playing the original.</span>
-            <button class="btn primary tip-wrap tip-end" aria-label="Make proxy" data-tip={proxyTip(version.duration ?? duration, preset)} onClick={() => void create(false)}>Make proxy</button>
+            <button class="btn primary tip-wrap tip-end" aria-label="Make proxy" data-tip={proxyTip(version.duration ?? duration, missing.length ? missing : [top])} onClick={() => void create(false)}>Make proxy</button>
           </>
         )}
         {shown === "stall" && (
           <>
             <span class="why"><b>Playback is stalling.</b> Turn on proxies?</span>
-            <button class="btn primary tip-wrap tip-end" aria-label="Turn on proxies" data-tip={`Plays a lighter ${PRESETS[preset].label} copy of each cut. Your originals aren't changed.`} onClick={turnOn}>Turn on proxies</button>
+            <button class="btn primary tip-wrap tip-end" aria-label="Turn on proxies" data-tip={`Plays a lighter ${presetNames(presets.length ? presets : [top])} copy of each cut. Your originals aren't changed.`} onClick={turnOn}>Turn on proxies</button>
             <button class="btn ghost ib" aria-label="Dismiss" data-tip="Dismiss" onClick={() => onStallDismissed?.()}><Icon name="x" /></button>
           </>
         )}
         {shown === "working" && (
           <>
-            <span>{job?.state === "queued" ? "Waiting to make a proxy" : "Creating proxy"}</span>
+            <span>{job?.state === "queued" ? `Waiting to make ${PRESETS[job.preset].label}` : `Creating ${job ? PRESETS[job.preset].label : "proxy"}`}</span>
             <div class="pbar" role="progressbar" aria-label="Proxy progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
               <i style={{ width: `${pct}%` }} />
             </div>
@@ -170,10 +181,10 @@ export function ProxyBar({
             <button class="btn" aria-disabled={!active || cancelling} onClick={() => void cancel()}>Cancel</button>
           </>
         )}
-        {shown === "done" && version.proxy && (
+        {shown === "done" && made && (
           <>
             <span class="ok">✓ Proxy ready</span>
-            <span class="why">Saved to <span class="mono">{version.proxy.file}</span> ({formatBytes(version.proxy.bytes)}).</span>
+            <span class="why">Saved to <span class="mono">{made.file}</span> ({formatBytes(made.bytes)}).</span>
             <button class="btn ghost ib" aria-label="Dismiss" data-tip="Dismiss" onClick={() => setDismissed(doneJob)}><Icon name="x" /></button>
           </>
         )}

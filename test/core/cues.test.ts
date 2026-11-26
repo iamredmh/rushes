@@ -5,7 +5,7 @@ import { addVariant } from "../../src/core/project.js";
 import { CueSchema, ProjectSchema, type Project } from "../../src/core/schema.js";
 import { OUTSIDE_MEDIA_EXT, contentType } from "../../src/server/files.js";
 
-const empty = (): Project => ({ schema: 1, rev: 0, name: "demo", fps: 30, videos: [], lanes: [], files: [], alwaysProxy: false, proxyPreset: "1080l" as const });
+const empty = (): Project => ({ schema: 1, rev: 0, name: "demo", fps: 30, videos: [], lanes: [], files: [], alwaysProxy: false, proxyPresets: ["1080l"] as const });
 
 describe("cue files (§23.3)", () => {
   it("are audio files of at most 1024 characters", () => {

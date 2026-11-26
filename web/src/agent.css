@@ -21,7 +21,7 @@
 .agentchip .astop svg.ic { width: 14px; height: 14px; }
 .agentchip .astop:hover { color: var(--over); }
 /* A failure's reason can be long: its tooltip wraps. */
-.agentchip.over .achip[data-tip]::after { white-space: normal; width: max-content; max-width: 320px; line-height: 1.35; text-align: left; }
+.agentchip.over .achip[data-tip] { --tip-wrap: wrap; --tip-max: 320px; }
 @media (prefers-reduced-motion: reduce) { .achip svg.ic.aspin { animation: none; } }
 
 /* ---- the Send to AI row above Send, and the who-line under it (AgentRow). The foot stacks them: row, Send, who-line,

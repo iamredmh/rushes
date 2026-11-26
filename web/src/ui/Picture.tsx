@@ -4,7 +4,7 @@ import { api, mediaUrl, originalFrame } from "../api.js";
 import { noteTarget, rulerMarks, type Selection, type Tool, viewPct, viewTime, zoomView } from "../desk.js";
 import {
   BOX_REASON, boxFrom, boxShowsOn, contentRect, fmt, frameAt, noteFormatTag, noteTime, otherFormatNotes, placeNote, RESHAPE_MS, reshapeKeyframes, scopeHint, shotAt,
-  shotLabel, shotSeek, snap, spacePressesButton, stepFrame, testFlags, versionFormats, visibleNotes, proxiesTip, stallsSayHint, STALL_MIN_MS,
+  shotLabel, shotSeek, snap, spacePressesButton, stepFrame, testFlags, versionFormats, visibleNotes, proxiesTip, stallsSayHint, STALL_MIN_MS, choosePlaying, stepDown, playingLabel, LADDER_TOP, type LadderState,
   type FormatView, type ProxyProgress,
 } from "../lib.js";
 import type { Asset, Note, ProxyJob, State, Video, Version } from "../types.js";
@@ -15,7 +15,7 @@ import { takeNotesOf } from "./desk/useTakeSelection.js";
 import { tabLabel, timelineNotes } from "../tabNotes.js";
 import { OtherFormats } from "./OtherFormats.js";
 import { ProxyBar } from "./ProxyBar.js";
-import { DEFAULT_PROXY_PRESET, type ProxyPreset } from "../../../src/core/proxyPresets.js";
+import { DEFAULT_PROXY_PRESETS, PRESETS, readyRungs, type ProxyPreset } from "../../../src/core/proxyPresets.js";
 import { PictureTrack } from "./desk/PictureTrack.js";
 import { Ruler, type RulerMarker } from "./desk/Ruler.js";
 import { LoudnessReadout, SoundTracks } from "./desk/SoundTracks.js";
@@ -36,6 +36,7 @@ declare global {
 
 /** §36.7: the cuts whose stall hint has been shown this session (by "video/version"): it shows once per cut. */
 const stallHinted = new Set<string>();
+const NO_JOBS: readonly ProxyProgress[] = [];
 
 type Box = { x: number; y: number; w: number; h: number };
 
@@ -66,14 +67,14 @@ export interface PictureProps {
   playerRef?: { current: HTMLVideoElement | null };
   /** §19.5: the server has ffmpeg (proxies are offered, and Grab Frame takes stills from the original). */
   ffmpeg?: boolean;
-  /** This cut's proxy job, as this tab last heard of it. */
-  proxyJob?: ProxyProgress;
+  /** §37.4: this cut's proxy jobs (one per quality), as this tab last heard of them. */
+  proxyJobs?: readonly ProxyProgress[];
   noteProxyJob?(job: ProxyJob): void;
   /** §36.7: the toolbar's Proxies, on or off in this browser for this project. A cut with a ready proxy plays it when on. */
   proxiesOn?: boolean;
   onProxiesChange?(on: boolean): void;
-  /** §36.3: the project's preset, for the tooltip and a proxy made from the player. */
-  proxyPreset?: ProxyPreset;
+  /** §37.3: the ticked qualities, best first: the ladder the player plays from. */
+  proxyPresets?: readonly ProxyPreset[];
   /** §21.5: this cut's shapes, the primary first (empty when its size isn't known yet). */
   formats?: FormatView[];
   /** §21.5: the format on screen; null on a one-format cut, which plays the version's own file. */
@@ -106,7 +107,7 @@ const typing = (el: EventTarget | null) => el instanceof HTMLElement && (el.isCo
  */
 export function Picture({
   video, version, fps, notes, toast, onChanged, onPendingChange, onMarksPendingChange, clock, mixView, grab, onGrabChange, playerRef,
-  ffmpeg = false, proxyJob, noteProxyJob, proxiesOn = false, onProxiesChange, proxyPreset = DEFAULT_PROXY_PRESET,
+  ffmpeg = false, proxyJobs = NO_JOBS, noteProxyJob, proxiesOn = false, onProxiesChange, proxyPresets = DEFAULT_PROXY_PRESETS,
   formats = [], format = null, formatMissing = false, onPrimarySize, onBoxPendingChange, onFormatChange, readOnly = false, formatSwitch,
   state, assets,
 }: PictureProps) {
@@ -296,10 +297,20 @@ export function Picture({
     }
   }, [format, notes]);
 
-  // §36.7: with the toolbar's Proxies on, a cut with a ready proxy plays it (one at an older preset too, until it's
-  // remade). It never changes the cut, so notes, timecodes and frame numbers are the same on both.
-  const playsProxy = onPrimary && !!version.proxy && proxiesOn;
-  const src = mediaUrl(playsProxy ? version.proxy!.file : onPrimary ? version.file : view!.file);
+  // §37.5: with the toolbar's Proxies on, the cut plays the best ticked quality that's ready, under the ladder's cap
+  // after a step down, or what was picked from the quality menu. It never changes the cut, so notes, timecodes and
+  // frame numbers are the same on every one.
+  const cutKey = `${video.id}/${version.id}`;
+  const [ladder, setLadder] = useState<{ cut: string; state: LadderState }>({ cut: cutKey, state: LADDER_TOP });
+  // A new cut starts at the top of the ladder, with no pick.
+  const ladderNow = ladder.cut === cutKey ? ladder.state : LADDER_TOP;
+  const ready = readyRungs(version.proxies, proxyPresets);
+  const quality = choosePlaying(onPrimary && proxiesOn, ready, ladderNow);
+  const playsProxy = onPrimary && quality.preset !== null;
+  const src = mediaUrl(playsProxy ? version.proxies[quality.preset!]!.file : onPrimary ? version.file : view!.file);
+  const setLadderNow = (state: LadderState) => setLadder({ cut: cutKey, state });
+  const [qmenu, setQmenu] = useState(false);
+  useEffect(() => setQmenu(false), [cutKey, proxiesOn]);
   const broken = brokenSrc === src;
 
   // When the file changes under the same cut (the switch, or a proxy arriving), the new one picks
@@ -754,7 +765,7 @@ export function Picture({
 
   // §36.7: the stall hint. With proxies off, a wait of STALL_MIN_MS or more counts as a stall; two within
   // STALL_WINDOW_MS show the hint, once per cut per session. Seeking's own waits don't count.
-  const cutKey = `${video.id}/${version.id}`;
+  // §37.5: with proxies on and a quality playing, the same count steps the ladder down one rung (stepDown).
   const [stalling, setStalling] = useState(false);
   const stalls = useRef<{ at: number; ms: number }[]>([]);
   const waitTimer = useRef<number | null>(null);
@@ -766,14 +777,26 @@ export function Picture({
     stalls.current = [];
     setStalling(false);
     return clearWait;
-  }, [cutKey, playsProxy]);
+  }, [cutKey, src]);
+  // Read in the timer, which runs after renders that may have changed them.
+  const ladderLive = useRef({ quality, ready, ladder: ladderNow });
+  ladderLive.current = { quality, ready, ladder: ladderNow };
   const onWaiting = (v: HTMLVideoElement) => {
-    if (playsProxy || !onPrimary || v.seeking || waitTimer.current !== null || stallHinted.has(cutKey)) return;
+    if (!onPrimary || v.seeking || waitTimer.current !== null) return;
+    const stepping = playsProxy;
+    if (!stepping && (proxiesOn || stallHinted.has(cutKey))) return;
     waitTimer.current = window.setTimeout(() => {
       waitTimer.current = null;
       const now = performance.now();
       stalls.current = [...stalls.current, { at: now, ms: STALL_MIN_MS }];
-      if (stallsSayHint(stalls.current, now) && !stallHinted.has(cutKey)) {
+      if (stepping) {
+        const { quality: p, ready: r, ladder: l } = ladderLive.current;
+        const next = stepDown(l, p, r, stalls.current, now);
+        if (next) {
+          stalls.current = [];
+          setLadderNow(next);
+        }
+      } else if (stallsSayHint(stalls.current, now) && !stallHinted.has(cutKey)) {
         stallHinted.add(cutKey);
         setStalling(true);
       }
@@ -793,7 +816,7 @@ export function Picture({
             onRange={rangeTool}
             onBox={() => setBoxMode((m) => !m)}
             onGrab={() => void grabFrame()}
-            proxies={ffmpeg && onProxiesChange ? { on: proxiesOn, tip: proxiesTip(proxiesOn, proxyPreset), onToggle: () => onProxiesChange(!proxiesOn) } : undefined}
+            proxies={ffmpeg && onProxiesChange ? { on: proxiesOn, tip: proxiesTip(proxiesOn, onPrimary ? quality : null), onToggle: () => onProxiesChange(!proxiesOn) } : undefined}
           />
           {/* The picture, centred on black, as large as the monitor allows in the cut's own shape. Its width is worked out
               from the box's size (container units): Safari doesn't narrow a width from a height through aspect-ratio. */}
@@ -805,7 +828,7 @@ export function Picture({
                 {formatMissing && !onPrimary && <div class="msg">File not found</div>}
                 {broken && !onPrimary && !formatMissing && <div class="msg">This file won't play in a browser. Ask your agent for an H.264 MP4 of this format.</div>}
                 {broken && onPrimary && !ffmpeg && <div class="msg">This file won't play in a browser. Ask your agent for an H.264 MP4 of this cut.</div>}
-                {broken && onPrimary && ffmpeg && version.proxy && !playsProxy && <div class="msg">This file won't play in a browser.</div>}
+                {broken && onPrimary && ffmpeg && ready.length > 0 && !playsProxy && <div class="msg">This file won't play in a browser.</div>}
                 <video
                   hidden={broken || (formatMissing && !onPrimary)}
                   ref={(el) => {
@@ -853,6 +876,47 @@ export function Picture({
                   </div>
                 </div>
                 <div class="tcover">f{frameAt(t, fps)}{current && ` · shot ${shotLabel(current.n)}`}</div>
+                {ffmpeg && proxiesOn && onPrimary && (
+                  // §37.5: what's playing, always said while Proxies are on; it opens the quality menu.
+                  <div class="qwrap" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
+                    <button
+                      type="button"
+                      class={`qlabel${quality.stepped ? " stepped" : ""}`}
+                      aria-haspopup="menu"
+                      aria-expanded={qmenu}
+                      aria-label={`Playing ${playingLabel(quality)}. Choose quality`}
+                      onClick={() => setQmenu((o) => !o)}
+                    >
+                      {playingLabel(quality)}
+                      <Icon name="chev" />
+                    </button>
+                    {qmenu && (
+                      <div
+                        class="qmenu"
+                        role="menu"
+                        aria-label="Playing quality"
+                        onKeyDown={(e) => {
+                          if (e.key === "Escape") {
+                            e.stopPropagation();
+                            setQmenu(false);
+                          }
+                        }}
+                      >
+                        {ready.map((p) => (
+                          <button key={p} type="button" role="menuitemradio" aria-checked={quality.preset === p} class="qitem" onClick={() => { setLadderNow({ ...ladderNow, pick: p }); setQmenu(false); }}>
+                            {PRESETS[p].label}
+                          </button>
+                        ))}
+                        <button type="button" role="menuitemradio" aria-checked={quality.preset === null} class="qitem" onClick={() => { setLadderNow({ ...ladderNow, pick: "original" }); setQmenu(false); }}>
+                          Original
+                        </button>
+                        <button type="button" role="menuitem" class="qitem qbest" onClick={() => { setLadderNow(LADDER_TOP); setQmenu(false); }}>
+                          Back to best
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
             {formatSwitch && <div class="monfmt">{formatSwitch}</div>}
@@ -865,13 +929,13 @@ export function Picture({
                 video={video}
                 version={version}
                 ffmpeg={ffmpeg}
-                job={proxyJob}
+                jobs={proxyJobs}
                 broken={broken && !playsProxy}
                 duration={duration}
                 toast={toast}
                 onChanged={onChanged}
                 noteProxyJob={noteProxyJob}
-                preset={proxyPreset}
+                presets={proxyPresets}
                 proxiesOn={proxiesOn}
                 onProxiesOn={onProxiesChange ? () => onProxiesChange(true) : undefined}
                 stalling={stalling && !proxiesOn}

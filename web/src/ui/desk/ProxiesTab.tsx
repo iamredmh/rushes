@@ -1,9 +1,13 @@
-// §36.7: the notes panel's Proxies tab, after Activity. The quality (four presets), the project's "always make proxies"
-// switch, Make proxies now, Test connection, the list of cuts with their proxies, and Delete all proxies.
+// §36.7, §37.5: the notes panel's Proxies tab, after Activity. The qualities (four checkboxes, one or more ticked), Make
+// proxies for this cut and for all films, the project's "always make proxies" switch, Test connection, the list of cuts
+// with a line per proxy, and Delete all proxies.
 import { useRef, useState } from "preact/hooks";
 import { api, ApiError, mediaUrl } from "../../api.js";
-import { formatBytes, proxyKey, speedText, type ProxyJobs, type ProxyProgress } from "../../lib.js";
-import { PRESETS, PROXY_PRESETS, presetsThatFit, proxyIsAt, proxyQuality, type ProxyPreset } from "../../../../src/core/proxyPresets.js";
+import { cutJobs, cutMissing, formatBytes, latestMissing, speedText, toMake, toggledPresets, type ProxyJobs, type ProxyProgress } from "../../lib.js";
+import {
+  LEGACY_PROXY, PRESETS, PROXY_PRESETS, hasAnyProxy, presetNames, presetsThatFit, proxyList, slotInUse, slotLabel,
+  type ProxyPreset, type ProxySlot,
+} from "../../../../src/core/proxyPresets.js";
 import type { Project, ProxyJob, Version, Video } from "../../types.js";
 import { Icon } from "../Icon.js";
 
@@ -20,7 +24,7 @@ export interface ProxiesTabProps {
   onChanged(): void;
 }
 
-/** One row of the list: a cut, and what its proxy is. */
+/** One row of the list: a cut, and what proxies it has. */
 interface Row {
   video: Video;
   version: Version;
@@ -34,21 +38,10 @@ export function proxyRows(project: Project): Row[] {
     const last = video.versions[video.versions.length - 1];
     for (const version of video.versions) {
       const latest = version === last && !video.shelved;
-      if (latest || version.proxy) rows.push({ video, version, latest });
+      if (latest || hasAnyProxy(version.proxies)) rows.push({ video, version, latest });
     }
   }
   return rows.sort((a, b) => (a.version.addedAt === b.version.addedAt ? 0 : a.version.addedAt < b.version.addedAt ? 1 : -1));
-}
-
-/** How many films' latest cuts have no proxy at `preset` (Make proxies now's count). */
-export function latestMissing(project: Project, preset: ProxyPreset, jobs: ProxyJobs): number {
-  return project.videos.filter((video) => {
-    if (video.shelved) return false;
-    const v = video.versions[video.versions.length - 1];
-    if (!v || proxyIsAt(v.proxy, preset)) return false;
-    const j = jobs[proxyKey(video.id, v.id)];
-    return !(j && (j.state === "queued" || j.state === "running") && j.preset === preset);
-  }).length;
 }
 
 /** The size Test connection fetches: enough to time a slow link, small enough to finish in seconds on one. */
@@ -57,9 +50,10 @@ export const TEST_BYTES = 16 * 1024 * 1024;
 const cutPath = (video: string, version: string) => `/api/videos/${encodeURIComponent(video)}/versions/${encodeURIComponent(version)}/proxy`;
 
 export function ProxiesTab({ project, ffmpeg, jobs, noteProxyJob, current, toast, onChanged }: ProxiesTabProps) {
-  const preset = project.proxyPreset;
+  const ticked = project.proxyPresets;
   const [busy, setBusy] = useState(false);
   const [confirmAll, setConfirmAll] = useState(false);
+  const [lastRefused, setLastRefused] = useState(false);
   const [speed, setSpeed] = useState<{ state: "idle" | "testing" | "done" | "failed"; mbps?: number }>({ state: "idle" });
   const testing = useRef<AbortController | null>(null);
 
@@ -72,11 +66,14 @@ export function ProxiesTab({ project, ffmpeg, jobs, noteProxyJob, current, toast
   }
 
   const rows = proxyRows(project);
-  const missing = latestMissing(project, preset, jobs);
-  const total = project.videos.reduce((n, v) => n + v.versions.reduce((m, x) => m + (x.proxy?.bytes ?? 0), 0), 0);
+  const allCount = latestMissing(project, ticked, jobs);
+  const onScreen = current && project.videos.find((v) => v.id === current.video);
+  const onScreenVersion = onScreen?.versions.find((v) => v.id === current!.version);
+  const cutCount = cutMissing(project, current, ticked, jobs);
+  const total = project.videos.reduce((n, v) => n + v.versions.reduce((m, x) => m + proxyList(x.proxies).reduce((k, e) => k + e.proxy.bytes, 0), 0), 0);
   const fits = speed.state === "done" && speed.mbps !== undefined ? new Set(presetsThatFit(speed.mbps)) : null;
 
-  const settings = async (change: { alwaysProxy?: boolean; proxyPreset?: ProxyPreset }) => {
+  const settings = async (change: { alwaysProxy?: boolean; proxyPresets?: ProxyPreset[] }) => {
     try {
       const r = await api.put<{ jobs: ProxyJob[] }>("/api/project/settings", change);
       for (const j of r.jobs ?? []) noteProxyJob(j);
@@ -85,26 +82,30 @@ export function ProxiesTab({ project, ffmpeg, jobs, noteProxyJob, current, toast
       toast((e as Error).message);
     }
   };
-  const makeNow = async () => {
+  const toggle = (id: ProxyPreset) => {
+    const next = toggledPresets(ticked, id);
+    if (!next) {
+      setLastRefused(true);
+      return;
+    }
+    setLastRefused(false);
+    void settings({ proxyPresets: next });
+  };
+  const run = async (work: () => Promise<ProxyJob[]>) => {
     if (busy) return;
     setBusy(true);
     try {
-      const r = await api.post<{ jobs: ProxyJob[] }>("/api/proxies");
-      for (const j of r.jobs) noteProxyJob(j);
+      for (const j of await work()) noteProxyJob(j);
     } catch (e) {
       toast((e as Error).message);
     } finally {
       setBusy(false);
     }
   };
-  const make = async (row: Row) => {
-    try {
-      const r = await api.post<{ job: ProxyJob }>(cutPath(row.video.id, row.version.id), { preset });
-      noteProxyJob(r.job);
-    } catch (e) {
-      toast((e as Error).message);
-    }
-  };
+  const makeAll = () => (allCount > 0 ? run(async () => (await api.post<{ jobs: ProxyJob[] }>("/api/proxies")).jobs) : undefined);
+  const makeCut = () =>
+    current && cutCount.length > 0 ? run(async () => (await api.post<{ jobs: ProxyJob[] }>(cutPath(current.video, current.version))).jobs) : undefined;
+  const make = (row: Row, preset: ProxyPreset) => run(async () => [(await api.post<{ job: ProxyJob }>(cutPath(row.video.id, row.version.id), { preset })).job]);
   const cancel = async (job: ProxyProgress) => {
     try {
       const r = await api.del<{ job: ProxyJob }>(`/api/proxy-jobs/${encodeURIComponent(job.job)}`);
@@ -114,9 +115,9 @@ export function ProxiesTab({ project, ffmpeg, jobs, noteProxyJob, current, toast
       else toast((e as Error).message);
     }
   };
-  const remove = async (row: Row) => {
+  const remove = async (row: Row, slot: ProxySlot) => {
     try {
-      await api.del(cutPath(row.video.id, row.version.id));
+      await api.del(`${cutPath(row.video.id, row.version.id)}?preset=${slot}`);
       onChanged();
     } catch (e) {
       toast((e as Error).message);
@@ -167,21 +168,47 @@ export function ProxiesTab({ project, ffmpeg, jobs, noteProxyJob, current, toast
     }
   };
 
+  const cutName = onScreen && onScreenVersion ? `${onScreen.name} ${onScreenVersion.id}` : "";
+  const cutTip = !current || !onScreenVersion
+    ? "Open a cut to make its proxies"
+    : cutCount.length > 0
+      ? `Makes ${presetNames(cutCount)} for ${cutName}`
+      : `${cutName} has every ticked quality, or it's being made`;
+  const allTip = allCount > 0 ? "Makes the ticked qualities each film's latest cut is missing" : "Every film's latest cut has the ticked qualities, or they're being made";
+  const cutOff = cutCount.length === 0 || busy;
+  const allOff = allCount === 0 || busy;
+
   return (
     <div class="proxtab">
       <section class="proxsec" aria-labelledby="prox-quality">
         <h3 id="prox-quality" class="proxh">Quality</h3>
-        <div role="radiogroup" aria-labelledby="prox-quality" class="proxpresets">
-          {PROXY_PRESETS.map((id) => (
-            <label key={id} class={`proxpreset${id === preset ? " on" : ""}`}>
-              <input type="radio" name="proxy-preset" value={id} checked={id === preset} onChange={() => void settings({ proxyPreset: id })} />
-              <span class="pname">
-                {PRESETS[id].label}
-                {fits && (fits.has(id) ? <span class="pfit" aria-label="should play smoothly from here"><Icon name="check" /></span> : null)}
-              </span>
-              <span class="phint">{PRESETS[id].hint}</span>
-            </label>
-          ))}
+        <div role="group" aria-labelledby="prox-quality" class="proxpresets">
+          {PROXY_PRESETS.map((id) => {
+            const on = ticked.includes(id);
+            return (
+              <label key={id} class={`proxpreset${on ? " on" : ""}`}>
+                <input type="checkbox" name="proxy-preset" value={id} checked={on} onChange={(e) => {
+                    // The last ticked one stays ticked: the box is put back, and the line under the group says why.
+                    if (!toggledPresets(ticked, id)) (e.currentTarget as HTMLInputElement).checked = true;
+                    toggle(id);
+                  }} />
+                <span class="pname">
+                  {PRESETS[id].label}
+                  {fits && (fits.has(id) ? <span class="pfit" aria-label="should play smoothly from here"><Icon name="check" /></span> : null)}
+                </span>
+                <span class="phint">{PRESETS[id].hint}</span>
+              </label>
+            );
+          })}
+        </div>
+        <p class="proxnote proxlast" role="status">{lastRefused ? "Keep at least one quality ticked." : ""}</p>
+        <div class="proxmake">
+          <button type="button" class={`btn${cutOff ? "" : " primary"} tip-wrap`} aria-disabled={cutOff} data-tip={cutTip} onClick={() => void makeCut()}>
+            Make proxies for this cut{cutCount.length > 0 && <span class="count">{cutCount.length}</span>}
+          </button>
+          <button type="button" class={`btn${allOff ? "" : " primary"} tip-wrap`} aria-disabled={allOff} data-tip={allTip} onClick={() => void makeAll()}>
+            Make proxies for all films{allCount > 0 && <span class="count">{allCount}</span>}
+          </button>
         </div>
       </section>
 
@@ -198,14 +225,9 @@ export function ProxiesTab({ project, ffmpeg, jobs, noteProxyJob, current, toast
         </button>
         <p class="proxnote">
           {project.alwaysProxy
-            ? `Every new cut gets a ${PRESETS[preset].label} proxy straight away.`
+            ? `Every new cut gets ${presetNames(ticked)} straight away.`
             : "Proxies are made only when you ask."}
         </p>
-        {!project.alwaysProxy && missing > 0 && (
-          <button type="button" class="btn" aria-disabled={busy} onClick={() => void makeNow()}>
-            Make proxies now <span class="count">{missing}</span>
-          </button>
-        )}
       </section>
 
       <section class="proxsec proxtest">
@@ -225,7 +247,15 @@ export function ProxiesTab({ project, ffmpeg, jobs, noteProxyJob, current, toast
         ) : (
           <ul class="proxlist">
             {rows.map((row) => (
-              <ProxyListRow key={`${row.video.id}/${row.version.id}`} row={row} preset={preset} job={jobs[proxyKey(row.video.id, row.version.id)]} onMake={() => void make(row)} onCancel={(j) => void cancel(j)} onDelete={() => void remove(row)} />
+              <ProxyListRow
+                key={`${row.video.id}/${row.version.id}`}
+                row={row}
+                ticked={ticked}
+                jobs={cutJobs(jobs, row.video.id, row.version.id)}
+                onMake={(p) => void make(row, p)}
+                onCancel={(j) => void cancel(j)}
+                onDelete={(slot) => void remove(row, slot)}
+              />
             ))}
           </ul>
         )}
@@ -247,53 +277,56 @@ export function ProxiesTab({ project, ffmpeg, jobs, noteProxyJob, current, toast
   );
 }
 
-function ProxyListRow({ row, preset, job, onMake, onCancel, onDelete }: {
+/** §37.5: one cut: a line per proxy it has and per quality being made, then a Make button per ticked quality it lacks. */
+function ProxyListRow({ row, ticked, jobs, onMake, onCancel, onDelete }: {
   row: Row;
-  preset: ProxyPreset;
-  job: ProxyProgress | undefined;
-  onMake(): void;
+  ticked: readonly ProxyPreset[];
+  jobs: readonly ProxyProgress[];
+  onMake(preset: ProxyPreset): void;
   onCancel(job: ProxyProgress): void;
-  onDelete(): void;
+  onDelete(slot: ProxySlot): void;
 }) {
   const { video, version } = row;
-  const proxy = version.proxy;
-  const active = job && (job.state === "queued" || job.state === "running") ? job : null;
-  const older = !!proxy && !proxyIsAt(proxy, preset);
-  const state = active ? (active.state === "queued" ? "queued" : "making") : proxy ? (older ? "older" : "ready") : "none";
   const label = `${video.name} · ${version.id}`;
+  const active = jobs.filter((j) => j.state === "queued" || j.state === "running");
+  const making = new Set(active.map((j) => j.preset));
+  const have = proxyList(version.proxies).filter((e) => !(e.slot !== LEGACY_PROXY && making.has(e.slot)));
+  const lacking = toMake(version.proxies, ticked, making);
   return (
-    <li class={`proxrow ${state}`} data-cut={`${video.id}/${version.id}`}>
-      <div class="pcut">
-        <span class="pnm" dir="auto">{label}</span>
-        <span class="pstate">
-          {state === "none" && "No proxy"}
-          {state === "queued" && `Queued · ${PRESETS[active!.preset].label}`}
-          {state === "making" && `Making ${PRESETS[active!.preset].label} · ${active!.pct}%`}
-          {state === "ready" && `${proxyQuality(proxy!)} · ${formatBytes(proxy!.bytes)}`}
-          {state === "older" && `Older quality (${proxyQuality(proxy!)}, ${formatBytes(proxy!.bytes)}), remake?`}
-        </span>
-        {state === "making" && (
-          <div class="pbar" role="progressbar" aria-label={`Proxy progress for ${label}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={active!.pct}>
-            <i style={{ width: `${active!.pct}%` }} />
+    <li class="proxrow" data-cut={`${video.id}/${version.id}`}>
+      <span class="pnm" dir="auto">{label}</span>
+      {have.length === 0 && active.length === 0 && <span class="pline none"><span class="pstate">No proxy</span></span>}
+      {have.map(({ slot, proxy }) => {
+        const inUse = slotInUse(slot, ticked);
+        return (
+          <div key={slot} class={`pline ${inUse ? "ready" : "unused"}`} data-preset={slot}>
+            <span class="pstate">{slotLabel(slot)} · {formatBytes(proxy.bytes)}{inUse ? "" : " · Not in use"}</span>
+            <button type="button" class="btn ghost ib" aria-label={`Delete the ${slotLabel(slot)} proxy for ${label}`} data-tip="Delete proxy (the original is kept)" onClick={() => onDelete(slot)}>
+              <Icon name="trash" />
+            </button>
           </div>
-        )}
-      </div>
-      <div class="pacts">
-        {active ? (
-          <button type="button" class="btn" aria-label={`Cancel the proxy for ${label}`} onClick={() => onCancel(active)}>Cancel</button>
-        ) : (
-          <>
-            {state !== "ready" && (
-              <button type="button" class="btn" aria-label={`${proxy ? "Remake" : "Make"} the proxy for ${label}`} onClick={onMake}>{proxy ? "Remake" : "Make"}</button>
-            )}
-            {proxy && (
-              <button type="button" class="btn ghost ib" aria-label={`Delete the proxy for ${label}`} data-tip="Delete proxy (the original is kept)" onClick={onDelete}>
-                <Icon name="trash" />
-              </button>
-            )}
-          </>
-        )}
-      </div>
+        );
+      })}
+      {active.map((job) => (
+        <div key={job.job} class={`pline ${job.state === "queued" ? "queued" : "making"}`} data-preset={job.preset}>
+          <span class="pstate">{job.state === "queued" ? `Queued · ${PRESETS[job.preset].label}` : `Making ${PRESETS[job.preset].label} · ${job.pct}%`}</span>
+          <button type="button" class="btn" aria-label={`Cancel the ${PRESETS[job.preset].label} proxy for ${label}`} onClick={() => onCancel(job)}>Cancel</button>
+          {job.state === "running" && (
+            <div class="pbar" role="progressbar" aria-label={`Proxy progress for ${label}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={job.pct}>
+              <i style={{ width: `${job.pct}%` }} />
+            </div>
+          )}
+        </div>
+      ))}
+      {lacking.length > 0 && (
+        <div class="pmake">
+          {lacking.map((p) => (
+            <button key={p} type="button" class="btn sm" aria-label={`Make the ${PRESETS[p].label} proxy for ${label}`} onClick={() => onMake(p)}>
+              Make {PRESETS[p].label}
+            </button>
+          ))}
+        </div>
+      )}
     </li>
   );
 }

@@ -11,7 +11,7 @@ import { lanesForVideo, onFilm, variantFilms, NoteSchema, ProjectSchema, type Pr
 import { CorruptFileError, InvalidError, NotFoundError, RushesError } from "../../src/core/errors.js";
 import { tmpProject } from "../helpers/tmp.js";
 
-const empty = (): Project => ({ schema: 1, rev: 0, name: "demo", fps: 30, videos: [], lanes: [], files: [], alwaysProxy: false, proxyPreset: "1080l" as const });
+const empty = (): Project => ({ schema: 1, rev: 0, name: "demo", fps: 30, videos: [], lanes: [], files: [], alwaysProxy: false, proxyPresets: ["1080l"] as const });
 
 describe("ids", () => {
   it("slugifies names, keeping digits and dropping accents", () => {
@@ -516,8 +516,8 @@ describe("formats in the data (§21.3)", () => {
   // Review Focus 1.
   it("a project and notes from 0.2.x load unchanged: no size, no formats, notes for every format", () => {
     const old = ProjectSchema.parse({
-      schema: 1, rev: 3, name: "demo", fps: 30, lanes: [], files: [], alwaysProxy: false, proxyPreset: "1080l" as const,
-      videos: [{ id: "hero", name: "Hero", lockedVersion: null, versions: [{ id: "v1", file: "renders/hero_v1.mp4", duration: 8, fps: 30, addedAt: "2026-10-01T00:00:00Z", note: "", shots: [], proxy: null }] }],
+      schema: 1, rev: 3, name: "demo", fps: 30, lanes: [], files: [], alwaysProxy: false, proxyPresets: ["1080l"] as const,
+      videos: [{ id: "hero", name: "Hero", lockedVersion: null, versions: [{ id: "v1", file: "renders/hero_v1.mp4", duration: 8, fps: 30, addedAt: "2026-10-01T00:00:00Z", note: "", shots: [], proxies: {} }] }],
     });
     expect(old.videos[0].versions[0]).toMatchObject({ width: null, height: null, formats: [] });
     const note = NoteSchema.parse({ id: "n_1", stage: "picture", video: "hero", version: "v1", scope: "point", t: 1, text: "x", createdAt: "2026-10-01T00:00:00Z", box: { x: 0.1, y: 0.1, w: 0.2, h: 0.2 } });

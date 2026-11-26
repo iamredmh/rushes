@@ -1,5 +1,6 @@
 // Pure helpers for the dashboard. No DOM, so they're unit-tested in Node.
-import { DEFAULT_PROXY_PRESET, PRESETS, PROXY_AUDIO_KBPS, type ProxyPreset } from "../../src/core/proxyPresets.js";
+import { DEFAULT_PROXY_PRESET, PRESETS, PROXY_AUDIO_KBPS, PROXY_PRESETS as PROXY_PRESET_ORDER, ladderOrder, missingPresets, type ProxyPreset } from "../../src/core/proxyPresets.js";
+import type { Proxies } from "../../src/core/schema.js";
 import type { Asset, AssetKind, BriefSectionView, BriefView, Cue, FilmPlan, FoundCounts, FoundItem, FoundKind, FoundSummary, InUse, Lane, LaneStage, LogLine, LoudnessResult, Mark, Note, Picks, Project, ProxyEvent, ProxyJob, Section, Shot, Stage, State, StoryboardView, TabState, Variant, Video, Version } from "./types.js";
 export type { FoundItem } from "./types.js";
 
@@ -1121,17 +1122,91 @@ export function proxyEstimateMb(seconds: number, preset: ProxyPreset = DEFAULT_P
   return Math.max(10, Math.round(mb / 10) * 10);
 }
 
-/** The Create proxy button's tooltip (§19.5, §36). */
-export function proxyTip(seconds: number, preset: ProxyPreset = DEFAULT_PROXY_PRESET): string {
-  return `Makes a lightweight ${PRESETS[preset].label} copy on your drive so this cut previews smoothly. About ${proxyEstimateMb(seconds, preset)} MB. Your original isn't changed.`;
+/** The Create proxy button's tooltip (§19.5, §36), for one quality or several (§37.4). */
+export function proxyTip(seconds: number, preset: ProxyPreset | readonly ProxyPreset[] = DEFAULT_PROXY_PRESET): string {
+  const list = typeof preset === "string" ? [preset] : preset.length ? preset : [DEFAULT_PROXY_PRESET];
+  const mb = list.reduce((n, p) => n + proxyEstimateMb(seconds, p), 0);
+  const names = list.map((p) => PRESETS[p].label);
+  const what = names.length === 1 ? `a lightweight ${names[0]} copy` : `lightweight ${names.slice(0, -1).join(", ")} and ${names[names.length - 1]} copies`;
+  return `Makes ${what} on your drive so this cut previews smoothly. About ${mb} MB. Your original isn't changed.`;
 }
 
 /** §36.7: where the toolbar's Proxies on/off is kept for this browser, per project. */
 export const proxiesKey = (project: string): string => `rushes:proxies:${project}`;
 
-/** §36.7: the toolbar button's tooltip. */
-export function proxiesTip(on: boolean, preset: ProxyPreset): string {
-  return on ? `Proxies on · playing ${PRESETS[preset].label}` : "Proxies off · playing originals";
+/** §37.5: what the player is playing with Proxies on: a quality, or the original (none ready, or picked). */
+export interface Playing {
+  /** The quality playing, or null for the original. */
+  preset: ProxyPreset | null;
+  /** The player stepped down after stalls (and nothing was picked by hand since). */
+  stepped: boolean;
+  /** Picked by hand from the quality menu. */
+  picked: boolean;
+}
+
+/** §36.7, §37.5: the toolbar button's tooltip, naming what's playing. */
+export function proxiesTip(on: boolean, playing?: Playing | ProxyPreset | null): string {
+  if (!on) return "Proxies off · playing originals";
+  const p: Playing | null = typeof playing === "string" ? { preset: playing, stepped: false, picked: false } : playing ?? null;
+  if (!p || p.preset === null) return p?.picked ? "Proxies on · playing the original" : "Proxies on · no proxy for this cut, playing the original";
+  return `Proxies on · playing ${PRESETS[p.preset].label}${p.stepped ? " (stepped down)" : ""}`;
+}
+
+/** §37.5: the quality label on the picture: "1080p Low", "720p Low · stepped down", "Original". */
+export function playingLabel(p: Playing): string {
+  if (p.preset === null) return "Original";
+  return `${PRESETS[p.preset].label}${p.stepped ? " · stepped down" : ""}`;
+}
+
+/**
+ * §37.5: the ladder's state for the cut on screen. `cap` is the best quality it may play after stepping down (null:
+ * the top); `pick` a choice from the quality menu ("original", or a quality), which holds until the cut changes.
+ */
+export interface LadderState {
+  cap: ProxyPreset | null;
+  pick: ProxyPreset | "original" | null;
+  /** performance.now() of the last step down, for the 10 s spacing. */
+  steppedAt: number | null;
+}
+export const LADDER_TOP: LadderState = { cap: null, pick: null, steppedAt: null };
+
+/** §37.5: at most one step down every this many ms. */
+export const STEP_SPACING_MS = 10_000;
+
+/**
+ * §37.5: what plays. Off: the original. On: a hand pick if it is still ready; otherwise the best ready rung at or
+ * under the cap. `ready` is the cut's ready ticked qualities, best first (readyRungs). None ready: the original.
+ */
+export function choosePlaying(on: boolean, ready: readonly ProxyPreset[], ladder: LadderState): Playing {
+  if (!on) return { preset: null, stepped: false, picked: false };
+  if (ladder.pick === "original") return { preset: null, stepped: false, picked: true };
+  if (ladder.pick && ready.includes(ladder.pick)) return { preset: ladder.pick, stepped: false, picked: true };
+  if (ready.length === 0) return { preset: null, stepped: false, picked: false };
+  const capAt = ladder.cap ? PROXY_PRESET_ORDER.indexOf(ladder.cap) : -1;
+  const allowed = capAt < 0 ? ready : ready.filter((p) => PROXY_PRESET_ORDER.indexOf(p) >= capAt);
+  const preset = allowed[0] ?? ready[ready.length - 1];
+  return { preset, stepped: ladder.cap !== null && preset !== ready[0], picked: false };
+}
+
+/**
+ * §37.5: after a stall, whether to step down, and to what. Only while a quality plays (not a hand pick, not the
+ * original), only when the player stalls repeatedly (stallsSayHint), only to the next ready rung below, and at most
+ * once every STEP_SPACING_MS. Returns the new state, or null to stay. It never steps up.
+ */
+export function stepDown(
+  ladder: LadderState,
+  playing: Playing,
+  ready: readonly ProxyPreset[],
+  stalls: readonly { at: number; ms: number }[],
+  now: number,
+): LadderState | null {
+  if (playing.preset === null || playing.picked) return null;
+  if (!stallsSayHint(stalls, now)) return null;
+  if (ladder.steppedAt !== null && now - ladder.steppedAt < STEP_SPACING_MS) return null;
+  const at = ready.indexOf(playing.preset);
+  const next = at >= 0 ? ready[at + 1] : undefined;
+  if (!next) return null;
+  return { cap: next, pick: null, steppedAt: now };
 }
 
 /** "About 5.8 Mbps from here": a measured speed, to one decimal under 10 and whole above. */
@@ -1157,10 +1232,26 @@ export const PLAYBACK_ERROR_REASON = "The browser couldn't play this file";
 export interface ProxyProgress extends ProxyEvent {
   at: number;
 }
-/** What this tab knows of every proxy job, one per cut, keyed by proxyKey(). */
+/** What this tab knows of every proxy job, one per cut and quality, keyed by proxyKey(). */
 export type ProxyJobs = Readonly<Record<string, ProxyProgress>>;
 
-export const proxyKey = (video: string, version: string): string => `${video}/${version}`;
+/** §37.4: one job per cut and quality. */
+export const proxyKey = (video: string, version: string, preset: ProxyPreset): string => `${video}/${version}/${preset}`;
+
+/** §37.4: every job this tab knows of for one cut, whatever the quality, best quality first. */
+export function cutJobs(jobs: ProxyJobs, video: string, version: string): ProxyProgress[] {
+  return PROXY_PRESET_ORDER.flatMap((p) => (jobs[proxyKey(video, version, p)] ? [jobs[proxyKey(video, version, p)]] : []));
+}
+
+/** §37.4: the qualities of a cut being made right now (queued or running). */
+export function makingPresets(jobs: ProxyJobs, video: string, version: string): Set<ProxyPreset> {
+  return new Set(cutJobs(jobs, video, version).filter((j) => proxyActive(j.state)).map((j) => j.preset));
+}
+
+/** §37.5: the ticked qualities a cut is missing that aren't being made yet: what its Make buttons would make. */
+export function toMake(proxies: Proxies | null | undefined, ticked: readonly ProxyPreset[], making: ReadonlySet<ProxyPreset>): ProxyPreset[] {
+  return missingPresets(proxies, ticked).filter((p) => !making.has(p));
+}
 
 /** A route's ProxyJob in the SSE event's shape. */
 export function proxyProgress(job: ProxyJob, at: number): ProxyProgress {
@@ -1176,7 +1267,7 @@ export function proxyProgress(job: ProxyJob, at: number): ProxyProgress {
  * same object when nothing changes, so a state update can bail out.
  */
 export function mergeProxyJob(jobs: ProxyJobs, e: ProxyProgress): ProxyJobs {
-  const key = proxyKey(e.video, e.version);
+  const key = proxyKey(e.video, e.version, e.preset);
   const old = jobs[key];
   if (old && old.job === e.job) {
     if (!proxyActive(old.state)) return jobs;
@@ -1201,13 +1292,13 @@ export function settleProxyJobs(
   jobs: ProxyJobs,
   running: readonly ProxyJob[],
   since: number,
-  hasProxy: (video: string, version: string) => boolean,
+  hasProxy: (video: string, version: string, preset: ProxyPreset) => boolean,
 ): ProxyJobs {
   const listed = new Set(running.map((j) => j.id));
   let next: Record<string, ProxyProgress> | null = null;
   for (const [key, p] of Object.entries(jobs)) {
     if (p.at >= since) continue;
-    const over = (proxyActive(p.state) && !listed.has(p.job)) || (p.state === "done" && !hasProxy(p.video, p.version));
+    const over = (proxyActive(p.state) && !listed.has(p.job)) || (p.state === "done" && !hasProxy(p.video, p.version, p.preset));
     if (!over) continue;
     next ??= { ...jobs };
     delete next[key];
@@ -1215,6 +1306,29 @@ export function settleProxyJobs(
   let out: ProxyJobs = next ?? jobs;
   for (const j of running) out = mergeProxyJob(out, proxyProgress(j, since));
   return out;
+}
+
+/** §37.5: Make proxies for all films' count: every ticked quality each film's latest cut is missing and isn't being made. */
+export function latestMissing(project: Pick<Project, "videos">, presets: readonly ProxyPreset[], jobs: ProxyJobs): number {
+  let n = 0;
+  for (const video of project.videos) {
+    if (video.shelved) continue;
+    const v = video.versions[video.versions.length - 1];
+    if (v) n += toMake(v.proxies, presets, makingPresets(jobs, video.id, v.id)).length;
+  }
+  return n;
+}
+
+/** §37.5: Make proxies for this cut's count: every ticked quality the cut on screen is missing and isn't being made. */
+export function cutMissing(project: Pick<Project, "videos">, cut: { video: string; version: string } | null, presets: readonly ProxyPreset[], jobs: ProxyJobs): ProxyPreset[] {
+  const v = cut && project.videos.find((x) => x.id === cut.video)?.versions.find((x) => x.id === cut.version);
+  return v ? toMake(v.proxies, presets, makingPresets(jobs, cut.video, cut.version)) : [];
+}
+
+/** §37.5: unticking a quality is refused when it is the last one ticked. Returns the new list, or null. */
+export function toggledPresets(ticked: readonly ProxyPreset[], id: ProxyPreset): ProxyPreset[] | null {
+  const next = ticked.includes(id) ? ticked.filter((p) => p !== id) : ladderOrder([...ticked, id]);
+  return next.length === 0 ? null : next;
 }
 
 export type ProxyPhase = "none" | "offer" | "working" | "done" | "missing" | "stall";

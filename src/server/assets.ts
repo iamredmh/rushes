@@ -8,6 +8,7 @@ import type { Store } from "../core/store.js";
 import { fromManifestPath } from "../core/paths.js";
 import { GRAB_PATH, SCREENSHOT_PATH, registeredMedia } from "./files.js";
 import { PROXY_PATH } from "./proxy.js";
+import { proxyList } from "../core/proxyPresets.js";
 import { chipOrder, labelOfId, versionFormats } from "../core/formats.js";
 
 export type AssetKind = "screenshot" | "cut" | "proxy" | "take" | "music" | "sfx" | "voice" | "visual" | FileKind;
@@ -286,7 +287,8 @@ export async function listAssets(store: Store, project: Project, script: ScriptF
     // Only a file this server would have written into proxies/: a hand-edited record pointing
     // anywhere else (the original, say) is never offered for deletion as a proxy.
     [...video.versions].reverse().flatMap((version) =>
-      version.proxy && PROXY_PATH.test(version.proxy.file) ? [{ video: video.id, version: version.id, proxy: version.proxy }] : [],
+      // §37.3: one per quality the cut holds.
+      proxyList(version.proxies).flatMap(({ slot, proxy }) => (PROXY_PATH.test(proxy.file) ? [{ video: video.id, version: version.id, slot, proxy }] : [])),
     ),
   );
   // A take has no name of its own in script.json (just an id and the text it was read against),

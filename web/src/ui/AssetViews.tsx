@@ -206,7 +206,9 @@ export function ProxyRow({ asset, toast, onChanged }: { asset: Asset; toast(mess
     if (busy || !asset.video || !asset.version) return;
     setBusy(true);
     try {
-      await api.del(`/api/videos/${encodeURIComponent(asset.video)}/versions/${encodeURIComponent(asset.version)}/proxy`);
+      // §37.4: just this file's quality, read off its name (…_proxy-720l.mp4; §19.5's …_proxy.mp4 is `legacy`).
+      const slot = /_proxy-(1080h|1080l|720h|720l)\.mp4$/.exec(asset.path)?.[1] ?? "legacy";
+      await api.del(`/api/videos/${encodeURIComponent(asset.video)}/versions/${encodeURIComponent(asset.version)}/proxy?preset=${slot}`);
       onChanged();
     } catch (e) {
       toast((e as Error).message);

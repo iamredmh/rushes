@@ -12,7 +12,7 @@ const GITIGNORE = "proxies/\npeaks/\nserver.json\nserver.log\nagent.json\nlog.js
 function defaults(key: FileKey, name: string): FileData[FileKey] {
   switch (key) {
     case "project":
-      return { schema: 1, rev: 0, name, fps: 30, videos: [], lanes: [], files: [], alwaysProxy: false, proxyPreset: "1080l" };
+      return { schema: 1, rev: 0, name, fps: 30, videos: [], lanes: [], files: [], alwaysProxy: false, proxyPresets: ["1080l"] };
     case "script":
       return { schema: 1, rev: 0, wordsPerSecond: 2.6, sections: [] };
     case "notes":

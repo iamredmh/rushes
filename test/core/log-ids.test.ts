@@ -38,7 +38,7 @@ describe("log ids are unique in the file (I1)", () => {
     const f: LogFile = { ...empty(), backfilled: false };
     queue.push("l_dddddd");
     appendEvent(f, lineEvent("Live", "project"), "agent", at(5));
-    const p: Project = { schema: 1, rev: 0, name: "Lumen launch film", fps: 30, videos: [], lanes: [], files: [], alwaysProxy: false, proxyPreset: "1080l" as const };
+    const p: Project = { schema: 1, rev: 0, name: "Lumen launch film", fps: 30, videos: [], lanes: [], files: [], alwaysProxy: false, proxyPresets: ["1080l"] as const };
     addVersion(p, { video: "Hero", file: "renders/hero_v1.mp4", note: "v1: first pass" }, at(-300));
     addVersion(p, { video: "Hero", file: "renders/hero_v2.mp4", note: "v2: second pass" }, at(-200));
     queue.push("l_dddddd", "l_dddddd", "l_eeeeee");

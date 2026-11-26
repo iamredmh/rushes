@@ -419,10 +419,12 @@ export async function main(argv: string[], io: Io): Promise<number> {
           io.out(`Added ${r.video.name} ${r.version.id}${r.restored ? " (it was shelved: restored)" : ""}`);
           // A Rushes started by an older version ignores `label` and its reply has none.
           if (o.label?.trim() && r.version.label === undefined) io.err("An older Rushes is running and dropped the label: the cut was added without it. Run `rushes stop`, then open again.");
-          // §36.5: with the project's switch on, every new cut gets a proxy; §19.5: otherwise, say when this cut is likely to play badly.
-          if (r.proxyJob) {
-            const preset: unknown = r.proxyJob.preset;
-            io.out(`Making a proxy${isPreset(preset) ? ` (${PRESETS[preset].label})` : ""}: "Always make proxies" is on.`);
+          // §37.4: with the project's switch on, every new cut gets a proxy at each ticked quality; §19.5: otherwise, say when
+          // this cut is likely to play badly.
+          const made: unknown[] = Array.isArray(r.proxyJobs) ? r.proxyJobs.map((j: { preset?: unknown }) => j.preset) : [];
+          const names = made.filter(isPreset).map((p) => PRESETS[p].label);
+          if (made.length) {
+            io.out(`Making ${made.length === 1 ? "a proxy" : `${made.length} proxies`}${names.length ? ` (${names.join(", ")})` : ""}: "Always make proxies" is on.`);
           }
           else if (r.proxySuggested) io.out(`Proxy suggested: ${r.proxyReason}. Create one from Picture.`);
           return 0;

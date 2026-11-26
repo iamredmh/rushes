@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, ApiError, projectId } from "../api.js";
 import {
   LOCKED_BRIEF, LOCKED_STORYBOARD, LOCKED_TAB, testFlags, STAGE_NAMES, agentPrompt, briefPrompt, briefSendPrompt, copyShortcut, currentFormat, defaultVersion, filmLanes, filmPicks, firstView, formatChips, formatPrompt, foundChip, foundSignature, foundTotal,
-  filmAfterShelving, inPlay, isPlanPage, noteOnFilm, scopeState, ROOT_PLAN, filmFromSearch, withFilm, type PlanPaths, labelOfId, latest, lockedFound, neighbourFormat, neighbourVideo, planProgress, planTarget, previousVersion, proxiesKey, proxyKey, readyPrompt, storySendPrompt, storyboardPrompt, versionFormats, type PlanPage,
+  filmAfterShelving, inPlay, isPlanPage, noteOnFilm, scopeState, ROOT_PLAN, filmFromSearch, withFilm, type PlanPaths, labelOfId, latest, lockedFound, neighbourFormat, neighbourVideo, planProgress, planTarget, previousVersion, proxiesKey, cutJobs, readyPrompt, storySendPrompt, storyboardPrompt, versionFormats, type PlanPage,
 } from "../lib.js";
 import { onLabel } from "../../../src/core/notes.js";
 import { deskPlace, deskView, noteTarget, sendAgainOffer, takeCount, takeGroups, unfinishedLines, unsentCount, unsentEdits, viewForKey, type DeskView } from "../desk.js";
@@ -1020,11 +1020,11 @@ export function App() {
               onGrabChange={setGrabFor}
               playerRef={playerRef}
               ffmpeg={state.proxies?.ffmpeg ?? false}
-              proxyJob={proxyJobs[proxyKey(video.id, version.id)]}
+              proxyJobs={cutJobs(proxyJobs, video.id, version.id)}
               noteProxyJob={noteProxyJob}
               proxiesOn={proxiesOn}
               onProxiesChange={setProxiesOn}
-              proxyPreset={state.project.proxyPreset}
+              proxyPresets={state.project.proxyPresets}
               formats={views}
               format={format}
               formatMissing={!!format && missingFiles.has(views.find((f) => f.id === format)?.file ?? "")}

@@ -6,14 +6,14 @@ import { join } from "node:path";
 import { RushesError, NotFoundError } from "../core/errors.js";
 import { VIDEO_FORMATS, hasFfprobe, probe as ffprobe, proxyNeed, type Probe } from "../core/media.js";
 import { fromManifestPath } from "../core/paths.js";
-import { DEFAULT_PROXY_PRESET, PRESETS, PROXY_AUDIO_KBPS, type ProxyPreset } from "../core/proxyPresets.js";
+import { DEFAULT_PROXY_PRESET, PRESETS, PROXY_AUDIO_KBPS, PROXY_PRESETS, type ProxyPreset } from "../core/proxyPresets.js";
 import type { Project, Version } from "../core/schema.js";
 import type { ChangeEvent, Store } from "../core/store.js";
 
-// §19.5 and §36: proxies. One job per cut, queued and run one at a time, newest cut first, with progress over SSE and a
-// Cancel that kills the process and deletes the half-written file. A version's `proxy` record is set only once a render
-// has completed and been renamed into place, so a `*.partial.mp4` never poses as a proxy. §36: each is made at one of
-// four presets, and making one at another preset replaces the old.
+// §19.5, §36 and §37: proxies. One job per cut and quality, queued and run one at a time, newest cut first (and within
+// a cut, the better quality first), with progress over SSE and a Cancel that kills the process and deletes the
+// half-written file. A version's `proxies` record for a quality is set only once a render has completed and been
+// renamed into place, so a `*.partial.mp4` never poses as a proxy. §37: a cut holds one proxy per quality.
 
 /**
  * Spawns ffmpeg with an argument array, never through a shell (global constraints). Same contract
@@ -380,38 +380,34 @@ export class ProxyJobs {
     return this.closing;
   }
 
-  /** The running job for a cut, if there is one. */
-  find(video: string, version: string): ProxyJob | undefined {
-    const r = this.byVersion.get(key(video, version));
+  /** The queued or running job for a cut at `preset`, if there is one. */
+  find(video: string, version: string, preset: ProxyPreset): ProxyJob | undefined {
+    const r = this.byVersion.get(key(video, version, preset));
     return r ? { ...r.job } : undefined;
+  }
+
+  /** §37.4: every queued and running job for a cut, whatever the quality. */
+  forCut(video: string, version: string): ProxyJob[] {
+    return this.list().filter((j) => j.video === video && j.version === version);
   }
 
   /** Every queued and running job, for GET /api/state. */
   list(): ProxyJob[] {
-    return [...this.byId.values()].filter((r) => this.byVersion.get(key(r.job.video, r.job.version)) === r).map((r) => ({ ...r.job }));
+    return [...this.byId.values()].filter((r) => this.byVersion.get(key(r.job.video, r.job.version, r.job.preset)) === r).map((r) => ({ ...r.job }));
   }
 
   /**
-   * Queues a proxy for a cut at `preset` (§36.6), or returns the job already there (Review Focus 2: two tabs or a
-   * double click get one job between them). One job per cut: a queued one at another preset takes the new preset; a
-   * running one at another preset is cancelled and the new one queued. With a slot free it starts at once. The caller
-   * checks the cut exists first. Refused (503 `closing`) once the server has started closing.
+   * Queues a proxy for a cut at `preset` (§37.4), or returns the job already there for that cut and quality (Review
+   * Focus 2: two tabs or a double click get one job between them). Jobs at other qualities of the same cut are left
+   * alone. With a slot free it starts at once. The caller checks the cut exists first. Refused (503 `closing`) once the
+   * server has started closing.
    */
   start(video: string, version: string, opts: { preset?: ProxyPreset; addedAt?: string } = {}): ProxyJob {
     const preset = opts.preset ?? DEFAULT_PROXY_PRESET;
-    const k = key(video, version);
+    const k = key(video, version, preset);
     const existing = this.byVersion.get(k);
-    if (existing && existing.job.preset === preset && !existing.cancelled) return { ...existing.job };
-    if (existing && existing.job.state === "queued") {
-      existing.job.preset = preset;
-      this.emit(existing.job);
-      return { ...existing.job };
-    }
+    if (existing && !existing.cancelled) return { ...existing.job };
     if (this.closing) throw new RushesError("Rushes is closing, so it isn't starting a proxy", 503, "closing");
-    if (existing && !existing.committing) {
-      existing.cancelled = true;
-      existing.controller.abort();
-    }
     const job: ProxyJob = { id: randomUUID(), video, version, preset, pct: 0, state: "queued" };
     let settle!: (j: ProxyJob) => void;
     const settled = new Promise<ProxyJob>((res) => (settle = res));
@@ -435,8 +431,14 @@ export class ProxyJobs {
   private pump(first?: Running): boolean {
     let startedFirst = false;
     while (this.active < this.concurrency && this.pending.length > 0 && !this.closing) {
-      // Newest cut first; among equals, the later ask.
-      this.pending.sort((a, b) => (a.addedAt === b.addedAt ? b.seq - a.seq : a.addedAt < b.addedAt ? 1 : -1));
+      // Newest cut first; within a cut, the better quality (§37.4); among equals, the later ask.
+      this.pending.sort((a, b) =>
+        a.addedAt !== b.addedAt
+          ? a.addedAt < b.addedAt ? 1 : -1
+          : a.job.video === b.job.video && a.job.version === b.job.version && a.job.preset !== b.job.preset
+            ? PROXY_PRESETS.indexOf(a.job.preset) - PROXY_PRESETS.indexOf(b.job.preset)
+            : b.seq - a.seq,
+      );
       const r = this.pending.shift()!;
       if (r === first) startedFirst = true;
       this.active++;
@@ -696,14 +698,16 @@ export class ProxyJobs {
         return await fail("Couldn't read the proxy's size");
       }
       let recorded = false;
-      // §36.4: one proxy per cut. The one it replaces (another preset, or §19.5's) is deleted once the new one is recorded.
+      // §37.3: one proxy per quality. Proxies at other qualities stay. A hand-edited record at this quality that
+      // pointed at another file is replaced, and that file deleted once the new one is recorded.
       let replaced: string | null = null;
       try {
         await this.store.update("project", (p) => {
           const v = findVersion(p, job.video, job.version);
           if (!v) return;
-          replaced = v.proxy && v.proxy.file !== named ? v.proxy.file : null;
-          v.proxy = { file: named, width: size.width, height: size.height, bytes: made.size, createdAt: new Date().toISOString(), preset };
+          const was = v.proxies[preset];
+          replaced = was && was.file !== named ? was.file : null;
+          v.proxies[preset] = { file: named, width: size.width, height: size.height, bytes: made.size, createdAt: new Date().toISOString(), preset };
           recorded = true;
         });
       } catch (e) {
@@ -733,7 +737,7 @@ export class ProxyJobs {
     let keep = false;
     try {
       const v = findVersion(await this.store.read("project"), job.video, job.version);
-      keep = v?.proxy?.file === proxyPath(job.video, job.version, job.preset);
+      keep = v?.proxies[job.preset]?.file === proxyPath(job.video, job.version, job.preset);
     } catch {
       keep = false;
     }
@@ -741,8 +745,8 @@ export class ProxyJobs {
   }
 }
 
-function key(video: string, version: string): string {
-  return `${video}/${version}`;
+function key(video: string, version: string, preset: ProxyPreset): string {
+  return `${video}/${version}/${preset}`;
 }
 
 /** A file's revision key (path, size and mtime) and size, or null when it isn't a file. */

@@ -7,6 +7,7 @@ import { sectionsOf } from "../core/script.js";
 import { cueFiles } from "../core/cues.js";
 import { VIDEO_EXT } from "../core/media.js";
 import { PROXY_PATH } from "./proxy.js";
+import { proxyList } from "../core/proxyPresets.js";
 
 export const CONTENT_TYPES: Record<string, string> = {
   ".mp4": "video/mp4",
@@ -82,7 +83,7 @@ export function registeredMedia(project: Project, script: ScriptFile | Pick<Scri
       files.add(ver.file);
       // §19.5: a cut's proxy plays in Picture just like the cut itself -- but only a name this
       // server would write, so a hand-edited record can't open up any other file.
-      if (ver.proxy && PROXY_PATH.test(ver.proxy.file)) files.add(ver.proxy.file);
+      for (const { proxy } of proxyList(ver.proxies)) if (PROXY_PATH.test(proxy.file)) files.add(proxy.file);
       // §21: a cut's other formats play in Picture like the cut itself, under the same §15.5 rules.
       for (const f of ver.formats) files.add(f.file);
     }

@@ -175,9 +175,18 @@ svg.ic { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-wid
 
 /* tooltips */
 [data-tip] { position: relative; }
-[data-tip]::after { content: attr(data-tip); position: absolute; left: 50%; bottom: calc(100% + 8px); transform: translateX(-50%) translateY(2px); background: var(--tip); color: var(--on-tip); font: 500 15px/1 var(--sans); padding: 7px 9px; border-radius: 7px; white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity 0.12s, transform 0.12s; z-index: 30; }
-[data-tip]:hover::after, [data-tip]:focus-visible::after { opacity: 1; transform: translateX(-50%); }
-.tip-below[data-tip]::after { bottom: auto; top: calc(100% + 8px); }
+/* §37.5: every data-tip is drawn by one fixed layer at the root (tips.ts), so no panel clips it. The look a context
+   asks for is set as custom properties on the element: --tip-side (above, below, right), --tip-size (small),
+   --tip-wrap (wrap, pre-line, clip) and --tip-max. */
+.tiplayer { position: fixed; left: 0; top: 0; z-index: 1000; max-width: calc(100vw - 16px); box-sizing: border-box; background: var(--tip); color: var(--on-tip); font: 500 15px/1 var(--sans); padding: 7px 9px; border-radius: 7px; white-space: nowrap; pointer-events: none; opacity: 0; visibility: hidden; transform: translateY(2px); transition: opacity 0.12s, transform 0.12s, visibility 0s 0.12s; }
+.tiplayer[data-side="below"] { transform: translateY(-2px); }
+.tiplayer[data-side="right"] { transform: translateX(-2px); }
+.tiplayer.show { opacity: 1; visibility: visible; transform: none; transition: opacity 0.12s, transform 0.12s; }
+.tiplayer.small { font-size: var(--t-small); padding: 5px 8px; border-radius: 5px; }
+.tiplayer.wrap, .tiplayer.fit { white-space: normal; width: max-content; max-width: min(var(--tip-max, 300px), calc(100vw - 16px)); line-height: 1.35; text-align: left; overflow-wrap: anywhere; }
+.tiplayer.preline { white-space: pre-line; }
+.tiplayer.clip { max-width: min(var(--tip-max, 300px), calc(100vw - 16px)); overflow: hidden; text-overflow: ellipsis; }
+@media (prefers-reduced-motion: reduce) { .tiplayer, .tiplayer.show { transform: none; } }
 
 /* frame (§27, 5.1): the window's height exactly, in three rows: the top bar, the work area and the status bar. Nothing
    uses the document's scroll; a screen taller than its room scrolls inside the work area, and the bars never move. */
@@ -295,11 +304,9 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .srcswitch button:hover { color: var(--text); }
 .srcswitch button[aria-pressed="true"] { background: var(--press); color: var(--text); }
 /* Long tooltips wrap; one by the left or right edge of its box lines up with that edge instead of centring. */
-.tip-wrap[data-tip]::after { white-space: normal; width: max-content; max-width: 300px; line-height: 1.35; text-align: left; }
-.tip-start[data-tip]::after { left: 0; transform: translateY(2px); }
-.tip-end[data-tip]::after { left: auto; right: 0; transform: translateY(2px); }
-.tip-start[data-tip]:hover::after, .tip-start[data-tip]:focus-visible::after,
-.tip-end[data-tip]:hover::after, .tip-end[data-tip]:focus-visible::after { transform: none; }
+/* Long tooltips wrap (300 px at most). .tip-start and .tip-end once lined a tip up with its box's edge; the layer now
+   keeps every tip inside the window, so they no longer change anything. */
+.tip-wrap[data-tip] { --tip-wrap: wrap; }
 
 /* notes */
 .panel { background: var(--raised); border-radius: var(--r-lg); display: flex; flex-direction: column; min-height: 0; }
@@ -533,8 +540,7 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .onwrap svg.ic { position: absolute; right: 9px; width: 14px; height: 14px; color: var(--text-2); pointer-events: none; }
 /* The On menu's tooltip (a round and read name can be long): left-aligned over the menu and wrapping
    within the composer, so it never runs off the window's edge. */
-.onwrap[data-tip]::after { left: 0; transform: translateY(2px); width: max-content; max-width: max(100%, 240px); white-space: normal; line-height: 1.3; text-align: left; }
-.onwrap[data-tip]:hover::after { transform: none; }
+.onwrap[data-tip] { --tip-wrap: wrap; --tip-max: 240px; }
 .sel.dbsel { height: 30px; background: var(--app); color: var(--text); padding: 0 28px 0 10px; max-width: 100%; text-overflow: ellipsis; }
 
 /* lightbox */
@@ -557,7 +563,7 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 /* ---- Assets › Found (§20.5) ---- */
 .amain.found { grid-template-columns: minmax(0, 1fr); }
 /* The controls sit at the window's right edge: their tooltips open below, anchored to the right, and wrap, so they never widen the page. */
-.amain.found .acontrols [data-tip]::after { left: auto; right: 0; bottom: auto; top: calc(100% + 8px); transform: none; white-space: normal; width: max-content; max-width: 280px; line-height: 1.3; text-align: left; }
+.amain.found .acontrols [data-tip] { --tip-side: below; --tip-wrap: wrap; --tip-max: 280px; }
 .afolder-btn.afound .count { color: var(--accent-2); font-weight: 600; opacity: 1; }
 .amain.found .aheader h2 .count { background: transparent; color: var(--accent-2); padding: 0; min-width: 0; }
 .fscan { display: flex; align-items: center; gap: 10px; margin: 0; color: var(--text-3); font-size: 15px; }
@@ -659,7 +665,7 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .note.ro .t { font-size: 15px; color: var(--text-2); cursor: default; }
 .nact .flink { margin-left: -8px; }
 /* The reason fits inside the notes column, which clips anything wider. */
-.fscope .tip-wrap[data-tip]::after { max-width: 220px; }
+.fscope .tip-wrap[data-tip] { --tip-max: 220px; }
 .sbnone { margin: 4px 0 0; color: var(--text-2); font-size: 15px; line-height: 1.6; }
 
 /* §25: the Visuals tab. Every class here starts with vz. */
