@@ -50,9 +50,18 @@ function size(file: string): { width: number; height: number } {
   return { width: s.width, height: s.height };
 }
 
+/**
+ * The encode's own args with ffmpeg held to two threads, so this file's encodes don't starve the timing-sensitive tests
+ * that run beside it on a small CI runner. The rate control under test is the same.
+ */
+function lean(args: string[]): string[] {
+  const out = args.indexOf("-progress");
+  return [...args.slice(0, out), "-threads", "2", ...args.slice(out)];
+}
+
 function lavfi(out: string, w: number, h: number, seconds: number, noise: boolean): void {
   const src = `testsrc2=size=${w}x${h}:rate=30${noise ? ",noise=alls=25:allf=t+u" : ""}`;
-  execFileSync("ffmpeg", ["-hide_banner", "-v", "error", "-y", "-f", "lavfi", "-i", src, "-f", "lavfi", "-i", "sine=f=440:r=48000", "-t", String(seconds), "-c:v", "libx264", "-preset", "ultrafast", "-crf", "20", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", out]);
+  execFileSync("ffmpeg", ["-hide_banner", "-v", "error", "-y", "-f", "lavfi", "-i", src, "-f", "lavfi", "-i", "sine=f=440:r=48000", "-t", String(seconds), "-threads", "2", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "20", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", out]);
 }
 
 describe.skipIf(!FFMPEG)("§36.8 encode check (real ffmpeg)", () => {
@@ -74,7 +83,7 @@ describe.skipIf(!FFMPEG)("§36.8 encode check (real ffmpeg)", () => {
   for (const preset of PROXY_PRESETS) {
     it(`${PRESETS[preset].label} holds its ${PRESETS[preset].peakKbps / 1000} Mbps peak within 15% over 1 s windows`, async () => {
       const out = join(dir, `motion_${preset}.mp4`);
-      const r = await defaultFfmpeg(encodeArgs(join(dir, "motion.mp4"), out, version, preset), { onStdout: () => undefined });
+      const r = await defaultFfmpeg(lean(encodeArgs(join(dir, "motion.mp4"), out, version, preset)), { onStdout: () => undefined });
       expect(r.code, r.stderr).toBe(0);
       const { avg, peak } = rates(packets(out));
       const cap = PRESETS[preset].peakKbps / 1000;
@@ -88,7 +97,7 @@ describe.skipIf(!FFMPEG)("§36.8 encode check (real ffmpeg)", () => {
   it("sizes portrait and square by the short edge, and never upscales a smaller source", async () => {
     const run = async (src: string, preset: (typeof PROXY_PRESETS)[number]) => {
       const out = join(dir, `${src}_${preset}.mp4`);
-      const r = await defaultFfmpeg(encodeArgs(join(dir, `${src}.mp4`), out, version, preset), { onStdout: () => undefined });
+      const r = await defaultFfmpeg(lean(encodeArgs(join(dir, `${src}.mp4`), out, version, preset)), { onStdout: () => undefined });
       expect(r.code, r.stderr).toBe(0);
       return size(out);
     };

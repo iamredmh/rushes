@@ -129,6 +129,8 @@ With proxies off, when the player stalls twice within 30 s for 1 s or more each 
 | 720p High | 4.5 | 3.11 / 4.04 |
 | 720p Low | 2 | 1.17 / 1.52 |
 
+The test holds ffmpeg to 2 threads so its encodes don't starve the timing-sensitive tests running beside it on CI. x264 with fewer threads sits closer to its average: on the mini at 2 threads the clip measures 10.32 / 14.94, 4.10 / 5.20, 3.58 / 4.42 and 1.51 / 2.04, so at most 7% over a stated peak on a small machine.
+
 With `-maxrate` at the full peak (the first build), the same clip measured 12.01 / 4.57 / 4.21 / 1.71 on the mini and 14.32 / 5.68 / **5.22** / 2.13 on CI's Windows nightly ffmpeg, which is what moved `-maxrate` to 90%.
 
 **Hands-on** (26 Nov, the Mac mini, a copy of Cloud Engines Shorts served from the branch on port 4598): turning the switch on at 1080p Low made the latest cut of all six films in 25 s, one at a time; changing to 720p Low showed all six as older, queued them and remade them in 17 s. Toggling Proxies while playing swapped the file and kept playing from the same place, four times out of four. The stall hint showed after two simulated stalls, and its button turned Proxies on and played the 720p Low proxy. The originals are 1080p H.264 at 9–55 Mbps. Final settings, per film (time is ffmpeg alone):
