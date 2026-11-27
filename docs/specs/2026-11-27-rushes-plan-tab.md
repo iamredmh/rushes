@@ -108,3 +108,18 @@ Each part is usable alone, in this order, with tests as elsewhere (unit for the 
 ## 38.9 What is left to the builder
 
 Exact spacing and sizes, the strip's length, how the Overview grid wraps, the version menu's time format, and how the fallback At a glance picks a sentence, within the rules above.
+
+## 38.10 As built (27 November 2026)
+
+Built in the order of 38.8 on branch `plan-tab`. Where the build differs from the design above:
+
+- **At a glance is read in the page, not on the server.** `src/core/glance.ts` (pure, shared) parses `- Label: value` lines and makes the fallback; `BriefView` is unchanged. A label is one to four words before the colon, so a sentence with a colon in it stays a plain line.
+- **The project brief** rides on each later film's plan as `projectBrief` (null for the first film). The Brief tab is open for a later film that has only the project brief, and shows it read-only with the prompt; Approve is hidden there.
+- **`rushes new`** writes `## At a glance` first in its template (ten sections now), and the skill and `AGENTS.md` ask for it, and for a film's own `films/<id>/brief.md` before it is built.
+- **Storyboard notes** are a new stage, `storyboard`, last in `STAGES`. The server stamps `shot` and `still` from the film's storyboard when the note is made and refuses a shot that is not there. It has a tab state (`unlocked` when the film has a storyboard) so `rushes_status` counts its open notes; `rushes status` prints them on the storyboard line, not as a tab. A line added in Activity from the Storyboard page goes under Script, as before. Note lists give the agent `shotLabel` and `where`.
+- **The notes panel** takes `onPick` for notes with no time: the label is a button that goes to the note's shot. Storyboard notes show no time chip.
+- **The frame follows its shot**: when the agent adds, removes or renumbers shots, the page stays on the shot with the same name, in the same render (so a field being typed in is not closed).
+- **Script versions** are recorded by `PUT /api/script` (the agent's path). A project whose script was written before versions existed shows its script as v1 without writing it; the agent's next write keeps that v1 and its own v2. `GET /api/script/versions` serves the lines; each film's plan carries `scriptVersions` (ids and times only).
+- **Use this line** sets the newest line's proposal to the older wording (or clears it when the wording is the agent's own already), and stays on the older version so more than one line can be brought back.
+
+Not built: a word diff for Direction on the Script page (direction edits there are saved as before, without a mark), and Overview remembered across films (it is per project).
