@@ -123,3 +123,9 @@ Built in the order of 38.8 on branch `plan-tab`. Where the build differs from th
 - **Use this line** sets the newest line's proposal to the older wording (or clears it when the wording is the agent's own already), and stays on the older version so more than one line can be brought back.
 
 Not built: a word diff for Direction on the Script page (direction edits there are saved as before, without a mark), and Overview remembered across films (it is per project).
+
+## 38.11 Send to agent from a prompt (Red, 27 November 2026)
+
+Every "Copy prompt for your agent" on the Plan pages and the locked pages (a film with no brief, the At a glance ask, a locked Brief, Script, Storyboard or Review tab, Ready to build) now offers **Send to <agent>** first when Send to AI is on, with **Copy prompt** beside it. With Send to AI off, Copy stays the main button and **Turn on Send to AI** sits beside it.
+
+Sending files a request: a batch with no notes, the page's prompt and a `label` that names the turn in Activity ("the EU only brief"), queued with Send's batches and handed to the runner, so the chip, Activity and Stop work as for any batch (`POST /api/agent/ask`). With Send to AI off nothing is filed. A refused hand-over copies the prompt and says why.

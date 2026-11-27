@@ -5,10 +5,10 @@
 // brief.md), shown read-only; a film with no brief of its own shows the project brief and asks for one.
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { glanceFallback, glanceIndex, parseGlance, type GlanceItem } from "../../../src/core/glance.js";
-import { copyShortcut } from "../lib.js";
 import { safeMarkdownHtml } from "../markdown.js";
 import type { BriefSectionView, BriefView } from "../types.js";
 import { useRecordSaves } from "./useRecordSaves.js";
+import { AskAgent } from "./AskAgent.js";
 import { Icon } from "./Icon.js";
 import { EditedMark, PlanField, PlanStatus, useDebounced } from "./Planning.js";
 
@@ -19,16 +19,6 @@ const LONG_LINES = 12;
 interface Saver {
   section(s: BriefSectionView, text: string): void;
   status(status: "draft" | "approved"): void;
-}
-
-/** Copies a prompt for the agent, or says what to press when the clipboard is refused. */
-async function copyPrompt(text: string, toast: (m: string) => void) {
-  try {
-    await navigator.clipboard.writeText(text);
-    toast("Prompt copied");
-  } catch {
-    toast(`Couldn't copy. Select the prompt and press ${copyShortcut(navigator.platform)}`);
-  }
 }
 
 /** §38.3: the prompt that asks for a film's own brief, built on the project's. */
@@ -182,7 +172,7 @@ const occurrenceOf = (sections: BriefSectionView[], index: number): number => se
  * A whole brief as cards: At a glance (its own or made from the sections), the headings as chips, then each section.
  * `save` null shows it read-only. `prefix` keeps two briefs on one page from sharing ids.
  */
-function BriefBody({ brief, save, prefix, glancePromptText, toast }: { brief: BriefView; save: Saver | null; prefix: string; glancePromptText: string | null; toast(m: string): void }) {
+function BriefBody({ brief, save, prefix, glancePromptText, toast, video = null }: { brief: BriefView; save: Saver | null; prefix: string; glancePromptText: string | null; toast(m: string): void; video?: string | null }) {
   const gi = glanceIndex(brief.sections);
   const rest = brief.sections.filter((_, i) => i !== gi);
   const sid = (s: BriefSectionView) => `${prefix}-${s.index}`;
@@ -201,10 +191,7 @@ function BriefBody({ brief, save, prefix, glancePromptText, toast }: { brief: Br
             {glancePromptText && (
               <p class="bask">
                 <span>Ask your agent for an At a glance summary</span>
-                <button class="btn" onClick={() => void copyPrompt(glancePromptText, toast)}>
-                  <Icon name="copy" />
-                  Copy prompt
-                </button>
+                <AskAgent prompt={glancePromptText} label="an At a glance for the brief" video={video} toast={toast} small copyWords="Copy prompt" />
               </p>
             )}
           </section>
@@ -288,10 +275,7 @@ export function Brief({
           <p>
             <b>This film has no brief of its own yet.</b> Ask your agent to write one from your chat. Until then, here is the project brief it builds on.
           </p>
-          <button class="btn primary" onClick={() => void copyPrompt(prompt, toast)}>
-            <Icon name="copy" />
-            Copy prompt for your agent
-          </button>
+          <AskAgent prompt={prompt} label={`the ${filmName ?? "film"} brief`} video={video} toast={toast} />
         </div>
         <div class="bproject readonly" aria-label="The project brief">
           <p class="bplabel">Project brief{projectBrief.title ? ` · ${projectBrief.title}` : ""}</p>
@@ -330,7 +314,7 @@ export function Brief({
         </div>
       )}
       {brief.sections.length === 0 && <p class="sbnone">brief.md has no ## sections yet. Your agent adds them as `## At a glance`, `## Purpose` and so on.</p>}
-      <BriefBody brief={brief} save={save} prefix="b" glancePromptText={glancePrompt(projectName, briefPath)} toast={toast} />
+      <BriefBody brief={brief} save={save} prefix="b" glancePromptText={glancePrompt(projectName, briefPath)} toast={toast} video={video} />
       <PlanStatus counts={brief.sections.length > 0 ? { approved: approved ? "Brief approved" : "Brief not approved yet", edited: brief.changed } : null}>
         <button class={`btn bapprove${approved ? " approved" : ""}`} aria-pressed={approved} onClick={() => save.status(approved ? "draft" : "approved")}>
           <Icon name="check" />

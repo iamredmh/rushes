@@ -2,8 +2,9 @@ import type { ComponentChildren } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { api, ApiError, projectId } from "../api.js";
 import {
-  LOCKED_BRIEF, LOCKED_STORYBOARD, LOCKED_TAB, testFlags, STAGE_NAMES, agentPrompt, briefPrompt, briefSendPrompt, copyShortcut, currentFormat, defaultVersion, filmLanes, filmPicks, firstView, formatChips, formatPrompt, foundChip, foundSignature, foundTotal,
+  LOCKED_BRIEF, LOCKED_STORYBOARD, LOCKED_TAB, testFlags, STAGE_NAMES, agentPrompt, briefPrompt, briefSendPrompt, currentFormat, defaultVersion, filmLanes, filmPicks, firstView, formatChips, formatPrompt, foundChip, foundSignature, foundTotal,
   filmAfterShelving, inPlay, isPlanPage, noteOnFilm, scopeState, ROOT_PLAN, filmFromSearch, withFilm, type PlanPaths, labelOfId, latest, lockedFound, neighbourFormat, neighbourVideo, planProgress, planTarget, previousVersion, proxiesKey, cutJobs, readyPrompt, storySendPrompt, storyboardPrompt, versionFormats, type PlanPage,
+  copyShortcut,
 } from "../lib.js";
 import { onLabel } from "../../../src/core/notes.js";
 import { shotNoteLabel, shotOfNote } from "../../../src/core/shotNotes.js";
@@ -15,6 +16,7 @@ import { Assets, type FoundRequest } from "./Assets.js";
 import { Brief } from "./Brief.js";
 import { FormatToggle } from "./FormatToggle.js";
 import { Icon, STAGE_ICONS } from "./Icon.js";
+import { AskAgent } from "./AskAgent.js";
 import { Picture } from "./Picture.js";
 import { Storyboard } from "./Storyboard.js";
 import { PLAN_PANEL_ID, PlanSwitch, planTabId, type PlanTabRow } from "./Planning.js";
@@ -63,7 +65,7 @@ type Sent = Pick<Batch, "id" | "prompt"> & { title?: string; why?: string | null
 const typing = (el: EventTarget | null) => el instanceof HTMLElement && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
 
 /** §19.1: a locked tab's own page -- what it's for, what unlocks it, and a prompt to copy for your agent. */
-function Locked({ tab, projectName, filmName, found, onReview, toast, paths = ROOT_PLAN }: { tab: Stage | "assets" | "brief" | "storyboard"; projectName: string; filmName: string | null; found: FoundCounts | undefined; onReview: (kind: FoundKind) => void; toast: (m: string) => void; paths?: PlanPaths }) {
+function Locked({ tab, projectName, filmName, video = null, found, onReview, toast, paths = ROOT_PLAN }: { tab: Stage | "assets" | "brief" | "storyboard"; projectName: string; filmName: string | null; video?: string | null; found: FoundCounts | undefined; onReview: (kind: FoundKind) => void; toast: (m: string) => void; paths?: PlanPaths }) {
   const planning = tab === "brief" || tab === "storyboard";
   const { what, unlocks } = tab === "brief" ? LOCKED_BRIEF : tab === "storyboard" ? LOCKED_STORYBOARD : LOCKED_TAB[tab];
   const name = tab === "assets" ? "Assets" : tab === "brief" ? "Brief" : tab === "storyboard" ? "Storyboard" : STAGE_NAMES[tab];
@@ -72,16 +74,6 @@ function Locked({ tab, projectName, filmName, found, onReview, toast, paths = RO
   // §20.5: when the folder holds files of this tab's kind, say so, and offer to look at them.
   const files = planning ? null : lockedFound(tab, found);
   const boxRef = useRef<HTMLTextAreaElement>(null);
-  const copyPrompt = async () => {
-    try {
-      await navigator.clipboard.writeText(prompt);
-      toast("Prompt copied");
-    } catch {
-      // The clipboard was refused: the prompt is selected instead, so say what to press.
-      boxRef.current?.select();
-      toast(`Prompt selected: press ${copyShortcut(navigator.platform)}`);
-    }
-  };
   return (
     <div class="emptypage locked">
       <Icon name={icon} />
@@ -89,10 +81,18 @@ function Locked({ tab, projectName, filmName, found, onReview, toast, paths = RO
       <p>{what}</p>
       <p>{unlocks}</p>
       <textarea class="promptbox mono" readOnly rows={4} ref={boxRef} value={prompt} aria-label="Prompt for your agent" />
-      <button class="btn primary" onClick={() => void copyPrompt()}>
-        <Icon name="copy" />
-        Copy prompt for your agent
-      </button>
+      {/* §38.7: with Send to AI on, the prompt goes straight to the agent; Copy stays beside it. */}
+      <AskAgent
+        prompt={prompt}
+        label={`${name.toLowerCase()}${filmName ? ` for ${filmName}` : ""}`}
+        video={video}
+        toast={toast}
+        onCopyRefused={() => {
+          // The clipboard was refused: the prompt is selected instead, so say what to press.
+          boxRef.current?.select();
+          return `Prompt selected: press ${copyShortcut(navigator.platform)}`;
+        }}
+      />
       {files && (
         <p class="foundline">
           <span>{files.text}</span>
@@ -643,14 +643,6 @@ export function App() {
     { page: "storyboard", name: "Storyboard", icon: "story", unlocked: fstate.storyboard.exists, ask: LOCKED_STORYBOARD.ask, approved: progress.storyboard === "ok", open: fstate.storyboard.changed },
   ];
   const planOpen = fstate.brief.changed + fstate.storyboard.changed + scriptTodo;
-  const copyReady = async () => {
-    try {
-      await navigator.clipboard.writeText(readyPrompt(state.project.name, video?.name ?? null, paths));
-      toast("Prompt copied");
-    } catch {
-      toast("Couldn't reach the clipboard. Ask your agent to build the film from the approved plan.");
-    }
-  };
 
   // §27: where the view sits on the desk, and each sound's takes on this film.
   const place = deskPlace(stage);
@@ -1009,10 +1001,7 @@ export function App() {
                   <Icon name="check" />
                   Ready to build
                 </span>
-                <button type="button" class="btn" onClick={() => void copyReady()}>
-                  <Icon name="copy" />
-                  Copy prompt for your agent
-                </button>
+                <AskAgent prompt={readyPrompt(state.project.name, video?.name ?? null, paths)} label={`building ${video?.name ?? "the film"}`} video={video?.id ?? null} toast={toast} small />
               </div>
             )}
           </div>
@@ -1043,7 +1032,7 @@ export function App() {
               <Locked tab="assets" projectName={state.project.name} filmName={video?.name ?? null} found={state.found?.counts} onReview={openFound} toast={toast} />
             )
           ) : !unlocked ? (
-            withPanel(<Locked tab={stage} projectName={state.project.name} filmName={video?.name ?? null} found={state.found?.counts} onReview={openFound} toast={toast} paths={paths} />)
+            withPanel(<Locked tab={stage} projectName={state.project.name} filmName={video?.name ?? null} video={video?.id ?? null} found={state.found?.counts} onReview={openFound} toast={toast} paths={paths} />)
           ) : stage === "picture" && soundOnly ? (
             <NoCutTimeline
               key={video?.id ?? "project"}

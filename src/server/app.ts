@@ -237,6 +237,8 @@ const AgentSetupBody = z.object({ on: z.boolean(), agent: z.enum(AGENTS).optiona
 // No stage: every tab's open notes (Send). A stage: that tab's only. §31.2.2: `video`, the film Send is pressed on:
 // only its notes and its script go. Without one, every film in play (an older client).
 const BatchBody = z.object({ stage: StageSchema.optional(), video: filmRef });
+// §38.7: Send to agent from a Plan page: the prompt the page would copy, and what the turn is called.
+const AskBody = z.object({ prompt: z.string().trim().min(1).max(4000), label: z.string().trim().min(1).max(80), video: filmRef });
 
 const NoteQuery = z.object({
   stage: StageSchema.optional(),
@@ -2001,6 +2003,29 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
       }
       handing = (async () => agent.send(result))();
       return result;
+    });
+    batchQueue = run;
+    const batch = await run;
+    return c.json({ batch, agent: await handOverOf(handing!) }, 201);
+  });
+
+  // §38.7: Send to agent from a Plan page (a film's brief to write, an At a glance to add, a storyboard to sketch). It is
+  // a batch with no notes, filed in turn with Send's, so the agent's turn, Activity and Stop work as for any batch; with
+  // Send to AI off it says why and the page copies the prompt instead.
+  app.post("/api/agent/ask", async (c) => {
+    const { prompt, label, video } = await body(c, AskBody);
+    await adoptAgentDefaultsOnce(store);
+    // With Send to AI off nothing is filed: the page copies the prompt.
+    if (!agent.status().on) return c.json({ batch: null, agent: { handedTo: null, why: "Send to AI is off" } });
+    const film = video ? chooseFilm(await store.read("project"), video)!.id : null;
+    let handing: Promise<SendResult> | undefined;
+    const run = batchQueue.catch(() => undefined).then(async (): Promise<Batch> => {
+      const batches = await store.read("batches");
+      const id = `b_${batches.batches.length + 1}`;
+      const batch: Batch = { id, stage: null, noteIds: [], sectionIds: [], sentAt: new Date().toISOString(), prompt: `${prompt}\n\n(This is request ${id} from the Rushes desk. It has no notes: do what it asks, then say what you did.)`, label, ...(film ? { video: film } : {}) };
+      await store.update("batches", (f) => { f.batches.push(batch); });
+      handing = (async () => agent.send(batch))();
+      return batch;
     });
     batchQueue = run;
     const batch = await run;

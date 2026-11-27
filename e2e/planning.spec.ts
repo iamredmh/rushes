@@ -707,3 +707,13 @@ test("§38.5 the script's version pill lists its versions, and an older line can
   // Your own edit is not a version.
   await expect(page.getByRole("button", { name: /^Script v2, choose a version/ })).toBeVisible();
 });
+
+test("§38.7 with Send to AI off, a film with no brief offers Copy first and a way to turn Send to AI on", async ({ page, rushes }) => {
+  await rushes.writeFiles([{ path: "brief.md", text: GLANCE_BRIEF }]);
+  await rushes.addCut("first", "Hero");
+  await rushes.addCut("second", "EU only");
+  await page.goto(`${rushes.url}?film=eu-only`);
+  await openPlanPage(page, "Brief");
+  const notice = page.locator(".bnotice");
+  await expect(notice.getByRole("button")).toHaveText(["Copy prompt for your agent", "Turn on Send to AI"]);
+});

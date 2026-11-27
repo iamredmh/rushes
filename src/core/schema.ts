@@ -519,6 +519,9 @@ export const BatchSchema = fileObject({
   sectionIds: z.array(z.string()).default([]),
   sentAt: z.string(),
   prompt: z.string(),
+  // §38.7: a request (Send to agent from a Plan page): no notes, just the prompt, and how Activity names its turn
+  // ("the EU only brief"). Absent on a batch of notes.
+  label: z.string().max(80).optional(),
   // §31.2.2: the film whose notes Send sent. Absent on a batch from before, and on one sent with no film yet.
   video: z.string().nullable().optional(),
   // I3: the hand-over was refused while Send to AI was on and nothing started (not signed in, not installed), so the

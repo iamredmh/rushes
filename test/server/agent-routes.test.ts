@@ -87,6 +87,32 @@ async function rig(o: { settings?: Partial<AgentSettings>; rules?: Partial<Agent
   return { root, store, runner, call, note, opened, log: fake.log, setAgents: (next: AgentInfo[]) => { agents = next; } };
 }
 
+describe("§38.7 Send to agent from a Plan page", () => {
+  it("with Send to AI off files nothing and says why, so the page copies the prompt", async () => {
+    const r = await rig();
+    const res = await r.call("POST", "/api/agent/ask", { prompt: "Write the brief for EU only.", label: "the EU only brief" });
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ batch: null, agent: { handedTo: null, why: "Send to AI is off" } });
+    expect((await r.store.read("batches")).batches).toEqual([]);
+  });
+
+  it("with Send to AI on files a request with no notes, named for Activity, and hands it to the agent", async () => {
+    const r = await rig({ settings: { on: true, agent: "claude" } });
+    const res = await r.call("POST", "/api/agent/ask", { prompt: "Write the brief for EU only.", label: "the EU only brief" });
+    expect(res.status).toBe(201);
+    expect(res.json.agent).toEqual({ handedTo: "claude" });
+    const [b] = (await r.store.read("batches")).batches;
+    expect(b).toMatchObject({ noteIds: [], sectionIds: [], label: "the EU only brief", stage: null });
+    expect(b.prompt).toContain("Write the brief for EU only.");
+    await waitFor("the run to finish", () => !r.runner.busy());
+  });
+
+  it("refuses an empty prompt", async () => {
+    const r = await rig({ settings: { on: true, agent: "claude" } });
+    expect((await r.call("POST", "/api/agent/ask", { prompt: " ", label: "x" })).status).toBe(400);
+  });
+});
+
 describe("Send hands the batch to the agent", () => {
   it("Send with Send to AI off files the batch and hands nothing over", async () => {
     const r = await rig();

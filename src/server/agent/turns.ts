@@ -17,7 +17,7 @@ export interface TurnJob {
 const count = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
 
 /** A batch's turn by what it holds (M7): "3 notes", or its script lines when it holds no note. Never its id. */
-export const batchLabel = (b: Pick<Batch, "noteIds" | "sectionIds">): string =>
-  b.noteIds.length === 0 && b.sectionIds.length > 0 ? count(b.sectionIds.length, "script line", "script lines") : count(b.noteIds.length, "note", "notes");
+export const batchLabel = (b: Pick<Batch, "noteIds" | "sectionIds" | "label">): string =>
+  b.label ? b.label : b.noteIds.length === 0 && b.sectionIds.length > 0 ? count(b.sectionIds.length, "script line", "script lines") : count(b.noteIds.length, "note", "notes");
 
 export const batchJob = (b: Batch): TurnJob => ({ kind: "batch", batchId: b.id, label: batchLabel(b), prompt: b.prompt + "\n\n" + AGENT_LINES });
