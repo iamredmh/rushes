@@ -77,7 +77,7 @@ function Row({ section, wps, video, toast, onChanged, onPick }: { section: Secti
           />
           {changed && (
             <EditedMark
-              baseline={[{ text: section.current }]}
+              baseline={[{ text: section.current, after: text }]}
               revertLabel="Revert"
               onRevert={() => {
                 editing.current = false;

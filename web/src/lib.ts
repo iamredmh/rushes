@@ -1846,3 +1846,77 @@ export function otherLanes(lanes: Lane[], videoId: string, videos: readonly Pick
 export function filmNotes(notes: Note[], stage: Stage, videoId: string | null | undefined, videos: readonly Pick<Video, "id">[] = []): Note[] {
   return notes.filter((n) => n.stage === stage && noteOnFilm(n, videoId, videos));
 }
+
+/** §38.6: one run of a word diff: words both texts share, words only the first had, or words only the second has. */
+export type DiffRun = { kind: "same" | "del" | "ins"; text: string };
+
+/** Past this many words on either side the diff is the two texts whole: a longest-common-subsequence table that big costs too much. */
+const DIFF_MAX_WORDS = 2000;
+
+/**
+ * §38.6: what changed between two wordings, word by word, for "Edited by you" on the Plan pages. Words and the whitespace
+ * between them are tokens; the longest common subsequence of tokens is "same". A change made of several words reads as one
+ * removal then one addition: whitespace shared between changed words joins the change rather than splitting it. Joining
+ * the same and del runs gives `before` back exactly, and the same and ins runs give `after`.
+ */
+export function wordDiff(before: string, after: string): DiffRun[] {
+  const a = before.match(/\s+|\S+/g) ?? [];
+  const b = after.match(/\s+|\S+/g) ?? [];
+  const words = (t: string[]) => t.filter((x) => /\S/.test(x)).length;
+  if (words(a) > DIFF_MAX_WORDS || words(b) > DIFF_MAX_WORDS) {
+    const out: DiffRun[] = [];
+    if (before) out.push({ kind: "del", text: before });
+    if (after) out.push({ kind: "ins", text: after });
+    return out;
+  }
+  // lcs[i][j]: the longest common subsequence of a[i..] and b[j..].
+  const lcs: Uint16Array[] = Array.from({ length: a.length + 1 }, () => new Uint16Array(b.length + 1));
+  for (let i = a.length - 1; i >= 0; i--) {
+    for (let j = b.length - 1; j >= 0; j--) lcs[i][j] = a[i] === b[j] ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+  }
+  const ops: { kind: DiffRun["kind"]; text: string }[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < a.length || j < b.length) {
+    if (i < a.length && j < b.length && a[i] === b[j]) {
+      ops.push({ kind: "same", text: a[i] });
+      i++;
+      j++;
+    } else if (j < b.length && (i === a.length || lcs[i][j + 1] >= lcs[i + 1][j])) {
+      ops.push({ kind: "ins", text: b[j++] });
+    } else {
+      ops.push({ kind: "del", text: a[i++] });
+    }
+  }
+  // Group into changes: a run of del/ins ops, where a whitespace-only "same" between two changed ops belongs to the change.
+  const out: DiffRun[] = [];
+  const push = (kind: DiffRun["kind"], text: string) => {
+    if (!text) return;
+    const last = out[out.length - 1];
+    if (last && last.kind === kind) last.text += text;
+    else out.push({ kind, text });
+  };
+  let k = 0;
+  while (k < ops.length) {
+    if (ops[k].kind === "same") {
+      push("same", ops[k].text);
+      k++;
+      continue;
+    }
+    let del = "";
+    let ins = "";
+    while (k < ops.length) {
+      const op = ops[k];
+      if (op.kind === "del") del += op.text;
+      else if (op.kind === "ins") ins += op.text;
+      else if (/^\s+$/.test(op.text) && k + 1 < ops.length && ops[k + 1].kind !== "same") {
+        del += op.text;
+        ins += op.text;
+      } else break;
+      k++;
+    }
+    push("del", del);
+    push("ins", ins);
+  }
+  return out;
+}

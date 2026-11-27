@@ -349,7 +349,7 @@ test("an agent's change doesn't overwrite a line you're still typing", async ({ 
   await box.press("End");
   await page.keyboard.type(" Still typing");
   await rushes.api("PUT", "/api/script", { sections: [{ id: "s1", start: 0, end: 13, current: "The agent's new line." }] });
-  await expect(baselineText(page.locator(".srow"))).toHaveText("The agent's new line.");
+  await expect(baselineText(page.locator(".srow"))).toHaveAttribute("data-before", "The agent's new line.");
   await expect(box).toHaveValue("First line. Still typing");
 });
 

@@ -88,7 +88,7 @@ test("edits to a shot's words and direction are saved into storyboard.md, marked
   await expect(r).toHaveClass(/changed/);
   await expect.poll(() => read(rushes.root)).toContain("Direction: Slower.\n\nA pale card, then the title.\n");
   await expect(editedMark(r)).toContainText("Edited by you");
-  await expect(baselineText(r).first()).toHaveText("The headline sits on a pale card.");
+  await expect(baselineText(r).first()).toHaveAttribute("data-before", "The headline sits on a pale card.");
   await expect(planStatus(page)).toHaveText("0 of 2 shots approved · 1 edited");
   await page.getByRole("button", { name: "Revert shot 1" }).click();
   await expect(page.getByLabel("Your version of shot 1")).toHaveValue("The headline sits on a pale card.");

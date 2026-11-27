@@ -522,9 +522,9 @@ export function editedMark(row: Locator): Locator {
   return row.locator(".edited");
 }
 
-/** The baseline wording struck through beneath an edited row: the agent's version, which Revert goes back to. */
+/** §38.6: the word diff beneath an edited row. Its data-before is the agent's version whole, which Revert goes back to. */
 export function baselineText(row: Locator): Locator {
-  return editedMark(row).locator("del");
+  return editedMark(row).locator(".diff");
 }
 
 /** The line at the foot of a Plan page that counts what is approved and what is edited. */

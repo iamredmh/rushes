@@ -63,8 +63,8 @@ function Row({ shot, save, onZoom }: { shot: StoryboardShotView; save: Saver; on
 
   // What your edits replaced, struck through under the field: the description, then the direction, whichever differ.
   const baseline: Baseline[] = [];
-  if (text.trim() !== shot.current.trim()) baseline.push({ text: shot.current });
-  if (direction.trim() !== shot.directionCurrent.trim()) baseline.push({ label: "Direction", text: shot.directionCurrent });
+  if (text.trim() !== shot.current.trim()) baseline.push({ text: shot.current, after: text });
+  if (direction.trim() !== shot.directionCurrent.trim()) baseline.push({ label: "Direction", text: shot.directionCurrent, after: direction });
   const changed = baseline.length > 0;
   const approved = shot.status === "approved";
   return (

@@ -64,7 +64,7 @@ test("Brief edits are saved to brief.md, marked as changed, and can be reverted"
   await expect(row).toHaveClass(/changed/);
   await expect.poll(() => read(rushes.root)).toContain("## Purpose\nShow how fast Lumen is.\n");
   await expect(editedMark(row)).toContainText("Edited by you");
-  await expect(baselineText(row)).toHaveText("Show that Lumen finds the best takes.");
+  await expect(baselineText(row)).toHaveAttribute("data-before", "Show that Lumen finds the best takes.");
   await page.getByRole("button", { name: "Revert Purpose" }).click();
   await expect(box).toHaveValue("Show that Lumen finds the best takes.");
   await expect(editedMark(row)).toHaveCount(0);
@@ -186,7 +186,7 @@ test("editing a script line marks it Edited by you, with the current wording str
   await expect(sendButton(page)).toHaveCount(0);
   await row.getByRole("textbox", { name: /^Your version of/ }).fill("Your work lives everywhere.");
   await expect(editedMark(row)).toContainText("Edited by you");
-  await expect(baselineText(row)).toHaveText("Your work lives on one laptop.");
+  await expect(baselineText(row)).toHaveAttribute("data-before", "Your work lives on one laptop.");
   await expect(sendButton(page)).toHaveAccessibleName("Send 1");
   // The Plan page has its notes panel, so the status bar offers no Send of its own (Red, round 2).
   await expect(page.locator("footer.status")).not.toContainText("Send");

@@ -45,7 +45,7 @@ function Row({ section, save }: { section: BriefSectionView; save: Saver }) {
         />
         {changed && (
           <EditedMark
-            baseline={[{ text: section.current }]}
+            baseline={[{ text: section.current, after: text }]}
             revertLabel={`Revert ${section.heading}`}
             onRevert={() => {
               editing.current = false;

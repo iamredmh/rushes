@@ -3,7 +3,7 @@
 // line at each page's foot. One of each, used by all three pages.
 import type { ComponentChildren } from "preact";
 import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
-import type { PlanPage } from "../lib.js";
+import { wordDiff, type PlanPage } from "../lib.js";
 import { Icon } from "./Icon.js";
 
 /** Run `fn` once input has paused for `ms`; flush() runs it now. A pending run is flushed, not dropped, on unmount. */
@@ -157,13 +157,28 @@ export function PlanField({ value, label, onInput, onBlur }: { value: string; la
   );
 }
 
-/** One wording an edit replaced, shown struck through: the text, and what it is when the row has more than one ("Direction"). */
+/** One wording an edit replaced: the agent's text, what it is now, and what it is when the row has more than one ("Direction"). */
 export interface Baseline {
   label?: string;
   text: string;
+  after: string;
 }
 
-/** Under a row whose wording differs from its baseline: "Edited by you", the baseline struck through, and the way back to it. */
+/** §38.6: two wordings as one, removed words struck through in red and added words in green. */
+export function Diff({ before, after }: { before: string; after: string }) {
+  const runs = wordDiff(before, after);
+  if (runs.length === 0) return <span class="diff dsame" data-before="">(none)</span>;
+  // data-before: the agent's wording whole, for whoever needs it without the markup (the tests).
+  return (
+    <span class="diff" data-before={before}>
+      {runs.map((r, i) =>
+        r.kind === "same" ? <span key={i} class="dsame">{r.text}</span> : r.kind === "del" ? <del key={i} class="ddel">{r.text}</del> : <ins key={i} class="dins">{r.text}</ins>,
+      )}
+    </span>
+  );
+}
+
+/** Under a row whose wording differs from the agent's: "Edited by you", what changed marked word by word, and the way back. */
 export function EditedMark({ baseline, revertLabel, onRevert }: { baseline: Baseline[]; revertLabel: string; onRevert(): void }) {
   return (
     <div class="edited">
@@ -176,7 +191,7 @@ export function EditedMark({ baseline, revertLabel, onRevert }: { baseline: Base
       {baseline.map((b) => (
         <p key={b.label ?? "text"} class="was">
           {b.label && <span class="wl">{b.label}: </span>}
-          <del>{b.text || "(none)"}</del>
+          <Diff before={b.text} after={b.after} />
         </p>
       ))}
     </div>

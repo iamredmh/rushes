@@ -374,7 +374,9 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .edited .etag { color: var(--todo); font-size: 12.5px; font-weight: 600; }
 .edited .ib { width: 24px; height: 24px; }
 .edited .was { margin: 0; color: var(--text-3); font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
-.edited .was del { text-decoration-color: var(--text-3); }
+.edited .was { color: var(--text-2); }
+.ddel { color: var(--over); background: var(--over-soft); text-decoration: line-through; text-decoration-color: var(--over); border-radius: 2px; }
+.dins { color: var(--done); background: var(--done-soft); text-decoration: none; border-radius: 2px; }
 .edited .wl { font-weight: 500; }
 .sfoot { display: grid; grid-template-columns: 84px minmax(0, 1fr) auto; gap: 14px; align-items: center; }
 .fit { height: 4px; border-radius: 2px; background: var(--raised); position: relative; overflow: hidden; cursor: help; }
