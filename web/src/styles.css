@@ -781,3 +781,56 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .filmsbtn.none { color: var(--todo); }
 .filmsmenu { max-height: 360px; overflow-y: auto; }
 .filmsmenu .fmitem input { margin: 0; accent-color: var(--accent); }
+
+/* §38.3: the Brief page reads like a document: an At a glance card, the headings as chips, then a card per section. */
+.bpage { max-width: 920px; }
+.bcards { display: grid; gap: 12px; }
+.bcard { display: grid; gap: 10px; padding: 14px 16px 16px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--app); scroll-margin-top: 12px; }
+.bcard.changed { border-left: 3px solid var(--todo); }
+.bcard.glance { background: var(--raised); border-color: var(--line-2); }
+.bchead { display: flex; align-items: center; gap: 10px; min-height: 30px; }
+.bchead h3 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.005em; }
+.bcard.glance .bchead h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-2); }
+.bchead .bedit { margin-left: auto; height: 30px; padding: 0 10px; font-size: 13px; gap: 6px; }
+.bchead .bedit svg { width: 15px; height: 15px; }
+.bfrom { margin-left: auto; color: var(--text-3); font-size: 12.5px; font-style: italic; }
+.bglance { display: grid; gap: 8px; margin: 0; }
+.bgrow { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 14px; align-items: baseline; }
+.bgrow.plain { grid-template-columns: minmax(0, 1fr); }
+.bgrow dt { color: var(--text-2); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+.bgrow dd { margin: 0; font-size: 15px; line-height: 1.5; overflow-wrap: anywhere; }
+.bgrow dd ul { margin: 0; padding-left: 18px; display: grid; gap: 2px; }
+.bglance.fallback dd { color: var(--text-2); }
+.bgnone { margin: 0; color: var(--text-3); }
+.bask { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 4px 0 0; padding-top: 10px; border-top: 1px solid var(--line); color: var(--text-2); font-size: 13.5px; }
+.bask .btn { height: 30px; font-size: 13px; padding: 0 10px; }
+.bchips { display: flex; flex-wrap: wrap; gap: 6px; }
+.bchip { height: 28px; padding: 0 11px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--text-2); font: inherit; font-size: 13px; cursor: pointer; }
+.bchip:hover { color: var(--text); border-color: var(--line-2); background: var(--raised); }
+.bread { display: grid; gap: 6px; }
+.bread .markdown { font-size: 15px; line-height: 1.6; overflow-wrap: anywhere; }
+.bread .markdown > :first-child { margin-top: 0; }
+.bread .markdown > :last-child { margin-bottom: 0; }
+.bread .markdown p, .bread .markdown ul, .bread .markdown ol, .bread .markdown pre, .bread .markdown blockquote { margin: 0 0 10px; }
+.bread .markdown ul, .bread .markdown ol { padding-left: 20px; }
+.bread .markdown li + li { margin-top: 3px; }
+.bread .markdown h1, .bread .markdown h2, .bread .markdown h3, .bread .markdown h4 { margin: 12px 0 6px; font-size: 14px; }
+.bread .markdown code { background: var(--bg); border-radius: 4px; padding: 1px 5px; font-family: var(--mono); font-size: 0.88em; overflow-wrap: anywhere; }
+.bread .markdown pre { background: var(--bg); border-radius: var(--r); padding: 10px 12px; overflow: auto; }
+.bread .markdown pre code { background: transparent; padding: 0; }
+.bread .markdown blockquote { padding-left: 12px; border-left: 2px solid var(--line-2); color: var(--text-2); }
+.bread .markdown.clipped { max-height: 17em; overflow: hidden; -webkit-mask-image: linear-gradient(to bottom, black 70%, transparent); mask-image: linear-gradient(to bottom, black 70%, transparent); }
+.bmore { justify-self: start; height: 28px; padding: 0 8px; font-size: 13px; color: var(--accent-2); }
+.bnotice { display: grid; gap: 12px; justify-items: start; padding: 14px 16px; border: 1px solid var(--accent-soft-2); border-radius: var(--r-lg); background: var(--accent-soft); }
+.bnotice p { margin: 0; font-size: 15px; line-height: 1.5; }
+.bproject { display: grid; gap: 12px; }
+.bproject.readonly .bcard { background: transparent; }
+.bplabel { margin: 6px 0 0; color: var(--text-2); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+.bbuilds { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 8px 10px 8px 12px; border: 1px solid var(--line); border-radius: var(--r-lg); }
+.bbuilds > p { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--text-2); font-size: 14px; }
+.bbuilds > p svg { width: 16px; height: 16px; }
+.bbuilds > .btn { margin-left: auto; height: 28px; padding: 0 10px; font-size: 13px; }
+.bbuilds > .bproject { flex-basis: 100%; padding: 10px 4px 4px; border-top: 1px solid var(--line); }
+@media (max-width: 640px) { .bgrow { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
+.bglance.fallback .bgrow { grid-template-columns: 180px minmax(0, 1fr); }
+.bglance.fallback dt { text-transform: none; letter-spacing: 0; font-size: 13px; color: var(--text); }

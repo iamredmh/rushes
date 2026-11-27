@@ -622,7 +622,8 @@ export function App() {
   const mixNotes = fstate.notes.notes.filter((n) => n.stage === "mix");
   const soundOnly = !version && (!!(filmUse?.voice || filmUse?.music || filmUse?.sfx) || mixNotes.length > 0) && (!!video || state.project.videos.length === 0);
   const timelineOpen = !!tab("picture")?.unlocked || soundOnly;
-  const unlocked = stage === "assets" ? assetsUnlocked : stage === "brief" ? fstate.brief.exists : stage === "storyboard" ? fstate.storyboard.exists : stage === "picture" ? timelineOpen : (tab(stage)?.unlocked ?? false);
+  const briefOpen = fstate.brief.exists || !!fstate.projectBrief?.exists;
+  const unlocked = stage === "assets" ? assetsUnlocked : stage === "brief" ? briefOpen : stage === "storyboard" ? fstate.storyboard.exists : stage === "picture" ? timelineOpen : (tab(stage)?.unlocked ?? false);
   // §27: the Plan switch's pages, each with its tick and its dot, and the Plan workspace's tick (all three approved) and dot.
   const hasCut = !!tab("picture")?.unlocked;
   const progress = planProgress(fstate.brief, fstate.script.sections, fstate.storyboard);
@@ -631,7 +632,7 @@ export function App() {
   const planning = fstate.build.started && !hasCut;
   const scriptTodo = tab("script")?.todo ?? 0;
   const planRows: PlanTabRow[] = [
-    { page: "brief", name: "Brief", icon: "brief", unlocked: fstate.brief.exists, ask: LOCKED_BRIEF.ask, approved: progress.brief === "ok", open: fstate.brief.changed },
+    { page: "brief", name: "Brief", icon: "brief", unlocked: briefOpen, ask: LOCKED_BRIEF.ask, approved: progress.brief === "ok", open: fstate.brief.changed },
     { page: "script", name: "Script", icon: STAGE_ICONS.script, unlocked: !!tab("script")?.unlocked, ask: LOCKED_TAB.script.ask, approved: progress.script === "ok", open: scriptTodo },
     { page: "storyboard", name: "Storyboard", icon: "story", unlocked: fstate.storyboard.exists, ask: LOCKED_STORYBOARD.ask, approved: progress.storyboard === "ok", open: fstate.storyboard.changed },
   ];
@@ -786,7 +787,7 @@ export function App() {
       onChanged={() => void refresh()}
       onPendingChange={setPending}
       readOnly={!planBox}
-      instead={planBox ? undefined : "Notes on the plan are written on the Script page."}
+      instead={planBox ? undefined : "Notes on the plan are written on the Script or Storyboard page."}
     />
   );
 
@@ -1040,7 +1041,7 @@ export function App() {
               assets={assets}
             />
           ) : stage === "brief" ? (
-            withPanel(<Brief key={video?.id ?? ""} brief={fstate.brief} video={video?.id ?? null} toast={toast} onChanged={() => void refresh()} settle={planSettle} />, planPanel)
+            withPanel(<Brief key={video?.id ?? ""} brief={fstate.brief} projectBrief={fstate.projectBrief ?? null} projectName={state.project.name} filmName={video?.name ?? null} briefPath={paths.brief} video={video?.id ?? null} toast={toast} onChanged={() => void refresh()} settle={planSettle} />, planPanel)
           ) : stage === "storyboard" ? (
             withPanel(<Storyboard key={video?.id ?? ""} board={fstate.storyboard} brief={fstate.brief} video={video?.id ?? null} toast={toast} onChanged={() => void refresh()} settle={planSettle} />, planPanel)
           ) : stage === "visuals" ? (

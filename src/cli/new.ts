@@ -11,7 +11,7 @@ import { BRIEF_FILE } from "../core/brief.js";
 export { BRIEF_FILE };
 
 /** The sections of brief.md, in order. AGENTS.md names every one; test/docs-start.test.ts keeps the two in step. */
-export const BRIEF_SECTIONS = ["Title", "Purpose", "Audience", "Length and formats", "Tone", "Include and avoid", "Built with", "Open questions", "References"] as const;
+export const BRIEF_SECTIONS = ["At a glance", "Title", "Purpose", "Audience", "Length and formats", "Tone", "Include and avoid", "Built with", "Open questions", "References"] as const;
 
 export function briefTemplate(name: string): string {
   return `# Brief: ${name}
@@ -19,6 +19,14 @@ export function briefTemplate(name: string): string {
 Status: draft
 
 Your agent drafts this with you. Change anything. Nothing gets built until you say the brief is approved.
+
+## At a glance
+- Ask: _the film in one line_
+- Length: _seconds_
+- Audience: _who it is for_
+- Deliver: _formats and where it goes_
+- Must: _what has to be in it_
+- Never: _what must not be_
 
 ## Title
 _The working title._

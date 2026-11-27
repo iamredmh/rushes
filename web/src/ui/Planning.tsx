@@ -126,11 +126,18 @@ function fitHeight(el: HTMLTextAreaElement) {
  * It sizes again when its text changes and when its width does (a narrower window, the notes panel shown, the one-column
  * layout), since the same text then wraps onto a different number of lines.
  */
-export function PlanField({ value, label, onInput, onBlur }: { value: string; label: string; onInput(text: string): void; onBlur(): void }) {
+export function PlanField({ value, label, onInput, onBlur, autoFocus = false, onKeyDown }: { value: string; label: string; onInput(text: string): void; onBlur(): void; autoFocus?: boolean; onKeyDown?(e: KeyboardEvent): void }) {
   const area = useRef<HTMLTextAreaElement>(null);
   useLayoutEffect(() => {
     if (area.current) fitHeight(area.current);
   }, [value]);
+  // §38.3: a field opened with Edit takes focus, the caret at the end of its text.
+  useLayoutEffect(() => {
+    const el = area.current;
+    if (!autoFocus || !el) return;
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+  }, []);
   useEffect(() => {
     const el = area.current;
     if (!el || typeof ResizeObserver === "undefined") return;
@@ -153,6 +160,7 @@ export function PlanField({ value, label, onInput, onBlur }: { value: string; la
       value={value}
       onInput={(e) => onInput((e.target as HTMLTextAreaElement).value)}
       onBlur={onBlur}
+      onKeyDown={onKeyDown}
     />
   );
 }
@@ -184,7 +192,8 @@ export function EditedMark({ baseline, revertLabel, onRevert }: { baseline: Base
     <div class="edited">
       <div class="ehead">
         <span class="etag">Edited by you</span>
-        <button class="btn ghost ib" data-tip={revertLabel} aria-label={revertLabel} onClick={onRevert}>
+        {/* Pressing it must not first blur an open field: on the Brief that closes the field and moves this button away. */}
+        <button class="btn ghost ib" data-tip={revertLabel} aria-label={revertLabel} onMouseDown={(e) => e.preventDefault()} onClick={onRevert}>
           <Icon name="undo" />
         </button>
       </div>

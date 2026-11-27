@@ -522,6 +522,19 @@ export function editedMark(row: Locator): Locator {
   return row.locator(".edited");
 }
 
+/** §38.3: a brief section reads as text; its Edit button opens the field. Returns the field, opened when it was closed. */
+export async function briefBox(page: Page, heading: string): Promise<Locator> {
+  const box = page.getByLabel(`Your version of ${heading}`, { exact: true });
+  if (!(await box.isVisible().catch(() => false))) await page.getByRole("button", { name: `Edit ${heading}`, exact: true }).click();
+  await expect(box).toBeVisible();
+  return box;
+}
+
+/** §38.3: a brief section's card: its heading, its text or field, and its Edited by you mark. */
+export function briefCard(page: Page, heading: string): Locator {
+  return page.locator(`.bcard[data-section="${heading}"]`);
+}
+
 /** §38.6: the word diff beneath an edited row. Its data-before is the agent's version whole, which Revert goes back to. */
 export function baselineText(row: Locator): Locator {
   return editedMark(row).locator(".diff");

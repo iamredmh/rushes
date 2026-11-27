@@ -24,7 +24,7 @@ describe("briefTemplate", () => {
     expect(text.split("\n")[0]).toBe("# Brief: Lumen launch film");
     expect(text).toContain("\nStatus: draft\n");
     expect([...text.matchAll(/^## (.+)$/gm)].map((m) => m[1])).toEqual([...BRIEF_SECTIONS]);
-    expect(BRIEF_SECTIONS).toHaveLength(9);
+    expect(BRIEF_SECTIONS).toHaveLength(10);
     expect(BRIEF_SECTIONS.indexOf("Open questions")).toBe(BRIEF_SECTIONS.indexOf("References") - 1);
   });
 });

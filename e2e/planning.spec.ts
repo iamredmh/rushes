@@ -1,6 +1,6 @@
 import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { test, expect, reviewTab, openWorkspace, workspaceTab, notesPanel, sendButton, sentDialog, planSwitch, planTab, openPlanPage, editedMark, baselineText, planStatus, noteTargetLabel, currentFilm } from "./fixture.js";
+import { test, expect, reviewTab, openWorkspace, workspaceTab, notesPanel, sendButton, sentDialog, planSwitch, planTab, openPlanPage, editedMark, baselineText, planStatus, noteTargetLabel, currentFilm, briefBox, briefCard } from "./fixture.js";
 
 // §24 step 2, §27: Plan is a workspace with a three-part switch (Brief, Script, Storyboard); brief.md is the file of record for the Brief page.
 
@@ -58,15 +58,15 @@ test("the switch is keyboard-driven: arrows move between its pages, Enter opens 
 test("Brief edits are saved to brief.md, marked as changed, and can be reverted", async ({ page, rushes }) => {
   await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
   await page.goto(rushes.url);
-  const box = page.getByLabel("Your version of Purpose");
+  const box = await briefBox(page, "Purpose");
   await box.fill("Show how fast Lumen is.");
-  const row = page.locator('.srow[data-section="Purpose"]');
+  const row = briefCard(page, "Purpose");
   await expect(row).toHaveClass(/changed/);
   await expect.poll(() => read(rushes.root)).toContain("## Purpose\nShow how fast Lumen is.\n");
   await expect(editedMark(row)).toContainText("Edited by you");
   await expect(baselineText(row)).toHaveAttribute("data-before", "Show that Lumen finds the best takes.");
   await page.getByRole("button", { name: "Revert Purpose" }).click();
-  await expect(box).toHaveValue("Show that Lumen finds the best takes.");
+  await expect(row).toContainText("Show that Lumen finds the best takes.");
   await expect(editedMark(row)).toHaveCount(0);
   await expect.poll(() => read(rushes.root)).toBe(BRIEF);
 });
@@ -74,8 +74,8 @@ test("Brief edits are saved to brief.md, marked as changed, and can be reverted"
 test("two edits in a row both land, and the tab count follows", async ({ page, rushes }) => {
   await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
   await page.goto(rushes.url);
-  await page.getByLabel("Your version of Purpose").fill("One.");
-  await page.getByLabel("Your version of Tone").fill("Two.");
+  await (await briefBox(page, "Purpose")).fill("One.");
+  await (await briefBox(page, "Tone")).fill("Two.");
   await expect.poll(() => read(rushes.root)).toContain("## Purpose\nOne.\n\n## Tone\nTwo.\n");
   await expect(sendButton(page)).toContainText("2");
 });
@@ -88,7 +88,7 @@ test("approving sets the status line, and editing an approved brief reopens it",
   await expect.poll(() => read(rushes.root)).toContain("Status: approved");
   await expect(page.getByRole("button", { name: "Approved" })).toHaveAttribute("aria-pressed", "true");
   await expect(planStatus(page)).toHaveText("Brief approved · 0 edited");
-  await page.getByLabel("Your version of Tone").fill("Warm.");
+  await (await briefBox(page, "Tone")).fill("Warm.");
   await expect.poll(() => read(rushes.root)).toContain("Status: draft");
   await expect(page.getByRole("button", { name: "Approve brief" })).toBeVisible();
   await expect(planStatus(page)).toHaveText("Brief not approved yet · 1 edited");
@@ -97,10 +97,10 @@ test("approving sets the status line, and editing an approved brief reopens it",
 test("a change the agent makes to brief.md shows up without a reload, and becomes the baseline", async ({ page, rushes }) => {
   await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
   await page.goto(rushes.url);
-  const tone = page.locator('.srow[data-section="Tone"]');
-  await expect(page.getByLabel("Your version of Tone")).toHaveValue("Calm and dry.");
+  const tone = briefCard(page, "Tone");
+  await expect(briefCard(page, "Tone")).toContainText("Calm and dry.");
   await rushes.writeFiles([{ path: "brief.md", text: BRIEF.replace("Calm and dry.", "Warm and quick.") }]);
-  await expect(page.getByLabel("Your version of Tone")).toHaveValue("Warm and quick.", { timeout: 8000 });
+  await expect(briefCard(page, "Tone")).toContainText("Warm and quick.", { timeout: 8000 });
   await expect(editedMark(tone)).toHaveCount(0);
   await expect(tone).not.toHaveClass(/changed/);
 });
@@ -138,7 +138,7 @@ test("key 1 opens Plan on the page last used, and 2 to 8 stay where they were", 
 test("Send on Brief gives a message that names what changed, and records nothing", async ({ page, rushes }) => {
   await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
   await page.goto(rushes.url);
-  await page.getByLabel("Your version of Purpose").fill("Mine.");
+  await (await briefBox(page, "Purpose")).fill("Mine.");
   await expect(sendButton(page)).toContainText("1");
   await sendButton(page).click();
   const dialog = sentDialog(page);
@@ -170,7 +170,7 @@ test("the switch shows a tick on an approved page, and a dot on a page with edit
   await expect(planTab(page, "Brief").locator(".pready")).toBeVisible();
   await expect(planTab(page, "Brief").locator(".dot")).toHaveCount(0);
   // Editing the approved brief reopens it: the tick goes and the dot says there is an edit to send.
-  await page.getByLabel("Your version of Tone").fill("Warm.");
+  await (await briefBox(page, "Tone")).fill("Warm.");
   await expect(planTab(page, "Brief").locator(".dot")).toBeVisible();
   await expect(planTab(page, "Brief")).not.toHaveAccessibleName(/Approved/);
   await expect(planTab(page, "Brief").locator(".pready")).toHaveCount(0);
@@ -235,7 +235,8 @@ test("every editable text on a Plan page sits in a field with a visible edge, at
     expect(edge.colour).not.toBe(edge.bg);
   };
   await openPlanPage(page, "Brief");
-  await hasEdge(page.getByLabel("Your version of Tone"), ".srow");
+  // §38.3: a brief section reads as text until Edit opens its field, which has the same edge.
+  await hasEdge(await briefBox(page, "Tone"), ".bcard");
   // A script line, a storyboard shot and its direction too.
   await openPlanPage(page, "Script");
   await hasEdge(page.locator(".srow").first().getByRole("textbox", { name: /^Your version of/ }), ".srow");
@@ -253,7 +254,7 @@ test("a save refused because the agent rewrote the file is tried again against t
     if (puts === 1) return route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ error: "brief_changed", message: "brief.md changed since you loaded it." }) });
     return route.continue();
   });
-  await page.getByLabel("Your version of Tone").fill("Warm.");
+  await (await briefBox(page, "Tone")).fill("Warm.");
   await expect.poll(() => read(rushes.root)).toContain("## Tone\nWarm.\n");
   expect(puts).toBe(2);
 });
@@ -264,7 +265,7 @@ test("a save refused twice says so and leaves the file alone", async ({ page, ru
   await page.route("**/api/brief/sections/*", (route) =>
     route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ error: "brief_changed", message: "brief.md changed since you loaded it." }) }),
   );
-  await page.getByLabel("Your version of Tone").fill("Warm.");
+  await (await briefBox(page, "Tone")).fill("Warm.");
   await expect(page.locator(".toast")).toContainText("Couldn't save Tone");
   expect(await read(rushes.root)).toBe(BRIEF);
 });
@@ -274,7 +275,7 @@ test("a digit typed in a Plan page's field stays in the field instead of switchi
   await rushes.addCut();
   await page.goto(rushes.url);
   await openPlanPage(page, "Brief");
-  const tone = page.getByLabel("Your version of Tone");
+  const tone = await briefBox(page, "Tone");
   await tone.click();
   await tone.press("End");
   // Outside a field, 3 is Voice. Inside one, the key is text.
@@ -293,7 +294,7 @@ test("text typed in a row survives the agent adding a section above it", async (
     await new Promise((r) => setTimeout(r, 1200));
     await route.continue();
   });
-  const tone = page.getByLabel("Your version of Tone");
+  const tone = await briefBox(page, "Tone");
   await tone.fill("Warm.");
   await rushes.writeFiles([{ path: "brief.md", text: BRIEF.replace("## Purpose", "## Hook\nOpen on the number.\n\n## Purpose") }]);
   await expect.poll(() => read(rushes.root), { timeout: 15000 }).toContain("## Tone\nWarm.\n");
@@ -304,7 +305,7 @@ test("text typed in a row survives the agent adding a section above it", async (
 test("Send straight after typing names the section just edited", async ({ page, rushes }) => {
   await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
   await page.goto(rushes.url);
-  await page.getByLabel("Your version of Purpose").fill("Mine.");
+  await (await briefBox(page, "Purpose")).fill("Mine.");
   await sendButton(page).click();
   await expect(sentDialog(page)).toContainText("this section in brief.md: Purpose");
 });
@@ -387,7 +388,7 @@ test("picking a page on the Plan switch with the keyboard leaves focus on its ta
 test("text refused twice is tried again when the file next changes, not left until the next edit", async ({ page, rushes }) => {
   await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
   await page.goto(rushes.url);
-  await expect(page.getByLabel("Your version of Tone")).toHaveValue("Calm and dry.");
+  await expect(briefCard(page, "Tone")).toContainText("Calm and dry.");
   let refused = 0;
   await page.route("**/api/brief/sections/*", (route) => {
     if (refused < 2) {
@@ -396,7 +397,7 @@ test("text refused twice is tried again when the file next changes, not left unt
     }
     return route.continue();
   });
-  await page.getByLabel("Your version of Tone").fill("Warm.");
+  await (await briefBox(page, "Tone")).fill("Warm.");
   await expect(page.locator(".toast")).toContainText("Couldn't save Tone");
   expect(await read(rushes.root)).toBe(BRIEF);
   // The agent touches another part of the file: that is the next moment the text can be saved, and it is.
@@ -408,7 +409,7 @@ test("text refused twice is tried again when the file next changes, not left unt
 test("Approve brief is not tried again against a brief the agent has rewritten since you looked", async ({ page, rushes }) => {
   await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
   await page.goto(rushes.url);
-  await expect(page.getByLabel("Your version of Tone")).toHaveValue("Calm and dry.");
+  await expect(briefCard(page, "Tone")).toContainText("Calm and dry.");
   await page.route("**/api/brief/status", async (route) => {
     await new Promise((r) => setTimeout(r, 1200));
     await route.continue();
@@ -434,18 +435,18 @@ test("a brief.md that is deleted while the page is open is dropped without a rel
   await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
   await rushes.api("PUT", "/api/script", SCRIPT);
   await page.goto(rushes.url);
-  await expect(page.getByLabel("Your version of Tone")).toBeVisible();
+  await expect(briefCard(page, "Tone")).toBeVisible();
   // The server looks for outside changes every half second: let it see the file once before it is taken away.
   await page.waitForTimeout(1200);
   await rm(join(rushes.root, "brief.md"));
-  await expect(page.getByLabel("Your version of Tone")).toHaveCount(0, { timeout: 8000 });
+  await expect(briefCard(page, "Tone")).toHaveCount(0, { timeout: 8000 });
 });
 
 // Review of the follow-ups: the retry of a refused save must never write over what the person did after it.
 test("a refused save is not written over text typed after it", async ({ page, rushes }) => {
   await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
   await page.goto(rushes.url);
-  const tone = page.getByLabel("Your version of Tone");
+  const tone = await briefBox(page, "Tone");
   await expect(tone).toHaveValue("Calm and dry.");
   let calls = 0;
   await page.route("**/api/brief/sections/*", async (route) => {
@@ -469,7 +470,7 @@ test("a refused save is not written over text typed after it", async ({ page, ru
 test("a refused save is not tried again over an approval made after it", async ({ page, rushes }) => {
   await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
   await page.goto(rushes.url);
-  const tone = page.getByLabel("Your version of Tone");
+  const tone = await briefBox(page, "Tone");
   await expect(tone).toHaveValue("Calm and dry.");
   let refused = 0;
   await page.route("**/api/brief/sections/*", (route) => {
@@ -492,7 +493,7 @@ test("a refused save is not tried again over an approval made after it", async (
 test("typing in a section and pressing Approve straight away saves the text and approves, with no complaint", async ({ page, rushes }) => {
   await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
   await page.goto(rushes.url);
-  const tone = page.getByLabel("Your version of Tone");
+  const tone = await briefBox(page, "Tone");
   await expect(tone).toHaveValue("Calm and dry.");
   // The server has written the file, and the page has already heard about it, when the answer to the save arrives.
   await page.route("**/api/brief/sections/*", async (route) => {
@@ -572,11 +573,102 @@ test("the Brief and Storyboard pages have no note box: their panel lists the scr
   for (const name of ["Brief", "Storyboard"] as const) {
     await openPlanPage(page, name);
     await expect(notesPanel(page).getByRole("textbox", { name: "New note" })).toHaveCount(0);
-    await expect(notesPanel(page)).toContainText("Notes on the plan are written on the Script page.");
+    await expect(notesPanel(page)).toContainText("Notes on the plan are written on the Script or Storyboard page.");
     await expect(notesPanel(page).locator(".note")).toHaveText([/Shorter overall/]);
     await expect(sendButton(page)).toBeVisible();
   }
   await openPlanPage(page, "Script");
   await expect(notesPanel(page).getByRole("textbox", { name: "New note" })).toBeVisible();
-  await expect(notesPanel(page)).not.toContainText("Notes on the plan are written on the Script page.");
+  await expect(notesPanel(page)).not.toContainText("Notes on the plan are written on the Script or Storyboard page.");
+});
+
+// §38.3: the brief opens with At a glance, reads as text, and every film after the first builds on the project brief.
+const GLANCE_BRIEF = `# Brief: Lumen launch film
+
+Status: draft
+
+## At a glance
+- Ask: A launch film for Lumen
+- Length: 30 s
+- Must: Show the best take found
+- Must: en-GB spelling
+
+## Purpose
+Show that Lumen finds the best takes. It does it fast.
+
+## Tone
+Calm and dry.
+`;
+
+test("§38.3 the brief opens with its At a glance card, labels grouped, then the other sections as text", async ({ page, rushes }) => {
+  await rushes.writeFiles([{ path: "brief.md", text: GLANCE_BRIEF }]);
+  await page.goto(rushes.url);
+  const card = briefCard(page, "At a glance");
+  await expect(card.locator("dt")).toHaveText(["Ask", "Length", "Must"]);
+  await expect(card.locator(".bgrow").nth(2).locator("li")).toHaveText(["Show the best take found", "en-GB spelling"]);
+  await expect(page.getByRole("navigation", { name: "Sections" }).getByRole("button")).toHaveText(["Purpose", "Tone"]);
+  await expect(briefCard(page, "Purpose")).toContainText("Show that Lumen finds the best takes. It does it fast.");
+  await expect(page.getByLabel("Your version of Purpose", { exact: true })).toHaveCount(0);
+});
+
+test("§38.3 a brief with no At a glance gets one from its sections, and a prompt to ask for the real thing", async ({ page, rushes }) => {
+  await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
+  await page.goto(rushes.url);
+  const card = page.locator(".bcard.glance");
+  await expect(card).toContainText("From the sections");
+  await expect(card.locator("dt")).toHaveText(["Purpose", "Tone"]);
+  await expect(card.locator("dd").first()).toHaveText("Show that Lumen finds the best takes.");
+  await expect(card.getByRole("button", { name: "Copy prompt" })).toBeVisible();
+  // The card is made by Rushes: nothing is written to the file.
+  expect(await read(rushes.root)).toBe(BRIEF);
+});
+
+test("§38.3 Edit opens a section's field, Done closes it, and the change shows word by word", async ({ page, rushes }) => {
+  await rushes.writeFiles([{ path: "brief.md", text: GLANCE_BRIEF }]);
+  await page.goto(rushes.url);
+  await page.getByRole("button", { name: "Edit Tone", exact: true }).click();
+  const box = page.getByLabel("Your version of Tone", { exact: true });
+  await expect(box).toBeFocused();
+  await box.fill("Calm and warm.");
+  await page.getByRole("button", { name: "Done" }).click();
+  await expect(box).toHaveCount(0);
+  const card = briefCard(page, "Tone");
+  await expect(card.locator(".bread")).toHaveText("Calm and warm.");
+  await expect(card.locator(".ddel")).toHaveText("dry.");
+  await expect(card.locator(".dins")).toHaveText("warm.");
+  await expect.poll(() => read(rushes.root)).toContain("## Tone\nCalm and warm.\n");
+  // Editing At a glance works the same way, and the card shows the new line.
+  await (await briefBox(page, "At a glance")).fill("- Ask: A launch film for Lumen\n- Length: 20 s");
+  await page.keyboard.press("Escape");
+  await expect(briefCard(page, "At a glance").locator("dd")).toHaveText(["A launch film for Lumen", "20 s"]);
+});
+
+test("§38.3 a later film with no brief of its own shows the project brief read-only and asks for one", async ({ page, rushes }) => {
+  await rushes.writeFiles([{ path: "brief.md", text: GLANCE_BRIEF }]);
+  await rushes.addCut("first", "Hero");
+  await rushes.addCut("second", "EU only");
+  await page.goto(`${rushes.url}?film=eu-only`);
+  await openPlanPage(page, "Brief");
+  await expect(page.locator(".bnotice")).toContainText("This film has no brief of its own yet.");
+  await expect(page.getByRole("button", { name: "Copy prompt for your agent" })).toBeVisible();
+  await expect(briefCard(page, "At a glance").locator("dt")).toHaveText(["Ask", "Length", "Must"]);
+  await expect(page.getByRole("button", { name: /^Edit / })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Approve brief" })).toHaveCount(0);
+});
+
+test("§38.3 a later film with its own brief says it builds on the project brief, and Show opens its At a glance", async ({ page, rushes }) => {
+  await rushes.writeFiles([
+    { path: "brief.md", text: GLANCE_BRIEF },
+    { path: "films/eu-only/brief.md", text: "# Brief: EU only\n\nStatus: draft\n\n## At a glance\n- Ask: The EU cut\n\n## Claims\nOnly EU nodes.\n" },
+  ]);
+  await rushes.addCut("first", "Hero");
+  await rushes.addCut("second", "EU only");
+  await page.goto(`${rushes.url}?film=eu-only`);
+  await openPlanPage(page, "Brief");
+  const strip = page.locator(".bbuilds");
+  await expect(strip).toContainText("Builds on the project brief: Lumen launch film");
+  await strip.getByRole("button", { name: "Show" }).click();
+  await expect(strip.locator("dt")).toHaveText(["Ask", "Length", "Must"]);
+  await expect(briefCard(page, "At a glance").locator("dd")).toHaveText(["The EU cut"]);
+  await expect(page.getByRole("button", { name: "Approve brief" })).toBeVisible();
 });
