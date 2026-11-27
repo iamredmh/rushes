@@ -241,8 +241,10 @@ test("every editable text on a Plan page sits in a field with a visible edge, at
   await openPlanPage(page, "Script");
   await hasEdge(page.locator(".srow").first().getByRole("textbox", { name: /^Your version of/ }), ".srow");
   await openPlanPage(page, "Storyboard");
-  await hasEdge(page.getByLabel("Your version of shot 1"), ".sbrow");
-  await hasEdge(page.getByLabel("Direction for shot 1"), ".sbrow");
+  // §38.4: the shot's description opens with Edit; its direction is always a field.
+  await page.getByRole("button", { name: "Edit shot 1", exact: true }).click();
+  await hasEdge(page.getByLabel("Your version of shot 1"), ".sbdetail");
+  await hasEdge(page.getByLabel("Direction for shot 1"), ".sbdetail");
 });
 
 test("a save refused because the agent rewrote the file is tried again against the file's new hash", async ({ page, rushes }) => {
@@ -565,21 +567,24 @@ test("a half-typed note on the Script page holds the page: Review, Assets, Brief
 
 // Final review m7 (ruling): neither the Brief nor the Storyboard page took notes before the desk, and a note typed there
 // was filed as a script note. Their panel lists the script's notes and says where to write one; Send stays.
-test("the Brief and Storyboard pages have no note box: their panel lists the script's notes and points to the Script page", async ({ page, rushes }) => {
+test("the Brief page has no note box: its panel lists the script's notes and points to the Script and Storyboard pages", async ({ page, rushes }) => {
   await rushes.writeFiles([{ path: "brief.md", text: BRIEF }, { path: "storyboard.md", text: "# Storyboard: Lumen\n\n## Shot 01 · Cold open\nTag: ESTABLISH\nLength: 3\nStatus: draft\nDirection:\n\nA laptop on a desk.\n" }]);
   await rushes.api("PUT", "/api/script", SCRIPT);
   await rushes.api("POST", "/api/notes", { stage: "script", video: null, version: null, on: null, scope: "whole", t: null, tOut: null, text: "Shorter overall" });
   await page.goto(rushes.url);
-  for (const name of ["Brief", "Storyboard"] as const) {
+  // §38.4: the Storyboard page takes notes on its shots now; only the Brief has none.
+  for (const name of ["Brief"] as const) {
     await openPlanPage(page, name);
     await expect(notesPanel(page).getByRole("textbox", { name: "New note" })).toHaveCount(0);
     await expect(notesPanel(page)).toContainText("Notes on the plan are written on the Script or Storyboard page.");
     await expect(notesPanel(page).locator(".note")).toHaveText([/Shorter overall/]);
     await expect(sendButton(page)).toBeVisible();
   }
-  await openPlanPage(page, "Script");
-  await expect(notesPanel(page).getByRole("textbox", { name: "New note" })).toBeVisible();
-  await expect(notesPanel(page)).not.toContainText("Notes on the plan are written on the Script or Storyboard page.");
+  for (const name of ["Script", "Storyboard"] as const) {
+    await openPlanPage(page, name);
+    await expect(notesPanel(page).getByRole("textbox", { name: "New note" })).toBeVisible();
+    await expect(notesPanel(page)).not.toContainText("Notes on the plan are written on the Script or Storyboard page.");
+  }
 });
 
 // §38.3: the brief opens with At a glance, reads as text, and every film after the first builds on the project brief.

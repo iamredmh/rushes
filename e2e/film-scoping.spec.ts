@@ -68,7 +68,8 @@ test("switching films changes Plan's Brief, Script and Storyboard (§31.3, §31.
   await videoReady(page);
   await expect(currentFilm(page)).toHaveText(MEET);
   await openPlanPage(page, "Brief");
-  await expect(page.getByText("Meet brief")).toBeVisible();
+  // §38.3: the words show in the section and in the At a glance made from it; the section is the brief's own.
+  await expect(page.locator(".bcards").getByText("Meet brief")).toBeVisible();
   await openPlanPage(page, "Script");
   await expect(page.locator(".prows textarea").first()).toHaveValue("Meet the agents line");
   // Meet your agents has no storyboard: its tab is locked, even though Five views has one.
@@ -76,13 +77,16 @@ test("switching films changes Plan's Brief, Script and Storyboard (§31.3, §31.
   await pickFilm(page, FIVE);
   await expect(page.locator(".prows textarea").first()).toHaveValue("Five ways to look line");
   await openPlanPage(page, "Brief");
-  await expect(page.getByText("Five brief")).toBeVisible();
-  await expect(page.getByText("Meet brief")).toHaveCount(0);
+  await expect(page.locator(".bcards").getByText("Five brief")).toBeVisible();
+  // The first film's brief is the project brief: Five views names it above its own, but none of its sections are here.
+  await expect(page.locator(".bcards").getByText("Meet brief")).toHaveCount(0);
   await openPlanPage(page, "Storyboard");
-  await expect(page.getByText("Five opening")).toBeVisible();
+  await expect(page.locator(".sbhead")).toContainText("Five opening");
   // A save on Five views' brief lands in its own file.
   await openPlanPage(page, "Brief");
-  const field = page.locator("textarea").first();
+  // §38.3: a section reads as text until its Edit opens the field.
+  await page.locator(".bcards .bedit").first().click();
+  const field = page.locator(".bcards textarea").first();
   await field.fill("Five is for people who know agents.");
   await field.blur();
   await expect.poll(async () => (await rushes.api("GET", "/api/brief?video=five-views")).brief.changed).toBe(1);
