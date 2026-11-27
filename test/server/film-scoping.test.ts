@@ -340,3 +340,22 @@ describe("§38.4 notes on storyboard shots", () => {
     expect(timed.status).toBe(400);
   });
 });
+
+describe("§38.5 script versions", () => {
+  it("keeps a version each time the agent changes the words, none for timings alone, per film, and names the newest", async () => {
+    const t = await project();
+    const put = (current: string, end = 3) => t.call("PUT", "/api/script", { video: "five-views", sections: [{ id: "s1", start: 0, end, current }] });
+    expect((await t.call("GET", "/api/script/versions?video=five-views")).json.versions).toEqual([]);
+    await put("One.");
+    await put("One.", 4);
+    await put("Two.");
+    const { versions } = (await t.call("GET", "/api/script/versions?video=five-views")).json;
+    expect(versions.map((v: { id: string; lines: { text: string }[] }) => [v.id, v.lines[0].text])).toEqual([["v1", "One."], ["v2", "Two."]]);
+    expect((await t.call("GET", "/api/script?video=five-views")).json.script.version).toBe("v2");
+    expect((await t.call("GET", "/api/script/versions?video=meet-your-agents")).json.versions).toEqual([]);
+    // The user's own edits are not versions.
+    const id = versions[1].lines[0].id;
+    await t.call("PATCH", `/api/script/${id}`, { video: "five-views", proposed: "Mine." });
+    expect((await t.call("GET", "/api/script/versions?video=five-views")).json.versions).toHaveLength(2);
+  });
+});

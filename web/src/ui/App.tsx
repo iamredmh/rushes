@@ -1130,7 +1130,7 @@ export function App() {
           ) : stage === "visuals" ? (
             <Visuals state={fstate} toast={toast} onChanged={() => void refresh()} onPendingChange={setPending} />
           ) : stage === "script" ? (
-            withPanel(<Script key={video?.id ?? ""} script={fstate.script} video={video?.id ?? null} toast={toast} onChanged={() => void refresh()} onPickLine={setPlanLine} />, planPanel)
+            withPanel(<Script key={video?.id ?? ""} script={fstate.script} versions={fstate.scriptVersions ?? []} video={video?.id ?? null} toast={toast} onChanged={() => void refresh()} onPickLine={setPlanLine} />, planPanel)
           ) : stage === "voice" ? (
             // Its own engine, disposed (and stopped) when you leave, like the other audio tabs.
             <Voice

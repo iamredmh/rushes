@@ -672,3 +672,33 @@ test("§38.3 a later film with its own brief says it builds on the project brief
   await expect(briefCard(page, "At a glance").locator("dd")).toHaveText(["The EU cut"]);
   await expect(page.getByRole("button", { name: "Approve brief" })).toBeVisible();
 });
+
+// §38.5: the script keeps its own versions; an older one is looked at read-only, marked against the newest, and a line
+// from it can be brought back as your version.
+test("§38.5 the script's version pill lists its versions, and an older line can be used again", async ({ page, rushes }) => {
+  await rushes.api("PUT", "/api/script", { sections: [{ start: 0, end: 4, current: "Your work lives on one laptop." }] });
+  const { script } = await rushes.api("GET", "/api/script");
+  const id = script.sections[0].id;
+  await rushes.api("PUT", "/api/script", { sections: [{ id, start: 0, end: 4, current: "Your work lives everywhere now." }] });
+  await page.goto(rushes.url);
+  await openPlanPage(page, "Script");
+  const pill = page.getByRole("button", { name: /^Script v2, choose a version/ });
+  await expect(pill).toHaveText(/Script v2/);
+  await pill.click();
+  const menu = page.getByRole("menu", { name: "Script versions" });
+  await expect(menu.getByRole("menuitemradio")).toHaveText([/v2.*newest/, /v1/]);
+  await menu.getByRole("menuitemradio", { name: /v1/ }).click();
+  await expect(page.locator(".scrold")).toContainText("Viewing v1, an older version");
+  const line = page.locator(`.scrline[data-section="${id}"]`);
+  await expect(line.locator(".scrtext")).toHaveText("Your work lives on one laptop.");
+  await expect(line.locator(".ddel")).toHaveText("on one laptop.");
+  await expect(line.locator(".dins")).toHaveText("everywhere now.");
+  await line.getByRole("button", { name: "Use this line" }).click();
+  await expect.poll(async () => (await rushes.api("GET", "/api/script")).script.sections[0].proposed).toBe("Your work lives on one laptop.");
+  await page.getByRole("button", { name: "Back to newest" }).click();
+  const row = page.locator(`.srow[data-section="${id}"]`);
+  await expect(row.getByRole("textbox", { name: /^Your version of/ })).toHaveValue("Your work lives on one laptop.");
+  await expect(editedMark(row)).toContainText("Edited by you");
+  // Your own edit is not a version.
+  await expect(page.getByRole("button", { name: /^Script v2, choose a version/ })).toBeVisible();
+});

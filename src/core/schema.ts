@@ -709,6 +709,18 @@ export const VisualsFileSchema = fileObject({
 });
 export type VisualsFile = z.infer<typeof VisualsFileSchema>;
 
+// §38.5: the script's own versions, per film ("_" for a script on no film): each the script as the agent wrote it.
+export const ScriptVersionLineSchema = z.object({ id: z.string(), start: z.number(), end: z.number(), text: z.string() });
+export type ScriptVersionLine = z.infer<typeof ScriptVersionLineSchema>;
+export const ScriptVersionSchema = z.object({ id: z.string(), at: z.string(), lines: z.array(ScriptVersionLineSchema) });
+export type ScriptVersion = z.infer<typeof ScriptVersionSchema>;
+export const ScriptVersionsFileSchema = fileObject({
+  schema: z.literal(1),
+  rev: z.number().int().nonnegative(),
+  films: z.record(z.string(), z.array(ScriptVersionSchema)).default({}),
+});
+export type ScriptVersionsFile = z.infer<typeof ScriptVersionsFileSchema>;
+
 // Send to AI: the agent's own settings in the project. Holds no secret: only whether it is on, which agent, and the
 // session to resume. What the agent may do unasked (AgentRules) is kept outside the project (R10), where the agent
 // can't change it.
@@ -792,6 +804,8 @@ export const FILES = {
   // §25.3: created by its first write, like the brief's.
   visuals: { name: "visuals.json", schema: VisualsFileSchema },
   agent: { name: "agent.json", schema: AgentSettingsSchema },
+  // §38.5: created by its first write.
+  scriptVersions: { name: "script-versions.json", schema: ScriptVersionsFileSchema },
 } as const;
 export type FileKey = keyof typeof FILES;
 export type FileData = {
@@ -806,4 +820,5 @@ export type FileData = {
   storyboard: BriefState;
   visuals: VisualsFile;
   agent: AgentSettings;
+  scriptVersions: ScriptVersionsFile;
 };

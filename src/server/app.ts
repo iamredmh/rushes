@@ -18,6 +18,7 @@ import { tabStates } from "../core/tabs.js";
 import { addVisualVersion, checkVisualNote, registerVisual, visualNoteView, visualRatios, type PageInput, type PictureInput } from "../core/visuals.js";
 import { readPicture } from "./visuals.js";
 import { shotNoteLabel, shotNoteWhere } from "../core/shotNotes.js";
+import { filmKey, recordVersion, shownVersions } from "../core/scriptVersions.js";
 import { fromManifestPath, toManifestPath } from "../core/paths.js";
 import { AUDIO_FORMATS, PROBE_TIMEOUT_MS, VIDEO_EXT, giveUpAfter, probe, probeVideo, videoGaveUp, type VideoProbe, type VideoProber } from "../core/media.js";
 import { PROXY_PATH, ProxyJobs, type ProxyEvent, type ProxyJob } from "./proxy.js";
@@ -55,7 +56,7 @@ import type { AgentRunner, AgentStatus, SendResult } from "./agent/runner.js";
 import { clearDetectCache, detectAgents, type AgentInfo } from "./agent/detect.js";
 import { AGENT_HELP, signInLabel } from "../core/agentHelp.js";
 import type { ConnectorStatus } from "./agent/connectors.js";
-import type { AgentId } from "../core/schema.js";
+import type { AgentId, Section } from "../core/schema.js";
 import { openInTerminal, type TerminalOpener } from "./agent/terminal.js";
 import { ATTENTION_TITLE_MAX, raiseAttention, replySettles, resolveAttention } from "../core/attention.js";
 import { resumeFor } from "./agent/resume.js";
@@ -921,8 +922,8 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
   app.get("/api/state", async (c) => {
     // §20.6: found is what the last scan left in memory; it never waits on a scan or a probe.
     // §22.8: the log's head is read-only, so a state request never writes (R6).
-    const [project, scriptFile, notes, picks, batches, ffmpeg, foundSummary, logHead, visuals] = await Promise.all([
-      store.read("project"), store.read("script"), store.read("notes"), store.read("picks"), store.read("batches"), jobs.available(), found.summary(), log.head(), store.read("visuals"),
+    const [project, scriptFile, notes, picks, batches, ffmpeg, foundSummary, logHead, visuals, keptVersions] = await Promise.all([
+      store.read("project"), store.read("script"), store.read("notes"), store.read("picks"), store.read("batches"), jobs.available(), found.summary(), log.head(), store.read("visuals"), store.read("scriptVersions"),
     ]);
     // §31.5: everything Plan and Review show for each film: its script, brief, storyboard and plan state, its tabs
     // (counts, to-do dots, unlocking) and its Activity head (the "new" dot). The desk picks the film on screen.
@@ -937,6 +938,8 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
         script: s,
         brief: b,
         projectBrief: place.first ? null : projectBrief,
+        // §38.5: the script's versions, oldest first, by id and time (the page fetches a version's lines when it shows one).
+        scriptVersions: shownVersions(keptVersions.films[filmKey(place.video)] ?? [], s.sections).map((v) => ({ id: v.id, at: v.at })),
         storyboard: sb,
         build: buildState({ brief: b, script: s.sections, storyboard: sb }),
         tabs: tabStates(project, s, notes, visuals, place.video, sb.exists),
@@ -962,7 +965,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
         versions: await Promise.all(v.versions.map(async (ver) => ({ ...ver, proxyNeed: await jobs.needNow(fromManifestPath(store.root, ver.file)) }))),
       })),
     );
-    return c.json({ version: VERSION, project: { ...project, videos }, script, notes, picks: withUse(project, picks), batches, tabs, visuals, proxies: { ffmpeg, jobs: jobs.list(), encoder: ffmpeg ? await jobs.encoder() : null }, found: foundSummary, log: logHead, brief: briefView, storyboard: storyboardView, build: first.build, films });
+    return c.json({ version: VERSION, project: { ...project, videos }, script, notes, picks: withUse(project, picks), batches, tabs, visuals, proxies: { ffmpeg, jobs: jobs.list(), encoder: ffmpeg ? await jobs.encoder() : null }, found: foundSummary, log: logHead, brief: briefView, storyboard: storyboardView, build: first.build, scriptVersions: first.scriptVersions, films });
   });
 
   // ---- found: the project's other files (§20) ----
@@ -1697,18 +1700,36 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     const [project, file] = await Promise.all([store.read("project"), store.read("script")]);
     const film = chooseFilm(project, videoQuery(c), "the script")?.id ?? null;
     const own = filmScript(file, project, film);
+    // §38.5: the newest script version's id, so the agent can say which version it worked from.
+    const versions = shownVersions((await store.read("scriptVersions")).films[filmKey(film)] ?? [], own.sections);
     // The shape it always had (schema, rev, wordsPerSecond, sections), now one film's, with the film named.
-    return c.json({ script: { schema: file.schema === 1 && film === firstFilm(project) ? 1 : 2, rev: file.rev, ...own, ...(film ? { video: film } : {}) } });
+    return c.json({ script: { schema: file.schema === 1 && film === firstFilm(project) ? 1 : 2, rev: file.rev, ...own, ...(film ? { video: film } : {}), version: versions.at(-1)?.id ?? null } });
+  });
+
+  // §38.5: a film's script versions, oldest first, each the script as the agent wrote it.
+  app.get("/api/script/versions", async (c) => {
+    const [project, file, kept] = await Promise.all([store.read("project"), store.read("script"), store.read("scriptVersions")]);
+    const film = chooseFilm(project, videoQuery(c), "the script")?.id ?? null;
+    return c.json({ versions: shownVersions(kept.films[filmKey(film)] ?? [], filmScript(file, project, film).sections) });
   });
 
   app.put("/api/script", async (c) => {
     const b = await body(c, ScriptBody);
     const project = await store.read("project");
     const film = chooseFilm(project, b.video, "the script")?.id ?? null;
+    let prior: Section[] = [];
     const { result } = await store.update("script", (f) => {
       const s = filmScriptDraft(f, project, film);
+      prior = s.sections.map((x) => ({ ...x }));
       if (b.wordsPerSecond) s.wordsPerSecond = b.wordsPerSecond;
       return setSections(s, b.sections, { replace: b.replace });
+    });
+    // §38.5: the agent wrote the script: keep it as a new version when its words changed.
+    const at = new Date().toISOString();
+    await store.update("scriptVersions", (f) => {
+      const key = filmKey(film);
+      const next = recordVersion(f.films[key] ?? [], result, at, prior);
+      if (next !== f.films[key]) f.films[key] = next;
     });
     // The film is named on the line only with several films, so a one-film project's log reads as it always did.
     await log.add(() => scriptEvent(result.length, project.videos.length > 1 ? film : null), by(c));

@@ -883,3 +883,26 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .sbsub svg { width: 14px; height: 14px; color: var(--done); margin-left: auto; }
 .note .onpick { padding: 0; border: 0; background: transparent; font: inherit; color: inherit; cursor: pointer; text-align: left; }
 .note .onpick:hover { color: var(--accent-2); text-decoration: underline; }
+
+/* §38.5: the script's own versions: the pill, its menu, and an older version marked against the newest. */
+.scrver { position: relative; }
+.scrpill { height: 28px; padding: 0 10px; gap: 6px; font-size: 13px; font-family: var(--mono); }
+.scrpill svg { width: 14px; height: 14px; }
+.scrpill.old { background: var(--todo-soft); color: var(--todo); }
+.scrmenu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 20; display: grid; min-width: 220px; padding: 4px; border: 1px solid var(--line-2); border-radius: var(--r-lg); background: var(--raised); box-shadow: 0 10px 30px var(--shadow); }
+.scrmenu button { display: flex; align-items: baseline; gap: 10px; padding: 7px 10px; border: 0; border-radius: var(--r); background: transparent; color: var(--text); font: inherit; font-size: 13.5px; text-align: left; cursor: pointer; }
+.scrmenu button:hover, .scrmenu button:focus-visible { background: var(--app); }
+.scrmenu button[aria-checked="true"] { background: var(--accent-soft); }
+.scrmenu b { font-family: var(--mono); min-width: 34px; }
+.scrmenu span { color: var(--text-2); font-size: 12.5px; }
+.scrold { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 12px; border: 1px solid var(--todo-line); border-radius: var(--r-lg); background: var(--todo-soft); font-size: 14px; }
+.scrold .btn { margin-left: auto; height: 30px; font-size: 13px; }
+.scrline .pbody { gap: 4px; }
+.scrtext { margin: 0; font-size: 15px; line-height: 1.5; white-space: pre-wrap; }
+.scrsame, .scrgone, .scrnew { margin: 0; font-size: 12.5px; color: var(--text-3); }
+.scrgone { color: var(--over); }
+.scrnew { color: var(--done); }
+.scrdiff { margin: 0; font-size: 13px; line-height: 1.5; color: var(--text-2); white-space: pre-wrap; }
+.scrdiff .wl { font-family: var(--mono); font-size: 12px; }
+.scrline .sfoot .btn { height: 28px; font-size: 12.5px; padding: 0 10px; gap: 6px; }
+.scrline .sfoot .btn svg { width: 14px; height: 14px; }

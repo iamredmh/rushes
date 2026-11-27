@@ -1800,6 +1800,7 @@ export function scopeState(state: State, film: string | null | undefined): State
     script: plan.script,
     brief: plan.brief,
     projectBrief: plan.projectBrief ?? null,
+    scriptVersions: plan.scriptVersions ?? [],
     planPaths: plan.paths,
     storyboard: plan.storyboard,
     build: plan.build,

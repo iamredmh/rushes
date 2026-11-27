@@ -53,6 +53,8 @@ export interface State {
   brief: BriefView;
   /** §38.3: on a film that is not the first, the project brief it builds on (scopeState sets it). */
   projectBrief?: BriefView | null;
+  /** §38.5: the film on screen's script versions, oldest first (scopeState sets it). */
+  scriptVersions?: { id: string; at: string }[];
   /** §31.3: where the film on screen keeps its brief and storyboard (scopeState sets it). */
   planPaths?: { brief: string; storyboard: string };
   /** §24.12: storyboard.md as the dashboard shows it (`exists: false` when there is none). */
@@ -73,6 +75,8 @@ export interface FilmPlan {
   brief: BriefView;
   /** §38.3: the project brief (the root brief.md) for a film that is not the first; null for the first. */
   projectBrief?: BriefView | null;
+  /** §38.5: the film's script versions, oldest first. */
+  scriptVersions?: { id: string; at: string }[];
   storyboard: StoryboardView;
   build: BuildState;
   tabs: TabState[];
