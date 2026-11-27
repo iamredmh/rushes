@@ -31,6 +31,8 @@ export interface NotesProps {
   toast(message: string): void;
   onAdd(text: string): Promise<void>;
   onSeek?(t: number, note: Note): void;
+  /** §38.4: a note with no time (a storyboard shot's) is picked by its label: the page goes to what it is on. */
+  onPick?(note: Note): void;
   onChanged(): void;
   /** Whether the note box has anything typed in it, so the player knows a note is pending. */
   onTextChange?(hasText: boolean): void;
@@ -138,7 +140,7 @@ const MARK_KINDS: { kind: MarkKind; label: string }[] = [
 
 /** The notes column used on every tab: list, filter, done circles and the note box. */
 export function Notes({
-  notes, version, placeholder, attachments, inputRef, toast, onAdd, onSeek, onChanged, onTextChange, target, marks, onLabel, fixedTimes, selectedId,
+  notes, version, placeholder, attachments, inputRef, toast, onAdd, onSeek, onPick, onChanged, onTextChange, target, marks, onLabel, fixedTimes, selectedId,
   formatTag, cardExtra, formatScope, listFooter, readOnly, instead, filter: shownFilter, agent,
 }: NotesProps) {
   const [ownFilter, setFilter] = useState<Filter>("all");
@@ -195,8 +197,8 @@ export function Notes({
               <Icon name="check" />
             </button>
             <div class="nt">
-              <button class="t" onClick={() => at.t !== null && onSeek?.(at.t, n)}>{noteTime(at.t, at.tOut)}</button>
-              {onLabel && onLabel(n) && <span class="on">{onLabel(n)}</span>}
+              {n.stage !== "storyboard" && <button class="t" onClick={() => at.t !== null && onSeek?.(at.t, n)}>{noteTime(at.t, at.tOut)}</button>}
+              {onLabel && onLabel(n) && (onPick ? <button class="on onpick" onClick={() => onPick(n)}>{onLabel(n)}</button> : <span class="on">{onLabel(n)}</span>)}
               {(() => {
                 const tag = formatTag?.(n) ?? null;
                 return tag && <span class={`ftag${tag === "All" ? " all" : ""}`}>{tag}</span>;
@@ -204,7 +206,7 @@ export function Notes({
               {at.from && <span class="from">from {at.from}</span>}
             </div>
             {marksLabel(n.marks) && <div class="nmarks">{marksLabel(n.marks)}</div>}
-            {n.shot && <div class="shotref">Shot {shotLabel(n.shot.n)} · {n.shot.name}</div>}
+            {n.shot && n.stage !== "storyboard" && <div class="shotref">Shot {shotLabel(n.shot.n)} · {n.shot.name}</div>}
             <div class="nx">{n.text}</div>
             {n.grab && (
               <div class="att">

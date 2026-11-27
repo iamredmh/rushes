@@ -6,6 +6,8 @@ import {
   filmAfterShelving, inPlay, isPlanPage, noteOnFilm, scopeState, ROOT_PLAN, filmFromSearch, withFilm, type PlanPaths, labelOfId, latest, lockedFound, neighbourFormat, neighbourVideo, planProgress, planTarget, previousVersion, proxiesKey, cutJobs, readyPrompt, storySendPrompt, storyboardPrompt, versionFormats, type PlanPage,
 } from "../lib.js";
 import { onLabel } from "../../../src/core/notes.js";
+import { shotNoteLabel, shotOfNote } from "../../../src/core/shotNotes.js";
+import type { Shape } from "../visuals.js";
 import { deskPlace, deskView, noteTarget, sendAgainOffer, takeCount, takeGroups, unfinishedLines, unsentCount, unsentEdits, viewForKey, type DeskView } from "../desk.js";
 import type { AgentStatus, Batch, BriefView, FoundCounts, FoundKind, Note, SendHandOver, Stage, StoryboardView, Video } from "../types.js";
 import { useRushes } from "../useRushes.js";
@@ -239,6 +241,10 @@ export function App() {
   });
   // §27, 5.8: the script line a note on a Plan page is about, picked by working in its row.
   const [planLine, setPlanLine] = useState<{ id: string; label: string } | null>(null);
+  // §38.4: the Storyboard page's shot in the frame (by film), the region or point drawn on it, and the note picked.
+  const [sbAt, setSbAt] = useState<Record<string, number>>({});
+  const [sbShape, setSbShape] = useState<Shape | null>(null);
+  const [sbSel, setSbSel] = useState<string | null>(null);
 
   // §19.5: a proxy that fails says why, in whichever tab is open; the bar returns to the offer.
   useEffect(() => {
@@ -767,8 +773,59 @@ export function App() {
   // §27, 5.8: the Plan pages' notes are the script's: on a line picked in Script, or on the script as a whole.
   const scriptNotes = fstate.notes.notes.filter((n) => n.stage === "script");
   const planTargetNow = planLine && stage === "script" ? noteTarget({ kind: "line", ...planLine }, null) : { stage: "script" as const, on: null, scope: "whole" as const, t: null, tOut: null, label: "The script" };
-  // m7 (ruling): the Brief and Storyboard pages take no notes of their own; a note on the plan is written on the Script page.
+  // §38.4 (replacing m7 for Storyboard): the Storyboard page takes notes on its shots; the Brief page takes none.
   const planBox = stage === "script";
+  const board = fstate.storyboard;
+  const sbKey = video?.id ?? "";
+  const sbIndex = Math.min(Math.max(0, sbAt[sbKey] ?? 0), Math.max(0, board.shots.length - 1));
+  const sbShot = board.shots[sbIndex];
+  const boardNotes = fstate.notes.notes.filter((n) => n.stage === "storyboard");
+  // The shot in the frame's notes first, then the other shots' in shot order, then those whose shot has gone.
+  const sbOrder = (n: Note) => {
+    const at = shotOfNote(board.shots, n);
+    return at === sbIndex ? -1 : at === null ? board.shots.length : at;
+  };
+  const sbNotes = [...boardNotes].sort((a, b) => sbOrder(a) - sbOrder(b));
+  const sbTarget = sbShot ? shotNoteLabel({ on: `shot/${sbShot.n}`, shot: { n: sbShot.n, name: sbShot.name }, box: sbShape && "box" in sbShape ? sbShape.box : null, pin: sbShape && "pin" in sbShape ? sbShape.pin : null }) : "";
+  const goToShotOf = (n: Note) => {
+    const at = shotOfNote(board.shots, n);
+    setSbSel(n.id);
+    if (at === null) return toast("That shot is no longer in the storyboard.");
+    if (at !== sbIndex) {
+      setSbShape(null);
+      setSbAt((m) => ({ ...m, [sbKey]: at }));
+    }
+  };
+  const boardPanel = (
+    <PlanNotesPanel
+      notes={sbNotes}
+      version={null}
+      placeholder={sbShot ? `Note on ${sbTarget}` : "No shot to note"}
+      fixedTimes
+      toast={toast}
+      onLabel={(n: Note) => {
+        const label = shotNoteLabel(n);
+        if (shotOfNote(board.shots, n) === null) return `${label} (no longer in the storyboard)`;
+        return sbShot && n.still !== null && (n.box || n.pin) && shotOfNote(board.shots, n) === sbIndex && n.still !== sbShot.still ? `${label} (on the earlier still)` : label;
+      }}
+      onPick={goToShotOf}
+      selectedId={sbSel}
+      target={sbShot ? { label: sbTarget, onClear: sbShape ? () => setSbShape(null) : undefined } : undefined}
+      onAdd={async (text) => {
+        if (!sbShot) return;
+        await api.post("/api/notes", {
+          stage: "storyboard", video: video?.id ?? null, version: null, on: `shot/${sbShot.n}`, scope: "whole", text,
+          ...(sbShape && "box" in sbShape ? { box: sbShape.box } : {}),
+          ...(sbShape && "pin" in sbShape ? { pin: sbShape.pin } : {}),
+        });
+        setSbShape(null);
+        void refresh();
+      }}
+      onChanged={() => void refresh()}
+      onPendingChange={setPending}
+      readOnly={!sbShot}
+    />
+  );
   const planPanel = (
     <PlanNotesPanel
       notes={scriptNotes}
@@ -1043,7 +1100,33 @@ export function App() {
           ) : stage === "brief" ? (
             withPanel(<Brief key={video?.id ?? ""} brief={fstate.brief} projectBrief={fstate.projectBrief ?? null} projectName={state.project.name} filmName={video?.name ?? null} briefPath={paths.brief} video={video?.id ?? null} toast={toast} onChanged={() => void refresh()} settle={planSettle} />, planPanel)
           ) : stage === "storyboard" ? (
-            withPanel(<Storyboard key={video?.id ?? ""} board={fstate.storyboard} brief={fstate.brief} video={video?.id ?? null} toast={toast} onChanged={() => void refresh()} settle={planSettle} />, planPanel)
+            withPanel(
+              <Storyboard
+                key={video?.id ?? ""}
+                board={fstate.storyboard}
+                brief={fstate.brief}
+                video={video?.id ?? null}
+                projectId={state.project.id ?? state.project.name}
+                notes={boardNotes}
+                at={sbIndex}
+                onAt={(i) => setSbAt((m) => ({ ...m, [sbKey]: i }))}
+                shape={sbShape}
+                onShape={(s) => {
+                  setSbShape(s);
+                  // A region or point is drawn: the note box takes the words for it.
+                  if (s) panelShared.revealNotes(() => document.querySelector<HTMLTextAreaElement>(".deskcols textarea[aria-label='New note']")?.focus());
+                }}
+                selected={sbSel}
+                onSelect={(id) => {
+                  setSbSel(id);
+                  document.querySelector(`.deskcols [data-note="${id}"]`)?.scrollIntoView({ block: "nearest" });
+                }}
+                toast={toast}
+                onChanged={() => void refresh()}
+                settle={planSettle}
+              />,
+              boardPanel,
+            )
           ) : stage === "visuals" ? (
             <Visuals state={fstate} toast={toast} onChanged={() => void refresh()} onPendingChange={setPending} />
           ) : stage === "script" ? (

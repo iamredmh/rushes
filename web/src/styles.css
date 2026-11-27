@@ -834,3 +834,52 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 @media (max-width: 640px) { .bgrow { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
 .bglance.fallback .bgrow { grid-template-columns: 180px minmax(0, 1fr); }
 .bglance.fallback dt { text-transform: none; letter-spacing: 0; font-size: 13px; color: var(--text); }
+
+/* §38.4: the Storyboard page: one shot large, the strip, the details; or every shot in Overview. */
+.sbpage { gap: 12px; }
+.sbpage .shead .sbview { margin-left: auto; height: 30px; padding: 0 12px; font-size: 13px; gap: 6px; }
+.sbpage .shead .sbview svg { width: 15px; height: 15px; }
+.sbpage .shead .sbview.on { background: var(--accent-soft); color: var(--accent-2); }
+.sbone { display: grid; gap: 12px; min-width: 0; }
+.sbhead { display: flex; align-items: center; gap: 12px; min-height: 34px; }
+.sbhead .sbnum { font-size: 15px; color: var(--text); }
+.sbhead .sbname { font-size: 16px; font-weight: 600; }
+.sbhead .sbtag { margin-left: 0; }
+.sbhead .sblen { color: var(--text-2); font-size: 13px; }
+.sbstate { margin-left: auto; height: 22px; padding: 0 9px; border-radius: 11px; display: inline-flex; align-items: center; font-size: 12px; font-weight: 600; color: var(--text-2); background: var(--raised); }
+.sbstate.ok { color: var(--done); background: var(--done-soft); }
+.sbfwrap { height: min(58vh, 620px); min-height: 220px; display: grid; place-items: center; background: var(--bg); border-radius: var(--r-lg); border: 1px solid var(--line); overflow: hidden; }
+.sbframe { position: relative; cursor: crosshair; touch-action: none; user-select: none; }
+.sbframe > img { width: 100%; height: 100%; object-fit: contain; display: block; pointer-events: none; }
+.sbframe > .nostill { position: absolute; inset: 0; font-size: 15px; }
+.sbframe .vzbox, .sbframe .vzpin { pointer-events: auto; cursor: pointer; padding: 0; font: inherit; }
+.sbframe .vzbox.draft, .sbframe .vzpin.draft { pointer-events: none; }
+.sbnav { display: flex; align-items: center; justify-content: center; gap: 10px; }
+.sbnav .btn { height: 32px; padding: 0 14px; font-size: 13.5px; }
+.sbstrip { display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 6px; scrollbar-width: thin; }
+.sbchipshot { position: relative; flex: 0 0 auto; width: 112px; aspect-ratio: 16 / 9; padding: 0; border-radius: 6px; overflow: hidden; border: 2px solid transparent; background: var(--bg); cursor: pointer; opacity: 0.72; }
+.sbchipshot:hover { opacity: 1; }
+.sbchipshot[aria-current="true"] { border-color: var(--accent); opacity: 1; }
+.sbchipshot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sbchipshot .nostill { font-size: 11px; }
+.sbno { position: absolute; left: 4px; bottom: 3px; padding: 0 4px; border-radius: 3px; font-size: 11px; color: var(--text); background: var(--scrim-2); }
+.sbchipshot.ok .sbno { color: var(--done); }
+.sbbadge { position: absolute; right: 4px; top: 4px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; display: grid; place-items: center; font-size: 11px; font-weight: 700; color: var(--on-todo); background: var(--todo); }
+.sbdetail { display: grid; gap: 10px; padding: 12px 14px 14px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--app); }
+.sbdetail.changed { border-left: 3px solid var(--todo); }
+.sbdhead { display: flex; align-items: center; gap: 10px; }
+.sbdhead h3 { margin: 0; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-2); }
+.sbdhead .bedit { margin-left: auto; height: 30px; padding: 0 10px; font-size: 13px; gap: 6px; }
+.sbdhead .bedit svg { width: 15px; height: 15px; }
+.sbgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 14px; }
+.sbcell { display: grid; gap: 6px; padding: 0 0 4px; border: 0; background: transparent; color: var(--text); text-align: left; cursor: pointer; font: inherit; }
+.sbthumb { position: relative; display: block; aspect-ratio: 16 / 9; border-radius: 6px; overflow: hidden; border: 1px solid var(--line-2); background: var(--bg); }
+.sbthumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sbcell:hover .sbthumb { border-color: var(--accent); }
+.sbcap { font-size: 13.5px; font-weight: 600; }
+.sbcap b { font-family: var(--mono); color: var(--text-2); margin-right: 4px; }
+.sbsub { display: flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 12px; }
+.sbsub .sbtag { margin-left: 0; font-size: 11.5px; }
+.sbsub svg { width: 14px; height: 14px; color: var(--done); margin-left: auto; }
+.note .onpick { padding: 0; border: 0; background: transparent; font: inherit; color: inherit; cursor: pointer; text-align: left; }
+.note .onpick:hover { color: var(--accent-2); text-decoration: underline; }
