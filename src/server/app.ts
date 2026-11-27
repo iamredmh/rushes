@@ -919,6 +919,8 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     // §31.5: everything Plan and Review show for each film: its script, brief, storyboard and plan state, its tabs
     // (counts, to-do dots, unlocking) and its Activity head (the "new" dot). The desk picks the film on screen.
     const heads = await log.filmHeads({ videos: project.videos, lanes: project.lanes, notes: notes.notes });
+    // §38.3: the project brief is the root brief.md (the first film's); every other film builds on it.
+    const projectBrief = await briefs.at(filmPlace(project, null)).view();
     const planOf = async (video: string | null) => {
       const place = filmPlace(project, video);
       const [b, sb] = await Promise.all([briefs.at(place).view(), storyboards.at(place).view()]);
@@ -926,6 +928,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
       return {
         script: s,
         brief: b,
+        projectBrief: place.first ? null : projectBrief,
         storyboard: sb,
         build: buildState({ brief: b, script: s.sections, storyboard: sb }),
         tabs: tabStates(project, s, notes, visuals, place.video),

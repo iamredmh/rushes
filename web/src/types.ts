@@ -51,6 +51,10 @@ export interface State {
   found: FoundSummary;
   /** §24 step 2: brief.md as the dashboard shows it (`exists: false` when there is none). */
   brief: BriefView;
+  /** §38.3: on a film that is not the first, the project brief it builds on (scopeState sets it). */
+  projectBrief?: BriefView | null;
+  /** §31.3: where the film on screen keeps its brief and storyboard (scopeState sets it). */
+  planPaths?: { brief: string; storyboard: string };
   /** §24.12: storyboard.md as the dashboard shows it (`exists: false` when there is none). */
   storyboard: StoryboardView;
   /** §24.12: whether the plan (brief, script, storyboard) is approved. */
@@ -67,6 +71,8 @@ export interface State {
 export interface FilmPlan {
   script: Script;
   brief: BriefView;
+  /** §38.3: the project brief (the root brief.md) for a film that is not the first; null for the first. */
+  projectBrief?: BriefView | null;
   storyboard: StoryboardView;
   build: BuildState;
   tabs: TabState[];

@@ -130,6 +130,27 @@ describe("each film's brief and storyboard (§31.3)", () => {
     expect(tabs.plans["five-views"]).toEqual({ brief: "films/five-views/brief.md", storyboard: "films/five-views/storyboard.md" });
   });
 
+  it("§38.3: gives every film but the first the project brief it builds on, whether or not it has its own", async () => {
+    const t = await project(["Meet your agents", "Five views", "Third"]);
+    await writeFile(join(t.root, "brief.md"), BRIEF("Project"));
+    await mkdir(join(t.root, "films", "five-views"), { recursive: true });
+    await writeFile(join(t.root, "films", "five-views", "brief.md"), BRIEF("Five"));
+    const state = (await t.call("GET", "/api/state")).json;
+    expect(state.films["meet-your-agents"].projectBrief).toBeNull();
+    expect(state.films["five-views"].brief.title).toBe("Five");
+    expect(state.films["five-views"].projectBrief.title).toBe("Project");
+    expect(state.films.third.brief.exists).toBe(false);
+    expect(state.films.third.projectBrief.exists).toBe(true);
+    expect(state.films.third.projectBrief.title).toBe("Project");
+  });
+
+  it("§38.3: a later film with no brief and no project brief has neither", async () => {
+    const t = await project();
+    const state = (await t.call("GET", "/api/state")).json;
+    expect(state.films["five-views"].brief.exists).toBe(false);
+    expect(state.films["five-views"].projectBrief.exists).toBe(false);
+  });
+
   it("seeds only a film's own first cut from its own storyboard", async () => {
     const { root, store } = await tmpProject("caffeine");
     await writeFile(join(root, "storyboard.md"), BOARD(3));

@@ -1791,6 +1791,8 @@ export function scopeState(state: State, film: string | null | undefined): State
     ...state,
     script: plan.script,
     brief: plan.brief,
+    projectBrief: plan.projectBrief ?? null,
+    planPaths: plan.paths,
     storyboard: plan.storyboard,
     build: plan.build,
     tabs: plan.tabs,
