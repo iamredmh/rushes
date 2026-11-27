@@ -380,13 +380,16 @@ export async function main(argv: string[], io: Io): Promise<number> {
         const { tabs, brief, storyboard, build, films } = await (await ensureServer(root, io.ensure)).get("/api/tabs");
         // The second column starts in the same place on every line: as wide as the longest label shown.
         const w = storyboard?.exists ? "storyboard".length : 8;
-        for (const t of tabs as { stage: string; unlocked: boolean; todo: number }[]) {
+        const all = tabs as { stage: string; unlocked: boolean; todo: number }[];
+        // §38.4: the storyboard's notes are counted on its own line below, not as a tab.
+        const boardTodo = all.find((t) => t.stage === "storyboard")?.todo ?? 0;
+        for (const t of all.filter((x) => x.stage !== "storyboard")) {
           io.out(`${t.stage.padEnd(w)} ${t.unlocked ? "open  " : "locked"} ${t.todo ? `${t.todo} to do` : ""}`.trimEnd());
         }
         // §24 step 2: brief.md, when there is one: its status and how many sections the user has changed.
         if (brief?.exists) io.out(`${"brief".padEnd(w)} ${String(brief.status ?? "draft").padEnd(6)} ${brief.changed ? `${brief.changed} changed` : ""}`.trimEnd());
         // §24.12: storyboard.md, and whether the plan is approved, once planning has begun.
-        if (storyboard?.exists) io.out(`${"storyboard".padEnd(w)} ${storyboard.approved} of ${storyboard.shots} approved${storyboard.changed ? `, ${storyboard.changed} changed` : ""}`);
+        if (storyboard?.exists) io.out(`${"storyboard".padEnd(w)} ${storyboard.approved} of ${storyboard.shots} approved${storyboard.changed ? `, ${storyboard.changed} changed` : ""}${boardTodo ? `, ${boardTodo} to do` : ""}`);
         if (build?.started) io.out(`${"build".padEnd(w)} ${build.ready ? "ready" : `waiting on ${(build.waitingOn as string[]).join(", ")}`}`);
         // §26: the films the user has set aside, so an agent leaves them alone. Nothing is printed when none are.
         const shelved = ((films ?? []) as { name: string; shelved: string | null }[]).filter((f) => f.shelved).map((f) => f.name);

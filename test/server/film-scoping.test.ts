@@ -317,3 +317,26 @@ describe("the API's ?video= filters (§31.6)", () => {
     expect(noteOnFilm({ stage: "visuals", video: null }, "b", p.videos)).toBe(true);
   });
 });
+
+describe("§38.4 notes on storyboard shots", () => {
+  it("stamps the shot and its still, lists it with its words, exports it, and refuses a shot that isn't there", async () => {
+    const t = await project();
+    await mkdir(join(t.root, "films", "five-views"), { recursive: true });
+    await writeFile(join(t.root, "films", "five-views", "storyboard.md"), BOARD(4).replace("Tag: ESTABLISH", "Tag: ESTABLISH\nStill: storyboard/s1.png"));
+    const made = await t.call("POST", "/api/notes", { stage: "storyboard", video: "five-views", on: "shot/1", scope: "whole", text: "Lower the sign.", box: { x: 0.1, y: 0.2, w: 0.3, h: 0.2 } });
+    expect(made.status).toBe(201);
+    expect(made.json.note).toMatchObject({ stage: "storyboard", video: "five-views", on: "shot/1", shot: { n: 1, name: "Open" }, still: "storyboard/s1.png" });
+    const listed = (await t.call("GET", "/api/notes?video=five-views")).json.notes.find((n: { id: string }) => n.id === made.json.note.id);
+    expect(listed.shotLabel).toBe("Shot 01 · Open · region");
+    expect(listed.where).toMatch(/^region \(/);
+    const exported = (await t.call("POST", "/api/exports/notes", {})).json;
+    const md = await readFile(join(t.root, exported.path), "utf8");
+    expect(md).toContain("## Storyboard");
+    expect(md).toContain("**Shot 01 · Open · region** · region (");
+    expect(md).toContain("Drawn on: storyboard/s1.png");
+    const missing = await t.call("POST", "/api/notes", { stage: "storyboard", video: "five-views", on: "shot/9", scope: "whole", text: "x" });
+    expect(missing.status).toBe(400);
+    const timed = await t.call("POST", "/api/notes", { stage: "storyboard", video: "five-views", on: "shot/1", scope: "point", t: 1, text: "x" });
+    expect(timed.status).toBe(400);
+  });
+});

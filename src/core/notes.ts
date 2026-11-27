@@ -1,3 +1,4 @@
+import { shotNoteLabel } from "./shotNotes.js";
 import {
   NoteSchema, ReplySchema, type Lane, type LaneStage, type Note, type NotesFile, type Picks, type Project, type Script, type Stage, type Variant,
 } from "./schema.js";
@@ -23,6 +24,8 @@ export interface NewNote {
   grab?: string | null;
   /** Stamped by the server (Task 2) from the version's shots; passed through here. */
   shot?: Note["shot"];
+  /** §38.4: stamped by the server on a storyboard note: the still the box or pin was drawn on. */
+  still?: string | null;
   /** User-owned, like text (§14.5): the quick marks on a range note on an audio tab. */
   marks?: Note["marks"];
   /** §21.3: a Format id, or null for every format. User-owned, like text. */
@@ -160,8 +163,10 @@ export interface OnContext {
  * note is about (§27, 5.8: `on` is its section id), as "S2 · The scan finds it". Null on Picture, on a
  * Script note with no line, or when `on` names nothing that's still there.
  */
-export function onLabel(note: Pick<Note, "stage" | "on">, ctx: OnContext): string | null {
+export function onLabel(note: Pick<Note, "stage" | "on"> & Partial<Pick<Note, "shot" | "box" | "pin">>, ctx: OnContext): string | null {
   const { stage, on } = note;
+  // §38.4: a storyboard note is on a shot: "Shot 03 · Offline", and "· region" or "· point" when one is drawn.
+  if (stage === "storyboard") return shotNoteLabel({ on, shot: note.shot ?? null, box: note.box ?? null, pin: note.pin ?? null });
   if (stage === "script") {
     const section = on === null ? undefined : ctx.script.sections.find((s) => s.id === on);
     return section ? sectionLineLabel(section) : null;

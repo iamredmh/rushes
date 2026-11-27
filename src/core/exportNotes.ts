@@ -1,14 +1,15 @@
 import { formatTag } from "./formats.js";
 import { slugify } from "./ids.js";
-import { onLabel, type OnContext } from "./notes.js";
+import { byFilm, onLabel, type OnContext } from "./notes.js";
 import { noteInPlay } from "./project.js";
 import { markLabel, type Note, type Picks, type Project, type Script, type Stage, type VisualsFile } from "./schema.js";
 import { labelOfId } from "./formats.js";
 import { pinWords, regionWords } from "./visuals.js";
+import { shotNoteLabel, shotNoteWhere, shotNumberOf } from "./shotNotes.js";
 
 // Picture notes are grouped by film and version; the other stages list straight through. The script's own edits
 // live in script.json and are not exported here; notes on the script (§27, 5.8: on a line, or the whole script) are.
-const STAGE_ORDER: Stage[] = ["script", "picture", "voice", "music", "sfx", "mix", "visuals"];
+const STAGE_ORDER: Stage[] = ["script", "storyboard", "picture", "voice", "music", "sfx", "mix", "visuals"];
 const STAGE_TITLES: Record<Stage, string> = {
   script: "Script",
   picture: "Picture",
@@ -17,6 +18,7 @@ const STAGE_TITLES: Record<Stage, string> = {
   sfx: "Sound effects",
   mix: "Mix",
   visuals: "Visuals",
+  storyboard: "Storyboard",
 };
 
 function pad(n: number): string {
@@ -79,6 +81,14 @@ function visualNoteLines(n: Note): string[] {
   const ratio = n.format === null ? "all ratios" : labelOfId(n.format);
   const shape = n.box ? `region (${regionWords(n.box)})` : n.pin ? `point (${pinWords(n.pin)})` : "whole image";
   const lines = [`- **Page ${page}** · ${ratio} · ${shape} · ${n.status === "done" ? "done" : "to do"} — ${continued(n.text, "  ")}`];
+  if (n.reply) lines.push(`  - Reply: ${continued(n.reply, "    ")}`);
+  return lines;
+}
+
+/** §38.4: a note on a storyboard shot: the shot, where on its still, and the still it was drawn on. */
+function shotNoteLines(n: Note): string[] {
+  const lines = [`- **${shotNoteLabel(n)}** · ${shotNoteWhere(n)} · ${n.status === "done" ? "done" : "to do"} — ${continued(n.text, "  ")}`];
+  if (n.still && (n.box || n.pin)) lines.push(`  - Drawn on: ${n.still}`);
   if (n.reply) lines.push(`  - Reply: ${continued(n.reply, "    ")}`);
   return lines;
 }
@@ -152,6 +162,12 @@ export function notesMarkdown(
       for (const g of orphanGroups.values()) {
         lines.push("", `### ${g.label} (removed)`);
         for (const n of [...g.notes].sort(byTimecode)) lines.push(...noteLines(n, ctx, project.videos));
+      }
+    } else if (stage === "storyboard") {
+      // §38.4: in shot order, each film's under its name when there are several.
+      for (const [film, notes] of byFilm(stageNotes, (n) => n.video)) {
+        if (project.videos.length > 1) lines.push("", `### ${project.videos.find((v) => v.id === film)?.name ?? film ?? "No film"}`);
+        for (const n of [...notes].sort((a, b) => shotNumberOf(a) - shotNumberOf(b))) lines.push(...shotNoteLines(n));
       }
     } else if (stage === "visuals") {
       // §25.5: grouped by visual and version, in page order; a visual that is gone keeps its notes, under (removed).

@@ -7,7 +7,8 @@ const box = { x: 0.1, y: 0.2, w: 0.3, h: 0.1 };
 
 describe("the Visuals stage", () => {
   it("comes after Mix, so its tab does", () => {
-    expect(STAGES.at(-1)).toBe("visuals");
+    // §38.4: the storyboard's notes stage comes last of all; it is a Plan page, not a Review tab.
+    expect(STAGES.at(-2)).toBe("visuals");
     expect(STAGES.indexOf("visuals")).toBeGreaterThan(STAGES.indexOf("mix"));
   });
   it("keeps its visuals in .rushes/visuals.json, read as an empty file until the first write", () => {

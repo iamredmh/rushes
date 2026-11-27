@@ -32,7 +32,7 @@ describe("parseBrief", () => {
   });
   it("reads every section of the template, with no status when there is no line", () => {
     const p = parseBrief(briefTemplate("X"));
-    expect(p.sections.map((s) => s.heading)).toHaveLength(9);
+    expect(p.sections.map((s) => s.heading)).toHaveLength(10);
     expect(parseBrief("# Brief\n\n## A\nx\n").status).toBeNull();
   });
   it("does not split on a ## inside a code fence, or on ###", () => {

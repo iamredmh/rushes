@@ -157,17 +157,19 @@ export function ActivityList({ log, projectId, head, project, stage, film, notes
     log.focused();
   }, []);
 
+  // §24.13, §38.4: a line added on the Storyboard page goes under Script, as it always has; the log has no Storyboard area.
+  const area = stage === "storyboard" ? "script" : stage;
   const add = async () => {
     const line = text.trim();
     if (!line) return;
     try {
       // §31.5: a line added on a film is that film's.
-      await api.post("/api/log", { text: line, area: stage, ...(scoped ? { video: scoped } : {}) });
+      await api.post("/api/log", { text: line, area, ...(scoped ? { video: scoped } : {}) });
       setText("");
       // A line the filter on show leaves out would just vanish: say where it went (fix round 1, M1).
-      if (!filterShows(filter, stage)) {
-        const label = AREA_LABELS[stage];
-        toast(`Added under ${label}. Choose All${FILTERS.some(([f]) => f === stage) ? ` or ${label}` : ""} to see it.`);
+      if (!filterShows(filter, area)) {
+        const label = AREA_LABELS[area];
+        toast(`Added under ${label}. Choose All${FILTERS.some(([f]) => f === area) ? ` or ${label}` : ""} to see it.`);
       }
       if (list.current) list.current.scrollTop = 0;
       await load(true);

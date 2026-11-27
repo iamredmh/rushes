@@ -12,6 +12,7 @@ export const TAB_NAMES: Readonly<Record<Note["stage"], string>> = {
   music: "Music",
   sfx: "Effects",
   visuals: "Visuals",
+  storyboard: "Storyboard",
 };
 
 /** The tabs whose notes are a take's: their `on` is "<lane>/<variant>", or "<lane>/<variant>:<cue>". */

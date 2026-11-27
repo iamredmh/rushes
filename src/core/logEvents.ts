@@ -6,7 +6,7 @@ import { PICKS_MERGE_MS, type LogArea } from "./logText.js";
 import type { Batch, FileEntry, FileKind, Lane, LaneStage, Note, Picks, Project, Section, Stage, Take, Variant, Video, Visual } from "./schema.js";
 
 /** The tabs' own names, as the dashboard shows them. */
-export const TAB_NAMES: Record<Stage, string> = { script: "Script", picture: "Picture", voice: "Voiceover", music: "Music", sfx: "Sound effects", mix: "Mix", visuals: "Visuals" };
+export const TAB_NAMES: Record<Stage, string> = { script: "Script", picture: "Picture", voice: "Voiceover", music: "Music", sfx: "Sound effects", mix: "Mix", visuals: "Visuals", storyboard: "Storyboard" };
 /** How a lane's stage starts a line. It's also its default lane's name (project.ts LANE_NAMES), which "to <lane>" leaves out. */
 export const STAGE_WORDS: Record<LaneStage, string> = { voice: "Voiceover", music: "Music", sfx: "Sound effects" };
 /** §16.1's Assets folders, by the kind of file they hold (web/src/lib.ts FOLDERS; test/core/log.test.ts keeps them equal). */

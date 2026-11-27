@@ -48,7 +48,7 @@ declare global {
 // §26: the tabs that look at a film, and so are view-only while it is shelved (the others are not about one film).
 const SHELVED_VIEW_ONLY: ReadonlySet<string> = new Set(["picture", "voice", "music", "sfx", "mix"]);
 // §27, 5.4: Review's tabs, in order, with their names on the desk. The mix plays on the timeline (5.6): it has no tab.
-const REVIEW_TABS: { view: Exclude<Stage, "script" | "visuals" | "mix">; label: string }[] = [
+const REVIEW_TABS: { view: Exclude<Stage, "script" | "visuals" | "mix" | "storyboard">; label: string }[] = [
   { view: "picture", label: "Timeline" },
   { view: "voice", label: "Voice" },
   { view: "music", label: "Music" },

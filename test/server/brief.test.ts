@@ -134,7 +134,7 @@ describe("BriefService", () => {
   it("the starter template reads and approves like any brief", async () => {
     const { brief } = await setup(briefTemplate("Lumen"));
     const v = await brief.view();
-    expect(v.sections).toHaveLength(9);
+    expect(v.sections).toHaveLength(10);
     expect((await brief.setStatus("approved", v.hash)).status).toBe("approved");
   });
 

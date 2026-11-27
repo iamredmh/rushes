@@ -14,7 +14,7 @@ function fileObject<T extends z.ZodRawShape>(shape: T): z.ZodObject<T> {
   return z.looseObject(shape) as unknown as z.ZodObject<T>;
 }
 
-export const STAGES =["script", "picture", "voice", "music", "sfx", "mix", "visuals"] as const;
+export const STAGES =["script", "picture", "voice", "music", "sfx", "mix", "visuals", "storyboard"] as const;
 export const StageSchema = z.enum(STAGES);
 export type Stage = z.infer<typeof StageSchema>;
 
@@ -369,6 +369,8 @@ export const NoteSchema = z.preprocess(withThread, z
     pin: PinSchema.nullable().default(null),
     grab: z.string().nullable().default(null),
     shot: fileObject({ n: z.number().int().positive(), name: z.string() }).nullable().default(null),
+    // §38.4: on a storyboard note, the still (a project path) the box or pin was drawn on, so a later still doesn't show it.
+    still: z.string().nullable().default(null),
     marks: z.array(MarkSchema).max(4).default([]),
     // §21.3: the format this note belongs to (a Format id such as "9x16"), or null for every format:
     // the default, and every note from before formats. The server checks it against the note's version.
@@ -392,9 +394,10 @@ export const NoteSchema = z.preprocess(withThread, z
       ctx.addIssue({ code: "custom", path: ["scope"], message: "a whole-track note has no t or tOut" });
 
     // §25.4: an image has no time, and a note on one is a region, a point or the whole image.
-    if (n.pin !== null && n.stage !== "visuals") ctx.addIssue({ code: "custom", path: ["pin"], message: "a point on an image belongs to a note on a visual" });
+    if (n.pin !== null && n.stage !== "visuals" && n.stage !== "storyboard") ctx.addIssue({ code: "custom", path: ["pin"], message: "a point on an image belongs to a note on a visual or a storyboard shot" });
     if (n.pin !== null && n.box !== null) ctx.addIssue({ code: "custom", path: ["pin"], message: "a note is a region or a point, not both" });
     if (n.stage === "visuals" && n.scope !== "whole") ctx.addIssue({ code: "custom", path: ["scope"], message: "a note on a visual has no time" });
+    if (n.stage === "storyboard" && n.scope !== "whole") ctx.addIssue({ code: "custom", path: ["scope"], message: "a note on a storyboard shot has no time" });
     if (n.marks.length > 0 && !MARK_STAGES.includes(n.stage)) {
       ctx.addIssue({ code: "custom", path: ["marks"], message: `marks don't apply to the ${n.stage} stage` });
     }

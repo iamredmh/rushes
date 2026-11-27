@@ -15,7 +15,7 @@ const visual = (id: string, name: string, pages: number, versions = 1, ratios = 
 });
 const note = (over: Partial<Note>): Note => ({
   id: "n1", stage: "visuals", video: null, version: "v1", on: "launch/1", scope: "whole", t: null, tOut: null, frame: null, text: "x", box: null, pin: null,
-  grab: null, shot: null, marks: [], format: "4x5", status: "todo", reply: "", replies: [], fixT: null, fixVersion: null, batch: null, createdAt: "2026-10-12T10:00:00Z", by: "user", ...over,
+  grab: null, shot: null, still: null, marks: [], format: "4x5", status: "todo", reply: "", replies: [], fixT: null, fixVersion: null, batch: null, createdAt: "2026-10-12T10:00:00Z", by: "user", ...over,
 });
 const launch = visual("launch", "Launch carousel", 12, 2);
 const quote = visual("quote", "Quote still", 1, 1, ["4x5", "16x9"]);

@@ -22,7 +22,7 @@ function laneHasVariants(p: Pick<Project, "lanes">, stage: "voice" | "music" | "
  * script, its notes and the shared visuals' notes); with none, the whole project's (a project with no film yet). `s`
  * is the script that goes with it: that film's.
  */
-export function tabStates(p: Project, s: Pick<Script, "sections">, n: NotesFile, v: Pick<VisualsFile, "visuals"> = { visuals: [] }, film?: string | null): TabState[] {
+export function tabStates(p: Project, s: Pick<Script, "sections">, n: NotesFile, v: Pick<VisualsFile, "visuals"> = { visuals: [] }, film?: string | null, storyboard = false): TabState[] {
   const own = film ? p.videos.find((x) => x.id === film) : undefined;
   const picture = own ? own.versions.length > 0 : p.videos.some((v) => v.versions.length > 0);
   const heard = { lanes: lanesForVideo(p.lanes, own?.id, p.videos) };
@@ -38,6 +38,8 @@ export function tabStates(p: Project, s: Pick<Script, "sections">, n: NotesFile,
     mix: picture && (voice || music || sfx),
     // §25.7: Visuals unlocks when one is registered.
     visuals: v.visuals.length > 0,
+    // §38.4: the Storyboard page is a Plan page; it opens when the film's storyboard.md has shots (the caller knows).
+    storyboard,
   };
   return STAGES.map((stage) => {
     // §26: a shelved film's open notes are kept but do not count.

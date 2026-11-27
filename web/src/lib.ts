@@ -101,7 +101,7 @@ export function filmAfterShelving(videos: Video[], id: string): string | null {
 }
 
 /** Is this stage built in this release of the dashboard? Later releases add the audio tabs. */
-export const BUILT: Record<Stage, boolean> = { script: true, picture: true, voice: true, music: true, sfx: true, mix: true, visuals: true };
+export const BUILT: Record<Stage, boolean> = { script: true, picture: true, voice: true, music: true, sfx: true, mix: true, visuals: true, storyboard: true };
 
 export const STAGE_NAMES: Record<Stage, string> = {
   script: "Script",
@@ -111,6 +111,7 @@ export const STAGE_NAMES: Record<Stage, string> = {
   sfx: "Sound effects",
   mix: "Mix",
   visuals: "Visuals",
+  storyboard: "Storyboard",
 };
 
 /** §19.1: a locked tab's copy -- what it's for, what unlocks it, and the noun its tooltip asks for. */
@@ -150,6 +151,12 @@ export const LOCKED_TAB: Record<Stage | "assets", { what: string; unlocks: strin
     unlocks: "Your agent registers a still or a carousel.",
     ask: "a still or a carousel",
   },
+  // §38.4: the Storyboard page's copy (LOCKED_STORYBOARD says the same; the Plan switch uses that one).
+  storyboard: {
+    what: "See each shot as a still, rewrite what happens, and approve it before anything is built.",
+    unlocks: "Your agent sketches the shots once the script is approved.",
+    ask: "a storyboard",
+  },
   assets: {
     what: "Every file in the project in one place.",
     unlocks: "Unlocks with the first cut, take, track or screenshot.",
@@ -175,6 +182,7 @@ const PROMPT_TEMPLATE: Record<Stage | "assets", (p: string, f: string | null) =>
     `In Rushes project "${p}", add a cut and at least one voice read, music bed or SFX pass${filmClause("for", f)}.`,
   visuals: (p) =>
     `In Rushes project "${p}", register my stills and carousels with rushes_add_visual: one visual per post (a still, or a carousel), with each page's picture in every aspect ratio it comes in. Then tell me, and I'll mark them up in the Visuals tab.`,
+  storyboard: (p, f) => storyboardPrompt(p, f),
   assets: (p, f) => `In Rushes project "${p}", add the first cut${filmClause("of", f)} with rushes_add_version.`,
 };
 

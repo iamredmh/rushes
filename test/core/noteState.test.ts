@@ -4,7 +4,7 @@ import type { Note } from "../../src/core/schema.js";
 
 const note = (over: Partial<Note> = {}): Note => ({
   id: "n1", stage: "picture", video: null, version: null, on: null, scope: "point", t: 1, tOut: null, frame: null,
-  text: "Hold longer", box: null, pin: null, grab: null, shot: null, marks: [], format: null,
+  text: "Hold longer", box: null, pin: null, grab: null, shot: null, still: null, marks: [], format: null,
   status: "todo", reply: "", replies: [], fixT: null, fixVersion: null, batch: null, createdAt: "2026-11-15T10:00:00.000Z", by: "user",
   ...over,
 });

@@ -21,7 +21,7 @@ describe("tabStates", () => {
   it("starts with every tab locked, in workflow order", () => {
     const c = ctx();
     const tabs = tabStates(c.project, c.script, c.notes);
-    expect(tabs.map((t) => t.stage)).toEqual(["script", "picture", "voice", "music", "sfx", "mix", "visuals"]);
+    expect(tabs.map((t) => t.stage)).toEqual(["script", "picture", "voice", "music", "sfx", "mix", "visuals", "storyboard"]);
     expect(tabs.every((t) => !t.unlocked)).toBe(true);
   });
 

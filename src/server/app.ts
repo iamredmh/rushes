@@ -17,6 +17,7 @@ import { exportFileName, notesMarkdown } from "../core/exportNotes.js";
 import { tabStates } from "../core/tabs.js";
 import { addVisualVersion, checkVisualNote, registerVisual, visualNoteView, visualRatios, type PageInput, type PictureInput } from "../core/visuals.js";
 import { readPicture } from "./visuals.js";
+import { shotNoteLabel, shotNoteWhere } from "../core/shotNotes.js";
 import { fromManifestPath, toManifestPath } from "../core/paths.js";
 import { AUDIO_FORMATS, PROBE_TIMEOUT_MS, VIDEO_EXT, giveUpAfter, probe, probeVideo, videoGaveUp, type VideoProbe, type VideoProber } from "../core/media.js";
 import { PROXY_PATH, ProxyJobs, type ProxyEvent, type ProxyJob } from "./proxy.js";
@@ -86,7 +87,14 @@ const MAX_PATH = 1024;
 /** §25.5: a note on a visual with where it is, in words, and the picture to open: what an agent reading the batch needs. */
 // Every note the server hands out carries its lifecycle state (noteState.ts), worked out, never stored.
 function withVisualViews<T extends Note>(notes: T[], visuals: Pick<VisualsFile, "visuals">): ((T & { state: NoteState }) | (T & { state: NoteState; visual: ReturnType<typeof visualNoteView> }))[] {
-  return notes.map((n) => (n.stage === "visuals" ? { ...withState(n), visual: visualNoteView(n, visuals) } : withState(n)));
+  return notes.map((n) =>
+    n.stage === "visuals"
+      ? { ...withState(n), visual: visualNoteView(n, visuals) }
+      : // §38.4: a storyboard note says which shot and where on its still, in words, for the agent.
+        n.stage === "storyboard"
+        ? { ...withState(n), shotLabel: shotNoteLabel(n), where: shotNoteWhere(n) }
+        : withState(n),
+  );
 }
 
 const NewNoteBody = z.object({
@@ -931,7 +939,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
         projectBrief: place.first ? null : projectBrief,
         storyboard: sb,
         build: buildState({ brief: b, script: s.sections, storyboard: sb }),
-        tabs: tabStates(project, s, notes, visuals, place.video),
+        tabs: tabStates(project, s, notes, visuals, place.video, sb.exists),
         log: (place.video && heads[place.video]) ?? logHead,
         // Where the agent finds this film's plan files.
         paths: { brief: place.brief, storyboard: place.storyboard },
@@ -1053,7 +1061,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     const [b, sb] = await Promise.all([briefs.at(place).view(), storyboards.at(place).view()]);
     const own = filmScript(script, project, place.video);
     return c.json({
-      tabs: tabStates(project, film ? own : filmScript(script, project, null), notes, visuals, film),
+      tabs: tabStates(project, film ? own : filmScript(script, project, null), notes, visuals, film, sb.exists),
       // §26: every film and whether it is shelved, so an agent leaves the shelved ones alone.
       films: project.videos.map((v) => ({ id: v.id, name: v.name, shelved: v.shelved ?? null })),
       // §31.3: where each film's own brief and storyboard are.
@@ -1121,8 +1129,18 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
     const b = await body(c, NewNoteBody);
     // The client never sends shot; the server stamps it from the version's shots.
     let shot: Note["shot"] = null;
+    // §38.4: and on a storyboard note, the shot and its still, from the film's storyboard as it is now.
+    let still: string | null = null;
     // §25.4: a note on a visual is checked against the visual, its version, its page and its ratios.
-    if (b.stage === "visuals") checkVisualNote({ stage: b.stage, on: b.on ?? null, version: b.version ?? null, format: b.format ?? null, box: b.box ?? null, pin: b.pin ?? null }, await store.read("visuals"));
+    if (b.stage === "storyboard") {
+      const project = await store.read("project");
+      const board = await storyboards.at(filmPlace(project, b.video ?? null)).view();
+      const m = /^shot\/(\d+)$/.exec(b.on ?? "");
+      const found = m ? board.shots.find((s) => s.n === Number(m[1])) : undefined;
+      if (!found) throw new InvalidError(`There is no ${b.on ? `shot ${b.on.replace(/^shot\//, "")}` : "shot"} in this film's storyboard`);
+      shot = { n: found.n, name: found.name };
+      still = found.still;
+    } else if (b.stage === "visuals") checkVisualNote({ stage: b.stage, on: b.on ?? null, version: b.version ?? null, format: b.format ?? null, box: b.box ?? null, pin: b.pin ?? null }, await store.read("visuals"));
     else if (b.stage === "picture" || b.format != null) {
       const project = await store.read("project");
       // §21.3: a format must be one of this cut's, and on a cut with formats a box belongs to one.
@@ -1139,7 +1157,7 @@ export function createApp(store: Store, opts: AppOptions = {}): Hono {
       const project = await store.read("project");
       if (project.videos.length > 1) video = project.videos[0].id;
     }
-    const { result } = await store.update("notes", (f) => addNote(f, { ...b, video, shot, by: "user" }));
+    const { result } = await store.update("notes", (f) => addNote(f, { ...b, video, shot, ...(b.stage === "storyboard" ? { still } : {}), by: "user" }));
     return c.json({ note: withState(result) }, 201);
   });
 

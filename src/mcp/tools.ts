@@ -21,7 +21,7 @@ export interface ToolContext {
 }
 
 const project = z.string().optional().describe("Project folder. Defaults to the current working directory.");
-const stage = z.enum(["script", "picture", "voice", "music", "sfx", "mix", "visuals"]);
+const stage = z.enum(["script", "picture", "voice", "music", "sfx", "mix", "visuals", "storyboard"]);
 const fileKind = z.enum(["doc", "image", "caption", "export", "delivery", "edit"]);
 const assetKind = z.enum(["screenshot", "cut", "proxy", "take", "music", "sfx", "voice", "visual", "doc", "image", "caption", "export", "delivery", "edit"]);
 
