@@ -3,6 +3,7 @@
 // every shot, and under it what happens (text with Edit), the direction and the approve tick. Drag on the still for a
 // region or click for a point; the note itself is written in the notes panel, which says which shot it is on. Overview
 // swaps the frame for a grid of every shot.
+import type { ComponentChildren } from "preact";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { shotOfNote } from "../../../src/core/shotNotes.js";
 import { mediaUrl } from "../api.js";
@@ -167,7 +168,7 @@ function Frame({ shot, marks, all, shape, selected, onShape, onSelect }: { shot:
 const shotOfNoteSame = (a: Note, b: Note) => a.shot?.n === b.shot?.n && a.shot?.name === b.shot?.name;
 
 /** Under the frame: what happens (text, with Edit), the direction, the word diff when you changed them, and the approve tick. */
-function Details({ shot, save }: { shot: StoryboardShotView; save: Saver }) {
+function Details({ shot, save, approve }: { shot: StoryboardShotView; save: Saver; approve?: ComponentChildren }) {
   const [text, setText] = useState(shot.description);
   const [direction, setDirection] = useState(shot.direction);
   const [open, setOpen] = useState(false);
@@ -208,6 +209,7 @@ function Details({ shot, save }: { shot: StoryboardShotView; save: Saver }) {
   const changed = baseline.length > 0;
   return (
     <div class={`sbdetail${changed ? " changed" : ""}`} data-shot={shot.heading}>
+      {approve}
       <div class="sbdhead">
         <h3>What happens</h3>
         {open ? (
@@ -288,6 +290,7 @@ function Overview({ board, open, onOpen }: { board: StoryboardView; open: number
           <span class="sbcap">
             <b>{pad(s.n)}</b> {s.name}
           </span>
+          {s.description && <span class="sbdesc">{s.description}</span>}
           <span class="sbsub mono">
             {s.length === null ? "no length" : `${s.length.toFixed(1)} s`}
             {s.tag && <span class="sbtag">{s.tag}</span>}
@@ -441,17 +444,23 @@ export function Storyboard({
     </div>
   );
   const approved = shot?.status === "approved";
+  const single = !!shot && !overview;
   return (
-    <div class="col ppage sbpage">
-      <div class="shead">
+    <div class={`col ppage sbpage${single ? " single" : ""}`}>
+      {/* §38.4 (Red, round 2): one shot on show has no header above it, so the still and its words fit without a scroll.
+          The page keeps its heading for screen readers. */}
+      <div class={`shead${single ? " vh" : ""}`}>
         <h2>Storyboard</h2>
         {count > 0 && (
           <span class="meta">
-            {count} shot{count === 1 ? "" : "s"} · {board.plannedLength.toFixed(1)} s
+            {count} shot{count === 1 ? "" : "s"}
+            {/* In Overview the planned length sits beside it, against the brief's target. */}
+            {overview ? "" : ` · ${board.plannedLength.toFixed(1)} s`}
           </span>
         )}
-        {count > 0 && (
-          <button class={`btn sbview${overview ? " on" : ""}`} aria-pressed={overview} onClick={() => setView(!overview)}>
+        {count > 0 && overview && total}
+        {count > 0 && overview && (
+          <button class="btn sbview on" aria-pressed="true" onClick={() => setView(false)}>
             <Icon name="grid" />
             Overview
           </button>
@@ -459,52 +468,41 @@ export function Storyboard({
       </div>
       {count === 0 && <p class="sbnone">storyboard.md has no shots yet. Your agent adds them as `## Shot 01 · Name` sections.</p>}
       {count > 0 && overview && (
-        <>
-          {total}
-          <Overview
-            board={board}
-            open={open}
-            onOpen={(n) => {
-              onShape(null);
-              onAt(n);
-              setView(false);
-            }}
-          />
-        </>
+        <Overview
+          board={board}
+          open={open}
+          onOpen={(n) => {
+            onShape(null);
+            onAt(n);
+            setView(false);
+          }}
+        />
       )}
-      {shot && !overview && (
+      {shot && single && (
         <div class="sbone">
-          <div class="sbhead">
-            <b class="sbnum mono">{pad(shot.n)}</b>
-            <span class="sbname">{shot.name}</span>
-            {shot.tag && <span class="sbtag">{shot.tag}</span>}
-            <span class="sblen mono">{shot.length === null ? "no length" : `${shot.length.toFixed(1)} s`}</span>
-            <span class={`sbstate${approved ? " ok" : ""}`}>{approved ? "Approved" : "Draft"}</span>
-            <button
-              class={`btn ib okd${approved ? " on" : ""}`}
-              // A toggle: its name stays and aria-pressed says whether it is on; the tooltip is its name.
-              data-tip={`Approve shot ${shot.n}`}
-              aria-label={`Approve shot ${shot.n}`}
-              aria-pressed={approved}
-              onClick={() => save.shot(shot, { status: approved ? "draft" : "approved" })}
-            >
-              <Icon name="check" />
-            </button>
-          </div>
           <Frame shot={shot} marks={marksOn(notes, board.shots, i)} all={notes} shape={shape} selected={selected} onShape={onShape} onSelect={onSelect} />
-          <div class="sbnav">
-            <button class="btn vzpill" aria-label="Previous shot" disabled={i === 0} onClick={() => go(i - 1)}>
-              Previous
-            </button>
-            <span class="vzcount mono" aria-label={`Shot ${i + 1} of ${count}`}>
-              {pad(i + 1)} / {pad(count)}
-            </span>
-            <button class="btn vzpill" onClick={() => setView(true)}>
-              Overview
-            </button>
-            <button class="btn vzpill primary" aria-label="Next shot" disabled={i >= count - 1} onClick={() => go(i + 1)}>
-              Next
-            </button>
+          <div class="sbbar">
+            <div class="sbhead">
+              <b class="sbnum mono">{pad(shot.n)}</b>
+              <span class="sbname">{shot.name}</span>
+              {shot.tag && <span class="sbtag">{shot.tag}</span>}
+              <span class="sblen mono">{shot.length === null ? "no length" : `${shot.length.toFixed(1)} s`}</span>
+            </div>
+            <div class="sbnav">
+              <button class="btn vzpill" aria-label="Previous shot" disabled={i === 0} onClick={() => go(i - 1)}>
+                Previous
+              </button>
+              <span class="vzcount mono" aria-label={`Shot ${i + 1} of ${count}`}>
+                {pad(i + 1)} / {pad(count)}
+              </span>
+              <button class="btn vzpill" aria-pressed="false" onClick={() => setView(true)}>
+                <Icon name="grid" />
+                Overview
+              </button>
+              <button class="btn vzpill primary" aria-label="Next shot" disabled={i >= count - 1} onClick={() => go(i + 1)}>
+                Next
+              </button>
+            </div>
           </div>
           <div class="sbstrip" ref={strip} role="list" aria-label="Shots">
             {board.shots.map((s, n) => (
@@ -523,7 +521,26 @@ export function Storyboard({
               </button>
             ))}
           </div>
-          <Details key={`${shot.heading}#${occurrenceOf(board.shots, i)}`} shot={shot} save={save} />
+          <Details
+            key={`${shot.heading}#${occurrenceOf(board.shots, i)}`}
+            shot={shot}
+            save={save}
+            approve={
+              <span class="sbok">
+                <span class={`sbstate${approved ? " ok" : ""}`}>{approved ? "Approved" : "Draft"}</span>
+                <button
+                  class={`btn ib okd${approved ? " on" : ""}`}
+                  // A toggle: its name stays and aria-pressed says whether it is on; the tooltip is its name.
+                  data-tip={`Approve shot ${shot.n}`}
+                  aria-label={`Approve shot ${shot.n}`}
+                  aria-pressed={approved}
+                  onClick={() => save.shot(shot, { status: approved ? "draft" : "approved" })}
+                >
+                  <Icon name="check" />
+                </button>
+              </span>
+            }
+          />
         </div>
       )}
       <PlanStatus counts={board.total > 0 ? { approved: approvedOf(board.approved, board.total, "shot"), edited: board.changed } : null} />

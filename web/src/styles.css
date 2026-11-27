@@ -906,3 +906,35 @@ kbd { font: 500 12px var(--mono); background: var(--bg); border-radius: 6px; pad
 .scrdiff .wl { font-family: var(--mono); font-size: 12px; }
 .scrline .sfoot .btn { height: 28px; font-size: 12.5px; padding: 0 10px; gap: 6px; }
 .scrline .sfoot .btn svg { width: 14px; height: 14px; }
+
+/* §38.4, Red round 2: no scroll on one shot. The still fills what is left of the work area; its title sits with
+   Previous and Next under it; what happens, the direction and the approve tick are a column beside it. Overview uses the
+   full width, with bigger stills and a line or three of what happens under each. */
+.sbpage { max-width: none; }
+.sbpage.single { height: 100%; grid-template-rows: minmax(0, 1fr) auto; gap: 8px; }
+.sbpage.single .shead.vh { position: absolute; }
+.sbpage .shead .sbtotal { flex: 1; min-width: 160px; }
+.sbpage .shead .sbtotal .bar { max-width: 320px; }
+.sbone { grid-template-columns: minmax(0, 1fr) minmax(240px, 300px); grid-template-rows: minmax(0, 1fr) auto auto; gap: 10px 16px; min-height: 0; }
+.sbone > .sbfwrap { grid-column: 1; grid-row: 1; height: auto; min-height: 200px; }
+.sbbar { grid-column: 1; grid-row: 2; display: flex; align-items: center; justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; min-width: 0; }
+.sbbar .sbhead { min-height: 32px; min-width: 0; gap: 10px; }
+.sbbar .sbhead .sbname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.sbbar .sbnav { gap: 8px; }
+.sbbar .sbnav .btn { gap: 6px; }
+.sbbar .sbnav .btn svg { width: 14px; height: 14px; }
+.sbone > .sbstrip { grid-column: 1; grid-row: 3; }
+.sbone > .sbdetail { grid-column: 2; grid-row: 1 / span 3; align-self: stretch; align-content: start; overflow: auto; min-height: 0; }
+.sbok { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.sbok .sbstate { margin-left: 0; }
+.sbdetail .sbdir { width: 100%; }
+@supports (width: 1cqw) {
+  .sbpage { container-type: inline-size; }
+@container (max-width: 760px) {
+  .sbone { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; }
+  .sbone > .sbfwrap { height: 48vh; }
+  .sbone > .sbdetail { grid-column: 1; grid-row: auto; overflow: visible; }
+}
+}
+.sbgrid { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 18px 16px; }
+.sbdesc { color: var(--text-2); font-size: 13px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }

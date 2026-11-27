@@ -91,9 +91,9 @@ test("planned length is shown against the brief's target", async ({ page, rushes
   await rushes.writeFiles([{ path: "brief.md", text: BRIEF }]);
   await page.goto(rushes.url);
   await openStoryboard(page);
-  await expect(page.locator(".shead .meta")).toHaveText("2 shots · 8.0 s");
-  // §38.4: the planned length against the brief sits at the head of Overview.
+  // §38.4: the planned length against the brief sits at the head of Overview, beside the count of shots.
   await page.getByRole("button", { name: "Overview", exact: true }).first().click();
+  await expect(page.locator(".shead .meta")).toHaveText("2 shots");
   await expect(page.locator(".sbtotal")).toContainText("8.0 / 30 s planned");
 });
 
@@ -366,4 +366,20 @@ test("a description the agent's rewrites refused is not lost when the same shot'
   await page.getByLabel("Direction for shot 1").fill("Slower.");
   await expect.poll(() => read(rushes.root), { timeout: 15000 }).toContain("Direction: Slower.");
   expect(await read(rushes.root)).toContain("Mine.");
+});
+
+test("§38.4 one shot fits the work area without a scroll, its words beside the still, and Overview shows what happens", async ({ page, rushes }) => {
+  await withBoard(rushes);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(rushes.url);
+  await openStoryboard(page);
+  const main = page.locator(".wsmain");
+  await expect.poll(() => main.evaluate((m) => m.scrollHeight - m.clientHeight)).toBeLessThanOrEqual(1);
+  // No header over the still: the shot's title sits with Previous and Next.
+  await expect(page.locator(".sbbar .sbhead")).toContainText("Cold open");
+  const frame = (await page.locator(".sbfwrap").boundingBox())!;
+  const words = (await page.locator(".sbdetail").boundingBox())!;
+  expect(words.x).toBeGreaterThanOrEqual(frame.x + frame.width);
+  await page.getByRole("button", { name: "Overview", exact: true }).click();
+  await expect(page.getByRole("listitem", { name: "Shot 2, Drop a folder" }).locator(".sbdesc")).toHaveText("A folder of clips lands in the window.");
 });
